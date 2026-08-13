@@ -21,7 +21,7 @@ This is a Wipeout-style networked prototype because it exercises the important l
 - basic bots or fixed test dummies;
 - placeholder visuals and audio.
 
-The MVP must be playable through a local dedicated server plus one client. A local in-process server/client mode may be used for rapid iteration, but it must use the same simulation and authority boundaries.
+The MVP must be playable through a local dedicated server plus one client. A local in-process server/client mode may be used for rapid iteration, but it must use the same server-owned gameplay systems and authority rules.
 
 ## Controls
 
@@ -73,17 +73,17 @@ Keyboard/mouse should remain fully playable rather than being a debug-only input
 Before exposing a full editor, provide named presets:
 
 - **Runner:** fast movement, sidearm, dash;
-- **Bruiser:** high health, scatter cannon, shield;
-- **Controller:** launcher, deployable sentry;
-- **Duelist:** impact blade, dash or pull.
+- **Bruiser:** high health, scatter cannon, defensive passives, and a legal first-iteration ultimate;
+- **Controller:** launcher, deployable sentry, and control-oriented passives;
+- **Duelist:** impact blade, dash, and short-range passives.
 
 Presets let the team evaluate the design while avoiding UI and persistence work.
 
-## Milestones
+## Delivery gates
 
-The detailed implementation sequence is maintained in [09-implementation-roadmap.md](./09-implementation-roadmap.md). This document defines the gameplay scope and acceptance criteria; the roadmap is the source of truth for milestone ordering.
+The detailed implementation sequence is maintained in the [v1 implementation roadmap](./implementation/v1/roadmap.md). This document defines the gameplay scope and acceptance criteria; the roadmap is the source of truth for milestone ordering and progress.
 
-There is no separate engine go/no-go spike. The Bevy/Lightyear stack is adopted for the MVP, and the first foundation and networked-sandbox milestones provide the practical validation. If those milestones expose a blocking integration problem, resolve it before expanding gameplay content.
+There is no separate engine go/no-go spike. The Bevy/Lightyear stack is adopted for the MVP, and v1 Milestones 01–03 provide the practical foundation, connection, replication, and authoritative-movement validation. If those milestones expose a blocking integration problem, resolve it before expanding gameplay content.
 
 ### Early implementation scope
 
@@ -99,59 +99,19 @@ The first implementation work combines the former engine validation with a minim
 - death and reset;
 - hit and defeat feedback.
 
-It must run as a macOS client connected to a headless authoritative server, with the same shared simulation boundary used by later milestones.
+It must run as a macOS client connected to a headless authoritative server, using the same server-owned Bevy gameplay systems, validation, and outcomes that later milestones extend.
 
-### M1 — weapon comparison
+### Combat vertical slice — Milestones 01–07
 
-- four weapons;
-- straight pulse projectile;
-- short-range pellet spread;
-- ballistic/lobbed splash projectile;
-- circular explosion payload;
-- ammo and reload;
-- weapon cooldowns;
-- weapon selection before a test round;
-- basic combat telemetry.
+The first playable gate adds the Rust/Bevy application and networking foundation, controller-first movement, a greybox collision environment, authoritative combat, four selectable weapons, one readable arena, and a complete Wipeout match. It is sufficient to validate combat and networking, but it does not yet validate Brawler's buildcraft differentiation.
 
-### M2 — teams and respawn
+### First product iteration — Milestones 01–08
 
-- teams;
-- spawn points;
-- defeat state;
-- respawn delay;
-- score tracking;
-- match timer and victory condition.
+The first product iteration adds the two initial ultimates, four to six passive items, a fixed build budget, two passive slots, and four legal named presets. This is the first gate that tests the product direction rather than only the underlying arena-shooter loop.
 
-### M3 — ability layer
+### Gameplay MVP verification — Milestones 01–10
 
-- ultimate meter;
-- dash ultimate;
-- deployable ultimate;
-- cooldown and charge UI;
-- effect cleanup on death.
-
-### M4 — build decisions
-
-- passive item slots;
-- build budget;
-- four named build presets;
-- end-of-match comparison of build performance.
-
-### M5 — second mode
-
-Implement Hot Zone on the same map or a small variant. This tests whether the combat loop supports contesting space, not only chasing eliminations.
-
-### M6 — destructible terrain prototype
-
-- one destructible terrain chunk;
-- circular explosion brush;
-- terrain mask update;
-- visual crater and edge feedback;
-- generated collision update;
-- player/projectile interaction with changed terrain;
-- unstuck behavior after terrain changes.
-
-This milestone validates Worms-like terrain flexibility without making the entire MVP map dependent on destruction.
+Hot Zone then verifies that the same fighter, weapon, ability, and lifecycle code works under spatial-control rules. The destructible-terrain milestone verifies arbitrary holes, generated collision, authoritative terrain revisions, and late/reconnecting client recovery. Completion of Milestone 10 is the point at which every acceptance criterion below must have evidence; Milestone 11 hardens and closes v1.
 
 Projectile behaviors beyond straight and ballistic movement—such as bouncing, homing, curved steering, boomerang return, piercing, splitting, and delayed trajectories—are second-phase content.
 
@@ -168,11 +128,11 @@ The MVP is successful when:
 - different presets produce visibly different match behavior;
 - a complete match finishes in roughly two to four minutes;
 - the team can change weapon values without rewriting combat code;
-- the same fighter and weapon code can run under Wipeout and Hot Zone rules.
+- the same fighter and weapon code can run under Wipeout and Hot Zone rules;
 - the complete combat loop is playable with an Xbox-like controller;
-- the same actions are playable with keyboard/mouse without separate gameplay implementations.
+- the same actions are playable with keyboard/mouse without separate gameplay implementations;
 - two local clients can play one server-authoritative match;
-- clients cannot authoritatively alter positions, damage, status meters, scores, or terrain.
+- clients cannot authoritatively alter positions, damage, status meters, scores, or terrain;
 - terrain destruction can create holes and tunnels without replacing visible map tiles;
 - terrain collision updates do not modify unrelated props, objectives, or fighter bodies.
 
@@ -182,16 +142,15 @@ The MVP is successful when:
 - internet-scale hosting and deployment;
 - lag compensation and advanced client-side prediction;
 - account and inventory persistence;
-- matchmaking;
 - progression and unlocks;
 - cosmetics;
 - touch controls;
 - multiple body sizes;
 - procedural content;
-- automated balance generation.
+- automated balance generation;
 - terrain bandwidth optimization and persistent terrain synchronization;
-- structural collapse, fluids, and persistent terrain deformation.
-- advanced projectile trajectories and multi-stage projectile effects.
+- structural collapse, fluids, and persistent terrain deformation;
+- advanced projectile trajectories and multi-stage projectile effects;
 - accumulating status meters and threshold-triggered crowd control.
 
 ## What to measure

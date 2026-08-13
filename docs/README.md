@@ -14,8 +14,8 @@ The project is intentionally starting with the gameplay loop. Production matchma
 - [Gameplay MVP](./05-gameplay-mvp.md) — the smallest playable slice, milestones, and acceptance criteria.
 - [Research sources](./06-research-sources.md) — external references used for the baseline.
 - [MVP asset shortlist](./07-mvp-asset-shortlist.md) — open/licensed stand-in tilemaps, characters, props, and icons.
-- [Network architecture](./08-network-architecture.md) — authority model, replication, server/client boundaries, and local network testing.
-- [Implementation roadmap](./09-implementation-roadmap.md) — deliverable milestones from workspace foundation through playtest hardening.
+- [Network architecture](./08-network-architecture.md) — authority model, Lightyear replication, Bevy server/client world composition, and local network testing.
+- [Version 1 implementation roadmap](./implementation/v1/roadmap.md) — tracked MVP milestones from the Rust and Bevy application foundation through playtest hardening and closeout.
 
 ## Working vocabulary
 

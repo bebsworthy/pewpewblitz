@@ -1,8 +1,8 @@
 # Fighter model
 
-## Conceptual layers
+## Data categories and lifecycles
 
-Separate three things:
+Keep three kinds of data distinct because they have different authors, validation rules, and lifecycles. This is a data-model distinction, not a requirement for separate crates or architectural layers:
 
 1. **Definition:** authored base values and available slots.
 2. **Build:** the selected weapon, ultimate, and items.
@@ -12,7 +12,7 @@ Separate three things:
 FighterDefinition
   BaseStats
   SlotRules
-  VisualDefinition
+  PresentationDefinitionId
 
 Build
   Weapon
@@ -28,6 +28,8 @@ FighterState
   Active effects
   Team / alive state
 ```
+
+`PresentationDefinitionId` is a stable reference that client presentation resolves to visual and audio assets. The authoritative server does not need to load those assets.
 
 ## Attribute inventory
 
@@ -101,7 +103,7 @@ Ally ice weapon  → +cold from a different source
 Cold threshold   → frozen for a defined duration
 ```
 
-The status system should support contribution from multiple sources, accumulation over time, decay after exposure, threshold-triggered effects, and temporary immunity or resistance after triggering. The first implementation should use one status meter, such as `cold`, rather than a large generalized status framework.
+The status behavior should support contribution from multiple sources, accumulation over time, decay after exposure, threshold-triggered effects, and temporary immunity or resistance after triggering. The first systemic-status milestone in a future version should implement one status meter such as `cold` with focused components, resources, and systems grouped in a cohesive plugin rather than starting with a large generalized framework.
 
 ### Information and interaction
 
@@ -115,7 +117,7 @@ The status system should support contribution from multiple sources, accumulatio
 
 ## Recommended MVP attributes
 
-Only these should affect balance in the first playable build:
+Only these should affect balance in the first product iteration through v1 Milestone 08:
 
 - maximum health;
 - movement speed;
@@ -132,12 +134,12 @@ Armor, critical hits, lifesteal, terrain permissions, vision manipulation, and c
 
 ## Loadout rules
 
-Initial rules:
+Initial build rules, introduced in v1 Milestone 08 after the combat vertical slice is stable:
 
 - one primary weapon;
 - one ultimate;
 - two passive item slots;
-- one active item slot, added after the combat sandbox is stable;
+- one active item slot only when playtest evidence justifies adding it after the combat sandbox is stable;
 - a fixed number of build points;
 - mutually exclusive item families where combinations create obvious balance problems.
 

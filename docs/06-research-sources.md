@@ -2,26 +2,47 @@
 
 The following sources informed the initial design baseline. They describe the reference genre and engine capabilities; Brawler should use original content and terminology.
 
-## Engine
+## Local source and example snapshots
+
+The repository contains local upstream material so implementation research can inspect real examples instead of guessing APIs. The snapshots are not all version-aligned:
+
+- `references/bevy/examples/` — Bevy 0.20-dev example index and Rust source across application setup, headless apps, plugins, 2D rendering, assets, input, states, UI, and other engine features. Use these as architectural examples and verify every transferred API against Bevy 0.19.
+- `references/lightyear/examples/` — Lightyear 0.29 example packages/workspace, Rust source, READMEs, and feature declarations. This snapshot targets Bevy 0.19; `simple_setup`, `simple_box`, and `avian_2d` are the primary starting points for early milestones.
+- `references/lightyear/book/` — the local Lightyear book; begin with `src/SUMMARY.md` and follow the relevant tutorial and concept chapters.
+
+Agents should inspect these folders before using external examples. Treat them as read-only upstream snapshots and cite exact paths in milestone research logs. For exact APIs, use Lightyear's Bevy-0.19-pinned source and official Bevy 0.19 documentation; use the Bevy 0.20-dev snapshot only after verifying the equivalent 0.19 API.
+
+Architecture research follows this priority: Brawler's gameplay and authority requirements; the local Lightyear 0.29 examples and book; official Bevy 0.19 source/documentation; Bevy-native ECS/plugin/schedule patterns; then general Rust dependency hygiene.
+
+## Selected engine and networking stack
+
+- [Bevy 0.19](https://bevy.org/news/bevy-0-19/) — selected engine baseline, code-first scenes, ECS, and engine development status.
+- [Bevy 0.19 ECS API](https://docs.rs/bevy/0.19.0/bevy/ecs/index.html) — version-pinned entities, components, systems, queries, schedules, and resources.
+- [Bevy 0.19 plugin API](https://docs.rs/bevy/0.19.0/bevy/app/trait.Plugin.html) and [headless example](https://docs.rs/crate/bevy/0.19.0/source/examples/app/headless.rs) — version-pinned plugin composition and omission of rendering/window features for headless applications.
+- [Lightyear 0.29](https://docs.rs/lightyear/0.29.0/lightyear/) — version-pinned selected networking stack with server/client plugins, replication, input buffering, prediction, rollback, interpolation, and transport options.
+- [Lightyear repository](https://github.com/cBournhonesque/lightyear) — supported Bevy versions, examples, transports, lag compensation, and project license.
+- [Lightyear book Markdown source](https://github.com/cBournhonesque/lightyear/tree/main/book/src) — official guide to Lightyear concepts, setup, replication, prediction, rollback, and networking architecture.
+- [Avian](https://github.com/avianphysics/avian) — optional Bevy-native 2D collision and physics integration if custom queries are insufficient.
+- [bevy_replicon](https://docs.rs/bevy_replicon/latest/bevy_replicon/) — modular server-authoritative replication fallback with pluggable transport.
+- [Renet](https://docs.rs/renet/latest/renet/) — lower-level client/server transport option for the fallback stack.
+- [Cargo test](https://doc.rust-lang.org/cargo/commands/cargo-test.html) — Rust unit, integration, documentation, and benchmark test workflow.
+- [rust-analyzer](https://rust-analyzer.github.io/manual.html) — Rust language-server tooling for navigation, completion, diagnostics, and refactoring.
+
+## Historical alternatives and terrain references
+
+The Godot material below informed the earlier engine comparison and the engine-neutral mask-to-visual-to-collision terrain concept. These APIs are not implementation dependencies for the selected Bevy stack.
 
 - [Godot license](https://godotengine.org/license/) — MIT licensing and treatment of engine versus game content.
 - [Godot GitHub repository](https://github.com/godotengine/godot) — cross-platform 2D/3D engine overview and supported export targets.
 - [Godot documentation](https://docs.godotengine.org/en/stable/) — official documentation for scenes, nodes, input, physics, and export workflows.
-- [Godot BitMap](https://docs.godotengine.org/en/latest/classes/class_bitmap.html) — binary masks and mask-to-polygon conversion through `opaque_to_polygons()`.
-- [Godot Geometry2D](https://docs.godotengine.org/en/stable/classes/class_geometry2d.html) — polygon clipping, subtraction, and decomposition helpers.
-- [Godot ImageTexture](https://docs.godotengine.org/en/stable/classes/class_imagetexture.html) — updating dynamic terrain textures efficiently.
-- [Spell-Splosion](https://github.com/MitchMakesThings/Spell-Splosion) — older Godot 3 GDScript example project demonstrating Worms-style 2D terrain destruction. The repository code is MIT-licensed; its README identifies Kenney and project-created assets separately, so asset licenses must be checked independently.
-- [Godot high-level multiplayer](https://docs.godotengine.org/en/4.0/tutorials/networking/high_level_multiplayer.html) — Godot's server/client networking model and high-level multiplayer API.
-- [Godot dedicated server exports](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_dedicated_servers.html) — headless and dedicated-server export workflow.
-- [Bevy 0.19](https://bevy.org/news/bevy-0-19/) — current release baseline, code-first scenes, ECS, and engine development status.
-- [Bevy ECS guide](https://bevy.org/learn/quick-start/getting-started/ecs/) — entities, components, systems, queries, and resources.
-- [Bevy plugins and headless servers](https://bevy.org/learn/quick-start/getting-started/plugins/) — modular plugin model and omission of rendering plugins for headless applications.
-- [Lightyear](https://docs.rs/lightyear/latest/lightyear/) — Bevy networking stack with server/client plugins, replication, input buffering, prediction, rollback, and interpolation.
-- [Lightyear repository](https://github.com/cBournhonesque/lightyear) — supported Bevy versions, transports, lag compensation, and project license.
-- [bevy_replicon](https://docs.rs/bevy_replicon/latest/bevy_replicon/) — modular server-authoritative replication alternative with pluggable transport.
-- [Renet](https://docs.rs/renet/latest/renet/) — lower-level client/server transport, authentication, encryption, and message channels.
-- [Cargo test](https://doc.rust-lang.org/cargo/commands/cargo-test.html) — Rust unit, integration, documentation, and benchmark test workflow.
-- [rust-analyzer](https://rust-analyzer.github.io/manual.html) — Rust language-server tooling for navigation, completion, diagnostics, and refactoring.
+- [Godot BitMap](https://docs.godotengine.org/en/latest/classes/class_bitmap.html) — historical reference for binary masks and mask-to-polygon conversion.
+- [Godot Geometry2D](https://docs.godotengine.org/en/stable/classes/class_geometry2d.html) — historical reference for polygon clipping, subtraction, and decomposition.
+- [Godot ImageTexture](https://docs.godotengine.org/en/stable/classes/class_imagetexture.html) — historical reference for updating dynamic terrain textures.
+- [Spell-Splosion](https://github.com/MitchMakesThings/Spell-Splosion) — older Godot 3 GDScript example demonstrating Worms-style terrain destruction. Its mask workflow is conceptually useful, but its engine APIs are not implementation guidance for Brawler.
+- [Godot high-level multiplayer](https://docs.godotengine.org/en/4.0/tutorials/networking/high_level_multiplayer.html) — reference used during the engine comparison.
+- [Godot dedicated server exports](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_dedicated_servers.html) — reference used during the engine comparison.
+
+The v1 Milestone 10 terrain-design pass should add the exact Rust crates, algorithms, and Bevy/Avian integration references selected after a maintenance and performance review. Until then, marching squares, polygon simplification, dirty texture uploads, and collider replacement are requirements rather than dependency decisions.
 
 ## Reference game and mode structure
 

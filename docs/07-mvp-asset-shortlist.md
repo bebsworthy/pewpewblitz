@@ -44,7 +44,7 @@ Do not combine all packs in the same visible scene. Use one primary visual langu
 ### Tilemaps and arena geometry
 
 - **Modern / readable:** Kenney Top-down Shooter.
-- **Sci-fi:** Sci-Fi Facility Asset Pack or Rawdanitsu’s 64×64 Top-Down Tileset.
+- **Sci-fi:** Sci-Fi Facility Asset Pack or the listed OpenGameArt 64×64 Top-Down Tileset.
 - **Pixel-art sandbox:** Devolution Topdown or Versatile 255-Tile Pack.
 - **Pure layout testing:** Yohal’s template, supplemented with colored rectangles.
 
@@ -53,7 +53,7 @@ Do not combine all packs in the same visible scene. Use one primary visual langu
 - **Fastest and clearest:** Kenney Shape Characters.
 - **Animated 4-direction characters:** Sci-Fi Facility Asset Pack.
 - **Broader animated character set:** Good and Evil.
-- **Fantasy character and enemy coverage:** Devolution Topdown or the CC0 Zelda-like pack.
+- **Fantasy character and enemy coverage:** Devolution Topdown.
 
 ### Object and interaction sprites
 
@@ -62,11 +62,13 @@ Do not combine all packs in the same visible scene. Use one primary visual langu
 - **Generic pickups and markers:** Versatile 255-Tile Pack.
 - **HUD and ability symbols:** Game-icons.net, with attribution.
 
-## Practical Godot import notes
+## Practical Bevy import notes
 
 - Keep pixel-art packs at native resolution and use nearest-neighbor texture filtering.
 - Pick one world pixel scale per scene; do not mix 16×16, 32×32, and 64×64 tiles without an explicit scale plan.
-- Use `TileMapLayer` with a tileset for floors and indestructible walls; use separate terrain chunks for flexible destruction and scene nodes for objectives, pickups, and hazards.
+- Load runtime visuals through Bevy's asset system, retain the handles for as long as the assets are needed, and gate entry into playable states until required assets finish loading.
+- Keep authoritative map definitions separate from client-only sprite sheets, atlases, textures, and audio handles. The headless server must be able to load map geometry and rules without visual assets.
+- Represent floors and indestructible walls through authored map data plus replaceable client visuals. Keep flexible destruction in separate mask-backed terrain chunks, and keep objectives, pickups, hazards, and props as distinct gameplay entities.
 - Treat the visual sprite and collision shape as separate concerns. A temporary fighter can be a colored circle or capsule while the final sprite is undecided.
 - Add team color, health bar, selection ring, and hit flash independently of the sprite. Those signals matter more than character detail during combat testing.
 - Keep source ZIPs outside the runtime asset directory or in a clearly labelled `third_party/` folder, and record pack name, URL, author, license, and import date in an asset manifest.

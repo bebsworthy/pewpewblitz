@@ -16,7 +16,7 @@ Weapon
 
 ## Projectile model
 
-Projectile behavior should be split into independent layers so trajectory, collision, gameplay payload, and presentation can evolve separately.
+Model projectile behavior as composable authored data, ECS components, and focused systems so trajectory, collision, gameplay payload, and presentation can evolve separately. These concerns do not imply separate crates or service layers.
 
 ```text
 Projectile
@@ -26,8 +26,10 @@ Projectile
   Lifetime
   ImpactRules
   Payloads
-  VisualEffects
+  PresentationCueIds
 ```
+
+Presentation cue IDs are stable gameplay-facing references. Client systems resolve them to visual, audio, camera, or controller feedback; authoritative projectile systems do not load or mutate presentation assets.
 
 ### Trajectory types
 
@@ -41,7 +43,7 @@ Projectile
 - delayed or timed;
 - stationary/deployable.
 
-The first implementation only needs straight and ballistic trajectories. The data boundary should still allow later trajectory types without changing weapon definitions or fighter code.
+The first implementation only needs straight and ballistic trajectories. The selected definition/component representation should allow later trajectory systems without rewriting fighter behavior or unrelated weapon data.
 
 ### Impact rules
 
@@ -57,11 +59,11 @@ A projectile may:
 - apply a destruction brush to terrain;
 - trigger a summon or deployable.
 
-Impact rules should be data-driven and should emit gameplay events. They must not directly own particle, sound, camera-shake, or UI code.
+Impact rules should be data-driven and expose authoritative outcomes through gameplay components or registered messages as appropriate. Their systems must not load or mutate particles, sounds, camera shake, or UI assets.
 
 ### Presentation effects
 
-Gameplay events may trigger independent presentation effects:
+Client presentation systems may observe replicated gameplay components or registered gameplay messages and produce independent presentation effects:
 
 - muzzle flash;
 - projectile trail;
@@ -73,7 +75,7 @@ Gameplay events may trigger independent presentation effects:
 - sound effect;
 - terrain crater edge.
 
-Presentation effects can be placeholders during the MVP and replaced later without changing collision or damage behavior.
+Presentation effects can be placeholders during the MVP and replaced later without changing authoritative collision or damage systems.
 
 ### Input behavior
 
@@ -136,6 +138,8 @@ Immediate effects include:
 - shield break;
 - silence or ability lockout.
 
+Every immediate effect needs explicit duration, stacking or refresh behavior, ownership/attribution, and cleanup rules. Effects must resolve consistently on expiry, defeat, respawn, disconnect, match restart, and removal of their source. These lifecycle rules belong to the reusable effect system rather than individual weapon scripts.
+
 Accumulating effects use a status contribution instead of directly triggering the final effect:
 
 ```text
@@ -164,7 +168,7 @@ Terrain destruction is a world-level payload. A weapon emits a destruction brush
 
 ## Projectile phase scope
 
-### MVP
+### Combat vertical slice and first product iteration
 
 - straight pulse projectile;
 - short-range pellet spread;
@@ -173,7 +177,7 @@ Terrain destruction is a world-level payload. A weapon emits a destruction brush
 - basic projectile trail and impact feedback;
 - collision with fighters, terrain, and objectives.
 
-### Second phase
+### Later projectile content
 
 - bouncing and ricocheting;
 - homing and curved/steered paths;
@@ -184,12 +188,12 @@ Terrain destruction is a world-level payload. A weapon emits a destruction brush
 
 ## Status interaction phase scope
 
-### MVP
+### Combat vertical slice and first product iteration
 
 - immediate effects may be represented by simple payloads such as damage, knockback, or a basic slow;
 - no accumulating status meter is required for the first combat sandbox.
 
-### Second phase
+### Systemic-status milestone
 
 - target-owned status meters;
 - contributions from multiple weapon types and persistent zones;
@@ -221,7 +225,7 @@ Use the same compositional model as weapons. Initial candidates:
 - area pull or knockback;
 - short-lived wall placement.
 
-Implement only two at first: a dash and a deployable. They exercise mobility, collision, targeting, lifetime, and counterplay.
+Implement only two in v1 Milestone 08: a dash and a bounded-lifetime deployable sentry. They exercise mobility, collision, targeting, ownership, lifetime, cleanup, and counterplay. Every named first-iteration preset must be constructible from these two ultimates and the implemented passive inventory.
 
 ## Passive items
 
@@ -238,7 +242,7 @@ Good first candidates:
 
 ## Active items
 
-Add active items after the core loop works. Candidates:
+Active items are optional after the core loop works and are not required for the first product-iteration gate. Candidates:
 
 - short burst of speed;
 - emergency shield;
