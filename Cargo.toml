@@ -8,8 +8,29 @@ publish = false
 
 [features]
 default = ["client"]
-client = ["bevy-client", "lightyear/client"]
-server = ["bevy-server", "lightyear/server"]
+client = [
+  "bevy-client",
+  "lightyear/client",
+  "lightyear/netcode",
+  "lightyear/replication",
+  "lightyear/udp",
+]
+server = [
+  "bevy-server",
+  "lightyear/netcode",
+  "lightyear/replication",
+  "lightyear/server",
+  "lightyear/udp",
+]
+network-test = [
+  "client",
+  "server",
+  "lightyear/client",
+  "lightyear/crossbeam",
+  "lightyear/netcode",
+  "lightyear/replication",
+  "lightyear/server",
+]
 bevy-client = [
   "bevy/bevy_asset",
   "bevy/bevy_core_pipeline",
@@ -32,6 +53,7 @@ bevy = { version = "=0.19.1", default-features = false, features = [
 ] }
 lightyear = { version = "=0.29.0", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "1.1", features = ["alloc"] }
 
 [[bin]]
 name = "brawler-client"
@@ -42,6 +64,11 @@ required-features = ["client"]
 name = "brawler-server"
 path = "src/bin/server.rs"
 required-features = ["server"]
+
+[[test]]
+name = "network"
+path = "tests/network.rs"
+required-features = ["network-test"]
 
 [lints.rust]
 unsafe_code = "deny"

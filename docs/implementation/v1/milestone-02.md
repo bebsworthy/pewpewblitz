@@ -6,11 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Specification review |
-| Specification validation | Pending user review |
-| Implementation | Not started |
-| Verification | Not started |
-| User validation/playtest | Not started |
+| Status | User playtest |
+| Specification validation | User requested implementation directly |
+| Implementation | Complete |
+| Verification | Complete |
+| User validation/playtest | Pending handoff |
 
 Update this table and the roadmap together whenever the milestone changes phase.
 
@@ -174,7 +174,8 @@ no internet fallback was required for this specification.
 
 ## Technical specification
 
-Status: **Proposed for user validation. Do not begin production implementation until approved.**
+Status: **Implemented; the user requested implementation directly. Automated verification is
+complete and interactive user playtest is pending.**
 
 ### Decisions
 
@@ -441,88 +442,88 @@ The launcher must follow Milestone 01's corrected supervision rules and must not
 
 ### Dependency and composition
 
-- [ ] Extend client/server Lightyear features with `replication`, `netcode`, and `udp` while
+- [x] Extend client/server Lightyear features with `replication`, `netcode`, and `udp` while
   preserving isolated production builds.
-- [ ] Add a dedicated `network-test` feature/target with Crossbeam and a locked CI lane.
-- [ ] Install `ClientPlugins`/`ServerPlugins` with `SIMULATION_TICK` before `ProtocolPlugin`.
-- [ ] Re-run and, if needed, strengthen the server feature-isolation script for the new graph.
+- [x] Add a dedicated `network-test` feature/target with Crossbeam and a locked CI lane.
+- [x] Install `ClientPlugins`/`ServerPlugins` with `SIMULATION_TICK` before `ProtocolPlugin`.
+- [x] Re-run and, if needed, strengthen the server feature-isolation script for the new graph.
 
 ### Protocol and identity
 
-- [ ] Replace the Milestone 01 placeholder protocol registration with the exact session messages,
+- [x] Replace the Milestone 01 placeholder protocol registration with the exact session messages,
   channel, and replicated components specified above.
-- [ ] Add the explicit Netcode protocol ID and supported Brawler protocol/build constants.
-- [ ] Implement checked server-owned ID allocation without exposing Bevy `Entity` on the wire.
-- [ ] Add protocol composition and actual transport-round-trip tests.
+- [x] Add the explicit Netcode protocol ID and supported Brawler protocol/build constants.
+- [x] Implement checked server-owned ID allocation without exposing Bevy `Entity` on the wire.
+- [x] Add protocol composition and actual transport-round-trip tests.
 
 ### Server networking
 
-- [ ] Implement validated server configuration and UDP + Netcode endpoint startup.
-- [ ] Configure new `LinkOf` entities with `ReplicationSender` and pending handshake state.
-- [ ] Validate hello/capacity exactly once and spawn one owned authoritative placeholder on accept.
-- [ ] Implement handshake timeout, rejection, idempotent cleanup, reconnect, and graceful stop.
+- [x] Implement validated server configuration and UDP + Netcode endpoint startup.
+- [x] Configure new `LinkOf` entities with `ReplicationSender` and pending handshake state.
+- [x] Validate hello/capacity exactly once and spawn one owned authoritative placeholder on accept.
+- [x] Implement handshake timeout, rejection, idempotent cleanup, reconnect, and graceful stop.
 
 ### Client networking and presentation
 
-- [ ] Implement validated client configuration and UDP + Netcode connection startup.
-- [ ] Send hello on real connection, consume outcomes, and expose structured join/disconnect status.
-- [ ] Derive and log the replicated roster by stable IDs; distinguish development client windows.
-- [ ] Add bounded headless automation behavior without constructing winit in headless tests.
+- [x] Implement validated client configuration and UDP + Netcode connection startup.
+- [x] Send hello on real connection, consume outcomes, and expose structured join/disconnect status.
+- [x] Derive and log the replicated roster by stable IDs; distinguish development client windows.
+- [x] Add bounded headless automation behavior without constructing winit in headless tests.
 
 ### Workflow and CI
 
-- [ ] Add supervised one-server/two-client local and process-smoke commands using Cargo-resolved
+- [x] Add supervised one-server/two-client local and process-smoke commands using Cargo-resolved
   execution and propagated exit statuses.
-- [ ] Document individual and combined locked commands plus expected logs/outcomes.
-- [ ] Add locked CI checks for network-test and retain isolated client/server lint/test/build lanes.
-- [ ] Record exact automated, UDP, process, and user smoke evidence rather than checking boxes from
-  implementation assumptions.
+- [x] Document individual and combined locked commands plus expected logs/outcomes.
+- [x] Add locked CI checks for network-test and retain isolated client/server lint/test/build lanes.
+- [x] Record exact automated, UDP, and process evidence; interactive user evidence remains pending
+  handoff rather than being inferred from automation.
 
 ## Test plan
 
 ### Unit and composition tests
 
-- [ ] Client and server apps install the proper Lightyear group before identical protocol
+- [x] Client and server apps install the proper Lightyear group before identical protocol
   registration; endpoint entities are created only afterward.
-- [ ] All Brawler message/component/channel registrations and directions are present.
-- [ ] Invalid CLI configuration fails with actionable errors and valid defaults/overrides round-trip.
-- [ ] Checked ID allocation is monotonic, unique, starts at 1, and rejects exhaustion without wrap.
-- [ ] The production server feature graph still excludes rendering, windowing, audio, device input,
+- [x] All Brawler message/component/channel registrations and directions are present.
+- [x] Invalid CLI configuration fails with actionable errors and valid defaults/overrides round-trip.
+- [x] Checked ID allocation is monotonic, unique, starts at 1, and rejects exhaustion without wrap.
+- [x] The production server feature graph still excludes rendering, windowing, audio, device input,
   and client assets.
 
 ### Deterministic separate-app integration tests
 
 Tests use Netcode over Crossbeam, separate `App` worlds, and simulated Bevy real/fixed time:
 
-- [ ] First client completes the real connection and Brawler hello before its server-owned
+- [x] First client completes the real connection and Brawler hello before its server-owned
   placeholder appears.
-- [ ] Second client joins in progress; both clients receive exactly the same two stable player and
+- [x] Second client joins in progress; both clients receive exactly the same two stable player and
   network-entity IDs, while their local Bevy entity IDs are not used for comparison.
-- [ ] Server placeholders contain `Replicate` and session ownership; client roster entries are
+- [x] Server placeholders contain `Replicate` and session ownership; client roster entries are
   receiver-side `Remote` entities. No client creates an authoritative placeholder.
-- [ ] A mismatched Netcode protocol ID, rejected request, and mismatched Brawler build/version each
+- [x] A mismatched Netcode protocol ID, rejected request, and mismatched Brawler build/version each
   produce a visible failure and zero owned placeholders.
-- [ ] Deliberately mismatched message, component, or channel registration is detected by
+- [x] Deliberately mismatched message, component, or channel registration is detected by
   Lightyear's registry protocol check and cannot produce an accepted Brawler session.
-- [ ] Connection and Brawler-handshake timeouts cross their thresholds through simulated time, not
+- [x] Connection and Brawler-handshake timeouts cross their thresholds through simulated time, not
   wall-clock sleeping, and leave no owned entities.
-- [ ] Client disconnect removes its server placeholder and replicates the despawn to the other
+- [x] Client disconnect removes its server placeholder and replicates the despawn to the other
   client. Repeating disconnect/cleanup transitions is safe.
-- [ ] Reconnecting the same development Netcode ID after cleanup creates exactly one fresh player
+- [x] Reconnecting the same development Netcode ID after cleanup creates exactly one fresh player
   with new Brawler IDs and receives the current roster.
-- [ ] Graceful server stop disconnects both clients and leaves no server connection or placeholder
+- [x] Graceful server stop disconnects both clients and leaves no server connection or placeholder
   entities after the bounded simulated deadline.
 
 ### Real UDP and process verification
 
-- [ ] A real loopback UDP test uses an OS-assigned server port and proves connection, hello, and one
+- [x] A real loopback UDP test uses an OS-assigned server port and proves connection, hello, and one
   replicated placeholder without relying on Crossbeam.
-- [ ] The supervised headless process harness launches the actual server and two client binaries,
+- [x] The supervised headless process harness launches the actual server and two client binaries,
   proves both report the same two-player roster, propagates any child failure, cleans all children,
   and times out with diagnostics rather than hanging.
 - [ ] Interactive `just network` opens two distinguishable responsive client windows, connects both,
   logs the same roster, and shuts all processes down when requested.
-- [ ] Server bind failure, absent server, duplicate client transport ID, and protocol rejection are
+- [x] Server bind failure, absent server, duplicate client transport ID, and protocol rejection are
   visible and bounded in the actual process path.
 
 ### Evidence rules
@@ -535,6 +536,40 @@ Tests use Netcode over Crossbeam, separate `App` worlds, and simulated Bevy real
 - Crossbeam evidence does not count as UDP evidence, and a window launch does not count as a
   two-client replication test.
 - All Cargo commands recorded as CI/canonical evidence use `--locked`.
+
+## Verification record
+
+Automated and local process verification completed on 2026-08-13:
+
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`
+  passed; the equivalent `server` and `network-test` commands also passed.
+- Client feature tests passed: 4 unit tests. Server feature tests passed: 5 unit tests.
+- `cargo test --locked --no-default-features --features network-test --test network
+  -- --test-threads=1 --nocapture` passed all 8 tests. This includes separate-App Crossbeam
+  connection/replication, join-in-progress, Brawler build rejection, Netcode protocol mismatch,
+  Lightyear registry mismatch detection, simulated handshake timeout, disconnect cleanup, fresh-ID
+  reconnect, and graceful server stop.
+- The Lightyear registry mismatch test is intentionally `#[should_panic]`: Lightyear 0.29 detects
+  the registry mismatch before Brawler acceptance, but its default Bevy error handler panics in this
+  test process. This is a visible bounded failure, not an accepted session.
+- `cargo build --locked --no-default-features --features client --bin brawler-client` and the
+  equivalent server build passed. `./scripts/check-server-features.sh` passed.
+- `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ADDR=127.0.0.1:5019 ./scripts/network.sh` passed
+  with status 0; it launched the actual UDP server and two client binaries, waited for both
+  two-player rosters, and left no Brawler processes. The real UDP integration test also passed
+  using an OS-assigned server port.
+- An absent server at `127.0.0.1:59999` logged `brawler client connection timed out` and returned
+  status 1 after the configured 5-second bound. Invalid headless configuration and zero server
+  capacity returned status 2 with actionable messages. A bind collision returned promptly with
+  `Address already in use`.
+- Two real UDP clients launched with the same development Netcode ID did not produce two active
+  sessions: one completed and the other returned a bounded timeout while the server logged Netcode
+  crypto/duplicate-identity warnings.
+- `bash -n scripts/network.sh` and `just --dry-run network-smoke` passed.
+
+The interactive windowed `just network` smoke remains a user-playtest item because it requires
+visual inspection of two macOS windows and manual shutdown.
 
 ## Visual and user smoke-test plan
 
@@ -554,31 +589,41 @@ No gameplay controls or fighter visuals are expected in this milestone.
 
 | ID | Feedback | Decision | Rationale | Task/backlog link |
 |---|---|---|---|---|
-| — | Awaiting specification review | — | — | — |
+| — | Awaiting interactive Milestone 02 smoke feedback | Pending | Automated and process verification are complete; window behavior and operator ergonomics still need user observation. | User playtest handoff below |
 
 ## Learn from errors
 
-Complete after implementation, verification, and feedback review:
+Completed on 2026-08-13:
 
-- Which Lightyear 0.29 API, feature, lifecycle, or ordering assumption was wrong?
-- Did any test bypass the real layer named in its claim?
-- Did process supervision, port allocation, timeout handling, or cleanup hide a failure?
-- Which check would have caught the issue earlier?
-- Is the lesson recurring enough to update a project/Codex skill?
-- Which Milestone 03 movement or prediction assumptions must change?
+- A protocol-registration unit test initially omitted the Lightyear role plugin and Bevy
+  `StatesPlugin`; component registration then failed for a missing `ProtocolHasher` or state
+  schedule. The fix was to build that test with the same minimal foundation and role ordering as
+  production apps.
+- Rejected links were initially despawned in the same server frame as their reliable rejection
+  outcome, so the client could miss the outcome and only observe a disconnect. A one-frame flush
+  boundary now separates outcome delivery from rejected-link cleanup.
+- Bevy's `AppExit::Error` was initially ignored by both binary entry points, making a timed-out
+  client log an error but return status 0. Returning `AppExit` from `main` now propagates the
+  bounded failure status to Cargo and the supervisor.
+- The registry mismatch path is detected by Lightyear's exact 0.29 protocol check, but the default
+  Bevy error handler panics. The test records that behavior explicitly instead of claiming a
+  graceful rejection; a later networking-hardening milestone can add a production error policy.
+- These are repository-specific lifecycle/composition lessons, so no new reusable Codex skill was
+  justified. Milestone 03 should continue to verify exact Lightyear ordering and keep prediction
+  or input work behind the same server-authoritative integration harness.
 
 ## Exit checklist
 
 - [x] Research questions are resolved or explicitly deferred with rationale.
-- [ ] Technical specification is validated by the user.
-- [ ] All accepted implementation tasks are complete.
-- [ ] Locked format, lint, test, build, feature-isolation, and network-test commands pass.
-- [ ] Two real local clients connect and receive the same two server-owned placeholders.
-- [ ] Rejection, timeout, disconnect, reconnect, and shutdown outcomes are visible and repeatable.
-- [ ] Rejected/disconnected sessions leave no authoritative owned entities behind.
-- [ ] Crossbeam deterministic tests and real UDP/process tests each provide evidence for their own
+- [x] Technical specification is accepted by the user's direct implementation request.
+- [x] All accepted implementation tasks are complete.
+- [x] Locked format, lint, test, build, feature-isolation, and network-test commands pass.
+- [x] Two real local clients connect and receive the same two server-owned placeholders.
+- [x] Rejection, timeout, disconnect, reconnect, and shutdown outcomes are visible and repeatable.
+- [x] Rejected/disconnected sessions leave no authoritative owned entities behind.
+- [x] Crossbeam deterministic tests and real UDP/process tests each provide evidence for their own
   layer.
-- [ ] The dedicated server remains headless by dependency graph and runtime behavior.
-- [ ] User smoke-test feedback is incorporated or triaged.
-- [ ] Learn-from-errors review is complete and reusable lessons are captured where justified.
-- [ ] Roadmap status and current milestone are updated.
+- [x] The dedicated server remains headless by dependency graph and runtime behavior.
+- [ ] User smoke-test feedback is incorporated or triaged; awaiting the interactive handoff.
+- [x] Learn-from-errors review is complete and reusable lessons are captured where justified.
+- [x] Roadmap status and current milestone are updated.

@@ -69,3 +69,11 @@ run:
 
         sleep 0.1
     done
+
+# Launch one server and two distinguishable windowed clients.
+network:
+    BRAWLER_NETWORK_HEADLESS=0 ./scripts/network.sh
+
+# Launch one server and two bounded headless clients; succeeds after both see a two-player roster.
+network-smoke:
+    BRAWLER_NETWORK_HEADLESS=1 ./scripts/network.sh

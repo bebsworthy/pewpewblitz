@@ -1,6 +1,6 @@
 # Brawler
 
-Brawler is a server-authoritative top-down arena shooter. Milestone 01 establishes the smallest Bevy/Rust application foundation: a blank macOS client, a headless dedicated server, shared fixed-tick gameplay composition, and a Lightyear protocol registry with no network connections yet.
+Brawler is a server-authoritative top-down arena shooter. Milestone 02 adds a Lightyear Netcode/UDP connection and replication sandbox: two local clients can join one headless server and observe its stable server-owned placeholder roster.
 
 ## Toolchain
 
@@ -14,7 +14,7 @@ Run these from the repository root:
 just
 ```
 
-`just` builds the isolated server and client configurations, launches both through Cargo's target resolution, and shuts down the other process when you press Ctrl-C, close the client window, or one process exits. If the server exits with a failure status, `just` stops the client and returns that status. The individual commands remain available for focused checks:
+`just` retains the Milestone 01 one-client launcher. For the network sandbox, use `just network` to open one server and two distinguishable client windows, or `just network-smoke` for a bounded headless process check. The launcher runs through Cargo's target resolution, supervises every child, propagates failures, and leaves no Brawler processes after shutdown. The individual commands remain available for focused checks:
 
 ```sh
 cargo fmt --all -- --check
@@ -22,16 +22,19 @@ cargo clippy --locked --no-default-features --features client --all-targets -- -
 cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings
 cargo test --locked --no-default-features --features client --all-targets
 cargo test --locked --no-default-features --features server --all-targets
+cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1
 cargo build --locked --no-default-features --features client --bin brawler-client
 cargo build --locked --no-default-features --features server --bin brawler-server
-cargo run --locked --no-default-features --features client --bin brawler-client
-cargo run --locked --no-default-features --features server --bin brawler-server
+cargo run --locked --no-default-features --features client --bin brawler-client -- --client-id 1
+cargo run --locked --no-default-features --features server --bin brawler-server -- --bind 127.0.0.1:5000
 ./scripts/check-server-features.sh
+just network
+just network-smoke
 ```
 
-The server command is headless and exits cleanly with Ctrl-C. The client opens a blank responsive window and exits cleanly when its window closes. `RUST_LOG` controls log filtering, for example `RUST_LOG=brawler=info`.
+The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. The client accepts `--server`, required `--client-id`, and bounded automation flags `--headless --exit-after-roster 2`. `RUST_LOG` controls log filtering, for example `RUST_LOG=brawler=info`. Window titles identify the two clients; structured logs report connection outcome and stable `(player_id, network_entity_id)` roster entries.
 
-Do not use `--all-features` as a supported application build: client and server are independently tested feature configurations, and Cargo features are additive.
+Do not use `--all-features` as a supported application build: client and server are independently tested production configurations, while `network-test` is the dedicated separate-app Crossbeam integration configuration. Cargo features are additive.
 
 ## Repository conventions
 
