@@ -19,8 +19,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 01 user playtest
-- **Current milestone:** Milestone 01 — Rust and Bevy application foundation
+- **Overall status:** Milestone 02 specification review; Milestone 01 user playtest pending
+- **Current milestone:** Milestone 02 — Network connection and replication sandbox
 - **Last completed milestone:** None
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -149,7 +149,7 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | Milestone | Status | Deliverable | Plan |
 |---|---|---|---|
 | 01 | User playtest | Rust and Bevy application foundation | [milestone-01.md](./milestone-01.md) |
-| 02 | Not started | Network connection and replication sandbox | Create when next |
+| 02 | Specification review | Network connection and replication sandbox | [milestone-02.md](./milestone-02.md) |
 | 03 | Not started | Movement, aiming, and greybox collision | Create when next |
 | 04 | Not started | Combat core | Create when next |
 | 05 | Not started | Weapon composition and selection | Create when next |
