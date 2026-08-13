@@ -19,14 +19,17 @@ run:
 
     cleanup() {
         local status=$?
+        local signal=INT
+
+        if [[ "$status" -ne 0 && "$status" -ne 130 && "$status" -ne 143 ]]; then
+            signal=TERM
+        fi
 
         if [[ -n "$client_pid" ]] && job_is_running "$client_pid"; then
-            kill -TERM "$client_pid" 2>/dev/null || true
+            kill -"$signal" "$client_pid" 2>/dev/null || true
         fi
         if [[ -n "$server_pid" ]] && job_is_running "$server_pid"; then
-            # Background jobs inherit the shell's ignored SIGINT disposition,
-            # so use SIGTERM for reliable launcher cleanup.
-            kill -TERM "$server_pid" 2>/dev/null || true
+            kill -"$signal" "$server_pid" 2>/dev/null || true
         fi
         wait "$client_pid" 2>/dev/null || true
         wait "$server_pid" 2>/dev/null || true
@@ -38,9 +41,9 @@ run:
 
     # Run through Cargo so CARGO_TARGET_DIR and Cargo configuration determine
     # the executable location instead of assuming target/debug in the repo.
-    (exec cargo run --locked --no-default-features --features server --bin brawler-server) &
+    (trap - INT TERM; exec cargo run --locked --no-default-features --features server --bin brawler-server) &
     server_pid=$!
-    (exec cargo run --locked --no-default-features --features client --bin brawler-client) &
+    (trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- --client-id 1) &
     client_pid=$!
 
     while :; do

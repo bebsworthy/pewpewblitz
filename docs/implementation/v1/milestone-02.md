@@ -256,6 +256,7 @@ Client → server
   ClientHello
     protocol_version
     build_version
+    registry_fingerprint
 
 Server → client
   JoinOutcome
@@ -266,7 +267,7 @@ Replicated components
   PlaceholderPlayer               zero-sized marker
   PlayerId(u64)
   NetworkEntityId(u64)
-  PlaceholderState { spawn_slot: u16 }
+  PlaceholderState { spawn_slot: u64 }
 ```
 
 Message directions are restricted during registration even though they share a bidirectional
@@ -274,10 +275,13 @@ channel. No gameplay input type or gameplay-event channel is registered yet. Lig
 metadata/replication channels remain library-owned.
 
 Compatibility policy for this milestone is exact equality for both Brawler protocol version and
-package build version. A mismatch produces `JoinOutcome::Rejected`, no placeholder spawn, a visible
-client failure status, and client-initiated disconnect. The server applies a deterministic handshake
-deadline and cleans a peer that never sends a valid hello. Netcode protocol-ID mismatch and Netcode
-request denial are surfaced through `DisconnectedReason` and likewise create no placeholder.
+package build version, plus an application-owned Lightyear registry fingerprint. A mismatch
+produces `JoinOutcome::Rejected`, no placeholder spawn, a visible client failure status, and
+client-initiated disconnect. Lightyear observer errors use a non-panicking log policy; the Brawler
+fingerprint rejection is the controlled application outcome. The server applies a deterministic
+handshake deadline and cleans a peer that never sends a valid hello. Netcode protocol-ID mismatch
+and Netcode request denial are surfaced through `DisconnectedReason` and likewise create no
+placeholder.
 
 ### ECS ownership and lifecycle
 
@@ -335,8 +339,9 @@ Clients receive mapped local Bevy entities. Brawler logic, logs, tests, and futu
 2. Install the server Lightyear group and Brawler protocol.
 3. Spawn the UDP + Netcode server endpoint and trigger `Start`.
 4. Emit the bound address, protocol/build version, and 60 Hz tick in structured logs.
-5. Failure to reach `Started` within the configured startup deadline exits nonzero in automated
-   mode and remains an actionable error in interactive mode.
+5. Bind and protocol errors are logged through the controlled Bevy error policy; the supervised
+   headless launcher has a bounded deadline and returns a failure status if startup or joining does
+   not complete.
 
 #### Client connect and acceptance
 
@@ -357,8 +362,9 @@ Clients receive mapped local Bevy entities. Brawler logic, logs, tests, and futu
 - Invalid Brawler hello receives an explicit rejection and the client requests disconnect.
 - A connected peer that sends no valid hello before the deterministic deadline is closed and owns
   no placeholder.
-- A client unable to reach a server leaves `Connecting` through Netcode's configured timeout. The
-  interactive client remains able to display/log the reason; automated mode exits nonzero.
+- A client unable to reach a server leaves `Connecting` through Netcode's configured timeout and
+  enters `Disconnected`. An active client whose automated roster target is not reached by the same
+  configured bound also exits nonzero.
 
 #### Disconnect and reconnect
 
@@ -374,7 +380,9 @@ Clients receive mapped local Bevy entities. Brawler logic, logs, tests, and futu
 - Graceful shutdown triggers Lightyear `Stop` on the server endpoint before app exit.
 - Connected client links transition through disconnect, session-owned placeholders are removed, and
   the endpoint reaches `Stopped`/`Unlinked` before the bounded shutdown deadline.
-- The supervised launcher propagates unexpected child failure and terminates remaining children.
+- Client window closure and automated success trigger Lightyear `Disconnect` before app exit. The
+  supervised launcher propagates unexpected child failure, requests graceful `SIGINT` shutdown,
+  and escalates only after its bounded cleanup wait.
 
 ### Schedule and ordering contract
 
@@ -408,7 +416,7 @@ or observer was registered.
 
 ### Process configuration and command surface
 
-Implementation may refine flag spelling during user review, but must provide these capabilities:
+The implemented command surface provides these capabilities:
 
 ```text
 brawler-server
@@ -427,6 +435,18 @@ Unknown flags, malformed addresses, duplicate launcher client IDs, zero/invalid 
 failure, and invalid automation combinations fail before an indefinite app run. Window titles and
 logs distinguish the two development clients. CLI parsing belongs in binaries/configuration code;
 network and session behavior remains in Bevy plugins and testable systems.
+
+`just network-smoke` sets a 30-second process deadline. Windowed `just network` intentionally stays
+open for manual disconnect/reconnect playtesting; when one client window closes, the server and
+remaining client stay alive. Restart the closed client with its same Netcode-only ID, for example:
+
+```sh
+cargo run --locked --no-default-features --features client --bin brawler-client -- \
+  --server 127.0.0.1:5000 --client-id 1
+```
+
+`BRAWLER_NETWORK_ADDR` selects the server address and
+`BRAWLER_NETWORK_TIMEOUT_SECONDS` can add a bounded deadline to the windowed launcher.
 
 Canonical workflow additions:
 
@@ -544,29 +564,31 @@ Automated and local process verification completed on 2026-08-13:
 - `cargo fmt --all -- --check` passed.
 - `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`
   passed; the equivalent `server` and `network-test` commands also passed.
-- Client feature tests passed: 4 unit tests. Server feature tests passed: 5 unit tests.
+- Client feature tests passed: 5 unit tests. Server feature tests passed: 6 unit tests.
 - `cargo test --locked --no-default-features --features network-test --test network
-  -- --test-threads=1 --nocapture` passed all 8 tests. This includes separate-App Crossbeam
-  connection/replication, join-in-progress, Brawler build rejection, Netcode protocol mismatch,
-  Lightyear registry mismatch detection, simulated handshake timeout, disconnect cleanup, fresh-ID
-  reconnect, and graceful server stop.
-- The Lightyear registry mismatch test is intentionally `#[should_panic]`: Lightyear 0.29 detects
-  the registry mismatch before Brawler acceptance, but its default Bevy error handler panics in this
-  test process. This is a visible bounded failure, not an accepted session.
+  -- --test-threads=1 --nocapture` passed all 10 tests. This includes separate-App Crossbeam
+  connection/replication, true join-in-progress, Brawler build and protocol-version rejection,
+  controlled Lightyear registry mismatch rejection, active-roster timeout, simulated handshake
+  timeout, two-client despawn replication, repeated disconnect cleanup, fresh-ID reconnect, and
+  graceful two-client server stop.
+- The Lightyear registry mismatch test now uses the production non-panicking Bevy error policy and
+  asserts `JoinRejection::RegistryMismatch`, client disconnection, and zero server placeholders.
 - `cargo build --locked --no-default-features --features client --bin brawler-client` and the
   equivalent server build passed. `./scripts/check-server-features.sh` passed.
-- `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ADDR=127.0.0.1:5019 ./scripts/network.sh` passed
-  with status 0; it launched the actual UDP server and two client binaries, waited for both
-  two-player rosters, and left no Brawler processes. The real UDP integration test also passed
-  using an OS-assigned server port.
-- An absent server at `127.0.0.1:59999` logged `brawler client connection timed out` and returned
-  status 1 after the configured 5-second bound. Invalid headless configuration and zero server
-  capacity returned status 2 with actionable messages. A bind collision returned promptly with
-  `Address already in use`.
+- `RUST_LOG=brawler=info BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ADDR=127.0.0.1:5036
+  ./scripts/network.sh` passed with status 0; it launched the actual UDP server and two client
+  binaries, waited for both two-player rosters, requested graceful server shutdown, and left no
+  Brawler processes. The real UDP integration test also passed using an OS-assigned server port.
+- An absent server at `127.0.0.1:59998` logged a structured disconnected transport reason and
+  returned status 1 after the configured 5-second bound. Invalid headless configuration and zero
+  server capacity returned status 2 with actionable messages. A bind collision returned promptly
+  with `Address already in use`.
 - Two real UDP clients launched with the same development Netcode ID did not produce two active
   sessions: one completed and the other returned a bounded timeout while the server logged Netcode
   crypto/duplicate-identity warnings.
-- `bash -n scripts/network.sh` and `just --dry-run network-smoke` passed.
+- A real server process launched with the Cargo-resolved binary handled `SIGINT` through Lightyear
+  `Stop`, logged UDP socket closure, and returned status 130. `bash -n scripts/network.sh`,
+  `just --dry-run`, and `just --dry-run network-smoke` passed.
 
 The interactive windowed `just network` smoke remains a user-playtest item because it requires
 visual inspection of two macOS windows and manual shutdown.
@@ -589,6 +611,11 @@ No gameplay controls or fighter visuals are expected in this milestone.
 
 | ID | Feedback | Decision | Rationale | Task/backlog link |
 |---|---|---|---|---|
+| R1 | Registry mismatch used Bevy's panic policy. | Implemented | Install a non-panicking error handler, add an application-owned registry fingerprint to `ClientHello`, and assert controlled rejection/disconnect. | `tests/network.rs`, registry mismatch test |
+| R2 | Production AppExit/launcher shutdown bypassed Lightyear lifecycle. | Implemented | Bridge AppExit to Lightyear `Stop`/`Disconnect`, reset inherited signal dispositions in supervised children, and use bounded graceful cleanup escalation. | `src/client.rs`, `src/server.rs`, `scripts/network.sh` |
+| R3 | Active roster automation and launchers could hang or block reconnect playtesting. | Implemented | Add active-roster timeout, launcher deadline, keep windowed sessions alive after one client closes, and document same-ID restart. | `src/client.rs`, `scripts/network.sh`, README |
+| R4 | Integration evidence overstated join, despawn, repeat cleanup, and protocol-version coverage. | Implemented | Add true late join, two-client despawn replication, repeated disconnect, protocol-version, and active-roster timeout tests. | `tests/network.rs` |
+| R5 | `spawn_slot: u16` imposed an unintended session cap. | Implemented | Use the monotonic `u64` player ID directly as placeholder slot state. | `src/protocol.rs`, `src/server.rs` |
 | — | Awaiting interactive Milestone 02 smoke feedback | Pending | Automated and process verification are complete; window behavior and operator ergonomics still need user observation. | User playtest handoff below |
 
 ## Learn from errors
@@ -606,8 +633,20 @@ Completed on 2026-08-13:
   client log an error but return status 0. Returning `AppExit` from `main` now propagates the
   bounded failure status to Cargo and the supervisor.
 - The registry mismatch path is detected by Lightyear's exact 0.29 protocol check, but the default
-  Bevy error handler panics. The test records that behavior explicitly instead of claiming a
-  graceful rejection; a later networking-hardening milestone can add a production error policy.
+  Bevy error handler previously panicked. The production apps now install a non-panicking handler
+  and independently exchange a registry fingerprint in `ClientHello` so the server can return a
+  structured `RegistryMismatch` outcome before spawning a placeholder.
+- AppExit previously ended the process without a network lifecycle transition, while the launcher
+  used signals that could bypass Lightyear. Shutdown now routes through `Stop`/`Disconnect`; the
+  launcher resets inherited signal dispositions, asks children to handle `SIGINT`, and escalates
+  only after a bounded wait.
+- The original test harness created all clients before time advanced and did not prove cleanup
+  replication to another client. The harness now adds the second client after the first is active and
+  keeps a second client through disconnect/reconnect assertions.
+- A session-slot conversion to `u16` silently created a lifetime cap unrelated to concurrent server
+  capacity. Placeholder state now uses the monotonic `u64` ID without narrowing.
+- The fingerprint handshake and widened placeholder state both change serialized wire data, so the
+  explicitly versioned Netcode protocol ID was bumped with the implementation.
 - These are repository-specific lifecycle/composition lessons, so no new reusable Codex skill was
   justified. Milestone 03 should continue to verify exact Lightyear ordering and keep prediction
   or input work behind the same server-authoritative integration harness.

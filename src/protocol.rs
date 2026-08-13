@@ -2,13 +2,13 @@
 
 use bevy::prelude::*;
 use lightyear::prelude::{
-    AppChannelExt, AppComponentExt, AppMessageExt, ChannelMode, ChannelSettings, NetworkDirection,
-    ReliableSettings,
+    AppChannelExt, AppComponentExt, AppMessageExt, ChannelMode, ChannelRegistry, ChannelSettings,
+    ComponentRegistry, MessageRegistry, NetworkDirection, ReliableSettings,
 };
 use serde::{Deserialize, Serialize};
 
 /// Netcode protocol ID. Bump this for incompatible wire-level changes.
-pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5232;
+pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5233;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
 pub const SUPPORTED_PROTOCOL_VERSION: u16 = 1;
@@ -18,6 +18,10 @@ pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
 
 /// Ordered reliable channel for the compatibility handshake and join outcome.
 pub struct SessionChannel;
+
+/// Hash of the Lightyear message, component, and channel registries for the local app.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProtocolFingerprint(pub u64);
 
 /// Stable server-assigned player identity.
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,13 +38,14 @@ pub struct PlaceholderPlayer;
 /// Small replicated state proving that the server owns the placeholder data.
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlaceholderState {
-    pub spawn_slot: u16,
+    pub spawn_slot: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ClientHello {
     pub protocol_version: u16,
     pub build_version: String,
+    pub registry_fingerprint: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -58,6 +63,7 @@ pub enum JoinOutcome {
 pub enum JoinRejection {
     ProtocolVersionMismatch,
     BuildVersionMismatch,
+    RegistryMismatch,
     HandshakeTimeout,
     ServerFull,
     IdentifierExhausted,
@@ -82,7 +88,30 @@ impl Plugin for ProtocolPlugin {
         app.component::<PlayerId>().replicate_once();
         app.component::<NetworkEntityId>().replicate_once();
         app.component::<PlaceholderState>().replicate();
+        app.add_systems(Startup, initialize_protocol_fingerprint);
     }
+}
+
+/// Compute the same application-owned fingerprint on both peers after all protocol plugins run.
+pub fn protocol_fingerprint(world: &mut World) -> u64 {
+    let messages = world
+        .get_resource_mut::<MessageRegistry>()
+        .map(|mut registry| registry.finish())
+        .unwrap_or_default();
+    let components = world
+        .get_resource_mut::<ComponentRegistry>()
+        .map(|mut registry| registry.finish())
+        .unwrap_or_default();
+    let channels = world
+        .get_resource_mut::<ChannelRegistry>()
+        .map(|mut registry| registry.finish())
+        .unwrap_or_default();
+    messages ^ components.rotate_left(21) ^ channels.rotate_left(42)
+}
+
+fn initialize_protocol_fingerprint(world: &mut World) {
+    let fingerprint = protocol_fingerprint(world);
+    world.insert_resource(ProtocolFingerprint(fingerprint));
 }
 
 #[cfg(test)]
@@ -107,13 +136,8 @@ mod tests {
         assert!(app.is_message_registered::<ClientHello>());
         assert!(app.is_message_registered::<JoinOutcome>());
         assert!(app.world().contains_resource::<MessageRegistry>());
-        assert!(
-            app.world()
-                .contains_resource::<lightyear::prelude::ChannelRegistry>()
-        );
-        let channels = app
-            .world()
-            .resource::<lightyear::prelude::ChannelRegistry>();
+        assert!(app.world().contains_resource::<ChannelRegistry>());
+        let channels = app.world().resource::<ChannelRegistry>();
         assert!((0..32).any(|id| {
             channels.get_name_from_net_id(id) == core::any::type_name::<SessionChannel>()
         }));
@@ -134,4 +158,45 @@ mod tests {
         let decoded: JoinOutcome = postcard::from_bytes(&bytes).expect("message deserializes");
         assert_eq!(decoded, message);
     }
+
+    #[test]
+    fn protocol_fingerprint_changes_when_a_registry_entry_changes() {
+        let mut baseline_app = App::new();
+        baseline_app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
+        #[cfg(feature = "client")]
+        baseline_app.add_plugins(lightyear::prelude::client::ClientPlugins {
+            tick_duration: crate::timing::SIMULATION_TICK,
+        });
+        #[cfg(all(not(feature = "client"), feature = "server"))]
+        baseline_app.add_plugins(lightyear::prelude::server::ServerPlugins {
+            tick_duration: crate::timing::SIMULATION_TICK,
+        });
+        baseline_app.add_plugins(ProtocolPlugin);
+        baseline_app.finish();
+        baseline_app.cleanup();
+        baseline_app.update();
+        let baseline = baseline_app.world().resource::<ProtocolFingerprint>().0;
+
+        let mut extra_app = App::new();
+        extra_app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
+        #[cfg(feature = "client")]
+        extra_app.add_plugins(lightyear::prelude::client::ClientPlugins {
+            tick_duration: crate::timing::SIMULATION_TICK,
+        });
+        #[cfg(all(not(feature = "client"), feature = "server"))]
+        extra_app.add_plugins(lightyear::prelude::server::ServerPlugins {
+            tick_duration: crate::timing::SIMULATION_TICK,
+        });
+        extra_app.register_message::<ProtocolFingerprintMessage>();
+        extra_app.add_plugins(ProtocolPlugin);
+        extra_app.finish();
+        extra_app.cleanup();
+        extra_app.update();
+        let extra = extra_app.world().resource::<ProtocolFingerprint>().0;
+
+        assert_ne!(extra, baseline);
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug)]
+    struct ProtocolFingerprintMessage;
 }

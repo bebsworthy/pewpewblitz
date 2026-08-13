@@ -6,12 +6,16 @@ use crate::{
     config::{ClientNetworkConfig, NetworkTransport},
     gameplay::GameplayPlugin,
     protocol::{
-        ClientHello, JoinOutcome, JoinRejection, NetworkEntityId, PlayerId, ProtocolPlugin,
-        SessionChannel,
+        ClientHello, JoinOutcome, JoinRejection, NetworkEntityId, PlayerId, ProtocolFingerprint,
+        ProtocolPlugin, SessionChannel,
     },
 };
 use bevy::{
-    app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, state::app::StatesPlugin,
+    app::ScheduleRunnerPlugin,
+    ecs::error::{FallbackErrorHandler, error},
+    log::LogPlugin,
+    prelude::*,
+    state::app::StatesPlugin,
     window::WindowCloseRequested,
 };
 use core::time::Duration;
@@ -40,6 +44,11 @@ pub struct ClientJoinStatus {
     pub phase: ClientJoinPhase,
     pub started_at: Duration,
     pub disconnect_requested: bool,
+}
+
+#[derive(Resource, Default, Debug)]
+struct ClientShutdown {
+    requested_exit: Option<AppExit>,
 }
 
 #[derive(Resource, Default, Debug, PartialEq, Eq)]
@@ -73,7 +82,9 @@ pub struct ClientNetworkPlugin;
 
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RosterLogState>()
+        app.insert_resource(FallbackErrorHandler(error))
+            .init_resource::<RosterLogState>()
+            .init_resource::<ClientShutdown>()
             .add_systems(Startup, spawn_client_connection)
             .add_systems(
                 Update,
@@ -84,6 +95,8 @@ impl Plugin for ClientNetworkPlugin {
                     observe_client_lifecycle,
                     log_replicated_roster,
                     enforce_client_timeout,
+                    forward_app_exit_to_client_disconnect,
+                    finish_client_shutdown,
                 )
                     .chain(),
             );
@@ -142,6 +155,7 @@ fn spawn_client_connection(
 
 fn send_client_hello(
     config: Res<ClientNetworkConfig>,
+    fingerprint: Res<ProtocolFingerprint>,
     time: Res<Time<Real>>,
     mut query: Query<
         (&mut ClientJoinStatus, &mut MessageSender<ClientHello>),
@@ -153,6 +167,7 @@ fn send_client_hello(
             sender.send::<SessionChannel>(ClientHello {
                 protocol_version: config.expected_protocol_version,
                 build_version: config.expected_build_version.clone(),
+                registry_fingerprint: fingerprint.0,
             });
             status.phase = ClientJoinPhase::AwaitingOutcome;
             status.started_at = time.elapsed();
@@ -169,6 +184,7 @@ fn process_join_outcome(
         ),
         With<Client>,
     >,
+    mut app_exit: MessageWriter<AppExit>,
 ) {
     for (mut status, receiver) in query.iter_mut() {
         let Some(mut receiver) = receiver else {
@@ -193,6 +209,7 @@ fn process_join_outcome(
                 JoinOutcome::Rejected { reason } => {
                     warn!(?reason, "brawler client rejected");
                     status.phase = ClientJoinPhase::Rejected(reason);
+                    app_exit.write(AppExit::error());
                 }
             }
         }
@@ -220,20 +237,20 @@ fn observe_client_lifecycle(
         ),
         With<Client>,
     >,
+    mut app_exit: MessageWriter<AppExit>,
 ) {
     for (mut status, disconnected, connecting) in query.iter_mut() {
         if disconnected.is_some()
             && !connecting
             && !matches!(
                 status.phase,
-                ClientJoinPhase::Connecting
-                    | ClientJoinPhase::Rejected(_)
-                    | ClientJoinPhase::Disconnected
+                ClientJoinPhase::Rejected(_) | ClientJoinPhase::Disconnected
             )
         {
             let reason = disconnected.map(|disconnected| disconnected.reason.to_string());
             warn!(?reason, "brawler client disconnected");
             status.phase = ClientJoinPhase::Disconnected;
+            app_exit.write(AppExit::error());
         }
     }
 }
@@ -274,18 +291,70 @@ fn enforce_client_timeout(
     config: Res<ClientNetworkConfig>,
     time: Res<Time<Real>>,
     status_query: Query<&ClientJoinStatus, With<Client>>,
+    roster: Query<(), (With<Remote>, With<crate::protocol::PlaceholderPlayer>)>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     let now = time.elapsed();
+    let roster_count = roster.iter().count();
     for status in status_query.iter() {
-        if matches!(
+        let connection_timed_out = matches!(
             status.phase,
             ClientJoinPhase::Connecting | ClientJoinPhase::AwaitingOutcome
-        ) && now >= status.started_at.saturating_add(config.connect_timeout)
-        {
+        ) && now
+            >= status.started_at.saturating_add(config.connect_timeout);
+        let roster_timed_out = config.exit_after_roster.is_some_and(|target| {
+            matches!(status.phase, ClientJoinPhase::Active { .. })
+                && roster_count < target
+                && now >= status.started_at.saturating_add(config.connect_timeout)
+        });
+        if connection_timed_out || roster_timed_out {
             error!("brawler client connection timed out");
             app_exit.write(AppExit::error());
         }
+    }
+}
+
+fn forward_app_exit_to_client_disconnect(
+    mut app_exits: ResMut<Messages<AppExit>>,
+    mut shutdown: ResMut<ClientShutdown>,
+    mut commands: Commands,
+    query: Query<(Entity, Option<&Disconnected>), With<Client>>,
+) {
+    if shutdown.requested_exit.is_some() {
+        return;
+    }
+    let exits: Vec<_> = app_exits.drain().collect();
+    let Some(exit) = exits
+        .iter()
+        .find(|exit| exit.is_error())
+        .or_else(|| exits.first())
+        .cloned()
+    else {
+        return;
+    };
+    shutdown.requested_exit = Some(exit);
+    for (entity, disconnected) in query.iter() {
+        if disconnected.is_none() {
+            commands.trigger(Disconnect { entity });
+        }
+    }
+}
+
+fn finish_client_shutdown(
+    mut app_exits: ResMut<Messages<AppExit>>,
+    mut shutdown: ResMut<ClientShutdown>,
+    query: Query<Option<&Disconnected>, With<Client>>,
+) {
+    let mut any_client = false;
+    let all_disconnected = query.iter().all(|disconnected| {
+        any_client = true;
+        disconnected.is_some()
+    });
+    if any_client
+        && all_disconnected
+        && let Some(exit) = shutdown.requested_exit.take()
+    {
+        app_exits.write(exit);
     }
 }
 

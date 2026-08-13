@@ -3,6 +3,23 @@ set -euo pipefail
 
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5000}"
 headless="${BRAWLER_NETWORK_HEADLESS:-0}"
+network_timeout_seconds="${BRAWLER_NETWORK_TIMEOUT_SECONDS:-}"
+
+if [[ -z "$network_timeout_seconds" ]]; then
+    if [[ "$headless" == "1" ]]; then
+        network_timeout_seconds=30
+    else
+        network_timeout_seconds=0
+    fi
+fi
+if ! [[ "$network_timeout_seconds" =~ ^[0-9]+$ ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_TIMEOUT_SECONDS must be a non-negative integer\n' >&2
+    exit 2
+fi
+if [[ "$headless" != "0" && "$headless" != "1" ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_HEADLESS must be 0 or 1\n' >&2
+    exit 2
+fi
 
 server_pid=""
 client_one_pid=""
@@ -15,19 +32,41 @@ job_is_running() {
     jobs -pr | grep -qx "$1"
 }
 
-cleanup() {
-    local status=$?
-    for pid in "$client_one_pid" "$client_two_pid" "$server_pid"; do
-        if [[ -n "$pid" ]] && job_is_running "$pid"; then
+stop_child() {
+    local pid="$1"
+    local signal="$2"
+    if [[ -z "$pid" ]]; then
+        return
+    fi
+    if job_is_running "$pid"; then
+        kill -"$signal" "$pid" 2>/dev/null || true
+        for _ in $(seq 1 30); do
+            if ! job_is_running "$pid"; then
+                break
+            fi
+            sleep 0.1
+        done
+        if job_is_running "$pid"; then
             kill -TERM "$pid" 2>/dev/null || true
+            sleep 0.2
         fi
-    done
+        if job_is_running "$pid"; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    fi
+    wait "$pid" 2>/dev/null || true
+}
+
+cleanup() {
+    local exit_code=$?
+    local signal=INT
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 130 && "$exit_code" -ne 143 ]]; then
+        signal=TERM
+    fi
     for pid in "$client_one_pid" "$client_two_pid" "$server_pid"; do
-        if [[ -n "$pid" ]]; then
-            wait "$pid" 2>/dev/null || true
-        fi
+        stop_child "$pid" "$signal"
     done
-    exit "$status"
+    exit "$exit_code"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -36,7 +75,7 @@ trap 'exit 143' TERM
 cargo build --locked --no-default-features --features server --bin brawler-server
 cargo build --locked --no-default-features --features client --bin brawler-client
 
-(exec cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
+(trap - INT TERM; exec cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
 server_pid=$!
 
 client_args=(--server "$network_addr")
@@ -44,60 +83,63 @@ if [[ "$headless" == "1" ]]; then
     client_args+=(--headless --exit-after-roster 2)
 fi
 
-(exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --client-id 1) &
+(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --client-id 1) &
 client_one_pid=$!
-(exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --client-id 2) &
+(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --client-id 2) &
 client_two_pid=$!
+
+start_epoch=$(date +%s)
+if [[ "$network_timeout_seconds" -gt 0 ]]; then
+    deadline_epoch=$((start_epoch + network_timeout_seconds))
+else
+    deadline_epoch=0
+fi
 
 while :; do
     if [[ "$server_done" -eq 0 ]] && ! job_is_running "$server_pid"; then
         if wait "$server_pid"; then
-            server_status=0
+            server_exit_code=0
         else
-            server_status=$?
+            server_exit_code=$?
         fi
         server_done=1
-        printf 'brawler network: server exited with status %s; stopping clients\n' "$server_status" >&2
-        if [[ "$server_status" -eq 0 ]]; then
-            exit 1
-        fi
-        exit "$server_status"
+        printf 'brawler network: server exited with status %s; stopping clients\n' "$server_exit_code" >&2
+        exit "$server_exit_code"
     fi
 
     if [[ "$client_one_done" -eq 0 ]] && ! job_is_running "$client_one_pid"; then
         if wait "$client_one_pid"; then
-            client_one_status=0
+            client_one_exit_code=0
         else
-            client_one_status=$?
+            client_one_exit_code=$?
         fi
         client_one_done=1
-        if [[ "$headless" == "1" && "$client_one_status" -ne 0 ]]; then
-            printf 'brawler network: client 1 failed with status %s\n' "$client_one_status" >&2
-            exit "$client_one_status"
-        fi
-        if [[ "$headless" != "1" ]]; then
-            exit "$client_one_status"
+        printf 'brawler network: client 1 exited with status %s\n' "$client_one_exit_code" >&2
+        if [[ "$client_one_exit_code" -ne 0 ]]; then
+            exit "$client_one_exit_code"
         fi
     fi
 
     if [[ "$client_two_done" -eq 0 ]] && ! job_is_running "$client_two_pid"; then
         if wait "$client_two_pid"; then
-            client_two_status=0
+            client_two_exit_code=0
         else
-            client_two_status=$?
+            client_two_exit_code=$?
         fi
         client_two_done=1
-        if [[ "$headless" == "1" && "$client_two_status" -ne 0 ]]; then
-            printf 'brawler network: client 2 failed with status %s\n' "$client_two_status" >&2
-            exit "$client_two_status"
-        fi
-        if [[ "$headless" != "1" ]]; then
-            exit "$client_two_status"
+        printf 'brawler network: client 2 exited with status %s\n' "$client_two_exit_code" >&2
+        if [[ "$client_two_exit_code" -ne 0 ]]; then
+            exit "$client_two_exit_code"
         fi
     fi
 
     if [[ "$headless" == "1" && "$client_one_done" -eq 1 && "$client_two_done" -eq 1 ]]; then
         exit 0
+    fi
+    if [[ "$deadline_epoch" -gt 0 && "$(date +%s)" -ge "$deadline_epoch" ]]; then
+        printf 'brawler network: timed out after %s seconds; server=%s client1=%s client2=%s\n' \
+            "$network_timeout_seconds" "$server_done" "$client_one_done" "$client_two_done" >&2
+        exit 124
     fi
     sleep 0.1
 done

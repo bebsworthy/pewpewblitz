@@ -17,7 +17,7 @@ use brawler::{
     timing::SIMULATION_TICK,
 };
 use lightyear::prelude::client::{Client, Connected, Disconnect, Disconnected, Remote};
-use lightyear::prelude::server::{NetcodeServer, ServerPlugins};
+use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Stopped};
 use lightyear::prelude::{AppMessageExt, LocalAddr, NetworkDirection};
 use serde::{Deserialize, Serialize};
 
@@ -81,50 +81,70 @@ impl Harness {
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
 
-        let mut clients = Vec::with_capacity(client_count);
-        let mut client_entities = Vec::with_capacity(client_count);
-        let mut server_links = Vec::with_capacity(client_count);
-        for client_id in 1..=client_count as u64 {
-            let mut config = ClientNetworkConfig::new(client_id);
-            config.transport = NetworkTransport::Crossbeam;
-            if client_id == 1
-                && let Some(protocol_id) = client_protocol_id
-            {
-                config.network_protocol_id = protocol_id;
-            }
-            let mut client = App::new();
-            client.insert_resource(config).add_plugins((
-                MinimalPlugins,
-                StatesPlugin,
-                lightyear::prelude::client::ClientPlugins {
-                    tick_duration: SIMULATION_TICK,
-                },
-                GameplayPlugin,
-                ProtocolPlugin,
-            ));
-            if extra_protocol {
-                client.add_plugins(MismatchedProtocolPlugin);
-            }
-            client.add_plugins(ClientNetworkPlugin);
-            client.finish();
-            client.cleanup();
-            let (client_io, server_io) = lightyear::crossbeam::CrossbeamIo::new_pair();
-            let config = client.world().resource::<ClientNetworkConfig>().clone();
-            let client_entity = spawn_crossbeam_client(client.world_mut(), config, client_io);
-            let server_link = spawn_crossbeam_link(server.world_mut(), server_entity, server_io);
-            clients.push(client);
-            client_entities.push(client_entity);
-            server_links.push(server_link);
-        }
-
-        Self {
+        let mut harness = Self {
             server,
             server_entity,
-            server_links,
-            clients,
-            client_entities,
+            server_links: Vec::with_capacity(client_count),
+            clients: Vec::with_capacity(client_count),
+            client_entities: Vec::with_capacity(client_count),
             now: Instant::now(),
+        };
+        for client_id in 1..=client_count as u64 {
+            harness.add_client_with_options(
+                client_id,
+                if client_id == 1 {
+                    client_protocol_id
+                } else {
+                    None
+                },
+                extra_protocol,
+            );
         }
+        harness
+    }
+
+    fn add_client(&mut self, client_id: u64) {
+        self.add_client_with_options(client_id, None, false);
+    }
+
+    fn add_client_with_options(
+        &mut self,
+        client_id: u64,
+        client_protocol_id: Option<u64>,
+        extra_protocol: bool,
+    ) {
+        let mut config = ClientNetworkConfig::new(client_id);
+        config.transport = NetworkTransport::Crossbeam;
+        if let Some(protocol_id) = client_protocol_id {
+            config.network_protocol_id = protocol_id;
+        }
+        let mut client = App::new();
+        client.insert_resource(config).add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            lightyear::prelude::client::ClientPlugins {
+                tick_duration: SIMULATION_TICK,
+            },
+            GameplayPlugin,
+            ProtocolPlugin,
+        ));
+        if extra_protocol {
+            client.add_plugins(MismatchedProtocolPlugin);
+        }
+        client.add_plugins(ClientNetworkPlugin);
+        client.finish();
+        client.cleanup();
+        let (client_transport, server_transport) = lightyear::crossbeam::CrossbeamIo::new_pair();
+        let config = client.world().resource::<ClientNetworkConfig>().clone();
+        let client_entity = spawn_crossbeam_client(client.world_mut(), config, client_transport);
+        let server_link = spawn_crossbeam_link(
+            self.server.world_mut(),
+            self.server_entity,
+            server_transport,
+        );
+        self.clients.push(client);
+        self.client_entities.push(client_entity);
+        self.server_links.push(server_link);
     }
 
     fn step(&mut self) {
@@ -192,7 +212,13 @@ impl Harness {
 
 #[test]
 fn two_clients_connect_and_receive_the_same_server_owned_roster() {
-    let mut harness = Harness::new(2);
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.client_ids(0).len() == 1
+    });
+    harness.add_client(2);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
@@ -211,6 +237,48 @@ fn two_clients_connect_and_receive_the_same_server_owned_roster() {
         &lightyear::prelude::ControlledBy,
     ), With<PlaceholderPlayer>>();
     assert_eq!(query.iter(harness.server.world()).count(), 2);
+}
+
+#[test]
+fn protocol_version_mismatch_is_rejected_without_a_placeholder() {
+    let mut harness = Harness::new(1);
+    harness.clients[0]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .expected_protocol_version += 1;
+
+    harness.step_until(|harness| {
+        let world = harness.clients[0].world_mut();
+        let mut query = world.query::<&ClientJoinStatus>();
+        query.iter(world).any(|status| {
+            matches!(
+                status.phase,
+                ClientJoinPhase::Rejected(
+                    brawler::protocol::JoinRejection::ProtocolVersionMismatch
+                )
+            )
+        })
+    });
+    assert!(harness.server_ids().is_empty());
+}
+
+#[test]
+fn active_client_with_incomplete_roster_times_out() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| harness.client_is_active(0) && harness.server_ids().len() == 1);
+    let client = &mut harness.clients[0];
+    let mut config = client.world_mut().resource_mut::<ClientNetworkConfig>();
+    config.exit_after_roster = Some(99);
+    config.connect_timeout = std::time::Duration::from_millis(50);
+
+    for _ in 0..20 {
+        harness.step();
+    }
+    assert!(
+        harness.clients[0]
+            .should_exit()
+            .is_some_and(|exit| exit.is_error())
+    );
 }
 
 #[test]
@@ -251,16 +319,35 @@ fn netcode_protocol_id_mismatch_disconnects_before_brawler_acceptance() {
             .get::<Connected>(client_entity)
             .is_none()
     );
+    let mut status_query = harness.clients[0].world_mut().query::<&ClientJoinStatus>();
+    assert!(
+        status_query
+            .iter(harness.clients[0].world())
+            .any(|status| { matches!(status.phase, ClientJoinPhase::Disconnected) })
+    );
     assert!(harness.server_ids().is_empty());
 }
 
 #[test]
-#[should_panic(expected = "the message protocol doesn't match")]
 fn lightyear_registry_mismatch_disconnects_before_brawler_acceptance() {
     let mut harness = Harness::new_with_extra_protocol(1);
-    for _ in 0..90 {
-        harness.step();
-    }
+    harness.step_until(|harness| {
+        let world = harness.clients[0].world_mut();
+        let mut query = world.query::<&ClientJoinStatus>();
+        query.iter(world).any(|status| {
+            matches!(
+                status.phase,
+                ClientJoinPhase::Rejected(brawler::protocol::JoinRejection::RegistryMismatch)
+            )
+        })
+    });
+    assert!(harness.server_ids().is_empty());
+    assert!(
+        harness.clients[0]
+            .world()
+            .get::<Disconnected>(harness.client_entities[0])
+            .is_some()
+    );
 }
 
 #[test]
@@ -297,63 +384,82 @@ fn connected_client_without_hello_times_out_without_owned_entities() {
 
 #[test]
 fn graceful_server_stop_removes_sessions_and_owned_placeholders() {
-    let mut harness = Harness::new(1);
-    harness.step_until(|harness| harness.client_is_active(0) && harness.server_ids().len() == 1);
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+    });
     brawler::server::request_stop(harness.server.world_mut(), harness.server_entity);
     for _ in 0..30 {
         harness.step();
     }
     assert!(harness.server_ids().is_empty());
-    let client_entity = harness.client_entities[0];
     assert!(
-        harness.clients[0]
+        harness
+            .server
             .world()
-            .get::<Connected>(client_entity)
-            .is_none()
+            .get::<Stopped>(harness.server_entity)
+            .is_some()
     );
+    for link in &harness.server_links {
+        assert!(harness.server.world().get_entity(*link).is_err());
+    }
+    for (client, entity) in harness.clients.iter().zip(&harness.client_entities) {
+        assert!(client.world().get::<Connected>(*entity).is_none());
+        assert!(client.world().get::<Disconnected>(*entity).is_some());
+    }
 }
 
 #[test]
 fn disconnect_cleans_owned_placeholder_and_reconnect_allocates_fresh_ids() {
-    let mut harness = Harness::new(1);
-    harness.step_until(|harness| harness.client_is_active(0) && harness.server_ids().len() == 1);
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+    });
     let first_ids = harness.server_ids();
 
     harness.clients[0].world_mut().trigger(Disconnect {
         entity: harness.client_entities[0],
     });
-    harness.step_until(|harness| harness.server_ids().is_empty());
+    for _ in 0..240 {
+        harness.step();
+        if harness.server_ids().len() == 1 {
+            break;
+        }
+    }
+    assert_eq!(harness.server_ids().len(), 1);
+    let remaining_ids = harness.server_ids();
+    for _ in 0..240 {
+        harness.step();
+        if harness.client_ids(1) == remaining_ids {
+            break;
+        }
+    }
+    assert_eq!(harness.client_ids(1), remaining_ids);
+    harness.clients[0].world_mut().trigger(Disconnect {
+        entity: harness.client_entities[0],
+    });
+    for _ in 0..10 {
+        harness.step();
+    }
+    assert_eq!(harness.server_ids(), remaining_ids);
 
     // A fresh Bevy client world models a reconnecting process/session while reusing the
     // development Netcode ID. The old server link is gone before this new link is attached.
-    let mut config = ClientNetworkConfig::new(1);
-    config.transport = NetworkTransport::Crossbeam;
-    let mut client = App::new();
-    client.insert_resource(config.clone()).add_plugins((
-        MinimalPlugins,
-        StatesPlugin,
-        lightyear::prelude::client::ClientPlugins {
-            tick_duration: SIMULATION_TICK,
-        },
-        GameplayPlugin,
-        ProtocolPlugin,
-        ClientNetworkPlugin,
-    ));
-    client.finish();
-    client.cleanup();
-    let (client_io, server_io) = lightyear::crossbeam::CrossbeamIo::new_pair();
-    let client_entity = spawn_crossbeam_client(client.world_mut(), config, client_io);
-    let server_link =
-        spawn_crossbeam_link(harness.server.world_mut(), harness.server_entity, server_io);
-    harness.clients.push(client);
-    harness.client_entities.push(client_entity);
-    harness.server_links.push(server_link);
+    harness.add_client(1);
     let index = harness.clients.len() - 1;
 
-    harness
-        .step_until(|harness| harness.client_is_active(index) && harness.server_ids().len() == 1);
+    harness.step_until(|harness| {
+        harness.client_is_active(index)
+            && harness.server_ids().len() == 2
+            && harness.client_ids(index).len() == 2
+    });
     let second_ids = harness.server_ids();
-    assert_ne!(first_ids, second_ids);
+    assert_eq!(second_ids.len(), 2);
+    assert_ne!(first_ids[0], second_ids[1]);
     assert_eq!(harness.client_ids(index), second_ids);
 }
 

@@ -7,18 +7,21 @@ use crate::{
     gameplay::GameplayPlugin,
     protocol::{
         ClientHello, DEVELOPMENT_PRIVATE_KEY, JoinOutcome, JoinRejection, NetworkEntityId,
-        PlaceholderPlayer, PlaceholderState, PlayerId, ProtocolPlugin,
+        PlaceholderPlayer, PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin,
     },
 };
 use bevy::{
     app::{ScheduleRunnerPlugin, TerminalCtrlCHandlerPlugin},
+    ecs::error::{FallbackErrorHandler, error},
     log::LogPlugin,
     prelude::*,
     state::app::StatesPlugin,
 };
 use core::time::Duration;
 use lightyear::prelude::server::ServerUdpIo;
-use lightyear::prelude::server::{NetcodeConfig, NetcodeServer, ServerPlugins, Start, Stop};
+use lightyear::prelude::server::{
+    NetcodeConfig, NetcodeServer, ServerPlugins, Start, Stop, Stopped,
+};
 use lightyear::prelude::{Connected, Disconnected, LinkOf, LocalAddr};
 use lightyear::prelude::{
     ControlledBy, Lifetime, MessageReceiver, MessageSender, NetworkTarget, Replicate,
@@ -42,6 +45,11 @@ pub struct ServerSession {
     pub deadline: Duration,
     pub last_outcome: Option<JoinOutcome>,
     pub disconnect_requested: bool,
+}
+
+#[derive(Resource, Default, Debug)]
+struct ServerShutdown {
+    requested_exit: Option<AppExit>,
 }
 
 #[derive(Resource, Debug, PartialEq, Eq)]
@@ -104,7 +112,9 @@ pub struct ServerNetworkPlugin;
 
 impl Plugin for ServerNetworkPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NextSessionIds>()
+        app.insert_resource(FallbackErrorHandler(error))
+            .init_resource::<NextSessionIds>()
+            .init_resource::<ServerShutdown>()
             .add_observer(configure_new_link)
             .add_systems(Startup, spawn_server_endpoint)
             .add_systems(
@@ -114,6 +124,8 @@ impl Plugin for ServerNetworkPlugin {
                     process_client_hellos,
                     enforce_session_deadlines,
                     disconnect_rejected_sessions,
+                    forward_app_exit_to_server_stop,
+                    finish_server_shutdown,
                 )
                     .chain(),
             );
@@ -169,6 +181,7 @@ fn initialize_sessions(
 fn process_client_hellos(
     mut commands: Commands,
     config: Res<ServerNetworkConfig>,
+    fingerprint: Res<ProtocolFingerprint>,
     mut ids: ResMut<NextSessionIds>,
     mut receivers: Query<(
         Entity,
@@ -211,37 +224,36 @@ fn process_client_hellos(
                         JoinOutcome::Rejected {
                             reason: JoinRejection::BuildVersionMismatch,
                         }
+                    } else if hello.registry_fingerprint != fingerprint.0 {
+                        JoinOutcome::Rejected {
+                            reason: JoinRejection::RegistryMismatch,
+                        }
                     } else {
                         match ids.allocate() {
                             Some((player_id, network_entity_id)) => {
-                                match u16::try_from(player_id.0) {
-                                    Ok(spawn_slot) => {
-                                        let accepted = JoinOutcome::Accepted {
-                                            player_id,
-                                            network_entity_id,
-                                        };
-                                        commands.spawn((
-                                            PlaceholderPlayer,
-                                            player_id,
-                                            network_entity_id,
-                                            PlaceholderState { spawn_slot },
-                                            Replicate::to_clients(NetworkTarget::All),
-                                            ControlledBy {
-                                                owner: connection,
-                                                lifetime: Lifetime::SessionBased,
-                                            },
-                                        ));
-                                        session.phase = ServerSessionPhase::Active {
-                                            player_id,
-                                            network_entity_id,
-                                        };
-                                        active_count += 1;
-                                        accepted
-                                    }
-                                    Err(_) => JoinOutcome::Rejected {
-                                        reason: JoinRejection::IdentifierExhausted,
+                                let accepted = JoinOutcome::Accepted {
+                                    player_id,
+                                    network_entity_id,
+                                };
+                                commands.spawn((
+                                    PlaceholderPlayer,
+                                    player_id,
+                                    network_entity_id,
+                                    PlaceholderState {
+                                        spawn_slot: player_id.0,
                                     },
-                                }
+                                    Replicate::to_clients(NetworkTarget::All),
+                                    ControlledBy {
+                                        owner: connection,
+                                        lifetime: Lifetime::SessionBased,
+                                    },
+                                ));
+                                session.phase = ServerSessionPhase::Active {
+                                    player_id,
+                                    network_entity_id,
+                                };
+                                active_count += 1;
+                                accepted
                             }
                             None => JoinOutcome::Rejected {
                                 reason: JoinRejection::IdentifierExhausted,
@@ -297,6 +309,44 @@ fn disconnect_rejected_sessions(
                 .insert(Disconnected::default())
                 .despawn();
         }
+    }
+}
+
+fn forward_app_exit_to_server_stop(
+    mut app_exits: ResMut<Messages<AppExit>>,
+    mut shutdown: ResMut<ServerShutdown>,
+    mut commands: Commands,
+    query: Query<(Entity, Option<&Stopped>), With<NetcodeServer>>,
+) {
+    if shutdown.requested_exit.is_some() {
+        return;
+    }
+    let exits: Vec<_> = app_exits.drain().collect();
+    let Some(exit) = exits
+        .iter()
+        .find(|exit| exit.is_error())
+        .or_else(|| exits.first())
+        .cloned()
+    else {
+        return;
+    };
+    shutdown.requested_exit = Some(exit);
+    for (entity, stopped) in query.iter() {
+        if stopped.is_none() {
+            commands.trigger(Stop { entity });
+        }
+    }
+}
+
+fn finish_server_shutdown(
+    mut app_exits: ResMut<Messages<AppExit>>,
+    mut shutdown: ResMut<ServerShutdown>,
+    query: Query<(), (With<NetcodeServer>, With<Stopped>)>,
+) {
+    if query.iter().next().is_some()
+        && let Some(exit) = shutdown.requested_exit.take()
+    {
+        app_exits.write(exit);
     }
 }
 
