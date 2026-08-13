@@ -81,7 +81,15 @@ trap 'exit 143' TERM
 cargo build --locked --no-default-features --features server --bin brawler-server
 cargo build --locked --no-default-features --features client --bin brawler-client
 
-(trap - INT TERM; exec env BRAWLER_SERVER_READY_FILE="$ready_file" BRAWLER_NETWORK_ASSERT_MOVEMENT=1 BRAWLER_NETWORK_MOVEMENT_READY_FILE="$movement_ready_file" cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
+server_env=(env "BRAWLER_SERVER_READY_FILE=$ready_file")
+if [[ "$headless" == "1" ]]; then
+    server_env+=(
+        "BRAWLER_NETWORK_ASSERT_MOVEMENT=1"
+        "BRAWLER_NETWORK_MOVEMENT_READY_FILE=$movement_ready_file"
+    )
+fi
+
+(trap - INT TERM; exec "${server_env[@]}" cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
 server_pid=$!
 
 start_epoch=$(date +%s)
@@ -108,9 +116,16 @@ if [[ "$headless" == "1" ]]; then
     client_args+=(--headless --exit-after-roster 2 --simulation-ticks 180)
 fi
 
-(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --move-axis 1,0 --aim-axis 0,1 --client-id 1) &
+client_one_args=("${client_args[@]}" --client-id 1)
+client_two_args=("${client_args[@]}" --client-id 2)
+if [[ "$headless" == "1" ]]; then
+    client_one_args+=(--move-axis 1,0 --aim-axis 0,1)
+    client_two_args+=(--move-axis -1,0 --aim-axis 0,-1)
+fi
+
+(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_one_args[@]}") &
 client_one_pid=$!
-(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --move-axis -1,0 --aim-axis 0,-1 --client-id 2) &
+(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_two_args[@]}") &
 client_two_pid=$!
 
 start_epoch=$(date +%s)
