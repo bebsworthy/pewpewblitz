@@ -20,13 +20,14 @@ use bevy::{
 use core::time::Duration;
 use lightyear::prelude::server::ServerUdpIo;
 use lightyear::prelude::server::{
-    NetcodeConfig, NetcodeServer, ServerPlugins, Start, Stop, Stopped,
+    NetcodeConfig, NetcodeServer, ServerPlugins, Start, Started, Stop, Stopped,
 };
-use lightyear::prelude::{Connected, Disconnected, LinkOf, LocalAddr};
+use lightyear::prelude::{Connected, Disconnected, LinkOf, Linked, LocalAddr};
 use lightyear::prelude::{
     ControlledBy, Lifetime, MessageReceiver, MessageSender, NetworkTarget, Replicate,
     ReplicationSender,
 };
+use std::{env, fs, path::PathBuf};
 
 /// Server-side session phase. Lightyear lifecycle components remain the connection truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -50,6 +51,23 @@ pub struct ServerSession {
 #[derive(Resource, Default, Debug)]
 struct ServerShutdown {
     requested_exit: Option<AppExit>,
+}
+
+#[derive(Resource, Debug)]
+struct ServerStartup {
+    ready_file: Option<PathBuf>,
+    ready_reported: bool,
+    failure_reported: bool,
+}
+
+impl FromWorld for ServerStartup {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            ready_file: env::var_os("BRAWLER_SERVER_READY_FILE").map(PathBuf::from),
+            ready_reported: false,
+            failure_reported: false,
+        }
+    }
 }
 
 #[derive(Resource, Debug, PartialEq, Eq)]
@@ -115,19 +133,23 @@ impl Plugin for ServerNetworkPlugin {
         app.insert_resource(FallbackErrorHandler(error))
             .init_resource::<NextSessionIds>()
             .init_resource::<ServerShutdown>()
+            .init_resource::<ServerStartup>()
             .add_observer(configure_new_link)
             .add_systems(Startup, spawn_server_endpoint)
             .add_systems(
                 Update,
                 (
+                    observe_server_endpoint,
                     initialize_sessions,
                     process_client_hellos,
                     enforce_session_deadlines,
                     disconnect_rejected_sessions,
-                    forward_app_exit_to_server_stop,
-                    finish_server_shutdown,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Last,
+                (forward_app_exit_to_server_stop, finish_server_shutdown).chain(),
             );
     }
 }
@@ -157,6 +179,52 @@ fn spawn_server_endpoint(mut commands: Commands, config: Res<ServerNetworkConfig
         .id();
     commands.trigger(Start { entity: server });
     Ok(())
+}
+
+fn observe_server_endpoint(
+    mut startup: ResMut<ServerStartup>,
+    ready_query: Query<
+        (),
+        (
+            With<NetcodeServer>,
+            With<ServerUdpIo>,
+            With<Started>,
+            With<Linked>,
+        ),
+    >,
+    failed_query: Query<
+        (),
+        (
+            With<NetcodeServer>,
+            With<ServerUdpIo>,
+            With<Started>,
+            Without<Linked>,
+        ),
+    >,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    if startup.ready_reported || startup.failure_reported {
+        return;
+    }
+    if failed_query.iter().next().is_some() {
+        startup.failure_reported = true;
+        error!("brawler server endpoint failed to bind or link");
+        app_exit.write(AppExit::error());
+        return;
+    }
+    if ready_query.iter().next().is_none() {
+        return;
+    }
+    if let Some(path) = startup.ready_file.clone() {
+        if let Err(error) = fs::write(&path, b"ready\n") {
+            startup.failure_reported = true;
+            error!(path = %path.display(), ?error, "brawler server readiness signal failed");
+            app_exit.write(AppExit::error());
+            return;
+        }
+        info!(path = %path.display(), "brawler server readiness signal written");
+    }
+    startup.ready_reported = true;
 }
 
 fn initialize_sessions(
@@ -435,5 +503,59 @@ mod tests {
             ..default()
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn started_unlinked_udp_server_requests_error_exit() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin))
+            .init_resource::<lightyear::prelude::PeerMetadata>()
+            .init_resource::<ServerStartup>()
+            .add_systems(Update, observe_server_endpoint);
+        app.world_mut().spawn((
+            NetcodeServer::new(NetcodeConfig::default()),
+            ServerUdpIo::default(),
+            Started,
+        ));
+
+        app.update();
+
+        assert!(app.should_exit().is_some_and(|exit| exit.is_error()));
+    }
+
+    #[test]
+    fn app_exit_is_forwarded_after_update_producers_run() {
+        fn request_exit(mut app_exit: MessageWriter<AppExit>) {
+            app_exit.write(AppExit::Success);
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AppExit>()
+            .init_resource::<lightyear::prelude::PeerMetadata>()
+            .init_resource::<ServerShutdown>()
+            .add_systems(Update, request_exit)
+            .add_systems(
+                Last,
+                (forward_app_exit_to_server_stop, finish_server_shutdown).chain(),
+            )
+            .add_observer(|trigger: On<Stop>, mut commands: Commands| {
+                commands.entity(trigger.entity).insert(Stopped);
+            });
+        let server = app
+            .world_mut()
+            .spawn(NetcodeServer::new(NetcodeConfig::default()))
+            .id();
+
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<ServerShutdown>()
+                .requested_exit
+                .is_none()
+        );
+        assert!(app.world().get::<Stopped>(server).is_some());
+        assert!(app.should_exit().is_some_and(|exit| exit.is_success()));
     }
 }

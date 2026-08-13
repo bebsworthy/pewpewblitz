@@ -4,6 +4,7 @@ set -euo pipefail
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5000}"
 headless="${BRAWLER_NETWORK_HEADLESS:-0}"
 network_timeout_seconds="${BRAWLER_NETWORK_TIMEOUT_SECONDS:-}"
+startup_timeout_seconds=10
 
 if [[ -z "$network_timeout_seconds" ]]; then
     if [[ "$headless" == "1" ]]; then
@@ -24,6 +25,7 @@ fi
 server_pid=""
 client_one_pid=""
 client_two_pid=""
+ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-server-ready.XXXXXX")"
 server_done=0
 client_one_done=0
 client_two_done=0
@@ -66,6 +68,7 @@ cleanup() {
     for pid in "$client_one_pid" "$client_two_pid" "$server_pid"; do
         stop_child "$pid" "$signal"
     done
+    rm -f "$ready_file"
     exit "$exit_code"
 }
 trap cleanup EXIT
@@ -75,8 +78,27 @@ trap 'exit 143' TERM
 cargo build --locked --no-default-features --features server --bin brawler-server
 cargo build --locked --no-default-features --features client --bin brawler-client
 
-(trap - INT TERM; exec cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
+(trap - INT TERM; exec env BRAWLER_SERVER_READY_FILE="$ready_file" cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
 server_pid=$!
+
+start_epoch=$(date +%s)
+startup_deadline_epoch=$((start_epoch + startup_timeout_seconds))
+while [[ ! -s "$ready_file" ]]; do
+    if ! job_is_running "$server_pid"; then
+        if wait "$server_pid"; then
+            server_exit_code=0
+        else
+            server_exit_code=$?
+        fi
+        printf 'brawler network: server exited before readiness with status %s\n' "$server_exit_code" >&2
+        exit 1
+    fi
+    if [[ "$(date +%s)" -ge "$startup_deadline_epoch" ]]; then
+        printf 'brawler network: server did not become ready after %s seconds\n' "$startup_timeout_seconds" >&2
+        exit 124
+    fi
+    sleep 0.1
+done
 
 client_args=(--server "$network_addr")
 if [[ "$headless" == "1" ]]; then
@@ -104,6 +126,9 @@ while :; do
         fi
         server_done=1
         printf 'brawler network: server exited with status %s; stopping clients\n' "$server_exit_code" >&2
+        if [[ "$server_exit_code" -eq 0 ]]; then
+            exit 1
+        fi
         exit "$server_exit_code"
     fi
 

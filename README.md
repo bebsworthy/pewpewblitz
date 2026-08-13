@@ -34,9 +34,11 @@ just network-smoke
 
 The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. The client accepts `--server`, required `--client-id`, and bounded automation flags `--headless --exit-after-roster 2`. `RUST_LOG` controls log filtering, for example `RUST_LOG=brawler=info`. Window titles identify the two clients; structured logs report connection outcome and stable `(player_id, network_entity_id)` roster entries.
 
-The windowed `just network` launcher remains running when one client closes so the remaining
-roster can be observed. Restart that client with the same individual command and `--client-id`;
-set `BRAWLER_NETWORK_TIMEOUT_SECONDS` to add a bounded windowed-session deadline when needed.
+The network launcher waits for its own server's readiness signal before starting clients, so a bind
+collision cannot accidentally test a pre-existing server. It remains running when one windowed
+client closes so the remaining roster can be observed. Restart that client with the same individual
+command and `--client-id`; set `BRAWLER_NETWORK_TIMEOUT_SECONDS` to add a bounded windowed-session
+deadline when needed.
 
 Do not use `--all-features` as a supported application build: client and server are independently tested production configurations, while `network-test` is the dedicated separate-app Crossbeam integration configuration. Cargo features are additive.
 

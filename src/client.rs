@@ -95,6 +95,12 @@ impl Plugin for ClientNetworkPlugin {
                     observe_client_lifecycle,
                     log_replicated_roster,
                     enforce_client_timeout,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Last,
+                (
                     forward_app_exit_to_client_disconnect,
                     finish_client_shutdown,
                 )
@@ -434,5 +440,43 @@ mod tests {
         assert!(config.validate().is_ok());
         config.exit_after_roster = Some(0);
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn app_exit_is_forwarded_after_update_producers_run() {
+        fn request_exit(mut app_exit: MessageWriter<AppExit>) {
+            app_exit.write(AppExit::Success);
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AppExit>()
+            .init_resource::<ClientShutdown>()
+            .add_systems(Update, request_exit)
+            .add_systems(
+                Last,
+                (
+                    forward_app_exit_to_client_disconnect,
+                    finish_client_shutdown,
+                )
+                    .chain(),
+            )
+            .add_observer(|trigger: On<Disconnect>, mut commands: Commands| {
+                commands
+                    .entity(trigger.entity)
+                    .insert(Disconnected::default());
+            });
+        let client = app.world_mut().spawn(Client).id();
+
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<ClientShutdown>()
+                .requested_exit
+                .is_none()
+        );
+        assert!(app.world().get::<Disconnected>(client).is_some());
+        assert!(app.should_exit().is_some_and(|exit| exit.is_success()));
     }
 }

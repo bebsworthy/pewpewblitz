@@ -48,7 +48,8 @@ Milestone 01's review and learn-from-errors section are binding inputs to this s
 - Windowed winit coverage stays in a main-thread process smoke test. Headless integration apps use
   `MinimalPlugins` and do not construct a macOS event loop on Cargo test threads.
 - Multi-process launchers must use Cargo-resolved execution, supervise every child, propagate the
-  first failure, clean up siblings, and work with `CARGO_TARGET_DIR`.
+  first failure, reject premature clean exits, clean up siblings, wait for explicit server
+  readiness, and work with `CARGO_TARGET_DIR`.
 - CI and documented dependency-resolving commands use `--locked`.
 - Test names and recorded evidence must describe the behavior actually exercised. Links in the
   milestone record must be validated from this directory.
@@ -339,9 +340,10 @@ Clients receive mapped local Bevy entities. Brawler logic, logs, tests, and futu
 2. Install the server Lightyear group and Brawler protocol.
 3. Spawn the UDP + Netcode server endpoint and trigger `Start`.
 4. Emit the bound address, protocol/build version, and 60 Hz tick in structured logs.
-5. Bind and protocol errors are logged through the controlled Bevy error policy; the supervised
-   headless launcher has a bounded deadline and returns a failure status if startup or joining does
-   not complete.
+5. A successful endpoint has both Lightyear `Started` and transport `Linked`; only then does the
+   server write the optional `BRAWLER_SERVER_READY_FILE` readiness sentinel used by the launcher.
+6. Bind/link failure is reported as an error `AppExit`; the launcher waits up to 10 seconds for its
+   own readiness sentinel and never starts clients against an unproven or pre-existing server.
 
 #### Client connect and acceptance
 
@@ -381,8 +383,10 @@ Clients receive mapped local Bevy entities. Brawler logic, logs, tests, and futu
 - Connected client links transition through disconnect, session-owned placeholders are removed, and
   the endpoint reaches `Stopped`/`Unlinked` before the bounded shutdown deadline.
 - Client window closure and automated success trigger Lightyear `Disconnect` before app exit. The
-  supervised launcher propagates unexpected child failure, requests graceful `SIGINT` shutdown,
-  and escalates only after its bounded cleanup wait.
+  forwarding systems run in `Last`, after `Update` producers such as Ctrl-C and window-close
+  handling, so the lifecycle request is initiated before Bevy observes the exit. The supervised
+  launcher propagates unexpected child failure, rejects a clean server exit before both clients
+  complete, requests graceful `SIGINT` shutdown, and escalates only after its bounded cleanup wait.
 
 ### Schedule and ordering contract
 
@@ -407,6 +411,11 @@ PostUpdate
   Lightyear message/replication packet construction
   → Netcode send
   → UDP/Crossbeam send
+
+Last
+  Update-produced AppExit forwarding
+  → Lightyear Stop/Disconnect
+  → wait for Stopped/Disconnected before replaying AppExit
 ```
 
 Where a system both observes lifecycle state and spawns/despawns an entity needed by replication in
@@ -493,7 +502,7 @@ The launcher must follow Milestone 01's corrected supervision rules and must not
 ### Workflow and CI
 
 - [x] Add supervised one-server/two-client local and process-smoke commands using Cargo-resolved
-  execution and propagated exit statuses.
+  execution, explicit server readiness, and propagated exit statuses.
 - [x] Document individual and combined locked commands plus expected logs/outcomes.
 - [x] Add locked CI checks for network-test and retain isolated client/server lint/test/build lanes.
 - [x] Record exact automated, UDP, and process evidence; interactive user evidence remains pending
@@ -539,7 +548,8 @@ Tests use Netcode over Crossbeam, separate `App` worlds, and simulated Bevy real
 - [x] A real loopback UDP test uses an OS-assigned server port and proves connection, hello, and one
   replicated placeholder without relying on Crossbeam.
 - [x] The supervised headless process harness launches the actual server and two client binaries,
-  proves both report the same two-player roster, propagates any child failure, cleans all children,
+  waits for the harness-owned server readiness sentinel, proves both report the same two-player
+  roster, propagates any child failure, rejects premature clean server exit, cleans all children,
   and times out with diagnostics rather than hanging.
 - [ ] Interactive `just network` opens two distinguishable responsive client windows, connects both,
   logs the same roster, and shuts all processes down when requested.
@@ -564,7 +574,7 @@ Automated and local process verification completed on 2026-08-13:
 - `cargo fmt --all -- --check` passed.
 - `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`
   passed; the equivalent `server` and `network-test` commands also passed.
-- Client feature tests passed: 5 unit tests. Server feature tests passed: 6 unit tests.
+- Client feature tests passed: 6 unit tests. Server feature tests passed: 8 unit tests.
 - `cargo test --locked --no-default-features --features network-test --test network
   -- --test-threads=1 --nocapture` passed all 10 tests. This includes separate-App Crossbeam
   connection/replication, true join-in-progress, Brawler build and protocol-version rejection,
@@ -575,10 +585,14 @@ Automated and local process verification completed on 2026-08-13:
   asserts `JoinRejection::RegistryMismatch`, client disconnection, and zero server placeholders.
 - `cargo build --locked --no-default-features --features client --bin brawler-client` and the
   equivalent server build passed. `./scripts/check-server-features.sh` passed.
-- `RUST_LOG=brawler=info BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ADDR=127.0.0.1:5036
+- `RUST_LOG=brawler=info BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ADDR=127.0.0.1:5038
   ./scripts/network.sh` passed with status 0; it launched the actual UDP server and two client
   binaries, waited for both two-player rosters, requested graceful server shutdown, and left no
   Brawler processes. The real UDP integration test also passed using an OS-assigned server port.
+- With an independent server already bound to `127.0.0.1:5041`, the supervised collision smoke
+  observed the new server's `Address already in use`, did not launch clients, returned status 1,
+  and left the independent process untouched. A server endpoint that exits cleanly before readiness
+  is likewise mapped to launcher failure rather than smoke success.
 - An absent server at `127.0.0.1:59998` logged a structured disconnected transport reason and
   returned status 1 after the configured 5-second bound. Invalid headless configuration and zero
   server capacity returned status 2 with actionable messages. A bind collision returned promptly
@@ -589,6 +603,9 @@ Automated and local process verification completed on 2026-08-13:
 - A real server process launched with the Cargo-resolved binary handled `SIGINT` through Lightyear
   `Stop`, logged UDP socket closure, and returned status 130. `bash -n scripts/network.sh`,
   `just --dry-run`, and `just --dry-run network-smoke` passed.
+- Client and server lifecycle unit tests prove that an `AppExit` produced during `Update` is only
+  observed after the `Last`-schedule forwarding systems have initiated Lightyear `Disconnect` or
+  `Stop`.
 
 The interactive windowed `just network` smoke remains a user-playtest item because it requires
 visual inspection of two macOS windows and manual shutdown.
@@ -616,6 +633,8 @@ No gameplay controls or fighter visuals are expected in this milestone.
 | R3 | Active roster automation and launchers could hang or block reconnect playtesting. | Implemented | Add active-roster timeout, launcher deadline, keep windowed sessions alive after one client closes, and document same-ID restart. | `src/client.rs`, `scripts/network.sh`, README |
 | R4 | Integration evidence overstated join, despawn, repeat cleanup, and protocol-version coverage. | Implemented | Add true late join, two-client despawn replication, repeated disconnect, protocol-version, and active-roster timeout tests. | `tests/network.rs` |
 | R5 | `spawn_slot: u16` imposed an unintended session cap. | Implemented | Use the monotonic `u64` player ID directly as placeholder slot state. | `src/protocol.rs`, `src/server.rs` |
+| R6 | Bind failure could leave a server process alive while the smoke clients joined a different pre-existing server. | Implemented | Require a `Started` + `Linked` readiness sentinel before launching clients; fail startup and cleanly supervise the failed child. | `src/server.rs`, `scripts/network.sh` |
+| R7 | A clean server exit or late AppExit producer could bypass smoke failure or Lightyear shutdown. | Implemented | Map premature clean server exit to status 1 and run AppExit forwarding in `Last` after `Update` producers, with regression tests. | `scripts/network.sh`, `src/client.rs`, `src/server.rs` |
 | — | Awaiting interactive Milestone 02 smoke feedback | Pending | Automated and process verification are complete; window behavior and operator ergonomics still need user observation. | User playtest handoff below |
 
 ## Learn from errors
@@ -647,6 +666,12 @@ Completed on 2026-08-13:
   capacity. Placeholder state now uses the monotonic `u64` ID without narrowing.
 - The fingerprint handshake and widened placeholder state both change serialized wire data, so the
   explicitly versioned Netcode protocol ID was bumped with the implementation.
+- A UDP bind error is an observer error, not proof that an endpoint is listening. The launcher now
+  waits for an application-owned readiness sentinel written only after `Started` and `Linked`,
+  which prevents a pre-existing listener from producing false-positive client results.
+- Bevy's runner observes `AppExit` after the main schedule, so forwarding it from `Update` relies on
+  registration order among independent producers. Moving the bridge to `Last` makes the lifecycle
+  ordering explicit and keeps the request in Lightyear before the runner exits.
 - These are repository-specific lifecycle/composition lessons, so no new reusable Codex skill was
   justified. Milestone 03 should continue to verify exact Lightyear ordering and keep prediction
   or input work behind the same server-authoritative integration harness.
