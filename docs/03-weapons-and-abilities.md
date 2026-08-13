@@ -166,6 +166,11 @@ The threshold effect should define what happens to the meter after triggering: r
 
 Terrain destruction is a world-level payload. A weapon emits a destruction brush—such as a circle, capsule, rectangle, or authored shape—with a position, size, and optional material effect. The terrain subsystem applies that brush to its mask and regenerates affected collision chunks. Weapons must not know about tiles or directly edit collision polygons.
 
+Ability-created smoke, darkness, grass-like cover, speed fields, and other environment areas should
+reuse the authored/runtime region and concealment contracts in
+[Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md). An ability may create or
+configure a region; it must not implement a parallel client-only visibility or movement rule.
+
 ## Projectile phase scope
 
 ### Combat vertical slice and first product iteration

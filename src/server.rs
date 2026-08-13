@@ -1,14 +1,26 @@
 //! Dedicated authoritative server networking and lifecycle systems.
-#![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+#![allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    clippy::too_many_arguments
+)]
 
 use crate::{
     VERSION,
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
-    protocol::{
-        ClientHello, DEVELOPMENT_PRIVATE_KEY, JoinOutcome, JoinRejection, NetworkEntityId,
-        PlaceholderPlayer, PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin,
+    movement::{
+        AuthoritativeMovementPlugin, AvianNetworkPlugin, GreyboxArenaDefinition, InputFreshness,
+        InputValidationState, MovementTuning,
     },
+    protocol::{
+        ClientHello, DEVELOPMENT_PRIVATE_KEY, Fighter, JoinOutcome, JoinRejection, NetworkEntityId,
+        PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin,
+    },
+};
+use avian2d::prelude::{
+    AngularVelocity, Collider, CollisionLayers, CustomPositionIntegration, LinearVelocity,
+    Position, RigidBody, Rotation,
 };
 use bevy::{
     app::{ScheduleRunnerPlugin, TerminalCtrlCHandlerPlugin},
@@ -24,8 +36,8 @@ use lightyear::prelude::server::{
 };
 use lightyear::prelude::{Connected, Disconnected, LinkOf, Linked, LocalAddr};
 use lightyear::prelude::{
-    ControlledBy, Lifetime, MessageReceiver, MessageSender, NetworkTarget, Replicate,
-    ReplicationSender,
+    ControlledBy, InterpolationTarget, Lifetime, MessageReceiver, MessageSender, NetworkTarget,
+    Replicate, ReplicationMetadata, ReplicationSender,
 };
 use std::{env, fs, path::PathBuf};
 
@@ -58,6 +70,27 @@ struct ServerStartup {
     ready_file: Option<PathBuf>,
     ready_reported: bool,
     failure_reported: bool,
+}
+
+#[derive(Resource, Debug)]
+struct ProcessMovementCheck {
+    enabled: bool,
+    ready_file: Option<PathBuf>,
+    initial_poses: Vec<(PlayerId, Vec2, f32)>,
+    initial_tick: Option<u64>,
+    completed: bool,
+}
+
+impl FromWorld for ProcessMovementCheck {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            enabled: env::var("BRAWLER_NETWORK_ASSERT_MOVEMENT").as_deref() == Ok("1"),
+            ready_file: env::var_os("BRAWLER_NETWORK_MOVEMENT_READY_FILE").map(PathBuf::from),
+            initial_poses: Vec::new(),
+            initial_tick: None,
+            completed: false,
+        }
+    }
 }
 
 impl FromWorld for ServerStartup {
@@ -134,6 +167,8 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<NextSessionIds>()
             .init_resource::<ServerShutdown>()
             .init_resource::<ServerStartup>()
+            .init_resource::<ProcessMovementCheck>()
+            .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
             .add_systems(Startup, spawn_server_endpoint)
             .add_systems(
@@ -144,6 +179,7 @@ impl Plugin for ServerNetworkPlugin {
                     process_client_hellos,
                     enforce_session_deadlines,
                     disconnect_rejected_sessions,
+                    verify_process_movement,
                 )
                     .chain(),
             )
@@ -154,8 +190,77 @@ impl Plugin for ServerNetworkPlugin {
     }
 }
 
+fn verify_process_movement(
+    mut check: ResMut<ProcessMovementCheck>,
+    tick: Res<crate::timing::SimulationTick>,
+    fighters: Query<(&PlayerId, &Position, &Rotation), With<Fighter>>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    if !check.enabled || check.completed {
+        return;
+    }
+    let mut current: Vec<_> = fighters
+        .iter()
+        .map(|(player, position, rotation)| (*player, position.0, rotation.as_radians()))
+        .collect();
+    current.sort_by_key(|(player, _, _)| player.0);
+    if current.len() < 2 {
+        return;
+    }
+    if check.initial_poses.is_empty() {
+        check.initial_poses.clone_from(&current);
+        check.initial_tick = Some(tick.0);
+        return;
+    }
+    if check
+        .initial_tick
+        .is_none_or(|initial_tick| tick.0 < initial_tick.saturating_add(120))
+    {
+        return;
+    }
+    let moved = current.iter().any(|(player, position, _)| {
+        check
+            .initial_poses
+            .iter()
+            .find(|(initial_player, _, _)| initial_player == player)
+            .is_some_and(|(_, initial_position, _)| {
+                (*position - *initial_position).length() > 100.0
+            })
+    });
+    let aimed = current.iter().any(|(player, _, facing)| {
+        check
+            .initial_poses
+            .iter()
+            .find(|(initial_player, _, _)| initial_player == player)
+            .is_some_and(|(_, _, initial_facing)| (facing - initial_facing).abs() > 0.5)
+    });
+    if moved && aimed {
+        info!(tick = tick.0, "network movement smoke assertion passed");
+        if let Some(path) = check.ready_file.as_ref()
+            && let Err(error) = fs::write(path, b"passed\n")
+        {
+            error!(
+                ?path,
+                ?error,
+                "network movement smoke readiness signal failed"
+            );
+            app_exit.write(AppExit::error());
+        }
+        check.completed = true;
+    } else {
+        error!(
+            tick = tick.0,
+            moved, aimed, "network movement smoke assertion failed"
+        );
+        app_exit.write(AppExit::error());
+        check.completed = true;
+    }
+}
+
 fn configure_new_link(trigger: On<Add, LinkOf>, mut commands: Commands) {
-    commands.entity(trigger.entity).insert(ReplicationSender);
+    commands
+        .entity(trigger.entity)
+        .insert((ReplicationSender, InputValidationState::default()));
 }
 
 fn spawn_server_endpoint(mut commands: Commands, config: Res<ServerNetworkConfig>) -> Result {
@@ -250,6 +355,8 @@ fn process_client_hellos(
     mut commands: Commands,
     config: Res<ServerNetworkConfig>,
     fingerprint: Res<ProtocolFingerprint>,
+    arena: Res<GreyboxArenaDefinition>,
+    movement_tuning: Res<MovementTuning>,
     mut ids: ResMut<NextSessionIds>,
     mut receivers: Query<(
         Entity,
@@ -257,7 +364,7 @@ fn process_client_hellos(
         &mut MessageSender<JoinOutcome>,
         &mut ServerSession,
     )>,
-    placeholders: Query<(), With<PlaceholderPlayer>>,
+    placeholders: Query<(), With<Fighter>>,
 ) {
     let mut active_count = placeholders.iter().count();
     for (connection, mut receiver, mut sender, mut session) in receivers.iter_mut() {
@@ -303,14 +410,33 @@ fn process_client_hellos(
                                     player_id,
                                     network_entity_id,
                                 };
+                                let spawn_position = arena.spawn_position(player_id.0);
                                 commands.spawn((
-                                    PlaceholderPlayer,
+                                    Fighter,
                                     player_id,
                                     network_entity_id,
                                     PlaceholderState {
-                                        spawn_slot: player_id.0,
+                                        spawn_slot: u64::from(GreyboxArenaDefinition::spawn_slot(
+                                            player_id.0,
+                                        )),
                                     },
-                                    Replicate::to_clients(NetworkTarget::All),
+                                    Position::from_xy(spawn_position.x, spawn_position.y),
+                                    Rotation::radians(movement_tuning.spawn_facing),
+                                    LinearVelocity::default(),
+                                    AngularVelocity::default(),
+                                    Collider::circle(movement_tuning.radius),
+                                    RigidBody::Kinematic,
+                                    CustomPositionIntegration,
+                                    CollisionLayers::new(
+                                        crate::movement::FIGHTER_LAYER,
+                                        crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
+                                            | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                                    ),
+                                    InputFreshness::default(),
+                                    (
+                                        Replicate::to_clients(NetworkTarget::All),
+                                        InterpolationTarget::to_clients(NetworkTarget::All),
+                                    ),
                                     ControlledBy {
                                         owner: connection,
                                         lifetime: Lifetime::SessionBased,
@@ -434,6 +560,8 @@ pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
         .add_plugins((
             GameplayPlugin,
             ProtocolPlugin,
+            AvianNetworkPlugin,
+            AuthoritativeMovementPlugin,
             ServerNetworkPlugin,
             DedicatedServerPlugin,
         ));

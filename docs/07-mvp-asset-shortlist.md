@@ -69,6 +69,7 @@ Do not combine all packs in the same visible scene. Use one primary visual langu
 - Load runtime visuals through Bevy's asset system, retain the handles for as long as the assets are needed, and gate entry into playable states until required assets finish loading.
 - Keep authoritative map definitions separate from client-only sprite sheets, atlases, textures, and audio handles. The headless server must be able to load map geometry and rules without visual assets.
 - Represent floors and indestructible walls through authored map data plus replaceable client visuals. Keep flexible destruction in separate mask-backed terrain chunks, and keep objectives, pickups, hazards, and props as distinct gameplay entities.
+- Keep decorative tiles distinct from the gameplay regions cataloged in [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md); grass art, speed markings, water, or hazard decals have no authoritative effect by themselves.
 - Treat the visual sprite and collision shape as separate concerns. A temporary fighter can be a colored circle or capsule while the final sprite is undecided.
 - Add team color, health bar, selection ring, and hit flash independently of the sprite. Those signals matter more than character detail during combat testing.
 - Keep source ZIPs outside the runtime asset directory or in a clearly labelled `third_party/` folder, and record pack name, URL, author, license, and import date in an asset manifest.

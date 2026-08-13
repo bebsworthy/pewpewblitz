@@ -42,6 +42,8 @@ Client presentation and local feedback
 - own status meters and threshold effects;
 - own pickups, objectives, scores, respawns, and victory;
 - own destructible terrain masks and collision regeneration;
+- derive observer-specific concealment and reveal outcomes before replication when those mechanics
+  are implemented;
 - replicate authoritative components and send discrete gameplay messages where required.
 
 ## Bevy and Lightyear world composition
@@ -119,6 +121,61 @@ TerrainDestructionEvent
 
 The server remains responsible for collision and gameplay truth. Clients use the event for presentation and prediction only. Each client tracks the latest applied terrain revision. A gap must trigger authoritative recovery from an initial mask, affected-chunk snapshot, or retained event history; reconnecting and late-joining clients cannot be required to have observed every live destruction event.
 
+## Interest management and concealment
+
+Future tall grass, smoke, darkness, and invisibility mechanics use server-owned network interest
+management as part of their gameplay rule. The server continues to simulate the absolute state of
+the match, including hidden fighters and bots, but derives network visibility separately for every
+observer connection and potentially hidden spatial entity.
+
+Lightyear 0.29 provides two complementary mechanisms:
+
+- `RoomPlugin` and `Rooms` provide coarse, semi-static filtering for match instances, arena
+  regions, or broad spatial partitions;
+- `VisibilityExt::gain_visibility` and `VisibilityExt::lose_visibility` provide dynamic
+  per-entity, per-connection visibility for observer-specific concealment and reveal.
+
+Rooms do not replace the gameplay visibility calculation. Opponents may share one arena room while
+receiving different visibility outcomes for the same fighter. The authoritative concealment system
+must run after relevant movement/effect/reveal state is resolved and apply visibility before the
+replication send path is assembled.
+
+Secret live spatial state uses ordinary while-visible loss semantics: a subject hidden before first
+relevance is not spawned for that client, and a previously visible remote entity is despawned when
+visibility is lost. Retained and always-present policies are not valid for secret live state because
+they preserve the remote entity and its initial or last-known data while updates are paused.
+
+When an always-visible participant roster is required, represent public participant information
+separately from the cullable spatial fighter:
+
+```text
+Public participant
+  stable player identity, team, connection/defeat state, public score
+
+Cullable spatial fighter
+  pose, facing, live presentation hierarchy, private effects and spatial state
+```
+
+The visibility boundary must include replicated descendants and related messages. Health bars,
+targeting markers, weapon children, status effects, projectiles, damage events, sounds, objective
+state, score updates, and telemetry can otherwise reveal a hidden subject even when its pose is
+culled. Owner control remains intact; permitted owners/allies receive the spatial fighter while
+opponents do not.
+
+This closes the normal packet-sniffing wallhack path for current hidden spatial state, but it is not
+a complete anti-cheat claim. Clients retain previously delivered state and can observe disappearance
+or reappearance timing; in-flight historical packets and traffic side channels require separate
+threat analysis if they become material.
+
+The implementing milestone must test hidden-before-join, visible-to-hidden despawn, owner/ally
+exceptions, two observers with different outcomes, current-state reappearance, late join,
+reconnect, defeat/respawn, hierarchy cleanup, interpolation/prediction cleanup, and absence of
+subject-derived private components/messages while hidden. See
+[Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md#network-interest-management)
+for the complete research catalog and verification list. The exact Lightyear 0.29 behavior is
+demonstrated in the checked-in `references/lightyear/examples/network_visibility/` example and the
+version-pinned [network visibility example](https://github.com/cBournhonesque/lightyear/blob/0.29.0/examples/network_visibility/README.md).
+
 ## Status synchronization
 
 The server owns internal status meters such as `cold`, threshold checks, freeze duration, decay, resistance, and immunity. Clients may receive the meter value for HUD feedback, but cannot apply or trigger the status themselves.
@@ -143,6 +200,7 @@ Networking is validated incrementally rather than treated as one oversized miles
 4. **v1 Milestone 07 — match:** the server owns teams, respawns, scores, timers, victory, restart, and disconnect behavior throughout the match lifecycle.
 5. **v1 Milestone 09 — objectives:** Hot Zone proves that continuous objective state remains authoritative while reusing the same gameplay and match-lifecycle components/plugins.
 6. **v1 Milestone 10 — terrain:** connected and late/reconnecting clients converge on the authoritative terrain revision and crater state.
-7. **Future systemic-status milestone:** accumulating meters, threshold triggers, immunity, and duration remain server-owned and recover correctly.
+7. **Future environment/concealment milestone:** surface effects remain server-owned while per-client visibility culls secret spatial state and recovers correctly at reveal, late join, and reconnect.
+8. **Future systemic-status milestone:** accumulating meters, threshold triggers, immunity, and duration remain server-owned and recover correctly.
 
 Prediction, lag compensation, advanced interpolation tuning, anti-cheat hardening, matchmaking, authentication, session services, and production hosting may be developed after the relevant early gates. The authority boundary, state recovery rules, and explicit connection lifecycle outcomes may not be postponed.

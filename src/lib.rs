@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod gameplay;
+pub mod movement;
 pub mod protocol;
 pub mod timing;
 

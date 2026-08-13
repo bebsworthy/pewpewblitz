@@ -26,6 +26,8 @@ server_pid=""
 client_one_pid=""
 client_two_pid=""
 ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-server-ready.XXXXXX")"
+movement_ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-movement-ready.XXXXXX")"
+rm -f "$movement_ready_file"
 server_done=0
 client_one_done=0
 client_two_done=0
@@ -69,6 +71,7 @@ cleanup() {
         stop_child "$pid" "$signal"
     done
     rm -f "$ready_file"
+    rm -f "$movement_ready_file"
     exit "$exit_code"
 }
 trap cleanup EXIT
@@ -78,7 +81,7 @@ trap 'exit 143' TERM
 cargo build --locked --no-default-features --features server --bin brawler-server
 cargo build --locked --no-default-features --features client --bin brawler-client
 
-(trap - INT TERM; exec env BRAWLER_SERVER_READY_FILE="$ready_file" cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
+(trap - INT TERM; exec env BRAWLER_SERVER_READY_FILE="$ready_file" BRAWLER_NETWORK_ASSERT_MOVEMENT=1 BRAWLER_NETWORK_MOVEMENT_READY_FILE="$movement_ready_file" cargo run --locked --no-default-features --features server --bin brawler-server -- --bind "$network_addr") &
 server_pid=$!
 
 start_epoch=$(date +%s)
@@ -102,12 +105,12 @@ done
 
 client_args=(--server "$network_addr")
 if [[ "$headless" == "1" ]]; then
-    client_args+=(--headless --exit-after-roster 2)
+    client_args+=(--headless --exit-after-roster 2 --simulation-ticks 180)
 fi
 
-(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --client-id 1) &
+(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --move-axis 1,0 --aim-axis 0,1 --client-id 1) &
 client_one_pid=$!
-(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --client-id 2) &
+(trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- "${client_args[@]}" --move-axis -1,0 --aim-axis 0,-1 --client-id 2) &
 client_two_pid=$!
 
 start_epoch=$(date +%s)
@@ -159,7 +162,10 @@ while :; do
     fi
 
     if [[ "$headless" == "1" && "$client_one_done" -eq 1 && "$client_two_done" -eq 1 ]]; then
-        exit 0
+        if [[ -s "$movement_ready_file" ]]; then
+            exit 0
+        fi
+        printf 'brawler network: clients finished before movement assertion completed; waiting for server evidence\n' >&2
     fi
     if [[ "$deadline_epoch" -gt 0 && "$(date +%s)" -ge "$deadline_epoch" ]]; then
         printf 'brawler network: timed out after %s seconds; server=%s client1=%s client2=%s\n' \

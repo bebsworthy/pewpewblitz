@@ -10,13 +10,21 @@ publish = false
 default = ["client"]
 client = [
   "bevy-client",
+  "avian2d/serialize",
   "lightyear/client",
+  "lightyear/avian2d",
   "lightyear/netcode",
+  "lightyear/input_native",
+  "lightyear/interpolation",
   "lightyear/replication",
   "lightyear/udp",
 ]
 server = [
   "bevy-server",
+  "avian2d/serialize",
+  "lightyear/avian2d",
+  "lightyear/input_native",
+  "lightyear/interpolation",
   "lightyear/netcode",
   "lightyear/replication",
   "lightyear/server",
@@ -27,6 +35,9 @@ network-test = [
   "server",
   "lightyear/client",
   "lightyear/crossbeam",
+  "lightyear/avian2d",
+  "lightyear/input_native",
+  "lightyear/interpolation",
   "lightyear/netcode",
   "lightyear/replication",
   "lightyear/server",
@@ -34,16 +45,29 @@ network-test = [
 bevy-client = [
   "bevy/bevy_asset",
   "bevy/bevy_core_pipeline",
+  "bevy/bevy_gilrs",
   "bevy/bevy_render",
+  "bevy/bevy_sprite",
+  "bevy/bevy_text",
+  "bevy/bevy_ui",
+  "bevy/bevy_ui_render",
   "bevy/bevy_winit",
   "bevy/bevy_window",
   "bevy/default_font",
+  "bevy/gamepad",
   "bevy/png",
   "bevy/keyboard",
+  "bevy/mouse",
 ]
 bevy-server = []
 
 [dependencies]
+avian2d = { version = "=0.7.0", default-features = false, features = [
+  "2d",
+  "f32",
+  "parry-f32",
+  "serialize",
+] }
 bevy = { version = "=0.19.1", default-features = false, features = [
   "async_executor",
   "bevy_log",
@@ -68,6 +92,11 @@ required-features = ["server"]
 [[test]]
 name = "network"
 path = "tests/network.rs"
+required-features = ["network-test"]
+
+[[test]]
+name = "performance"
+path = "tests/performance.rs"
 required-features = ["network-test"]
 
 [lints.rust]

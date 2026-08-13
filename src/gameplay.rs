@@ -8,7 +8,7 @@ use bevy::prelude::*;
 pub enum GameplaySet {
     Input,
     Simulation,
-    Presentation,
+    Finalize,
 }
 
 /// Installs the non-presentation gameplay and fixed-tick foundation.
@@ -23,13 +23,13 @@ impl Plugin for GameplayPlugin {
                 (
                     GameplaySet::Input,
                     GameplaySet::Simulation,
-                    GameplaySet::Presentation,
+                    GameplaySet::Finalize,
                 )
                     .chain(),
             )
             .add_systems(
                 FixedUpdate,
-                advance_simulation_tick.in_set(GameplaySet::Simulation),
+                advance_simulation_tick.in_set(GameplaySet::Finalize),
             );
     }
 }
@@ -54,8 +54,8 @@ mod tests {
         trace.0.push(GameplaySet::Simulation);
     }
 
-    fn record_presentation_set(mut trace: ResMut<SetTrace>) {
-        trace.0.push(GameplaySet::Presentation);
+    fn record_finalize_set(mut trace: ResMut<SetTrace>) {
+        trace.0.push(GameplaySet::Finalize);
     }
 
     #[test]
@@ -69,7 +69,7 @@ mod tests {
                 (
                     record_input_set.in_set(GameplaySet::Input),
                     record_simulation_set.in_set(GameplaySet::Simulation),
-                    record_presentation_set.in_set(GameplaySet::Presentation),
+                    record_finalize_set.in_set(GameplaySet::Finalize),
                 ),
             );
         app.update();
@@ -82,7 +82,7 @@ mod tests {
             vec![
                 GameplaySet::Input,
                 GameplaySet::Simulation,
-                GameplaySet::Presentation,
+                GameplaySet::Finalize,
             ]
         );
         assert_eq!(

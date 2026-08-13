@@ -404,7 +404,7 @@ Update
   → client roster/status observation
 
 FixedUpdate
-  GameplaySet::Input → GameplaySet::Simulation → GameplaySet::Presentation
+  GameplaySet::Input → GameplaySet::Simulation → GameplaySet::Finalize
   (no networked movement systems in this milestone)
 
 PostUpdate

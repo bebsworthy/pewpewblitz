@@ -19,8 +19,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 02 user playtest; Milestone 01 user playtest pending
-- **Current milestone:** Milestone 02 — Network connection and replication sandbox
+- **Overall status:** Milestone 03 verifying; Milestone 02 user playtest remains open; Milestone 01 user playtest pending
+- **Current milestone:** Milestone 03 — Movement, aiming, and greybox collision
 - **Last completed milestone:** None
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -31,7 +31,7 @@ Record deferred implementation and playtest feedback here. Every item needs its 
 
 | ID | Source | Item | Rationale | Review target |
 |---|---|---|---|---|
-| — | — | No items yet | — | — |
+| M03-PRED | Milestone 03 implementation decision | Run the impairment/latency comparison for owner prediction; retain authoritative interpolation until the gate has evidence. | Prediction is intentionally not enabled without measured convergence and correction behavior. | Milestone 04 preparation |
 
 ## Planning and evidence rule
 
@@ -150,7 +150,7 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 |---|---|---|---|
 | 01 | User playtest | Rust and Bevy application foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | User playtest | Network connection and replication sandbox | [milestone-02.md](./milestone-02.md) |
-| 03 | Not started | Movement, aiming, and greybox collision | Create when next |
+| 03 | User playtest | Movement, aiming, and greybox collision | [milestone-03.md](./milestone-03.md) |
 | 04 | Not started | Combat core | Create when next |
 | 05 | Not started | Weapon composition and selection | Create when next |
 | 06 | Not started | First authored arena and presentation baseline | Create when next |
@@ -598,6 +598,7 @@ These candidates preserve the longer-term design direction without assigning sco
 - **Solo Showdown:** free-for-all placement, loot, and a shrinking boundary; duo/trio variants later.
 - **Systemic status interaction:** one target-owned cold-to-freeze meter contributed to by compatible projectiles and areas.
 - **Advanced projectiles:** bouncing, homing, curved steering, piercing, splitting, boomerang, and delayed behavior.
+- **Environment surfaces and concealment:** tall grass or another concealment region, a spell-created concealment area, speedway and slow surfaces, one readable hazard, and server-owned per-client network visibility following [environment and tile research](../../09-environment-and-tile-ideas.md).
 
 Move a candidate into `docs/implementation/vN/roadmap.md` only when a future version is intentionally scoped.
 

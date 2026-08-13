@@ -15,6 +15,42 @@ A map definition should contain:
 - visibility or concealment regions;
 - mode-specific parameters.
 
+## Visual tiles and gameplay regions
+
+Visual tiles are replaceable client presentation. Authoritative gameplay should be composed from
+geometry, authored regions, runtime environment entities, and destructible-terrain data instead of
+giving every floor or wall sprite a bespoke rule.
+
+- ordinary ground is a walkable surface without a modifier;
+- permanent walls and cover are blocking geometry;
+- destructible terrain uses mask-backed solidity and generated collision;
+- speedways, slow ground, hazards, objectives, and concealment are shaped gameplay regions;
+- smoke, temporary walls, and similar ability-created areas are server-owned runtime entities;
+- decorative grass, puddles, decals, and props have no gameplay effect unless map data explicitly
+  associates them with a region or geometry definition.
+
+See [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) for the future-facing
+catalog, property model, and promotion rules. That catalog is research, not automatic v1 scope.
+
+## Concealment regions
+
+The map model reserves visibility and concealment regions for future tall grass, bushes, smoke,
+darkness, and invisibility effects. All sources should feed one server-owned observer-versus-subject
+visibility decision. Clients do not declare themselves concealed and do not decide which opponents
+they may observe.
+
+Static concealment geometry can be known to every client; the hidden fighter's live spatial state
+is the secret. The server retains the complete simulation, including bots, and applies per-client
+network visibility before replication. Match/arena rooms are suitable coarse interest partitions,
+while dynamic grass, reveal, and invisibility decisions require per-entity, per-connection
+visibility. Public roster identity must remain separate from cullable live fighter state when both
+behaviors are needed.
+
+The implementing milestone must define proximity, ally, attack, damage, objective-carrier,
+spectator, projectile, audio, and reappearance rules and verify that related components or messages
+cannot leak the hidden state. See [Network architecture](./08-network-architecture.md#interest-management-and-concealment)
+for the transport contract.
+
 ## Destructible terrain
 
 Destruction should not be implemented as replacing individual visible tiles. Brawler will use a flexible, mask-backed terrain system suitable for arbitrary craters, tunnels, and cutouts.

@@ -34,6 +34,7 @@ Use the checked-in source and examples before guessing an API or copying an unre
 - `references/bevy/examples/` — official Bevy example source. Start with `README.md`, then locate focused examples with `rg`; useful foundation examples include `app/headless.rs`, `app/plugin.rs`, and `app/plugin_group.rs`.
 - `references/lightyear/examples/` — official Lightyear example projects and their `Cargo.toml` feature sets. Start with `README.md`; use `simple_setup` for minimal client/server composition, `simple_box` for authoritative replication/prediction/interpolation, and `avian_2d` only when physics integration is in scope.
 - `references/lightyear/book/` — local Lightyear book. Start with `src/SUMMARY.md`, then read the relevant tutorial or concept pages for protocol, transport, replication, inputs, system ordering, shared plugins, client/server setup, prediction, interpolation, and Avian integration.
+- `references/avian/crates/avian2d/examples` — official Avian 2D examples project and their `Cargo.toml` feature sets. 
 
 The Lightyear 0.29 snapshot targets Bevy 0.19, while the checked-in Bevy source is currently 0.20-dev. Use the Bevy snapshot for architectural examples, but confirm exact APIs against Bevy 0.19 source or official documentation before implementation.
 

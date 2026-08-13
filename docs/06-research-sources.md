@@ -7,8 +7,9 @@ The following sources informed the initial design baseline. They describe the re
 The repository contains local upstream material so implementation research can inspect real examples instead of guessing APIs. The snapshots are not all version-aligned:
 
 - `references/bevy/examples/` — Bevy 0.20-dev example index and Rust source across application setup, headless apps, plugins, 2D rendering, assets, input, states, UI, and other engine features. Use these as architectural examples and verify every transferred API against Bevy 0.19.
-- `references/lightyear/examples/` — Lightyear 0.29 example packages/workspace, Rust source, READMEs, and feature declarations. This snapshot targets Bevy 0.19; `simple_setup`, `simple_box`, and `avian_2d` are the primary starting points for early milestones.
-- `references/lightyear/book/` — the local Lightyear book; begin with `src/SUMMARY.md` and follow the relevant tutorial and concept chapters.
+- `references/lightyear/examples/` — Lightyear 0.29 example packages/workspace, Rust source, READMEs, and feature declarations. This snapshot targets Bevy 0.19; `simple_setup`, `simple_box`, and `avian_2d` are the primary starting points for early milestones, while `network_visibility` demonstrates future interest management and visibility lifetimes.
+- `references/lightyear/book/` — the local Lightyear book; begin with `src/SUMMARY.md` and follow the relevant tutorial and concept chapters, including `concepts/advanced_replication/interest_management.md` for future concealment work.
+- `references/lightyear/crates/replication/replication/src/visibility/` — exact Lightyear 0.29 immediate and room-based network visibility implementation. Use this resolved source when older book terminology differs.
 
 Agents should inspect these folders before using external examples. Treat them as read-only upstream snapshots and cite exact paths in milestone research logs. For exact APIs, use Lightyear's Bevy-0.19-pinned source and official Bevy 0.19 documentation; use the Bevy 0.20-dev snapshot only after verifying the equivalent 0.19 API.
 
@@ -22,6 +23,8 @@ Architecture research follows this priority: Brawler's gameplay and authority re
 - [Lightyear 0.29](https://docs.rs/lightyear/0.29.0/lightyear/) — version-pinned selected networking stack with server/client plugins, replication, input buffering, prediction, rollback, interpolation, and transport options.
 - [Lightyear repository](https://github.com/cBournhonesque/lightyear) — supported Bevy versions, examples, transports, lag compensation, and project license.
 - [Lightyear book Markdown source](https://github.com/cBournhonesque/lightyear/tree/main/book/src) — official guide to Lightyear concepts, setup, replication, prediction, rollback, and networking architecture.
+- [Lightyear 0.29 network visibility example](https://github.com/cBournhonesque/lightyear/blob/0.29.0/examples/network_visibility/README.md) — version-pinned interest-management behavior and while-visible, retained, and always-present lifetimes.
+- [Lightyear 0.29 immediate visibility source](https://github.com/cBournhonesque/lightyear/blob/0.29.0/crates/replication/replication/src/visibility/immediate.rs) and [room visibility source](https://github.com/cBournhonesque/lightyear/blob/0.29.0/crates/replication/replication/src/visibility/room.rs) — exact per-client visibility and semi-static room filtering APIs selected for future concealment research.
 - [Avian](https://github.com/avianphysics/avian) — optional Bevy-native 2D collision and physics integration if custom queries are insufficient.
 - [bevy_replicon](https://docs.rs/bevy_replicon/latest/bevy_replicon/) — modular server-authoritative replication fallback with pluggable transport.
 - [Renet](https://docs.rs/renet/latest/renet/) — lower-level client/server transport option for the fallback stack.

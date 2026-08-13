@@ -115,6 +115,11 @@ The status behavior should support contribution from multiple sources, accumulat
 - objective damage multiplier;
 - carry capacity.
 
+Vision radius and concealment/reveal behavior are future information rules, not client-rendering
+preferences. When implemented, the server derives visibility for each observer and subject and uses
+network interest management to withhold secret live spatial state. See
+[Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md#concealment-gameplay-model).
+
 ## Recommended MVP attributes
 
 Only these should affect balance in the first product iteration through v1 Milestone 08:

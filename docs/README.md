@@ -15,6 +15,7 @@ The project is intentionally starting with the gameplay loop. Production matchma
 - [Research sources](./06-research-sources.md) — external references used for the baseline.
 - [MVP asset shortlist](./07-mvp-asset-shortlist.md) — open/licensed stand-in tilemaps, characters, props, and icons.
 - [Network architecture](./08-network-architecture.md) — authority model, Lightyear replication, Bevy server/client world composition, and local network testing.
+- [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) — future-facing environment catalog, composable region properties, concealment, and network interest management.
 - [Version 1 implementation roadmap](./implementation/v1/roadmap.md) — tracked MVP milestones from the Rust and Bevy application foundation through playtest hardening and closeout.
 
 ## Working vocabulary
@@ -25,3 +26,4 @@ The project is intentionally starting with the gameplay loop. Production matchma
 - **Payload:** the gameplay effect produced by an attack or ability.
 - **Mode:** the rules that determine scoring, respawning, and victory.
 - **Map:** geometry, spawn points, objectives, hazards, and interactables.
+- **Gameplay region:** an authored or runtime area that applies movement, concealment, hazard, objective, or other server-owned rules independently from its visual tiles.

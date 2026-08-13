@@ -1,8 +1,93 @@
-default: run
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-# Build both isolated configurations, then run the dedicated server and client
-# together. Ctrl-C, closing the client, or a server failure shuts down the
-# other process and determines the launcher status.
+default: help
+
+# List the supported development commands.
+help:
+    @just --list
+
+# Format all Rust sources.
+fmt:
+    cargo fmt --all
+
+# Check formatting without changing files.
+fmt-check:
+    cargo fmt --all -- --check
+
+# Check the isolated client configuration.
+check-client:
+    cargo check --locked --no-default-features --features client --all-targets
+
+# Check the isolated dedicated-server configuration.
+check-server:
+    cargo check --locked --no-default-features --features server --all-targets
+
+# Check the Crossbeam integration-test configuration.
+check-network:
+    cargo check --locked --no-default-features --features network-test --tests
+
+check: check-client check-server check-network
+
+# Build both production roles.
+build: build-client build-server
+
+build-client:
+    cargo build --locked --no-default-features --features client --bin brawler-client
+
+build-server:
+    cargo build --locked --no-default-features --features server --bin brawler-server
+
+# Run the isolated client unit and target tests.
+test-client:
+    cargo test --locked --no-default-features --features client --all-targets
+
+# Run the isolated dedicated-server unit and target tests.
+test-server:
+    cargo test --locked --no-default-features --features server --all-targets
+
+# Run deterministic Crossbeam and loopback-UDP network tests.
+test-network:
+    cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1
+
+# Measure the fixed-tick budget with 100 headless fighters.
+test-performance:
+    cargo test --locked --no-default-features --features network-test --test performance -- --nocapture
+
+test: test-client test-server test-network test-performance
+
+# Run Clippy for both independently buildable roles.
+clippy: clippy-client clippy-server
+
+clippy-client:
+    cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings
+
+clippy-server:
+    cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings
+
+lint: fmt-check clippy
+
+# Verify all automated development-cycle gates, including the supervised UDP smoke.
+verify: lint test server-features network-smoke
+
+ci: verify
+
+server-features:
+    ./scripts/check-server-features.sh
+
+# Generate API documentation for the client-facing library configuration.
+docs:
+    cargo doc --locked --no-deps --no-default-features --features client
+
+# Remove Cargo build artifacts. This does not modify source files or Cargo.lock.
+clean:
+    cargo clean
+
+# Run automated verification, then start the end-of-cycle interactive user test.
+user-test: verify
+    @printf '%s\n' 'Automated verification passed. Starting the two-client interactive user test.'
+    BRAWLER_NETWORK_HEADLESS=0 ./scripts/network.sh
+
+# Build both roles, then run one dedicated server and one client together.
 run:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -17,20 +102,31 @@ run:
         jobs -pr | grep -qx "$1"
     }
 
+    # `cargo run` is a wrapper around the actual binary.  Signal the complete
+    # descendant tree so Ctrl-C cannot leave the server binary orphaned.
+    terminate_process_tree() {
+        local pid="$1"
+        local signal="$2"
+        local child
+
+        [[ -n "$pid" ]] || return 0
+        kill -0 "$pid" 2>/dev/null || return 0
+        while read -r child; do
+            [[ -n "$child" ]] || continue
+            terminate_process_tree "$child" "$signal"
+        done < <(pgrep -P "$pid" 2>/dev/null || true)
+        kill -"$signal" "$pid" 2>/dev/null || true
+    }
+
     cleanup() {
         local status=$?
-        local signal=INT
+        # Background jobs inherit the launcher's ignored SIGINT disposition on
+        # some shells.  TERM is therefore the reliable shutdown signal after
+        # the launcher has already handled Ctrl-C.
+        local signal=TERM
 
-        if [[ "$status" -ne 0 && "$status" -ne 130 && "$status" -ne 143 ]]; then
-            signal=TERM
-        fi
-
-        if [[ -n "$client_pid" ]] && job_is_running "$client_pid"; then
-            kill -"$signal" "$client_pid" 2>/dev/null || true
-        fi
-        if [[ -n "$server_pid" ]] && job_is_running "$server_pid"; then
-            kill -"$signal" "$server_pid" 2>/dev/null || true
-        fi
+        terminate_process_tree "$client_pid" "$signal"
+        terminate_process_tree "$server_pid" "$signal"
         wait "$client_pid" 2>/dev/null || true
         wait "$server_pid" 2>/dev/null || true
         exit "$status"
@@ -77,6 +173,6 @@ run:
 network:
     BRAWLER_NETWORK_HEADLESS=0 ./scripts/network.sh
 
-# Launch one server and two bounded headless clients; succeeds after both see a two-player roster.
+# Launch bounded headless clients; succeeds only after server movement/facing assertions.
 network-smoke:
     BRAWLER_NETWORK_HEADLESS=1 ./scripts/network.sh

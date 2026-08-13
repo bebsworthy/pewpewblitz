@@ -65,6 +65,9 @@ pub struct ClientNetworkConfig {
     pub connect_timeout: Duration,
     pub headless: bool,
     pub exit_after_roster: Option<usize>,
+    pub headless_move: Option<(i8, i8)>,
+    pub headless_aim: Option<(i8, i8)>,
+    pub headless_simulation_ticks: Option<u32>,
 }
 
 impl ClientNetworkConfig {
@@ -85,12 +88,30 @@ impl ClientNetworkConfig {
             connect_timeout: Duration::from_secs(5),
             headless: false,
             exit_after_roster: None,
+            headless_move: None,
+            headless_aim: None,
+            headless_simulation_ticks: None,
         }
     }
 
     pub fn validate(&self) -> Result<(), String> {
         if self.exit_after_roster.is_some_and(|count| count == 0) {
             return Err("--exit-after-roster must be greater than zero".to_string());
+        }
+        if self
+            .headless_simulation_ticks
+            .is_some_and(|ticks| ticks == 0)
+        {
+            return Err("--simulation-ticks must be greater than zero".to_string());
+        }
+        if self.headless_move.is_some() && !self.headless {
+            return Err("--move-axis requires --headless".to_string());
+        }
+        if self.headless_aim.is_some() && !self.headless {
+            return Err("--aim-axis requires --headless".to_string());
+        }
+        if self.headless_simulation_ticks.is_some() && !self.headless {
+            return Err("--simulation-ticks requires --headless".to_string());
         }
         if self.connect_timeout.is_zero() {
             return Err("client connect timeout must be greater than zero".to_string());
