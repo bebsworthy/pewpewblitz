@@ -14,7 +14,7 @@ Run these from the repository root:
 just
 ```
 
-`just` builds the isolated server and client configurations, launches both, and shuts down the server when you press Ctrl-C or close the client window. The individual commands remain available for focused checks:
+`just` builds the isolated server and client configurations, launches both through Cargo's target resolution, and shuts down the other process when you press Ctrl-C, close the client window, or one process exits. If the server exits with a failure status, `just` stops the client and returns that status. The individual commands remain available for focused checks:
 
 ```sh
 cargo fmt --all -- --check

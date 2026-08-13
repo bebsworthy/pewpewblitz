@@ -260,6 +260,7 @@ Verification evidence (2026-08-13, macOS arm64, Rust 1.95.0):
 - `./scripts/check-server-features.sh` — passed. `cargo metadata` exposed only the package's additive `client`/`server` feature definitions; the server `cargo tree -e features` contained no `bevy_render`, `bevy_winit`, `bevy_window`, `bevy_audio`, `bevy_asset`, keyboard, mouse, gamepad, touch, or gesture backend features. The core `bevy_input` crate remains because Bevy 0.19's `bevy` crate includes it in its core API surface; no device backend is enabled.
 - Dedicated server process smoke: `target/debug/brawler-server` emitted `mode="dedicated-server" version="0.1.0" tick_hz=60` and exited 0 after SIGINT.
 - Client process smoke: `target/debug/brawler-client` created a blank `brawler-client` window on the Apple M3 Metal adapter, emitted `mode="client" version="0.1.0" tick_hz=60`, and exited 0 after SIGINT.
+- Combined launcher smoke: `just` launched both configurations through Cargo, closing the client returned the launcher with status 0, and no Brawler processes remained. The launcher now monitors the server's Cargo-run status and returns it after stopping the client on server exit.
 
 ## User validation and handoff
 
@@ -281,16 +282,19 @@ Verification evidence (2026-08-13, macOS arm64, Rust 1.95.0):
 
 | ID | Feedback | Decision | Rationale | Task/backlog link |
 |---|---|---|---|---|
-| F1 | User requested one command to launch the dedicated server and client together. | Implemented | Added a `just` launcher that builds both isolated targets, starts the server, launches the client, and cleans up the server on client exit or Ctrl-C. | [`justfile`](../../justfile), [`README.md`](../../README.md) |
-| F2 | Closing the client window left repeated “No windows are open, exiting” logs and did not return to the prompt. | Implemented | The client now requests `AppExit` on `WindowCloseRequested`, and the launcher terminates its background server with SIGTERM, which is reliable for shell background jobs. | [`src/client.rs`](../../src/client.rs), [`justfile`](../../justfile) |
+| F1 | User requested one command to launch the dedicated server and client together. | Implemented | Added a `just` launcher that builds both isolated targets, starts the server and client through Cargo's target resolution, monitors both exit statuses, and cleans up the other process on exit or failure. | [`justfile`](../../../justfile), [`README.md`](../../../README.md) |
+| F2 | Closing the client window left repeated “No windows are open, exiting” logs and did not return to the prompt. | Implemented | The client now requests `AppExit` on `WindowCloseRequested`, and the launcher terminates its background server with SIGTERM, which is reliable for shell background jobs. | [`src/client.rs`](../../../src/client.rs), [`justfile`](../../../justfile) |
+| F3 | Review found that the launcher could hide a server startup failure and bypass Cargo's configured target directory. | Implemented | The launcher supervises Cargo-run process statuses, stops the client when the server exits, returns the server status, and uses `cargo run` rather than a hard-coded repository target path. | [`justfile`](../../../justfile) |
+| F4 | Review found that the fixed-tick test manually ran `FixedUpdate` and did not prove Bevy's fixed loop or set chain. | Implemented | The headless test now uses `MinimalPlugins` with `TimeUpdateStrategy::FixedTimesteps(1)`, advances through `App::update()`, and records the declared Input → Simulation → Presentation order. | [`src/gameplay.rs`](../../../src/gameplay.rs) |
+| F5 | Review found that CI Clippy, tests, and builds omitted `--locked`. | Implemented | All dependency-resolving CI commands now enforce the committed lockfile. | [`ci.yml`](../../../.github/workflows/ci.yml) |
 
 ## Learn from errors
 
 Implementation review (2026-08-13):
 
-- What went wrong or caused rework? The first fixed-tick constant used a non-const `Duration::from_secs_f64`; Bevy 0.19 resource initialization also requires marker resources to implement `Default`. A client composition test initially finalized winit on Cargo's non-main test thread.
+- What went wrong or caused rework? The first fixed-tick constant used a non-const `Duration::from_secs_f64`; Bevy 0.19 resource initialization also requires marker resources to implement `Default`. A client composition test initially finalized winit on Cargo's non-main test thread. Review also identified that the launcher used a hard-coded target path, could mask server startup failure, and that the fixed-tick test bypassed Bevy's automatic loop.
 - Which assumption caused it? Bevy 0.19's exact API behavior differed from the development snapshot, and macOS winit event-loop ownership is process-thread-specific.
-- Prevention: keep exact released dependency pins, test the reusable plugin set with a headless `App`, and reserve actual `DefaultPlugins`/winit validation for a process smoke test on the main thread. Keep the shared tick duration as a const nanosecond duration.
+- Prevention: keep exact released dependency pins, test the reusable plugin set with a headless `App`, and reserve actual `DefaultPlugins`/winit validation for a process smoke test on the main thread. Use `cargo run` when launching Cargo-built binaries, supervise sibling process statuses, and use `TimeUpdateStrategy::FixedTimesteps` when testing Bevy's fixed loop. Keep the shared tick duration as a const nanosecond duration.
 - Reusable skill: no new skill was justified; the existing Bevy game-engine skill plus the checked-in local references covered the recurring setup decisions.
 - Future-milestone impact: Milestone 02 must add Lightyear client/server plugin groups before any connection entities or expanded protocol registration; do not treat this milestone's protocol registry as network validation.
 

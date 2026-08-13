@@ -26,11 +26,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy (${{ matrix.configuration.name }})
-        run: cargo clippy --no-default-features --features ${{ matrix.configuration.features }} --all-targets -- -D warnings
+        run: cargo clippy --locked --no-default-features --features ${{ matrix.configuration.features }} --all-targets -- -D warnings
       - name: Test (${{ matrix.configuration.name }})
-        run: cargo test --no-default-features --features ${{ matrix.configuration.features }} --all-targets
+        run: cargo test --locked --no-default-features --features ${{ matrix.configuration.features }} --all-targets
       - name: Build (${{ matrix.configuration.name }})
-        run: cargo build --no-default-features --features ${{ matrix.configuration.features }} --bin ${{ matrix.configuration.binary }}
+        run: cargo build --locked --no-default-features --features ${{ matrix.configuration.features }} --bin ${{ matrix.configuration.binary }}
       - name: Feature isolation
         if: matrix.configuration.name == 'server'
         run: ./scripts/check-server-features.sh
