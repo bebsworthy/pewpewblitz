@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration:
+          - name: client
+            features: client
+            binary: brawler-client
+          - name: server
+            features: server
+            binary: brawler-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy (${{ matrix.configuration.name }})
+        run: cargo clippy --no-default-features --features ${{ matrix.configuration.features }} --all-targets -- -D warnings
+      - name: Test (${{ matrix.configuration.name }})
+        run: cargo test --no-default-features --features ${{ matrix.configuration.features }} --all-targets
+      - name: Build (${{ matrix.configuration.name }})
+        run: cargo build --no-default-features --features ${{ matrix.configuration.features }} --bin ${{ matrix.configuration.binary }}
+      - name: Feature isolation
+        if: matrix.configuration.name == 'server'
+        run: ./scripts/check-server-features.sh

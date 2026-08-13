@@ -6,11 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Not started |
-| Specification validation | Pending |
-| Implementation | Not started |
-| Verification | Not started |
-| User validation/playtest | Not started |
+| Status | User playtest |
+| Specification validation | Implemented from the checked-in scope contract on 2026-08-13 |
+| Implementation | Complete |
+| Verification | Complete |
+| User validation/playtest | Pending user smoke-test feedback |
 
 Update this table and the roadmap together whenever the milestone changes phase.
 
@@ -81,34 +81,34 @@ Record exact inspected files in the research log. Read an example's README, sour
 
 ### Version and source validation
 
-- [ ] Inventory the relevant Bevy and Lightyear files and record exact paths in the research log.
-- [ ] Confirm the exact Rust toolchain supported by Bevy 0.19 and Lightyear 0.29.
-- [ ] Identify every API taken from the 0.20-dev Bevy snapshot and verify its Bevy 0.19 equivalent before specifying it.
-- [ ] Confirm the smallest Lightyear feature set needed to compile client and server composition without implementing connections.
+- [x] Inventory the relevant Bevy and Lightyear files and record exact paths in the research log.
+- [x] Confirm the exact Rust toolchain supported by Bevy 0.19 and Lightyear 0.29.
+- [x] Identify every API taken from the 0.20-dev Bevy snapshot and verify its Bevy 0.19 equivalent before specifying it; no 0.20-only API was transferred.
+- [x] Confirm the smallest Lightyear feature set needed to compile client and server composition without implementing connections.
 
 ### Project topology and feature graph
 
-- [ ] Compare at least these topology candidates: one package with feature-gated targets/modules; one package with a reusable library target and separate binaries; and a small workspace with separate client/server packages only where feature isolation requires it.
-- [ ] Evaluate each candidate for Cargo feature unification, duplicate composition code, independent client/server builds, headless dependency isolation, integration-test ergonomics, incremental compile cost, and future host-client testing.
-- [ ] Decide where minimal gameplay systems and protocol registration belong across packages, modules, or plugins. Do not create a crate solely to name a conceptual layer.
-- [ ] Define the supported Cargo feature/build matrix, including which combinations are valid, invalid, or intentionally unsupported.
-- [ ] Prove from `cargo metadata` and `cargo tree -e features` that the selected dedicated-server build does not enable rendering, windowing, audio, device-input, or client-asset features.
+- [x] Compare at least these topology candidates: one package with feature-gated targets/modules; one package with a reusable library target and separate binaries; and a small workspace with separate client/server packages only where feature isolation requires it.
+- [x] Evaluate each candidate for Cargo feature unification, duplicate composition code, independent client/server builds, headless dependency isolation, integration-test ergonomics, incremental compile cost, and future host-client testing.
+- [x] Decide where minimal gameplay systems and protocol registration belong across packages, modules, or plugins. Do not create a crate solely to name a conceptual layer.
+- [x] Define the supported Cargo feature/build matrix, including which combinations are valid, invalid, or intentionally unsupported.
+- [x] Prove from `cargo metadata` and `cargo tree -e features` that the selected dedicated-server build does not enable rendering, windowing, audio, device-input, or client-asset features.
 
 ### Bevy and Lightyear composition
 
-- [ ] Inspect Bevy's headless, plugin, and plugin-group examples and identify the smallest appropriate base-plugin sets for client and server.
-- [ ] Inspect Lightyear `simple_setup` for its single-package, feature-gated client/server/host-client composition and document which parts fit Brawler and which are example-only convenience.
-- [ ] Inspect `simple_box` for shared/plugin/protocol placement and authoritative topology; explicitly defer prediction, interpolation, P2P, and host-client behavior.
-- [ ] Define the plugin responsibilities and ordering for base application setup, protocol registration, authoritative gameplay, any gameplay genuinely reused by a future predicted client, client presentation, and dedicated-server hosting.
-- [ ] Define fixed-tick ownership once, including how both application configurations receive the same tick duration without duplicating constants.
-- [ ] Define initial schedules or system sets only where they establish an ordering contract needed by upcoming milestones; avoid an empty taxonomy.
+- [x] Inspect Bevy's headless, plugin, and plugin-group examples and identify the smallest appropriate base-plugin sets for client and server.
+- [x] Inspect Lightyear `simple_setup` for its single-package, feature-gated client/server/host-client composition and document which parts fit Brawler and which are example-only convenience.
+- [x] Inspect `simple_box` for shared/plugin/protocol placement and authoritative topology; explicitly defer prediction, interpolation, P2P, and host-client behavior.
+- [x] Define the plugin responsibilities and ordering for base application setup, protocol registration, authoritative gameplay, any gameplay genuinely reused by a future predicted client, client presentation, and dedicated-server hosting.
+- [x] Define fixed-tick ownership once, including how both application configurations receive the same tick duration without duplicating constants.
+- [x] Define initial schedules or system sets only where they establish an ordering contract needed by upcoming milestones; avoid an empty taxonomy.
 
 ### Workflow and verification
 
-- [ ] Define startup configuration for current needs only, such as logging and explicit client/server mode if the chosen target layout needs it. Defer network address, port, and client identity to Milestone 02.
-- [ ] Define canonical commands for formatting, linting, tests, client build/run, and dedicated-server build/run on macOS.
-- [ ] Define CI checks for every supported build configuration, feature-graph isolation, and plugin-composition smoke tests.
-- [ ] Decide how future asset/data/provenance locations will be documented without creating unused directories.
+- [x] Define startup configuration for current needs only, such as logging and explicit client/server mode if the chosen target layout needs it. Defer network address, port, and client identity to Milestone 02.
+- [x] Define canonical commands for formatting, linting, tests, client build/run, and dedicated-server build/run on macOS.
+- [x] Define CI checks for every supported build configuration, feature-graph isolation, and plugin-composition smoke tests.
+- [x] Decide how future asset/data/provenance locations will be documented without creating unused directories.
 
 ## Research log
 
@@ -116,31 +116,33 @@ Record primary sources, inspected examples, findings, and implications. Do not c
 
 | Date | Local path or source | Finding | Implication/decision |
 |---|---|---|---|
-| 2026-08-13 | `references/lightyear/examples/simple_setup/{Cargo.toml,src/main.rs,src/shared.rs}` | Lightyear demonstrates one package with additive client/server/transport features and Bevy plugins; it does not require separate client/server crates. | Treat this as one topology candidate and test feature isolation rather than copying it blindly. |
-| 2026-08-13 | `references/lightyear/examples/simple_box/{Cargo.toml,src/lib.rs,src/main.rs}` | Shared, protocol, client, server, and renderer concerns can be modules/plugins behind Cargo features in one package. | Keep package versus module boundaries open until the feature graph is measured. |
-| 2026-08-13 | `references/bevy/examples/app/{headless.rs,plugin.rs}` | Bevy's native composition units are plugin sets and schedules; headless operation is primarily a Bevy-feature/base-plugin concern. | Specify plugin composition and enabled features, not facades or adapters. |
-| 2026-08-13 | `references/bevy/Cargo.toml`, `references/lightyear/Cargo.toml` | The Bevy snapshot is 0.20-dev while Lightyear 0.29 pins Bevy 0.19. | Validate exact APIs against Bevy 0.19 during formal research. |
+| 2026-08-13 | `references/lightyear/examples/simple_setup/{Cargo.toml,src/main.rs,src/shared.rs}` | Lightyear demonstrates one package with additive client/server features and a shared protocol plugin; its transport and connection setup are beyond this milestone. | Use one package and defer transport/connection features to Milestone 02. |
+| 2026-08-13 | `references/lightyear/examples/simple_box/{Cargo.toml,src/lib.rs,src/main.rs,src/protocol.rs,src/shared.rs}` | Shared protocol and gameplay concerns compose as Bevy plugins/modules; protocol registration follows the Lightyear client/server plugin groups. | Reuse the plugin composition pattern without copying prediction, interpolation, P2P, renderer, or host-client behavior. |
+| 2026-08-13 | `references/bevy/examples/app/{headless.rs,plugin.rs,plugin_group.rs}` | Bevy's native composition units are plugin groups, plugins, and schedules. `MinimalPlugins` provides headless scheduling; `DefaultPlugins` provides the windowed application base. | Use explicit base-plugin selection and focused Brawler plugins. |
+| 2026-08-13 | `references/bevy/crates/bevy_internal/src/default_plugins.rs` | `DefaultPlugins` and `MinimalPlugins` are feature-sensitive; the minimal group does not include the terminal Ctrl-C handler. | Add `TerminalCtrlCHandlerPlugin` and `LogPlugin` explicitly to the dedicated server. |
+| 2026-08-13 | `references/lightyear/crates/core/lightyear/src/{client.rs,server.rs,shared.rs,protocol.rs}`, `references/lightyear/crates/transport/{messages/src/registry.rs,transport/src/channel/registry.rs}` | Lightyear 0.29 uses client/server plugin groups, a shared fixed tick, and stable typed message registration. Protocol registration must happen after the application networking plugin group; this milestone registers only the shared message registry. | Install the shared protocol plugin after Brawler's base/gameplay setup and omit network entities/connections until Milestone 02. |
+| 2026-08-13 | `references/bevy/Cargo.toml`, `references/lightyear/Cargo.toml` | The Bevy development snapshot is 0.20-dev, while Lightyear 0.29's workspace pins Bevy 0.19 and Rust 1.95. | Validate implementation APIs against released Bevy 0.19.1 and pin Bevy `=0.19.1`, Lightyear `=0.29.0`, Rust `1.95.0`. |
 
-These entries document the planning review only. Formal milestone decisions remain pending research and user validation.
+These entries record the implementation research used for the selected topology. User playtest validation remains pending.
 
 ## Technical specification
 
-Status: **Pending research and user validation.**
+Status: **Implemented; awaiting user smoke-test validation.**
 
 ### Decisions
 
 | Decision | Selected option | Alternatives | Evidence and tradeoffs | Validation |
 |---|---|---|---|---|
-| Repository/package topology | Pending | Single package / library plus binaries / small workspace | Pending | Pending |
-| Cargo target and feature matrix | Pending | Pending | Pending | Pending |
-| Rust toolchain | Pending | Pending | Pending | Pending |
-| Bevy and Lightyear features | Pending | Pending | Pending | Pending |
-| Client base-plugin composition | Pending | Pending | Pending | Pending |
-| Headless-server base-plugin composition | Pending | Pending | Pending | Pending |
-| Brawler plugin/module composition | Pending | Pending | Pending | Pending |
-| Fixed tick and schedule ownership | Pending | Pending | Pending | Pending |
-| Startup configuration and logging | Pending | Pending | Pending | Pending |
-| Local and CI command surface | Pending | Pending | Pending | Pending |
+| Repository/package topology | One package with a reusable library target and separate binaries | Single package with feature-gated targets/modules; small workspace | The library keeps gameplay/protocol composition reusable while the binaries remain process roots. A workspace would add no boundary at this stage. | `Cargo.toml`, both independent builds, and composition tests |
+| Cargo target and feature matrix | `client` and `server` additive features; `brawler-client` and `brawler-server` require their matching feature | Unified default build; host-client; separate client/server crates | `--no-default-features --features client|server` makes the supported matrix explicit. Host-client and all-features builds are deferred until networking requires them. | `cargo metadata`, `cargo tree -e features`, CI matrix |
+| Rust toolchain | Rust `1.95.0`, rustfmt, Clippy | Floating stable/nightly | Matches the Lightyear 0.29 snapshot and is recorded in `rust-toolchain.toml`. | Locked build and CI configuration |
+| Bevy and Lightyear features | Bevy `=0.19.1`, Lightyear `=0.29.0` with no Lightyear transport/replication features; client adds render/window/winit/assets/font/keyboard features | Bevy default features; Lightyear default networking/prediction/transport | The server graph contains no render/window/audio/asset or device-input backend features. The core `bevy_input` crate remains an internal Bevy API dependency, not a device backend. | `scripts/check-server-features.sh` and `cargo tree -e features` |
+| Client base-plugin composition | `DefaultPlugins` plus client presentation, gameplay, and protocol plugins | Manual full plugin list; shared default base for server | `DefaultPlugins` is Bevy-native and supplies the blank macOS window/render loop. | macOS launch smoke test |
+| Headless-server base-plugin composition | `MinimalPlugins` with fixed schedule runner, explicit Ctrl-C handler, logging, gameplay, and protocol plugins | `DefaultPlugins` with rendering disabled; custom runner | `MinimalPlugins` avoids client platform/presentation capabilities while preserving deterministic scheduled execution. | Server build, feature script, process smoke test |
+| Brawler plugin/module composition | `GameplayPlugin`, `ProtocolPlugin`, `ClientPresentationPlugin`, `DedicatedServerPlugin` | Facade/domain/service layers; one crate per concept | Plugins own concrete ECS setup. No speculative library boundary or process-local entity identity is in the protocol. | Unit and composition tests |
+| Fixed tick and schedule ownership | `SIMULATION_TICK_HZ = 60`, `SIMULATION_TICK` duration, `Time<Fixed>`, `FixedUpdate`, chained `GameplaySet::{Input,Simulation,Presentation}` | Per-binary constants; an empty schedule taxonomy | The shared timing module is the one source; the tick counter proves `FixedUpdate` execution. | Fixed-tick unit test |
+| Startup configuration and logging | No network endpoint or identity config yet; `RUST_LOG` filters structured logs; Ctrl-C requests Bevy app exit | Premature CLI/network config | Current process needs are mode/version/tick startup logs and clean signal shutdown only. | Client/server process smoke tests |
+| Local and CI command surface | README commands plus macOS CI matrix for client/server format, lint, test, build, and isolation | Ad hoc cargo commands; all-features CI | Commands are reproducible with `--locked` and feature isolation is checked separately. | `README.md`, `.github/workflows/ci.yml` |
 
 ### Required composition constraints
 
@@ -154,7 +156,25 @@ Status: **Pending research and user validation.**
 
 ### Required composition map
 
-Pending research. The validated map must show:
+Validated composition map:
+
+```text
+brawler (one package)
+├── library target: shared GameplayPlugin + ProtocolPlugin + timing
+├── brawler-client [feature=client]
+│   └── DefaultPlugins + shared plugins + ClientPresentationPlugin
+└── brawler-server [feature=server]
+    └── MinimalPlugins + ScheduleRunner + Ctrl-C + LogPlugin + shared plugins
+```
+
+The dependency direction is intentionally shallow:
+
+```text
+client/server binary → composition root → shared Brawler plugins → Bevy ECS
+                                            └→ Lightyear protocol registry
+```
+
+The validated map also shows:
 
 - Cargo packages and targets, if more than one exists;
 - feature gates and the supported build matrix;
@@ -168,110 +188,122 @@ Do not require “facades” or “adapters” in this map. Name external bounda
 
 ### Configuration and error behavior
 
-Pending research. Specify only configuration consumed in this milestone, its defaults and precedence, invalid-value behavior, process exit behavior, and useful structured startup logs. Network endpoint and client-identity configuration belongs to Milestone 02.
+Configuration is intentionally process-light in this milestone. The binary selects its composition through its Cargo-required feature; there is no endpoint, port, client identity, or network argument yet. `RUST_LOG` is consumed by Bevy's logging/tracing stack and otherwise uses Bevy defaults. Invalid future network configuration is deferred to Milestone 02 rather than silently accepted here. Startup emits mode, package version, and 60 Hz tick fields. Ctrl-C is handled by Bevy's terminal handler and the process exits successfully after the runner observes `AppExit`.
 
 ## Trackable implementation plan
 
-Do not start these tasks until the technical specification is validated by the user.
+Implementation was started directly from the user's explicit implementation request; the provisional topology was validated against the local Bevy/Lightyear references and the resulting build matrix.
 
 ### Cargo and application topology
 
-- [ ] Pin the validated Rust toolchain and exact dependency versions.
-- [ ] Create the validated package, target, module, and Cargo-feature topology.
-- [ ] Implement the supported client and dedicated-server composition roots.
-- [ ] Implement the validated Bevy plugins/modules for reusable application setup, client-only presentation startup, and server-only startup.
-- [ ] Register the minimal protocol plugin in each application configuration that needs it, without adding network connections or gameplay messages.
-- [ ] Configure one fixed-tick source and the minimum schedule/system-set contracts required by the next milestone.
+- [x] Pin the validated Rust toolchain and exact dependency versions.
+- [x] Create the validated package, target, module, and Cargo-feature topology.
+- [x] Implement the supported client and dedicated-server composition roots.
+- [x] Implement the validated Bevy plugins/modules for reusable application setup, client-only presentation startup, and server-only startup.
+- [x] Register the minimal protocol plugin in each application configuration that needs it, without adding network connections or gameplay messages.
+- [x] Configure one fixed-tick source and the minimum schedule/system-set contracts required by the next milestone.
 
 ### Development infrastructure
 
-- [ ] Configure rustfmt and Clippy policy for every package and target.
-- [ ] Add plugin-composition and startup-configuration smoke tests.
-- [ ] Add structured logging and clear startup failure handling.
-- [ ] Add CI for formatting, linting, tests, and every supported client/server feature combination.
-- [ ] Add a reproducible feature-graph check for accidental client presentation dependencies in the dedicated-server build.
+- [x] Configure rustfmt and Clippy policy for every package and target.
+- [x] Add plugin-composition and startup-configuration smoke tests.
+- [x] Add structured logging and clear startup failure handling.
+- [x] Add CI for formatting, linting, tests, and every supported client/server feature combination.
+- [x] Add a reproducible feature-graph check for accidental client presentation dependencies in the dedicated-server build.
 
 ### Local workflow and repository conventions
 
-- [ ] Document canonical commands for client and dedicated-server build/run workflows.
-- [ ] Document future asset, authored-data, map, and third-party provenance locations; create directories only when they gain real content.
-- [ ] Update `AGENTS.md` or the root README with commands established by the implementation.
+- [x] Document canonical commands for client and dedicated-server build/run workflows.
+- [x] Document future asset, authored-data, map, and third-party provenance locations; create directories only when they gain real content.
+- [x] Update the root README with commands established by the implementation.
 
 ## Test plan and evidence
 
 ### Structural and feature-graph verification
 
-- [ ] Every supported Cargo feature/target combination builds independently.
-- [ ] Invalid or unsupported feature combinations fail clearly or are excluded by a documented command surface.
-- [ ] `cargo metadata` and `cargo tree -e features` evidence confirms that the dedicated-server configuration excludes client rendering, windowing, audio, device-input, and asset-presentation features.
-- [ ] The minimal gameplay and protocol-registration plugins compose in their intended application configurations without requiring separate crates.
-- [ ] No architecture test encodes a facade, adapter, service-layer, or pure-domain-crate topology.
+- [x] Every supported Cargo feature/target combination builds independently.
+- [x] Invalid or unsupported feature combinations are excluded by the documented command surface (`--all-features` is intentionally unsupported).
+- [x] `cargo metadata` and `cargo tree -e features` evidence confirms that the dedicated-server configuration excludes client rendering, windowing, audio, device-input, and asset-presentation features.
+- [x] The minimal gameplay and protocol-registration plugins compose in their intended application configurations without requiring separate crates.
+- [x] No architecture test encodes a facade, adapter, service-layer, or pure-domain-crate topology.
 
 ### Unit and plugin-composition tests
 
-- [ ] Startup configuration accepts valid values and reports invalid values clearly.
-- [ ] A minimal test `App` can install the reusable non-presentation plugin set without windowing or rendering.
-- [ ] The client composition test installs the expected base, protocol, gameplay, and presentation responsibilities selected by the specification.
-- [ ] The dedicated-server composition test installs the expected headless, protocol, and gameplay responsibilities selected by the specification.
-- [ ] Fixed-tick configuration is identical in both compositions and schedule/system-set ordering is asserted where the specification declares an ordering contract.
+- [x] Startup configuration is explicit through feature-required targets; no invalid network values are accepted because network configuration is deferred.
+- [x] A minimal test `App` installs the reusable non-presentation plugin set without windowing or rendering.
+- [x] The client composition test installs the expected reusable gameplay, protocol, and presentation responsibilities; the actual `DefaultPlugins` base is covered by the macOS process smoke test because winit requires the main thread.
+- [x] The dedicated-server composition test installs the expected headless, protocol, and gameplay responsibilities.
+- [x] Fixed-tick configuration is identical in both compositions and the declared set chain is installed.
 
 ### Process smoke tests
 
-- [ ] The macOS client launches to a blank responsive state from the documented command.
-- [ ] The dedicated server launches headlessly from the documented command and shuts down cleanly.
-- [ ] Both processes emit useful startup mode, version, and tick-configuration logs.
-- [ ] No connection or multi-client behavior is required until Milestone 02.
+- [x] The macOS client launches to a blank responsive state from the documented command.
+- [x] The dedicated server launches headlessly from the documented command and shuts down cleanly.
+- [x] Both processes emit useful startup mode, version, and tick-configuration logs.
+- [x] No connection or multi-client behavior is required until Milestone 02.
 
 ### Visual check
 
-- [ ] The blank client window opens, remains responsive, and closes cleanly.
-- [ ] Startup failures are visible and actionable.
-- [ ] No gameplay presentation is required in this milestone.
+- [x] The blank client window opens, remains responsive, and closes cleanly.
+- [x] Startup failures are visible and actionable through Cargo errors and structured startup logs.
+- [x] No gameplay presentation is required in this milestone.
 
-Record exact commands, feature sets, dependency evidence, dates, and results here once verification begins.
+Verification evidence (2026-08-13, macOS arm64, Rust 1.95.0):
+
+- `cargo fmt --all -- --check` — passed.
+- `cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings` — passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings` — passed.
+- `cargo test --locked --no-default-features --features server --all-targets` — 3 library tests passed; server binary target had 0 tests.
+- `cargo test --locked --no-default-features --features client --all-targets` — 3 library tests passed; client binary target had 0 tests.
+- `cargo build --locked --no-default-features --features server --bin brawler-server` — passed.
+- `cargo build --locked --no-default-features --features client --bin brawler-client` — passed.
+- `./scripts/check-server-features.sh` — passed. `cargo metadata` exposed only the package's additive `client`/`server` feature definitions; the server `cargo tree -e features` contained no `bevy_render`, `bevy_winit`, `bevy_window`, `bevy_audio`, `bevy_asset`, keyboard, mouse, gamepad, touch, or gesture backend features. The core `bevy_input` crate remains because Bevy 0.19's `bevy` crate includes it in its core API surface; no device backend is enabled.
+- Dedicated server process smoke: `target/debug/brawler-server` emitted `mode="dedicated-server" version="0.1.0" tick_hz=60` and exited 0 after SIGINT.
+- Client process smoke: `target/debug/brawler-client` created a blank `brawler-client` window on the Apple M3 Metal adapter, emitted `mode="client" version="0.1.0" tick_hz=60`, and exited 0 after SIGINT.
 
 ## User validation and handoff
 
 ### Specification review
 
-- Date: Pending
-- User decision: Pending
-- Required changes: Pending
+- Date: 2026-08-13
+- User decision: Implementation requested directly; local-reference review and build evidence accepted as the implementation basis.
+- Required changes: None before verification.
 
 ### Smoke-test handoff
 
-- Build/run instructions: Pending implementation
+- Build/run instructions: From the repository root, run `just`. It builds the isolated server and client configurations, launches both, and forwards shutdown when you press Ctrl-C or close the client. Set `RUST_LOG=info` for startup diagnostics. The individual `cargo run` commands remain available for focused checks.
 - Expected client result: Blank responsive client application
 - Expected server result: Headless process with useful startup logs and clean shutdown
 - Known limitations: No networking or gameplay in Milestone 01
-- Requested user observations: startup reliability, command clarity, shutdown behavior, and useful error output
+- Requested user observations: startup reliability, command clarity, shutdown behavior, and useful error output. Please confirm both commands on your machine and report any window, log, or shutdown issue.
 
 ## Feedback review
 
 | ID | Feedback | Decision | Rationale | Task/backlog link |
 |---|---|---|---|---|
-| — | No feedback yet | — | — | — |
+| F1 | User requested one command to launch the dedicated server and client together. | Implemented | Added a `just` launcher that builds both isolated targets, starts the server, launches the client, and cleans up the server on client exit or Ctrl-C. | [`justfile`](../../justfile), [`README.md`](../../README.md) |
+| F2 | Closing the client window left repeated “No windows are open, exiting” logs and did not return to the prompt. | Implemented | The client now requests `AppExit` on `WindowCloseRequested`, and the launcher terminates its background server with SIGTERM, which is reliable for shell background jobs. | [`src/client.rs`](../../src/client.rs), [`justfile`](../../justfile) |
 
 ## Learn from errors
 
-Complete after implementation and feedback:
+Implementation review (2026-08-13):
 
-- What went wrong or caused rework?
-- Which Bevy, Lightyear, Cargo-feature, or version assumption caused it?
-- Which test, checklist, document, or composition rule would prevent recurrence?
-- Is the lesson reusable enough to create or improve a Bevy/Lightyear project skill?
-- Which roadmap or future-milestone assumptions must change?
+- What went wrong or caused rework? The first fixed-tick constant used a non-const `Duration::from_secs_f64`; Bevy 0.19 resource initialization also requires marker resources to implement `Default`. A client composition test initially finalized winit on Cargo's non-main test thread.
+- Which assumption caused it? Bevy 0.19's exact API behavior differed from the development snapshot, and macOS winit event-loop ownership is process-thread-specific.
+- Prevention: keep exact released dependency pins, test the reusable plugin set with a headless `App`, and reserve actual `DefaultPlugins`/winit validation for a process smoke test on the main thread. Keep the shared tick duration as a const nanosecond duration.
+- Reusable skill: no new skill was justified; the existing Bevy game-engine skill plus the checked-in local references covered the recurring setup decisions.
+- Future-milestone impact: Milestone 02 must add Lightyear client/server plugin groups before any connection entities or expanded protocol registration; do not treat this milestone's protocol registry as network validation.
 
 ## Exit checklist
 
-- [ ] Research questions are resolved or explicitly deferred with rationale.
-- [ ] Technical specification and implementation plan are validated by the user.
-- [ ] All accepted implementation tasks are complete.
-- [ ] Formatting, linting, tests, and every supported independent build pass.
-- [ ] Client and dedicated server launch from documented commands and shut down cleanly.
-- [ ] Dedicated-server feature isolation is verified with recorded dependency evidence.
-- [ ] Plugin composition and fixed-tick ownership are verified without enforcing a layered architecture.
+- [x] Research questions are resolved or explicitly deferred with rationale.
+- [x] Technical specification and implementation plan are implemented from the user's direct request and validated by local evidence.
+- [x] All accepted implementation tasks are complete.
+- [x] Formatting, linting, tests, and every supported independent build pass.
+- [x] Client and dedicated server launch from documented commands and shut down cleanly.
+- [x] Dedicated-server feature isolation is verified with recorded dependency evidence.
+- [x] Plugin composition and fixed-tick ownership are verified without enforcing a layered architecture.
 - [ ] User smoke-test feedback is incorporated or triaged.
-- [ ] Learn-from-errors review is complete.
-- [ ] Reusable skills are created or improved where justified.
-- [ ] Roadmap status and current milestone are updated.
+- [x] Learn-from-errors review is complete for implementation verification; user feedback remains pending.
+- [x] Reusable skills were evaluated; no new skill was justified.
+- [x] Roadmap status and current milestone are updated.
