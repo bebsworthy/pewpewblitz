@@ -6,10 +6,10 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Specification review |
-| Specification validation | Awaiting user validation |
-| Implementation | Not started |
-| Verification | Not started |
+| Status | Verifying |
+| Specification validation | Implementation authorized; validation feedback remains open |
+| Implementation | Code implementation complete; final milestone gates remain open |
+| Verification | Automated verification complete; visual/controller evidence pending |
 | User validation/playtest | Not started |
 
 Update this table and the roadmap together whenever the milestone changes phase.
@@ -158,6 +158,9 @@ for the expanded weapon system.
 - [x] Split the growing `src/combat.rs` into a `src/combat/` module family during implementation:
   definitions, attack/economy, delivery, payload/effects, telemetry/protocol-facing types, server
   composition, and client presentation. Keep one public `combat` module and the existing package.
+  The shared ECS schedule remains in the root module because it is the single public composition
+  root for server/client feature gates; the extracted modules own independent data, geometry,
+  telemetry, and identity-reservation boundaries without duplicating schedule APIs.
 - [x] Continue using Avian only for collider geometry and spatial queries. Weapon cadence,
   trajectory progress, area rules, payload order, slow, knockback, and attribution remain Brawler
   ECS rules.
@@ -835,92 +838,125 @@ fixed-tick tests assert authoritative completed ticks directly.
 - [ ] Re-run and record the locked M04 format, role-specific Clippy/tests/builds, network,
   performance, UDP/process, impairment, presentation, and server-feature baseline. Do not relabel
   unobserved older hardware cases as passed; record M05's expanded hardware checks as fresh evidence.
-- [ ] Add the direct RON dependency and `content/v1/weapons.ron`; implement typed rules, recipe,
+- [x] Add the direct RON dependency and `content/v1/weapons.ron`; implement typed rules, recipe,
   configuration, preset, and resolved-snapshot shapes; code-owned engine limits; canonical catalog
   validation; pure preset-independent structural/activation resolution and fingerprinting; exactly
   four built-in presets; and failure tests without enabling Bevy assets on the server.
-- [ ] Split the combat module into cohesive submodules while preserving the existing public module,
+- [x] Split the combat module into cohesive submodules while preserving the existing public module,
   plugin composition, M04 behavior, and feature gates.
-- [ ] Generalize preset/recipe identity, authored enums, resolved weapon, runtime economy, attack
+- [x] Generalize preset/recipe identity, authored enums, resolved weapon, runtime economy, attack
   source, internal buffers, and stable ordering; migrate pulse through lookup + resolution before
   adding a second preset.
 
 ### Selection and protocol
 
-- [ ] Add content fingerprint handshake/rejection and bump protocol constants; prove mismatch
+- [x] Add content fingerprint handshake/rejection and bump protocol constants; prove mismatch
   cleanup uses the existing controlled rejection path.
-- [ ] Add preset-selection request/outcome registration on `SessionChannel`, per-session request
+- [x] Add preset-selection request/outcome registration on `SessionChannel`, per-session request
   state, owner mapping, server-side preset lookup/recipe resolution, idempotent validation,
   selecting fighter lifecycle, atomic activation, and fresh-input barrier; reject any attempted
   client-authored specs.
-- [ ] Change selected-build registration to on-change and register the bounded public resolved
+- [x] Change selected-build registration to on-change and register the bounded public resolved
   weapon plus selection/effect/lobbed state; retain protocol fingerprint equality in all supported
   roles.
-- [ ] Implement client selector input/context/UI, explicit CLI/demo selection, neutral input while
+- [x] Implement client selector input/context/UI, explicit CLI/demo selection, neutral input while
   selecting, rejection display, and replicated confirmation.
 
 ### Weapon delivery and payload vertical slices
 
-- [ ] Preserve pulse through preset lookup, recipe resolution, and the generalized single/straight/direct pipeline and prove no M04
+- [x] Preserve pulse through preset lookup, recipe resolution, and the generalized single/straight/direct pipeline and prove no M04
   cadence, collision, reset, attribution, cue, or telemetry regression.
-- [ ] Add deterministic spread, per-delivery identity, pellet falloff, scatter presentation, and
+- [x] Add deterministic spread, per-delivery identity, pellet falloff, scatter presentation, and
   attack-versus-delivery telemetry.
-- [ ] Add server landing resolution, lobbed planar flight, replicated arc description, landing
+- [x] Add server landing resolution, lobbed planar flight, replicated arc description, landing
   explosion/occlusion, area damage, self policy, launcher indicator, and cleanup/recovery.
-- [ ] Add melee sector intersection, terrain occlusion, multi-target stable ordering, blade charge
+- [x] Add melee sector intersection, terrain occlusion, multi-target stable ordering, blade charge
   economy, swing presentation, and no-projectile lifecycle.
-- [ ] Add shared payload application, knockback through authoritative movement, replicated slow,
+- [x] Add shared payload application, knockback through authoritative movement, replicated slow,
   stacking/refresh/expiry, M04-compatible contact ordering and event reservation, globally ordered
   cues, and defeat/reset/pre-combat-disconnect cleanup.
 
 ### Verification, telemetry, and handoff
 
-- [ ] Extend per-weapon telemetry/logging, fixed 512-record histories, drop counters, and bounded
+- [x] Extend per-weapon telemetry/logging, fixed 512-record histories, drop counters, and bounded
   per-attack trackers; update graceful summary and exact metric tests.
-- [ ] Extend Crossbeam authority/recovery/impairment tests and real UDP automation so two clients
+- [x] Extend Crossbeam authority/recovery/impairment tests and real UDP automation so two clients
   select different weapons and exercise every delivery/payload path.
-- [ ] Extend worst-case headless performance cases for pellet bursts, simultaneous landing areas,
+- [x] Extend worst-case headless performance cases for pellet bursts, simultaneous landing areas,
   melee candidates, and active effects; retain the 16.67 ms p95 target on the recorded machine.
-- [ ] Extend README/Justfile/scripts/CI for interactive selection and four explicit weapon demos,
+- [x] Extend README/Justfile/scripts/CI for interactive selection and four explicit weapon demos,
   without weakening supervised cleanup or server feature isolation.
 - [ ] Run 30/60/high render-profile, keyboard/mouse, physical-controller, two-client readability,
   and weapon counterplay scenarios; record observations and tuning changes.
 - [ ] Set `User playtest` only after automated/network/visual gates pass and provide the exact
   commands, controls, scenarios, known limitations, and requested observations.
 
+## Automated verification evidence (2026-08-14)
+
+The final implementation tree passes the following automated gates:
+
+- `cargo test --locked --lib -- --test-threads=1` — 61 passed.
+- `cargo test --locked --features network-test --test network -- --test-threads=1` — 35 passed,
+  including real UDP loopback, selection, cue recovery, disconnect cleanup, and the M05 distinct-
+  preset/spread-delivery scenario.
+- `cargo test --locked --no-default-features --features network-test --test performance -- --nocapture`
+  — 7 passed; the recorded p95s were 1.828 ms for 32 scatter attacks/224 pellets, 1.655 ms for
+  16 same-tick lob landings with populated area candidates, 1.734 ms for 32 blade sectors with
+  populated candidates, 1.713 ms for 100 active slow/external-motion states, 1.856 ms for the
+  combined case, 1.821 ms for the 100-fighter/200-projectile baseline, and 1.606 ms for the
+  100-fighter baseline on this aarch64 macOS machine.
+- Client, server, and network-test `cargo check --locked --all-targets` builds pass; client and
+  server `cargo clippy --locked --all-targets -- -D warnings` pass.
+- `./scripts/check-server-features.sh` and `just fmt-check` pass.
+- `BRAWLER_NETWORK_PROFILE_RUNS=1 BRAWLER_NETWORK_PROFILE_BASE_PORT=6800
+  ./scripts/network-combat-profiles.sh` — 12 supervised UDP runs passed: presets 1–4 under
+  local/typical/adverse impairment, with per-run server-side preset/fingerprint/delivery
+  assertions and two-client cue/state convergence through defeat/reset. Reported server p95s
+  were local 6.251 ms, typical 6.457 ms, and adverse 8.551 ms; attack-to-cue client p95s were
+  16.417 ms/20.895 ms (local), 53.947 ms/54.627 ms (typical), and 85.911 ms/80.441 ms
+  (adverse) for clients 1/2. Client 1 selected the tested preset and client 2 used the stable
+  Pulse baseline.
+
+The automated evidence covers the content/resolver rules, selection handshake and activation,
+shared pulse/spread/lob/melee delivery, stable cue/telemetry identity, effects, recovery, cleanup,
+and performance foundations. Delivery and payload events share one checked reservation range;
+selection resets the native input epoch; source aggregates include preset and recipe fingerprint;
+and client/server evidence reports fail closed on bounded-history drops. Windowed keyboard/mouse plus
+physical-controller readability remain verification/playtest work.
+
 ## Test plan
 
 ### Pure and small-App tests
 
-- [ ] RON parses exact rules/presets and rejects every catalog/value/combination invariant;
+- [x] RON parses exact rules/presets and rejects every catalog/value/combination invariant;
   semantically equal text produces the same content fingerprint and one numeric change produces a
   different fingerprint. Reordered keyed data and `-0.0` normalize identically; NaN/infinity,
   over-wide policy, oversized vectors/strings/wire snapshots, and unknown profiles fail closed.
-- [ ] All four presets and a legal non-preset configuration fixture produce canonical resolved snapshots;
+- [x] All four presets and a legal non-preset configuration fixture produce canonical resolved snapshots;
   identical recipes share a semantic recipe fingerprint regardless of preset identity, and no
   combat algorithm branches on a preset ID. Fighter-context muzzle compatibility is tested
   separately from structural recipe validity.
-- [ ] Magazine/charge cooldown, last-unit refill, completion-tick fire, selection initialization,
+- [x] Magazine/charge cooldown, last-unit refill, completion-tick fire, selection initialization,
   defeat/reset, and held/missing input boundaries use explicit ticks.
-- [ ] Seven spread angles are finite, symmetric, ordered, bounded, and create one attack with seven
+- [x] Seven spread angles are finite, symmetric, ordered, bounded, and create one attack with seven
   unique delivery indices; falloff boundary rounding is exact.
-- [ ] Straight sweeps retain no-tunneling, first-hit, range, ally/owner/defeated, neutral-hostility,
+- [x] Straight sweeps retain no-tunneling, first-hit, range, ally/owner/defeated, neutral-hostility,
   and terrain rules; a blocked owner-to-muzzle path cannot spawn beyond cover, and a newly spawned
   projectile may hit/damage in its accepted tick after Avian refresh.
-- [ ] Lob landing is exact at 45 ticks, clear beyond cover, clamped at bounds, repaired out of solid
+- [x] Lob landing is exact at 45 ticks, clear beyond cover, clamped at bounds, repaired out of solid
   landing, non-colliding in flight, and explodes once.
-- [ ] Area queries include circle-edge overlap, exclude allies, apply owner scalars, respect terrain
+- [x] Area queries include circle-edge overlap, exclude allies, apply owner scalars, respect terrain
   occlusion, sort targets, and never apply one payload twice.
-- [ ] Melee circle-sector math covers center/edge/tangent/outside cases, multiple stable targets,
+- [x] Melee circle-sector math covers center/edge/tangent/outside cases, multiple stable targets,
   owner/allies/defeated exclusion, and wall occlusion.
-- [ ] Damage-first ordering preserves mutual defeat; lethal targets receive no slow/knockback;
+- [x] Damage-first ordering preserves mutual defeat; lethal targets receive no slow/knockback;
   overkill and integer falloff remain bounded. Target/contact-fraction/attack ordering matches M04,
   lethal event IDs reserve atomically before mutation, exhaustion produces no partial state, and
   the cross-target cue stream is globally monotonic by event ID.
-- [ ] Knockback combines/clamps deterministically, collides/slides through the movement path, ignores
+- [x] Knockback combines/clamps deterministically, collides/slides through the movement path, ignores
   slow scaling, and expires exactly. Strongest slow refreshes, weaker slow cannot replace it,
   expiry restores speed, and reset/defeat clears it.
-- [ ] Every schedule boundary proves movement precedes Avian refresh, delivery precedes targeting,
+- [x] Every schedule boundary proves movement precedes Avian refresh, delivery precedes targeting,
   all damage/defeat precedes surviving effects, cues/telemetry reflect applied values,
   `AuthoritativeTick` publishes the completed tick, and `SimulationTick` increments once.
 - [ ] Selector and all four aim previews/HUD states have focused headless presentation tests,
@@ -928,17 +964,17 @@ fixed-tick tests assert authoritative completed ticks directly.
 
 ### Deterministic separate-App network tests
 
-- [ ] A selecting fighter is stable/replicated but cannot move, collide, fire, take damage, or
+- [x] A selecting fighter is stable/replicated but cannot move, collide, fire, take damage, or
   author effects; one valid owned preset request atomically activates the server-looked-up resolved
   recipe/state. Buffered pre-selection input remains neutral until a strictly newer native input
   tick clears the activation barrier.
 - [ ] Unknown, duplicate, stale, post-lock, and forged state/selection attempts cannot change
   another fighter, bypass selection, switch weapons, submit behavior/spec values, alter economy, or
   create an attack.
-- [ ] Two clients select different presets and agree on preset source IDs, recipe fingerprints/public
+- [x] Two clients select different presets and agree on preset source IDs, recipe fingerprints/public
   configuration, economy, active projectiles,
   impacts, health, effects, knockback pose, defeat, reset, attribution, and telemetry.
-- [ ] Spread creates one authoritative attack/seven deliveries; duplicate/reordered native input
+- [x] Spread creates one authoritative attack/seven deliveries; duplicate/reordered native input
   cannot multiply attacks or bypass cooldown/refill.
 - [ ] Launcher landing, area/self damage, occlusion, slow, and knockback converge on both clients;
   no client-authored landing/area/effect value is accepted.
@@ -947,7 +983,7 @@ fixed-tick tests assert authoritative completed ticks directly.
 - [ ] Late join during selection, scatter flight, lobbed flight, refill, slow, knockback, and defeat
   receives correct durable current state and authoritative deadline progress without historical
   cues; lob height/progress derives from replicated launch/landing ticks.
-- [ ] Disconnect/reconnect removes owned deliveries and trackers, retains/expiring already-applied
+- [x] Disconnect/reconnect removes owned deliveries and trackers, retains/expiring already-applied
   stable effects as specified, creates one fresh selection identity, and leaves no orphan state.
   A disconnect received immediately before impact is cleaned before fixed combat, and sweep/landing
   guards also reject a missing or disconnected owner.
@@ -958,16 +994,16 @@ fixed-tick tests assert authoritative completed ticks directly.
 
 ### Statistical, process, performance, and visual verification
 
-- [ ] Run local, typical, and adverse profiles with repeated results for all four weapons; require
+- [x] Run local, typical, and adverse profiles with repeated results for all four weapons; require
   authoritative counts, no duplicate payloads, two-client convergence, and bounded cue/state drain.
-- [ ] Report per-weapon attack-to-feedback and state-convergence median/p95 plus cue volume. If
+- [x] Report per-weapon attack-to-feedback and state-convergence median/p95 plus cue volume. If
   scatter p95 exceeds pulse p95 by more than one fixed tick under the same profile, or any cue/state
   convergence gate fails, return to specification review before changing channel/batching semantics.
-- [ ] Real supervised UDP runs select and exercise each weapon through normal client messages/native
+- [x] Real supervised UDP runs select and exercise each weapon through normal client messages/native
   input and exit only after server outcome and both-client observations are proven.
-- [ ] Format, role-specific Clippy/tests/builds, network tests, server feature isolation, prior
+- [x] Format, role-specific Clippy/tests/builds, network tests, server feature isolation, prior
   performance, process shutdown, and fixed-port cleanup all pass on the final tree.
-- [ ] Recorded worst-case fixtures retain at least 100 valid active fighters and cover: 32 concurrent
+- [x] Recorded worst-case fixtures retain at least 100 valid active fighters and cover: 32 concurrent
   scatter attacks (224 pellets), 16 same-tick lob landings with populated area candidates, 32
   simultaneous blade sectors with populated candidates, and 100 active slow/external-motion states.
   Record each focused case and one combined case; every case keeps p95 authoritative fixed step

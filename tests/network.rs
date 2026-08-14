@@ -15,10 +15,11 @@ use brawler::{
         spawn_crossbeam_client,
     },
     combat::{
-        CaptureCombatCues, CombatCue, CombatEventId, CombatLogRecord, CombatTelemetry,
-        CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions,
-        PULSE_SIDEARM_DEFINITION, Projectile, ProjectileRuntime, ProjectileSource, ShotId,
-        SpawnState, TeamId, TestDummy, WeaponPhase, WeaponState,
+        AttackDelivery, CaptureCombatCues, CombatCue, CombatEventId, CombatLogRecord,
+        CombatTelemetry, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions,
+        PULSE_SIDEARM_DEFINITION, Projectile, ProjectileRuntime, ProjectileSource, ResolvedWeapon,
+        SelectedBuild, SelectingWeapon, ShotId, SpawnState, TeamId, TestDummy, WeaponPhase,
+        WeaponPresetId, WeaponState,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -56,6 +57,65 @@ impl bevy::prelude::Plugin for MismatchedProtocolPlugin {
         app.register_message::<MismatchedMessage>()
             .add_direction(NetworkDirection::Bidirectional);
     }
+}
+
+#[test]
+fn milestone_five_selection_resolves_distinct_presets_and_spawns_spread_deliveries() {
+    let mut harness = Harness::new(2);
+    harness.clients[0]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .weapon_preset = Some(2);
+    harness.clients[1]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .weapon_preset = Some(4);
+
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+    });
+    for _ in 0..60 {
+        harness.step();
+    }
+    harness.step_until(|harness| {
+        (0..2).all(|index| {
+            let world = harness.clients[index].world_mut();
+            let mut query = world
+                .query_filtered::<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>();
+            query.iter(world).next().is_none()
+        })
+    });
+
+    let world = harness.server.world_mut();
+    let mut query = world.query_filtered::<(&PlayerId, &SelectedBuild, &ResolvedWeapon, &WeaponState), With<Fighter>>();
+    let mut selections: Vec<_> = query
+        .iter(world)
+        .filter(|(player, _, _, _)| player.0 != 0)
+        .map(|(player, build, resolved, state)| (player.0, build, resolved, state))
+        .collect();
+    selections.sort_by_key(|(_, build, _, _)| build.source_preset_id);
+    assert_eq!(selections.len(), 2);
+    assert_eq!(selections[0].1.source_preset_id, Some(WeaponPresetId(2)));
+    assert_eq!(selections[1].1.source_preset_id, Some(WeaponPresetId(4)));
+    assert_eq!(selections[0].2.recipe.economy.capacity(), 4);
+    assert_eq!(selections[1].2.recipe.economy.capacity(), 3);
+    assert_eq!(selections[0].3.ammo, 4);
+    assert_eq!(selections[1].3.ammo, 3);
+
+    for index in 0..2 {
+        harness.set_controlled_input(
+            index,
+            FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+        );
+    }
+    for _ in 0..3 {
+        harness.step();
+    }
+    let world = harness.server.world_mut();
+    let mut deliveries = world.query_filtered::<&AttackDelivery, With<Projectile>>();
+    assert_eq!(deliveries.iter(world).count(), 7);
 }
 
 #[derive(Resource, Debug, Default)]
@@ -334,6 +394,13 @@ impl Harness {
             .any(|status| matches!(status.phase, ClientJoinPhase::Active { .. }))
     }
 
+    fn selection_is_complete(&mut self, index: usize) -> bool {
+        let world = self.clients[index].world_mut();
+        let mut query =
+            world.query_filtered::<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>();
+        query.iter(world).next().is_none()
+    }
+
     fn active_server_sessions(&mut self) -> usize {
         let world = self.server.world_mut();
         let mut query = world.query::<&ServerSession>();
@@ -368,6 +435,20 @@ impl Harness {
             .iter(world)
             .next()
             .expect("active client should own a fighter")
+    }
+
+    fn aim_at_dummy(&mut self, index: usize) -> Vec2 {
+        let player = self.controlled_player_id(index);
+        let world = self.server.world_mut();
+        let mut fighters = world.query_filtered::<(&PlayerId, &Position), With<Fighter>>();
+        let owner_position = fighters
+            .iter(world)
+            .find(|(candidate, _)| **candidate == player)
+            .map(|(_, position)| position.0)
+            .expect("controlled fighter position");
+        let mut dummies = world.query_filtered::<&Position, With<TestDummy>>();
+        let dummy_position = dummies.single(world).expect("dummy position").0;
+        (dummy_position - owner_position).normalize_or_zero()
     }
 
     fn remote_entity_for_player(&mut self, index: usize, player_id: PlayerId) -> Entity {
@@ -541,6 +622,8 @@ fn two_clients_connect_and_receive_the_same_server_owned_roster() {
             && harness.server_ids().len() == 2
             && harness.client_ids(0).len() == 2
             && harness.client_ids(1).len() == 2
+            && harness.selection_is_complete(0)
+            && harness.selection_is_complete(1)
     });
 
     let server_ids = harness.server_ids();
@@ -563,6 +646,7 @@ fn lost_input_repeats_briefly_then_neutralizes_without_server_pause() {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
             && harness.client_ids(0).len() == 1
+            && harness.selection_is_complete(0)
     });
 
     harness.set_controlled_input(0, FighterInput::from_axes(Vec2::X, None, 0));
@@ -601,12 +685,10 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             && harness.server_ids().len() == 2
             && harness.client_ids(0).len() == 2
             && harness.client_ids(1).len() == 2
+            && harness.selection_is_complete(0)
+            && harness.selection_is_complete(1)
     });
-    let dummy_aim = if harness.controlled_player_id(0).0 == 1 {
-        Vec2::X
-    } else {
-        -Vec2::X
-    };
+    let dummy_aim = harness.aim_at_dummy(0);
     let (dummy_entity, dummy_spawn, dummy_initial_rotation, dummy_initial_layers) = {
         let world = harness.server.world_mut();
         let mut query = world
@@ -616,6 +698,9 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
         (entity, *spawn, *rotation, *layers)
     };
 
+    // Cross the server's strictly-newer-input activation barrier before the first fire intent.
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.step();
     harness.set_controlled_input(
         0,
         FighterInput::from_axes(Vec2::ZERO, Some(dummy_aim), FighterInput::PRIMARY_FIRE),
@@ -897,9 +982,10 @@ fn newly_spawned_projectile_can_hit_the_target_in_its_first_fixed_tick() {
         .resource::<CombatTelemetry>()
         .records
         .len();
+    let dummy_aim = harness.aim_at_dummy(0);
     harness.set_controlled_input(
         0,
-        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+        FighterInput::from_axes(Vec2::ZERO, Some(dummy_aim), FighterInput::PRIMARY_FIRE),
     );
     harness.step_until(|harness| {
         harness
@@ -1120,7 +1206,15 @@ fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
         .cues
         .iter()
         .map(|cue| match cue {
-            CombatCue::Muzzle { event_id, .. }
+            CombatCue::AttackAccepted { event_id, .. }
+            | CombatCue::DeliveryImpact { event_id, .. }
+            | CombatCue::LobLanded { event_id, .. }
+            | CombatCue::MeleeContact { event_id, .. }
+            | CombatCue::DamageApplied { event_id, .. }
+            | CombatCue::EffectApplied { event_id, .. }
+            | CombatCue::FighterDefeated { event_id, .. }
+            | CombatCue::FighterReset { event_id, .. }
+            | CombatCue::Muzzle { event_id, .. }
             | CombatCue::Impact { event_id, .. }
             | CombatCue::Damage { event_id, .. }
             | CombatCue::Defeat { event_id, .. }
@@ -1460,6 +1554,7 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
             && harness.client_ids(0).len() == 1
+            && harness.selection_is_complete(0)
     });
     harness
         .server
@@ -1468,9 +1563,12 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
         .entries[0]
         .defeat_reset_delay_ticks = 600;
 
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.step();
+    let dummy_aim = harness.aim_at_dummy(0);
     harness.set_controlled_input(
         0,
-        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+        FighterInput::from_axes(Vec2::ZERO, Some(dummy_aim), FighterInput::PRIMARY_FIRE),
     );
     harness.step_until(|harness| harness.server_projectile_count() > 0);
 

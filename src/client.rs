@@ -8,7 +8,10 @@
 
 use crate::{
     VERSION,
-    combat::{ClientCombatPlugin, CombatHudText, fighter_color},
+    combat::{
+        ClientCombatPlugin, CombatHudText, SelectingWeapon, WeaponCatalogResource,
+        WeaponSelectionText, fighter_color,
+    },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
     movement::{
@@ -17,7 +20,8 @@ use crate::{
     },
     protocol::{
         ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, NetworkEntityId, PlayerId,
-        ProtocolFingerprint, ProtocolPlugin, SessionChannel,
+        ProtocolFingerprint, ProtocolPlugin, SessionChannel, WeaponSelectionDecision,
+        WeaponSelectionOutcome, WeaponSelectionRequest,
     },
 };
 use avian2d::prelude::{AngularVelocity, LinearVelocity, PhysicsSystems, Position, Rotation};
@@ -84,6 +88,27 @@ struct HeadlessAutomation {
     fire: bool,
     simulation_ticks: Option<u32>,
     elapsed_ticks: u32,
+}
+
+#[derive(Resource, Debug)]
+struct WeaponSelectionState {
+    next_request_id: u64,
+    current_index: usize,
+    last_sent: Option<u64>,
+    last_outcome: Option<WeaponSelectionOutcome>,
+    analog_ready: bool,
+}
+
+impl Default for WeaponSelectionState {
+    fn default() -> Self {
+        Self {
+            next_request_id: 0,
+            current_index: 0,
+            last_sent: None,
+            last_outcome: None,
+            analog_ready: true,
+        }
+    }
 }
 
 impl FromWorld for HeadlessAutomation {
@@ -183,7 +208,7 @@ impl Default for PendingLocalActions {
 }
 
 const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
-const HEADLESS_FIRE_DURATION_TICKS: u32 = 90;
+const HEADLESS_FIRE_DURATION_TICKS: u32 = 240;
 const ACTION_ACTIVE_ITEM: u16 = 1 << 1;
 const ACTION_ULTIMATE: u16 = 1 << 2;
 const ACTION_INTERACT: u16 = 1 << 3;
@@ -624,6 +649,7 @@ fn write_client_input(
     mut pending: ResMut<PendingLocalActions>,
     trace: Option<ResMut<LiveInputTrace>>,
     context: Res<ClientInputContext>,
+    selecting: Query<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>,
     mut query: Query<&mut ActionState<FighterInput>, With<InputMarker<FighterInput>>>,
 ) {
     let mut trace = trace.filter(|trace| trace.enabled);
@@ -640,15 +666,16 @@ fn write_client_input(
         }
         return;
     };
-    let input = if matches!(*context, ClientInputContext::Paused) {
-        pending.latched_buttons = 0;
-        FighterInput::default()
-    } else {
-        let buttons = pending.held_buttons | pending.latched_buttons;
-        let input = FighterInput::from_axes(pending.move_axis, pending.aim_axis, buttons);
-        pending.latched_buttons = 0;
-        input
-    };
+    let input =
+        if matches!(*context, ClientInputContext::Paused) || selecting.iter().next().is_some() {
+            pending.latched_buttons = 0;
+            FighterInput::default()
+        } else {
+            let buttons = pending.held_buttons | pending.latched_buttons;
+            let input = FighterInput::from_axes(pending.move_axis, pending.aim_axis, buttons);
+            pending.latched_buttons = 0;
+            input
+        };
     action.0 = input;
     let write_state = (
         input.move_axis.to_vec2(),
@@ -933,6 +960,20 @@ fn spawn_client_hud(mut commands: Commands) {
         },
     ));
     commands.spawn((
+        WeaponSelectionText,
+        Text::new("Select weapon: A/D or arrows • Space / South to confirm\nPulse Sidearm"),
+        TextFont::from_font_size(22.0),
+        TextColor(Color::srgb(0.85, 0.95, 1.0)),
+        Visibility::Inherited,
+        Node {
+            position_type: PositionType::Absolute,
+            left: percent(25.0),
+            right: percent(25.0),
+            top: percent(18.0),
+            ..default()
+        },
+    ));
+    commands.spawn((
         ScoreboardOverlay,
         Text::new("SCOREBOARD\nLocal fighter roster is authoritative"),
         TextFont::from_font_size(22.0),
@@ -1158,6 +1199,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<HeadlessAutomation>()
             .init_resource::<InputDeviceActivity>()
             .init_resource::<ClientInputContext>()
+            .init_resource::<WeaponSelectionState>()
             .init_resource::<GreyboxArenaDefinition>()
             .init_resource::<InputTuning>()
             .add_systems(
@@ -1187,6 +1229,9 @@ impl Plugin for ClientNetworkPlugin {
                 (
                     send_client_hello,
                     process_join_outcome,
+                    process_weapon_selection_outcomes,
+                    send_weapon_selection_request,
+                    update_weapon_selection_overlay,
                     disconnect_rejected_client,
                     observe_client_lifecycle,
                     log_replicated_roster,
@@ -1301,6 +1346,7 @@ fn update_controller_demo_gamepad(
 fn send_client_hello(
     config: Res<ClientNetworkConfig>,
     fingerprint: Res<ProtocolFingerprint>,
+    content_fingerprint: Res<crate::combat::GameplayContentFingerprint>,
     time: Res<Time<Real>>,
     mut query: Query<
         (&mut ClientJoinStatus, &mut MessageSender<ClientHello>),
@@ -1313,11 +1359,189 @@ fn send_client_hello(
                 protocol_version: config.expected_protocol_version,
                 build_version: config.expected_build_version.clone(),
                 registry_fingerprint: fingerprint.0,
+                content_fingerprint: *content_fingerprint,
             });
             status.phase = ClientJoinPhase::AwaitingOutcome;
             status.started_at = time.elapsed();
             info!("brawler client connected; awaiting compatibility outcome");
         }
+    }
+}
+
+fn process_weapon_selection_outcomes(
+    mut state: ResMut<WeaponSelectionState>,
+    mut receivers: Query<Option<&mut MessageReceiver<WeaponSelectionOutcome>>, With<Client>>,
+) {
+    for receiver in &mut receivers {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for outcome in receiver.receive() {
+            state.last_outcome = Some(outcome);
+        }
+    }
+}
+
+fn send_weapon_selection_request(
+    config: Res<ClientNetworkConfig>,
+    mut state: ResMut<WeaponSelectionState>,
+    catalog: Res<WeaponCatalogResource>,
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    gamepads: Query<&Gamepad>,
+    fighters: Query<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>,
+    statuses: Query<&ClientJoinStatus, With<Client>>,
+    mut senders: Query<&mut MessageSender<WeaponSelectionRequest>, With<Client>>,
+) {
+    if !statuses
+        .iter()
+        .any(|status| matches!(status.phase, ClientJoinPhase::Active { .. }))
+        || fighters.iter().next().is_none()
+    {
+        return;
+    }
+    let keyboard = keyboard.as_deref();
+    let left = keyboard.is_some_and(|keys| {
+        keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA)
+    }) || gamepads
+        .iter()
+        .any(|gamepad| gamepad.just_pressed(GamepadButton::DPadLeft));
+    let right = keyboard.is_some_and(|keys| {
+        keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD)
+    }) || gamepads
+        .iter()
+        .any(|gamepad| gamepad.just_pressed(GamepadButton::DPadRight));
+    let stick_x = gamepads
+        .iter()
+        .find_map(|gamepad| gamepad.get(GamepadAxis::LeftStickX))
+        .unwrap_or(0.0);
+    let analog_left = stick_x < -0.6 && state.analog_ready;
+    let analog_right = stick_x > 0.6 && state.analog_ready;
+    if stick_x.abs() < 0.3 {
+        state.analog_ready = true;
+    }
+    if left || analog_left {
+        state.analog_ready = false;
+        state.current_index = (state.current_index + 3) % 4;
+    } else if right || analog_right {
+        state.analog_ready = false;
+        state.current_index = (state.current_index + 1) % 4;
+    }
+    let confirm = keyboard
+        .is_some_and(|keys| keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter))
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::South));
+    let automatic = config.headless
+        || crossbeam_transport(&config)
+        || cfg!(feature = "network-test")
+        || config.windowed_combat_demo.is_some()
+        || config.windowed_controller_demo.is_some();
+    let should_send = automatic && state.last_sent.is_none() || confirm;
+    if !should_send {
+        return;
+    }
+    if state.last_sent.is_some() && !confirm {
+        return;
+    }
+    if let Some(preset) = config.weapon_preset {
+        state.current_index = usize::from(preset.saturating_sub(1).min(3));
+    }
+    let Some(preset) = catalog.0.presets.get(state.current_index) else {
+        return;
+    };
+    state.next_request_id = state.next_request_id.saturating_add(1).max(1);
+    let request = WeaponSelectionRequest {
+        request_id: state.next_request_id,
+        preset_id: preset.id,
+    };
+    for mut sender in &mut senders {
+        sender.send::<SessionChannel>(request);
+    }
+    state.last_sent = Some(request.request_id);
+}
+
+fn crossbeam_transport(config: &ClientNetworkConfig) -> bool {
+    #[cfg(feature = "network-test")]
+    {
+        return matches!(config.transport, NetworkTransport::Crossbeam);
+    }
+    #[cfg(not(feature = "network-test"))]
+    {
+        let _ = config;
+        false
+    }
+}
+
+fn update_weapon_selection_overlay(
+    state: Res<WeaponSelectionState>,
+    catalog: Res<WeaponCatalogResource>,
+    fighters: Query<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>,
+    mut overlay: Query<(&mut Text, &mut Visibility), With<WeaponSelectionText>>,
+) {
+    let selecting = fighters.iter().next().is_some();
+    let Some(preset) = catalog.0.presets.get(state.current_index) else {
+        return;
+    };
+    let current = preset.display_name.as_str();
+    let recipe = &preset.configuration.recipe;
+    let pattern = match recipe.firing {
+        crate::combat::FiringPattern::Single => "single",
+        crate::combat::FiringPattern::Spread { delivery_count, .. } => {
+            if delivery_count == 7 {
+                "7-pellet spread"
+            } else {
+                "spread"
+            }
+        }
+    };
+    let range = match recipe.delivery {
+        crate::combat::DeliveryMethod::Straight { range, .. } => format!("range {range:.0}"),
+        crate::combat::DeliveryMethod::Lobbed { distance, .. } => {
+            format!("fixed landing {distance:.0}")
+        }
+        crate::combat::DeliveryMethod::MeleeArc {
+            reach,
+            angle_degrees,
+        } => format!("reach {reach:.0} / {angle_degrees:.0}°"),
+    };
+    let recovery = format!("{}t recovery", recipe.economy.refill_ticks());
+    let profile = match preset.id.0 {
+        1 => "steady mid-range pressure; cover and rushes counter it",
+        2 => "close burst; cone, falloff, and reload punish misses",
+        3 => "cover/group punish; telegraphed landing and dead zone",
+        4 => "close displacement burst; kite outside danger range",
+        _ => "server-authored preset",
+    };
+    let status = state
+        .last_outcome
+        .map_or("Awaiting server".to_string(), |outcome| {
+            match outcome.decision {
+                WeaponSelectionDecision::Accepted => {
+                    "Accepted; waiting for replicated state".to_string()
+                }
+                WeaponSelectionDecision::UnknownPreset => {
+                    "Server rejected: unknown preset".to_string()
+                }
+                WeaponSelectionDecision::NotSelecting => {
+                    "Server rejected: selection is locked".to_string()
+                }
+                WeaponSelectionDecision::StaleRequest => {
+                    "Server rejected: stale request".to_string()
+                }
+                WeaponSelectionDecision::ResolutionFailed => {
+                    "Server rejected: recipe failed validation".to_string()
+                }
+            }
+        });
+    for (mut text, mut visibility) in &mut overlay {
+        *visibility = if selecting {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        **text = format!(
+            "Select weapon: A/D or arrows • D-pad/stick • Space / South\n{current} • {pattern} • {range} • {recovery}\n{profile}\n{status}"
+        );
     }
 }
 

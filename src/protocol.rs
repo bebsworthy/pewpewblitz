@@ -1,4 +1,5 @@
 //! Stable protocol registration shared by the client and dedicated server.
+#![allow(clippy::needless_pass_by_value)]
 
 use avian2d::prelude::{Position, Rotation};
 use bevy::ecs::entity::{EntityMapper, MapEntities};
@@ -26,8 +27,10 @@ use lightyear::prelude::{
 use serde::{Deserialize, Serialize};
 
 use crate::combat::{
-    AuthoritativeTick, CombatCue, CurrentHealth, Defeated, FighterDefinitionId, Projectile,
-    ProjectileSource, SelectedBuild, TeamId, WeaponDefinitionId, WeaponState,
+    ActiveEffects, AttackDelivery, AuthoritativeTick, CombatCue, CurrentHealth, Defeated,
+    FighterDefinitionId, GameplayContentFingerprint, LobbedFlight, Projectile, ProjectileSource,
+    ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon, TeamId,
+    WeaponDefinitionId, WeaponState,
 };
 use crate::timing::SIMULATION_TICK;
 
@@ -35,7 +38,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5236;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 4;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 5;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -183,6 +186,30 @@ pub struct ClientHello {
     pub protocol_version: u16,
     pub build_version: String,
     pub registry_fingerprint: u64,
+    pub content_fingerprint: GameplayContentFingerprint,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WeaponSelectionRequest {
+    pub request_id: u64,
+    pub preset_id: crate::combat::WeaponPresetId,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeaponSelectionDecision {
+    Accepted,
+    UnknownPreset,
+    NotSelecting,
+    StaleRequest,
+    ResolutionFailed,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WeaponSelectionOutcome {
+    pub request_id: u64,
+    pub decision: WeaponSelectionDecision,
+    pub accepted_preset_id: Option<crate::combat::WeaponPresetId>,
+    pub accepted_recipe_fingerprint: Option<crate::combat::WeaponRecipeFingerprint>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -201,6 +228,7 @@ pub enum JoinRejection {
     ProtocolVersionMismatch,
     BuildVersionMismatch,
     RegistryMismatch,
+    ContentMismatch,
     HandshakeTimeout,
     ServerFull,
     IdentifierExhausted,
@@ -228,9 +256,15 @@ fn interpolate_network_pose(
 
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<crate::combat::WeaponCatalogResource>()
+            .add_systems(Startup, initialize_content_fingerprint);
         app.register_message::<ClientHello>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<JoinOutcome>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<WeaponSelectionRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<WeaponSelectionOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
         app.add_plugins(InputPlugin::<FighterInput> {
             config: InputConfig {
@@ -260,7 +294,13 @@ impl Plugin for ProtocolPlugin {
         app.component::<PlaceholderState>().replicate();
         app.component::<FighterDefinitionId>().replicate_once();
         app.component::<WeaponDefinitionId>().replicate_once();
-        app.component::<SelectedBuild>().replicate_once();
+        app.component::<SelectedBuild>().replicate();
+        app.component::<SelectedWeapon>().replicate();
+        app.component::<SelectingWeapon>().replicate();
+        app.component::<ResolvedWeapon>().replicate();
+        app.component::<ActiveEffects>().replicate();
+        app.component::<AttackDelivery>().replicate_once();
+        app.component::<LobbedFlight>().replicate_once();
         app.component::<TeamId>().replicate();
         app.component::<CurrentHealth>().replicate();
         app.component::<WeaponState>().replicate();
@@ -268,6 +308,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<Defeated>().replicate();
         app.component::<Projectile>().replicate_once();
         app.component::<ProjectileSource>().replicate_once();
+        app.component::<ReplicatedAttackSource>().replicate_once();
         app.component::<Position>()
             .replicate()
             .add_linear_interpolation();
@@ -280,6 +321,17 @@ impl Plugin for ProtocolPlugin {
         );
         app.add_systems(Startup, initialize_protocol_fingerprint);
     }
+}
+
+fn initialize_content_fingerprint(
+    catalog: Res<crate::combat::WeaponCatalogResource>,
+    mut commands: Commands,
+) {
+    let fingerprint = catalog
+        .0
+        .fingerprint()
+        .expect("embedded weapon catalog must fingerprint");
+    commands.insert_resource(fingerprint);
 }
 
 /// Compute the same application-owned fingerprint on both peers after all protocol plugins run.

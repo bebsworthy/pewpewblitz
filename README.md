@@ -59,7 +59,8 @@ just clean
 ```
 
 The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. The client accepts
-`--server`, required `--client-id`, and bounded automation flags `--headless --exit-after-roster 2
+`--server`, required `--client-id`, and `--weapon-preset 1..4` (`1` Pulse, `2` Scatter, `3` Arc,
+`4` Blade), plus bounded automation flags `--headless --exit-after-roster 2
 --move-axis X,Y --aim-axis X,Y --aim-dummy --fire --simulation-ticks N`. `--combat-demo` enables the
 same authoritative aim-at-dummy/fire loop in a windowed client for a reproducible visual smoke run.
 `--controller-demo` creates a synthetic gamepad only for the windowed controller-path smoke; it

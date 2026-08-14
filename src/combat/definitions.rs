@@ -1,0 +1,852 @@
+//! Typed, embedded weapon content and the preset-independent resolver.
+
+use bevy::prelude::{Component, FromWorld, Resource};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+
+use super::FighterDefinition;
+
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 1;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 1;
+pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct WeaponPresetId(pub u16);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WeaponPresentationProfileId(pub u16);
+
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Default,
+)]
+pub struct WeaponRecipeFingerprint(pub u64);
+
+#[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GameplayContentFingerprint(pub u64);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct EngineWeaponLimits {
+    pub max_deliveries_per_attack: u8,
+    pub max_payload_bundles: u8,
+    pub max_effects_per_bundle: u8,
+    pub max_capacity: u8,
+    pub max_deadline_ticks: u64,
+    pub max_lifetime_ticks: u64,
+    pub max_damage: u16,
+    pub max_world_field: f32,
+    pub max_radius: f32,
+    pub max_knockback_speed: f32,
+    pub max_angle_degrees: f32,
+}
+
+impl Default for EngineWeaponLimits {
+    fn default() -> Self {
+        Self {
+            max_deliveries_per_attack: 16,
+            max_payload_bundles: 4,
+            max_effects_per_bundle: 4,
+            max_capacity: 32,
+            max_deadline_ticks: 3_600,
+            max_lifetime_ticks: 600,
+            max_damage: 1_000,
+            max_world_field: 4_096.0,
+            max_radius: 512.0,
+            max_knockback_speed: 900.0,
+            max_angle_degrees: 180.0,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WeaponRecipePolicy {
+    pub max_deliveries_per_attack: u8,
+    pub max_payload_bundles: u8,
+    pub max_effects_per_bundle: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WeaponCatalog {
+    pub schema_version: u16,
+    pub recipe_policy: WeaponRecipePolicy,
+    pub presets: Vec<WeaponPresetDefinition>,
+}
+
+impl WeaponCatalog {
+    pub fn embedded() -> Result<Self, String> {
+        let catalog: Self = ron::from_str(include_str!("../../content/v1/weapons.ron"))
+            .map_err(|error| format!("embedded weapon catalog parse failed: {error}"))?;
+        catalog.validate()?;
+        Ok(catalog)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let limits = EngineWeaponLimits::default();
+        if self.schema_version != WEAPON_CATALOG_SCHEMA_VERSION {
+            return Err("unsupported weapon catalog schema".to_string());
+        }
+        if self.presets.len() != 4 {
+            return Err("M05 requires exactly four weapon presets".to_string());
+        }
+        if self.recipe_policy.max_deliveries_per_attack == 0
+            || self.recipe_policy.max_deliveries_per_attack > limits.max_deliveries_per_attack
+            || self.recipe_policy.max_payload_bundles == 0
+            || self.recipe_policy.max_payload_bundles > limits.max_payload_bundles
+            || self.recipe_policy.max_effects_per_bundle == 0
+            || self.recipe_policy.max_effects_per_bundle > limits.max_effects_per_bundle
+        {
+            return Err("weapon recipe policy exceeds engine limits".to_string());
+        }
+        let mut ids = HashSet::new();
+        let mut keys = HashSet::new();
+        for preset in &self.presets {
+            if !matches!(preset.id.0, 1..=4)
+                || !ids.insert(preset.id)
+                || !keys.insert(preset.key.clone())
+                || !valid_key(&preset.key)
+                || !valid_display_name(&preset.display_name)
+                || !matches!(preset.configuration.presentation_profile_id.0, 1..=4)
+            {
+                return Err(format!("invalid preset metadata for {}", preset.key));
+            }
+            preset
+                .configuration
+                .validate(self.recipe_policy, limits, None)?;
+        }
+        if ids.len() != 4 || !(1..=4).all(|id| ids.contains(&WeaponPresetId(id))) {
+            return Err("weapon preset IDs must be exactly 1 through 4".to_string());
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn preset(&self, id: WeaponPresetId) -> Option<&WeaponPresetDefinition> {
+        self.presets.iter().find(|preset| preset.id == id)
+    }
+
+    pub fn fingerprint(&self) -> Result<GameplayContentFingerprint, String> {
+        self.validate()?;
+        let mut canonical = self.clone();
+        canonical.presets.sort_by_key(|preset| preset.id);
+        for preset in &mut canonical.presets {
+            normalize_recipe(&mut preset.configuration.recipe);
+        }
+        let bytes = postcard::to_allocvec(&(
+            FINGERPRINT_FORMAT_VERSION,
+            EngineWeaponLimits::default(),
+            canonical,
+        ))
+        .map_err(|error| format!("weapon fingerprint serialization failed: {error}"))?;
+        Ok(GameplayContentFingerprint(fnv1a64(&bytes)))
+    }
+
+    pub fn resolve_preset(
+        &self,
+        id: WeaponPresetId,
+        fighter: &FighterDefinition,
+    ) -> Result<ResolvedWeapon, String> {
+        let preset = self
+            .preset(id)
+            .ok_or_else(|| "unknown weapon preset".to_string())?;
+        resolve_configuration_with_policy(
+            Some(id),
+            preset.configuration.clone(),
+            fighter,
+            self.recipe_policy,
+            EngineWeaponLimits::default(),
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WeaponPresetDefinition {
+    pub id: WeaponPresetId,
+    pub key: String,
+    pub display_name: String,
+    pub configuration: WeaponConfiguration,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WeaponConfiguration {
+    pub presentation_profile_id: WeaponPresentationProfileId,
+    pub recipe: WeaponRecipe,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WeaponRecipe {
+    pub economy: WeaponEconomy,
+    pub fire_cooldown_ticks: u64,
+    pub firing: FiringPattern,
+    pub delivery: DeliveryMethod,
+    pub payload_bundles: Vec<PayloadBundleDefinition>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeaponEconomy {
+    Magazine { capacity: u8, refill_ticks: u64 },
+    Charges { capacity: u8, recharge_ticks: u64 },
+}
+
+impl WeaponEconomy {
+    #[must_use]
+    pub fn capacity(self) -> u8 {
+        match self {
+            Self::Magazine { capacity, .. } | Self::Charges { capacity, .. } => capacity,
+        }
+    }
+    #[must_use]
+    pub fn refill_ticks(self) -> u64 {
+        match self {
+            Self::Magazine { refill_ticks, .. }
+            | Self::Charges {
+                recharge_ticks: refill_ticks,
+                ..
+            } => refill_ticks,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum FiringPattern {
+    Single,
+    Spread {
+        delivery_count: u8,
+        total_angle_degrees: f32,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum DeliveryMethod {
+    Straight {
+        speed: f32,
+        radius: f32,
+        range: f32,
+        lifetime_ticks: u64,
+        muzzle_offset: f32,
+    },
+    Lobbed {
+        distance: f32,
+        flight_ticks: u64,
+        visual_arc_height: f32,
+        landing_clearance_radius: f32,
+        muzzle_offset: f32,
+    },
+    MeleeArc {
+        reach: f32,
+        angle_degrees: f32,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum TargetSelection {
+    Direct,
+    Area {
+        radius: f32,
+        terrain_occlusion: bool,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PayloadBundleDefinition {
+    pub target: TargetSelection,
+    pub effects: Vec<PayloadEffectDefinition>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum PayloadEffectDefinition {
+    Damage {
+        amount: u16,
+        falloff: DamageFalloff,
+        recipients: RecipientPolicy,
+    },
+    Knockback {
+        speed: f32,
+        duration_ticks: u64,
+        recipients: RecipientPolicy,
+    },
+    Slow {
+        movement_multiplier: f32,
+        duration_ticks: u64,
+        stacking: SlowStacking,
+        recipients: RecipientPolicy,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum DamageFalloff {
+    None,
+    Linear {
+        start_distance: f32,
+        end_distance: f32,
+        minimum_scale: f32,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum RecipientPolicy {
+    Hostiles,
+    HostilesAndOwner { owner_scale: f32 },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlowStacking {
+    StrongestRefreshes,
+}
+
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ResolvedWeapon {
+    pub source_preset_id: Option<WeaponPresetId>,
+    pub recipe_fingerprint: WeaponRecipeFingerprint,
+    pub presentation_profile_id: WeaponPresentationProfileId,
+    pub recipe: WeaponRecipe,
+}
+
+#[derive(Resource, Clone, Debug, PartialEq)]
+pub struct WeaponCatalogResource(pub WeaponCatalog);
+
+impl FromWorld for WeaponCatalogResource {
+    fn from_world(_: &mut bevy::prelude::World) -> Self {
+        Self(WeaponCatalog::embedded().expect("embedded weapon catalog is valid"))
+    }
+}
+
+impl WeaponConfiguration {
+    pub fn validate(
+        &self,
+        policy: WeaponRecipePolicy,
+        limits: EngineWeaponLimits,
+        fighter_radius: Option<f32>,
+    ) -> Result<(), String> {
+        let recipe = &self.recipe;
+        if !matches!(self.presentation_profile_id.0, 1..=4) {
+            return Err("unknown weapon presentation profile".to_string());
+        }
+        if recipe.fire_cooldown_ticks == 0 || recipe.fire_cooldown_ticks > limits.max_deadline_ticks
+        {
+            return Err("invalid fire cooldown".to_string());
+        }
+        let capacity = recipe.economy.capacity();
+        let refill_ticks = recipe.economy.refill_ticks();
+        if capacity == 0
+            || capacity > limits.max_capacity
+            || refill_ticks == 0
+            || refill_ticks > limits.max_deadline_ticks
+        {
+            return Err("invalid weapon economy".to_string());
+        }
+        let deliveries = match recipe.firing {
+            FiringPattern::Single => 1,
+            FiringPattern::Spread {
+                delivery_count,
+                total_angle_degrees,
+            } => {
+                if delivery_count < 2
+                    || delivery_count > policy.max_deliveries_per_attack
+                    || !finite_range(total_angle_degrees, 0.0, limits.max_angle_degrees)
+                    || total_angle_degrees == 0.0
+                {
+                    return Err("invalid spread".to_string());
+                }
+                delivery_count
+            }
+        };
+        match recipe.delivery {
+            DeliveryMethod::Straight {
+                speed,
+                radius,
+                range,
+                lifetime_ticks,
+                muzzle_offset,
+            } => {
+                if !finite_range(speed, 0.0, limits.max_world_field)
+                    || !finite_range(radius, 0.0, limits.max_radius)
+                    || radius == 0.0
+                    || !finite_range(range, 0.0, limits.max_world_field)
+                    || range == 0.0
+                    || lifetime_ticks == 0
+                    || lifetime_ticks > limits.max_lifetime_ticks
+                    || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
+                    || muzzle_offset == 0.0
+                    || speed / 60.0 > range
+                {
+                    return Err("invalid straight delivery".to_string());
+                }
+            }
+            DeliveryMethod::Lobbed {
+                distance,
+                flight_ticks,
+                visual_arc_height,
+                landing_clearance_radius,
+                muzzle_offset,
+            } => {
+                if !finite_range(distance, 0.0, limits.max_world_field)
+                    || distance == 0.0
+                    || flight_ticks == 0
+                    || flight_ticks > limits.max_lifetime_ticks
+                    || !finite_range(visual_arc_height, 0.0, limits.max_world_field)
+                    || !finite_range(landing_clearance_radius, 0.0, limits.max_radius)
+                    || landing_clearance_radius == 0.0
+                    || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
+                    || muzzle_offset == 0.0
+                {
+                    return Err("invalid lobbed delivery".to_string());
+                }
+                if !recipe
+                    .payload_bundles
+                    .iter()
+                    .any(|bundle| matches!(bundle.target, TargetSelection::Area { .. }))
+                {
+                    return Err("lobbed delivery needs area payload".to_string());
+                }
+            }
+            DeliveryMethod::MeleeArc {
+                reach,
+                angle_degrees,
+            } => {
+                if !finite_range(reach, 0.0, limits.max_world_field)
+                    || reach == 0.0
+                    || !finite_range(angle_degrees, 0.0, limits.max_angle_degrees)
+                    || angle_degrees == 0.0
+                {
+                    return Err("invalid melee delivery".to_string());
+                }
+                if !recipe
+                    .payload_bundles
+                    .iter()
+                    .any(|bundle| matches!(bundle.target, TargetSelection::Direct))
+                {
+                    return Err("melee delivery needs direct payload".to_string());
+                }
+            }
+        }
+        if !matches!(recipe.delivery, DeliveryMethod::Straight { .. })
+            && !matches!(recipe.firing, FiringPattern::Single)
+        {
+            return Err("spread firing is only valid for straight delivery".to_string());
+        }
+        if recipe.payload_bundles.is_empty()
+            || recipe.payload_bundles.len() > policy.max_payload_bundles as usize
+            || recipe.payload_bundles.len() > limits.max_payload_bundles as usize
+        {
+            return Err("invalid payload bundle count".to_string());
+        }
+        for bundle in &recipe.payload_bundles {
+            if bundle.effects.is_empty()
+                || bundle.effects.len() > policy.max_effects_per_bundle as usize
+                || bundle.effects.len() > limits.max_effects_per_bundle as usize
+            {
+                return Err("invalid payload effect count".to_string());
+            }
+            let target_is_valid = match recipe.delivery {
+                DeliveryMethod::Straight { .. } | DeliveryMethod::MeleeArc { .. } => {
+                    matches!(bundle.target, TargetSelection::Direct)
+                }
+                DeliveryMethod::Lobbed { .. } => {
+                    matches!(bundle.target, TargetSelection::Area { .. })
+                }
+            };
+            if !target_is_valid {
+                return Err("payload target is incompatible with delivery".to_string());
+            }
+            if let TargetSelection::Area { radius, .. } = bundle.target
+                && (!finite_range(radius, 0.0, limits.max_radius) || radius == 0.0)
+            {
+                return Err("invalid area radius".to_string());
+            }
+            for effect in &bundle.effects {
+                validate_effect(*effect, limits)?;
+            }
+        }
+        if deliveries == 0 {
+            return Err("zero deliveries".to_string());
+        }
+        if let Some(radius) = fighter_radius
+            && (!radius.is_finite() || radius <= 0.0)
+        {
+            return Err("invalid fighter radius".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn validate_effect(
+    effect: PayloadEffectDefinition,
+    limits: EngineWeaponLimits,
+) -> Result<(), String> {
+    match effect {
+        PayloadEffectDefinition::Damage {
+            amount,
+            falloff,
+            recipients,
+        } => {
+            if amount == 0
+                || amount > limits.max_damage
+                || !valid_recipients(recipients, limits)
+                || !valid_falloff(falloff, limits)
+            {
+                return Err("invalid damage effect".to_string());
+            }
+        }
+        PayloadEffectDefinition::Knockback {
+            speed,
+            duration_ticks,
+            recipients,
+        } => {
+            if !finite_range(speed, 0.0, limits.max_knockback_speed)
+                || duration_ticks == 0
+                || duration_ticks > limits.max_deadline_ticks
+                || !valid_recipients(recipients, limits)
+            {
+                return Err("invalid knockback effect".to_string());
+            }
+        }
+        PayloadEffectDefinition::Slow {
+            movement_multiplier,
+            duration_ticks,
+            stacking,
+            recipients,
+        } => {
+            if !finite_range(movement_multiplier, 0.0, 1.0)
+                || movement_multiplier == 0.0
+                || duration_ticks == 0
+                || duration_ticks > limits.max_deadline_ticks
+                || !valid_recipients(recipients, limits)
+                || !matches!(stacking, SlowStacking::StrongestRefreshes)
+            {
+                return Err("invalid slow effect".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn valid_recipients(recipients: RecipientPolicy, limits: EngineWeaponLimits) -> bool {
+    match recipients {
+        RecipientPolicy::Hostiles => true,
+        RecipientPolicy::HostilesAndOwner { owner_scale } => {
+            finite_range(owner_scale, 0.0, 1.0) && owner_scale <= 1.0 && limits.max_damage > 0
+        }
+    }
+}
+
+fn valid_falloff(falloff: DamageFalloff, limits: EngineWeaponLimits) -> bool {
+    match falloff {
+        DamageFalloff::None => true,
+        DamageFalloff::Linear {
+            start_distance,
+            end_distance,
+            minimum_scale,
+        } => {
+            finite_range(start_distance, 0.0, limits.max_world_field)
+                && finite_range(end_distance, 0.0, limits.max_world_field)
+                && end_distance > start_distance
+                && finite_range(minimum_scale, 0.0, 1.0)
+                && minimum_scale > 0.0
+        }
+    }
+}
+
+pub fn resolve_configuration(
+    source_preset_id: Option<WeaponPresetId>,
+    configuration: WeaponConfiguration,
+    fighter: &FighterDefinition,
+) -> Result<ResolvedWeapon, String> {
+    resolve_configuration_with_policy(
+        source_preset_id,
+        configuration,
+        fighter,
+        WeaponRecipePolicy {
+            max_deliveries_per_attack: 16,
+            max_payload_bundles: 4,
+            max_effects_per_bundle: 4,
+        },
+        EngineWeaponLimits::default(),
+    )
+}
+
+pub fn resolve_configuration_with_policy(
+    source_preset_id: Option<WeaponPresetId>,
+    configuration: WeaponConfiguration,
+    fighter: &FighterDefinition,
+    policy: WeaponRecipePolicy,
+    limits: EngineWeaponLimits,
+) -> Result<ResolvedWeapon, String> {
+    if !limits_within_engine_ceiling(limits) {
+        return Err("weapon limits exceed code-owned engine ceilings".to_string());
+    }
+    configuration.validate(policy, limits, Some(fighter.body_radius))?;
+    if let DeliveryMethod::Straight {
+        radius,
+        muzzle_offset,
+        ..
+    } = configuration.recipe.delivery
+        && muzzle_offset < fighter.body_radius + radius
+    {
+        return Err("straight muzzle starts inside fighter".to_string());
+    }
+    if let DeliveryMethod::Lobbed { muzzle_offset, .. } = configuration.recipe.delivery
+        && muzzle_offset < fighter.body_radius
+    {
+        return Err("lobbed muzzle starts inside fighter".to_string());
+    }
+    let mut recipe = configuration.recipe.clone();
+    normalize_recipe(&mut recipe);
+    let recipe_bytes = postcard::to_allocvec(&(FINGERPRINT_FORMAT_VERSION, &recipe))
+        .map_err(|error| error.to_string())?;
+    let fingerprint = WeaponRecipeFingerprint(fnv1a64(&recipe_bytes));
+    let resolved = ResolvedWeapon {
+        source_preset_id,
+        recipe_fingerprint: fingerprint,
+        presentation_profile_id: configuration.presentation_profile_id,
+        recipe,
+    };
+    if postcard::to_allocvec(&resolved)
+        .map_or(true, |bytes| bytes.len() > MAX_RESOLVED_WEAPON_BYTES)
+    {
+        return Err("resolved weapon exceeds wire bound".to_string());
+    }
+    Ok(resolved)
+}
+
+#[must_use]
+pub fn spread_angles(facing: f32, count: u8, total_angle_degrees: f32) -> Vec<f32> {
+    if count < 2 {
+        return vec![facing];
+    }
+    let total = total_angle_degrees.to_radians();
+    (0..count)
+        .map(|index| facing - total / 2.0 + total * f32::from(index) / f32::from(count - 1))
+        .collect()
+}
+
+#[must_use]
+pub fn linear_falloff(falloff: DamageFalloff, travel: f32) -> f32 {
+    match falloff {
+        DamageFalloff::None => 1.0,
+        DamageFalloff::Linear {
+            start_distance,
+            end_distance,
+            minimum_scale,
+        } => {
+            let progress =
+                ((travel - start_distance) / (end_distance - start_distance)).clamp(0.0, 1.0);
+            (1.0 - progress * (1.0 - minimum_scale)).max(minimum_scale)
+        }
+    }
+}
+
+fn normalize_recipe(recipe: &mut WeaponRecipe) {
+    fn n(value: &mut f32) {
+        if *value == 0.0 {
+            *value = 0.0;
+        }
+    }
+    match &mut recipe.delivery {
+        DeliveryMethod::Straight {
+            speed,
+            radius,
+            range,
+            muzzle_offset,
+            ..
+        } => {
+            n(speed);
+            n(radius);
+            n(range);
+            n(muzzle_offset);
+        }
+        DeliveryMethod::Lobbed {
+            distance,
+            visual_arc_height,
+            landing_clearance_radius,
+            muzzle_offset,
+            ..
+        } => {
+            n(distance);
+            n(visual_arc_height);
+            n(landing_clearance_radius);
+            n(muzzle_offset);
+        }
+        DeliveryMethod::MeleeArc {
+            reach,
+            angle_degrees,
+        } => {
+            n(reach);
+            n(angle_degrees);
+        }
+    }
+    if let FiringPattern::Spread {
+        total_angle_degrees,
+        ..
+    } = &mut recipe.firing
+    {
+        n(total_angle_degrees);
+    }
+    for bundle in &mut recipe.payload_bundles {
+        if let TargetSelection::Area { radius, .. } = &mut bundle.target {
+            n(radius);
+        }
+        for effect in &mut bundle.effects {
+            match effect {
+                PayloadEffectDefinition::Damage { falloff, .. } => {
+                    if let DamageFalloff::Linear {
+                        start_distance,
+                        end_distance,
+                        minimum_scale,
+                    } = falloff
+                    {
+                        n(start_distance);
+                        n(end_distance);
+                        n(minimum_scale);
+                    }
+                }
+                PayloadEffectDefinition::Knockback { speed, .. } => n(speed),
+                PayloadEffectDefinition::Slow {
+                    movement_multiplier,
+                    ..
+                } => n(movement_multiplier),
+            }
+        }
+    }
+}
+
+fn finite_range(value: f32, min: f32, max: f32) -> bool {
+    value.is_finite() && value >= min && value <= max
+}
+fn valid_key(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+        && !value.contains("--")
+}
+
+fn limits_within_engine_ceiling(limits: EngineWeaponLimits) -> bool {
+    let ceiling = EngineWeaponLimits::default();
+    limits.max_deliveries_per_attack <= ceiling.max_deliveries_per_attack
+        && limits.max_payload_bundles <= ceiling.max_payload_bundles
+        && limits.max_effects_per_bundle <= ceiling.max_effects_per_bundle
+        && limits.max_capacity <= ceiling.max_capacity
+        && limits.max_deadline_ticks <= ceiling.max_deadline_ticks
+        && limits.max_lifetime_ticks <= ceiling.max_lifetime_ticks
+        && limits.max_damage <= ceiling.max_damage
+        && limits.max_world_field.is_finite()
+        && limits.max_world_field <= ceiling.max_world_field
+        && limits.max_radius.is_finite()
+        && limits.max_radius <= ceiling.max_radius
+        && limits.max_knockback_speed.is_finite()
+        && limits.max_knockback_speed <= ceiling.max_knockback_speed
+        && limits.max_angle_degrees.is_finite()
+        && limits.max_angle_degrees <= ceiling.max_angle_degrees
+}
+fn valid_display_name(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 48 && value.chars().all(|character| !character.is_control())
+}
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn embedded_catalog_is_exactly_four_presets() {
+        let catalog = WeaponCatalog::embedded().unwrap();
+        assert_eq!(catalog.presets.len(), 4);
+        assert_eq!(
+            catalog.presets[1].configuration.recipe.payload_bundles[0]
+                .effects
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn spread_is_symmetric_and_ordered() {
+        let values = spread_angles(0.3, 7, 30.0);
+        assert_eq!(values.len(), 7);
+        assert!((values[0] + values[6] - 0.6).abs() < 0.0001);
+        assert!((values[3] - 0.3).abs() < 0.0001);
+    }
+    #[test]
+    fn falloff_clamps_and_rounds_only_at_damage_boundary() {
+        let falloff = DamageFalloff::Linear {
+            start_distance: 140.0,
+            end_distance: 360.0,
+            minimum_scale: 0.5,
+        };
+        assert!((linear_falloff(falloff, 140.0) - 1.0).abs() < f32::EPSILON);
+        assert!((linear_falloff(falloff, 360.0) - 0.5).abs() < f32::EPSILON);
+    }
+    #[test]
+    fn semantically_equal_catalog_text_has_stable_fingerprint() {
+        let a = WeaponCatalog::embedded().unwrap();
+        let mut b = WeaponCatalog::embedded().unwrap();
+        b.presets.reverse();
+        assert_eq!(a.fingerprint(), b.fingerprint());
+    }
+
+    #[test]
+    fn non_preset_configuration_uses_the_same_resolver_and_recipe_fingerprint() {
+        let mut fighter = super::super::FighterDefinitions::default().entries[0];
+        fighter.body_radius = 20.0;
+        let configuration = WeaponConfiguration {
+            presentation_profile_id: WeaponPresentationProfileId(1),
+            recipe: WeaponRecipe {
+                economy: WeaponEconomy::Magazine {
+                    capacity: 2,
+                    refill_ticks: 30,
+                },
+                fire_cooldown_ticks: 6,
+                firing: FiringPattern::Single,
+                delivery: DeliveryMethod::Straight {
+                    speed: 300.0,
+                    radius: 4.0,
+                    range: 300.0,
+                    lifetime_ticks: 30,
+                    muzzle_offset: 25.0,
+                },
+                payload_bundles: vec![PayloadBundleDefinition {
+                    target: TargetSelection::Direct,
+                    effects: vec![PayloadEffectDefinition::Damage {
+                        amount: 7,
+                        falloff: DamageFalloff::None,
+                        recipients: RecipientPolicy::Hostiles,
+                    }],
+                }],
+            },
+        };
+        let first = resolve_configuration(None, configuration.clone(), &fighter).unwrap();
+        let mut other_profile = configuration;
+        other_profile.presentation_profile_id = WeaponPresentationProfileId(4);
+        let second = resolve_configuration(None, other_profile, &fighter).unwrap();
+        assert_eq!(first.source_preset_id, None);
+        assert_eq!(first.recipe_fingerprint, second.recipe_fingerprint);
+        assert_ne!(
+            first.presentation_profile_id,
+            second.presentation_profile_id
+        );
+    }
+
+    #[test]
+    fn catalog_rejects_unsupported_spread_and_unbounded_values() {
+        let mut catalog = WeaponCatalog::embedded().unwrap();
+        catalog.presets[1].configuration.recipe.firing = FiringPattern::Spread {
+            delivery_count: 1,
+            total_angle_degrees: 30.0,
+        };
+        assert!(catalog.validate().is_err());
+
+        let mut catalog = WeaponCatalog::embedded().unwrap();
+        catalog.presets[0].configuration.recipe.payload_bundles[0].effects[0] =
+            PayloadEffectDefinition::Damage {
+                amount: 1_001,
+                falloff: DamageFalloff::None,
+                recipients: RecipientPolicy::Hostiles,
+            };
+        assert!(catalog.validate().is_err());
+    }
+}

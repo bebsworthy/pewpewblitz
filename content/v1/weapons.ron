@@ -1,0 +1,85 @@
+(
+    schema_version: 1,
+    recipe_policy: (
+        max_deliveries_per_attack: 16,
+        max_payload_bundles: 4,
+        max_effects_per_bundle: 4,
+    ),
+    presets: [
+        (
+            id: WeaponPresetId(1),
+            key: "pulse-sidearm",
+            display_name: "Pulse Sidearm",
+            configuration: (
+                presentation_profile_id: WeaponPresentationProfileId(1),
+                recipe: (
+                    economy: Magazine(capacity: 6, refill_ticks: 60),
+                    fire_cooldown_ticks: 12,
+                    firing: Single,
+                    delivery: Straight(speed: 900.0, radius: 6.0, range: 900.0, lifetime_ticks: 60, muzzle_offset: 34.0),
+                    payload_bundles: [
+                        (target: Direct, effects: [Damage(amount: 25, falloff: None, recipients: Hostiles)]),
+                    ],
+                ),
+            ),
+        ),
+        (
+            id: WeaponPresetId(2),
+            key: "scatter-cannon",
+            display_name: "Scatter Cannon",
+            configuration: (
+                presentation_profile_id: WeaponPresentationProfileId(2),
+                recipe: (
+                    economy: Magazine(capacity: 4, refill_ticks: 72),
+                    fire_cooldown_ticks: 36,
+                    firing: Spread(delivery_count: 7, total_angle_degrees: 30.0),
+                    delivery: Straight(speed: 850.0, radius: 4.0, range: 360.0, lifetime_ticks: 30, muzzle_offset: 32.0),
+                    payload_bundles: [
+                        (target: Direct, effects: [Damage(amount: 12, falloff: Linear(start_distance: 140.0, end_distance: 360.0, minimum_scale: 0.5), recipients: Hostiles)]),
+                    ],
+                ),
+            ),
+        ),
+        (
+            id: WeaponPresetId(3),
+            key: "arc-launcher",
+            display_name: "Arc Launcher",
+            configuration: (
+                presentation_profile_id: WeaponPresentationProfileId(3),
+                recipe: (
+                    economy: Magazine(capacity: 3, refill_ticks: 96),
+                    fire_cooldown_ticks: 48,
+                    firing: Single,
+                    delivery: Lobbed(distance: 520.0, flight_ticks: 45, visual_arc_height: 140.0, landing_clearance_radius: 10.0, muzzle_offset: 34.0),
+                    payload_bundles: [
+                        (target: Area(radius: 150.0, terrain_occlusion: true), effects: [
+                            Damage(amount: 40, falloff: None, recipients: HostilesAndOwner(owner_scale: 0.5)),
+                            Knockback(speed: 300.0, duration_ticks: 8, recipients: HostilesAndOwner(owner_scale: 1.0)),
+                            Slow(movement_multiplier: 0.70, duration_ticks: 45, stacking: StrongestRefreshes, recipients: Hostiles),
+                        ]),
+                    ],
+                ),
+            ),
+        ),
+        (
+            id: WeaponPresetId(4),
+            key: "impact-blade",
+            display_name: "Impact Blade",
+            configuration: (
+                presentation_profile_id: WeaponPresentationProfileId(4),
+                recipe: (
+                    economy: Charges(capacity: 3, recharge_ticks: 60),
+                    fire_cooldown_ticks: 18,
+                    firing: Single,
+                    delivery: MeleeArc(reach: 120.0, angle_degrees: 100.0),
+                    payload_bundles: [
+                        (target: Direct, effects: [
+                            Damage(amount: 34, falloff: None, recipients: Hostiles),
+                            Knockback(speed: 650.0, duration_ticks: 6, recipients: Hostiles),
+                        ]),
+                    ],
+                ),
+            ),
+        ),
+    ],
+)

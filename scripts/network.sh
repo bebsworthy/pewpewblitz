@@ -174,7 +174,7 @@ done
 client_args=(--server "$network_addr")
 if [[ "$headless" == "1" ]]; then
     if [[ "$combat_assert" == "1" ]]; then
-        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 240 --fire)
+        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 360 --fire)
     else
         client_args+=(--headless --exit-after-roster 2 --simulation-ticks 180)
     fi
@@ -182,6 +182,13 @@ fi
 
 client_one_args=("${client_args[@]}" --client-id 1)
 client_two_args=("${client_args[@]}" --client-id 2)
+
+if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
+    client_one_args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
+fi
+if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO:-}" ]]; then
+    client_two_args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO")
+fi
 if [[ "$windowed_combat_demo" == "1" ]]; then
     client_one_args+=(--combat-demo)
 fi
@@ -190,8 +197,10 @@ if [[ "$windowed_controller_demo" == "1" ]]; then
 fi
 if [[ "$headless" == "1" ]]; then
     if [[ "$combat_assert" == "1" ]]; then
-        client_one_args+=(--move-axis 0,0 --aim-dummy)
-        client_two_args+=(--move-axis 0,0 --aim-dummy)
+        # Walk the two clients toward the neutral dummy so every authored M05 delivery family
+        # reaches its acceptance range (scatter and melee are intentionally short-range).
+        client_one_args+=(--move-axis 1,0 --aim-dummy)
+        client_two_args+=(--move-axis -1,0 --aim-dummy)
     else
         client_one_args+=(--move-axis 1,0 --aim-axis 0,1)
         client_two_args+=(--move-axis -1,0 --aim-axis 0,-1)

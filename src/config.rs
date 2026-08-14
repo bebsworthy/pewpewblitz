@@ -163,6 +163,7 @@ pub struct ClientNetworkConfig {
     pub headless_aim_at_dummy: bool,
     pub headless_fire: bool,
     pub headless_simulation_ticks: Option<u32>,
+    pub weapon_preset: Option<u16>,
     pub windowed_combat_demo: Option<WindowedCombatDemo>,
     pub windowed_controller_demo: Option<WindowedControllerDemo>,
     pub render_profile: RenderProfile,
@@ -200,6 +201,7 @@ impl ClientNetworkConfig {
             headless_aim_at_dummy: false,
             headless_fire: false,
             headless_simulation_ticks: None,
+            weapon_preset: None,
             windowed_combat_demo: None,
             windowed_controller_demo: None,
             render_profile: RenderProfile::from_env(),
@@ -215,6 +217,12 @@ impl ClientNetworkConfig {
             .is_some_and(|ticks| ticks == 0)
         {
             return Err("--simulation-ticks must be greater than zero".to_string());
+        }
+        if self
+            .weapon_preset
+            .is_some_and(|preset| !(1..=4).contains(&preset))
+        {
+            return Err("--weapon-preset must be between 1 and 4".to_string());
         }
         let automation_enabled = self.headless
             || self.windowed_combat_demo.is_some()

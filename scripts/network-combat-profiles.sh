@@ -3,6 +3,7 @@ set -euo pipefail
 
 runs="${BRAWLER_NETWORK_PROFILE_RUNS:-3}"
 base_port="${BRAWLER_NETWORK_PROFILE_BASE_PORT:-5100}"
+presets="${BRAWLER_NETWORK_PROFILE_PRESETS:-1 2 3 4}"
 if ! [[ "$runs" =~ ^[1-9][0-9]*$ ]]; then
     printf 'brawler combat profiles: BRAWLER_NETWORK_PROFILE_RUNS must be a positive integer\n' >&2
     exit 2
@@ -21,9 +22,14 @@ trap cleanup EXIT
 
 run_number=0
 for profile in local typical adverse; do
-    for repeat in $(seq 1 "$runs"); do
+    for preset in $presets; do
+        if ! [[ "$preset" =~ ^[1-4]$ ]]; then
+            printf 'brawler combat profiles: weapon presets must be integers from 1 through 4\n' >&2
+            exit 2
+        fi
+        for repeat in $(seq 1 "$runs"); do
         run_number=$((run_number + 1))
-        run_id="${profile}-${repeat}-$(date +%s)"
+        run_id="${profile}-preset-${preset}-${repeat}-$(date +%s)"
         port=$((base_port + run_number - 1))
         if ((port > 65535)); then
             printf 'brawler combat profiles: run port exceeds 65535\n' >&2
@@ -33,6 +39,8 @@ for profile in local typical adverse; do
         log_file="$report_dir/$run_id.log"
         if ! BRAWLER_NETWORK_HEADLESS=1 \
             BRAWLER_NETWORK_ASSERT_COMBAT=1 \
+            BRAWLER_NETWORK_WEAPON_PRESET="$preset" \
+            BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO="${BRAWLER_NETWORK_PROFILE_CLIENT_TWO_PRESET:-1}" \
             BRAWLER_NETWORK_PROFILE="$profile" \
             BRAWLER_NETWORK_RUN_ID="$run_id" \
             BRAWLER_NETWORK_COMBAT_REPORT_FILE="$report_file" \
@@ -51,9 +59,16 @@ for profile in local typical adverse; do
         cue_two_us="$(printf '%s\n' "$cue_two_values" | awk 'NF {values[++count]=$1} END {if (!count) exit 1; print values[int((count + 1) / 2)]}')"
         state_converged="$(awk -F= '/^state_converged=/{print $2}' "$report_file")"
         cue_converged="$(awk -F= '/^cue_converged=/{print $2}' "$report_file")"
+        tested_preset_id="$(awk -F= '/^tested_preset_id=/{print $2}' "$report_file")"
+        tested_recipe_fingerprint="$(awk -F= '/^tested_recipe_fingerprint=/{print $2}' "$report_file")"
+        tested_attacks="$(awk -F= '/^tested_accepted_attacks=/{print $2}' "$report_file")"
+        tested_deliveries="$(awk -F= '/^tested_emitted_deliveries=/{print $2}' "$report_file")"
         if [[ -z "$server_ms" || -z "$client_one_ms" || -z "$client_two_ms" \
             || -z "$cue_one_us" || -z "$cue_two_us" || "$state_converged" != "1" \
-            || "$cue_converged" != "1" ]]; then
+            || "$cue_converged" != "1" || "$tested_preset_id" != "$preset" \
+            || -z "$tested_recipe_fingerprint" || "$tested_recipe_fingerprint" == "0" \
+            || -z "$tested_attacks" || "$tested_attacks" -lt 1 \
+            || -z "$tested_deliveries" || "$tested_deliveries" -lt 1 ]]; then
             cat "$report_file" >&2
             printf 'brawler combat profiles: incomplete report for run %s\n' "$run_id" >&2
             exit 1
@@ -63,6 +78,7 @@ for profile in local typical adverse; do
             "$cue_one_us" "$cue_two_us" >>"$results_file"
         printf 'run_id=%s profile=%s server_ms=%s client1_ms=%s client2_ms=%s cue1_us=%s cue2_us=%s\n' \
             "$run_id" "$profile" "$server_ms" "$client_one_ms" "$client_two_ms" "$cue_one_us" "$cue_two_us"
+        done
     done
 done
 

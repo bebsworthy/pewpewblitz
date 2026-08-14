@@ -8,7 +8,7 @@ use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--headless --exit-after-roster <N> --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --simulation-ticks <N>] [--combat-demo | --controller-demo]"
+        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--weapon-preset <1-4>] [--headless --exit-after-roster <N> --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --simulation-ticks <N>] [--combat-demo | --controller-demo]"
     );
 }
 
@@ -49,6 +49,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut headless_aim_at_dummy = false;
     let mut headless_fire = false;
     let mut headless_simulation_ticks = None;
+    let mut weapon_preset = None;
     let mut windowed_combat_demo = false;
     let mut windowed_controller_demo = false;
     while let Some(flag) = args.next() {
@@ -65,6 +66,9 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--fire" => headless_fire = true,
             "--simulation-ticks" => {
                 headless_simulation_ticks = Some(parse_value(&flag, args.next())?);
+            }
+            "--weapon-preset" | "--weapon" => {
+                weapon_preset = Some(parse_value(&flag, args.next())?);
             }
             "--combat-demo" => windowed_combat_demo = true,
             "--controller-demo" => windowed_controller_demo = true,
@@ -94,6 +98,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.headless_aim_at_dummy = headless_aim_at_dummy;
     config.headless_fire = headless_fire;
     config.headless_simulation_ticks = headless_simulation_ticks;
+    config.weapon_preset = weapon_preset;
     config.windowed_combat_demo = windowed_combat_demo.then_some(WindowedCombatDemo);
     config.windowed_controller_demo = windowed_controller_demo.then_some(WindowedControllerDemo);
     if windowed_combat_demo {

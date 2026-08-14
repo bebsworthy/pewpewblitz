@@ -2,7 +2,8 @@
 #![allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
-    clippy::too_many_arguments
+    clippy::too_many_arguments,
+    clippy::too_many_lines
 )]
 
 use avian2d::prelude::*;
@@ -574,6 +575,10 @@ fn authoritative_movement(
             Option<&ActionState<FighterInput>>,
             Option<&NativeBuffer<FighterInput>>,
             Option<&crate::combat::Defeated>,
+            Option<&crate::combat::SelectingWeapon>,
+            Option<&crate::combat::AwaitingPostSelectionInput>,
+            Option<&crate::combat::ActiveEffects>,
+            Option<&crate::combat::ExternalMotion>,
         ),
         With<Fighter>,
     >,
@@ -584,10 +589,23 @@ fn authoritative_movement(
         skin_width: tuning.skin_width,
         ..default()
     };
-    for (entity, position, rotation, collider, velocity, freshness, action, buffer, defeated) in
-        &fighters
+    for (
+        entity,
+        position,
+        rotation,
+        collider,
+        velocity,
+        freshness,
+        action,
+        buffer,
+        defeated,
+        selecting,
+        activation_barrier,
+        active_effects,
+        external_motion,
+    ) in &fighters
     {
-        if defeated.is_some() {
+        if defeated.is_some() || selecting.is_some() {
             continue;
         }
         let previous_position = position.0;
@@ -611,14 +629,33 @@ fn authoritative_movement(
             FighterInput::default()
         };
 
-        if let Some(aim) = input
-            .aim_update
-            .and_then(|axis| committed_aim(axis.to_vec2(), *input_tuning))
+        let activation_ready = activation_barrier.is_none_or(|barrier| {
+            freshness
+                .last_fresh_tick
+                .is_some_and(|fresh_tick| fresh_tick > barrier.accepted_at_tick)
+        });
+        if activation_ready
+            && let Some(aim) = input
+                .aim_update
+                .and_then(|axis| committed_aim(axis.to_vec2(), *input_tuning))
         {
             rotation = Rotation::radians(aim.y.atan2(aim.x));
         }
         let movement = decoded_move(input.move_axis, *input_tuning);
-        let desired_velocity = movement * tuning.speed;
+        let movement_multiplier = active_effects
+            .and_then(|effects| effects.slow)
+            .filter(|slow| tick.0 < slow.expires_at_tick)
+            .map_or(1.0, |slow| {
+                f32::from(slow.movement_multiplier_milli) / 1000.0
+            });
+        let desired_velocity = if activation_ready {
+            movement * tuning.speed * movement_multiplier
+                + external_motion
+                    .filter(|motion| tick.0 < motion.expires_at_tick)
+                    .map_or(Vec2::ZERO, |motion| motion.velocity)
+        } else {
+            Vec2::ZERO
+        };
         let filter = SpatialQueryFilter::from_mask(
             INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
         )
@@ -678,6 +715,15 @@ fn authoritative_movement(
         commands
             .entity(entity)
             .insert((position, rotation, velocity, freshness));
+        if activation_barrier.is_some_and(|barrier| {
+            freshness
+                .last_fresh_tick
+                .is_some_and(|fresh_tick| fresh_tick > barrier.accepted_at_tick)
+        }) {
+            commands
+                .entity(entity)
+                .remove::<crate::combat::AwaitingPostSelectionInput>();
+        }
     }
 }
 

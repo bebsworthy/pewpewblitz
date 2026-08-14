@@ -9,8 +9,10 @@
 use crate::{
     VERSION,
     combat::{
-        AuthoritativeTick, CombatCue, CombatTelemetry, CurrentHealth, Defeated, ServerCombatPlugin,
-        SpawnState, TestDummy, decode_combat_cue, default_fighter_runtime, sandbox_team,
+        ActiveEffects, AuthoritativeTick, CombatCue, CombatTelemetry, CurrentHealth, Defeated,
+        ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon, ServerCombatPlugin,
+        SpawnState, TestDummy, WeaponCatalogResource, WeaponPresetId, WeaponTelemetry,
+        WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, sandbox_team,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -19,8 +21,9 @@ use crate::{
         InputValidationState, MovementTuning,
     },
     protocol::{
-        ClientHello, DEVELOPMENT_PRIVATE_KEY, Fighter, JoinOutcome, JoinRejection, NetworkEntityId,
-        PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin,
+        ClientHello, DEVELOPMENT_PRIVATE_KEY, Fighter, FighterInput, JoinOutcome, JoinRejection,
+        NetworkEntityId, PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin,
+        SessionChannel, WeaponSelectionDecision, WeaponSelectionOutcome, WeaponSelectionRequest,
     },
 };
 use avian2d::prelude::{
@@ -35,6 +38,7 @@ use bevy::{
     state::app::StatesPlugin,
 };
 use core::time::Duration;
+use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 use lightyear::prelude::server::{
     NetcodeConfig, NetcodeServer, ServerPlugins, Start, Started, Stop, Stopped,
 };
@@ -44,7 +48,7 @@ use lightyear::prelude::{
     ControlledBy, InterpolationTarget, Lifetime, MessageReceiver, MessageSender, NetworkTarget,
     Replicate, ReplicationMetadata, ReplicationSender,
 };
-use std::{env, fmt::Write as _, fs, path::PathBuf, time::Instant};
+use std::{collections::HashSet, env, fmt::Write as _, fs, path::PathBuf, time::Instant};
 
 /// Server-side session phase. Lightyear lifecycle components remain the connection truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -63,6 +67,8 @@ pub struct ServerSession {
     pub deadline: Duration,
     pub last_outcome: Option<JoinOutcome>,
     pub disconnect_requested: bool,
+    pub last_selection_request: Option<WeaponSelectionRequest>,
+    pub last_selection_outcome: Option<WeaponSelectionOutcome>,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -93,6 +99,7 @@ struct ProcessCombatCheck {
     client_ready_dir: Option<PathBuf>,
     report_file: Option<PathBuf>,
     run_id: String,
+    expected_preset_id: Option<WeaponPresetId>,
     started_at: Instant,
     completed: bool,
 }
@@ -105,6 +112,10 @@ impl FromWorld for ProcessCombatCheck {
             client_ready_dir: env::var_os("BRAWLER_NETWORK_COMBAT_READY_DIR").map(PathBuf::from),
             report_file: env::var_os("BRAWLER_NETWORK_COMBAT_REPORT_FILE").map(PathBuf::from),
             run_id: env::var("BRAWLER_NETWORK_RUN_ID").unwrap_or_else(|_| "unknown".to_string()),
+            expected_preset_id: env::var("BRAWLER_NETWORK_WEAPON_PRESET")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+                .map(WeaponPresetId),
             started_at: Instant::now(),
             completed: false,
         }
@@ -208,6 +219,8 @@ impl Plugin for ServerNetworkPlugin {
                     observe_server_endpoint,
                     initialize_sessions,
                     process_client_hellos,
+                    process_weapon_selection,
+                    ApplyDeferred,
                     enforce_session_deadlines,
                     disconnect_rejected_sessions,
                     verify_process_movement,
@@ -293,8 +306,9 @@ fn verify_process_movement(
 fn verify_process_combat(
     mut check: ResMut<ProcessCombatCheck>,
     telemetry: Res<CombatTelemetry>,
+    weapon_telemetry: Res<WeaponTelemetry>,
+    catalog: Res<WeaponCatalogResource>,
     fighters: Res<crate::combat::FighterDefinitions>,
-    weapons: Res<crate::combat::WeaponDefinitions>,
     dummy: Query<
         (
             &CurrentHealth,
@@ -304,6 +318,7 @@ fn verify_process_combat(
         With<TestDummy>,
     >,
     sessions: Query<&ServerSession, With<LinkOf>>,
+    selected_fighters: Query<(&SelectedBuild, &ResolvedWeapon), With<Fighter>>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     if !check.enabled || check.completed {
@@ -319,9 +334,59 @@ fn verify_process_combat(
     let Some(fighter_definition) = fighters.get(*fighter_definition_id) else {
         return;
     };
-    let Some(weapon_definition) = weapons.get(crate::combat::PULSE_SIDEARM_DEFINITION) else {
+    let accepted_attacks: u64 = weapon_telemetry.accepted_attacks.values().copied().sum();
+    let Some(expected_preset_id) = check.expected_preset_id else {
+        error!("combat process assertion is missing BRAWLER_NETWORK_WEAPON_PRESET");
+        check.completed = true;
+        app_exit.write(AppExit::error());
         return;
     };
+    let Some(_) = catalog.0.preset(expected_preset_id) else {
+        error!(
+            preset_id = expected_preset_id.0,
+            "combat assertion requested an unknown preset"
+        );
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    };
+    let Ok(expected_resolved) = catalog
+        .0
+        .resolve_preset(expected_preset_id, fighter_definition)
+    else {
+        error!(
+            preset_id = expected_preset_id.0,
+            "combat assertion could not resolve the requested preset"
+        );
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    };
+    let tested_fighter = selected_fighters.iter().any(|(build, resolved)| {
+        build.source_preset_id == Some(expected_preset_id)
+            && resolved.source_preset_id == Some(expected_preset_id)
+            && resolved.recipe_fingerprint == expected_resolved.recipe_fingerprint
+    });
+    let expected_attacks = weapon_telemetry
+        .accepted_attacks
+        .get(&expected_preset_id)
+        .copied()
+        .unwrap_or(0);
+    let expected_deliveries = weapon_telemetry
+        .emitted_deliveries
+        .get(&expected_preset_id)
+        .copied()
+        .unwrap_or(0);
+    let expected_aggregate = weapon_telemetry.source_aggregates.get(&WeaponTelemetryKey {
+        preset_id: expected_preset_id,
+        recipe_fingerprint: expected_resolved.recipe_fingerprint,
+    });
+    let expected_family_exercised = expected_aggregate.is_some_and(|aggregate| {
+        aggregate.accepted_attacks > 0
+            && aggregate.emitted_deliveries > 0
+            && aggregate.accepted_attacks == expected_attacks
+            && aggregate.emitted_deliveries == expected_deliveries
+    });
     let clients_observed = check.client_ready_dir.as_ref().is_some_and(|directory| {
         [1_u64, 2].iter().all(|client_id| {
             directory
@@ -330,11 +395,13 @@ fn verify_process_combat(
         })
     });
     if active_sessions < 2
-        || telemetry.accepted_shots < 4
-        || telemetry.applied_damage < u64::from(weapon_definition.direct_damage)
+        || accepted_attacks < 4
+        || telemetry.applied_damage == 0
         || telemetry.defeats == 0
         || health.0 != fighter_definition.maximum_health
         || defeated.is_some()
+        || !tested_fighter
+        || !expected_family_exercised
         || !clients_observed
     {
         return;
@@ -372,20 +439,72 @@ fn verify_process_combat(
             return;
         }
     };
-    let expected_cue_stream = &telemetry.cues;
-    let client_one_cue_stream = parse_client_cue_stream(&client_one);
-    let client_two_cue_stream = parse_client_cue_stream(&client_two);
-    let expected_muzzle_count = expected_cue_stream
-        .iter()
-        .filter(|cue| matches!(cue, CombatCue::Muzzle { .. }))
-        .count() as u64;
-    let cue_converged = expected_muzzle_count == telemetry.accepted_shot_timestamps.len() as u64
-        && !expected_cue_stream.is_empty()
+    let client_evidence_drops = [client_one.as_str(), client_two.as_str()]
+        .into_iter()
+        .map(|contents| {
+            parse_report_counter(contents, "dropped_cue_stream")
+                + parse_report_counter(contents, "dropped_cue_timestamps")
+        })
+        .sum::<u64>();
+    if telemetry.dropped_cues > 0
+        || telemetry.dropped_records > 0
+        || telemetry.dropped_accepted_shot_timestamps > 0
+        || client_evidence_drops > 0
+    {
+        error!(
+            server_dropped_cues = telemetry.dropped_cues,
+            server_dropped_records = telemetry.dropped_records,
+            server_dropped_timestamps = telemetry.dropped_accepted_shot_timestamps,
+            client_evidence_drops,
+            "combat evidence history was truncated"
+        );
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    }
+    let through_reset = |cues: &[CombatCue]| {
+        cues.iter()
+            .take_while(|cue| {
+                !matches!(
+                    cue,
+                    CombatCue::Reset { .. } | CombatCue::FighterReset { .. }
+                )
+            })
+            .chain(
+                cues.iter()
+                    .skip_while(|cue| {
+                        !matches!(
+                            cue,
+                            CombatCue::Reset { .. } | CombatCue::FighterReset { .. }
+                        )
+                    })
+                    .take(1),
+            )
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let expected_cue_stream = through_reset(&telemetry.cues);
+    let client_one_cue_stream = through_reset(&parse_client_cue_stream(&client_one));
+    let client_two_cue_stream = through_reset(&parse_client_cue_stream(&client_two));
+    let cue_converged = !expected_cue_stream.is_empty()
         && client_one_cue_stream.as_slice() == expected_cue_stream.as_slice()
         && client_two_cue_stream.as_slice() == expected_cue_stream.as_slice();
     if !cue_converged {
+        let first_client_one_mismatch = expected_cue_stream
+            .iter()
+            .zip(&client_one_cue_stream)
+            .position(|(expected, actual)| expected != actual);
+        let first_client_two_mismatch = expected_cue_stream
+            .iter()
+            .zip(&client_two_cue_stream)
+            .position(|(expected, actual)| expected != actual);
         error!(
-            accepted_shots = telemetry.accepted_shots,
+            accepted_attacks,
+            expected_cue_count = expected_cue_stream.len(),
+            client_one_cue_count = client_one_cue_stream.len(),
+            client_two_cue_count = client_two_cue_stream.len(),
+            first_client_one_mismatch = ?first_client_one_mismatch,
+            first_client_two_mismatch = ?first_client_two_mismatch,
             expected_cue_stream = ?expected_cue_stream,
             client_one_cue_stream = ?client_one_cue_stream,
             client_two_cue_stream = ?client_two_cue_stream,
@@ -424,14 +543,21 @@ fn verify_process_combat(
             return;
         }
         let report = format!(
-            "run_id={}\nprofile={}\nserver_elapsed_ms={}\naccepted_shots={}\nhostile_hits={}\napplied_damage={}\ndefeats={}\nstate_converged=1\ncue_converged=1\nordered_cue_stream_converged=1\n{}client_one={}client_two={}",
+            "run_id={}\nprofile={}\nserver_elapsed_ms={}\ntested_preset_id={}\ntested_recipe_fingerprint={}\ntested_accepted_attacks={}\ntested_emitted_deliveries={}\naccepted_shots={}\nhostile_hits={}\napplied_damage={}\ndefeats={}\nserver_dropped_cues={}\nserver_dropped_records={}\nserver_dropped_timestamps={}\nstate_converged=1\ncue_converged=1\nordered_cue_stream_converged=1\n{}client_one={}client_two={}",
             check.run_id,
             env::var("BRAWLER_NETWORK_PROFILE").unwrap_or_else(|_| "local".to_string()),
             check.started_at.elapsed().as_millis(),
-            telemetry.accepted_shots,
+            expected_preset_id.0,
+            expected_resolved.recipe_fingerprint.0,
+            expected_attacks,
+            expected_deliveries,
+            accepted_attacks,
             telemetry.hostile_fighter_hits,
             telemetry.applied_damage,
             telemetry.defeats,
+            telemetry.dropped_cues,
+            telemetry.dropped_records,
+            telemetry.dropped_accepted_shot_timestamps,
             latency_evidence,
             client_one,
             client_two,
@@ -462,6 +588,14 @@ fn parse_client_cue_timestamps(contents: &str) -> Vec<(u64, u128)> {
             Some((shot_id.parse().ok()?, timestamp.parse().ok()?))
         })
         .collect()
+}
+
+fn parse_report_counter(contents: &str, key: &str) -> u64 {
+    contents
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
 }
 
 fn parse_client_cue_stream(contents: &str) -> Vec<CombatCue> {
@@ -561,6 +695,8 @@ fn initialize_sessions(
                 deadline: now.saturating_add(config.handshake_timeout),
                 last_outcome: None,
                 disconnect_requested: false,
+                last_selection_request: None,
+                last_selection_outcome: None,
             });
         }
     }
@@ -570,6 +706,7 @@ fn process_client_hellos(
     mut commands: Commands,
     config: Res<ServerNetworkConfig>,
     fingerprint: Res<ProtocolFingerprint>,
+    content_fingerprint: Res<crate::combat::GameplayContentFingerprint>,
     arena: Res<GreyboxArenaDefinition>,
     movement_tuning: Res<MovementTuning>,
     fighters: Res<crate::combat::FighterDefinitions>,
@@ -580,11 +717,16 @@ fn process_client_hellos(
         &mut MessageReceiver<ClientHello>,
         &mut MessageSender<JoinOutcome>,
         &mut ServerSession,
+        Has<Disconnected>,
     )>,
     placeholders: Query<(), (With<Fighter>, Without<TestDummy>)>,
 ) {
     let mut active_count = placeholders.iter().count();
-    for (connection, mut receiver, mut sender, mut session) in receivers.iter_mut() {
+    for (connection, mut receiver, mut sender, mut session, disconnected) in receivers.iter_mut() {
+        if disconnected {
+            receiver.receive().for_each(drop);
+            continue;
+        }
         let messages: Vec<_> = receiver.receive().collect();
         for hello in messages {
             match &session.phase {
@@ -592,14 +734,14 @@ fn process_client_hellos(
                     player_id,
                     network_entity_id,
                 } => {
-                    sender.send::<crate::protocol::SessionChannel>(JoinOutcome::Accepted {
+                    sender.send::<SessionChannel>(JoinOutcome::Accepted {
                         player_id: *player_id,
                         network_entity_id: *network_entity_id,
                     });
                 }
                 ServerSessionPhase::Rejected => {
                     if let Some(outcome) = &session.last_outcome {
-                        sender.send::<crate::protocol::SessionChannel>(outcome.clone());
+                        sender.send::<SessionChannel>(outcome.clone());
                     }
                 }
                 ServerSessionPhase::AwaitingHello => {
@@ -620,6 +762,10 @@ fn process_client_hellos(
                         JoinOutcome::Rejected {
                             reason: JoinRejection::RegistryMismatch,
                         }
+                    } else if hello.content_fingerprint != *content_fingerprint {
+                        JoinOutcome::Rejected {
+                            reason: JoinRejection::ContentMismatch,
+                        }
                     } else {
                         match ids.allocate() {
                             Some((player_id, network_entity_id)) => {
@@ -628,7 +774,7 @@ fn process_client_hellos(
                                     network_entity_id,
                                 };
                                 let spawn_position = arena.spawn_position(player_id.0);
-                                let (fighter_definition, build, team, health, weapon) =
+                                let (fighter_definition, _build, team, health, _weapon) =
                                     default_fighter_runtime(
                                         sandbox_team(player_id),
                                         &fighters,
@@ -645,10 +791,10 @@ fn process_client_hellos(
                                             ),
                                         },
                                         fighter_definition,
-                                        build,
                                         team,
                                         health,
-                                        weapon,
+                                        SelectingWeapon,
+                                        ActiveEffects::default(),
                                         AuthoritativeTick::default(),
                                         SpawnState {
                                             position: spawn_position,
@@ -666,8 +812,7 @@ fn process_client_hellos(
                                     CustomPositionIntegration,
                                     CollisionLayers::new(
                                         crate::movement::FIGHTER_LAYER,
-                                        crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                                            | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                                        avian2d::prelude::LayerMask::NONE,
                                     ),
                                     InputFreshness::default(),
                                     (
@@ -692,13 +837,197 @@ fn process_client_hellos(
                         }
                     };
                     let rejected = matches!(outcome, JoinOutcome::Rejected { .. });
-                    sender.send::<crate::protocol::SessionChannel>(outcome.clone());
+                    sender.send::<SessionChannel>(outcome.clone());
                     session.last_outcome = Some(outcome);
                     if rejected {
                         session.phase = ServerSessionPhase::Rejected;
                     }
                 }
             }
+        }
+    }
+}
+
+/// Resolve a preset request against the server's embedded catalog. The request is scoped to the
+/// receiving link; it never carries a fighter/entity target or any client-authored recipe data.
+fn process_weapon_selection(
+    mut commands: Commands,
+    catalog: Res<WeaponCatalogResource>,
+    definitions: Res<crate::combat::FighterDefinitions>,
+    tick: Res<crate::timing::SimulationTick>,
+    mut telemetry: ResMut<WeaponTelemetry>,
+    mut sessions: Query<(
+        Entity,
+        &mut MessageReceiver<WeaponSelectionRequest>,
+        &mut MessageSender<WeaponSelectionOutcome>,
+        &mut ServerSession,
+        Has<Disconnected>,
+    )>,
+    mut fighter_query: Query<
+        (
+            Entity,
+            &ControlledBy,
+            &crate::combat::FighterDefinitionId,
+            Option<&SelectingWeapon>,
+            Option<&mut NativeBuffer<FighterInput>>,
+            Option<&mut ActionState<FighterInput>>,
+            Option<&mut InputFreshness>,
+        ),
+        With<Fighter>,
+    >,
+) {
+    // Commands are deferred until the explicit ApplyDeferred boundary after this system. Keep
+    // an in-tick lock as well, so two queued requests cannot both observe SelectingWeapon and
+    // schedule competing accepted builds for the same fighter.
+    let mut accepted_fighters_this_tick = HashSet::new();
+    for (connection, mut receiver, mut sender, mut session, disconnected) in &mut sessions {
+        if disconnected {
+            receiver.receive().for_each(drop);
+            continue;
+        }
+        let requests: Vec<_> = receiver.receive().collect();
+        for request in requests {
+            if session
+                .last_selection_request
+                .is_some_and(|previous| request.request_id < previous.request_id)
+            {
+                sender.send::<SessionChannel>(WeaponSelectionOutcome {
+                    request_id: request.request_id,
+                    decision: WeaponSelectionDecision::StaleRequest,
+                    accepted_preset_id: None,
+                    accepted_recipe_fingerprint: None,
+                });
+                continue;
+            }
+            if session
+                .last_selection_request
+                .is_some_and(|previous| request.request_id == previous.request_id)
+            {
+                if let Some(outcome) = session.last_selection_outcome {
+                    sender.send::<SessionChannel>(outcome);
+                }
+                continue;
+            }
+
+            let fighter = fighter_query
+                .iter_mut()
+                .find(|(_, controlled, _, _, _, _, _)| controlled.owner == connection);
+            let outcome = if let Some((
+                fighter_entity,
+                _,
+                fighter_definition_id,
+                selecting,
+                mut input_buffer,
+                mut action,
+                mut input_freshness,
+            )) = fighter
+            {
+                if selecting.is_none() || accepted_fighters_this_tick.contains(&fighter_entity) {
+                    WeaponSelectionOutcome {
+                        request_id: request.request_id,
+                        decision: WeaponSelectionDecision::NotSelecting,
+                        accepted_preset_id: None,
+                        accepted_recipe_fingerprint: None,
+                    }
+                } else if catalog.0.preset(request.preset_id).is_none() {
+                    WeaponSelectionOutcome {
+                        request_id: request.request_id,
+                        decision: WeaponSelectionDecision::UnknownPreset,
+                        accepted_preset_id: None,
+                        accepted_recipe_fingerprint: None,
+                    }
+                } else {
+                    let resolved = definitions
+                        .get(*fighter_definition_id)
+                        .ok_or_else(|| "fighter definition missing".to_string())
+                        .and_then(|fighter_definition| {
+                            catalog
+                                .0
+                                .resolve_preset(request.preset_id, fighter_definition)
+                        });
+                    match resolved {
+                        Ok(resolved) => {
+                            accepted_fighters_this_tick.insert(fighter_entity);
+                            // Selection acceptance is a hard input epoch boundary. Discard every
+                            // buffered native state, the currently applied action, and its cached
+                            // watermark so a packet sent before acceptance, including one carrying
+                            // a future tick, cannot satisfy the post-selection freshness barrier.
+                            if let Some(buffer) = input_buffer.as_mut() {
+                                **buffer = NativeBuffer::default();
+                            }
+                            if let Some(action) = action.as_mut() {
+                                **action = ActionState::default();
+                            }
+                            if let Some(input_freshness) = input_freshness.as_mut() {
+                                **input_freshness = InputFreshness::default();
+                            }
+                            let capacity = resolved.recipe.economy.capacity();
+                            commands
+                                .entity(fighter_entity)
+                                .insert((
+                                    SelectedBuild {
+                                        primary_weapon: crate::combat::WeaponDefinitionId(
+                                            request.preset_id.0,
+                                        ),
+                                        source_preset_id: Some(request.preset_id),
+                                        recipe_fingerprint: Some(resolved.recipe_fingerprint),
+                                    },
+                                    SelectedWeapon {
+                                        source_preset_id: request.preset_id,
+                                        recipe_fingerprint: resolved.recipe_fingerprint,
+                                    },
+                                    resolved.clone(),
+                                    crate::combat::WeaponState {
+                                        ammo: capacity,
+                                        phase: crate::combat::WeaponPhase::Ready,
+                                    },
+                                    ActiveEffects::default(),
+                                    crate::combat::AwaitingPostSelectionInput {
+                                        accepted_at_tick: tick.0,
+                                    },
+                                    CollisionLayers::new(
+                                        crate::movement::FIGHTER_LAYER,
+                                        crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
+                                            | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                                    ),
+                                ))
+                                .remove::<SelectingWeapon>();
+                            telemetry
+                                .record_selection(request.preset_id, resolved.recipe_fingerprint);
+                            let _ = fighter_definition_id;
+                            WeaponSelectionOutcome {
+                                request_id: request.request_id,
+                                decision: WeaponSelectionDecision::Accepted,
+                                accepted_preset_id: Some(request.preset_id),
+                                accepted_recipe_fingerprint: Some(resolved.recipe_fingerprint),
+                            }
+                        }
+                        Err(error) => {
+                            warn!(
+                                ?error,
+                                preset_id = request.preset_id.0,
+                                "weapon selection resolution failed"
+                            );
+                            WeaponSelectionOutcome {
+                                request_id: request.request_id,
+                                decision: WeaponSelectionDecision::ResolutionFailed,
+                                accepted_preset_id: None,
+                                accepted_recipe_fingerprint: None,
+                            }
+                        }
+                    }
+                }
+            } else {
+                WeaponSelectionOutcome {
+                    request_id: request.request_id,
+                    decision: WeaponSelectionDecision::NotSelecting,
+                    accepted_preset_id: None,
+                    accepted_recipe_fingerprint: None,
+                }
+            };
+            session.last_selection_request = Some(request);
+            session.last_selection_outcome = Some(outcome);
+            sender.send::<SessionChannel>(outcome);
         }
     }
 }

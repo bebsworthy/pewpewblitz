@@ -16,12 +16,16 @@ Milestone 11 hardens and closes the v1 MVP. Additional mode families and systemi
 
 The milestones are not release promises. A milestone may be split during its technical-design pass, but its exit criteria may not be silently moved to a later gate.
 
+Milestone 06 has a pre-existing first-draft specification in this worktree and may remain in
+specification review while Milestone 05 is verified; its implementation is explicitly blocked
+until Milestone 05 reaches its user-playtest and feedback gates.
+
 The milestone sections below are outcome briefs and research prompts, not prevalidated technical specifications. Type names, plugins, schedules, package boundaries, data formats, and algorithms remain provisional until the milestone research and specification are approved.
 
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 05 specification review; Milestone 04 complete, while Milestone 03 verification and earlier user playtests remain open
+- **Overall status:** Milestone 05 verification in progress after automated implementation checks; Milestone 06 first-draft specification review is running in parallel, while Milestone 03 verification and earlier user playtests remain open
 - **Current milestone:** Milestone 05 — Weapon composition and preset selection
 - **Last completed milestone:** Milestone 04 — Combat core
 
@@ -163,8 +167,8 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 02 | User playtest | Network connection and replication sandbox | [milestone-02.md](./milestone-02.md) |
 | 03 | Verifying | Movement, aiming, and greybox collision | [milestone-03.md](./milestone-03.md) |
 | 04 | Complete | Combat core | [milestone-04.md](./milestone-04.md) |
-| 05 | Specification review | Weapon composition and preset selection | [milestone-05.md](./milestone-05.md) |
-| 06 | Not started | First map-recipe arena and presentation baseline | Create when next |
+| 05 | Verifying | Weapon composition and preset selection | [milestone-05.md](./milestone-05.md) |
+| 06 | Specification review | First map-recipe arena and presentation baseline | [milestone-06.md](./milestone-06.md) |
 | 07 | Not started | Wipeout match loop | Create when next |
 | 08 | Not started | Bounded brawler builds and abilities | Create when next |
 | 09 | Not started | Hot Zone | Create when next |

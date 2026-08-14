@@ -193,6 +193,19 @@ network-combat-60:
 network-combat-high:
     BRAWLER_RENDER_PROFILE=high BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 ./scripts/network.sh
 
+# Launch the combat demo with an explicit preset (1 Pulse, 2 Scatter, 3 Arc, 4 Blade).
+network-combat-pulse:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 BRAWLER_NETWORK_WEAPON_PRESET=1 ./scripts/network.sh
+
+network-combat-scatter:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 BRAWLER_NETWORK_WEAPON_PRESET=2 ./scripts/network.sh
+
+network-combat-arc:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 BRAWLER_NETWORK_WEAPON_PRESET=3 ./scripts/network.sh
+
+network-combat-blade:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 BRAWLER_NETWORK_WEAPON_PRESET=4 ./scripts/network.sh
+
 # Launch bounded headless clients; succeeds only after server movement/facing assertions.
 network-smoke:
     BRAWLER_NETWORK_HEADLESS=1 ./scripts/network.sh
