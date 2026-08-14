@@ -49,7 +49,7 @@ test-server:
 test-network:
     cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1
 
-# Measure the fixed-tick budget with 100 headless fighters.
+# Measure the fixed-tick budget with 100 headless fighters and 200 active projectiles.
 test-performance:
     cargo test --locked --no-default-features --features network-test --test performance -- --nocapture
 
@@ -173,6 +173,30 @@ run:
 network:
     BRAWLER_NETWORK_HEADLESS=0 ./scripts/network.sh
 
+# Launch two windowed clients with client 1 firing at the neutral dummy.
+network-combat:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 ./scripts/network.sh
+
+# Launch two windowed clients with client 1 using the native gamepad path.
+network-controller:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO=1 ./scripts/network.sh
+
+# Repeat the windowed combat scenario using the 30 Hz presentation profile.
+network-combat-30:
+    BRAWLER_RENDER_PROFILE=30 BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 ./scripts/network.sh
+
+# Repeat the windowed combat scenario using the 60 Hz presentation profile.
+network-combat-60:
+    BRAWLER_RENDER_PROFILE=60 BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 ./scripts/network.sh
+
+# Repeat the windowed combat scenario using the high-refresh/no-vsync profile.
+network-combat-high:
+    BRAWLER_RENDER_PROFILE=high BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1 ./scripts/network.sh
+
 # Launch bounded headless clients; succeeds only after server movement/facing assertions.
 network-smoke:
     BRAWLER_NETWORK_HEADLESS=1 ./scripts/network.sh
+
+# Run repeated local, typical, and adverse combat convergence profiles.
+network-combat-profiles:
+    ./scripts/network-combat-profiles.sh

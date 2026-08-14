@@ -8,7 +8,8 @@
 
 use crate::{
     VERSION,
-    config::{ClientNetworkConfig, NetworkTransport},
+    combat::{ClientCombatPlugin, CombatHudText, fighter_color},
+    config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
     movement::{
         AvianNetworkPlugin, CAMERA_VERTICAL_SPAN, GreyboxArenaDefinition, InputTuning,
@@ -29,7 +30,8 @@ use bevy::{
     log::LogPlugin,
     prelude::*,
     state::app::StatesPlugin,
-    window::{PrimaryWindow, WindowCloseRequested},
+    window::{PresentMode, PrimaryWindow, WindowCloseRequested},
+    winit::{UpdateMode, WinitSettings},
 };
 use core::time::Duration;
 use lightyear::prelude::InterpolationSystems;
@@ -40,7 +42,7 @@ use lightyear::prelude::client::{
 };
 use lightyear::prelude::input::native::{ActionState, InputMarker};
 use lightyear::prelude::{
-    Authentication, InterpolationTimeline, LocalAddr, NetworkTimeline, PeerAddr,
+    Authentication, InterpolationTimeline, Link, LocalAddr, NetworkTimeline, PeerAddr,
 };
 use lightyear::prelude::{ConfirmedHistory, Controlled, Interpolated};
 use lightyear::prelude::{MessageReceiver, MessageSender, PingManager, ReplicationReceiver, UdpIo};
@@ -78,6 +80,8 @@ struct RosterLogState(Vec<(PlayerId, NetworkEntityId)>);
 struct HeadlessAutomation {
     move_axis: Vec2,
     aim_axis: Option<Vec2>,
+    aim_at_dummy: bool,
+    fire: bool,
     simulation_ticks: Option<u32>,
     elapsed_ticks: u32,
 }
@@ -92,6 +96,8 @@ impl FromWorld for HeadlessAutomation {
             aim_axis: config
                 .headless_aim
                 .map(|(x, y)| Vec2::new(f32::from(x), f32::from(y))),
+            aim_at_dummy: config.headless_aim_at_dummy,
+            fire: config.headless_fire,
             simulation_ticks: config.headless_simulation_ticks,
             elapsed_ticks: 0,
         }
@@ -140,6 +146,7 @@ pub struct PendingLocalActions {
 struct LiveInputTrace {
     enabled: bool,
     last_sample: Option<(bool, [bool; 4], Vec2, ActiveInputDevice)>,
+    last_aim: Option<Vec2>,
     last_write: Option<(Vec2, u8, usize)>,
     last_presented: Vec<(Entity, Vec2)>,
     last_history: Vec<(Entity, Vec2)>,
@@ -151,6 +158,7 @@ impl FromWorld for LiveInputTrace {
         Self {
             enabled: env::var("BRAWLER_INPUT_TRACE").as_deref() == Ok("1"),
             last_sample: None,
+            last_aim: None,
             last_write: None,
             last_presented: Vec::new(),
             last_history: Vec::new(),
@@ -175,6 +183,7 @@ impl Default for PendingLocalActions {
 }
 
 const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
+const HEADLESS_FIRE_DURATION_TICKS: u32 = 90;
 const ACTION_ACTIVE_ITEM: u16 = 1 << 1;
 const ACTION_ULTIMATE: u16 = 1 << 2;
 const ACTION_INTERACT: u16 = 1 << 3;
@@ -216,8 +225,43 @@ fn select_active_gamepad(
     }
 }
 
+fn select_active_input_device(
+    current: ActiveInputDevice,
+    keyboard_mouse_active: bool,
+    selected_gamepad: Option<Entity>,
+    meaningful_gamepad: Option<Entity>,
+) -> ActiveInputDevice {
+    match current {
+        ActiveInputDevice::KeyboardMouse => {
+            meaningful_gamepad.map_or(ActiveInputDevice::KeyboardMouse, ActiveInputDevice::Gamepad)
+        }
+        ActiveInputDevice::Gamepad(_) if keyboard_mouse_active => ActiveInputDevice::KeyboardMouse,
+        ActiveInputDevice::Gamepad(_) => {
+            selected_gamepad.map_or(ActiveInputDevice::KeyboardMouse, ActiveInputDevice::Gamepad)
+        }
+    }
+}
+
+fn apply_pause_request(
+    context: &mut ClientInputContext,
+    pending: &mut PendingLocalActions,
+    pause_pressed: bool,
+) {
+    if pause_pressed {
+        *context = match *context {
+            ClientInputContext::Gameplay => ClientInputContext::Paused,
+            ClientInputContext::Paused => ClientInputContext::Gameplay,
+        };
+        pending.latched_buttons = 0;
+    }
+}
+
 #[derive(Component)]
 struct ArenaCamera;
+
+/// Marker for the reproducible, windowed controller smoke path.
+#[derive(Component)]
+struct ControllerDemoGamepad;
 
 #[derive(Component)]
 struct PauseOverlay;
@@ -361,18 +405,22 @@ fn sample_local_input(
             .map(|(_, gamepad)| (entity, gamepad.left_stick(), gamepad.right_stick(), gamepad))
     });
 
-    if keyboard_active
+    let keyboard_mouse_active = keyboard_active
         || mouse_active
         || keyboard_scoreboard
         || mouse_buttons
-            .is_some_and(|buttons| buttons.any_pressed([MouseButton::Left, MouseButton::Right]))
-    {
-        pending.active_device = ActiveInputDevice::KeyboardMouse;
-    } else if let Some((entity, _, _, _)) = gamepad_sample {
-        pending.active_device = ActiveInputDevice::Gamepad(entity);
+            .is_some_and(|buttons| buttons.any_pressed([MouseButton::Left, MouseButton::Right]));
+    let meaningful_gamepad = if meaningful_gamepads.is_empty() {
+        None
     } else {
-        pending.active_device = ActiveInputDevice::KeyboardMouse;
-    }
+        active_gamepad.or_else(|| meaningful_gamepads.last().copied())
+    };
+    pending.active_device = select_active_input_device(
+        pending.active_device,
+        keyboard_mouse_active,
+        active_gamepad,
+        meaningful_gamepad,
+    );
 
     let (move_axis, aim_axis, gamepad_buttons, gamepad_pause, gamepad_interact) =
         match (pending.active_device, gamepad_sample) {
@@ -445,13 +493,7 @@ fn sample_local_input(
     if pending.scoreboard_held {
         pending.action_indicator |= ACTION_SCOREBOARD;
     }
-    if gamepad_pause || pending.cancel_pressed {
-        *context = match *context {
-            ClientInputContext::Gameplay => ClientInputContext::Paused,
-            ClientInputContext::Paused => ClientInputContext::Gameplay,
-        };
-        pending.latched_buttons = 0;
-    }
+    apply_pause_request(&mut context, &mut pending, gamepad_pause);
     if gamepad_interact
         || keyboard.just_pressed(KeyCode::Space)
         || keyboard.just_pressed(KeyCode::Enter)
@@ -488,6 +530,10 @@ fn sample_local_input(
             );
             trace.last_sample = Some(sample);
         }
+        if trace.last_aim != pending.aim_axis {
+            info!(aim_axis = ?pending.aim_axis, "live client aim sample changed");
+            trace.last_aim = pending.aim_axis;
+        }
     }
 }
 
@@ -495,6 +541,8 @@ fn apply_headless_input(
     automation: Res<HeadlessAutomation>,
     mut pending: ResMut<PendingLocalActions>,
     statuses: Query<&ClientJoinStatus, With<Client>>,
+    controlled: Query<&Position, (With<Fighter>, With<Controlled>)>,
+    fighters: Query<(&NetworkEntityId, &Position), With<Fighter>>,
 ) {
     if !statuses
         .iter()
@@ -508,16 +556,40 @@ fn apply_headless_input(
     {
         return;
     }
-    if automation.move_axis != Vec2::ZERO || automation.aim_axis.is_some() {
+    let aim_axis = if automation.aim_at_dummy {
+        controlled.iter().next().and_then(|position| {
+            fighters
+                .iter()
+                .find(|(network_id, _)| network_id.0 == 0)
+                .map(|(_, target)| target.0 - position.0)
+                .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
+                .map(Vec2::normalize)
+        })
+    } else {
+        automation.aim_axis
+    };
+    if automation.move_axis != Vec2::ZERO
+        || aim_axis.is_some()
+        || automation.aim_at_dummy
+        || automation.fire
+    {
         if automation.elapsed_ticks == 0 {
             info!(
                 move_axis = ?automation.move_axis,
-                aim_axis = ?automation.aim_axis,
+                aim_axis = ?aim_axis,
+                aim_at_dummy = automation.aim_at_dummy,
+                fire = automation.fire,
                 "headless movement automation enabled"
             );
         }
         pending.move_axis = automation.move_axis;
-        pending.aim_axis = automation.aim_axis;
+        pending.aim_axis = aim_axis;
+        let fire_held = automation.fire && automation.elapsed_ticks < HEADLESS_FIRE_DURATION_TICKS;
+        pending.held_buttons = if fire_held {
+            FighterInput::PRIMARY_FIRE
+        } else {
+            0
+        };
         pending.active_device = ActiveInputDevice::KeyboardMouse;
     }
 }
@@ -742,41 +814,41 @@ impl Plugin for MovementPresentationPlugin {
 }
 
 fn spawn_client_arena(mut commands: Commands, arena: Res<GreyboxArenaDefinition>) {
-    let border_color = Color::srgb(0.10, 0.13, 0.18);
-    let cover_color = Color::srgb(0.22, 0.28, 0.36);
-    let thickness = 48.0;
-    let width = arena.max.x - arena.min.x;
-    let height = arena.max.y - arena.min.y;
-    let center = (arena.min + arena.max) / 2.0;
-    for (position, size) in [
-        (
-            Vec2::new(arena.min.x - thickness / 2.0, center.y),
-            Vec2::new(thickness, height + thickness * 2.0),
-        ),
-        (
-            Vec2::new(arena.max.x + thickness / 2.0, center.y),
-            Vec2::new(thickness, height + thickness * 2.0),
-        ),
-        (
-            Vec2::new(center.x, arena.min.y - thickness / 2.0),
-            Vec2::new(width, thickness),
-        ),
-        (
-            Vec2::new(center.x, arena.max.y + thickness / 2.0),
-            Vec2::new(width, thickness),
-        ),
-    ] {
+    let border_color = Color::srgb(0.08, 0.34, 0.58);
+    let boundary_color = Color::srgb(0.40, 0.86, 1.0);
+    let cover_color = Color::srgb(0.08, 0.34, 0.68);
+    let cover_edge_color = Color::srgb(0.68, 0.92, 1.0);
+    for (position, size) in arena.perimeter_visual_shapes() {
         commands.spawn((
             ArenaVisual,
             Sprite::from_color(border_color, size),
-            Transform::from_translation(position.extend(-10.0)),
+            Transform::from_translation(position.extend(-2.0)),
         ));
     }
-    for position in arena.cover_centers {
+    // The collision bodies remain outside the playable bounds. This in-bounds layer is
+    // deliberately thick enough to survive a compact window and a camera at any arena edge;
+    // only its inner edge is bright so the HUD remains readable when the camera reaches a wall.
+    for (position, size) in arena.perimeter_visual_edge_shapes() {
         commands.spawn((
             ArenaVisual,
-            Sprite::from_color(cover_color, arena.cover_size),
-            Transform::from_translation(position.extend(-5.0)),
+            Sprite::from_color(boundary_color, size),
+            Transform::from_translation(position.extend(1.0)),
+        ));
+    }
+    for (position, size) in arena.cover_shapes() {
+        commands.spawn((
+            ArenaVisual,
+            Sprite::from_color(cover_color, size),
+            // Keep blocker bodies above the arena markers/background so the complete cover,
+            // rather than only its edge strip, remains visible in the window.
+            Transform::from_translation(position.extend(2.0)),
+        ));
+        commands.spawn((
+            ArenaVisual,
+            Sprite::from_color(cover_edge_color, Vec2::new(size.x, 10.0)),
+            Transform::from_translation(
+                (position + Vec2::new(0.0, size.y / 2.0 - 5.0)).extend(3.0),
+            ),
         ));
     }
 }
@@ -825,10 +897,12 @@ fn spawn_client_hud(mut commands: Commands) {
         Text::new("WASD / left stick: move   Mouse / right stick: aim\nQ: active item   E: ultimate   Space: interact   Tab: scoreboard   Esc: pause/cancel"),
         TextFont::from_font_size(16.0),
         TextColor(Color::WHITE),
+        TextLayout::linebreak(LineBreak::WordBoundary),
         Node {
             position_type: PositionType::Absolute,
             left: px(16.0),
             bottom: px(16.0),
+            width: percent(52.0),
             ..default()
         },
     ));
@@ -837,10 +911,24 @@ fn spawn_client_hud(mut commands: Commands) {
         Text::new("Input: keyboard/mouse | gameplay"),
         TextFont::from_font_size(16.0),
         TextColor(Color::srgb(0.75, 0.9, 1.0)),
+        TextLayout::new(Justify::Right, LineBreak::WordBoundary),
         Node {
             position_type: PositionType::Absolute,
             right: px(16.0),
             bottom: px(16.0),
+            width: percent(42.0),
+            ..default()
+        },
+    ));
+    commands.spawn((
+        CombatHudText,
+        Text::new("Health ---   Pulse --/--   READY"),
+        TextFont::from_font_size(20.0),
+        TextColor(Color::srgb(1.0, 0.85, 0.35)),
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(16.0),
+            top: px(16.0),
             ..default()
         },
     ));
@@ -861,16 +949,23 @@ fn spawn_client_hud(mut commands: Commands) {
 
 fn ensure_fighter_visuals(
     mut commands: Commands,
-    mut query: Query<(Entity, &PlayerId, Option<&mut Sprite>), (With<Fighter>, With<Remote>)>,
+    mut query: Query<
+        (Entity, &PlayerId, &NetworkEntityId, Option<&mut Sprite>),
+        (With<Fighter>, With<Remote>),
+    >,
 ) {
-    for (entity, player_id, sprite) in &mut query {
+    for (entity, player_id, network_id, sprite) in &mut query {
         if sprite.is_none() {
-            let hue_index =
-                u16::try_from(player_id.0.wrapping_mul(97) % 360).expect("hue index fits in u16");
-            let hue = f32::from(hue_index) / 360.0;
+            if network_id.0 == 0 {
+                commands.entity(entity).insert((
+                    FighterVisual,
+                    Sprite::from_color(Color::srgb(0.95, 0.25, 0.1), Vec2::new(52.0, 32.0)),
+                ));
+                continue;
+            }
             commands.entity(entity).insert((
                 FighterVisual,
-                Sprite::from_color(Color::hsl(hue, 0.78, 0.56), Vec2::new(48.0, 28.0)),
+                Sprite::from_color(fighter_color(*player_id), Vec2::new(48.0, 28.0)),
             ));
         }
     }
@@ -1055,6 +1150,7 @@ pub struct ClientNetworkPlugin;
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FallbackErrorHandler(error))
+            .add_plugins(ClientCombatPlugin)
             .init_resource::<RosterLogState>()
             .init_resource::<ClientShutdown>()
             .init_resource::<PendingLocalActions>()
@@ -1064,10 +1160,14 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<ClientInputContext>()
             .init_resource::<GreyboxArenaDefinition>()
             .init_resource::<InputTuning>()
-            .add_systems(Startup, spawn_client_connection)
+            .add_systems(
+                Startup,
+                (spawn_client_connection, spawn_controller_demo_gamepad).chain(),
+            )
             .add_systems(
                 RunFixedMainLoop,
                 (
+                    update_controller_demo_gamepad,
                     sample_local_input,
                     apply_headless_input.after(sample_local_input),
                 )
@@ -1139,6 +1239,7 @@ fn spawn_client_connection(
             },
             PingManager::default(),
             ReplicationReceiver,
+            Link::default().with_conditioner(config.impairment_profile.receive_conditioner()),
             NetcodeClient::new(auth, netcode_config)?,
             LocalAddr(config.local_addr),
             PeerAddr(config.server_addr),
@@ -1156,6 +1257,45 @@ fn spawn_client_connection(
         "brawler client connecting"
     );
     Ok(())
+}
+
+fn spawn_controller_demo_gamepad(mut commands: Commands, config: Res<ClientNetworkConfig>) {
+    if config.windowed_controller_demo.is_some() {
+        commands.spawn((Gamepad::default(), ControllerDemoGamepad));
+        info!("windowed synthetic controller demo enabled");
+    }
+}
+
+/// Keep the synthetic controller aimed at the server-owned neutral dummy while preserving the
+/// normal gamepad sampling path. This is only a visual/input smoke aid; it is not gameplay logic.
+fn update_controller_demo_gamepad(
+    config: Res<ClientNetworkConfig>,
+    mut gamepads: Query<&mut Gamepad, With<ControllerDemoGamepad>>,
+    controlled: Query<&Position, (With<Fighter>, With<Controlled>)>,
+    fighters: Query<(&NetworkEntityId, &Position), With<Fighter>>,
+) {
+    if config.windowed_controller_demo.is_none() {
+        return;
+    }
+    let aim = controlled
+        .iter()
+        .next()
+        .and_then(|controlled| {
+            fighters
+                .iter()
+                .find(|(network_id, _)| network_id.0 == 0)
+                .map(|(_, dummy)| dummy.0 - controlled.0)
+        })
+        .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
+        .map_or(Vec2::X, Vec2::normalize);
+
+    for mut gamepad in &mut gamepads {
+        gamepad.analog_mut().set(GamepadAxis::LeftStickX, 0.0);
+        gamepad.analog_mut().set(GamepadAxis::LeftStickY, 0.0);
+        gamepad.analog_mut().set(GamepadAxis::RightStickX, aim.x);
+        gamepad.analog_mut().set(GamepadAxis::RightStickY, aim.y);
+        gamepad.analog_mut().set(GamepadButton::RightTrigger2, 1.0);
+    }
 }
 
 fn send_client_hello(
@@ -1368,6 +1508,7 @@ fn finish_client_shutdown(
 pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     let headless = config.headless;
     let client_id = config.client_id;
+    let render_profile = config.render_profile;
     let mut app = App::new();
     app.insert_resource(config);
     if headless {
@@ -1377,13 +1518,20 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         .add_plugins(StatesPlugin)
         .add_plugins(LogPlugin::default());
     } else {
+        let (present_mode, winit_settings) = render_profile_settings(render_profile);
         app.add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: format!("Brawler Client {client_id}"),
+                present_mode,
                 ..default()
             }),
             ..default()
-        }));
+        }))
+        .insert_resource(winit_settings);
+        info!(
+            profile = render_profile.name(),
+            "windowed render profile selected"
+        );
     }
     app.add_plugins(ClientPlugins {
         tick_duration: crate::timing::SIMULATION_TICK,
@@ -1398,6 +1546,30 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         app.add_plugins(ClientPresentationPlugin);
     }
     app
+}
+
+const RENDER_30_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);
+const RENDER_60_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 60);
+
+fn render_profile_settings(profile: RenderProfile) -> (PresentMode, WinitSettings) {
+    match profile {
+        RenderProfile::Native => (PresentMode::Fifo, WinitSettings::game()),
+        RenderProfile::ThirtyFps => (
+            PresentMode::Fifo,
+            WinitSettings {
+                focused_mode: UpdateMode::reactive(RENDER_30_INTERVAL),
+                unfocused_mode: UpdateMode::reactive_low_power(RENDER_30_INTERVAL),
+            },
+        ),
+        RenderProfile::SixtyFps => (
+            PresentMode::Fifo,
+            WinitSettings {
+                focused_mode: UpdateMode::reactive(RENDER_60_INTERVAL),
+                unfocused_mode: UpdateMode::reactive_low_power(RENDER_60_INTERVAL),
+            },
+        ),
+        RenderProfile::HighRefresh => (PresentMode::AutoNoVsync, WinitSettings::continuous()),
+    }
 }
 
 /// Build the default client application.
@@ -1426,6 +1598,7 @@ pub fn spawn_crossbeam_client(
             },
             PingManager::default(),
             ReplicationReceiver,
+            Link::default().with_conditioner(config.impairment_profile.receive_conditioner()),
             NetcodeClient::new(auth, NetcodeConfig::default()).expect("test netcode client"),
             io,
         ))
@@ -1445,6 +1618,28 @@ mod tests {
         assert!(config.validate().is_ok());
         config.exit_after_roster = Some(0);
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn render_profiles_keep_fixed_simulation_and_select_expected_window_path() {
+        assert_eq!(
+            render_profile_settings(RenderProfile::Native).0,
+            PresentMode::Fifo
+        );
+        assert_eq!(
+            render_profile_settings(RenderProfile::HighRefresh).0,
+            PresentMode::AutoNoVsync
+        );
+        let (_, settings) = render_profile_settings(RenderProfile::ThirtyFps);
+        assert!(matches!(
+            settings.focused_mode,
+            UpdateMode::Reactive { wait, .. } if wait == RENDER_30_INTERVAL
+        ));
+        let (_, settings) = render_profile_settings(RenderProfile::SixtyFps);
+        assert!(matches!(
+            settings.focused_mode,
+            UpdateMode::Reactive { wait, .. } if wait == RENDER_60_INTERVAL
+        ));
     }
 
     #[test]
@@ -1593,6 +1788,82 @@ mod tests {
     }
 
     #[test]
+    fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
+        let mut gamepad = Gamepad::default();
+        gamepad.analog_mut().set(GamepadAxis::LeftStickX, 0.75);
+        gamepad.analog_mut().set(GamepadAxis::RightStickY, -0.8);
+        gamepad.analog_mut().set(GamepadButton::RightTrigger2, 1.0);
+        gamepad.digital_mut().press(GamepadButton::Start);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .init_resource::<PendingLocalActions>()
+            .init_resource::<ClientInputContext>()
+            .init_resource::<InputDeviceActivity>()
+            .init_resource::<InputTuning>()
+            .add_systems(Update, sample_local_input);
+        let gamepad_entity = app.world_mut().spawn(gamepad).id();
+
+        app.update();
+
+        let pending = app.world().resource::<PendingLocalActions>();
+        assert_eq!(
+            pending.active_device,
+            ActiveInputDevice::Gamepad(gamepad_entity)
+        );
+        assert_eq!(pending.move_axis, Vec2::new(0.75, 0.0));
+        assert_eq!(pending.aim_axis, Some(Vec2::new(0.0, -0.8)));
+        assert_ne!(pending.held_buttons & FighterInput::PRIMARY_FIRE, 0);
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Paused
+        );
+        assert_ne!(pending.action_indicator & ACTION_PAUSE, 0);
+    }
+
+    #[test]
+    fn controller_sample_reaches_native_fighter_action_buffer() {
+        let mut gamepad = Gamepad::default();
+        gamepad.analog_mut().set(GamepadAxis::LeftStickX, 0.75);
+        gamepad.analog_mut().set(GamepadAxis::RightStickY, -0.8);
+        gamepad.analog_mut().set(GamepadButton::RightTrigger2, 1.0);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .init_resource::<PendingLocalActions>()
+            .init_resource::<ClientInputContext>()
+            .init_resource::<InputDeviceActivity>()
+            .init_resource::<InputTuning>()
+            .add_systems(Update, (sample_local_input, write_client_input).chain());
+        app.world_mut().spawn((
+            ActionState::<FighterInput>::default(),
+            InputMarker::<FighterInput>::default(),
+        ));
+        let gamepad_entity = app.world_mut().spawn(gamepad).id();
+
+        app.update();
+
+        let mut actions = app.world_mut().query::<&ActionState<FighterInput>>();
+        let action = actions
+            .single(app.world())
+            .expect("one controller input target");
+        assert_eq!(
+            action.0,
+            FighterInput::from_axes(
+                Vec2::new(0.75, 0.0),
+                Some(Vec2::new(0.0, -0.8)),
+                FighterInput::PRIMARY_FIRE,
+            )
+        );
+        assert_eq!(
+            app.world().resource::<PendingLocalActions>().active_device,
+            ActiveInputDevice::Gamepad(gamepad_entity)
+        );
+    }
+
+    #[test]
     fn interpolated_fighter_pose_is_written_to_render_transform() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1647,6 +1918,55 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_mouse_selection_persists_until_gamepad_activity() {
+        let gamepad = Entity::from_raw_u32(3).expect("valid test entity index");
+        assert_eq!(
+            select_active_input_device(
+                ActiveInputDevice::KeyboardMouse,
+                false,
+                Some(gamepad),
+                None,
+            ),
+            ActiveInputDevice::KeyboardMouse
+        );
+        assert_eq!(
+            select_active_input_device(
+                ActiveInputDevice::KeyboardMouse,
+                false,
+                Some(gamepad),
+                Some(gamepad),
+            ),
+            ActiveInputDevice::Gamepad(gamepad)
+        );
+        assert_eq!(
+            select_active_input_device(
+                ActiveInputDevice::Gamepad(gamepad),
+                true,
+                Some(gamepad),
+                None,
+            ),
+            ActiveInputDevice::KeyboardMouse
+        );
+    }
+
+    #[test]
+    fn controller_cancel_does_not_toggle_pause() {
+        let mut context = ClientInputContext::Gameplay;
+        let mut pending = PendingLocalActions {
+            cancel_pressed: true,
+            latched_buttons: FighterInput::INTERACT,
+            ..default()
+        };
+        apply_pause_request(&mut context, &mut pending, false);
+        assert_eq!(context, ClientInputContext::Gameplay);
+        assert_eq!(pending.latched_buttons, FighterInput::INTERACT);
+
+        apply_pause_request(&mut context, &mut pending, true);
+        assert_eq!(context, ClientInputContext::Paused);
+        assert_eq!(pending.latched_buttons, 0);
+    }
+
+    #[test]
     fn camera_clamp_uses_viewport_aspect_and_centers_oversized_axes() {
         let arena = GreyboxArenaDefinition::default();
         let landscape = clamp_camera_center(Vec2::new(900.0, 0.0), arena, Vec2::new(16.0, 9.0));
@@ -1660,6 +1980,24 @@ mod tests {
             clamp_camera_center(Vec2::new(900.0, 400.0), arena, Vec2::new(4000.0, 100.0));
         assert!(oversized.x.abs() < 0.001);
         assert!((oversized.y - 140.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn client_arena_spawns_visible_geometry_for_every_blocker() {
+        let arena = GreyboxArenaDefinition::default();
+        let expected_visuals =
+            arena.perimeter_visual_shapes().len() * 2 + arena.cover_shapes().len() * 2;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(arena)
+            .add_systems(Startup, spawn_client_arena);
+
+        app.update();
+
+        let mut visuals = app
+            .world_mut()
+            .query_filtered::<Entity, With<ArenaVisual>>();
+        assert_eq!(visuals.iter(app.world()).count(), expected_visuals);
     }
 
     #[test]

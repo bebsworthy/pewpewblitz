@@ -25,13 +25,17 @@ use lightyear::prelude::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::combat::{
+    AuthoritativeTick, CombatCue, CurrentHealth, Defeated, FighterDefinitionId, Projectile,
+    ProjectileSource, SelectedBuild, TeamId, WeaponDefinitionId, WeaponState,
+};
 use crate::timing::SIMULATION_TICK;
 
 /// Netcode protocol ID. Bump this for incompatible wire-level changes.
-pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5234;
+pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5236;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 2;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 4;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -39,10 +43,14 @@ pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
 /// Ordered reliable channel for the compatibility handshake and join outcome.
 pub struct SessionChannel;
 
+/// Ordered reliable server-to-client stream for presentation-only combat facts.
+pub struct CombatChannel;
+
 #[cfg(feature = "network-test")]
 pub type TestNativeInputMessage = InputMessage<NativeStateSequence<FighterInput>>;
 
 #[cfg(feature = "network-test")]
+#[must_use]
 pub fn forged_native_input_message_for_test(
     target: InputTarget,
     end_tick: u32,
@@ -238,10 +246,28 @@ impl Plugin for ProtocolPlugin {
         })
         .add_direction(NetworkDirection::Bidirectional);
 
+        app.register_message::<CombatCue>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.add_channel::<CombatChannel>(ChannelSettings {
+            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::ServerToClient);
+
         app.component::<Fighter>().replicate_once();
         app.component::<PlayerId>().replicate_once();
         app.component::<NetworkEntityId>().replicate_once();
         app.component::<PlaceholderState>().replicate();
+        app.component::<FighterDefinitionId>().replicate_once();
+        app.component::<WeaponDefinitionId>().replicate_once();
+        app.component::<SelectedBuild>().replicate_once();
+        app.component::<TeamId>().replicate();
+        app.component::<CurrentHealth>().replicate();
+        app.component::<WeaponState>().replicate();
+        app.component::<AuthoritativeTick>().replicate();
+        app.component::<Defeated>().replicate();
+        app.component::<Projectile>().replicate_once();
+        app.component::<ProjectileSource>().replicate_once();
         app.component::<Position>()
             .replicate()
             .add_linear_interpolation();
@@ -305,6 +331,7 @@ mod tests {
 
         assert!(app.is_message_registered::<ClientHello>());
         assert!(app.is_message_registered::<JoinOutcome>());
+        assert!(app.is_message_registered::<CombatCue>());
         assert!(app.world().contains_resource::<MessageRegistry>());
         assert!(app.world().contains_resource::<ChannelRegistry>());
         let channels = app.world().resource::<ChannelRegistry>();
@@ -316,6 +343,19 @@ mod tests {
         assert!(components.is_registered::<PlayerId>());
         assert!(components.is_registered::<NetworkEntityId>());
         assert!(components.is_registered::<PlaceholderState>());
+        assert!(components.is_registered::<FighterDefinitionId>());
+        assert!(components.is_registered::<WeaponDefinitionId>());
+        assert!(components.is_registered::<SelectedBuild>());
+        assert!(components.is_registered::<TeamId>());
+        assert!(components.is_registered::<CurrentHealth>());
+        assert!(components.is_registered::<WeaponState>());
+        assert!(components.is_registered::<AuthoritativeTick>());
+        assert!(components.is_registered::<Defeated>());
+        assert!(components.is_registered::<Projectile>());
+        assert!(components.is_registered::<ProjectileSource>());
+        assert!((0..32).any(|id| {
+            channels.get_name_from_net_id(id) == core::any::type_name::<CombatChannel>()
+        }));
     }
 
     #[cfg(feature = "client")]

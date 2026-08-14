@@ -19,8 +19,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 03 verifying; Milestone 02 user playtest remains open; Milestone 01 user playtest pending
-- **Current milestone:** Milestone 03 — Movement, aiming, and greybox collision
+- **Overall status:** Milestone 05 specification review; Milestone 04 feedback review, Milestone 03 verification, and earlier user playtests remain open
+- **Current milestone:** Milestone 05 — Weapon composition and selection
 - **Last completed milestone:** None
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -31,7 +31,7 @@ Record deferred implementation and playtest feedback here. Every item needs its 
 
 | ID | Source | Item | Rationale | Review target |
 |---|---|---|---|---|
-| M03-PRED | Milestone 03 implementation decision | Run the impairment/latency comparison for owner prediction; retain authoritative interpolation until the gate has evidence. | Prediction is intentionally not enabled without measured convergence and correction behavior. | Milestone 04 preparation |
+| M03-PRED | Milestone 03 implementation decision | Run the impairment/latency comparison for owner prediction; the M04 harness records the authoritative owner baseline and keeps prediction disabled until a predicted comparison exists. | Prediction is intentionally not enabled without measured convergence and correction behavior. | Milestone 03 verification |
 
 ## Planning and evidence rule
 
@@ -150,9 +150,9 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 |---|---|---|---|
 | 01 | User playtest | Rust and Bevy application foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | User playtest | Network connection and replication sandbox | [milestone-02.md](./milestone-02.md) |
-| 03 | User playtest | Movement, aiming, and greybox collision | [milestone-03.md](./milestone-03.md) |
-| 04 | Not started | Combat core | Create when next |
-| 05 | Not started | Weapon composition and selection | Create when next |
+| 03 | Verifying | Movement, aiming, and greybox collision | [milestone-03.md](./milestone-03.md) |
+| 04 | Feedback review | Combat core | [milestone-04.md](./milestone-04.md) |
+| 05 | Specification review | Weapon composition and selection | [milestone-05.md](./milestone-05.md) |
 | 06 | Not started | First authored arena and presentation baseline | Create when next |
 | 07 | Not started | Wipeout match loop | Create when next |
 | 08 | Not started | Abilities and bounded build presets | Create when next |

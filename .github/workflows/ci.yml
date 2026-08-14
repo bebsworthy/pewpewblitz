@@ -44,3 +44,5 @@ jobs:
           components: rustfmt, clippy
       - name: Network integration tests
         run: cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1
+      - name: Headless combat performance
+        run: cargo test --locked --no-default-features --features network-test --test performance -- --nocapture

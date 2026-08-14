@@ -2,6 +2,96 @@
 
 use bevy::prelude::Resource;
 use core::{net::SocketAddr, time::Duration};
+use lightyear::prelude::{LinkConditionerConfig, RecvLinkConditioner};
+
+/// Windowed presentation profile used by the visual smoke-test workflow.
+///
+/// The default keeps the platform's normal vsync behavior. The explicit profiles make it
+/// possible to repeat the same scenario at the milestone's 30 Hz, 60 Hz, and high-refresh paths
+/// without changing the fixed authoritative simulation tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RenderProfile {
+    #[default]
+    Native,
+    ThirtyFps,
+    SixtyFps,
+    HighRefresh,
+}
+
+impl RenderProfile {
+    #[must_use]
+    pub fn from_env() -> Self {
+        std::env::var("BRAWLER_RENDER_PROFILE")
+            .ok()
+            .and_then(|value| Self::parse(&value))
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "native" | "default" => Some(Self::Native),
+            "30" | "30hz" | "30fps" => Some(Self::ThirtyFps),
+            "60" | "60hz" | "60fps" => Some(Self::SixtyFps),
+            "high" | "high-refresh" | "high_refresh" | "uncapped" => Some(Self::HighRefresh),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::ThirtyFps => "30fps",
+            Self::SixtyFps => "60fps",
+            Self::HighRefresh => "high-refresh",
+        }
+    }
+}
+
+/// Statistical receive-side impairment profile used by process and Crossbeam evidence runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NetworkImpairmentProfile {
+    #[default]
+    Local,
+    Typical,
+    Adverse,
+}
+
+impl NetworkImpairmentProfile {
+    #[must_use]
+    pub fn from_env() -> Self {
+        match std::env::var("BRAWLER_NETWORK_PROFILE").as_deref() {
+            Ok("typical") => Self::Typical,
+            Ok("adverse") => Self::Adverse,
+            _ => Self::Local,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Typical => "typical",
+            Self::Adverse => "adverse",
+        }
+    }
+
+    #[must_use]
+    pub fn receive_conditioner(self) -> Option<RecvLinkConditioner> {
+        let config = match self {
+            Self::Local => return None,
+            Self::Typical => LinkConditionerConfig::default()
+                .with_incoming_latency(Duration::from_millis(25))
+                .with_incoming_jitter(Duration::from_millis(5)),
+            Self::Adverse => LinkConditionerConfig::default()
+                .with_incoming_latency(Duration::from_millis(50))
+                .with_incoming_jitter(Duration::from_millis(10))
+                .with_fixed_loss(0.02),
+        };
+        Some(RecvLinkConditioner::new(config))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetworkTransport {
@@ -19,6 +109,7 @@ pub struct ServerNetworkConfig {
     pub max_clients: usize,
     pub handshake_timeout: Duration,
     pub client_timeout: Duration,
+    pub impairment_profile: NetworkImpairmentProfile,
 }
 
 impl Default for ServerNetworkConfig {
@@ -32,6 +123,7 @@ impl Default for ServerNetworkConfig {
             max_clients: 8,
             handshake_timeout: Duration::from_secs(3),
             client_timeout: Duration::from_secs(3),
+            impairment_profile: NetworkImpairmentProfile::from_env(),
         }
     }
 }
@@ -63,12 +155,26 @@ pub struct ClientNetworkConfig {
     pub expected_protocol_version: u16,
     pub expected_build_version: String,
     pub connect_timeout: Duration,
+    pub impairment_profile: NetworkImpairmentProfile,
     pub headless: bool,
     pub exit_after_roster: Option<usize>,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
+    pub headless_aim_at_dummy: bool,
+    pub headless_fire: bool,
     pub headless_simulation_ticks: Option<u32>,
+    pub windowed_combat_demo: Option<WindowedCombatDemo>,
+    pub windowed_controller_demo: Option<WindowedControllerDemo>,
+    pub render_profile: RenderProfile,
 }
+
+/// Enables the reproducible, windowed aim-at-dummy/fire smoke scenario.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowedCombatDemo;
+
+/// Enables a reproducible windowed smoke scenario through the native gamepad input path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowedControllerDemo;
 
 impl ClientNetworkConfig {
     #[must_use]
@@ -86,11 +192,17 @@ impl ClientNetworkConfig {
             expected_protocol_version: crate::protocol::SUPPORTED_PROTOCOL_VERSION,
             expected_build_version: crate::VERSION.to_string(),
             connect_timeout: Duration::from_secs(5),
+            impairment_profile: NetworkImpairmentProfile::from_env(),
             headless: false,
             exit_after_roster: None,
             headless_move: None,
             headless_aim: None,
+            headless_aim_at_dummy: false,
+            headless_fire: false,
             headless_simulation_ticks: None,
+            windowed_combat_demo: None,
+            windowed_controller_demo: None,
+            render_profile: RenderProfile::from_env(),
         }
     }
 
@@ -104,21 +216,108 @@ impl ClientNetworkConfig {
         {
             return Err("--simulation-ticks must be greater than zero".to_string());
         }
-        if self.headless_move.is_some() && !self.headless {
-            return Err("--move-axis requires --headless".to_string());
+        let automation_enabled = self.headless
+            || self.windowed_combat_demo.is_some()
+            || self.windowed_controller_demo.is_some();
+        if self.headless_move.is_some() && !automation_enabled {
+            return Err("--move-axis requires --headless or --combat-demo".to_string());
         }
-        if self.headless_aim.is_some() && !self.headless {
-            return Err("--aim-axis requires --headless".to_string());
+        if self.headless_aim.is_some() && !automation_enabled {
+            return Err("--aim-axis requires --headless or --combat-demo".to_string());
         }
-        if self.headless_simulation_ticks.is_some() && !self.headless {
-            return Err("--simulation-ticks requires --headless".to_string());
+        if self.headless_fire && !automation_enabled {
+            return Err("--fire requires --headless or --combat-demo".to_string());
+        }
+        if self.headless_aim_at_dummy && !automation_enabled {
+            return Err("--aim-dummy requires --headless or --combat-demo".to_string());
+        }
+        if self.headless_simulation_ticks.is_some() && !automation_enabled {
+            return Err("--simulation-ticks requires --headless or --combat-demo".to_string());
         }
         if self.connect_timeout.is_zero() {
             return Err("client connect timeout must be greater than zero".to_string());
+        }
+        if self.headless && self.windowed_controller_demo.is_some() {
+            return Err("--controller-demo requires a windowed client".to_string());
+        }
+        if self.windowed_combat_demo.is_some() && self.windowed_controller_demo.is_some() {
+            return Err("--combat-demo and --controller-demo cannot be combined".to_string());
         }
         if self.expected_build_version.is_empty() {
             return Err("expected build version must not be empty".to_string());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn impairment_profiles_have_expected_directional_conditioners() {
+        assert_eq!(NetworkImpairmentProfile::Local.name(), "local");
+        assert!(
+            NetworkImpairmentProfile::Local
+                .receive_conditioner()
+                .is_none()
+        );
+        assert!(
+            NetworkImpairmentProfile::Typical
+                .receive_conditioner()
+                .is_some()
+        );
+        assert!(
+            NetworkImpairmentProfile::Adverse
+                .receive_conditioner()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn windowed_combat_demo_allows_native_automation_flags() {
+        let mut config = ClientNetworkConfig::new(1);
+        config.windowed_combat_demo = Some(WindowedCombatDemo);
+        config.headless_aim_at_dummy = true;
+        config.headless_fire = true;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn render_profiles_parse_all_visual_smoke_modes() {
+        assert_eq!(RenderProfile::parse("native"), Some(RenderProfile::Native));
+        assert_eq!(
+            RenderProfile::parse("30fps"),
+            Some(RenderProfile::ThirtyFps)
+        );
+        assert_eq!(RenderProfile::parse("60Hz"), Some(RenderProfile::SixtyFps));
+        assert_eq!(
+            RenderProfile::parse("high-refresh"),
+            Some(RenderProfile::HighRefresh)
+        );
+        assert_eq!(RenderProfile::parse("unknown"), None);
+        assert_eq!(RenderProfile::HighRefresh.name(), "high-refresh");
+    }
+
+    #[test]
+    fn controller_demo_is_windowed_and_mutually_exclusive_with_combat_demo() {
+        let mut config = ClientNetworkConfig::new(1);
+        config.windowed_controller_demo = Some(WindowedControllerDemo);
+        assert!(config.validate().is_ok());
+
+        config.windowed_combat_demo = Some(WindowedCombatDemo);
+        assert!(
+            config
+                .validate()
+                .is_err_and(|error| error.contains("cannot be combined"))
+        );
+
+        config.windowed_combat_demo = None;
+        config.headless = true;
+        assert!(
+            config
+                .validate()
+                .is_err_and(|error| error.contains("windowed client"))
+        );
     }
 }

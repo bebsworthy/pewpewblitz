@@ -2,11 +2,17 @@
 #![allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
-    clippy::too_many_arguments
+    clippy::too_many_arguments,
+    clippy::too_many_lines
 )]
 
 use crate::{
     VERSION,
+    combat::{
+        AuthoritativeTick, CombatCueKey, CombatCueKind, CombatTelemetry, CurrentHealth, Defeated,
+        ServerCombatPlugin, SpawnState, TestDummy, default_fighter_runtime, sandbox_team,
+        telemetry_cue_keys,
+    },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
     movement::{
@@ -30,16 +36,16 @@ use bevy::{
     state::app::StatesPlugin,
 };
 use core::time::Duration;
-use lightyear::prelude::server::ServerUdpIo;
 use lightyear::prelude::server::{
     NetcodeConfig, NetcodeServer, ServerPlugins, Start, Started, Stop, Stopped,
 };
+use lightyear::prelude::server::{Server as LightyearServer, ServerUdpIo};
 use lightyear::prelude::{Connected, Disconnected, LinkOf, Linked, LocalAddr};
 use lightyear::prelude::{
     ControlledBy, InterpolationTarget, Lifetime, MessageReceiver, MessageSender, NetworkTarget,
     Replicate, ReplicationMetadata, ReplicationSender,
 };
-use std::{env, fs, path::PathBuf};
+use std::{env, fmt::Write as _, fs, path::PathBuf, time::Instant};
 
 /// Server-side session phase. Lightyear lifecycle components remain the connection truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -79,6 +85,31 @@ struct ProcessMovementCheck {
     initial_poses: Vec<(PlayerId, Vec2, f32)>,
     initial_tick: Option<u64>,
     completed: bool,
+}
+
+#[derive(Resource, Debug)]
+struct ProcessCombatCheck {
+    enabled: bool,
+    ready_file: Option<PathBuf>,
+    client_ready_dir: Option<PathBuf>,
+    report_file: Option<PathBuf>,
+    run_id: String,
+    started_at: Instant,
+    completed: bool,
+}
+
+impl FromWorld for ProcessCombatCheck {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            enabled: env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1"),
+            ready_file: env::var_os("BRAWLER_NETWORK_COMBAT_READY_FILE").map(PathBuf::from),
+            client_ready_dir: env::var_os("BRAWLER_NETWORK_COMBAT_READY_DIR").map(PathBuf::from),
+            report_file: env::var_os("BRAWLER_NETWORK_COMBAT_REPORT_FILE").map(PathBuf::from),
+            run_id: env::var("BRAWLER_NETWORK_RUN_ID").unwrap_or_else(|_| "unknown".to_string()),
+            started_at: Instant::now(),
+            completed: false,
+        }
+    }
 }
 
 impl FromWorld for ProcessMovementCheck {
@@ -168,6 +199,7 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ServerShutdown>()
             .init_resource::<ServerStartup>()
             .init_resource::<ProcessMovementCheck>()
+            .init_resource::<ProcessCombatCheck>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
             .add_systems(Startup, spawn_server_endpoint)
@@ -180,13 +212,15 @@ impl Plugin for ServerNetworkPlugin {
                     enforce_session_deadlines,
                     disconnect_rejected_sessions,
                     verify_process_movement,
+                    verify_process_combat,
                 )
                     .chain(),
             )
             .add_systems(
                 Last,
                 (forward_app_exit_to_server_stop, finish_server_shutdown).chain(),
-            );
+            )
+            .add_plugins(ServerCombatPlugin);
     }
 }
 
@@ -257,6 +291,194 @@ fn verify_process_movement(
     }
 }
 
+fn verify_process_combat(
+    mut check: ResMut<ProcessCombatCheck>,
+    telemetry: Res<CombatTelemetry>,
+    fighters: Res<crate::combat::FighterDefinitions>,
+    weapons: Res<crate::combat::WeaponDefinitions>,
+    dummy: Query<
+        (
+            &CurrentHealth,
+            &crate::combat::FighterDefinitionId,
+            Option<&Defeated>,
+        ),
+        With<TestDummy>,
+    >,
+    sessions: Query<&ServerSession, With<LinkOf>>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    if !check.enabled || check.completed {
+        return;
+    }
+    let active_sessions = sessions
+        .iter()
+        .filter(|session| matches!(session.phase, ServerSessionPhase::Active { .. }))
+        .count();
+    let Some((health, fighter_definition_id, defeated)) = dummy.iter().next() else {
+        return;
+    };
+    let Some(fighter_definition) = fighters.get(*fighter_definition_id) else {
+        return;
+    };
+    let Some(weapon_definition) = weapons.get(crate::combat::PULSE_SIDEARM_DEFINITION) else {
+        return;
+    };
+    let clients_observed = check.client_ready_dir.as_ref().is_some_and(|directory| {
+        [1_u64, 2].iter().all(|client_id| {
+            directory
+                .join(format!("client-{client_id}.ready"))
+                .is_file()
+        })
+    });
+    if active_sessions < 2
+        || telemetry.accepted_shots < 4
+        || telemetry.applied_damage < u64::from(weapon_definition.direct_damage)
+        || telemetry.defeats == 0
+        || health.0 != fighter_definition.maximum_health
+        || defeated.is_some()
+        || !clients_observed
+    {
+        return;
+    }
+    let Some(path) = check.ready_file.clone() else {
+        error!("combat process assertion is enabled without a readiness file");
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    };
+
+    let Some(client_ready_dir) = check.client_ready_dir.clone() else {
+        error!("combat process assertion is enabled without a client evidence directory");
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    };
+    let client_one_path = client_ready_dir.join("client-1.ready");
+    let client_two_path = client_ready_dir.join("client-2.ready");
+    let client_one = match fs::read_to_string(&client_one_path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            error!(path = %client_one_path.display(), ?error, "client one combat evidence could not be read");
+            check.completed = true;
+            app_exit.write(AppExit::error());
+            return;
+        }
+    };
+    let client_two = match fs::read_to_string(&client_two_path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            error!(path = %client_two_path.display(), ?error, "client two combat evidence could not be read");
+            check.completed = true;
+            app_exit.write(AppExit::error());
+            return;
+        }
+    };
+    let expected_cue_stream = telemetry_cue_keys(&telemetry.records);
+    let client_one_cue_stream = parse_client_cue_stream(&client_one);
+    let client_two_cue_stream = parse_client_cue_stream(&client_two);
+    let expected_muzzle_count = expected_cue_stream
+        .iter()
+        .filter(|cue| cue.kind == CombatCueKind::Muzzle)
+        .count() as u64;
+    let cue_converged = expected_muzzle_count == telemetry.accepted_shots
+        && !expected_cue_stream.is_empty()
+        && client_one_cue_stream == expected_cue_stream
+        && client_two_cue_stream == expected_cue_stream;
+    if !cue_converged {
+        error!(
+            accepted_shots = telemetry.accepted_shots,
+            expected_cue_stream = ?expected_cue_stream,
+            client_one_cue_stream = ?client_one_cue_stream,
+            client_two_cue_stream = ?client_two_cue_stream,
+            "combat cue stream evidence is incomplete"
+        );
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    }
+    if let Some(report_path) = check.report_file.clone() {
+        let client_one_cues = parse_client_cue_timestamps(&client_one);
+        let client_two_cues = parse_client_cue_timestamps(&client_two);
+        let mut latency_evidence = String::new();
+        for (shot_id, fired_at) in &telemetry.accepted_shot_timestamps {
+            for (client_name, cues) in [
+                ("client_one", &client_one_cues),
+                ("client_two", &client_two_cues),
+            ] {
+                let Some((_, cue_at)) = cues.iter().find(|(candidate, _)| candidate == &shot_id.0)
+                else {
+                    continue;
+                };
+                if *cue_at >= *fired_at {
+                    let _ = writeln!(
+                        latency_evidence,
+                        "fire_to_cue_{client_name}_us={}",
+                        cue_at.saturating_sub(*fired_at)
+                    );
+                }
+            }
+        }
+        if latency_evidence.is_empty() {
+            error!("combat fire-to-cue latency evidence is incomplete");
+            check.completed = true;
+            app_exit.write(AppExit::error());
+            return;
+        }
+        let report = format!(
+            "run_id={}\nprofile={}\nserver_elapsed_ms={}\naccepted_shots={}\nhostile_hits={}\napplied_damage={}\ndefeats={}\nstate_converged=1\ncue_converged=1\nordered_cue_stream_converged=1\n{}client_one={}client_two={}",
+            check.run_id,
+            env::var("BRAWLER_NETWORK_PROFILE").unwrap_or_else(|_| "local".to_string()),
+            check.started_at.elapsed().as_millis(),
+            telemetry.accepted_shots,
+            telemetry.hostile_fighter_hits,
+            telemetry.applied_damage,
+            telemetry.defeats,
+            latency_evidence,
+            client_one,
+            client_two,
+        );
+        if let Err(error) = fs::write(&report_path, report) {
+            error!(path = %report_path.display(), ?error, "combat report write failed");
+            check.completed = true;
+            app_exit.write(AppExit::error());
+            return;
+        }
+    }
+    if let Err(error) = fs::write(&path, b"combat-ready\n") {
+        error!(path = %path.display(), ?error, "combat readiness signal failed");
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    }
+    check.completed = true;
+    info!(path = %path.display(), "network combat readiness signal written");
+}
+
+fn parse_client_cue_timestamps(contents: &str) -> Vec<(u64, u128)> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("cue_shot_id=")?;
+            let (shot_id, timestamp) = rest.split_once("_epoch_us=")?;
+            Some((shot_id.parse().ok()?, timestamp.parse().ok()?))
+        })
+        .collect()
+}
+
+fn parse_client_cue_stream(contents: &str) -> Vec<CombatCueKey> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("cue_stream=")?;
+            let (kind, event_id) = rest.split_once(':')?;
+            Some(CombatCueKey {
+                kind: CombatCueKind::parse(kind)?,
+                event_id: crate::combat::CombatEventId(event_id.parse().ok()?),
+            })
+        })
+        .collect()
+}
+
 fn configure_new_link(trigger: On<Add, LinkOf>, mut commands: Commands) {
     commands
         .entity(trigger.entity)
@@ -277,6 +499,7 @@ fn spawn_server_endpoint(mut commands: Commands, config: Res<ServerNetworkConfig
     let server = commands
         .spawn((
             NetcodeServer::new(netcode_config),
+            LightyearServer::new(config.impairment_profile.receive_conditioner()),
             LocalAddr(config.bind_addr),
             ServerUdpIo::default(),
             Name::new("Brawler UDP server"),
@@ -357,6 +580,8 @@ fn process_client_hellos(
     fingerprint: Res<ProtocolFingerprint>,
     arena: Res<GreyboxArenaDefinition>,
     movement_tuning: Res<MovementTuning>,
+    fighters: Res<crate::combat::FighterDefinitions>,
+    weapons: Res<crate::combat::WeaponDefinitions>,
     mut ids: ResMut<NextSessionIds>,
     mut receivers: Query<(
         Entity,
@@ -364,7 +589,7 @@ fn process_client_hellos(
         &mut MessageSender<JoinOutcome>,
         &mut ServerSession,
     )>,
-    placeholders: Query<(), With<Fighter>>,
+    placeholders: Query<(), (With<Fighter>, Without<TestDummy>)>,
 ) {
     let mut active_count = placeholders.iter().count();
     for (connection, mut receiver, mut sender, mut session) in receivers.iter_mut() {
@@ -411,19 +636,39 @@ fn process_client_hellos(
                                     network_entity_id,
                                 };
                                 let spawn_position = arena.spawn_position(player_id.0);
-                                commands.spawn((
-                                    Fighter,
-                                    player_id,
-                                    network_entity_id,
-                                    PlaceholderState {
-                                        spawn_slot: u64::from(GreyboxArenaDefinition::spawn_slot(
-                                            player_id.0,
-                                        )),
-                                    },
-                                    Position::from_xy(spawn_position.x, spawn_position.y),
-                                    Rotation::radians(movement_tuning.spawn_facing),
-                                    LinearVelocity::default(),
-                                    AngularVelocity::default(),
+                                let (fighter_definition, build, team, health, weapon) =
+                                    default_fighter_runtime(
+                                        sandbox_team(player_id),
+                                        &fighters,
+                                        &weapons,
+                                    );
+                                let fighter_entity = commands
+                                    .spawn((
+                                        Fighter,
+                                        player_id,
+                                        network_entity_id,
+                                        PlaceholderState {
+                                            spawn_slot: u64::from(
+                                                GreyboxArenaDefinition::spawn_slot(player_id.0),
+                                            ),
+                                        },
+                                        fighter_definition,
+                                        build,
+                                        team,
+                                        health,
+                                        weapon,
+                                        AuthoritativeTick::default(),
+                                        SpawnState {
+                                            position: spawn_position,
+                                            facing: movement_tuning.spawn_facing,
+                                        },
+                                        Position::from_xy(spawn_position.x, spawn_position.y),
+                                        Rotation::radians(movement_tuning.spawn_facing),
+                                        LinearVelocity::default(),
+                                        AngularVelocity::default(),
+                                    ))
+                                    .id();
+                                commands.entity(fighter_entity).insert((
                                     Collider::circle(movement_tuning.radius),
                                     RigidBody::Kinematic,
                                     CustomPositionIntegration,
@@ -590,7 +835,12 @@ pub fn spawn_crossbeam_server(world: &mut World, config: &ServerNetworkConfig) -
         server_addr_check: false,
         ..netcode_config
     };
-    let server = world.spawn(NetcodeServer::new(netcode_config)).id();
+    let server = world
+        .spawn((
+            NetcodeServer::new(netcode_config),
+            LightyearServer::new(config.impairment_profile.receive_conditioner()),
+        ))
+        .id();
     world.flush();
     world.trigger(Start { entity: server });
     world.flush();

@@ -8,8 +8,8 @@
 | Roadmap | [roadmap.md](./roadmap.md) |
 | Status | Verifying |
 | Specification validation | Accepted by explicit implementation request on 2026-08-13 |
-| Implementation | Implemented; owner prediction remains disabled pending the required impairment evidence |
-| Verification | Automated authority, collision, UDP/process, HUD, pause, and performance checks pass; visual, hardware, and prediction evidence remain open |
+| Implementation | Implemented; owner prediction remains disabled pending the comparison gate |
+| Verification | Automated authority, collision, UDP/process, HUD, pause, performance, and lost-input checks pass; visual, hardware, and prediction evidence remain open |
 | User validation/playtest | Pending interactive controller/windowed playtest |
 
 Update this table and the roadmap together whenever the milestone changes phase.
@@ -29,11 +29,11 @@ it does not absorb or close the remaining Milestone 02 playtest.
 
 ### Implementation decision
 
-The authoritative/interpolated baseline is the delivered path. Owner prediction is deferred: the
-repository has no impairment/measurement harness yet, so enabling rollback prediction would be an
-unmeasured architectural expansion. The server remains authoritative, remote and owner views use
-the same canonical replicated pose, and the prediction comparison is a scoped v1 backlog item for
-the next evidence pass.
+The authoritative/interpolated baseline remains the delivered path. Milestone 04 added a receive-
+conditioner process harness and a deterministic input-loss fixture, but it did not implement a
+second owner-predicted composition. The server remains authoritative, remote and owner views use
+the same canonical replicated pose, and `M03-PRED` remains a scoped v1 backlog item until a real
+baseline-versus-predicted comparison can be run under the specified profiles.
 
 ## Source requirements
 
@@ -622,6 +622,25 @@ Crossbeam harness explicitly moves its presentation timeline to the newest histo
 its synthetic time loop does not accumulate the wall-clock ping samples used for live timeline
 synchronization.
 
+Review follow-up on 2026-08-13 closed three input-handling defects: absent-ending native input no
+longer refreshes server freshness, keyboard/mouse remains the selected device until meaningful
+gamepad activity, and controller B/East reports Cancel without toggling the pause context. The
+prediction comparison, delayed/lost transport comparison, windowed interpolation check, physical
+controller check, and user playtest remain open gates; this review does not claim those gates are
+verified.
+
+Follow-up evidence on 2026-08-14 used the Milestone 04 harness:
+
+- `cargo test --locked --no-default-features --features network-test --test network` includes
+  `lost_input_repeats_briefly_then_neutralizes_without_server_pause`, which stops client updates
+  while the server continues its fixed schedule. The server drains already-received native
+  redundancy, then neutralizes movement without pausing or drifting indefinitely.
+- `owner_view_records_authoritative_interpolation_baseline_without_prediction` records the current
+  owner composition as the authoritative/interpolated baseline with no `Predicted` entity.
+- The three-profile UDP combat run measured combat state/cue convergence, but it is not a movement
+  baseline-versus-prediction comparison. Owner prediction remains deferred under `M03-PRED` rather
+  than being inferred from combat timings.
+
 ## Trackable implementation plan
 
 ### Prerequisite and dependency composition
@@ -672,9 +691,9 @@ synchronization.
 
 ### Interpolation, prediction decision, and workflow
 
-- [x] Configure explicit one-tick replication metadata and authoritative network interpolation;
-  if owner prediction passes, verify its fixed-to-render smoothing at multiple render rates without
-  double-smoothing network-interpolated views.
+- [x] Configure explicit one-tick replication metadata and authoritative network interpolation.
+- [ ] Verify fixed-to-render smoothing at multiple render rates if owner prediction passes, without
+  double-smoothing network-interpolated views; the windowed evidence remains open.
 - [ ] Capture the authoritative-owner baseline, implement the owner-prediction comparison behind a
   removable configuration boundary, run all three impairment profiles, and record the gate result.
 - [ ] For the prediction candidate, install `PredictionManager` before replicated spawn, configure
@@ -695,16 +714,19 @@ synchronization.
   hysteresis, and last-valid facing cover boundary values.
 - [x] Known input ticks produce the exact fixed-speed displacement/facing and increment completed
   `SimulationTick` only after validated movement.
-- [x] Missing input repeats only through tick 12, tick 13 is neutral, and facing persists.
+- [x] Missing input repeats only through tick 12, tick 13 is neutral, facing persists, and an
+  absent-ending native message cannot refresh the freshness watermark.
 - [x] Unknown buttons, rate excess, too-old/future, duplicate, reordered, and unauthorized packet
-  targets have transport-fixture coverage and bounded diagnostics; delayed/lost packet recovery
-  remains open.
+  targets have transport-fixture coverage and bounded diagnostics; fixed-schedule lost-input
+  neutralization is covered separately.
 - [x] Wall stop, tangential slide, inside/outside corner, maximum-speed sweep, spawn depenetration,
   bounds, fighter overlap, and terrain-only movement casts are deterministic in the headless Avian
   network harness.
 - [x] Camera clamp handles common aspect ratios, viewport changes, and a viewport larger than the
   arena's horizontal axis.
 - [x] Pause writes neutral gameplay input, leaves fixed time advancing, and clears latches.
+- [x] Keyboard/mouse device ownership persists without new gamepad activity, and controller
+  B/East Cancel does not toggle the pause context.
 - [x] Protocol registration is identical for both Lightyear roles and round-trips the new types;
   an intentionally mismatched registry is still rejected before fighter spawn.
 - [x] The Brawler pose-only bundle overrides Avian's incomplete pose-and-velocity interpolation
@@ -784,9 +806,13 @@ static collision.
 
 ## Feedback review
 
-Pending the user playtest. Each playtest item will be recorded as implemented now, deferred to the
-v1 backlog, rejected with rationale, or awaiting evidence. Tuning changes update the relevant
-constants/tests and preserve authority/collision invariants.
+The user approved the current authoritative/interpolated baseline for now on 2026-08-13, with
+in-depth testing deferred. The fixed-schedule lost-input result is now recorded, while the
+baseline-versus-prediction and movement conditioner comparison, windowed interpolation, physical
+controller, and interactive playtest evidence remain required before M03 closeout. Each playtest
+item will be recorded as implemented now, deferred to the v1 backlog, rejected with
+rationale, or awaiting evidence. Tuning changes update the relevant constants/tests and preserve
+authority/collision invariants.
 
 ## Learn from errors
 
@@ -803,8 +829,8 @@ automatic interpolation bundle must be checked against the application's narrowe
 contract: component history can advance while a higher-priority incomplete bundle suppresses the
 live pose. A rule-precedence test must assert the applied component, not only marker presence or
 client-to-client agreement. These lessons are specific to the current Bevy/Lightyear composition.
-Final closeout remains pending delayed/lost transport evidence, prediction measurements, and user
-windowed/controller playtest feedback.
+Final closeout remains pending the movement delayed/lost transport comparison, prediction
+measurements, and user windowed/controller playtest feedback.
 
 ## Exit checklist
 
@@ -815,8 +841,8 @@ windowed/controller playtest feedback.
 - [x] Controller and keyboard/mouse feed the same gameplay input and fixed movement system.
 - [x] Two players move/aim simultaneously while only the server owns authoritative pose/collision.
 - [ ] Invalid, stale, duplicate, reordered, excessive, delayed, lost, and missing input all have
-  end-to-end verified outcomes; hostile validation is covered, but delayed/lost transport evidence
-  remains open.
+  end-to-end verified outcomes; hostile validation and fixed-schedule lost-input neutralization are
+  covered, but movement conditioner comparison remains open.
 - [x] Fighters cannot leave bounds/cross walls and the collision matrix/policies are represented in
   code/tests where this milestone implements them.
 - [ ] Remote network interpolation is visually acceptable; numeric pose convergence and

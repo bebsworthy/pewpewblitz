@@ -33,6 +33,7 @@ use crate::{
 pub const ARENA_MIN: Vec2 = Vec2::new(-800.0, -500.0);
 pub const ARENA_MAX: Vec2 = Vec2::new(800.0, 500.0);
 pub const CAMERA_VERTICAL_SPAN: f32 = 720.0;
+pub const ARENA_WALL_THICKNESS: f32 = 48.0;
 
 #[derive(Resource, Debug)]
 struct AuthoritativeInputTrace {
@@ -82,7 +83,99 @@ impl GreyboxArenaDefinition {
     #[must_use]
     pub fn spawn_position(self, player_id: u64) -> Vec2 {
         let slot = usize::from(Self::spawn_slot(player_id));
-        Vec2::new(self.spawn_x[slot / 4], self.spawn_y[slot % 4])
+        Vec2::new(self.spawn_x[slot % 2], self.spawn_y[slot / 2])
+    }
+
+    #[must_use]
+    pub fn perimeter_wall_shapes(self) -> [(Vec2, Vec2); 4] {
+        let thickness = ARENA_WALL_THICKNESS;
+        let width = self.max.x - self.min.x;
+        let height = self.max.y - self.min.y;
+        let center = (self.min + self.max) / 2.0;
+        [
+            (
+                Vec2::new(self.min.x - thickness / 2.0, center.y),
+                Vec2::new(thickness, height + thickness * 2.0),
+            ),
+            (
+                Vec2::new(self.max.x + thickness / 2.0, center.y),
+                Vec2::new(thickness, height + thickness * 2.0),
+            ),
+            (
+                Vec2::new(center.x, self.min.y - thickness / 2.0),
+                Vec2::new(width, thickness),
+            ),
+            (
+                Vec2::new(center.x, self.max.y + thickness / 2.0),
+                Vec2::new(width, thickness),
+            ),
+        ]
+    }
+
+    /// Return an in-bounds debug representation of the perimeter collision faces.
+    ///
+    /// The authoritative wall bodies intentionally sit outside the playable rectangle so a
+    /// fighter can reach the exact clamped boundary. A camera following a fighter can therefore
+    /// exclude the collider sprites entirely. Keep this presentation geometry inset from the
+    /// collision face while deriving it from the same arena bounds.
+    #[must_use]
+    pub fn perimeter_visual_shapes(self) -> [(Vec2, Vec2); 4] {
+        const VISUAL_THICKNESS: f32 = 24.0;
+        let width = self.max.x - self.min.x;
+        let height = self.max.y - self.min.y;
+        let center = (self.min + self.max) / 2.0;
+        [
+            (
+                Vec2::new(self.min.x + VISUAL_THICKNESS / 2.0, center.y),
+                Vec2::new(VISUAL_THICKNESS, height),
+            ),
+            (
+                Vec2::new(self.max.x - VISUAL_THICKNESS / 2.0, center.y),
+                Vec2::new(VISUAL_THICKNESS, height),
+            ),
+            (
+                Vec2::new(center.x, self.min.y + VISUAL_THICKNESS / 2.0),
+                Vec2::new(width, VISUAL_THICKNESS),
+            ),
+            (
+                Vec2::new(center.x, self.max.y - VISUAL_THICKNESS / 2.0),
+                Vec2::new(width, VISUAL_THICKNESS),
+            ),
+        ]
+    }
+
+    /// Return the high-contrast inner edge for the in-bounds perimeter debug geometry.
+    #[must_use]
+    pub fn perimeter_visual_edge_shapes(self) -> [(Vec2, Vec2); 4] {
+        const VISUAL_THICKNESS: f32 = 24.0;
+        const EDGE_THICKNESS: f32 = 6.0;
+        let edge_offset = VISUAL_THICKNESS - EDGE_THICKNESS / 2.0;
+        let width = self.max.x - self.min.x;
+        let height = self.max.y - self.min.y;
+        let center = (self.min + self.max) / 2.0;
+        [
+            (
+                Vec2::new(self.min.x + edge_offset, center.y),
+                Vec2::new(EDGE_THICKNESS, height),
+            ),
+            (
+                Vec2::new(self.max.x - edge_offset, center.y),
+                Vec2::new(EDGE_THICKNESS, height),
+            ),
+            (
+                Vec2::new(center.x, self.min.y + edge_offset),
+                Vec2::new(width, EDGE_THICKNESS),
+            ),
+            (
+                Vec2::new(center.x, self.max.y - edge_offset),
+                Vec2::new(width, EDGE_THICKNESS),
+            ),
+        ]
+    }
+
+    #[must_use]
+    pub fn cover_shapes(self) -> [(Vec2, Vec2); 2] {
+        self.cover_centers.map(|center| (center, self.cover_size))
     }
 
     #[must_use]
@@ -222,6 +315,32 @@ fn decoded_input_is_valid(input: FighterInput) -> bool {
         && input
             .aim_update
             .is_none_or(|axis| axis.to_vec2().length_squared() <= 1.0002)
+}
+
+#[cfg(feature = "server")]
+fn input_sequence_ends_with_present_state(
+    states: impl Iterator<Item = Compressed<ActionState<FighterInput>>>,
+) -> bool {
+    let mut present = false;
+    for state in states {
+        match state {
+            Compressed::Absent => present = false,
+            Compressed::Input(_) => present = true,
+            Compressed::SameAsPrecedent => {}
+        }
+    }
+    present
+}
+
+/// Returns the newest remote tick whose resolved buffer value is present.
+///
+/// `InputBuffer::last_remote_tick` is a transport watermark, not a freshness
+/// signal: Lightyear advances it even when a received state resolves to
+/// `Compressed::Absent`. Only a present value (including a resolved
+/// `SameAsPrecedent`) is evidence that the client supplied input for the tick.
+fn latest_present_remote_tick(buffer: &NativeBuffer<FighterInput>) -> Option<u64> {
+    let tick = buffer.last_remote_tick?;
+    buffer.get(tick).map(|_| u64::from(tick.0))
 }
 
 /// Semantic marker for static greybox physics entities.
@@ -397,29 +516,7 @@ impl Plugin for AuthoritativeMovementPlugin {
 }
 
 fn spawn_greybox_arena(mut commands: Commands, arena: Res<GreyboxArenaDefinition>) {
-    let thickness = 48.0;
-    let width = arena.max.x - arena.min.x;
-    let height = arena.max.y - arena.min.y;
-    let center = (arena.min + arena.max) / 2.0;
-    let walls = [
-        (
-            Vec2::new(arena.min.x - thickness / 2.0, center.y),
-            Vec2::new(thickness, height + thickness * 2.0),
-        ),
-        (
-            Vec2::new(arena.max.x + thickness / 2.0, center.y),
-            Vec2::new(thickness, height + thickness * 2.0),
-        ),
-        (
-            Vec2::new(center.x, arena.min.y - thickness / 2.0),
-            Vec2::new(width, thickness),
-        ),
-        (
-            Vec2::new(center.x, arena.max.y + thickness / 2.0),
-            Vec2::new(width, thickness),
-        ),
-    ];
-    for (position, size) in walls {
+    for (position, size) in arena.perimeter_wall_shapes() {
         commands.spawn((
             ArenaWall,
             RigidBody::Static,
@@ -433,11 +530,11 @@ fn spawn_greybox_arena(mut commands: Commands, arena: Res<GreyboxArenaDefinition
             Transform::from_translation(position.extend(0.0)),
         ));
     }
-    for position in arena.cover_centers {
+    for (position, size) in arena.cover_shapes() {
         commands.spawn((
             ArenaWall,
             RigidBody::Static,
-            Collider::rectangle(arena.cover_size.x, arena.cover_size.y),
+            Collider::rectangle(size.x, size.y),
             terrain_collision_layers(),
             Position::from_xy(position.x, position.y),
             Rotation::IDENTITY,
@@ -476,6 +573,7 @@ fn authoritative_movement(
             &InputFreshness,
             Option<&ActionState<FighterInput>>,
             Option<&NativeBuffer<FighterInput>>,
+            Option<&crate::combat::Defeated>,
         ),
         With<Fighter>,
     >,
@@ -486,20 +584,23 @@ fn authoritative_movement(
         skin_width: tuning.skin_width,
         ..default()
     };
-    for (entity, position, rotation, collider, velocity, freshness, action, buffer) in &fighters {
+    for (entity, position, rotation, collider, velocity, freshness, action, buffer, defeated) in
+        &fighters
+    {
+        if defeated.is_some() {
+            continue;
+        }
         let previous_position = position.0;
         let mut position = *position;
         let mut rotation = *rotation;
         let mut velocity = *velocity;
         let mut freshness = *freshness;
-        if let Some(remote_tick) = buffer.and_then(|buffer| buffer.last_remote_tick) {
-            let remote_tick = u64::from(remote_tick.0);
-            if freshness
+        if let Some(remote_tick) = buffer.and_then(latest_present_remote_tick)
+            && freshness
                 .last_fresh_tick
                 .is_none_or(|last| remote_tick > last)
-            {
-                freshness.last_fresh_tick = Some(remote_tick);
-            }
+        {
+            freshness.last_fresh_tick = Some(remote_tick);
         }
         let stale =
             input_should_neutralize(tick.0, freshness.last_fresh_tick, tuning.stale_input_ticks);
@@ -642,6 +743,16 @@ fn validate_fighter_input_messages(
                 return false;
             }
 
+            if !input_sequence_ends_with_present_state(
+                target
+                    .states
+                    .clone()
+                    .get_snapshots_from_message(SIMULATION_TICK),
+            ) {
+                state.malformed_rejections = state.malformed_rejections.saturating_add(1);
+                return false;
+            }
+
             let valid_states = target
                 .states
                 .clone()
@@ -748,18 +859,72 @@ mod tests {
     }
 
     #[test]
+    fn absent_remote_input_does_not_refresh_freshness() {
+        let input = FighterInput::from_axes(Vec2::X, None, 0);
+        let mut buffer = NativeBuffer::<FighterInput>::default();
+        buffer.set(lightyear::prelude::Tick(10), ActionState(input));
+        buffer.last_remote_tick = Some(lightyear::prelude::Tick(10));
+        assert_eq!(latest_present_remote_tick(&buffer), Some(10));
+
+        buffer.set_empty(lightyear::prelude::Tick(11));
+        buffer.last_remote_tick = Some(lightyear::prelude::Tick(11));
+        assert_eq!(latest_present_remote_tick(&buffer), None);
+    }
+
+    #[test]
     fn camera_and_spawn_bounds_are_stable() {
         let arena = GreyboxArenaDefinition::default();
         assert_eq!(arena.spawn_position(1), Vec2::new(-620.0, -300.0));
-        assert_eq!(arena.spawn_position(2), Vec2::new(-620.0, -100.0));
-        assert_eq!(arena.spawn_position(5), Vec2::new(620.0, -300.0));
+        assert_eq!(arena.spawn_position(2), Vec2::new(620.0, -300.0));
+        assert_eq!(arena.spawn_position(5), Vec2::new(-620.0, 100.0));
         assert_eq!(arena.spawn_position(8), Vec2::new(620.0, 300.0));
         assert_eq!(GreyboxArenaDefinition::spawn_slot(1), 0);
         assert_eq!(GreyboxArenaDefinition::spawn_slot(8), 7);
+        let perimeter = arena.perimeter_wall_shapes();
+        assert!((perimeter[0].0.x - (arena.min.x - ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
+        assert!((perimeter[1].0.x - (arena.max.x + ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
+        assert!((perimeter[2].0.y - (arena.min.y - ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
+        assert!((perimeter[3].0.y - (arena.max.y + ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
+        assert_eq!(
+            arena.cover_shapes()[0],
+            (Vec2::new(0.0, -220.0), Vec2::new(180.0, 120.0))
+        );
         assert_eq!(
             arena.clamp_position(Vec2::new(9_000.0, -9_000.0), 24.0),
             Vec2::new(776.0, -476.0)
         );
+    }
+
+    #[test]
+    fn perimeter_visual_shapes_are_in_bounds_and_follow_collision_faces() {
+        let arena = GreyboxArenaDefinition::default();
+        let visuals = arena.perimeter_visual_shapes();
+
+        assert_eq!(
+            visuals[0],
+            (Vec2::new(-788.0, 0.0), Vec2::new(24.0, 1000.0))
+        );
+        assert_eq!(visuals[1], (Vec2::new(788.0, 0.0), Vec2::new(24.0, 1000.0)));
+        assert_eq!(
+            visuals[2],
+            (Vec2::new(0.0, -488.0), Vec2::new(1600.0, 24.0))
+        );
+        assert_eq!(visuals[3], (Vec2::new(0.0, 488.0), Vec2::new(1600.0, 24.0)));
+
+        for (position, size) in visuals {
+            let min = position - size / 2.0;
+            let max = position + size / 2.0;
+            assert!(min.x >= arena.min.x);
+            assert!(min.y >= arena.min.y);
+            assert!(max.x <= arena.max.x);
+            assert!(max.y <= arena.max.y);
+        }
+
+        let edges = arena.perimeter_visual_edge_shapes();
+        assert_eq!(edges[0], (Vec2::new(-779.0, 0.0), Vec2::new(6.0, 1000.0)));
+        assert_eq!(edges[1], (Vec2::new(779.0, 0.0), Vec2::new(6.0, 1000.0)));
+        assert_eq!(edges[2], (Vec2::new(0.0, -479.0), Vec2::new(1600.0, 6.0)));
+        assert_eq!(edges[3], (Vec2::new(0.0, 479.0), Vec2::new(1600.0, 6.0)));
     }
 
     #[test]
@@ -831,5 +996,24 @@ mod tests {
             y: QuantizedAxis2::MAX,
         };
         assert!(!decoded_input_is_valid(too_fast));
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn absent_end_state_cannot_refresh_input_validation() {
+        let input = FighterInput::from_axes(Vec2::X, None, 0);
+        assert!(input_sequence_ends_with_present_state(
+            [
+                Compressed::Input(ActionState(input)),
+                Compressed::SameAsPrecedent,
+            ]
+            .into_iter(),
+        ));
+        assert!(!input_sequence_ends_with_present_state(
+            [Compressed::Input(ActionState(input)), Compressed::Absent,].into_iter(),
+        ));
+        assert!(!input_sequence_ends_with_present_state(
+            [Compressed::Absent, Compressed::SameAsPrecedent].into_iter(),
+        ));
     }
 }

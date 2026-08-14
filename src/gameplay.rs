@@ -6,8 +6,10 @@ use bevy::prelude::*;
 /// Ordering contract for gameplay systems that will be added in later milestones.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GameplaySet {
+    Lifecycle,
     Input,
     Simulation,
+    Fire,
     Finalize,
 }
 
@@ -21,20 +23,33 @@ impl Plugin for GameplayPlugin {
             .configure_sets(
                 FixedUpdate,
                 (
+                    GameplaySet::Lifecycle,
                     GameplaySet::Input,
                     GameplaySet::Simulation,
+                    GameplaySet::Fire,
                     GameplaySet::Finalize,
                 )
                     .chain(),
-            )
-            .add_systems(
-                FixedUpdate,
-                advance_simulation_tick.in_set(GameplaySet::Finalize),
             );
+        app.configure_sets(
+            FixedPostUpdate,
+            (
+                crate::combat::CombatSet::ProjectileSweep,
+                crate::combat::CombatSet::Damage,
+                crate::combat::CombatSet::Lifecycle,
+                crate::combat::CombatSet::TelemetryAndCues,
+                crate::combat::CombatSet::Finalize,
+            )
+                .chain(),
+        )
+        .add_systems(
+            FixedPostUpdate,
+            advance_simulation_tick.in_set(crate::combat::CombatSet::Finalize),
+        );
     }
 }
 
-fn advance_simulation_tick(mut tick: ResMut<SimulationTick>) {
+pub(crate) fn advance_simulation_tick(mut tick: ResMut<SimulationTick>) {
     tick.0 = tick.0.saturating_add(1);
 }
 

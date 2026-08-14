@@ -2,7 +2,7 @@ use avian2d::prelude::{Position, Rotation};
 use bevy::{
     app::App,
     platform::time::Instant,
-    prelude::{Entity, MinimalPlugins, Vec2, With},
+    prelude::{Entity, MinimalPlugins, Vec2, With, Without},
     state::app::StatesPlugin,
     time::TimeUpdateStrategy,
 };
@@ -10,6 +10,11 @@ use brawler::{
     client::{
         ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions,
         spawn_crossbeam_client,
+    },
+    combat::{
+        CaptureCombatCues, CombatCue, CombatCueKey, CombatCueKind, CombatEventId, CombatTelemetry,
+        CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions, Projectile, TeamId,
+        TestDummy, WeaponPhase, WeaponState, combat_cue_key, telemetry_cue_keys,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -31,7 +36,7 @@ use lightyear::prelude::client::{Client, Connected, Disconnect, Disconnected, Re
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Stopped};
 use lightyear::prelude::{
     AppMessageExt, ConfirmedHistory, Controlled, Interpolated, InterpolationTimeline, LocalAddr,
-    MessageSender, NetworkDirection, NetworkTimeline,
+    MessageSender, NetworkDirection, NetworkTimeline, Predicted,
 };
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +58,7 @@ struct Harness {
     server_links: Vec<Entity>,
     clients: Vec<App>,
     client_entities: Vec<Entity>,
+    client_cues: Vec<Vec<CombatCue>>,
     now: Instant,
 }
 
@@ -103,6 +109,7 @@ impl Harness {
             server_links: Vec::with_capacity(client_count),
             clients: Vec::with_capacity(client_count),
             client_entities: Vec::with_capacity(client_count),
+            client_cues: Vec::with_capacity(client_count),
             now: Instant::now(),
         };
         for client_id in 1..=client_count as u64 {
@@ -148,6 +155,7 @@ impl Harness {
         if extra_protocol {
             client.add_plugins(MismatchedProtocolPlugin);
         }
+        client.insert_resource(CaptureCombatCues::default());
         client.add_plugins(ClientNetworkPlugin);
         client.finish();
         client.cleanup();
@@ -162,14 +170,44 @@ impl Harness {
         self.clients.push(client);
         self.client_entities.push(client_entity);
         self.server_links.push(server_link);
+        self.client_cues.push(Vec::new());
     }
 
     fn step(&mut self) {
         self.now += SIMULATION_TICK;
-        for client in &mut self.clients {
+        for index in 0..self.clients.len() {
+            let client = &mut self.clients[index];
             client.insert_resource(TimeUpdateStrategy::ManualInstant(self.now));
             client.update();
+            self.drain_client_cues(index);
         }
+        self.server
+            .insert_resource(TimeUpdateStrategy::ManualInstant(self.now));
+        self.server.update();
+    }
+
+    fn drain_client_cues(&mut self, index: usize) {
+        let cues = {
+            let world = self.clients[index].world_mut();
+            let Some(mut capture) = world.get_resource_mut::<CaptureCombatCues>() else {
+                return;
+            };
+            std::mem::take(&mut capture.cues)
+        };
+        if index >= self.client_cues.len() {
+            self.client_cues.resize_with(index + 1, Vec::new);
+        }
+        self.client_cues[index].extend(cues);
+    }
+
+    fn client_cue_keys(&self, index: usize) -> Vec<CombatCueKey> {
+        self.client_cues[index].iter().map(combat_cue_key).collect()
+    }
+
+    /// Advance only the authoritative server after a client stops producing input.
+    /// This models a lost-input interval while keeping the fixed simulation running.
+    fn step_server_only(&mut self) {
+        self.now += SIMULATION_TICK;
         self.server
             .insert_resource(TimeUpdateStrategy::ManualInstant(self.now));
         self.server.update();
@@ -189,9 +227,10 @@ impl Harness {
         let mut query = self
             .server
             .world_mut()
-            .query_filtered::<(&PlayerId, &NetworkEntityId), With<PlaceholderPlayer>>();
+            .query_filtered::<(&PlayerId, &NetworkEntityId), (With<PlaceholderPlayer>, Without<TestDummy>)>();
         let mut ids: Vec<_> = query
             .iter(self.server.world())
+            .filter(|(player, _)| player.0 != 0)
             .map(|(player, entity)| (*player, *entity))
             .collect();
         ids.sort_by_key(|(player, entity)| (player.0, entity.0));
@@ -200,9 +239,11 @@ impl Harness {
 
     fn client_ids(&mut self, index: usize) -> Vec<(PlayerId, NetworkEntityId)> {
         let world = self.clients[index].world_mut();
-        let mut query = world.query_filtered::<(&PlayerId, &NetworkEntityId), With<Remote>>();
+        let mut query = world
+            .query_filtered::<(&PlayerId, &NetworkEntityId), (With<Remote>, Without<TestDummy>)>();
         let mut ids: Vec<_> = query
             .iter(world)
+            .filter(|(player, _)| player.0 != 0)
             .map(|(player, entity)| (*player, *entity))
             .collect();
         ids.sort_by_key(|(player, entity)| (player.0, entity.0));
@@ -289,9 +330,11 @@ impl Harness {
 
     fn server_positions(&mut self) -> Vec<(PlayerId, Position)> {
         let world = self.server.world_mut();
-        let mut query = world.query_filtered::<(&PlayerId, &Position), With<Fighter>>();
+        let mut query =
+            world.query_filtered::<(&PlayerId, &Position), (With<Fighter>, Without<TestDummy>)>();
         let mut positions: Vec<_> = query
             .iter(world)
+            .filter(|(player, _)| player.0 != 0)
             .map(|(player, position)| (*player, *position))
             .collect();
         positions.sort_by_key(|(player, _)| player.0);
@@ -305,11 +348,24 @@ impl Harness {
         walls.iter(world).count() + markers.iter(world).count()
     }
 
+    fn server_projectile_count(&mut self) -> usize {
+        let world = self.server.world_mut();
+        let mut query = world.query_filtered::<Entity, With<Projectile>>();
+        query.iter(world).count()
+    }
+
+    fn client_projectile_count(&mut self, index: usize) -> usize {
+        let world = self.clients[index].world_mut();
+        let mut query = world.query_filtered::<Entity, With<Projectile>>();
+        query.iter(world).count()
+    }
+
     fn server_poses(&mut self) -> Vec<(PlayerId, Position, Rotation)> {
         let world = self.server.world_mut();
-        let mut query = world.query_filtered::<(&PlayerId, &Position, &Rotation), With<Fighter>>();
+        let mut query = world.query_filtered::<(&PlayerId, &Position, &Rotation), (With<Fighter>, Without<TestDummy>)>();
         let mut poses: Vec<_> = query
             .iter(world)
+            .filter(|(player, _, _)| player.0 != 0)
             .map(|(player, position, rotation)| (*player, *position, *rotation))
             .collect();
         poses.sort_by_key(|(player, _, _)| player.0);
@@ -322,10 +378,30 @@ impl Harness {
             world.query_filtered::<(&PlayerId, &Position), (With<Fighter>, With<Remote>)>();
         let mut positions: Vec<_> = query
             .iter(world)
+            .filter(|(player, _)| player.0 != 0)
             .map(|(player, position)| (*player, *position))
             .collect();
         positions.sort_by_key(|(player, _)| player.0);
         positions
+    }
+
+    fn client_fighter_combat_state(
+        &mut self,
+        index: usize,
+        network_id: NetworkEntityId,
+    ) -> (CurrentHealth, WeaponState, bool) {
+        let world = self.clients[index].world_mut();
+        let mut query = world.query_filtered::<(
+            &NetworkEntityId,
+            &CurrentHealth,
+            &WeaponState,
+            Option<&Defeated>,
+        ), With<Fighter>>();
+        query
+            .iter(world)
+            .find(|(candidate, _, _, _)| **candidate == network_id)
+            .map(|(_, health, weapon, defeated)| (*health, *weapon, defeated.is_some()))
+            .expect("client should have the requested combat fighter")
     }
 
     /// The in-memory harness advances Bevy time without wall-clock delay, so Lightyear's ping
@@ -334,10 +410,11 @@ impl Harness {
     fn sample_client_at_newest_position_history(&mut self, index: usize) {
         let newest_tick = {
             let world = self.clients[index].world_mut();
-            let mut query = world.query_filtered::<&ConfirmedHistory<Position>, With<Fighter>>();
+            let mut query = world.query_filtered::<(&PlayerId, &ConfirmedHistory<Position>), (With<Fighter>, Without<TestDummy>)>();
             query
                 .iter(world)
-                .filter_map(ConfirmedHistory::newest_present)
+                .filter(|(player, _)| player.0 != 0)
+                .filter_map(|(_, history)| history.newest_present())
                 .map(|(tick, _)| tick)
                 .max()
                 .expect("client fighter should have replicated position history")
@@ -356,9 +433,16 @@ impl Harness {
 
     fn client_interpolated_fighters(&mut self, index: usize) -> usize {
         let world = self.clients[index].world_mut();
-        let mut query =
-            world.query_filtered::<Entity, (With<Fighter>, With<Remote>, With<Interpolated>)>();
-        query.iter(world).count()
+        let mut query = world.query_filtered::<(&PlayerId, Entity), (
+            With<Fighter>,
+            With<Remote>,
+            With<Interpolated>,
+            Without<TestDummy>,
+        )>();
+        query
+            .iter(world)
+            .filter(|(player, _)| player.0 != 0)
+            .count()
     }
 }
 
@@ -387,8 +471,622 @@ fn two_clients_connect_and_receive_the_same_server_owned_roster() {
     let mut query = harness.server.world_mut().query_filtered::<(
         &lightyear::prelude::Replicate,
         &lightyear::prelude::ControlledBy,
-    ), With<PlaceholderPlayer>>();
+    ), (With<PlaceholderPlayer>, Without<TestDummy>)>(
+    );
     assert_eq!(query.iter(harness.server.world()).count(), 2);
+}
+
+#[test]
+fn lost_input_repeats_briefly_then_neutralizes_without_server_pause() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.client_ids(0).len() == 1
+    });
+
+    harness.set_controlled_input(0, FighterInput::from_axes(Vec2::X, None, 0));
+    for _ in 0..36 {
+        harness.step();
+    }
+    let moving_position = harness.server_positions()[0].1.0;
+
+    // Native input redundancy can leave a few already-received states in the
+    // authoritative buffer; the server must drain those before neutralizing.
+    for _ in 0..24 {
+        harness.step_server_only();
+    }
+    let neutralized_position = harness.server_positions()[0].1.0;
+    for _ in 0..4 {
+        harness.step_server_only();
+    }
+    let settled_position = harness.server_positions()[0].1.0;
+
+    assert!(
+        neutralized_position.x > moving_position.x,
+        "lost input did not advance before neutralization: moving={moving_position:?} neutralized={neutralized_position:?}"
+    );
+    assert!(
+        settled_position.distance(neutralized_position) < 0.001,
+        "server kept moving after neutralization: neutralized={neutralized_position:?} settled={settled_position:?}"
+    );
+}
+
+#[test]
+fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+            && harness.client_ids(0).len() == 2
+            && harness.client_ids(1).len() == 2
+    });
+    let dummy_aim = if harness.controlled_player_id(0).0 == 1 {
+        Vec2::X
+    } else {
+        -Vec2::X
+    };
+
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(dummy_aim), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&Defeated, With<TestDummy>>();
+        query.iter(world).next().is_some()
+    });
+
+    harness.step_until(|harness| {
+        [0, 1].into_iter().all(|index| {
+            let (health, _, defeated) =
+                harness.client_fighter_combat_state(index, DUMMY_NETWORK_ENTITY);
+            health.0 == 0 && defeated
+        })
+    });
+
+    let defeated_health = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
+        query.single(world).expect("dummy health").0
+    };
+    assert_eq!(defeated_health, 0);
+    let (accepted_shots, applied_damage, defeats) = {
+        let telemetry = harness.server.world().resource::<CombatTelemetry>();
+        (
+            telemetry.accepted_shots,
+            telemetry.applied_damage,
+            telemetry.defeats,
+        )
+    };
+    assert!(accepted_shots >= 4);
+    assert_eq!(applied_damage, 100);
+    assert_eq!(defeats, 1);
+
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut defeated = world.query_filtered::<Entity, With<TestDummy>>();
+        let dummy = defeated.single(world).expect("dummy");
+        world.get::<Defeated>(dummy).is_none()
+    });
+    harness.step_until(|harness| {
+        [0, 1].into_iter().all(|index| {
+            let (health, weapon, defeated) =
+                harness.client_fighter_combat_state(index, DUMMY_NETWORK_ENTITY);
+            health.0 == 100
+                && weapon.ammo == 6
+                && matches!(weapon.phase, WeaponPhase::Ready)
+                && !defeated
+        })
+    });
+    let reset_health = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
+        query.single(world).expect("reset dummy health").0
+    };
+    assert_eq!(reset_health, 100);
+    assert!(
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .records
+            .iter()
+            .any(|record| matches!(record, brawler::combat::CombatLogRecord::Reset { .. }))
+    );
+    let expected_cue_stream =
+        telemetry_cue_keys(&harness.server.world().resource::<CombatTelemetry>().records);
+    let expected_muzzle_count = expected_cue_stream
+        .iter()
+        .filter(|cue| cue.kind == CombatCueKind::Muzzle)
+        .count() as u64;
+    let current_accepted_shots = harness
+        .server
+        .world()
+        .resource::<CombatTelemetry>()
+        .accepted_shots;
+    assert_eq!(expected_muzzle_count, current_accepted_shots);
+    assert_eq!(harness.client_cue_keys(0), expected_cue_stream);
+    assert_eq!(harness.client_cue_keys(1), expected_cue_stream);
+
+    harness.set_controlled_input(0, FighterInput::default());
+    for _ in 0..20 {
+        harness.step();
+    }
+    let defeats_before_repeats = harness.server.world().resource::<CombatTelemetry>().defeats;
+    for repeat in 0..2 {
+        harness.set_controlled_input(
+            0,
+            FighterInput::from_axes(Vec2::ZERO, Some(dummy_aim), FighterInput::PRIMARY_FIRE),
+        );
+        let mut saw_defeat = false;
+        for _ in 0..240 {
+            harness.step();
+            let world = harness.server.world_mut();
+            let mut query = world.query_filtered::<Entity, With<Defeated>>();
+            if query
+                .iter(world)
+                .any(|entity| world.get::<TestDummy>(entity).is_some())
+            {
+                saw_defeat = true;
+                break;
+            }
+        }
+        assert!(
+            saw_defeat,
+            "repeat {repeat} did not defeat the dummy; telemetry={:?}",
+            harness.server.world().resource::<CombatTelemetry>()
+        );
+        harness.step_until(|harness| {
+            let world = harness.server.world_mut();
+            let mut query = world.query_filtered::<Entity, With<TestDummy>>();
+            let dummy = query.single(world).expect("dummy");
+            world.get::<Defeated>(dummy).is_none()
+        });
+        harness.set_controlled_input(0, FighterInput::default());
+        harness.step_until(|harness| {
+            [0, 1].into_iter().all(|index| {
+                let (health, weapon, defeated) =
+                    harness.client_fighter_combat_state(index, DUMMY_NETWORK_ENTITY);
+                health.0 == 100
+                    && weapon.ammo == 6
+                    && matches!(weapon.phase, WeaponPhase::Ready)
+                    && !defeated
+            })
+        });
+    }
+    assert!(
+        harness.server.world().resource::<CombatTelemetry>().defeats >= defeats_before_repeats + 2
+    );
+}
+
+#[test]
+fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+            && harness.client_ids(0).len() == 2
+            && harness.client_ids(1).len() == 2
+    });
+
+    {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(
+            &PlayerId,
+            &mut Position,
+            &mut Rotation,
+            &mut CurrentHealth,
+        ), With<Fighter>>();
+        for (player, mut position, mut rotation, mut health) in query.iter_mut(world) {
+            if player.0 == 0 {
+                continue;
+            }
+            let right_side = player.0 % 2 == 0;
+            position.0 = Vec2::new(if right_side { 100.0 } else { -100.0 }, 0.0);
+            *rotation = Rotation::radians(if right_side {
+                std::f32::consts::PI
+            } else {
+                0.0
+            });
+            health.0 = 25;
+        }
+    }
+
+    for index in 0..2 {
+        let right_side = harness.controlled_player_id(index).0 % 2 == 0;
+        harness.set_controlled_input(
+            index,
+            FighterInput::from_axes(
+                Vec2::ZERO,
+                Some(if right_side { -Vec2::X } else { Vec2::X }),
+                FighterInput::PRIMARY_FIRE,
+            ),
+        );
+    }
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&NetworkEntityId, (With<Fighter>, With<Defeated>)>();
+        query.iter(world).count() == 2
+    });
+
+    let telemetry = harness.server.world().resource::<CombatTelemetry>();
+    assert_eq!(telemetry.defeats, 2);
+    let mut defeated_targets: Vec<_> = telemetry
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            brawler::combat::CombatLogRecord::Defeat {
+                source: Some(brawler::combat::DamageSource::PlayerWeapon { shot_id, .. }),
+                target,
+                ..
+            } => Some((*target, *shot_id)),
+            _ => None,
+        })
+        .collect();
+    defeated_targets.sort_by_key(|(target, shot_id)| (target.0, shot_id.0));
+    assert_eq!(defeated_targets.len(), 2);
+    assert_ne!(defeated_targets[0].0, defeated_targets[1].0);
+    assert_ne!(defeated_targets[0].1, defeated_targets[1].1);
+}
+
+#[test]
+fn projectile_filters_allied_fighters_and_consumes_on_terrain() {
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+    });
+
+    {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(
+            &PlayerId,
+            &mut Position,
+            &mut Rotation,
+            &mut TeamId,
+        ), With<Fighter>>();
+        let mut player_one_team = None;
+        for (player, mut position, mut rotation, mut team) in query.iter_mut(world) {
+            if player.0 == 0 {
+                continue;
+            }
+            let right_side = player.0 % 2 == 0;
+            position.0 = Vec2::new(if right_side { 100.0 } else { -100.0 }, 0.0);
+            *rotation = Rotation::radians(if right_side {
+                std::f32::consts::PI
+            } else {
+                0.0
+            });
+            if player_one_team.is_none() {
+                player_one_team = Some(*team);
+            } else {
+                *team = player_one_team.expect("first player team");
+            }
+        }
+    }
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    for _ in 0..70 {
+        harness.step();
+    }
+    let server_health: Vec<_> = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&PlayerId, &CurrentHealth), With<Fighter>>();
+        query
+            .iter(world)
+            .filter(|(player, _)| player.0 != 0)
+            .map(|(player, health)| (*player, *health))
+            .collect()
+    };
+    assert!(server_health.iter().all(|(_, health)| health.0 == 100));
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .hostile_fighter_hits,
+        0
+    );
+    harness.set_controlled_input(0, FighterInput::default());
+    for _ in 0..70 {
+        harness.step();
+    }
+    assert_eq!(harness.server_projectile_count(), 0);
+
+    {
+        let world = harness.server.world_mut();
+        let mut query =
+            world.query_filtered::<(&PlayerId, &mut Position, &mut Rotation), With<Fighter>>();
+        for (player, mut position, mut rotation) in query.iter_mut(world) {
+            if player.0 == 1 {
+                position.0 = Vec2::new(700.0, 0.0);
+                *rotation = Rotation::IDENTITY;
+            }
+        }
+    }
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .records
+            .iter()
+            .any(|record| {
+                matches!(
+                    record,
+                    brawler::combat::CombatLogRecord::Hit { target: None, .. }
+                )
+            })
+    });
+    assert_eq!(harness.server_projectile_count(), 0);
+}
+
+#[test]
+fn posthumous_projectile_retains_original_source_attribution() {
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+    });
+    {
+        let world = harness.server.world_mut();
+        let mut query =
+            world.query_filtered::<(&PlayerId, &mut Position, &mut Rotation), With<Fighter>>();
+        for (player, mut position, mut rotation) in query.iter_mut(world) {
+            if player.0 == 0 {
+                continue;
+            }
+            let right_side = player.0 % 2 == 0;
+            position.0 = Vec2::new(if right_side { 100.0 } else { -100.0 }, 0.0);
+            *rotation = Rotation::radians(if right_side {
+                std::f32::consts::PI
+            } else {
+                0.0
+            });
+        }
+    }
+    let source_player = harness.controlled_player_id(0);
+    let source_aim = if source_player.0 == 1 {
+        Vec2::X
+    } else {
+        -Vec2::X
+    };
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(source_aim), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| harness.server_projectile_count() > 0);
+    let owner = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(Entity, &PlayerId), With<Fighter>>();
+        query
+            .iter(world)
+            .find(|(_, player)| **player == source_player)
+            .map(|(entity, _)| entity)
+            .expect("owner fighter")
+    };
+    harness.server.world_mut().entity_mut(owner).insert((
+        CurrentHealth(0),
+        Defeated {
+            event_id: CombatEventId(10_000),
+            reset_at_tick: u64::MAX,
+        },
+    ));
+
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .hostile_fighter_hits
+            > 0
+    });
+    assert!(
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .records
+            .iter()
+            .any(|record| {
+                matches!(
+                    record,
+                    brawler::combat::CombatLogRecord::Damage {
+                        source: brawler::combat::DamageSource::PlayerWeapon { player_id, .. },
+                        ..
+                    } if *player_id == source_player
+                )
+            })
+    );
+}
+
+#[test]
+fn late_join_recovers_active_projectile_and_defeated_durable_state() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.client_ids(0).len() == 1
+    });
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<FighterDefinitions>()
+        .entries[0]
+        .defeat_reset_delay_ticks = 600;
+
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| harness.server_projectile_count() > 0);
+
+    harness.add_client(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+            && harness.client_ids(1).len() == 2
+            && harness.client_projectile_count(1) > 0
+    });
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<Entity, With<TestDummy>>();
+        let dummy = query.single(world).expect("dummy");
+        world.get::<Defeated>(dummy).is_some()
+    });
+    harness.step_until(|harness| {
+        let (health, _, defeated) = harness.client_fighter_combat_state(1, DUMMY_NETWORK_ENTITY);
+        health.0 == 0 && defeated
+    });
+}
+
+#[test]
+fn late_join_recovers_in_progress_reload_state() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.client_ids(0).len() == 1
+    });
+    {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&mut Position, With<TestDummy>>();
+        query.single_mut(world).expect("dummy").0.y = 300.0;
+    }
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    let player_network_id = harness.server_ids()[0].1;
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&NetworkEntityId, &WeaponState), With<Fighter>>();
+        query.iter(world).any(|(network_id, weapon)| {
+            *network_id == player_network_id
+                && matches!(weapon.phase, WeaponPhase::Reloading { .. })
+                && weapon.ammo == 0
+        })
+    });
+
+    harness.add_client(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(1)
+            && harness.client_ids(1).len() == 2
+            && matches!(
+                harness
+                    .client_fighter_combat_state(1, player_network_id)
+                    .1
+                    .phase,
+                WeaponPhase::Reloading { .. }
+            )
+    });
+}
+
+#[test]
+fn duplicate_and_reordered_fire_inputs_do_not_bypass_server_cadence() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.client_ids(0).len() == 1
+    });
+    let target = harness.controlled_entity(0);
+    let first_tick = harness.server_tick().saturating_add(1);
+    let fire = FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE);
+    for _ in 0..4 {
+        harness.send_forged_input(
+            0,
+            lightyear::input::input_message::InputTarget::Entity(target),
+            first_tick,
+            fire,
+        );
+    }
+    harness.step();
+    let first_shot_count = harness
+        .server
+        .world()
+        .resource::<CombatTelemetry>()
+        .accepted_shots;
+    assert_eq!(first_shot_count, 1);
+
+    for stale_tick in [first_tick, first_tick.saturating_sub(1)] {
+        for _ in 0..3 {
+            harness.send_forged_input(
+                0,
+                lightyear::input::input_message::InputTarget::Entity(target),
+                stale_tick,
+                fire,
+            );
+        }
+    }
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .accepted_shots,
+        first_shot_count
+    );
+    let diagnostics = harness
+        .server
+        .world_mut()
+        .query::<&InputValidationState>()
+        .iter(harness.server.world())
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|state| state.stale_or_reordered_rejections > 0),
+        "duplicate/stale inputs should be diagnosed: {diagnostics:?}"
+    );
+
+    let drop_tick = harness.server_tick().saturating_add(1);
+    harness.send_forged_input(
+        0,
+        lightyear::input::input_message::InputTarget::Entity(target),
+        drop_tick,
+        FighterInput::default(),
+    );
+    for _ in 0..14 {
+        harness.step();
+    }
+    let after_drop_count = harness
+        .server
+        .world()
+        .resource::<CombatTelemetry>()
+        .accepted_shots;
+    assert_eq!(after_drop_count, first_shot_count);
+
+    let release_tick = harness.server_tick().saturating_add(1);
+    harness.send_forged_input(
+        0,
+        lightyear::input::input_message::InputTarget::Entity(target),
+        release_tick,
+        fire,
+    );
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .accepted_shots
+            > after_drop_count
+    });
 }
 
 #[test]
@@ -487,6 +1185,22 @@ fn two_clients_move_simultaneously_and_observe_the_same_authoritative_poses() {
 }
 
 #[test]
+fn owner_view_records_authoritative_interpolation_baseline_without_prediction() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.client_ids(0).len() == 1
+    });
+
+    let world = harness.clients[0].world_mut();
+    let mut controlled = world.query_filtered::<Entity, (With<Fighter>, With<Controlled>)>();
+    assert_eq!(controlled.iter(world).count(), 1);
+    let mut predicted = world.query_filtered::<Entity, With<Predicted>>();
+    assert_eq!(predicted.iter(world).count(), 0);
+}
+
+#[test]
 fn changed_authoritative_position_reaches_an_existing_client() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| {
@@ -496,7 +1210,8 @@ fn changed_authoritative_position_reaches_an_existing_client() {
     });
     let expected = {
         let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<&mut Position, With<Fighter>>();
+        let mut query =
+            world.query_filtered::<&mut Position, (With<Fighter>, Without<TestDummy>)>();
         let mut position = query.single_mut(world).expect("one server fighter");
         position.0.x += 100.0;
         *position
@@ -508,12 +1223,18 @@ fn changed_authoritative_position_reaches_an_existing_client() {
     let actual = harness.client_positions(0)[0].1;
     let history = {
         let world = harness.clients[0].world_mut();
-        let mut query = world
-            .query_filtered::<Option<&ConfirmedHistory<Position>>, (With<Fighter>, With<Remote>)>();
+        let mut query = world.query_filtered::<
+            (&PlayerId, Option<&ConfirmedHistory<Position>>),
+            (With<Fighter>, With<Remote>, Without<TestDummy>),
+        >();
         query
-            .single(world)
-            .expect("one client fighter")
-            .and_then(|history| history.newest_present().map(|(tick, value)| (tick, *value)))
+            .iter(world)
+            .find(|(player, _)| player.0 != 0)
+            .and_then(|(_, history)| {
+                history.and_then(|history| {
+                    history.newest_present().map(|(tick, value)| (tick, *value))
+                })
+            })
     };
     let timeline = {
         let timeline = harness.clients[0]
@@ -828,7 +1549,7 @@ fn authoritative_move_and_slide_depenetrates_a_spawned_inside_cover_fighter() {
     harness.step_until(|harness| harness.client_is_active(0) && harness.server_ids().len() == 1);
     let fighter = {
         let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<Entity, With<Fighter>>();
+        let mut query = world.query_filtered::<Entity, (With<Fighter>, Without<TestDummy>)>();
         query
             .iter(world)
             .next()
@@ -1030,6 +1751,12 @@ fn disconnect_cleans_owned_placeholder_and_reconnect_allocates_fresh_ids() {
     let first_ids = harness.server_ids();
     let static_count = harness.server_static_arena_count();
 
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| harness.server_projectile_count() > 0);
+
     harness.clients[0].world_mut().trigger(Disconnect {
         entity: harness.client_entities[0],
     });
@@ -1040,6 +1767,7 @@ fn disconnect_cleans_owned_placeholder_and_reconnect_allocates_fresh_ids() {
         }
     }
     assert_eq!(harness.server_ids().len(), 1);
+    assert_eq!(harness.server_projectile_count(), 0);
     let remaining_ids = harness.server_ids();
     for _ in 0..240 {
         harness.step();
@@ -1148,7 +1876,8 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
             client_world.query_filtered::<Entity, (With<Client>, With<Connected>)>();
         let client_connected = client_query.iter(client_world).next().is_some();
         let server_world = server.world_mut();
-        let mut server_query = server_world.query_filtered::<Entity, With<PlaceholderPlayer>>();
+        let mut server_query =
+            server_world.query_filtered::<Entity, (With<PlaceholderPlayer>, Without<TestDummy>)>();
         let server_spawned = server_query.iter(server_world).next().is_some();
         let mut remote_query = client.world_mut().query_filtered::<Entity, With<Remote>>();
         let client_replicated = remote_query.iter(client.world()).next().is_some();
@@ -1164,7 +1893,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
 
     let initial_x = {
         let world = server.world_mut();
-        let mut query = world.query_filtered::<&Position, With<Fighter>>();
+        let mut query = world.query_filtered::<&Position, (With<Fighter>, Without<TestDummy>)>();
         query
             .iter(world)
             .next()
@@ -1187,7 +1916,8 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
     }
     let (final_x, final_facing) = {
         let world = server.world_mut();
-        let mut query = world.query_filtered::<(&Position, &Rotation), With<Fighter>>();
+        let mut query =
+            world.query_filtered::<(&Position, &Rotation), (With<Fighter>, Without<TestDummy>)>();
         let (position, rotation) = query
             .iter(world)
             .next()
