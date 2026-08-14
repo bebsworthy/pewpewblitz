@@ -194,6 +194,13 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
         .init_resource::<InputTuning>()
         .add_systems(Update, sample_local_input);
     let gamepad_entity = app.world_mut().spawn(gamepad).id();
+    let catalog = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    let launcher = catalog
+        .resolve_preset(crate::combat::WeaponPresetId(3), &fighter)
+        .expect("arc launcher preset");
+    app.world_mut()
+        .spawn((Fighter, Controlled, Position::default(), launcher));
 
     app.update();
 
@@ -204,6 +211,11 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
     );
     assert_eq!(pending.move_axis, Vec2::new(0.75, 0.0));
     assert_eq!(pending.aim_axis, Some(Vec2::new(0.0, -0.8)));
+    assert!(
+        pending
+            .aim_distance
+            .is_some_and(|distance| (distance - 381.333_34).abs() < 0.001)
+    );
     assert_ne!(pending.held_buttons & FighterInput::PRIMARY_FIRE, 0);
     assert_eq!(
         *app.world().resource::<ClientInputContext>(),

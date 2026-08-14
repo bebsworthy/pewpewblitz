@@ -1,5 +1,5 @@
 (
-    schema_version: 1,
+    schema_version: 2,
     recipe_policy: (
         max_deliveries_per_attack: 16,
         max_payload_bundles: 4,
@@ -68,11 +68,11 @@
                     economy: Magazine(capacity: 3, refill_ticks: 96),
                     fire_cooldown_ticks: 48,
                     firing: Single,
-                    delivery: Lobbed(distance: 520.0, flight_ticks: 45, visual_arc_height: 140.0, landing_clearance_radius: 10.0, muzzle_offset: 34.0),
+                    delivery: Lobbed(distance: 520.0, max_flight_ticks: 45, visual_arc_height: 140.0, landing_clearance_radius: 10.0, muzzle_offset: 34.0),
                     payload_bundles: [
                         (target: Area(radius: 150.0, terrain_occlusion: true, max_targets: 16), effects: [
-                            Damage(amount: 40, falloff: None, recipients: HostilesAndOwner(owner_scale: 0.5)),
-                            Knockback(speed: 300.0, duration_ticks: 8, recipients: HostilesAndOwner(owner_scale: 1.0)),
+                            Damage(amount: 40, falloff: None, recipients: Hostiles),
+                            Knockback(speed: 300.0, duration_ticks: 8, recipients: Hostiles),
                             Slow(movement_multiplier: 0.70, duration_ticks: 45, stacking: StrongestRefreshes, recipients: Hostiles),
                         ]),
                     ],

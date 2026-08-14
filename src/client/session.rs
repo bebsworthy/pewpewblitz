@@ -318,9 +318,11 @@ pub(super) fn update_weapon_selection_overlay(
     };
     let range = match recipe.delivery {
         crate::combat::DeliveryMethod::Straight { range, .. } => format!("range {range:.0}"),
-        crate::combat::DeliveryMethod::Lobbed { distance, .. } => {
-            format!("fixed landing {distance:.0}")
-        }
+        crate::combat::DeliveryMethod::Lobbed {
+            distance,
+            max_flight_ticks,
+            ..
+        } => format!("aimed landing up to {distance:.0} / up to {max_flight_ticks}t flight"),
         crate::combat::DeliveryMethod::MeleeArc {
             reach,
             angle_degrees,

@@ -29,7 +29,7 @@ pub(super) fn sample_local_input(
     gamepads: Query<(Entity, &Gamepad)>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
-    fighters: Query<&Position, (With<Fighter>, With<Controlled>)>,
+    fighters: Query<(&Position, Option<&ResolvedWeapon>), (With<Fighter>, With<Controlled>)>,
 ) {
     let Some(keyboard) = keyboard else {
         return;
@@ -146,7 +146,7 @@ pub(super) fn sample_local_input(
         meaningful_gamepad,
     );
 
-    let (move_axis, aim_axis, gamepad_buttons, gamepad_pause, gamepad_interact) =
+    let (move_axis, aim_axis, aim_distance, gamepad_buttons, gamepad_pause, gamepad_interact) =
         match (pending.active_device, gamepad_sample) {
             (ActiveInputDevice::Gamepad(active), Some((entity, left, right, gamepad)))
                 if active == entity =>
@@ -169,6 +169,11 @@ pub(super) fn sample_local_input(
                 (
                     left,
                     right.is_finite().then_some(right),
+                    committed_aim(right, *tuning).and_then(|_| {
+                        controlled_lob_range(&fighters).map(|range| {
+                            radial_deadzone(right, tuning.aim_deadzone).length() * range
+                        })
+                    }),
                     buttons,
                     gamepad.just_pressed(GamepadButton::Start),
                     gamepad.just_pressed(GamepadButton::South),
@@ -185,9 +190,11 @@ pub(super) fn sample_local_input(
                 if keyboard.pressed(KeyCode::KeyE) {
                     buttons |= FighterInput::ULTIMATE;
                 }
+                let mouse_aim = mouse_aim(&windows, &cameras, &fighters);
                 (
                     keyboard_move,
-                    mouse_aim_direction(&windows, &cameras, &fighters),
+                    mouse_aim.map(|(direction, _)| direction),
+                    mouse_aim.map(|(_, distance)| distance),
                     buttons,
                     keyboard.just_pressed(KeyCode::Escape),
                     keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::Enter),
@@ -226,6 +233,7 @@ pub(super) fn sample_local_input(
     }
     pending.move_axis = move_axis;
     pending.aim_axis = aim_axis;
+    pending.aim_distance = aim_distance;
     pending.held_buttons = gamepad_buttons;
 
     if let Some(mut trace) = trace.filter(|trace| trace.enabled) {
@@ -285,12 +293,12 @@ pub(super) fn apply_headless_input(
         .iter()
         .find(|(network_id, _)| network_id.0 == 0)
         .map(|(_, target)| target.0);
+    let aim_delta = controlled_position
+        .zip(dummy_position)
+        .map(|(position, target)| target - position)
+        .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON);
     let aim_axis = if automation.aim_at_dummy {
-        controlled_position
-            .zip(dummy_position)
-            .map(|(position, target)| target - position)
-            .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
-            .map(Vec2::normalize)
+        aim_delta.map(Vec2::normalize)
     } else {
         automation.aim_axis
     };
@@ -315,6 +323,11 @@ pub(super) fn apply_headless_input(
         }
         pending.move_axis = move_axis;
         pending.aim_axis = aim_axis;
+        pending.aim_distance = if automation.aim_at_dummy {
+            aim_delta.map(Vec2::length)
+        } else {
+            None
+        };
         let fire_held = automation.fire && automation.elapsed_ticks < HEADLESS_FIRE_DURATION_TICKS;
         pending.held_buttons = if fire_held {
             FighterInput::PRIMARY_FIRE
@@ -338,17 +351,31 @@ pub(super) fn advance_headless_automation(
     }
 }
 
-pub(super) fn mouse_aim_direction(
+fn controlled_lob_range(
+    fighters: &Query<(&Position, Option<&ResolvedWeapon>), (With<Fighter>, With<Controlled>)>,
+) -> Option<f32> {
+    fighters
+        .iter()
+        .next()?
+        .1
+        .and_then(|resolved| match resolved.recipe.delivery {
+            crate::combat::DeliveryMethod::Lobbed { distance, .. } => Some(distance),
+            _ => None,
+        })
+}
+
+pub(super) fn mouse_aim(
     windows: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Camera, &GlobalTransform), With<Camera2d>>,
-    fighters: &Query<&Position, (With<Fighter>, With<Controlled>)>,
-) -> Option<Vec2> {
+    fighters: &Query<(&Position, Option<&ResolvedWeapon>), (With<Fighter>, With<Controlled>)>,
+) -> Option<(Vec2, f32)> {
     let cursor = windows.iter().next()?.cursor_position()?;
     let (camera, camera_transform) = cameras.iter().next()?;
     let world = camera.viewport_to_world_2d(camera_transform, cursor).ok()?;
-    let fighter = fighters.iter().next()?.0;
+    let fighter = fighters.iter().next()?.0.0;
     let delta = world - fighter;
-    (delta.is_finite() && delta.length_squared() > f32::EPSILON).then(|| delta.normalize())
+    (delta.is_finite() && delta.length_squared() > f32::EPSILON)
+        .then(|| (delta.normalize(), delta.length()))
 }
 
 pub(super) fn write_client_input(
@@ -378,7 +405,12 @@ pub(super) fn write_client_input(
             FighterInput::default()
         } else {
             let buttons = pending.held_buttons | pending.latched_buttons;
-            let input = FighterInput::from_axes(pending.move_axis, pending.aim_axis, buttons);
+            let input = FighterInput::from_axes_with_aim_distance(
+                pending.move_axis,
+                pending.aim_axis,
+                pending.aim_distance,
+                buttons,
+            );
             pending.latched_buttons = 0;
             input
         };

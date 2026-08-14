@@ -311,7 +311,12 @@ impl Harness {
             .world_mut()
             .resource_mut::<PendingLocalActions>();
         pending.move_axis = input.move_axis.to_vec2();
-        pending.aim_axis = input.aim_update.map(|axis| axis.to_vec2());
+        pending.aim_axis = input
+            .aim_update
+            .map(brawler::protocol::QuantizedAxis2::to_vec2);
+        pending.aim_distance = input
+            .aim_distance
+            .map(brawler::protocol::QuantizedAimDistance::to_world_units);
         pending.held_buttons = input.gameplay_buttons;
     }
 

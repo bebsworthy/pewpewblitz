@@ -65,9 +65,40 @@ fn delivery_angles(facing: f32, firing: FiringPattern) -> Vec<f32> {
 }
 
 #[cfg(feature = "server")]
+fn requested_lob_distance(
+    maximum_distance: f32,
+    aim_distance: Option<crate::protocol::QuantizedAimDistance>,
+) -> f32 {
+    aim_distance.map_or(maximum_distance, |requested| {
+        requested.to_world_units().clamp(0.0, maximum_distance)
+    })
+}
+
+#[cfg(feature = "server")]
+const MINIMUM_LOB_FLIGHT_TICKS: u64 = 6;
+
+/// Scale lob time by the authoritative landing distance while retaining a short presentation and
+/// replication floor. `max_flight_ticks` is the authored duration at maximum range.
+#[cfg(feature = "server")]
+fn resolved_lob_flight_ticks(
+    maximum_distance: f32,
+    landing_distance: f32,
+    max_flight_ticks: u64,
+) -> u64 {
+    let proportional = ((landing_distance.clamp(0.0, maximum_distance) / maximum_distance)
+        * max_flight_ticks as f32)
+        .ceil() as u64;
+    proportional.clamp(
+        MINIMUM_LOB_FLIGHT_TICKS.min(max_flight_ticks),
+        max_flight_ticks,
+    )
+}
+
+#[cfg(feature = "server")]
 fn resolved_lob_landing(
     origin: Vec2,
     facing: f32,
+    aim_distance: Option<crate::protocol::QuantizedAimDistance>,
     recipe: &WeaponRecipe,
     arena: &crate::movement::GreyboxArenaDefinition,
     spatial_query: &avian2d::prelude::SpatialQuery,
@@ -80,7 +111,8 @@ fn resolved_lob_landing(
     else {
         return None;
     };
-    let desired = origin + Vec2::from_angle(facing) * distance;
+    let requested_distance = requested_lob_distance(distance, aim_distance);
+    let desired = origin + Vec2::from_angle(facing) * requested_distance;
     let bounded = desired.clamp(
         arena.min + Vec2::splat(landing_clearance_radius),
         arena.max - Vec2::splat(landing_clearance_radius),
@@ -263,13 +295,15 @@ fn emit_attack_deliveries(
         }
         DeliveryMethod::Lobbed {
             distance,
-            flight_ticks,
+            max_flight_ticks,
             visual_arc_height,
             landing_clearance_radius: _,
             muzzle_offset,
         } => {
             let landing = lob_landing.expect("validated lob landing must exist");
             let launch = muzzle_position(origin, facing, muzzle_offset);
+            let flight_ticks =
+                resolved_lob_flight_ticks(distance, origin.distance(landing), max_flight_ticks);
             commands.spawn((
                 Projectile,
                 source_component,
@@ -540,7 +574,14 @@ pub(super) fn authoritative_composed_fire(
         }
         let origin = position.0;
         let facing = rotation.as_radians();
-        let lob_landing = resolved_lob_landing(origin, facing, recipe, &arena, &spatial_query);
+        let lob_landing = resolved_lob_landing(
+            origin,
+            facing,
+            input.aim_distance,
+            recipe,
+            &arena,
+            &spatial_query,
+        );
         if matches!(recipe.delivery, DeliveryMethod::Lobbed { .. }) && lob_landing.is_none() {
             continue;
         }
@@ -642,5 +683,31 @@ mod tests {
     fn delivery_indices_are_stable_within_one_attack() {
         assert_eq!(delivery_key(AttackId(7), 3), (7, 3));
         assert_eq!(delivery_count(FiringPattern::Single), 1);
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn lob_focal_distance_is_bounded_by_the_authored_maximum() {
+        use crate::protocol::QuantizedAimDistance;
+
+        assert!((requested_lob_distance(520.0, None) - 520.0).abs() < f32::EPSILON);
+        assert!(
+            (requested_lob_distance(520.0, Some(QuantizedAimDistance(180))) - 180.0).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (requested_lob_distance(520.0, Some(QuantizedAimDistance(900))) - 520.0).abs()
+                < f32::EPSILON
+        );
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn lob_flight_time_scales_with_landing_distance_and_keeps_a_short_floor() {
+        assert_eq!(resolved_lob_flight_ticks(520.0, 520.0, 45), 45);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 260.0, 45), 23);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 1.0, 45), 6);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 0.0, 45), 6);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 900.0, 45), 45);
     }
 }

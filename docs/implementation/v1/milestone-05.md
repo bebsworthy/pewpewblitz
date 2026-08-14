@@ -9,7 +9,7 @@
 | Status | Verifying |
 | Specification validation | Implementation authorized; validation feedback remains open |
 | Implementation | Architecture remediation complete: combat, client, server, movement, and network tests now follow cohesive ownership boundaries |
-| Verification | Final automated tree is green, including all twelve impairment runs; windowed render-profile and physical-controller evidence remains |
+| Verification | Arc Launcher playtest amendments pass role-specific lint, unit, network, and performance suites; twelve impairment runs plus windowed render-profile and physical-controller evidence require rerun |
 | User validation/playtest | Not started |
 
 Update this table and the roadmap together whenever the milestone changes phase.
@@ -17,7 +17,7 @@ Update this table and the roadmap together whenever the milestone changes phase.
 ## Outcome
 
 Four server-authoritative primary-weapon presets can be selected before entering the networked
-combat sandbox: the existing pulse sidearm, a short-range scatter cannon, a fixed-range lobbed arc
+combat sandbox: the existing pulse sidearm, a short-range scatter cannon, an aimed lobbed arc
 launcher, and an impact blade. Each is an ordinary typed weapon recipe resolved through the same
 server-owned validation path intended for later player-authored recipes. They share weapon economy,
 attack acceptance, payload application, attribution, lifecycle, replication, cues, and telemetry
@@ -193,14 +193,18 @@ for the expanded weapon system.
   valid hostile or terrain hit; allies, owner, and defeated fighters remain pass-through.
 - [x] Model the arc launcher as top-down ballistic presentation over deterministic planar flight,
   not as an Avian dynamic rigid body. The server advances ground projection from launch to landing
-  over an authored number of ticks; clients derive visual height as `4h*t*(1-t)` from replicated
-  flight endpoints/current pose. It ignores fighter and terrain collision while airborne and
-  resolves one landing explosion.
-- [x] Launcher aim is fixed-range along preserved authoritative facing. This is controller-readable
-  with the existing directional input and does not invent cursor-only distance selection. Clamp the
-  desired point to arena bounds; if the landing circle overlaps solid terrain, search backward
-  along the aim ray for the furthest clear point. A clear point beyond intervening cover remains
-  valid, so the lob can punish cover.
+  for a distance-scaled number of fixed ticks up to the authored maximum-range duration; clients
+  derive visual height as `4h*t*(1-t)` from replicated flight endpoints/current pose. It ignores
+  fighter and terrain collision while airborne and resolves one landing explosion. A six-tick
+  floor keeps very short lobs visible and recoverable without making them wait for the full-range
+  duration.
+- [x] Launcher aim accepts a focal distance along preserved authoritative facing. Mouse input uses
+  cursor-to-fighter world distance; controller input uses right-stick magnitude; missing focal
+  distance preserves maximum range for automation and compatibility. The client sends quantized
+  intent, while the server clamps it to the authored maximum, clamps the desired point to arena
+  bounds, and searches backward along the aim ray for the furthest clear point when the landing
+  circle overlaps solid terrain. A clear point beyond intervening cover remains valid, so the lob
+  can punish cover.
 - [x] A melee attack is one instantaneous multi-target sector query after current movement and
   Avian refresh. Use `shape_intersections` for bounded fighter candidates, a pure circle-versus-
   sector test for reach/angle, and terrain-only line-of-sight query per candidate. Sort by stable
@@ -307,6 +311,9 @@ for the expanded weapon system.
 |---|---|---|---|
 | 2026-08-14 | `docs/{00-product-direction,02-fighter-model,03-weapons-and-abilities,05-gameplay-mvp,08-network-architecture}.md` and `docs/implementation/v1/{roadmap,milestone-03,milestone-04}.md` | M05 must add exactly four readable weapon profiles while keeping selection/build/runtime state and presentation/authority separate. M03 already fixes friendly/self collision policy; M04 fixes stable attribution and recovery. | Preserve those contracts and limit new primitives to spread, lob/area, melee, knockback, and slow. |
 | 2026-08-14 | User product-direction clarification and re-audit of the same product/architecture documents | The intended product is an arsenal of player-authored brawlers whose weapons vary in behavior and bounded specs. The earlier M05 draft composed developer-authored definitions internally but selected only immutable weapon IDs, leaving no explicit player-recipe/resolution boundary. | Recast the four M05 weapons as preset recipes, add preset-independent structural resolution and replicated resolved configuration, require one non-preset fixture, place first bounded player editing at M08, and defer persistence/acquisition without coupling them to combat. |
+| 2026-08-14 | User Arc Launcher playtest feedback | A fixed-range lob cannot land at the player's focal point and makes the launcher substantially less controllable than its targeting presentation implies. | Extend fixed-tick input with a quantized focal distance, derive it from mouse world position or controller stick magnitude, clamp it authoritatively to the recipe maximum, preserve max range when absent, and bump both protocol compatibility identifiers. |
+| 2026-08-15 | User Arc Launcher playtest feedback | The launcher owner was damaged and displaced by their own explosion because its authored damage and knockback policies explicitly included the owner. This was content behavior, not an authority-filtering defect. | Make all Arc Launcher payload effects hostile-only. Retain the generic owner-recipient capability and self-damage telemetry for later recipes that deliberately opt into it. |
+| 2026-08-15 | User Arc Launcher playtest feedback | Every lob copied the authored 45 ticks directly into its deadline, so near and maximum-range throws had identical airtime. | Treat the recipe value as `max_flight_ticks`, derive the authoritative duration proportionally from the resolved landing distance, clamp it to 6–45 ticks for this preset, and replicate the resulting deadline through the existing flight state. |
 | 2026-08-14 | Completeness pass against the user-approved M04 fixes and current combat/network tests | The first M05 draft weakened several proven invariants: pre-combat disconnect cleanup, same-tick projectile collision, impact-fraction ordering, atomic event-ID reservation, globally ordered outcomes, bounded evidence, and completed-tick publication. Selection also needed a fresh-input barrier, and presentation identity was still coupled to presets. | Make every M04 fix a hard M05 regression contract; add exact engine ceilings, canonical float/fingerprint rules, preset-independent weapon configuration, atomic selection activation, deterministic lob repair, bounded telemetry, and measurable load/latency gates. |
 | 2026-08-14 | Current `Cargo.toml`, `src/{combat,client,server,movement,protocol}.rs`, `tests/{network,performance}.rs`, README, Justfile, and scripts | M04 already supplies held native input, replicated selected/runtime state, swept projectiles, ordered cues, fixed reset, impairment profiles, and stable IDs. `SelectedBuild` is currently replicate-once and the pulse-only `combat.rs` is already large. | Evolve rather than duplicate the pipeline; make selection mutable/insertable and split the combat module by cohesive responsibilities. |
 | 2026-08-14 | `references/lightyear/examples/README.md`, `simple_setup`, `simple_box`, and book `src/SUMMARY.md`, `concepts/{reliability/channels,advanced_replication/replication_logic}.md` | Typed messages on an ordered-reliable channel fit discrete selection; component updates and entity actions have different recovery/ordering behavior. | Reuse `SessionChannel` for selection and replicated components for current selected/effect/projectile state. |
@@ -401,7 +408,7 @@ WeaponRecipe {
   fire_cooldown_ticks: u64,
   firing: Single | Spread { delivery_count, total_angle_degrees },
   delivery: Straight { speed, radius, range, lifetime_ticks, muzzle_offset }
-          | Lobbed { distance, flight_ticks, visual_arc_height,
+          | Lobbed { distance, max_flight_ticks, visual_arc_height,
                       landing_clearance_radius, muzzle_offset }
           | MeleeArc { reach, angle_degrees },
   payload_bundles: Vec<PayloadBundleDefinition>
@@ -498,7 +505,7 @@ preset's recipe; algorithms do not branch on preset ID.
 |---|---|---|---|---|
 | Pulse sidearm `1` | magazine 6; cooldown 12 ticks; reload 60 | single straight; speed 900; radius 6; range 900; lifetime 60; muzzle 34 | direct 25, no falloff | reliable mid range; six-shot pressure; low burst; cover/rushing counter it |
 | Scatter cannon `2` | magazine 4; cooldown 36; reload 72 | 7 straight pellets over 30°; speed 850; radius 4; range 360; lifetime 30; muzzle 32 | direct 12 each; linear falloff 140–360 to 50% | close burst up to 84; cone/falloff and reload punish range/misses |
-| Arc launcher `3` | magazine 3; cooldown 48; reload 96 | single lob; distance 520; flight 45; visual height 140; clearance radius 10; muzzle 34 | terrain-occluded area radius 150: hostile damage 40, knockback 300 for 8 ticks, slow 0.70 for 45; owner damage 50%, knockback 100%, no owner slow | fixed-range cover/group punish; visible 0.75 s landing; dead zone up close; wall/boundary clamping can self-hit |
+| Arc launcher `3` | magazine 3; cooldown 48; reload 96 | single aimed lob; maximum distance 520; distance-scaled flight 6–45 ticks; visual height 140; clearance radius 10; muzzle 34 | terrain-occluded area radius 150: hostile-only damage 40, knockback 300 for 8 ticks, and slow 0.70 for 45 | variable-range cover/group punish; up to 0.75 s landing telegraph; safe to place near its owner |
 | Impact blade `4` | 3 charges; cooldown 18; recharge 60 | single melee sector; reach 120; angle 100° | direct 34 and knockback 650 for 6 ticks | three-swing close burst; displacement; must enter kiteable danger range |
 
 All authored deadlines use simulation ticks. Damage remains integer. Falloff scales in `f32`, then
@@ -773,7 +780,7 @@ fighter pose; the source preset ID supplies name/icon only:
 
 - pulse: center line/end marker at maximum range;
 - scatter: cone boundaries and short-range end arc;
-- launcher: fixed landing marker, flight path hint, and explosion-radius ring; blocked/clamped
+- launcher: aimed landing marker, flight path hint, and explosion-radius ring; blocked/clamped
   landing uses the shared greybox shape helpers where possible;
 - blade: reach/angle sector that clearly communicates danger range.
 
@@ -952,6 +959,19 @@ Automated verification is complete. The remaining verification work is the speci
 physical-controller selection/aim/fire/pause/disconnect/reconnect pass. Explicit specification
 validation, user feedback triage, and learn-from-errors closeout also remain before completion.
 
+## Arc Launcher playtest-amendment evidence (2026-08-15)
+
+User playtest feedback invalidated the fixed-range launcher rule. On the amended tree, `just lint`
+passed with both role-specific Clippy configurations and `just test` passed with 74 client tests,
+62 server tests, 40 deterministic network tests, and 7 performance tests. The new tests cover wire
+round-trip, controller distance sampling, preview geometry, authoritative maximum clamping, a
+180-unit end-to-end server landing with a 16-tick proportional duration, flight-time scaling and
+floor boundaries, and a near-owner explosion that produces neither owner damage nor knockback. The
+combined load case measured 2.059 ms p95 on the aarch64 macOS host after the duration correction.
+Because the input wire payload, automated launcher targeting, and recipe fingerprint changed, the
+previous twelve-run impairment matrix remains historical evidence and must be rerun before M05
+advances.
+
 ### Remaining manual verification handoff
 
 Run these from the repository root on the target display/controller hardware:
@@ -1034,7 +1054,7 @@ Run these from the repository root on the target display/controller hardware:
   impacts, health, effects, knockback pose, defeat, reset, attribution, and telemetry.
 - [x] Spread creates one authoritative attack/seven deliveries; duplicate/reordered native input
   cannot multiply attacks or bypass cooldown/refill.
-- [ ] Launcher landing, area/self damage, occlusion, slow, and knockback converge on both clients;
+- [ ] Launcher landing, hostile-only area damage, occlusion, slow, and knockback converge on both clients;
   no client-authored landing/area/effect value is accepted.
 - [ ] Blade affects all and only stable visible sector targets with no projectile entity and cannot
   hit through terrain.
@@ -1106,9 +1126,10 @@ per weapon. The requested scenario:
    projectile/impact source.
 3. Use scatter at point-blank, edge-of-range, and beyond range; identify the cone, pellet paths,
    falloff, four-attack burst, and reload vulnerability.
-4. Aim the launcher across central cover and near a wall/boundary; compare indicator to landing,
-   dodge the telegraph, observe blast occlusion, owner damage/knockback, hostile slow, and long
-   recovery.
+4. Aim the launcher at near, middle, and maximum focal distances, then across central cover and near
+   a wall/boundary; compare indicator to landing, dodge the telegraph, observe blast occlusion,
+   verify the owner takes no damage or knockback, observe hostile slow and long recovery, and repeat
+   with mouse and controller stick magnitude.
 5. Use the blade on one and multiple targets near open ground and behind cover; identify the sector,
    three-charge burst, knockback, recharge, and inability to hit through walls.
 6. Have two clients fire different weapons simultaneously; verify source/weapon readability,
@@ -1120,7 +1141,9 @@ per weapon. The requested scenario:
 
 Known limitations must state: no owner/projectile prediction or lag compensation; selection is an
 initial four-preset sandbox gate rather than a lobby or weapon editor; clients cannot submit custom
-recipes; weapon switching requires reconnect/restart; lobs use fixed directional range; melee is
+recipes; weapon switching requires reconnect/restart; lob focal distance has whole-world-unit wire
+precision, controller distance uses radial stick magnitude, and lob airtime has a six-tick minimum;
+melee is
 instantaneous; slow is one immediate non-accumulating effect; art/audio are placeholders; the
 greybox is not the Milestone 06 authored arena; no score/match loop, build budget, ultimate,
 passive, persistent arsenal, acquisition, advanced trajectory, or production content hot-reload

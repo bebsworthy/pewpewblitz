@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 1;
-pub const FINGERPRINT_FORMAT_VERSION: u16 = 1;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 2;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -334,7 +334,7 @@ pub enum DeliveryMethod {
     },
     Lobbed {
         distance: f32,
-        flight_ticks: u64,
+        max_flight_ticks: u64,
         visual_arc_height: f32,
         landing_clearance_radius: f32,
         muzzle_offset: f32,
@@ -514,7 +514,7 @@ impl WeaponConfiguration {
             }
             DeliveryMethod::Lobbed {
                 distance,
-                flight_ticks,
+                max_flight_ticks,
                 visual_arc_height,
                 landing_clearance_radius,
                 muzzle_offset,
@@ -522,9 +522,9 @@ impl WeaponConfiguration {
                 if !finite_range(distance, 0.0, limits.max_world_field)
                     || !finite_range(distance, 0.0, policy.max_distance)
                     || distance == 0.0
-                    || flight_ticks == 0
-                    || flight_ticks > limits.max_lifetime_ticks
-                    || flight_ticks > policy.max_projectile_lifetime_ticks
+                    || max_flight_ticks == 0
+                    || max_flight_ticks > limits.max_lifetime_ticks
+                    || max_flight_ticks > policy.max_projectile_lifetime_ticks
                     || !finite_range(visual_arc_height, 0.0, limits.max_world_field)
                     || !finite_range(visual_arc_height, 0.0, policy.max_distance)
                     || !finite_range(landing_clearance_radius, 0.0, limits.max_radius)

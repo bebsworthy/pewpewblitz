@@ -4,14 +4,14 @@
 use crate::{
     VERSION,
     combat::{
-        ClientCombatEvidenceStatus, ClientCombatPlugin, CombatHudText, SelectingWeapon,
-        WeaponCatalogResource, WeaponSelectionText, fighter_color,
+        ClientCombatEvidenceStatus, ClientCombatPlugin, CombatHudText, ResolvedWeapon,
+        SelectingWeapon, WeaponCatalogResource, WeaponSelectionText, fighter_color,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
     movement::{
         AvianNetworkPlugin, CAMERA_VERTICAL_SPAN, GreyboxArenaDefinition, InputTuning,
-        trigger_pressed,
+        committed_aim, radial_deadzone, trigger_pressed,
     },
     protocol::{
         ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, NetworkEntityId, PlayerId,
@@ -170,6 +170,7 @@ pub struct InputDeviceActivity {
 pub struct PendingLocalActions {
     pub move_axis: Vec2,
     pub aim_axis: Option<Vec2>,
+    pub aim_distance: Option<f32>,
     pub held_buttons: u8,
     pub latched_buttons: u8,
     pub active_device: ActiveInputDevice,
@@ -208,6 +209,7 @@ impl Default for PendingLocalActions {
         Self {
             move_axis: Vec2::ZERO,
             aim_axis: None,
+            aim_distance: None,
             held_buttons: 0,
             latched_buttons: 0,
             active_device: ActiveInputDevice::KeyboardMouse,

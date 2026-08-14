@@ -25,7 +25,7 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 05 architecture remediation and automated verification are complete; windowed render-profile, keyboard/mouse, physical-controller, specification-validation, and user-playtest gates remain. Milestone 06's post-M05 specification review is running in parallel, while Milestone 03 verification and earlier user playtests remain open
+- **Overall status:** Milestone 05 architecture remediation is complete and the Arc Launcher playtest amendments pass role-specific unit/network/performance verification; its twelve-run impairment matrix, windowed render-profile, keyboard/mouse, physical-controller, specification-validation, and user-playtest gates remain. Milestone 06's post-M05 specification review is running in parallel, while Milestone 03 verification and earlier user playtests remain open
 - **Current milestone:** Milestone 05 — Weapon composition and preset selection
 - **Last completed milestone:** Milestone 04 — Combat core
 

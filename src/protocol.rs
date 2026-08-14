@@ -36,10 +36,10 @@ use crate::combat::{
 use crate::timing::SIMULATION_TICK;
 
 /// Netcode protocol ID. Bump this for incompatible wire-level changes.
-pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5236;
+pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5237;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 5;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 6;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -143,11 +143,32 @@ fn quantize_axis_component(value: f32) -> i16 {
     (value.clamp(-1.0, 1.0) * f32::from(QuantizedAxis2::MAX)).round() as i16
 }
 
+/// Unsigned whole-world-unit aim distance carried as player intent.
+///
+/// The authoritative combat rule clamps this value to the selected delivery's legal range.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub struct QuantizedAimDistance(pub u16);
+
+impl QuantizedAimDistance {
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn from_world_units(distance: f32) -> Self {
+        let distance = if distance.is_finite() { distance } else { 0.0 };
+        Self(distance.clamp(0.0, f32::from(u16::MAX)).round() as u16)
+    }
+
+    #[must_use]
+    pub fn to_world_units(self) -> f32 {
+        f32::from(self.0)
+    }
+}
+
 /// The one fixed-tick intent payload accepted by the authoritative server.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub struct FighterInput {
     pub move_axis: QuantizedAxis2,
     pub aim_update: Option<QuantizedAxis2>,
+    pub aim_distance: Option<QuantizedAimDistance>,
     pub gameplay_buttons: u8,
 }
 
@@ -161,9 +182,20 @@ impl FighterInput {
 
     #[must_use]
     pub fn from_axes(move_axis: Vec2, aim_update: Option<Vec2>, gameplay_buttons: u8) -> Self {
+        Self::from_axes_with_aim_distance(move_axis, aim_update, None, gameplay_buttons)
+    }
+
+    #[must_use]
+    pub fn from_axes_with_aim_distance(
+        move_axis: Vec2,
+        aim_update: Option<Vec2>,
+        aim_distance: Option<f32>,
+        gameplay_buttons: u8,
+    ) -> Self {
         Self {
             move_axis: QuantizedAxis2::from_vec2(move_axis),
             aim_update: aim_update.map(QuantizedAxis2::from_vec2),
+            aim_distance: aim_distance.map(QuantizedAimDistance::from_world_units),
             gameplay_buttons: gameplay_buttons & Self::ALLOWED_BUTTONS,
         }
     }
@@ -482,10 +514,15 @@ mod tests {
             Some(Vec2::X),
             FighterInput::PRIMARY_FIRE,
         );
+        let input = FighterInput {
+            aim_distance: Some(QuantizedAimDistance::from_world_units(237.4)),
+            ..input
+        };
         let bytes = postcard::to_allocvec(&input).expect("input serializes");
         let decoded: FighterInput = postcard::from_bytes(&bytes).expect("input deserializes");
         assert_eq!(decoded, input);
         assert!((decoded.move_axis.to_vec2().x - 0.5).abs() < 1.0 / 32_000.0);
+        assert_eq!(decoded.aim_distance, Some(QuantizedAimDistance(237)));
         assert!(
             !FighterInput {
                 gameplay_buttons: 0x80,

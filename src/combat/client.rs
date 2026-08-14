@@ -15,6 +15,7 @@ pub const MAX_PREVIEW_SEGMENTS: usize = 24;
 pub(super) fn preview_segments(
     origin: Vec2,
     facing: f32,
+    aim_distance: Option<f32>,
     resolved: &ResolvedWeapon,
     arena: &crate::movement::GreyboxArenaDefinition,
 ) -> Vec<(Vec2, f32, Vec2, Color)> {
@@ -81,7 +82,8 @@ pub(super) fn preview_segments(
             ..
         } => {
             let direction = Vec2::from_angle(facing);
-            let desired = origin + direction * distance;
+            let desired =
+                origin + direction * aim_distance.unwrap_or(distance).clamp(0.0, distance);
             let bounded = desired.clamp(
                 arena.min + Vec2::splat(landing_clearance_radius),
                 arena.max - Vec2::splat(landing_clearance_radius),
@@ -669,6 +671,7 @@ struct WeaponPreviewVisual {
 fn update_weapon_preview(
     mut commands: Commands,
     arena: Res<crate::movement::GreyboxArenaDefinition>,
+    pending: Res<crate::client::PendingLocalActions>,
     fighters: Query<
         (&Position, &Rotation, Option<&ResolvedWeapon>),
         (With<Fighter>, With<lightyear::prelude::Controlled>),
@@ -694,7 +697,7 @@ fn update_weapon_preview(
     };
     let origin = position.0;
     let facing = rotation.as_radians();
-    let segments = preview_segments(origin, facing, resolved, &arena);
+    let segments = preview_segments(origin, facing, pending.aim_distance, resolved, &arena);
     for (visual, mut transform, mut sprite, mut visibility) in &mut visuals {
         let Some((center, angle, size, color)) = segments.get(usize::from(visual.slot)) else {
             *visibility = Visibility::Hidden;
@@ -984,6 +987,7 @@ mod tests {
         preview_segments(
             Vec2::ZERO,
             0.0,
+            None,
             &resolved,
             &GreyboxArenaDefinition::default(),
         )
@@ -1006,6 +1010,22 @@ mod tests {
         assert_eq!(preview_for(2).len(), 8);
         assert_eq!(preview_for(3).len(), 14);
         assert_eq!(preview_for(4).len(), 10);
+    }
+
+    #[test]
+    fn launcher_preview_uses_the_requested_focal_distance() {
+        let catalog = WeaponCatalog::embedded().unwrap();
+        let fighter = FighterDefinitions::default().entries[0];
+        let resolved = catalog.resolve_preset(WeaponPresetId(3), &fighter).unwrap();
+        let segments = preview_segments(
+            Vec2::ZERO,
+            0.0,
+            Some(180.0),
+            &resolved,
+            &GreyboxArenaDefinition::default(),
+        );
+
+        assert!((segments[0].2.x - 180.0).abs() < 0.001);
     }
 
     #[test]
