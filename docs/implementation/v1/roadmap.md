@@ -7,7 +7,9 @@ This roadmap is the source of truth for implementation order. The other design d
 The work is divided into three early gates:
 
 1. **Combat vertical slice — Milestones 01–07.** Two teams can complete a short, server-authoritative Wipeout match with four weapons on one readable arena.
-2. **First product iteration — Milestones 01–08.** The vertical slice also includes bounded builds, two ultimates, and named presets. This is the first gate that tests Brawler's buildcraft differentiation.
+2. **First product iteration — Milestones 01–08.** The vertical slice also includes bounded builds,
+   one constrained non-preset weapon configuration, two ultimates, and named presets. This is the
+   first gate that tests Brawler's player-authored buildcraft differentiation.
 3. **Gameplay MVP verification — Milestones 01–10.** Hot Zone and flexible destructible terrain prove that combat code works across mode rules and mutable map geometry. This gate satisfies the full acceptance scope in [Gameplay MVP](../../05-gameplay-mvp.md).
 
 Milestone 11 hardens and closes the v1 MVP. Additional mode families and systemic status interactions are future-version candidates, not hidden v1 commitments.
@@ -20,7 +22,7 @@ The milestone sections below are outcome briefs and research prompts, not preval
 
 - **Version:** v1 — gameplay MVP
 - **Overall status:** Milestone 05 specification review; Milestone 04 complete, while Milestone 03 verification and earlier user playtests remain open
-- **Current milestone:** Milestone 05 — Weapon composition and selection
+- **Current milestone:** Milestone 05 — Weapon composition and preset selection
 - **Last completed milestone:** Milestone 04 — Combat core
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -32,6 +34,8 @@ Record deferred implementation and playtest feedback here. Every item needs its 
 | ID | Source | Item | Rationale | Review target |
 |---|---|---|---|---|
 | M03-PRED | Milestone 03 implementation decision | Run the impairment/latency comparison for owner prediction; the M04 harness records the authoritative owner baseline and keeps prediction disabled until a predicted comparison exists. | Prediction is intentionally not enabled without measured convergence and correction behavior. | Milestone 03 verification |
+| FUT-ARSENAL | Product direction clarification, 2026-08-14 | Persistent account-owned arsenal of brawlers, saved build identity/revisions, production weapon editor, and acquisition/entitlement flow. | M05 establishes recipe/resolution/runtime boundaries and M08 proves bounded in-memory customization; accounts, storage, currency, loot, and unlock policy are outside v1. | Post-v1 product planning |
+| FUT-MAP-BUILDER | Product direction clarification, 2026-08-14 | Player-facing builder for bounded map recipes plus persistence, publishing, discovery, moderation, asset policy, and version migration. Players arrange approved presentation, terrain, geometry, entities, regions, spawns, and objective anchors but cannot author mode rules. | M06 must establish the recipe/preset/resolved/runtime boundary and server validation without expanding v1 into editor or platform services. | Future-version planning after M06 evidence |
 
 ## Planning and evidence rule
 
@@ -70,7 +74,12 @@ Architecture decisions follow the product and authority requirements first, then
 
 Use Bevy's `World` as the runtime model rather than maintaining a parallel domain model solely for layering:
 
-- **Authored data:** serializable fighter, build, weapon, effect, map, and mode definitions or Bevy assets/configuration.
+- **Authored content/rules:** serializable fighter, weapon primitive, effect, map, mode, validation,
+  and preset definitions or Bevy assets/configuration.
+- **Player-authored build data:** a bounded brawler build and weapon recipe, distinct from both the
+  content catalog and the immutable server-resolved match loadout.
+- **Player-authored map data:** a bounded map recipe distinct from the map-content catalog,
+  immutable server-resolved map, runtime map state, and developer-authored mode plugins.
 - **Runtime gameplay state:** components, resources, entities, and state machines in the authoritative server `World`; client worlds contain replicated or predicted copies plus local presentation state.
 - **Gameplay behavior:** focused systems grouped into cohesive plugins and scheduled explicitly, normally in fixed-step schedules when behavior affects networked simulation.
 - **Networking:** Lightyear registration plugins for the concrete inputs, replicated components, and messages the game actually uses.
@@ -103,7 +112,9 @@ Prefer static and kinematic bodies. Full rigid-body simulation requires a specif
 
 ## Network and protocol policy
 
-Clients send intent, never authoritative results. The server owns movement, firing, hits, damage, effects, deaths, builds, abilities, terrain, objectives, scores, respawns, and victory.
+Clients send intent, never authoritative results. The server owns build/weapon-recipe and map-recipe
+validation/resolution, movement, firing, hits, damage, effects, deaths, abilities, terrain,
+objectives, scores, respawns, mode rules, and victory.
 
 The protocol design must address these concerns as they become relevant:
 
@@ -152,10 +163,10 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 02 | User playtest | Network connection and replication sandbox | [milestone-02.md](./milestone-02.md) |
 | 03 | Verifying | Movement, aiming, and greybox collision | [milestone-03.md](./milestone-03.md) |
 | 04 | Complete | Combat core | [milestone-04.md](./milestone-04.md) |
-| 05 | Specification review | Weapon composition and selection | [milestone-05.md](./milestone-05.md) |
-| 06 | Not started | First authored arena and presentation baseline | Create when next |
+| 05 | Specification review | Weapon composition and preset selection | [milestone-05.md](./milestone-05.md) |
+| 06 | Not started | First map-recipe arena and presentation baseline | Create when next |
 | 07 | Not started | Wipeout match loop | Create when next |
-| 08 | Not started | Abilities and bounded build presets | Create when next |
+| 08 | Not started | Bounded brawler builds and abilities | Create when next |
 | 09 | Not started | Hot Zone | Create when next |
 | 10 | Not started | Flexible destructible terrain | Create when next |
 | 11 | Not started | MVP playtest hardening and closeout | Create when next |
@@ -307,16 +318,19 @@ A single pulse weapon supports authoritative firing, hit resolution, damage, def
 - players can identify a hit and defeat from placeholder feedback;
 - telemetry can be written or inspected locally.
 
-## Milestone 05 — Weapon composition and selection
+## Milestone 05 — Weapon composition and preset selection
 
 ### Deliverable
 
-Composable weapon, projectile, effect, and payload data/components/systems support four server-validated weapon choices.
+Composable weapon-recipe, projectile, effect, and payload data/components/systems support four
+server-validated preset choices without making those presets permanent weapon classes.
 
 ### Scope
 
-- stable weapon definition identifiers and validated authored data;
-- weapon definitions separate from per-fighter runtime state;
+- a typed weapon configuration (recipe plus approved presentation profile), four stable preset
+  identifiers, code-owned safety ceilings, and validated authored primitive/rule data;
+- content/rules, player-authored recipe shape, server-resolved weapon, selected build identity, and
+  per-fighter runtime state remain distinct;
 - firing patterns and delivery methods needed by the first four weapons;
 - straight pulse projectile;
 - short-range pellet spread;
@@ -326,35 +340,52 @@ Composable weapon, projectile, effect, and payload data/components/systems suppo
 - duration, stacking, refresh, and cleanup rules for immediate effects;
 - collision behavior against fighters and terrain;
 - server-validated weapon selection before a test round;
+- deterministic preset-independent structural and fighter-context activation resolution used by
+  every preset and shaped for later bounded custom recipes;
 - controller-readable aim/range feedback, including a landing indicator for the lobbed weapon;
 - presentation systems observe gameplay components/messages and own visual or audio effects; gameplay systems do not load or mutate presentation assets;
 - weapon telemetry: use, shots, hit rate, damage, distance, defeats, and self-damage where allowed.
 
 ### Automated verification
 
-- authored definitions reject duplicate IDs, invalid ranges, and unsupported combinations;
+- content/rules and preset recipes reject duplicate IDs, invalid ranges, and unsupported
+  combinations, and authored policy cannot widen code-owned safety/wire bounds;
+- every preset passes through the same configuration resolver, and a non-preset fixture proves that the
+  representation is not coupled to the four preset IDs even though M05 exposes only presets;
 - the four weapons use composable data, components, and focused systems without duplicating whole fighter-specific weapon implementations; genuinely different behavior may use a specialized system;
 - pellet, splash, melee, knockback, and slow rules have repeatable fixed-schedule ECS tests;
-- selected weapon identity and runtime state agree across server and clients;
+- selected preset source, resolved recipe fingerprint/public configuration, and runtime state agree
+  across server and clients;
 - effects clean up correctly on expiry, defeat, disconnect, and sandbox reset.
+- the generalized pipeline preserves M04's pre-combat disconnect cleanup, same-tick projectile
+  collision, deterministic contact/event ordering, bounded evidence, and authoritative tick rules.
 
 ### Exit criteria
 
 - all four weapons can be selected and played in the networked sandbox;
 - values can be changed in data without rewriting combat code;
-- server and client agree on definition identity and presentation events;
+- adding a legal recipe in a test/content fixture does not require a new weapon-specific system or
+  enum branch on preset identity;
+- server and client agree on preset source, resolved recipe identity, and presentation events;
 - each weapon has a measurable preferred distance, burst window, recovery window, and counterplay profile;
 - bouncing, homing, curved steering, piercing, splitting, boomerang behavior, and accumulating status meters remain deferred.
 
-## Milestone 06 — First authored arena and presentation baseline
+## Milestone 06 — First map-recipe arena and presentation baseline
 
 ### Deliverable
 
-One readable symmetrical arena using replaceable provisional assets and minimal combat audio.
+One readable symmetrical built-in arena is parsed, validated, resolved, and instantiated from the
+same bounded map-recipe representation intended for a future player map builder, using replaceable
+provisional assets and minimal combat audio.
 
 ### Scope
 
-- validated map definition format with stable IDs;
+- typed separation between map-content catalog, user-authorable `MapRecipe`, built-in `MapPreset`,
+  immutable server-owned `ResolvedMap`, runtime map state, and developer-owned mode rules;
+- versioned, canonical, round-trippable map-recipe format with stable map/preset, presentation,
+  geometry, terrain, entity, region, spawn, and mode-anchor IDs;
+- a deterministic preset-independent server resolver with bounds/count/complexity, reference,
+  spawn-safety, and mode-compatibility validation;
 - rectangular playable bounds, two team spawn areas, central open space, two side routes, permanent cover, and at least one chokepoint;
 - a clearly marked region reserved for the later destruction milestone;
 - authored static collision and camera bounds;
@@ -365,12 +396,21 @@ One readable symmetrical arena using replaceable provisional assets and minimal 
 - projectile, impact, hit, defeat, and reload feedback;
 - placeholder fire, hit, defeat, and match-state audio cues;
 - asset manifest with source, author, license, URL, and import date;
-- client-only visual/audio loading kept out of the headless server.
+- client-only visual/audio loading kept out of the headless server;
+- no player-facing editor, arbitrary asset upload/path, script, custom component blob, or custom
+  game-mode rule in v1.
 
 ### Automated and visual verification
 
-- map data rejects invalid bounds, duplicate IDs, blocked spawn points, and unsupported references;
+- map data rejects invalid bounds/coordinates, excessive geometry/entity/region counts, duplicate
+  IDs, blocked/unsafe spawn points, missing mode anchors, and unsupported references/combinations;
+- canonical serialize/parse round trips preserve a recipe and semantically equivalent recipes
+  resolve identically, so a future editor need not serialize an ECS `World`;
+- the built-in arena and a legal non-preset map fixture resolve through the same path, and no map or
+  mode system branches on the built-in preset ID;
 - the server loads all gameplay-relevant map state without loading client visuals;
+- client presentation is reconstructed from stable presentation references while collision,
+  regions, spawns, and entities come from the authoritative resolved map;
 - replacement of a fighter sprite or terrain texture does not change collision or gameplay state;
 - controller play verifies HUD legibility, aim feedback, team recognition, and combat readability;
 - common window aspect ratios preserve the playable view and critical HUD information.
@@ -381,6 +421,8 @@ One readable symmetrical arena using replaceable provisional assets and minimal 
 - the arena supports the intended range profiles of all four weapons;
 - team re-entry routes do not obviously force immediate spawn trapping;
 - placeholder art and audio can be replaced without changing simulation code;
+- changing a legal map layout, visual references, geometry, regions, entities, or spawn/anchor
+  placement in recipe data does not require a new system or mode-rule change;
 - all server-required map data is independent of client-only assets.
 
 ## Milestone 07 — Wipeout match loop
@@ -425,17 +467,21 @@ A complete, repeatable, short Wipeout-style match that supports a 2v2 test confi
 
 Before Milestone 08, conduct a playtest and technical review. Resolve blocking authority, input, collision, readability, cleanup, or match-loop problems before adding the build layer. Content quantity alone is not evidence that the gate passed.
 
-## Milestone 08 — Abilities and bounded build presets
+## Milestone 08 — Bounded brawler builds and abilities
 
 ### Deliverable
 
-Players choose a server-validated bounded build whose ultimate and passive choices create a recognizable combat pattern.
+Players choose a server-validated bounded brawler build whose weapon recipe, ultimate, and passive
+choices create a recognizable combat pattern.
 
 ### Scope
 
-- distinct authored build data, fighter base data, and runtime ECS state;
-- one primary weapon, one ultimate, and two passive item slots;
+- distinct content/rule definitions, player-authored build/weapon recipe, server-resolved match
+  loadout, fighter base data, and runtime ECS state;
+- one compositional primary-weapon recipe, one ultimate, and two passive item slots;
 - fixed build-point budget and mutually exclusive families where needed;
+- at least one bounded non-preset weapon variation using M05 primitives; precise editable axes,
+  costs, and UI are decided during M08 research rather than pre-authored here;
 - four to six passive items that change decisions or timing windows;
 - at least one mobility modifier and one defensive modifier;
 - ultimate resource and explicit charge-source rules;
@@ -450,15 +496,20 @@ Players choose a server-validated bounded build whose ultimate and passive choic
 
 ### Automated verification
 
-- invalid point totals, slot counts, IDs, and mutually exclusive combinations are rejected;
+- invalid weapon values/combinations, point totals, slot counts, IDs, and mutually exclusive
+  combinations are rejected;
 - dash and deployable rules have repeatable fixed-schedule ECS tests;
 - deployables are removed on expiry, match cleanup, and all documented owner lifecycle events;
 - build identity and runtime ability state replicate correctly;
 - all four named presets are constructible from the implemented content inventory.
+- a legal non-preset weapon recipe resolves, replicates, and plays through the same systems as the
+  four presets without a preset-ID behavior branch.
 
 ### Exit criteria
 
 - builds create visibly different combat behavior rather than only larger numbers;
+- at least one bounded player-authored weapon variation changes behavior or a meaningful timing/
+  range tradeoff and remains server-authoritative;
 - players can understand ability availability and activation from a controller;
 - the fixed budget creates explicit tradeoffs;
 - preset-level match telemetry can be compared after a Wipeout match;
@@ -478,7 +529,8 @@ Hot Zone intentionally precedes Heist and Gem Grab because it is the earliest di
 
 ### Scope
 
-- capture volume represented in authored map data;
+- capture volume represented as a mode-required anchor/region in a map recipe; Hot Zone rules own
+  its meaning and validation requirements;
 - authoritative occupancy evaluation;
 - per-team progress and progress rate;
 - contested, empty, and simultaneous-entry rules;
@@ -511,6 +563,8 @@ Server-authoritative arbitrary terrain destruction supports visual reconstructio
 
 - Bevy-specific technical decision for mask storage, texture updates, marching squares or equivalent contour generation, simplification, and collider replacement;
 - one destructible terrain region divided into dirty chunks;
+- initial terrain mask/shape, placement, and stable chunk identities sourced from the resolved map
+  recipe while runtime destruction/revisions remain server-owned;
 - circular destruction brush emitted as a world-level payload;
 - authoritative terrain mask and monotonically increasing revision;
 - visual crater and edge update independent of collision generation;
@@ -599,6 +653,9 @@ These candidates preserve the longer-term design direction without assigning sco
 - **Systemic status interaction:** one target-owned cold-to-freeze meter contributed to by compatible projectiles and areas.
 - **Advanced projectiles:** bouncing, homing, curved steering, piercing, splitting, boomerang, and delayed behavior.
 - **Environment surfaces and concealment:** tall grass or another concealment region, a spell-created concealment area, speedway and slow surfaces, one readable hazard, and server-owned per-client network visibility following [environment and tile research](../../09-environment-and-tile-ideas.md).
+- **Player map builder:** edit and preview bounded map recipes using approved presentation, terrain,
+  geometry, entity, region, spawn, and mode-anchor catalogs; server validation remains authoritative
+  and game modes remain developer-authored.
 
 Move a candidate into `docs/implementation/vN/roadmap.md` only when a future version is intentionally scoped.
 
@@ -612,4 +669,6 @@ Move a candidate into `docs/implementation/vN/roadmap.md` only when a future ver
 - platform certification and store release work;
 - production anti-cheat, internet fleet orchestration, and global hosting;
 - procedural maps or automatic balance generation;
+- production user-map editing, persistence, distribution, publishing, discovery, moderation,
+  arbitrary asset upload, and map-version migration;
 - persistent terrain saving, structural collapse, fluids, and material simulation.

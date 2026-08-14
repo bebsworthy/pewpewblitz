@@ -2,18 +2,70 @@
 
 ## Map model
 
-A map definition should contain:
+A map recipe should contain:
 
 - playable bounds;
 - static walls and cover;
 - destructible geometry;
 - walkable and blocked surfaces;
+- visual tile/decal layers and decorative entity placements through stable presentation IDs;
 - spawn points;
-- objective points or volumes;
+- mode-required objective points, anchors, or volumes;
 - pickup spawn rules;
 - hazards;
 - visibility or concealment regions;
-- mode-specific parameters.
+- a compatible server-owned mode definition ID and only the bounded map parameters that mode's
+  schema explicitly exposes.
+
+Keep these authoring levels distinct:
+
+```text
+MapContentCatalog       developer-authored tiles, entities, regions, geometry primitives, bounds
+MapRecipe               user-authored arrangement of allowed content
+MapPreset               a named, developer-authored legal recipe
+ResolvedMap             immutable server-validated match snapshot
+MapRuntimeState         spawned entities, active regions, terrain revisions, objective state
+ModeDefinition/Plugin   developer-authored server rules; never authored by the map recipe
+```
+
+The first v1 arena is a built-in preset, but it must flow through the same versioned typed recipe
+parser/serializer, validator, resolver, and runtime-instantiation path intended for future
+user-authored maps. Map systems must not branch on the first map's identity, and a serialized ECS
+`World` is not the authored source of truth.
+
+## Player map-builder boundary
+
+The eventual map builder may let a user:
+
+- select and arrange approved visual tiles, decals, decorations, and presentation themes;
+- shape playable bounds and place bounded permanent or destructible geometry;
+- place approved props, pickups, hazards, and other map-entity definitions;
+- place and configure supported gameplay regions;
+- place team, free-for-all, or other mode-required spawn points;
+- place objective anchors/volumes required by the selected built-in mode;
+- edit only those sizes, orientations, counts, and parameters exposed by the authoritative catalog.
+
+It does not let a user provide Rust, scripts, systems, arbitrary component data, executable rules,
+new game modes, or unrestricted asset/network references. Choosing `Wipeout`, `Hot Zone`,
+`Showdown`, or another supported mode selects a developer-authored server rules plugin and schema;
+the recipe supplies compatible layout data only.
+
+Server resolution must validate at least schema/revision compatibility, stable IDs, finite and
+bounded coordinates, map dimensions, geometry complexity, collider/region counts, allowed entity
+and presentation references, spawn safety/counts, required objective anchors, mode compatibility,
+destructible-terrain limits, and performance budgets. Competitive fairness checks, asset upload and
+licensing, persistence, publishing, discovery, moderation, and version migration belong to later
+specifications and must not be folded into collision or mode systems.
+
+Milestone 06 establishes the typed recipe/resolved/runtime boundaries with one built-in arena and a
+non-preset validation fixture. It does not implement the player-facing editor. A future builder
+edits a candidate recipe; the server remains responsible for accepting and resolving it before a
+match can use it.
+
+Mode-facing validation grows with implemented modes. Milestone 06 needs only the sandbox/base map
+requirements and a stable place for mode layouts; Milestone 07 adds Wipeout's concrete requirements,
+Milestone 09 adds Hot Zone's, and later modes add their own schemas without making map recipes
+executable or requiring a universal mode trait in advance.
 
 ## Visual tiles and gameplay regions
 
@@ -28,6 +80,10 @@ giving every floor or wall sprite a bespoke rule.
 - smoke, temporary walls, and similar ability-created areas are server-owned runtime entities;
 - decorative grass, puddles, decals, and props have no gameplay effect unless map data explicitly
   associates them with a region or geometry definition.
+
+A user-authored recipe may arrange both visual and gameplay layers, but presentation never implies
+collision or an effect. The recipe must reference each gameplay shape/region explicitly, and the
+headless server resolves those references without loading textures or other client assets.
 
 See [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) for the future-facing
 catalog, property model, and promotion rules. That catalog is research, not automatic v1 scope.
@@ -72,6 +128,11 @@ Generated collision polygons
 - Generate collision outlines from the modified mask using marching squares and polygon simplification.
 
 The v1 Milestone 10 technical design must choose and validate the Bevy/Rust implementation for mask storage, dirty texture uploads, contour generation, simplification, and collider replacement. This may combine small maintained crates with project-owned code; do not adopt a large terrain framework merely to avoid a focused algorithm.
+
+The initial mask, allowed material/brush profiles, placement bounds, and stable terrain-chunk IDs
+are authorable map-recipe data. Runtime destruction, collision regeneration, and terrain revision
+remain server-owned match state; a map author cannot directly publish a runtime revision or crater
+event.
 
 For a historical reference, [Spell-Splosion](https://github.com/MitchMakesThings/Spell-Splosion) demonstrates several Worms-style terrain-destruction techniques in an older Godot project. Its mask-to-visual-to-collision workflow is conceptually useful, but its engine APIs and scene structure are not Brawler implementation dependencies.
 
@@ -189,3 +250,8 @@ Keep mode rules out of fighter and weapon systems, but do not require an object-
 - client presentation systems that observe replicated mode state and render the scoreboard, timer, objective progress, and results.
 
 Common match lifecycle components, resources, and systems should emerge from implementing Wipeout and be reused by Hot Zone where their behavior is truly identical. Mode-specific rule plugins may use specialized systems. Introduce a shared trait, registry, or generic mode abstraction only after multiple implemented modes demonstrate a concrete need that plugin composition and ECS queries do not already solve.
+
+A mode plugin owns the validation schema for its map-facing requirements. For example, Wipeout may
+require safe team spawns, Hot Zone a bounded capture volume, and Showdown distributed spawns plus a
+boundary-compatible play area. A map recipe supplies these placements but cannot change what they
+mean, how scoring advances, or how victory is decided.

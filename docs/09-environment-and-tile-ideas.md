@@ -16,6 +16,9 @@ The word **tile** can describe how client art is assembled, but a visible tile i
 an authoritative gameplay object.
 
 - **Visual tile:** replaceable client-only floor, wall, vegetation, edge, or decoration art.
+- **Map recipe:** a user-authorable bounded arrangement of presentation layers, geometry, terrain,
+  entities, regions, spawn points, and mode-required anchors.
+- **Map preset:** a developer-authored legal map recipe used as built-in content or a test fixture.
 - **Authored region:** stable map data describing a shape and gameplay properties such as speed,
   concealment, or periodic damage.
 - **Geometry:** authoritative blocking or queryable shapes for movement, projectiles, placement,
@@ -27,6 +30,11 @@ an authoritative gameplay object.
 
 This separation lets art change without changing simulation and prevents a large `TileKind` enum
 from becoming the owner of unrelated movement, collision, status, and networking rules.
+
+The eventual map builder edits map recipes using stable catalog references and bounded values. It
+does not create environment systems or game-mode rules. Adding a new region behavior, entity family,
+terrain material rule, or mode remains developer-authored engine/content work; users compose the
+capabilities that have been exposed.
 
 ## Environment idea catalog
 
@@ -232,7 +240,8 @@ audio policy, and whether a player can understand why an opponent became visible
 The current v1 implementation remains intentionally smaller:
 
 - Milestone 03 proves neutral ground, permanent bounds/cover, and authoritative collision.
-- Milestone 06 authors the first readable arena and reserves a destructible region.
+- Milestone 06 resolves the first readable built-in map recipe, proves recipe/preset/resolved/runtime
+  separation, and reserves a destructible region without implementing the player editor.
 - Milestone 09 adds an objective region through Hot Zone.
 - Milestone 10 proves one mask-backed destructible terrain region and recovery.
 

@@ -25,6 +25,8 @@ Use **Avian 2D** for physics if the prototype needs a physics library beyond sim
 - Bevy has no first-party networking stack. Lightyear is a third-party dependency and should be pinned and upgraded deliberately.
 - Bevy and Lightyear track each other's versions closely. A Bevy upgrade is a coordinated dependency migration, not a casual package update.
 - Bevy has less mature authoring/editor infrastructure than Godot. This is acceptable because Brawler is intentionally code/data-driven, but map and asset authoring tools will be our responsibility.
+- The eventual player map builder should edit a Brawler-owned serializable map recipe and preview
+  it with Bevy; the Bevy `World` or editor UI must not become the only stored map representation.
 - Rust compile times and ECS concepts add upfront complexity.
 - Rust being compiled does not automatically make the game faster. The benefit is predictable control and efficient native execution; actual performance still depends on simulation, rendering, networking, and profiling.
 - The Rust ecosystem is broader than the GDScript ecosystem, but the Bevy-specific ecosystem is smaller than Godot's. Prefer well-maintained dependencies that explicitly support the selected Bevy version, pin them, and keep their plugin/configuration usage localized enough to replace when evidence requires it.
@@ -65,6 +67,9 @@ Defold is lightweight and strong for 2D deployment, but its workflow and ecosyst
 - Implement each mode as focused Bevy rule plugins, resources/components, and scheduled systems rather than branching victory logic through fighter or weapon systems. Do not require a universal mode trait before multiple modes demonstrate the need.
 - Prefer serializable Rust definitions or authored Bevy assets/configuration files for content and focused Bevy systems for behavior.
 - Keep gameplay definitions in serializable Rust data structures or authored data files; do not make the ECS world itself the only source of content definitions.
+- Express the first built-in arena through the same bounded map-recipe schema and server resolver
+  intended for later user-authored maps. Keep server-owned mode implementations separate from
+  user-editable layout data.
 - Keep destructible terrain as a mask-to-visual-to-collision subsystem rather than encoding it as visible tile replacement.
 - Queue terrain collision rebuilds between physics frames and rebuild only dirty terrain chunks.
 - Treat the game as a dedicated-server-authoritative networked game from the first gameplay architecture.

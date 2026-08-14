@@ -1,6 +1,8 @@
 # Brawler design documentation
 
-Brawler is an original, cross-platform top-down arena shooter built around player-authored fighters. Players assemble a fighter from a bounded set of stats, weapons, abilities, and equipment rather than selecting a fixed hero with a fixed kit.
+Brawler is an original, cross-platform top-down arena shooter built around player-authored
+brawlers. Players compose a bounded primary-weapon recipe and combine it with body choices,
+abilities, and equipment rather than selecting a fixed hero with a fixed kit.
 
 The project is intentionally starting with the gameplay loop. Production matchmaking, account services, monetization, cosmetics, live operations, and release engineering are out of scope initially. Core networking and the server-authoritative simulation are in scope from the beginning.
 
@@ -20,10 +22,18 @@ The project is intentionally starting with the gameplay loop. Production matchma
 
 ## Working vocabulary
 
-- **Fighter:** the player-controlled combatant.
-- **Build:** the fighter's selected weapon, ability, and equipment.
+- **Brawler:** a player-authored, potentially persistent fighter configuration in the player's
+  arsenal.
+- **Fighter:** the server-owned in-match combatant instantiated from a validated brawler build.
+- **Weapon recipe:** the chosen behavior and bounded specifications for a brawler's primary weapon.
+- **Build:** the brawler's weapon recipe, ability, body choices, and equipment.
+- **Preset:** a developer-authored legal recipe/build used for onboarding, testing, or quick choice;
+  it is not a separate combat implementation.
+- **Map recipe:** a bounded arrangement of presentation layers, geometry, terrain, entities,
+  regions, spawn points, and mode-required anchors; built-in maps are preset recipes.
+- **Mode:** a server-owned rules implementation selected for a compatible map; players may lay out
+  its required anchors but do not author the rules.
 - **Item:** an equipable passive or active modifier.
 - **Payload:** the gameplay effect produced by an attack or ability.
-- **Mode:** the rules that determine scoring, respawning, and victory.
 - **Map:** geometry, spawn points, objectives, hazards, and interactables.
 - **Gameplay region:** an authored or runtime area that applies movement, concealment, hazard, objective, or other server-owned rules independently from its visual tiles.

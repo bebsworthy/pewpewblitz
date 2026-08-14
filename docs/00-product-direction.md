@@ -2,15 +2,18 @@
 
 ## One-sentence pitch
 
-Brawler is a short-match arena shooter where players create their own fighter build and win through movement, aim, positioning, and tactical use of equipment.
+Brawler is a short-match arena shooter where players create a brawler around a customized primary
+weapon and win through movement, aim, positioning, and tactical use of equipment.
 
 ## Design pillars
 
 1. **Combat first.** Every system must improve the feel, clarity, or depth of the moment-to-moment fight.
-2. **Meaningful builds.** A weapon and two or three items should create a recognizable play pattern, not merely add invisible numerical power.
+2. **Meaningful builds.** A customized weapon and two or three items should create a recognizable
+   play pattern, not merely add invisible numerical power.
 3. **Readable competition.** Players should understand why they were damaged, slowed, defeated, or denied an objective.
 4. **Short feedback cycles.** A match should expose a build's strengths and weaknesses quickly.
-5. **Content through composition.** New weapons, payloads, items, and map rules should combine without requiring a new bespoke fighter class.
+5. **Content through composition.** New weapon recipes, payloads, items, and map layouts should
+   combine from bounded primitives without requiring a bespoke fighter class or game-mode script.
 6. **Network-first simulation.** The product is a networked competitive game; offline and local testing must exercise the same server-authoritative simulation path.
 
 ## Differentiation
@@ -18,11 +21,27 @@ Brawler is a short-match arena shooter where players create their own fighter bu
 The reference genre usually begins with a predefined character and then adds character-specific upgrades. Brawler reverses that relationship:
 
 - the body is a relatively small, understandable foundation;
-- the weapon determines the primary combat pattern;
+- the player composes the weapon's behavior and bounded specifications, which determine the primary
+  combat pattern;
 - the ultimate and items create specialization;
 - players trade strengths and weaknesses within a bounded budget.
 
-This creates a buildcraft game without requiring a large roster of heroes.
+The player's long-lived collection is an arsenal of authored brawlers, each with its own validated
+weapon configuration and loadout. This creates a buildcraft game without requiring a large roster
+of developer-defined heroes.
+
+## Creator direction
+
+An eventual player-facing map builder lets users author arena layouts from server-known content:
+visual tiles and decorations, terrain, bounded geometry, placeable entities, gameplay regions,
+spawn points, and mode-required anchors. Users choose a supported game mode for a map; they do not
+author scoring, victory, respawn, shrinking-boundary, objective, or other executable mode rules.
+
+Built-in maps and user-authored maps must use the same map-recipe and server-validation path. The
+first v1 arena establishes that representation without implementing the editor, persistence,
+publishing, asset upload, discovery, moderation, or procedural generation. A user map builder is
+therefore compatible with the non-goal of procedural map generation: one is deliberate bounded
+authoring, while the other is automatic generation.
 
 ## Balance principle
 
@@ -35,7 +54,13 @@ Examples:
 - a strong crowd-control item can have a long cooldown;
 - a mobility item can occupy the same slot as a defensive item.
 
-The first prototype should use manually authored presets and a fixed budget. Automatic balancing and procedural item generation are later problems.
+The first combat prototype should use manually authored weapon and brawler presets, but those
+presets must be expressed through the same compositional recipe and validation path intended for
+player-authored builds. The first bounded customization pass uses a fixed budget; its exact point
+allocation belongs to that milestone's specification. Acquisition mechanics such as currency,
+loot, unlocks, and progression decide which options a player owns, not whether a weapon is legal in
+combat, and are later product problems. Automatic balancing and procedural item generation are
+also later problems.
 
 ## Non-goals for the gameplay MVP
 

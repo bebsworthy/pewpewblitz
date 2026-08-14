@@ -68,6 +68,9 @@ Do not combine all packs in the same visible scene. Use one primary visual langu
 - Pick one world pixel scale per scene; do not mix 16×16, 32×32, and 64×64 tiles without an explicit scale plan.
 - Load runtime visuals through Bevy's asset system, retain the handles for as long as the assets are needed, and gate entry into playable states until required assets finish loading.
 - Keep authoritative map definitions separate from client-only sprite sheets, atlases, textures, and audio handles. The headless server must be able to load map geometry and rules without visual assets.
+- Make the first built-in map a preset recipe that references stable presentation-catalog IDs. A
+  future user map builder may arrange approved visuals, but arbitrary texture paths or asset handles
+  must never become authoritative gameplay data.
 - Represent floors and indestructible walls through authored map data plus replaceable client visuals. Keep flexible destruction in separate mask-backed terrain chunks, and keep objectives, pickups, hazards, and props as distinct gameplay entities.
 - Keep decorative tiles distinct from the gameplay regions cataloged in [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md); grass art, speed markings, water, or hazard decals have no authoritative effect by themselves.
 - Treat the visual sprite and collision shape as separate concerns. A temporary fighter can be a colored circle or capsule while the final sprite is undecided.

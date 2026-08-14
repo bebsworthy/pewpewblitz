@@ -2,15 +2,18 @@
 
 ## MVP statement
 
-Two teams of two or three fighters fight on one small map. Each player chooses one of four weapons and one of two ultimates. Players move, aim, fire, take damage, die, respawn, and earn points for eliminations. The first team to the target score wins.
+Two teams of two or three fighters fight on one small map. The combat slice begins with four
+server-validated weapon presets; the first product iteration adds a bounded customized brawler
+build and two ultimates. Players move, aim, fire, take damage, die, respawn, and earn points for
+eliminations. The first team to the target score wins.
 
 This is a Wipeout-style networked prototype because it exercises the important loop with minimal mode-specific machinery. The first test may run locally, but it uses a server-authoritative simulation.
 
 ## Content scope
 
-- one arena;
+- one built-in arena preset expressed through a future-compatible map recipe;
 - one fighter body profile;
-- four weapons;
+- four weapon presets expressed as compositional recipes;
 - two projectile trajectories in the first combat pass: straight and ballistic/lobbed;
 - immediate hit effects only; accumulating status meters are deferred;
 - two ultimates;
@@ -77,7 +80,11 @@ Before exposing a full editor, provide named presets:
 - **Controller:** launcher, deployable sentry, and control-oriented passives;
 - **Duelist:** impact blade, dash, and short-range passives.
 
-Presets let the team evaluate the design while avoiding UI and persistence work.
+Each named weapon inside these builds is a preset recipe resolved through the same server path as a
+future customized recipe. Presets let the team evaluate the design while avoiding persistence,
+arsenal management, acquisition, and a full editor. Milestone 08 must also exercise at least one
+bounded non-preset weapon variation; its exact editor interaction and budget are deliberately left
+for that milestone's research.
 
 ## Delivery gates
 
@@ -103,11 +110,18 @@ It must run as a macOS client connected to a headless authoritative server, usin
 
 ### Combat vertical slice — Milestones 01–07
 
-The first playable gate adds the Rust/Bevy application and networking foundation, controller-first movement, a greybox collision environment, authoritative combat, four selectable weapons, one readable arena, and a complete Wipeout match. It is sufficient to validate combat and networking, but it does not yet validate Brawler's buildcraft differentiation.
+The first playable gate adds the Rust/Bevy application and networking foundation, controller-first
+movement, a greybox collision environment, authoritative combat, four selectable weapons, one
+readable arena resolved from a typed map recipe, and a complete Wipeout match. It is sufficient to
+validate combat and networking, but it does not yet validate the player-facing brawler or map
+authoring experiences.
 
 ### First product iteration — Milestones 01–08
 
-The first product iteration adds the two initial ultimates, four to six passive items, a fixed build budget, two passive slots, and four legal named presets. This is the first gate that tests the product direction rather than only the underlying arena-shooter loop.
+The first product iteration adds the two initial ultimates, four to six passive items, a fixed build
+budget, two passive slots, four legal named presets, and at least one bounded non-preset weapon
+configuration built from Milestone 05 primitives. This is the first gate that tests Brawler's
+player-authored build direction rather than only the underlying arena-shooter loop.
 
 ### Gameplay MVP verification — Milestones 01–10
 
@@ -126,8 +140,12 @@ The MVP is successful when:
 - fighters can reliably hit, damage, defeat, and respawn;
 - players can identify why they lost a fight;
 - different presets produce visibly different match behavior;
+- a player can alter at least one allowed weapon behavior or specification within a bounded build,
+  and the server accepts the legal recipe while rejecting illegal values/combinations;
 - a complete match finishes in roughly two to four minutes;
 - the team can change weapon values without rewriting combat code;
+- the team can change a legal map layout, presentation references, geometry, regions, entities, and
+  spawn/objective placements in map data without rewriting map or mode systems;
 - the same fighter and weapon code can run under Wipeout and Hot Zone rules;
 - the complete combat loop is playable with an Xbox-like controller;
 - the same actions are playable with keyboard/mouse without separate gameplay implementations;
@@ -143,6 +161,9 @@ The MVP is successful when:
 - lag compensation and advanced client-side prediction;
 - account and inventory persistence;
 - progression and unlocks;
+- persistent brawler-arsenal storage and a production weapon editor;
+- a player-facing map builder, custom-map persistence/distribution/discovery/moderation, and user
+  asset upload;
 - cosmetics;
 - touch controls;
 - multiple body sizes;

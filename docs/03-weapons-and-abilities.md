@@ -2,10 +2,11 @@
 
 ## Weapon composition
 
-Represent a weapon as a composition of input, firing, delivery, collision, and payload rules.
+Represent a weapon recipe as a composition of input, firing, delivery, collision, payload, and
+economy rules.
 
 ```text
-Weapon
+WeaponRecipe
   InputBehavior
   FiringPattern
   DeliveryMethod
@@ -13,6 +14,42 @@ Weapon
   Payloads
   Economy
 ```
+
+Keep these authoring levels distinct:
+
+```text
+WeaponContentCatalog       developer-authored primitives, bounds, compatibility, costs
+WeaponRecipe               player-authored choices and specifications
+WeaponConfiguration        a recipe plus an approved presentation-profile reference
+WeaponPreset               a named, developer-authored legal configuration
+ResolvedWeapon             immutable server-validated match snapshot
+WeaponState                ammo/charges, cooldowns, and effects during play
+```
+
+The server resolves recipes deterministically. Validation has separate concerns even when they are
+implemented by one focused module:
+
+1. **Structural/capability validation:** IDs exist, values are finite and bounded, the requested
+   combination has implemented systems, and vector/count limits are safe.
+2. **Balance validation:** the recipe obeys the current point budget, slot rules, mutual exclusions,
+   and required tradeoffs.
+3. **Entitlement validation:** a player owns or may use the selected primitives. This depends on
+   future accounts, progression, loot, or currency and is not a combat-system concern.
+
+Code-owned engine ceilings bound collection sizes, numeric fields, and serialized resolved data.
+Authored catalog or balance policy may narrow those limits but cannot widen them. Structural recipe
+validation remains independent of preset identity; activation resolution also checks the recipe
+against its chosen fighter definition, so a future brawler body can impose compatibility rules
+without changing the reusable recipe.
+
+Milestone 05 implements the first four weapons as presets and runs them through the same structural
+resolver used by future recipes; it does not expose an editor or accept arbitrary client-authored
+specifications. Milestone 08 introduces the first bounded non-preset customization and decides the
+initial balance-budget policy. Persistent storage and entitlement validation come later.
+
+Do not represent player customization as executable scripts, client-selected system names, or
+unbounded numeric maps. A recipe selects typed, server-known primitives and bounded values. Focused
+ECS systems implement behavior; data composition selects among those capabilities.
 
 ## Projectile model
 
@@ -207,7 +244,7 @@ configure a region; it must not implement a parallel client-only visibility or m
 - resistance, immunity, and trigger cooldowns;
 - one complete cold-to-freeze interaction as the reference implementation.
 
-## Initial weapon set
+## Initial weapon presets
 
 | Weapon | Pattern | Strength | Cost or weakness |
 |---|---|---|---|
@@ -217,7 +254,9 @@ configure a region; it must not implement a parallel client-only visibility or m
 | Impact blade | Melee arc | Strong duel pressure and displacement | Must enter danger range |
 | Optional fifth: charge rifle | Charge-and-release projectile | Long-range accuracy reward | Vulnerable while charging |
 
-The first four are sufficient for the initial combat test. Add the charge rifle only if the map provides enough sightlines to evaluate it fairly.
+The first four are sufficient for the initial combat test. They are reference recipes that exercise
+the first composition primitives, not four permanent weapon classes. Add the charge rifle only if
+the map provides enough sightlines to evaluate it fairly.
 
 ## Ultimate abilities
 

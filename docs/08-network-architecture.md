@@ -25,17 +25,21 @@ Client presentation and local feedback
 ### Client responsibilities
 
 - read controller or keyboard/mouse input;
+- request selection of a preset or brawler build using stable identity/revision data;
 - send timestamped input commands or input frames;
 - predict local movement later if needed;
 - render the latest authoritative state;
 - interpolate remote fighters;
 - play visual, audio, and camera effects;
 - display HUD and scoreboard;
+- never decide whether a weapon recipe is legal or directly install resolved weapon values;
 - never decide authoritative damage, hits, deaths, status triggers, scores, or terrain edits.
 
 ### Server responsibilities
 
 - own the match lifecycle and mode rules;
+- retrieve or receive candidate brawler builds, validate their weapon recipes, and create immutable
+  resolved match loadouts;
 - simulate fighter movement and abilities;
 - validate fire commands and cooldowns;
 - perform projectile, hit, damage, and collision resolution;
@@ -65,7 +69,12 @@ Authoritative server World
   validation, ownership, cleanup, recovery
 ```
 
-Authored definitions may be serializable Rust data or Bevy assets/configuration loaded into the worlds that need them. Runtime authority lives in server components, resources, entities, states, and scheduled systems. Client-only presentation observes replicated gameplay state or presentation messages and must not become gameplay truth.
+Authored content/rule definitions may be serializable Rust data or Bevy assets/configuration loaded
+into the worlds that need them. Player-authored brawler builds and weapon recipes are separate from
+those definitions, and immutable resolved match loadouts are separate from mutable runtime state.
+Runtime authority lives in server components, resources, entities, states, and scheduled systems.
+Client-only presentation observes replicated gameplay state or presentation messages and must not
+become gameplay truth.
 
 Use a shared gameplay plugin or module only for systems that genuinely execute on both server and client, primarily when prediction requires identical fixed-step behavior. Server-only match, validation, damage, score, terrain, and lifecycle rules remain server-only. Package and folder boundaries are implementation decisions made from feature and dependency evidence, not part of the network contract.
 
@@ -84,6 +93,79 @@ InputFrame
   ultimate
   interact
 ```
+
+Build selection and weapon editing are not per-tick combat input. They use ordered, idempotent
+requests tied to the receiving authenticated/session connection. A request never authoritatively
+names another fighter or installs ECS runtime state.
+
+### Weapon-recipe authority
+
+Keep these network concepts separate:
+
+```text
+Shared content/rule catalog fingerprint
+  proves client/server schema and known primitive compatibility
+
+Candidate brawler build / weapon recipe
+  preset lookup in Milestone 05
+  bounded client proposal in Milestone 08
+  server-side stored arsenal revision when persistence exists
+
+Resolved match loadout
+  created and owned by the server
+  replicated as stable identity plus the bounded public configuration needed for HUD/presentation
+
+Runtime weapon state
+  ammo/charges, cooldowns, projectiles, effects; mutated only by server simulation
+```
+
+Milestone 05 clients request a built-in preset ID; the server loads and resolves the recipe from its
+own catalog instead of trusting client-supplied damage, range, behavior, or payload values. A later
+bounded editor may send a typed recipe proposal, but the server must independently validate known
+primitives, finite/ranged values, supported combinations, budget/slot policy, and—when persistence
+exists—build revision and entitlement. Invalid or stale recipes do not create or mutate a fighter.
+
+Per-player recipes are authoritative session/build data, not part of the global gameplay-content
+fingerprint. The fingerprint covers the shared schema, primitive catalog, and built-in presets. The
+server replicates the accepted resolved public configuration so late join and reconnect do not
+depend on every client having a player's custom recipe preinstalled.
+
+### Map-recipe and mode authority
+
+Map authoring follows the same definition/recipe/resolved/runtime separation without allowing map
+recipes to become game-mode programs:
+
+```text
+Shared map-content catalog and mode schemas
+  known presentation, geometry, terrain, entity, region, and anchor definitions
+
+Candidate map recipe
+  one built-in preset in Milestone 06
+  future bounded user-authored layout/revision
+
+Resolved map
+  immutable server-validated geometry, regions, placements, presentation references, and mode ID
+
+Runtime map state
+  spawned entities, objective state, active regions, and terrain revisions owned by the server
+```
+
+Milestone 06 loads one built-in recipe through the future-compatible resolver. A future builder may
+produce a typed candidate recipe, but the server validates catalog/schema versions, IDs, finite and
+bounded geometry, complexity/count budgets, spawn safety, objective requirements, mode
+compatibility, and allowed references before installing it. A client cannot submit collision,
+spawn, region, entity, or terrain changes directly to a running match.
+
+The selected `ModeDefinitionId` resolves only to a server-installed mode plugin. A map recipe may
+place that mode's required anchors and choose explicitly exposed parameters, but cannot define or
+replace scoring, victory, respawn, objective, or other executable rules. The server replicates the
+accepted map identity/revision and resolved data needed for client reconstruction. Distribution,
+asset upload, persistence, publishing, discovery, moderation, and migration of user maps are later
+network/service concerns.
+
+User-map identity/revision is authoritative match data, not a substitute for the shared catalog and
+mode-schema fingerprint. The shared fingerprint proves that both roles understand the referenced
+primitive and presentation IDs; the server-approved recipe/revision identifies the actual layout.
 
 The server normally exposes authoritative state through Lightyear-replicated ECS components. Discrete outcomes use explicitly registered messages when they are not adequately represented by replicated state:
 
