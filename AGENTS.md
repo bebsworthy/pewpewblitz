@@ -27,6 +27,104 @@ Group focused systems, components, resources, and messages into cohesive plugins
 
 For architecture decisions, prioritize Brawler's gameplay and authority requirements, the local Lightyear material, verified Bevy 0.19 APIs, and Bevy-native patterns before general Rust architecture advice. Server-oriented DDD or hexagonal architecture is not the governing model; use ports/adapters only at a concrete external boundary where they solve an observed problem.
 
+## Current source layout
+
+The crate keeps one public gameplay/application API while organizing implementation by ECS state
+ownership, execution role, plugin composition, and schedule phase:
+
+```text
+src/
+  lib.rs                   shared crate module and role feature gates
+  bin/{client,server}.rs   thin executable entry points
+  gameplay.rs              shared fixed-tick schedule/set composition
+  protocol.rs              wire registration and network protocol boundary
+  config.rs                validated client/server/process configuration
+  timing.rs                shared simulation time definitions
+  combat/
+    mod.rs                 combat composition root, public re-exports, shared sets/plugins
+    model.rs               stable identities and shared/runtime combat state shapes
+    cues.rs                gameplay-to-presentation combat facts
+    definitions/           authored catalog, validation, resolution, fingerprints, tests
+    authority.rs           authoritative fighter lifecycle and authority helpers
+    attack.rs              economy, attack acceptance, firing expansion, attack telemetry
+    delivery.rs            straight, lobbed, and melee delivery geometry/execution
+    effects.rs             targeting, payloads, damage, effects, defeat, ordered outcomes
+    telemetry.rs           bounded records, trackers, aggregates, summaries
+    evidence.rs            bounded process/checkpoint evidence and convergence schemas
+    server.rs              server combat plugin and schedule registration
+    client.rs              combat-specific previews, cues, effects, projectiles, and HUD
+    tests.rs               shared combat model/composition tests
+  movement/
+    mod.rs                 movement plugins and authoritative schedule composition
+    arena.rs               arena definitions, geometry, colliders, and spawn helpers
+    input.rs               pure input shaping plus server validation/freshness rules
+    tests.rs               focused movement tests
+  client/
+    mod.rs                 client application composition and shared client state
+    input.rs               keyboard, mouse, gamepad, and native-input sampling
+    presentation.rs        camera, arena, HUD, and replicated-pose presentation
+    session.rs             connection, selection, shutdown, and headless automation lifecycle
+    tests.rs               client composition and behavior tests
+  server/
+    mod.rs                 dedicated-server and connection/session composition
+    verification.rs        process-only movement/combat evidence validation
+    tests.rs               server composition and lifecycle tests
+tests/
+  network.rs               integration-test composition entry point
+  network/
+    harness.rs             reusable separate-App/Crossbeam/UDP test harness
+    *.rs                   scenarios grouped by lifecycle, movement, selection, combat, recovery
+```
+
+`content/v1/` owns build-embedded authored gameplay data. `references/` contains read-only upstream
+material and is not part of Brawler's production module layout.
+
+## Code organization rules
+
+- Treat each `mod.rs` as a composition and intentional public-API surface, not an implementation
+  dumping ground. It may define shared system sets/resources, install plugins/schedules, and
+  re-export the small API used by sibling concerns. Put focused algorithms and lifecycle work in
+  owned submodules.
+- Choose a module boundary from responsibility and runtime ownership, not line count alone. Split
+  when code has different state owners, execution roles, feature gates, schedule phases, reasons to
+  change, or independently testable algorithms. Do not create one plugin, architectural layer, or
+  file per type merely to make files shorter.
+- A schedule-facing Bevy system should coordinate a recognizable phase. When it grows to combine
+  validation, candidate collection, deterministic ordering, mutation, telemetry, and cue emission,
+  extract named helpers or focused systems while keeping ordering explicit. Moving one giant
+  function unchanged into another file is not decomposition.
+- Preserve fixed-tick ordering and deferred-command boundaries during extraction. Keep meaningful
+  `SystemSet`, `.before`/`.after`, `.chain()`, physics refresh, and `ApplyDeferred` relationships
+  visible at the composition point; add schedule tests when changing them.
+- Keep execution roles strict. Authoritative mutation belongs to server-gated combat, movement, or
+  session modules. Client modules sample intent and present replicated state/cues. Process evidence
+  and verification may observe gameplay but must not become a second gameplay or mutation path.
+- Keep authored definitions, selected/resolved builds, mutable ECS runtime state, protocol
+  registration, telemetry/evidence, and presentation as separate concerns. A shared wire shape does
+  not authorize shared execution of server-only rules.
+- Keep network registrations in `protocol.rs`; keep stable shared protocol/gameplay types in the
+  appropriate shared model/cue/definition module. Never expose process-local `Entity` identity on
+  the wire. Preserve public module paths and wire contracts during organization-only changes unless
+  the active milestone explicitly approves and tests a protocol change.
+- Default new items and submodules to private. Use `pub(crate)` for demonstrated cross-module use
+  and public re-exports only for the crate API consumed by another role, integration tests, or a
+  genuine external boundary. Avoid wildcard re-exports that accidentally turn implementation
+  details into API.
+- Feature-gate role-owned modules at their ownership boundary. The server feature graph must not
+  acquire windowing, rendering, audio, device input, or client assets through a convenient shared
+  module. Run role-specific checks after moving imports or types across client/server boundaries.
+- Avoid module/file-wide complexity suppressions. A necessary Clippy exception for a Bevy system
+  query or deterministic orchestration function should be attached narrowly to that item and remain
+  reviewable. New `too_many_lines`/`too_many_arguments` findings are prompts to inspect ownership
+  and decomposition before adding an allow.
+- Place pure rule tests beside the owning module, using `tests.rs` when a focused module's tests
+  would otherwise obscure production code. Put separate-App authority/replication behavior under
+  `tests/network/`, reuse `harness.rs`, and group scenarios by behavior rather than accumulating
+  them in `tests/network.rs` or duplicating harness setup.
+- When a file is already large but cohesive, add new code only if it shares that exact ownership and
+  lifecycle. A new concern should get a named submodule; recurring growth inside one system should
+  be decomposed into testable helpers. Do not use a hard line limit as a substitute for this review.
+
 ## Local implementation references
 
 Use the checked-in source and examples before guessing an API or copying an unrelated internet snippet, but verify snapshot versions before transferring exact APIs:

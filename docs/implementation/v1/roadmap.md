@@ -16,16 +16,16 @@ Milestone 11 hardens and closes the v1 MVP. Additional mode families and systemi
 
 The milestones are not release promises. A milestone may be split during its technical-design pass, but its exit criteria may not be silently moved to a later gate.
 
-Milestone 06 has a pre-existing first-draft specification in this worktree and may remain in
-specification review while Milestone 05 is remediated; its implementation is explicitly blocked
-until Milestone 05 reaches its user-playtest and feedback gates.
+Milestone 06 has a post-M05 architecture-aligned specification in this worktree and may remain in
+specification review while Milestone 05 finishes its remaining gates; its implementation is
+explicitly blocked until Milestone 05 reaches its user-playtest and feedback gates.
 
 The milestone sections below are outcome briefs and research prompts, not prevalidated technical specifications. Type names, plugins, schedules, package boundaries, data formats, and algorithms remain provisional until the milestone research and specification are approved.
 
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 05 architecture remediation and automated verification are complete; windowed render-profile, keyboard/mouse, physical-controller, specification-validation, and user-playtest gates remain. Milestone 06 first-draft specification review is running in parallel, while Milestone 03 verification and earlier user playtests remain open
+- **Overall status:** Milestone 05 architecture remediation and automated verification are complete; windowed render-profile, keyboard/mouse, physical-controller, specification-validation, and user-playtest gates remain. Milestone 06's post-M05 specification review is running in parallel, while Milestone 03 verification and earlier user playtests remain open
 - **Current milestone:** Milestone 05 — Weapon composition and preset selection
 - **Last completed milestone:** Milestone 04 — Combat core
 
@@ -398,7 +398,8 @@ provisional assets and minimal combat audio.
 - team colors, health, ammo, selected weapon, aiming, and match-information HUD layout for controller play;
 - connection and error-state presentation needed for local testing;
 - projectile, impact, hit, defeat, and reload feedback;
-- placeholder fire, hit, defeat, and match-state audio cues;
+- placeholder fire, hit, defeat, and session/readiness audio cues; formal match-state audio waits for
+  Milestone 07's match lifecycle;
 - asset manifest with source, author, license, URL, and import date;
 - client-only visual/audio loading kept out of the headless server;
 - no player-facing editor, arbitrary asset upload/path, script, custom component blob, or custom
