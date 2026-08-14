@@ -505,6 +505,45 @@ pub fn combat_cue_key(cue: &CombatCue) -> CombatCueKey {
     CombatCueKey { kind, event_id }
 }
 
+/// Encode a cue payload for the line-oriented process evidence file.
+#[must_use]
+pub fn encode_combat_cue(cue: &CombatCue) -> String {
+    let bytes = postcard::to_allocvec(cue).expect("combat cue serialization should be infallible");
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use core::fmt::Write as _;
+        let _ = write!(encoded, "{byte:02x}");
+    }
+    encoded
+}
+
+/// Decode a cue payload from the process evidence file.
+#[must_use]
+pub fn decode_combat_cue(encoded: &str) -> Option<CombatCue> {
+    if !encoded.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes = encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = hex_value(pair[0])?;
+            let low = hex_value(pair[1])?;
+            Some((high << 4) | low)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    postcard::from_bytes(&bytes).ok()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// Server counters retained across sandbox resets.
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
 pub struct CombatTelemetry {
@@ -518,7 +557,20 @@ pub struct CombatTelemetry {
     /// Wall-clock samples used only by the local impairment evidence harness. They are never
     /// used by gameplay or attribution.
     pub accepted_shot_timestamps: Vec<(ShotId, u128)>,
+    /// Bounded authoritative cue payloads retained for deterministic/process evidence.
+    pub cues: Vec<CombatCue>,
     pub records: Vec<CombatLogRecord>,
+}
+
+impl CombatTelemetry {
+    pub fn record_cue(&mut self, cue: CombatCue) -> bool {
+        if self.cues.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+            self.cues.push(cue);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(feature = "server")]
@@ -531,7 +583,6 @@ struct CombatEvidenceMode {
     enabled: bool,
 }
 
-#[cfg(any(feature = "server", feature = "client"))]
 const MAX_COMBAT_EVIDENCE_EVENTS: usize = 512;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -856,7 +907,6 @@ impl Plugin for ServerCombatPlugin {
     }
 }
 
-#[cfg(feature = "server")]
 fn validate_definitions(fighters: Res<FighterDefinitions>, weapons: Res<WeaponDefinitions>) {
     fighters
         .validate(&weapons)
@@ -975,12 +1025,14 @@ fn reset_due_fighters(
             target: *network_id,
             position: WorldPoint::from(position),
         });
-        outbox.0.push(CombatCue::Reset {
+        let cue = CombatCue::Reset {
             event_id,
             tick: tick.0,
             target: *network_id,
             position: WorldPoint::from(position),
-        });
+        };
+        telemetry.record_cue(cue.clone());
+        outbox.0.push(cue);
         let _ = fighter;
     }
 }
@@ -1103,12 +1155,6 @@ fn authoritative_fire(
             InterpolationTarget::to_clients(NetworkTarget::All),
         ));
         telemetry.accepted_shots = telemetry.accepted_shots.saturating_add(1);
-        if evidence.enabled && telemetry.accepted_shot_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS
-        {
-            telemetry
-                .accepted_shot_timestamps
-                .push((shot_id, unix_epoch_micros()));
-        }
         telemetry.records.push(CombatLogRecord::Shot {
             event_id,
             tick: tick.0,
@@ -1125,14 +1171,24 @@ fn authoritative_fire(
             ammo_after = state.ammo,
             "authoritative pulse shot accepted"
         );
-        outbox.0.push(CombatCue::Muzzle {
+        let cue = CombatCue::Muzzle {
             event_id,
             tick: tick.0,
             source: *network_id,
             shot_id,
             weapon_definition_id: build.primary_weapon,
             position: WorldPoint::from(muzzle),
-        });
+        };
+        let cue_retained = telemetry.record_cue(cue.clone());
+        if evidence.enabled
+            && cue_retained
+            && telemetry.accepted_shot_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS
+        {
+            telemetry
+                .accepted_shot_timestamps
+                .push((shot_id, unix_epoch_micros()));
+        }
+        outbox.0.push(cue);
     }
 }
 
@@ -1357,7 +1413,7 @@ fn emit_combat_outcomes(
     mut outbox: ResMut<CombatOutbox>,
 ) {
     for impact in impacts.read() {
-        outbox.0.push(CombatCue::Impact {
+        let cue = CombatCue::Impact {
             event_id: impact.event_id,
             tick: tick.0,
             source: impact.source.owner_network_entity_id,
@@ -1367,7 +1423,9 @@ fn emit_combat_outcomes(
             position: WorldPoint::from(impact.position),
             normal: WorldPoint::from(impact.normal),
             distance_band: impact.band,
-        });
+        };
+        telemetry.record_cue(cue.clone());
+        outbox.0.push(cue);
         telemetry.records.push(CombatLogRecord::Hit {
             tick: tick.0,
             event_id: impact.event_id,
@@ -1384,7 +1442,7 @@ fn emit_combat_outcomes(
         telemetry.applied_damage = telemetry
             .applied_damage
             .saturating_add(u64::from(damage.amount));
-        outbox.0.push(CombatCue::Damage {
+        let cue = CombatCue::Damage {
             event_id: damage.event_id,
             tick: tick.0,
             source: damage.source,
@@ -1392,7 +1450,9 @@ fn emit_combat_outcomes(
             amount: damage.amount,
             health_after: damage.health_after,
             distance_band: damage.distance_band,
-        });
+        };
+        telemetry.record_cue(cue.clone());
+        outbox.0.push(cue);
         telemetry.records.push(CombatLogRecord::Damage {
             tick: tick.0,
             event_id: damage.event_id,
@@ -1411,12 +1471,14 @@ fn emit_combat_outcomes(
             source: Some(defeat.source),
             target: defeat.target,
         });
-        outbox.0.push(CombatCue::Defeat {
+        let cue = CombatCue::Defeat {
             event_id: defeat.event_id,
             tick: tick.0,
             source: Some(defeat.source),
             target: defeat.target,
-        });
+        };
+        telemetry.record_cue(cue.clone());
+        outbox.0.push(cue);
     }
 }
 
@@ -1540,7 +1602,7 @@ struct ClientCombatObservation {
     saw_defeat: bool,
     saw_reset: bool,
     cue_timestamps: Vec<(ShotId, u128)>,
-    cue_stream: Vec<CombatCueKey>,
+    cue_stream: Vec<CombatCue>,
     ready_file: Option<PathBuf>,
     started_at: Instant,
     wrote_ready: bool,
@@ -1589,6 +1651,7 @@ impl Plugin for ClientCombatPlugin {
             .init_resource::<WeaponDefinitions>()
             .init_resource::<RecentCombatEvents>()
             .init_resource::<ClientCombatObservation>()
+            .add_systems(Startup, validate_definitions)
             .add_systems(
                 Update,
                 (
@@ -1610,7 +1673,7 @@ fn receive_combat_cues(
     mut commands: Commands,
     mut recent: ResMut<RecentCombatEvents>,
     mut observation: ResMut<ClientCombatObservation>,
-    capture: Option<ResMut<CaptureCombatCues>>,
+    mut capture: Option<ResMut<CaptureCombatCues>>,
     mut receivers: Query<
         Option<&mut lightyear::prelude::MessageReceiver<CombatCue>>,
         With<lightyear::prelude::client::Client>,
@@ -1618,15 +1681,6 @@ fn receive_combat_cues(
     fighters: Query<(&NetworkEntityId, &Position), With<Fighter>>,
     local_fighter: Query<&PlayerId, (With<Fighter>, With<lightyear::prelude::Controlled>)>,
 ) {
-    if let Some(mut capture) = capture {
-        for receiver in &mut receivers {
-            let Some(mut receiver) = receiver else {
-                continue;
-            };
-            capture.cues.extend(receiver.receive());
-        }
-        return;
-    }
     let local_player = local_fighter.iter().next().copied();
     for receiver in &mut receivers {
         let Some(mut receiver) = receiver else {
@@ -1649,9 +1703,14 @@ fn receive_combat_cues(
             if !remember_combat_event(&mut recent, event_id) {
                 continue;
             }
+            if let Some(capture) = capture.as_mut()
+                && capture.cues.len() < MAX_COMBAT_EVIDENCE_EVENTS
+            {
+                capture.cues.push(cue.clone());
+            }
             if observation.ready_file.is_some() {
                 if observation.cue_stream.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-                    observation.cue_stream.push(combat_cue_key(&cue));
+                    observation.cue_stream.push(cue.clone());
                 }
                 if let CombatCue::Muzzle { shot_id, .. } = &cue
                     && observation.cue_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS
@@ -1766,12 +1825,7 @@ fn record_headless_combat_observation(
         let _ = writeln!(report, "cue_shot_id={}_epoch_us={}", shot_id.0, timestamp);
     }
     for cue in &observation.cue_stream {
-        let _ = writeln!(
-            report,
-            "cue_stream={}:{}",
-            cue.kind.as_str(),
-            cue.event_id.0
-        );
+        let _ = writeln!(report, "cue_stream={}", encode_combat_cue(cue));
     }
     match fs::write(&path, report) {
         Ok(()) => {
@@ -2025,6 +2079,25 @@ mod tests {
             .validate(&FighterDefinitions::default())
             .is_err()
         );
+    }
+
+    #[test]
+    fn combat_cue_evidence_encoding_round_trips_full_payload() {
+        let cue = CombatCue::Impact {
+            event_id: CombatEventId(7),
+            tick: 42,
+            source: NetworkEntityId(11),
+            shot_id: ShotId(13),
+            weapon_definition_id: PULSE_SIDEARM_DEFINITION,
+            target: Some(NetworkEntityId(17)),
+            position: WorldPoint { x: 1.5, y: -2.5 },
+            normal: WorldPoint { x: -1.0, y: 0.0 },
+            distance_band: DistanceBand::Mid,
+        };
+
+        let encoded = encode_combat_cue(&cue);
+        assert_eq!(decode_combat_cue(&encoded), Some(cue));
+        assert!(decode_combat_cue("abc").is_none());
     }
 
     #[cfg(feature = "server")]

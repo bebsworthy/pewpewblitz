@@ -547,7 +547,7 @@ Research preparation on 2026-08-13 established:
 - no new dependency or feature is needed for M04;
 - exact Bevy 0.19.1, Lightyear 0.29.0, and Avian 0.7.0 APIs were checked in Cargo-resolved source;
 - `cargo fmt --all -- --check` and `git diff --check` pass for this documentation change;
-- the locked `network-test` integration command passes all 27 current
+- the locked `network-test` integration command passes all 28 current
   authority/lifecycle/movement cases;
 - `./scripts/check-server-features.sh` passes and confirms that the server graph excludes client
   presentation capabilities;
@@ -568,16 +568,16 @@ authority path without weakening the existing M03 movement contracts.
 Green automated evidence recorded after implementation:
 
 - `cargo fmt --all -- --check`;
-- client isolated unit tests: 46 passed, including native gamepad stick/trigger/Start mapping,
+- client isolated unit tests: 47 passed, including native gamepad stick/trigger/Start mapping,
   end-to-end controller sampling into the native fighter action buffer, replicated reload/defeat
   HUD text, and bounded combat-effect expiry;
-- server isolated unit tests: 37 passed, including definition-driven runtime initialization, accumulated
+- server isolated unit tests: 38 passed, including definition-driven runtime initialization, accumulated
   range/clamping, and impact-fraction damage ordering;
 - `cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1`:
-  27 passed;
+  28 passed;
 - `cargo test --locked --no-default-features --features network-test --test performance -- --nocapture`:
-  2 passed; the latest 100-fighter/200-projectile scene measured p95 `549.584µs` and the
-  100-fighter baseline measured p95 `508.125µs` on aarch64 macOS, below the 16.67ms fixed-tick
+  2 passed; the latest 100-fighter/200-projectile scene measured p95 `629µs` and the
+  100-fighter baseline measured p95 `486.458µs` on aarch64 macOS, below the 16.67ms fixed-tick
   budget;
 - `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`;
 - `cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings`;
@@ -596,15 +596,23 @@ Green automated evidence recorded after implementation:
   The authoritative tick is replicated with fighter state for reconnect-safe HUD deadlines, and
   fighter health/ammo initialization reads the selected definitions rather than duplicate literals.
 - Review follow-up verification: process combat readiness now requires both clients to serialize the
-  complete ordered `(cue kind, event ID)` stream and match the server's accepted-shot telemetry,
-  even when no report file is requested. The deterministic harness captures `CombatCue` messages
-  directly and compares the same ordered stream. Fire-to-cue timestamps are bounded and enabled
-  only for the impairment evidence harness; the authored dummy facing is reused for its runtime
+  complete ordered `CombatCue` payload stream and match the server's bounded accepted-shot
+  telemetry, even when no report file is requested. The deterministic harness captures `CombatCue`
+  messages directly and compares every payload field, including target, weapon, damage, health, and
+  reset position. A targeted Lightyear receive-packet test duplicates and reverses a cue-producing
+  batch, then proves both clients converge to the authoritative stream exactly once. Fire-to-cue
+  timestamps are bounded and enabled only for the impairment evidence harness; client and server
+  validate authored catalogs at startup; the authored dummy facing is reused for its runtime
   transform/collision setup; `Impact` carries `weapon_definition_id`; and the network protocol ID
   plus application version were bumped for that wire change.
 - `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_COMBAT=1 BRAWLER_NETWORK_RUN_ID=no-report-cue-gate ./scripts/network.sh`
   — passed with no `BRAWLER_NETWORK_COMBAT_REPORT_FILE`, proving the mandatory cue-stream gate is
   not conditional on report generation.
+- Current-tree retention follow-up: `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_COMBAT=1
+  BRAWLER_NETWORK_RUN_ID=final-review-followup BRAWLER_NETWORK_ADDR=127.0.0.1:6233
+  ./scripts/network.sh` passed without a report file; one-run local/typical/adverse profile
+  checks also passed with run IDs `local-1-1786692150`, `typical-1-1786692159`, and
+  `adverse-1-1786692167`.
 - `BRAWLER_NETWORK_PROFILE_RUNS=3 BRAWLER_NETWORK_PROFILE_BASE_PORT=6000 ./scripts/network-combat-profiles.sh`
   — all 9 current-code runs passed. The report now includes matched server fire and client muzzle
   cue epoch timestamps, exact cue-set convergence, and the following readiness/convergence and
@@ -648,8 +656,8 @@ Windowed keyboard/mouse smoke evidence from two packaged clients on 2026-08-14:
   `keyboard/mouse | paused` before resume.
 - A continuation audit on 2026-08-14 reran the current tree's isolated client/server tests,
   both role-specific Clippy lanes, the complete network-test suite, performance tests, and the
-  server-feature isolation check; all passed (46 client tests, 37 server tests, 54 network-test
-  unit tests, 27 network tests, and 2 performance tests). A fresh supervised UDP combat run
+  server-feature isolation check; all passed (47 client tests, 38 server tests, 55 network-test
+  unit tests, 28 network tests, and 2 performance tests). A fresh supervised UDP combat run
   (`continuation-local-combat`) also passed the server/client readiness and combat assertions.
 - The new `just network-combat` launcher profile was exercised from the current tree; its
   supervised command line started client 1 with `--combat-demo` and client 2 without it, then
@@ -801,7 +809,9 @@ recorded above.
 - [x] A late join during live projectile, reload, and defeat receives current durable state and
   active projectiles without requiring historical cues.
 - [x] Targeted drop/hold/duplicate/release cases eventually deliver ordered cues exactly once at
-  presentation, converge durable state, and never apply authoritative damage twice.
+  presentation, converge durable state, and never apply authoritative damage twice; the
+  duplicate/reordered case now impairs received Lightyear packets after a cue-producing shot and
+  compares the complete cue payload stream.
 - [x] Every existing M02/M03 rejection, timeout, roster, movement, collision, interpolation,
   reconnect, shutdown, and arena-stability assertion retains its meaning.
 
@@ -911,13 +921,14 @@ single-shooter scenario used for this check. The remaining controller and high-r
 awaiting hardware; they are not silently treated as passed by the automated input tests or the
 scripted windowed demo.
 
-The subsequent implementation review found five combat-evidence/protocol issues. All five are
+The subsequent implementation reviews found nine combat-evidence/protocol issues. All are
 implemented now: cue verification is mandatory without a report file; server-accepted shots and
-the complete ordered Muzzle → Impact → Damage → Defeat → Reset stream are compared in both the
-process smoke and deterministic harness; evidence timestamp/stream buffers are gated and bounded;
-the dummy uses `spawn_facing`; and Impact cues carry weapon identity under the bumped protocol.
-The milestone remains in `Feedback review` only because the physical-controller and alternate
-refresh evidence gates above still require hardware.
+the complete ordered Muzzle → Impact → Damage → Defeat → Reset payload stream are compared in both
+the process smoke and deterministic harness; targeted duplicate/reordered packet impairment is
+covered; client and server validate both authored catalogs at startup; evidence timestamp/stream
+buffers share a bounded retention contract; the dummy uses `spawn_facing`; and Impact cues carry
+weapon identity under the bumped protocol. The milestone remains in `Feedback review` only
+because the physical-controller and alternate refresh evidence gates above still require hardware.
 
 ## Learn from errors
 

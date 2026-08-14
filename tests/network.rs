@@ -2,7 +2,10 @@ use avian2d::prelude::{Position, Rotation};
 use bevy::{
     app::App,
     platform::time::Instant,
-    prelude::{Entity, MinimalPlugins, Vec2, With, Without},
+    prelude::{
+        Entity, IntoScheduleConfigs, MinimalPlugins, PreUpdate, Query, ResMut, Resource, Vec2,
+        With, Without,
+    },
     state::app::StatesPlugin,
     time::TimeUpdateStrategy,
 };
@@ -12,9 +15,9 @@ use brawler::{
         spawn_crossbeam_client,
     },
     combat::{
-        CaptureCombatCues, CombatCue, CombatCueKey, CombatCueKind, CombatEventId, CombatTelemetry,
-        CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions, Projectile, TeamId,
-        TestDummy, WeaponPhase, WeaponState, combat_cue_key, telemetry_cue_keys,
+        CaptureCombatCues, CombatCue, CombatEventId, CombatTelemetry, CurrentHealth,
+        DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions, Projectile, TeamId, TestDummy,
+        WeaponPhase, WeaponState,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -35,9 +38,11 @@ use brawler::{
 use lightyear::prelude::client::{Client, Connected, Disconnect, Disconnected, Remote};
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Stopped};
 use lightyear::prelude::{
-    AppMessageExt, ConfirmedHistory, Controlled, Interpolated, InterpolationTimeline, LocalAddr,
-    MessageSender, NetworkDirection, NetworkTimeline, Predicted,
+    AppMessageExt, ConfirmedHistory, Controlled, Interpolated, InterpolationTimeline, Link,
+    LinkSystems, LocalAddr, MessageSender, MessageSystems, NetworkDirection, NetworkTimeline,
+    Predicted,
 };
+use lightyear::transport::plugin::TransportSystems;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -49,6 +54,47 @@ impl bevy::prelude::Plugin for MismatchedProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.register_message::<MismatchedMessage>()
             .add_direction(NetworkDirection::Bidirectional);
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+struct CuePacketImpairment {
+    armed: bool,
+    injected: bool,
+    duplicated_packets: u32,
+    reordered_batches: u32,
+    held_packet: Option<lightyear::link::RecvPayload>,
+}
+
+fn impair_cue_packets(
+    mut impairment: ResMut<CuePacketImpairment>,
+    mut links: Query<&mut Link, With<Client>>,
+) {
+    if !impairment.armed || impairment.injected {
+        return;
+    }
+    for mut link in &mut links {
+        let mut packets: Vec<_> = link.recv.drain().collect();
+        if let Some(held_packet) = impairment.held_packet.take() {
+            packets.push(held_packet);
+        }
+        if packets.len() < 2 {
+            impairment.held_packet = packets.pop();
+            for packet in packets {
+                link.recv.push_raw(packet);
+            }
+            continue;
+        }
+        packets.reverse();
+        let duplicate = packets[1].clone();
+        packets.insert(2, duplicate);
+        for packet in packets {
+            link.recv.push_raw(packet);
+        }
+        impairment.injected = true;
+        impairment.duplicated_packets = impairment.duplicated_packets.saturating_add(1);
+        impairment.reordered_batches = impairment.reordered_batches.saturating_add(1);
+        break;
     }
 }
 
@@ -155,6 +201,15 @@ impl Harness {
         if extra_protocol {
             client.add_plugins(MismatchedProtocolPlugin);
         }
+        client
+            .insert_resource(CuePacketImpairment::default())
+            .add_systems(
+                PreUpdate,
+                impair_cue_packets
+                    .after(LinkSystems::Receive)
+                    .before(TransportSystems::Receive)
+                    .before(MessageSystems::Receive),
+            );
         client.insert_resource(CaptureCombatCues::default());
         client.add_plugins(ClientNetworkPlugin);
         client.finish();
@@ -200,8 +255,28 @@ impl Harness {
         self.client_cues[index].extend(cues);
     }
 
-    fn client_cue_keys(&self, index: usize) -> Vec<CombatCueKey> {
-        self.client_cues[index].iter().map(combat_cue_key).collect()
+    fn client_cues(&self, index: usize) -> &[CombatCue] {
+        &self.client_cues[index]
+    }
+
+    fn arm_cue_packet_impairment(&mut self, index: usize) {
+        self.clients[index]
+            .world_mut()
+            .resource_mut::<CuePacketImpairment>()
+            .armed = true;
+    }
+
+    fn cue_packet_impairment(&self, index: usize) -> CuePacketImpairment {
+        let impairment = self.clients[index]
+            .world()
+            .resource::<CuePacketImpairment>();
+        CuePacketImpairment {
+            armed: impairment.armed,
+            injected: impairment.injected,
+            duplicated_packets: impairment.duplicated_packets,
+            reordered_batches: impairment.reordered_batches,
+            held_packet: None,
+        }
     }
 
     /// Advance only the authoritative server after a client stops producing input.
@@ -595,11 +670,15 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             .iter()
             .any(|record| matches!(record, brawler::combat::CombatLogRecord::Reset { .. }))
     );
-    let expected_cue_stream =
-        telemetry_cue_keys(&harness.server.world().resource::<CombatTelemetry>().records);
+    let expected_cue_stream = harness
+        .server
+        .world()
+        .resource::<CombatTelemetry>()
+        .cues
+        .clone();
     let expected_muzzle_count = expected_cue_stream
         .iter()
-        .filter(|cue| cue.kind == CombatCueKind::Muzzle)
+        .filter(|cue| matches!(cue, CombatCue::Muzzle { .. }))
         .count() as u64;
     let current_accepted_shots = harness
         .server
@@ -607,8 +686,8 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
         .resource::<CombatTelemetry>()
         .accepted_shots;
     assert_eq!(expected_muzzle_count, current_accepted_shots);
-    assert_eq!(harness.client_cue_keys(0), expected_cue_stream);
-    assert_eq!(harness.client_cue_keys(1), expected_cue_stream);
+    assert_eq!(harness.client_cues(0), expected_cue_stream.as_slice());
+    assert_eq!(harness.client_cues(1), expected_cue_stream.as_slice());
 
     harness.set_controlled_input(0, FighterInput::default());
     for _ in 0..20 {
@@ -1087,6 +1166,68 @@ fn duplicate_and_reordered_fire_inputs_do_not_bypass_server_cadence() {
             .accepted_shots
             > after_drop_count
     });
+}
+
+#[test]
+fn duplicate_and_reordered_cue_packets_converge_to_one_full_payload_stream() {
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+            && harness.client_ids(0).len() == 2
+            && harness.client_ids(1).len() == 2
+    });
+    let dummy_aim = if harness.controlled_player_id(0).0 == 1 {
+        Vec2::X
+    } else {
+        -Vec2::X
+    };
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(dummy_aim), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .accepted_shots
+            >= 1
+    });
+    harness.arm_cue_packet_impairment(0);
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .accepted_shots
+            >= 4
+    });
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.step_until(|harness| {
+        let expected_len = harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .cues
+            .len();
+        harness.cue_packet_impairment(0).injected
+            && harness.client_cues(0).len() == expected_len
+            && harness.client_cues(1).len() == expected_len
+    });
+
+    let expected = harness
+        .server
+        .world()
+        .resource::<CombatTelemetry>()
+        .cues
+        .clone();
+    let impairment = harness.cue_packet_impairment(0);
+    assert!(impairment.duplicated_packets > 0);
+    assert!(impairment.reordered_batches > 0);
+    assert_eq!(harness.client_cues(0), expected.as_slice());
+    assert_eq!(harness.client_cues(1), expected.as_slice());
 }
 
 #[test]

@@ -9,9 +9,8 @@
 use crate::{
     VERSION,
     combat::{
-        AuthoritativeTick, CombatCueKey, CombatCueKind, CombatTelemetry, CurrentHealth, Defeated,
-        ServerCombatPlugin, SpawnState, TestDummy, default_fighter_runtime, sandbox_team,
-        telemetry_cue_keys,
+        AuthoritativeTick, CombatCue, CombatTelemetry, CurrentHealth, Defeated, ServerCombatPlugin,
+        SpawnState, TestDummy, decode_combat_cue, default_fighter_runtime, sandbox_team,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -373,17 +372,17 @@ fn verify_process_combat(
             return;
         }
     };
-    let expected_cue_stream = telemetry_cue_keys(&telemetry.records);
+    let expected_cue_stream = &telemetry.cues;
     let client_one_cue_stream = parse_client_cue_stream(&client_one);
     let client_two_cue_stream = parse_client_cue_stream(&client_two);
     let expected_muzzle_count = expected_cue_stream
         .iter()
-        .filter(|cue| cue.kind == CombatCueKind::Muzzle)
+        .filter(|cue| matches!(cue, CombatCue::Muzzle { .. }))
         .count() as u64;
-    let cue_converged = expected_muzzle_count == telemetry.accepted_shots
+    let cue_converged = expected_muzzle_count == telemetry.accepted_shot_timestamps.len() as u64
         && !expected_cue_stream.is_empty()
-        && client_one_cue_stream == expected_cue_stream
-        && client_two_cue_stream == expected_cue_stream;
+        && client_one_cue_stream.as_slice() == expected_cue_stream.as_slice()
+        && client_two_cue_stream.as_slice() == expected_cue_stream.as_slice();
     if !cue_converged {
         error!(
             accepted_shots = telemetry.accepted_shots,
@@ -465,17 +464,10 @@ fn parse_client_cue_timestamps(contents: &str) -> Vec<(u64, u128)> {
         .collect()
 }
 
-fn parse_client_cue_stream(contents: &str) -> Vec<CombatCueKey> {
+fn parse_client_cue_stream(contents: &str) -> Vec<CombatCue> {
     contents
         .lines()
-        .filter_map(|line| {
-            let rest = line.strip_prefix("cue_stream=")?;
-            let (kind, event_id) = rest.split_once(':')?;
-            Some(CombatCueKey {
-                kind: CombatCueKind::parse(kind)?,
-                event_id: crate::combat::CombatEventId(event_id.parse().ok()?),
-            })
-        })
+        .filter_map(|line| decode_combat_cue(line.strip_prefix("cue_stream=")?))
         .collect()
 }
 
