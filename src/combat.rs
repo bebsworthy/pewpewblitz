@@ -559,6 +559,7 @@ pub struct CombatTelemetry {
     pub accepted_shot_timestamps: Vec<(ShotId, u128)>,
     /// Bounded authoritative cue payloads retained for deterministic/process evidence.
     pub cues: Vec<CombatCue>,
+    /// Bounded diagnostic history; authoritative counters and cues are retained separately.
     pub records: Vec<CombatLogRecord>,
 }
 
@@ -569,6 +570,12 @@ impl CombatTelemetry {
             true
         } else {
             false
+        }
+    }
+
+    pub fn record(&mut self, record: CombatLogRecord) {
+        if self.records.len() < MAX_COMBAT_RECORDS {
+            self.records.push(record);
         }
     }
 }
@@ -584,6 +591,7 @@ struct CombatEvidenceMode {
 }
 
 const MAX_COMBAT_EVIDENCE_EVENTS: usize = 512;
+const MAX_COMBAT_RECORDS: usize = 512;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CombatLogRecord {
@@ -693,8 +701,17 @@ impl NextCombatIds {
     }
 
     pub fn allocate_event(&mut self) -> Option<CombatEventId> {
+        self.allocate_event_count(1)
+    }
+
+    pub fn allocate_event_pair(&mut self) -> Option<(CombatEventId, CombatEventId)> {
+        let first = self.allocate_event_count(2)?;
+        Some((first, CombatEventId(first.0 + 1)))
+    }
+
+    fn allocate_event_count(&mut self, count: u64) -> Option<CombatEventId> {
         let id = self.next_event_id;
-        self.next_event_id = id.checked_add(1)?;
+        self.next_event_id = id.checked_add(count)?;
         Some(CombatEventId(id))
     }
 }
@@ -843,6 +860,13 @@ pub fn sandbox_team(player_id: PlayerId) -> TeamId {
     TeamId(u8::try_from(player_id.0.saturating_sub(1) % 2).expect("team index fits in u8"))
 }
 
+/// Neutral entities are hostile to every team, including other neutral entities. Non-neutral
+/// fighters are hostile only when their authored team IDs differ.
+#[must_use]
+pub fn teams_are_hostile(source: TeamId, target: TeamId) -> bool {
+    source == NEUTRAL_TEAM || target == NEUTRAL_TEAM || source != target
+}
+
 #[cfg(feature = "server")]
 pub struct ServerCombatPlugin;
 
@@ -893,7 +917,11 @@ impl Plugin for ServerCombatPlugin {
                         .before(crate::gameplay::advance_simulation_tick),
                 ),
             )
-            .add_systems(Update, cleanup_disconnected_projectiles)
+            .add_systems(
+                PreUpdate,
+                cleanup_disconnected_projectiles
+                    .after(lightyear::transport::plugin::TransportSystems::Receive),
+            )
             .add_systems(Last, emit_combat_summary);
         let definition = *app
             .world()
@@ -930,7 +958,9 @@ fn spawn_test_dummy(
     let Some(fighter) = fighters.get(STANDARD_FIGHTER_DEFINITION) else {
         return;
     };
-    let position = Vec2::new(0.0, -300.0);
+    // Keep the dummy clear of the lower cover's collision body while remaining in the default
+    // horizontal firing lane of the player spawns.
+    let position = Vec2::new(0.0, -320.0);
     let spawn_facing = fighter.spawn_facing;
     let body_radius = fighter.body_radius;
     let (fighter_definition, build, team, health, weapon) =
@@ -1019,12 +1049,19 @@ fn reset_due_fighters(
                 fighter_collision_layers(),
             ))
             .remove::<Defeated>();
-        telemetry.records.push(CombatLogRecord::Reset {
+        telemetry.record(CombatLogRecord::Reset {
             tick: tick.0,
             event_id,
             target: *network_id,
             position: WorldPoint::from(position),
         });
+        info!(
+            tick = tick.0,
+            event_id = event_id.0,
+            target = network_id.0,
+            position = ?position,
+            "authoritative fighter reset"
+        );
         let cue = CombatCue::Reset {
             event_id,
             tick: tick.0,
@@ -1155,7 +1192,7 @@ fn authoritative_fire(
             InterpolationTarget::to_clients(NetworkTarget::All),
         ));
         telemetry.accepted_shots = telemetry.accepted_shots.saturating_add(1);
-        telemetry.records.push(CombatLogRecord::Shot {
+        telemetry.record(CombatLogRecord::Shot {
             event_id,
             tick: tick.0,
             shot_id,
@@ -1167,7 +1204,10 @@ fn authoritative_fire(
         info!(
             tick = tick.0,
             shot_id = shot_id.0,
+            event_id = event_id.0,
             source = network_id.0,
+            weapon = build.primary_weapon.0,
+            muzzle_position = ?muzzle,
             ammo_after = state.ammo,
             "authoritative pulse shot accepted"
         );
@@ -1204,20 +1244,53 @@ fn sweep_projectiles(
     mut ids: ResMut<NextCombatIds>,
     mut impacts: MessageWriter<ProjectileImpact>,
     mut projectiles: Query<(Entity, &Position, &mut ProjectileRuntime, &ProjectileSource)>,
-    fighters: Query<(Entity, &TeamId, Option<&Defeated>, &NetworkEntityId), With<Fighter>>,
+    fighters: Query<
+        (
+            Entity,
+            &TeamId,
+            Option<&Defeated>,
+            &NetworkEntityId,
+            Option<&lightyear::prelude::ControlledBy>,
+        ),
+        With<Fighter>,
+    >,
+    disconnected: Query<
+        Entity,
+        (
+            With<lightyear::prelude::LinkOf>,
+            With<lightyear::prelude::Disconnected>,
+        ),
+    >,
     walls: Query<Entity, With<ArenaWall>>,
     spatial_query: avian2d::prelude::SpatialQuery,
 ) {
+    let disconnected: HashSet<_> = disconnected.iter().collect();
     let fighter_info: HashMap<_, _> = fighters
         .iter()
-        .map(|(entity, team, defeated, network_id)| {
-            (entity, (team.0, defeated.is_some(), *network_id))
+        .map(|(entity, team, defeated, network_id, controlled)| {
+            (
+                entity,
+                (
+                    team.0,
+                    defeated.is_some(),
+                    *network_id,
+                    controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner)),
+                ),
+            )
         })
         .collect();
     let wall_entities: HashSet<_> = walls.iter().collect();
     let mut ordered: Vec<_> = projectiles.iter_mut().collect();
     ordered.sort_by_key(|(_, _, _, source)| source.shot_id.0);
     for (entity, position, mut runtime, source) in ordered {
+        let Some((_, _, _, owner_disconnected)) = fighter_info.get(&runtime.owner_entity) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if *owner_disconnected {
+            commands.entity(entity).despawn();
+            continue;
+        }
         let Some(weapon) = weapons.get(source.weapon_definition_id) else {
             commands.entity(entity).despawn();
             continue;
@@ -1250,7 +1323,11 @@ fn sweep_projectiles(
             &|candidate| {
                 fighter_info.get(&candidate).map_or_else(
                     || wall_entities.contains(&candidate),
-                    |(team, defeated, _)| *team != source.team_id.0 && !defeated,
+                    |(team, defeated, _, owner_disconnected)| {
+                        teams_are_hostile(source.team_id, TeamId(*team))
+                            && !defeated
+                            && !owner_disconnected
+                    },
                 )
             },
         );
@@ -1277,7 +1354,7 @@ fn sweep_projectiles(
         };
         let target_network_id = fighter_info
             .get(&hit.entity)
-            .map(|(_, _, network_id)| *network_id);
+            .map(|(_, _, network_id, _)| *network_id);
         impacts.write(ProjectileImpact {
             event_id,
             source: *source,
@@ -1349,14 +1426,15 @@ fn apply_pending_damage(
         };
         let requested = damage.requested_damage;
         let applied = applied_damage(requested, health.0);
-        health.0 = health.0.saturating_sub(applied);
-        telemetry.hostile_fighter_hits = telemetry.hostile_fighter_hits.saturating_add(1);
-        match damage.band {
-            DistanceBand::Close => telemetry.close_hits = telemetry.close_hits.saturating_add(1),
-            DistanceBand::Mid => telemetry.mid_hits = telemetry.mid_hits.saturating_add(1),
-            DistanceBand::Long => telemetry.long_hits = telemetry.long_hits.saturating_add(1),
-        }
         if applied == 0 {
+            telemetry.hostile_fighter_hits = telemetry.hostile_fighter_hits.saturating_add(1);
+            match damage.band {
+                DistanceBand::Close => {
+                    telemetry.close_hits = telemetry.close_hits.saturating_add(1);
+                }
+                DistanceBand::Mid => telemetry.mid_hits = telemetry.mid_hits.saturating_add(1),
+                DistanceBand::Long => telemetry.long_hits = telemetry.long_hits.saturating_add(1),
+            }
             continue;
         }
         let source = DamageSource::PlayerWeapon {
@@ -1365,9 +1443,39 @@ fn apply_pending_damage(
             weapon_definition_id: damage.source.weapon_definition_id,
             shot_id: damage.source.shot_id,
         };
-        let Some(damage_event) = ids.allocate_event() else {
-            continue;
+        let defeats_target = health.0 == applied
+            && defeated.is_none()
+            && !defeated_this_tick.contains(&damage.target);
+        let (damage_event, defeat_event) = if defeats_target {
+            let Some((damage_event, defeat_event)) = ids.allocate_event_pair() else {
+                error!(
+                    tick = tick.0,
+                    target = target_id.0,
+                    shot_id = damage.source.shot_id.0,
+                    "combat event IDs exhausted before lethal damage"
+                );
+                continue;
+            };
+            (damage_event, Some(defeat_event))
+        } else {
+            let Some(damage_event) = ids.allocate_event() else {
+                error!(
+                    tick = tick.0,
+                    target = target_id.0,
+                    shot_id = damage.source.shot_id.0,
+                    "combat event IDs exhausted before damage"
+                );
+                continue;
+            };
+            (damage_event, None)
         };
+        health.0 = health.0.saturating_sub(applied);
+        telemetry.hostile_fighter_hits = telemetry.hostile_fighter_hits.saturating_add(1);
+        match damage.band {
+            DistanceBand::Close => telemetry.close_hits = telemetry.close_hits.saturating_add(1),
+            DistanceBand::Mid => telemetry.mid_hits = telemetry.mid_hits.saturating_add(1),
+            DistanceBand::Long => telemetry.long_hits = telemetry.long_hits.saturating_add(1),
+        }
         damage_applied.write(DamageApplied {
             event_id: damage_event,
             source,
@@ -1377,10 +1485,8 @@ fn apply_pending_damage(
             health_after: health.0,
             distance_band: damage.band,
         });
-        if health.0 == 0 && defeated.is_none() && defeated_this_tick.insert(damage.target) {
-            let Some(defeat_event) = ids.allocate_event() else {
-                continue;
-            };
+        if let Some(defeat_event) = defeat_event {
+            defeated_this_tick.insert(damage.target);
             let reset_delay = fighters
                 .get(*fighter_id)
                 .map_or(90, |definition| definition.defeat_reset_delay_ticks);
@@ -1398,9 +1504,15 @@ fn apply_pending_damage(
                 source,
                 target: *target_id,
             });
-            info!(tick = tick.0, target = target_id.0, "fighter defeated");
         }
     }
+}
+
+#[cfg(feature = "server")]
+enum CombatOutcome {
+    Impact(ProjectileImpact),
+    Damage(DamageApplied),
+    Defeat(FighterDefeated),
 }
 
 #[cfg(feature = "server")]
@@ -1412,73 +1524,125 @@ fn emit_combat_outcomes(
     mut telemetry: ResMut<CombatTelemetry>,
     mut outbox: ResMut<CombatOutbox>,
 ) {
-    for impact in impacts.read() {
-        let cue = CombatCue::Impact {
-            event_id: impact.event_id,
-            tick: tick.0,
-            source: impact.source.owner_network_entity_id,
-            shot_id: impact.source.shot_id,
-            weapon_definition_id: impact.source.weapon_definition_id,
-            target: impact.target_network_id,
-            position: WorldPoint::from(impact.position),
-            normal: WorldPoint::from(impact.normal),
-            distance_band: impact.band,
-        };
-        telemetry.record_cue(cue.clone());
-        outbox.0.push(cue);
-        telemetry.records.push(CombatLogRecord::Hit {
-            tick: tick.0,
-            event_id: impact.event_id,
-            shot_id: impact.source.shot_id,
-            source: impact.source.owner_network_entity_id,
-            target: impact.target_network_id,
-            weapon: impact.source.weapon_definition_id,
-            position: WorldPoint::from(impact.position),
-            distance: impact.travelled,
-            band: impact.band,
-        });
-    }
-    for damage in damage_applied.read() {
-        telemetry.applied_damage = telemetry
-            .applied_damage
-            .saturating_add(u64::from(damage.amount));
-        let cue = CombatCue::Damage {
-            event_id: damage.event_id,
-            tick: tick.0,
-            source: damage.source,
-            target: damage.target,
-            amount: damage.amount,
-            health_after: damage.health_after,
-            distance_band: damage.distance_band,
-        };
-        telemetry.record_cue(cue.clone());
-        outbox.0.push(cue);
-        telemetry.records.push(CombatLogRecord::Damage {
-            tick: tick.0,
-            event_id: damage.event_id,
-            source: damage.source,
-            target: damage.target,
-            requested: damage.requested,
-            applied: damage.amount,
-            health_after: damage.health_after,
-        });
-    }
-    for defeat in fighter_defeated.read() {
-        telemetry.defeats = telemetry.defeats.saturating_add(1);
-        telemetry.records.push(CombatLogRecord::Defeat {
-            tick: tick.0,
-            event_id: defeat.event_id,
-            source: Some(defeat.source),
-            target: defeat.target,
-        });
-        let cue = CombatCue::Defeat {
-            event_id: defeat.event_id,
-            tick: tick.0,
-            source: Some(defeat.source),
-            target: defeat.target,
-        };
-        telemetry.record_cue(cue.clone());
-        outbox.0.push(cue);
+    let mut outcomes = Vec::new();
+    outcomes.extend(
+        impacts
+            .read()
+            .map(|impact| (impact.event_id.0, CombatOutcome::Impact(*impact))),
+    );
+    outcomes.extend(
+        damage_applied
+            .read()
+            .map(|damage| (damage.event_id.0, CombatOutcome::Damage(*damage))),
+    );
+    outcomes.extend(
+        fighter_defeated
+            .read()
+            .map(|defeat| (defeat.event_id.0, CombatOutcome::Defeat(*defeat))),
+    );
+    outcomes.sort_unstable_by_key(|(event_id, _)| *event_id);
+
+    for (_, outcome) in outcomes {
+        match outcome {
+            CombatOutcome::Impact(impact) => {
+                let cue = CombatCue::Impact {
+                    event_id: impact.event_id,
+                    tick: tick.0,
+                    source: impact.source.owner_network_entity_id,
+                    shot_id: impact.source.shot_id,
+                    weapon_definition_id: impact.source.weapon_definition_id,
+                    target: impact.target_network_id,
+                    position: WorldPoint::from(impact.position),
+                    normal: WorldPoint::from(impact.normal),
+                    distance_band: impact.band,
+                };
+                telemetry.record_cue(cue.clone());
+                outbox.0.push(cue);
+                telemetry.record(CombatLogRecord::Hit {
+                    tick: tick.0,
+                    event_id: impact.event_id,
+                    shot_id: impact.source.shot_id,
+                    source: impact.source.owner_network_entity_id,
+                    target: impact.target_network_id,
+                    weapon: impact.source.weapon_definition_id,
+                    position: WorldPoint::from(impact.position),
+                    distance: impact.travelled,
+                    band: impact.band,
+                });
+                info!(
+                    tick = tick.0,
+                    event_id = impact.event_id.0,
+                    shot_id = impact.source.shot_id.0,
+                    source = impact.source.owner_network_entity_id.0,
+                    target = ?impact.target_network_id,
+                    weapon = impact.source.weapon_definition_id.0,
+                    position = ?impact.position,
+                    distance = impact.travelled,
+                    distance_band = ?impact.band,
+                    "authoritative projectile impact"
+                );
+            }
+            CombatOutcome::Damage(damage) => {
+                telemetry.applied_damage = telemetry
+                    .applied_damage
+                    .saturating_add(u64::from(damage.amount));
+                let cue = CombatCue::Damage {
+                    event_id: damage.event_id,
+                    tick: tick.0,
+                    source: damage.source,
+                    target: damage.target,
+                    amount: damage.amount,
+                    health_after: damage.health_after,
+                    distance_band: damage.distance_band,
+                };
+                telemetry.record_cue(cue.clone());
+                outbox.0.push(cue);
+                telemetry.record(CombatLogRecord::Damage {
+                    tick: tick.0,
+                    event_id: damage.event_id,
+                    source: damage.source,
+                    target: damage.target,
+                    requested: damage.requested,
+                    applied: damage.amount,
+                    health_after: damage.health_after,
+                });
+                info!(
+                    tick = tick.0,
+                    event_id = damage.event_id.0,
+                    source = ?damage.source,
+                    target = damage.target.0,
+                    requested = damage.requested,
+                    applied = damage.amount,
+                    health_after = damage.health_after,
+                    distance_band = ?damage.distance_band,
+                    "authoritative damage applied"
+                );
+            }
+            CombatOutcome::Defeat(defeat) => {
+                telemetry.defeats = telemetry.defeats.saturating_add(1);
+                telemetry.record(CombatLogRecord::Defeat {
+                    tick: tick.0,
+                    event_id: defeat.event_id,
+                    source: Some(defeat.source),
+                    target: defeat.target,
+                });
+                let cue = CombatCue::Defeat {
+                    event_id: defeat.event_id,
+                    tick: tick.0,
+                    source: Some(defeat.source),
+                    target: defeat.target,
+                };
+                telemetry.record_cue(cue.clone());
+                outbox.0.push(cue);
+                info!(
+                    tick = tick.0,
+                    event_id = defeat.event_id.0,
+                    source = ?defeat.source,
+                    target = defeat.target.0,
+                    "authoritative fighter defeated"
+                );
+            }
+        }
     }
 }
 
@@ -1505,7 +1669,7 @@ fn cleanup_disconnected_projectiles(
             With<lightyear::prelude::Disconnected>,
         ),
     >,
-    fighters: Query<(Entity, &lightyear::prelude::ControlledBy), With<Fighter>>,
+    fighters: Query<(Entity, Option<&lightyear::prelude::ControlledBy>), With<Fighter>>,
     projectiles: Query<(Entity, &ProjectileRuntime)>,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
@@ -1513,7 +1677,7 @@ fn cleanup_disconnected_projectiles(
     let mut disconnected_fighters = HashSet::new();
     for (fighter, controlled) in &fighters {
         fighter_entities.insert(fighter);
-        if disconnected.contains(&controlled.owner) {
+        if controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner)) {
             disconnected_fighters.insert(fighter);
         }
     }
@@ -2030,6 +2194,18 @@ mod tests {
     #[cfg(feature = "client")]
     use core::time::Duration;
 
+    #[cfg(feature = "server")]
+    #[derive(Resource, Clone, Copy)]
+    struct TestPendingDamage(PendingDamage);
+
+    #[cfg(feature = "server")]
+    fn send_test_pending_damage(
+        fixture: Res<TestPendingDamage>,
+        mut pending_damage: MessageWriter<PendingDamage>,
+    ) {
+        pending_damage.write(fixture.0);
+    }
+
     #[test]
     fn authored_catalogs_validate_and_have_expected_values() {
         let fighters = FighterDefinitions::default();
@@ -2198,6 +2374,104 @@ mod tests {
         ids.next_shot_id = u64::MAX;
         assert_eq!(ids.allocate_shot(), None);
         assert_eq!(ids.next_shot_id, u64::MAX);
+    }
+
+    #[test]
+    fn lethal_event_pair_reservation_is_atomic_at_exhaustion() {
+        let mut ids = NextCombatIds {
+            next_shot_id: 1,
+            next_event_id: u64::MAX - 1,
+        };
+        assert_eq!(ids.allocate_event_pair(), None);
+        assert_eq!(ids.next_event_id, u64::MAX - 1);
+        assert_eq!(ids.allocate_event(), Some(CombatEventId(u64::MAX - 1)));
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn lethal_damage_event_exhaustion_preserves_living_target_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<FighterDefinitions>()
+            .insert_resource(SimulationTick(7))
+            .insert_resource(NextCombatIds {
+                next_shot_id: 1,
+                next_event_id: u64::MAX - 1,
+            })
+            .init_resource::<CombatTelemetry>()
+            .add_message::<PendingDamage>()
+            .add_message::<DamageApplied>()
+            .add_message::<FighterDefeated>()
+            .add_systems(
+                Update,
+                (send_test_pending_damage, apply_pending_damage).chain(),
+            );
+        let target = app
+            .world_mut()
+            .spawn((
+                Fighter,
+                NetworkEntityId(7),
+                STANDARD_FIGHTER_DEFINITION,
+                CurrentHealth(10),
+            ))
+            .id();
+        app.insert_resource(TestPendingDamage(PendingDamage {
+            event_id: CombatEventId(1),
+            source: ProjectileSource {
+                shot_id: ShotId(1),
+                player_id: PlayerId(1),
+                owner_network_entity_id: NetworkEntityId(1),
+                team_id: TeamId(0),
+                weapon_definition_id: PULSE_SIDEARM_DEFINITION,
+            },
+            target,
+            target_network_id: NetworkEntityId(7),
+            requested_damage: 25,
+            travelled: 10.0,
+            impact_fraction: 0.5,
+            band: DistanceBand::Close,
+        }));
+
+        app.update();
+
+        assert_eq!(app.world().get::<CurrentHealth>(target).unwrap().0, 10);
+        assert!(app.world().get::<Defeated>(target).is_none());
+        assert_eq!(
+            app.world()
+                .resource::<CombatTelemetry>()
+                .hostile_fighter_hits,
+            0
+        );
+        assert_eq!(
+            app.world().resource::<NextCombatIds>().next_event_id,
+            u64::MAX - 1
+        );
+    }
+
+    #[test]
+    fn neutral_entities_are_hostile_to_every_team() {
+        assert!(teams_are_hostile(NEUTRAL_TEAM, NEUTRAL_TEAM));
+        assert!(teams_are_hostile(NEUTRAL_TEAM, TeamId(0)));
+        assert!(teams_are_hostile(TeamId(0), NEUTRAL_TEAM));
+        assert!(teams_are_hostile(TeamId(0), TeamId(1)));
+        assert!(!teams_are_hostile(TeamId(0), TeamId(0)));
+    }
+
+    #[test]
+    fn diagnostic_record_history_is_bounded() {
+        let mut telemetry = CombatTelemetry::default();
+        for index in 0..(MAX_COMBAT_RECORDS + 32) {
+            telemetry.record(CombatLogRecord::Shot {
+                event_id: CombatEventId(index as u64 + 1),
+                tick: index as u64,
+                shot_id: ShotId(index as u64 + 1),
+                source: NetworkEntityId(1),
+                weapon: PULSE_SIDEARM_DEFINITION,
+                muzzle_position: WorldPoint { x: 0.0, y: 0.0 },
+                ammo_after: 5,
+            });
+        }
+        assert_eq!(telemetry.records.len(), MAX_COMBAT_RECORDS);
     }
 
     #[test]

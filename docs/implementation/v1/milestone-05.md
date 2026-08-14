@@ -27,9 +27,9 @@ firing, delivery, targeting, payload, and immediate-effect primitives required b
 weapons. Build budgets, ultimates, passive items, match lobby/state, production assets/audio, and
 advanced trajectories remain in their planned milestones.
 
-Milestone 04 remains open for final hardware/user verification. Milestone 05 implementation begins
-by re-running the accepted Milestone 04 baseline and records its remaining physical-controller and
-display observations without treating them as Milestone 05 work or silently closing them.
+Milestone 04 is complete by explicit user approval. Milestone 05 implementation begins by
+re-running the accepted Milestone 04 baseline and retains the deferred physical-controller and
+display observations as non-M05 evidence rather than treating them as passed hardware checks.
 
 ## Source requirements
 

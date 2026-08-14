@@ -6,11 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Feedback review |
+| Status | Complete |
 | Specification validation | Accepted by implementation request |
 | Implementation | Core combat slice, review corrections, and supervised combat evidence complete; accepted playtest feedback implemented |
-| Verification | Automated core, deterministic fixture, repeated UDP profiles with measured fire-to-cue evidence, keyboard/mouse/render-profile smoke, and synthetic controller smoke green; physical-controller gate open |
-| User validation/playtest | Keyboard/mouse smoke recorded and feedback triaged; physical-controller evidence and final acceptance pending |
+| Verification | Automated core, deterministic fixture, repeated UDP profiles with measured fire-to-cue evidence, keyboard/mouse/render-profile smoke, and synthetic controller smoke green; hardware-only checks explicitly deferred by user approval |
+| User validation/playtest | Keyboard/mouse smoke recorded, feedback triaged, and Milestone 04 approved; physical-controller and alternate-refresh observations remain deferred rather than represented as passed |
 
 Update this table and the roadmap together whenever the milestone changes phase.
 
@@ -24,11 +24,10 @@ health, weapon, defeat, and reset state and receive presentation-only combat cue
 placeholder effects make hits, ammo, reload, and defeat legible. Server telemetry records shots,
 hits, damage, defeats, and hit distance.
 
-Milestone 03 is implemented but remains in `Verifying`: delayed/lost-input evidence, the owner-
-prediction comparison, windowed interpolation, and physical-controller checks are still open.
-Milestone 04 research and specification may proceed against its current authoritative/interpolated
-baseline, but implementation begins by re-running that baseline and must not mark either milestone
-complete or silently absorb its pending interactive playtest.
+Milestone 03 remains in `Verifying` for its own delayed/lost-input, owner-prediction, windowed
+interpolation, and physical-controller evidence. Milestone 04 is independently complete against
+its documented combat authority and evidence contract; the remaining hardware-only observations
+are explicitly deferred by user approval and are not represented as passed.
 
 ## Source requirements
 
@@ -191,8 +190,9 @@ complete or silently absorb its pending interactive playtest.
   defeat is valid. After a target reaches zero, later same-tick records apply zero damage and do
   not earn another defeat.
 - [x] Applied damage is `min(requested_damage, current_health)`. The first ordered record that
-  changes health to zero owns the defeat credit. Each damage and defeat outcome receives a
-  monotonic `CombatEventId`. Direct friendly fire and self-damage are disabled as fixed in M03.
+  changes health to zero owns the defeat credit. Damage/defeat IDs are reserved before mutating
+  state, and cross-target outcomes are emitted in global event-ID order. Direct friendly fire and
+  self-damage are disabled as fixed in M03; neutral is hostile to every team, including neutral.
 - [x] Represent `DamageSource` as player weapon or environment. M04 only creates player-weapon
   damage; the environmental variant has no player credit and reserves an authored cause ID for
   later hazards/terrain. Do not invent environmental damage behavior now.
@@ -203,10 +203,11 @@ complete or silently absorb its pending interactive playtest.
 - [x] At the reset deadline, restore the fighter's original spawn position and definition facing,
   full health, full magazine, ready weapon state, and targetable collision layer, then remove
   `Defeated`. Reset is a sandbox lifecycle event, not a respawn, life, or score event.
-- [x] On disconnect, despawn every projectile whose server-only owner is that fighter before/with
-  the existing owned-fighter cleanup. On defeat, projectiles persist. On reset, no prior cooldown/
-  reload survives. No authoritative ongoing effect exists in M04. Client-only flashes/markers use
-  bounded timers and are removed on expiry, replicated despawn, disconnect, or presentation reset.
+- [x] On disconnect, despawn every projectile whose server-only owner is that fighter before the
+  fixed combat loop can sweep, with a sweep-time guard for missing/disconnected owners. On defeat,
+  projectiles persist. On reset, no prior cooldown/reload survives. No authoritative ongoing effect
+  exists in M04. Client-only flashes/markers use bounded timers and are removed on expiry,
+  replicated despawn, disconnect, or presentation reset.
 
 ### Replication, transient cues, and recovery
 
@@ -247,8 +248,9 @@ complete or silently absorb its pending interactive playtest.
   correct. Cues enhance feedback but cannot be the only source for a current value.
 - [x] `CombatTelemetry` is a server resource with totals for accepted shots, hostile fighter hits,
   applied damage, and defeats plus close/mid/long hit counts. Structured logs include event/tick,
-  source, target, weapon, amount, and distance band. Counters persist across sandbox resets and are
-  inspectable in tests and logged on graceful shutdown; no file/database exporter is added.
+  source, target, weapon, amount, and distance band for shot, hit, damage, defeat, and reset
+  outcomes. Counters persist across sandbox resets; bounded diagnostic records are capped at 512,
+  are inspectable in tests, and are logged on graceful shutdown; no file/database exporter is added.
 - [x] Distance is straight projectile path traveled from muzzle to impact. Initial bands are close
   `< 250`, mid `250..600`, and long `>= 600` world units. Terrain impacts and expiry do not count as
   weapon hits; damage uses the actual non-overkill amount.
@@ -547,7 +549,7 @@ Research preparation on 2026-08-13 established:
 - no new dependency or feature is needed for M04;
 - exact Bevy 0.19.1, Lightyear 0.29.0, and Avian 0.7.0 APIs were checked in Cargo-resolved source;
 - `cargo fmt --all -- --check` and `git diff --check` pass for this documentation change;
-- the locked `network-test` integration command passes all 28 current
+- the locked `network-test` integration command passes the pre-implementation baseline's 28
   authority/lifecycle/movement cases;
 - `./scripts/check-server-features.sh` passes and confirms that the server graph excludes client
   presentation capabilities;
@@ -568,16 +570,19 @@ authority path without weakening the existing M03 movement contracts.
 Green automated evidence recorded after implementation:
 
 - `cargo fmt --all -- --check`;
-- client isolated unit tests: 47 passed, including native gamepad stick/trigger/Start mapping,
+- client isolated unit tests: 50 passed, including native gamepad stick/trigger/Start mapping,
   end-to-end controller sampling into the native fighter action buffer, replicated reload/defeat
   HUD text, and bounded combat-effect expiry;
-- server isolated unit tests: 38 passed, including definition-driven runtime initialization, accumulated
-  range/clamping, and impact-fraction damage ordering;
+- server isolated unit tests: 42 passed, including definition-driven runtime initialization, accumulated
+  range/clamping, impact-fraction damage ordering, event-exhaustion atomicity, bounded diagnostics,
+  and neutral targeting;
 - `cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1`:
-  28 passed;
+  34 passed, including fixed-schedule reload/fire, same-tick first-tick projectile hit/damage,
+  closest-hit and thin-cover sweeps, near-impact disconnect cleanup, and fabricated-owner rejection;
 - `cargo test --locked --no-default-features --features network-test --test performance -- --nocapture`:
-  2 passed; the latest 100-fighter/200-projectile scene measured p95 `629µs` and the
-  100-fighter baseline measured p95 `486.458µs` on aarch64 macOS, below the 16.67ms fixed-tick
+  2 passed; the latest sustained near-collider 100-fighter/200-projectile scene measured p95
+  `2.800125ms` and the 100-fighter baseline measured p95 `822.791µs` on aarch64 macOS, below the
+  16.67ms fixed-tick
   budget;
 - `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`;
 - `cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings`;
@@ -613,6 +618,16 @@ Green automated evidence recorded after implementation:
   ./scripts/network.sh` passed without a report file; one-run local/typical/adverse profile
   checks also passed with run IDs `local-1-1786692150`, `typical-1-1786692159`, and
   `adverse-1-1786692167`.
+- Latest review follow-up: disconnect cleanup now runs after transport receive and before the
+  fixed combat loop, while projectile sweep rejects missing/disconnected owners as a second
+  authority boundary. The sustained performance fixture uses authored fighter/runtime state,
+  stable owner entities, nearby fighter/cover sweep candidates, and asserts all 200 projectiles
+  remain active before every sample. Deterministic network coverage now exercises deferred
+  authoritative fire, same-tick first-tick collision and damage, reload-completion fire,
+  closest-target selection, thin-cover stopping, exact reset timing from `SimulationTick` records,
+  near-impact disconnect cleanup, and direct orphan-projectile rejection. Damage/defeat IDs are
+  reserved atomically before state mutation, outcomes are emitted by global event ID, neutral
+  targeting is explicit, and diagnostic records/logs are bounded and structured.
 - `BRAWLER_NETWORK_PROFILE_RUNS=3 BRAWLER_NETWORK_PROFILE_BASE_PORT=6000 ./scripts/network-combat-profiles.sh`
   — all 9 current-code runs passed. The report now includes matched server fire and client muzzle
   cue epoch timestamps, exact cue-set convergence, and the following readiness/convergence and
@@ -656,8 +671,8 @@ Windowed keyboard/mouse smoke evidence from two packaged clients on 2026-08-14:
   `keyboard/mouse | paused` before resume.
 - A continuation audit on 2026-08-14 reran the current tree's isolated client/server tests,
   both role-specific Clippy lanes, the complete network-test suite, performance tests, and the
-  server-feature isolation check; all passed (47 client tests, 38 server tests, 55 network-test
-  unit tests, 28 network tests, and 2 performance tests). A fresh supervised UDP combat run
+  server-feature isolation check; all passed (50 client tests, 42 server tests, 65 network-test
+  unit tests, 34 network tests, and 2 performance tests). A fresh supervised UDP combat run
   (`continuation-local-combat`) also passed the server/client readiness and combat assertions.
 - The new `just network-combat` launcher profile was exercised from the current tree; its
   supervised command line started client 1 with `--combat-demo` and client 2 without it, then
@@ -783,10 +798,11 @@ recorded above.
 - [x] Damage clamps overkill, preserves health invariants, orders equal-tick hits by the specified
   keys, credits one defeat, allows mutual defeat, and retains posthumous attribution.
 - [x] Reset restores exact spawn/facing/health/collision/weapon state after 90 ticks and not at 89;
-  repeated defeat/reset leaves no stale marker, cooldown, or presentation state.
+  the authoritative reset record is stamped with the `SimulationTick` deadline, and repeated
+  defeat/reset leaves no stale marker, cooldown, or presentation state.
 - [x] `SimulationTick` advances once and only after movement, Avian refresh, projectile collision,
   damage, defeat, cues/telemetry, and validation; a first-tick projectile is visible across the
-  deferred boundary.
+  deferred boundary and can hit/damage a target in that same tick.
 - [x] Protocol registration/fingerprint contains every new type/channel in both roles; round trips
   preserve stable IDs and reject mismatched registration through the existing non-panicking path.
 - [x] Telemetry counts accepted shots/hostile hits/applied damage/defeats and exact distance bands;
@@ -831,15 +847,17 @@ recorded above.
 - [x] Locked format, isolated client/server Clippy/tests/builds, network test, UDP/process,
   server-feature check, and prior performance lane pass.
 - [x] Measure at least 100 fighters plus 200 simultaneous active straight projectiles in a headless
-  worst-case sweep scene; p95 authoritative fixed step stays below 16.67 ms on the recorded machine.
+  near-collider worst-case sweep scene with nearby fighters/cover candidates; p95 authoritative
+  fixed step stays below 16.67 ms on the recorded machine.
 - [x] Provide a reproducible windowed render-profile harness for 30 Hz, 60 Hz, and high-refresh/
   no-vsync paths without changing the 60 Hz authoritative simulation; configuration tests and
   bounded startup/cleanup smoke runs pass.
 - [x] Windowed keyboard/mouse and selected render-profile verification confirms primary fire,
   muzzle/projectile/impact readability, health/ammo/reload HUD, hit marker, defeat/reset feedback,
   and no obvious wall tunneling or stale effects at the 30 Hz, 60 Hz, and high-refresh paths.
-- [ ] Physical-controller verification confirms the same combat readability and HUD/effect behavior
-  on target controller hardware and an actual alternate high-refresh display.
+- [x] The user explicitly approved completion with physical-controller and alternate high-refresh
+  verification deferred; synthetic controller/render-profile evidence is recorded without being
+  presented as hardware proof.
 
 ### Evidence rules
 
@@ -881,12 +899,12 @@ automatic reload has no manual/cancel input; the dummy does not act; teams/reset
 sandbox rules; only direct damage exists; no score/match/respawn loop, audio polish, other weapon,
 or production content authoring is present.
 
-## Feedback review
+## Feedback review and closeout
 
-Specification accepted; automated verification is complete and the milestone is now in `Feedback
-review`. Record each item as implemented now,
-deferred with a roadmap target, rejected with rationale, or awaiting evidence. Numeric tuning may
-change after playtest while authority, lifecycle, recovery, and schedule invariants remain fixed.
+Specification accepted; automated verification and feedback triage are complete. The user approved
+Milestone 04 completion with physical-controller and alternate-refresh observations explicitly
+deferred. Numeric tuning may change after playtest while authority, lifecycle, recovery, and
+schedule invariants remain fixed.
 
 The latest automated pass adds deterministic coverage for the replicated reload/defeat HUD text and
 the bounded lifetime of client-only combat effects. The selected 30 Hz, 60 Hz, and high-refresh
@@ -927,8 +945,29 @@ the complete ordered Muzzle → Impact → Damage → Defeat → Reset payload s
 the process smoke and deterministic harness; targeted duplicate/reordered packet impairment is
 covered; client and server validate both authored catalogs at startup; evidence timestamp/stream
 buffers share a bounded retention contract; the dummy uses `spawn_facing`; and Impact cues carry
-weapon identity under the bumped protocol. The milestone remains in `Feedback review` only
-because the physical-controller and alternate refresh evidence gates above still require hardware.
+weapon identity under the bumped protocol. The milestone is complete; physical-controller and
+alternate-refresh observations are deferred by explicit user approval and are not claimed as
+automated evidence.
+
+The latest review found seven authority, evidence, and lifecycle gaps. All are implemented now:
+disconnect cleanup is ordered before fixed combat and reinforced inside projectile sweep; the
+200-projectile gate measures a sustained scene with valid owners; fixed-schedule tests cover
+deferred fire, reload completion, first-tick collision, thin cover, closest-hit selection, exact
+reset timing, and fabricated projectile rejection; damage/defeat ID allocation is atomic; outcome
+emission is globally event-ordered; telemetry history is bounded and hit/damage/defeat/reset
+outcomes emit structured logs; and neutral entities are hostile to every team. These corrections
+are backed by the current green role, network, and performance lanes. The milestone remains in
+`Complete` after explicit user approval; hardware-only controller and alternate-refresh evidence
+remains a documented deferred observation rather than an unverified claim.
+
+The next review tightened the remaining evidence claims. The 200-projectile fixture now keeps
+paths inside the authored arena and sweeps through nearby fighter/cover candidates while asserting
+all projectiles remain active. A dedicated network test places a target inside the newly spawned
+projectile's first sweep and requires Shot, Impact, and Damage records to share one
+`SimulationTick`. Reload firing and reset restoration likewise compare recorded event ticks
+directly with authoritative deadlines; reset verification covers spawn position/facing, health,
+weapon readiness, collision layers, and removal of `Defeated`. The dummy spawn was moved clear of
+the lower cover so physics cannot invalidate the exact reset pose.
 
 ## Learn from errors
 
@@ -943,7 +982,15 @@ The implementation review recorded these reusable lessons before playtest closeo
 - Stable player/shot/event IDs must be carried through damage and posthumous projectile outcomes;
   local Bevy entity identity is not valid attribution. Disconnect cleanup also needs to remove
   projectiles whose owner entity has already disappeared, not only owners still carrying a session
-  marker.
+  marker; cleanup must be ordered before fixed combat and duplicated by a sweep-time authority
+  guard.
+- Reserve every event ID needed for a lethal outcome before mutating health or hit counters, and
+  emit cross-target outcomes in allocation order so event IDs remain monotonic in the cue stream.
+- Performance fixtures must construct the same stable owner/team/runtime components as gameplay and
+  assert that the intended sustained population survives every sampled schedule step; a benchmark
+  that silently cleans up its entities is measuring a different scene.
+- Diagnostic telemetry needs an explicit retention policy and structured outcome logs from the
+  start; process-lifetime vectors are not a safe substitute for bounded evidence history.
 - The scripted input-loss case is an application-level Crossbeam fixture, not transport
   interception. It proves the repeat-through-12 then neutral contract; Lightyear conditioner runs
   provide the separate statistical UDP impairment evidence.
@@ -975,15 +1022,17 @@ The implementation review recorded these reusable lessons before playtest closeo
 - Replicated absolute deadlines require a replicated clock reference. Comparing them with a local
   simulation counter is valid only while peers start together; reconnect-safe HUDs must use the
   authoritative tick arriving with the durable weapon state.
+- Fixed-tick evidence must read the authoritative `SimulationTick` and recorded event ticks, not a
+  transport/presentation timeline that can drift. Reset fixtures must also place authored bodies
+  outside static cover, or physics correction can obscure whether the reset pose was restored.
 - Process smoke launchers should supervise the built application binaries directly. Wrapping them
   in `cargo run` leaves an extra child-process lifecycle to drain during Ctrl-C and can make a
   subsequent fixed-port profile run race the previous server's shutdown.
 
 The learn-from-errors review is complete for the current evidence. No reusable skill was created:
 the lessons above are specific to this repository's Bevy/Lightyear composition rather than a
-recurring cross-project workflow. Final milestone closeout remains pending physical-controller and
-actual alternate-display verification plus explicit user confirmation of windowed HUD/effect
-legibility.
+recurring cross-project workflow. Final milestone closeout is complete after explicit user approval;
+physical-controller and actual alternate-display verification remain deferred observations.
 
 ## Exit checklist
 
