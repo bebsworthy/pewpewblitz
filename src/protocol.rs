@@ -27,10 +27,11 @@ use lightyear::prelude::{
 use serde::{Deserialize, Serialize};
 
 use crate::combat::{
-    ActiveEffects, AttackDelivery, AuthoritativeTick, CombatCue, CurrentHealth, Defeated,
-    FighterDefinitionId, GameplayContentFingerprint, LobbedFlight, Projectile, ProjectileSource,
-    ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon, TeamId,
-    WeaponDefinitionId, WeaponState,
+    ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
+    CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId,
+    GameplayContentFingerprint, KnockbackFeedback, LobbedFlight, Projectile, ProjectileDeadline,
+    ProjectileSource, ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectedWeapon,
+    SelectingWeapon, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
 };
 use crate::timing::SIMULATION_TICK;
 
@@ -282,6 +283,8 @@ impl Plugin for ProtocolPlugin {
 
         app.register_message::<CombatCue>()
             .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<CombatEvidenceCheckpoint>()
+            .add_direction(NetworkDirection::ServerToClient);
         app.add_channel::<CombatChannel>(ChannelSettings {
             mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
             ..default()
@@ -299,12 +302,16 @@ impl Plugin for ProtocolPlugin {
         app.component::<SelectingWeapon>().replicate();
         app.component::<ResolvedWeapon>().replicate();
         app.component::<ActiveEffects>().replicate();
+        app.component::<KnockbackFeedback>().replicate();
         app.component::<AttackDelivery>().replicate_once();
         app.component::<LobbedFlight>().replicate_once();
+        app.component::<ProjectileDeadline>().replicate_once();
+        app.component::<StraightFlight>().replicate_once();
         app.component::<TeamId>().replicate();
         app.component::<CurrentHealth>().replicate();
         app.component::<WeaponState>().replicate();
         app.component::<AuthoritativeTick>().replicate();
+        app.component::<AuthoritativePose>().replicate();
         app.component::<Defeated>().replicate();
         app.component::<Projectile>().replicate_once();
         app.component::<ProjectileSource>().replicate_once();

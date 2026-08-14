@@ -28,12 +28,14 @@ pub use definitions::{
     resolve_configuration, spread_angles,
 };
 pub use telemetry::{
-    WeaponTelemetry, WeaponTelemetryAggregate, WeaponTelemetryKey, WeaponTelemetryRecord,
+    CombatFighterSnapshot, CombatProjectileSnapshot, CombatStateSnapshot,
+    WeaponSelectionTelemetryRecord, WeaponTelemetry, WeaponTelemetryAggregate, WeaponTelemetryKey,
+    WeaponTelemetryOutcome, WeaponTelemetryRecord, encode_state_snapshot,
 };
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "client"))]
 use std::collections::BTreeMap;
 #[cfg(any(feature = "server", feature = "client"))]
 use std::collections::HashMap;
@@ -62,7 +64,7 @@ use lightyear::prelude::input::native::ActionState;
 #[cfg(feature = "server")]
 use lightyear::prelude::server::{NetcodeServer, Stopped};
 #[cfg(feature = "server")]
-use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
+use lightyear::prelude::{InterpolationTarget, LinkOf, NetworkTarget, Replicate};
 
 #[cfg(feature = "server")]
 use crate::movement::{DESTRUCTIBLE_TERRAIN_LAYER, INDESTRUCTIBLE_TERRAIN_LAYER};
@@ -372,6 +374,14 @@ pub struct ExternalMotion {
     pub expires_at_tick: u64,
 }
 
+/// Replicated feedback state corresponding to server-applied knockback. The pose remains the
+/// authoritative movement result; this component only lets clients render and audit the effect.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct KnockbackFeedback {
+    pub velocity: WorldPoint,
+    pub expires_at_tick: u64,
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct AttackDelivery {
     pub attack_id: AttackId,
@@ -387,6 +397,33 @@ pub struct LobbedFlight {
     pub visual_arc_height: f32,
 }
 
+/// The server-owned deadline for a live delivery. Keeping it replicated makes late-join and
+/// process evidence independent of a client's local simulation clock.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProjectileDeadline {
+    pub expires_at_tick: u64,
+}
+
+/// Latest server-computed fighter pose carried without client interpolation for evidence and
+/// late-join auditing. The ordinary Position/Rotation pair remains the presentation pose.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct AuthoritativePose {
+    pub position: WorldPoint,
+    pub facing: f32,
+    pub tick: u64,
+}
+
+/// Replicated straight-flight inputs let evidence reconstruct a canonical position from the
+/// authoritative tick instead of comparing an interpolated render position.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct StraightFlight {
+    pub origin: WorldPoint,
+    pub facing: f32,
+    pub speed: f32,
+    pub maximum_range: f32,
+    pub launched_at_tick: u64,
+}
+
 #[cfg(feature = "server")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActiveAttackTracker {
@@ -397,8 +434,19 @@ pub struct ActiveAttackTracker {
 }
 
 #[cfg(feature = "server")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompletedAttack {
+    pub source_preset_id: Option<WeaponPresetId>,
+    pub recipe_fingerprint: WeaponRecipeFingerprint,
+    pub had_hostile_contact: bool,
+}
+
+#[cfg(feature = "server")]
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
-pub struct ActiveAttackTrackers(pub BTreeMap<AttackId, ActiveAttackTracker>);
+pub struct ActiveAttackTrackers {
+    pub active: BTreeMap<AttackId, ActiveAttackTracker>,
+    pub completed: Vec<CompletedAttack>,
+}
 
 /// Sandbox affiliation used by the direct-hit policy.
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
@@ -469,16 +517,6 @@ pub struct SpawnState {
     pub facing: f32,
 }
 
-/// Server-only projectile motion and cleanup state.
-#[cfg(feature = "server")]
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub struct ProjectileRuntime {
-    pub owner_entity: Entity,
-    pub velocity: Vec2,
-    pub travelled: f32,
-    pub expires_at_tick: u64,
-}
-
 #[cfg(feature = "server")]
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct ComposedProjectileRuntime {
@@ -529,6 +567,8 @@ pub struct PendingDelivery {
     pub source: AttackSource,
     pub delivery_index: u8,
     pub tick: u64,
+    pub engagement_distance: f32,
+    pub delivery_travel: f32,
     pub kind: PendingDeliveryKind,
 }
 
@@ -914,7 +954,11 @@ struct CombatEvidenceMode {
 }
 
 const MAX_COMBAT_EVIDENCE_EVENTS: usize = 512;
+#[cfg(feature = "server")]
+const COMBAT_CHECKPOINT_LATCH_TICKS: u16 = 600;
 const MAX_COMBAT_RECORDS: usize = 512;
+#[cfg(feature = "client")]
+const MAX_COMBAT_SNAPSHOT_HISTORY: usize = 2048;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CombatLogRecord {
@@ -1047,20 +1091,6 @@ impl NextCombatIds {
     }
 }
 
-#[cfg(feature = "server")]
-fn advance_weapon_state(state: &mut WeaponState, weapon: &WeaponDefinition, tick: u64) {
-    match state.phase {
-        WeaponPhase::Cooldown { ready_at_tick } if tick >= ready_at_tick => {
-            state.phase = WeaponPhase::Ready;
-        }
-        WeaponPhase::Reloading { ready_at_tick } if tick >= ready_at_tick => {
-            state.ammo = weapon.magazine_capacity;
-            state.phase = WeaponPhase::Ready;
-        }
-        _ => {}
-    }
-}
-
 #[must_use]
 #[cfg(feature = "server")]
 fn muzzle_position(position: Vec2, facing: f32, offset: f32) -> Vec2 {
@@ -1073,12 +1103,6 @@ fn reset_is_due(current_tick: u64, reset_at_tick: u64) -> bool {
     current_tick >= reset_at_tick
 }
 
-#[must_use]
-#[cfg(feature = "server")]
-fn applied_damage(requested: u16, current_health: u16) -> u16 {
-    requested.min(current_health)
-}
-
 /// Fixed-post authoritative combat ordering.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CombatSet {
@@ -1087,55 +1111,6 @@ pub enum CombatSet {
     Lifecycle,
     TelemetryAndCues,
     Finalize,
-}
-
-#[cfg(feature = "server")]
-#[derive(Message, Clone, Copy, Debug)]
-pub struct ProjectileImpact {
-    pub event_id: CombatEventId,
-    pub source: ProjectileSource,
-    pub target: Option<Entity>,
-    pub target_network_id: Option<NetworkEntityId>,
-    pub position: Vec2,
-    pub normal: Vec2,
-    pub travelled: f32,
-    /// Fraction of the current fixed-tick sweep at which the impact occurred.
-    pub impact_fraction: f32,
-    pub band: DistanceBand,
-    pub requested_damage: u16,
-}
-
-#[cfg(feature = "server")]
-#[derive(Message, Clone, Copy, Debug)]
-pub struct PendingDamage {
-    pub event_id: CombatEventId,
-    pub source: ProjectileSource,
-    pub target: Entity,
-    pub target_network_id: NetworkEntityId,
-    pub requested_damage: u16,
-    pub travelled: f32,
-    pub impact_fraction: f32,
-    pub band: DistanceBand,
-}
-
-#[cfg(feature = "server")]
-#[derive(Message, Clone, Copy, Debug)]
-pub struct DamageApplied {
-    pub event_id: CombatEventId,
-    pub source: DamageSource,
-    pub target: NetworkEntityId,
-    pub requested: u16,
-    pub amount: u16,
-    pub health_after: u16,
-    pub distance_band: DistanceBand,
-}
-
-#[cfg(feature = "server")]
-#[derive(Message, Clone, Copy, Debug)]
-pub struct FighterDefeated {
-    pub event_id: CombatEventId,
-    pub source: DamageSource,
-    pub target: NetworkEntityId,
 }
 
 #[must_use]
@@ -1171,21 +1146,6 @@ pub fn default_fighter_runtime(
             phase: WeaponPhase::Ready,
         },
     )
-}
-
-#[cfg(feature = "server")]
-fn pending_damage_order(left: &PendingDamage, right: &PendingDamage) -> std::cmp::Ordering {
-    left.target_network_id
-        .0
-        .cmp(&right.target_network_id.0)
-        .then_with(|| left.impact_fraction.total_cmp(&right.impact_fraction))
-        .then_with(|| left.source.shot_id.0.cmp(&right.source.shot_id.0))
-}
-
-#[cfg(feature = "server")]
-#[must_use]
-fn projectile_step_distance(projectile_speed: f32, maximum_range: f32, travelled: f32) -> f32 {
-    (projectile_speed / 60.0).min((maximum_range - travelled).max(0.0))
 }
 
 #[must_use]
@@ -1237,14 +1197,11 @@ impl Plugin for ServerCombatPlugin {
             .init_resource::<WeaponTelemetry>()
             .init_resource::<ActiveAttackTrackers>()
             .init_resource::<CombatOutbox>()
+            .init_resource::<CombatEvidenceSnapshots>()
             .init_resource::<CombatSummaryLogged>()
             .insert_resource(CombatEvidenceMode {
                 enabled: env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1"),
             })
-            .add_message::<ProjectileImpact>()
-            .add_message::<PendingDamage>()
-            .add_message::<DamageApplied>()
-            .add_message::<FighterDefeated>()
             .add_message::<MeleeAttack>()
             .add_message::<PendingPayload>()
             .add_message::<PendingDelivery>()
@@ -1255,7 +1212,6 @@ impl Plugin for ServerCombatPlugin {
                     reset_due_fighters.in_set(GameplaySet::Lifecycle),
                     expire_runtime_effects.in_set(GameplaySet::Lifecycle),
                     ApplyDeferred.after(GameplaySet::Lifecycle),
-                    authoritative_fire.in_set(GameplaySet::Fire),
                     authoritative_composed_fire.in_set(GameplaySet::Fire),
                     ApplyDeferred.after(GameplaySet::Fire),
                 ),
@@ -1263,9 +1219,6 @@ impl Plugin for ServerCombatPlugin {
             .add_systems(
                 FixedPostUpdate,
                 (
-                    sweep_projectiles
-                        .after(avian2d::prelude::PhysicsSystems::StepSimulation)
-                        .in_set(CombatSet::ProjectileSweep),
                     sweep_composed_projectiles
                         .after(avian2d::prelude::PhysicsSystems::StepSimulation)
                         .in_set(CombatSet::ProjectileSweep),
@@ -1273,18 +1226,17 @@ impl Plugin for ServerCombatPlugin {
                     resolve_composed_payloads
                         .after(resolve_melee_attacks)
                         .in_set(CombatSet::Damage),
-                    queue_pending_damage.in_set(CombatSet::Damage),
-                    apply_pending_damage
-                        .after(queue_pending_damage)
-                        .in_set(CombatSet::Damage),
-                    clear_defeated_projectiles.in_set(CombatSet::Lifecycle),
-                    emit_combat_outcomes
-                        .in_set(CombatSet::TelemetryAndCues)
-                        .before(send_combat_cues),
+                    flush_completed_attack_telemetry.in_set(CombatSet::TelemetryAndCues),
                     send_combat_cues.in_set(CombatSet::TelemetryAndCues),
                     publish_authoritative_tick
                         .in_set(CombatSet::Finalize)
                         .before(crate::gameplay::advance_simulation_tick),
+                    capture_server_combat_checkpoints
+                        .in_set(CombatSet::Finalize)
+                        .after(publish_authoritative_tick),
+                    send_combat_evidence_checkpoints
+                        .in_set(CombatSet::Finalize)
+                        .after(capture_server_combat_checkpoints),
                 ),
             )
             .add_systems(
@@ -1330,8 +1282,14 @@ fn spawn_test_dummy(
         return;
     };
     // Keep the dummy clear of the lower cover's collision body while leaving a deterministic
-    // horizontal approach lane for the short-range process-combat profiles.
-    let position = Vec2::new(0.0, -380.0);
+    // horizontal approach lane for the short-range process-combat profiles. The process harness
+    // uses the open spawn row so every delivery family can reach the same target during its
+    // bounded run; deterministic/unit harnesses retain the lower-row placement.
+    let position = if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
+        Vec2::new(0.0, -300.0)
+    } else {
+        Vec2::new(0.0, -380.0)
+    };
     let spawn_facing = fighter.spawn_facing;
     let body_radius = fighter.body_radius;
     let (fighter_definition, build, team, health, weapon) =
@@ -1451,6 +1409,7 @@ fn reset_due_fighters(
             ))
             .remove::<Defeated>()
             .remove::<ExternalMotion>()
+            .remove::<KnockbackFeedback>()
             .insert(ActiveEffects::default());
         telemetry.record(CombatLogRecord::Reset {
             tick: tick.0,
@@ -1486,16 +1445,20 @@ fn expire_runtime_effects(
             Entity,
             &mut ActiveEffects,
             Option<&ExternalMotion>,
+            Option<&KnockbackFeedback>,
             Option<&Defeated>,
         ),
         With<Fighter>,
     >,
 ) {
-    for (entity, mut effects, external_motion, defeated) in &mut fighters {
+    for (entity, mut effects, external_motion, knockback, defeated) in &mut fighters {
         if defeated.is_some() {
             effects.slow = None;
             if external_motion.is_some() {
-                commands.entity(entity).remove::<ExternalMotion>();
+                commands
+                    .entity(entity)
+                    .remove::<ExternalMotion>()
+                    .remove::<KnockbackFeedback>();
             }
             continue;
         }
@@ -1506,174 +1469,13 @@ fn expire_runtime_effects(
             effects.slow = None;
         }
         if external_motion.is_some_and(|motion| tick.0 >= motion.expires_at_tick) {
-            commands.entity(entity).remove::<ExternalMotion>();
+            commands
+                .entity(entity)
+                .remove::<ExternalMotion>()
+                .remove::<KnockbackFeedback>();
+        } else if knockback.is_some_and(|feedback| tick.0 >= feedback.expires_at_tick) {
+            commands.entity(entity).remove::<KnockbackFeedback>();
         }
-    }
-}
-
-#[cfg(feature = "server")]
-fn authoritative_fire(
-    mut commands: Commands,
-    tick: Res<SimulationTick>,
-    fighters: Res<FighterDefinitions>,
-    weapons: Res<WeaponDefinitions>,
-    evidence: Res<CombatEvidenceMode>,
-    mut ids: ResMut<NextCombatIds>,
-    mut telemetry: ResMut<CombatTelemetry>,
-    mut outbox: ResMut<CombatOutbox>,
-    query: Query<
-        (
-            Entity,
-            &Position,
-            &Rotation,
-            &FighterDefinitionId,
-            &SelectedBuild,
-            Option<&ResolvedWeapon>,
-            &TeamId,
-            &PlayerId,
-            &NetworkEntityId,
-            &crate::movement::InputFreshness,
-            &mut WeaponState,
-            Option<&ActionState<FighterInput>>,
-            Option<&Defeated>,
-            Option<&AwaitingPostSelectionInput>,
-        ),
-        With<Fighter>,
-    >,
-) {
-    for (
-        entity,
-        position,
-        rotation,
-        fighter_id,
-        build,
-        resolved,
-        team,
-        player_id,
-        network_id,
-        freshness,
-        mut state,
-        action,
-        defeated,
-        activation_barrier,
-    ) in query
-    {
-        if defeated.is_some() || activation_barrier.is_some() || resolved.is_some() {
-            continue;
-        }
-        let Some(_fighter) = fighters.get(*fighter_id) else {
-            continue;
-        };
-        let Some(weapon) = weapons.get(build.primary_weapon) else {
-            continue;
-        };
-        // M04 compatibility path for pre-M05 flat runtime fighters. Live M05 fighters always
-        // carry ResolvedWeapon and are handled by the recipe-driven path above.
-        advance_weapon_state(&mut state, weapon, tick.0);
-        let input = action.map_or(FighterInput::default(), |value| value.0);
-        let held = !input_should_neutralize(tick.0, freshness.last_fresh_tick, 12)
-            && input.is_valid()
-            && input.gameplay_buttons & FighterInput::PRIMARY_FIRE != 0;
-        if !held || !matches!(state.phase, WeaponPhase::Ready) {
-            if held && state.ammo == 0 && matches!(state.phase, WeaponPhase::Ready) {
-                state.phase = WeaponPhase::Reloading {
-                    ready_at_tick: tick.0.saturating_add(weapon.reload_duration_ticks),
-                };
-            }
-            continue;
-        }
-        if state.ammo == 0 {
-            state.phase = WeaponPhase::Reloading {
-                ready_at_tick: tick.0.saturating_add(weapon.reload_duration_ticks),
-            };
-            continue;
-        }
-        let Some(shot_id) = ids.allocate_shot() else {
-            warn!(tick = tick.0, "combat shot allocator exhausted");
-            continue;
-        };
-        let Some(event_id) = ids.allocate_event() else {
-            warn!(tick = tick.0, "combat event allocator exhausted");
-            continue;
-        };
-        state.ammo = state.ammo.saturating_sub(1);
-        state.phase = if state.ammo == 0 {
-            WeaponPhase::Reloading {
-                ready_at_tick: tick.0.saturating_add(weapon.reload_duration_ticks),
-            }
-        } else {
-            WeaponPhase::Cooldown {
-                ready_at_tick: tick.0.saturating_add(weapon.fire_cooldown_ticks),
-            }
-        };
-        let direction = Vec2::from_angle(rotation.as_radians());
-        let muzzle = muzzle_position(position.0, rotation.as_radians(), weapon.muzzle_offset);
-        let source = ProjectileSource {
-            shot_id,
-            player_id: *player_id,
-            owner_network_entity_id: *network_id,
-            team_id: *team,
-            weapon_definition_id: build.primary_weapon,
-        };
-        commands.spawn((
-            Projectile,
-            source,
-            ProjectileRuntime {
-                owner_entity: entity,
-                velocity: direction * weapon.projectile_speed,
-                travelled: 0.0,
-                expires_at_tick: tick.0.saturating_add(weapon.maximum_lifetime_ticks),
-            },
-            Position::from_xy(muzzle.x, muzzle.y),
-            Rotation::radians(rotation.as_radians()),
-            Collider::circle(weapon.projectile_radius),
-            CollisionLayers::new(
-                PROJECTILE_LAYER,
-                FIGHTER_LAYER | INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
-            ),
-            Replicate::to_clients(NetworkTarget::All),
-            InterpolationTarget::to_clients(NetworkTarget::All),
-        ));
-        telemetry.accepted_shots = telemetry.accepted_shots.saturating_add(1);
-        telemetry.record(CombatLogRecord::Shot {
-            event_id,
-            tick: tick.0,
-            shot_id,
-            source: *network_id,
-            weapon: build.primary_weapon,
-            muzzle_position: WorldPoint::from(muzzle),
-            ammo_after: state.ammo,
-        });
-        info!(
-            tick = tick.0,
-            shot_id = shot_id.0,
-            event_id = event_id.0,
-            source = network_id.0,
-            weapon = build.primary_weapon.0,
-            muzzle_position = ?muzzle,
-            ammo_after = state.ammo,
-            "authoritative pulse shot accepted"
-        );
-        let cue = CombatCue::Muzzle {
-            event_id,
-            tick: tick.0,
-            source: *network_id,
-            shot_id,
-            weapon_definition_id: build.primary_weapon,
-            position: WorldPoint::from(muzzle),
-        };
-        let cue_retained = telemetry.record_cue(cue.clone());
-        if evidence.enabled && cue_retained {
-            if telemetry.accepted_shot_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-                telemetry
-                    .accepted_shot_timestamps
-                    .push((shot_id, unix_epoch_micros()));
-            } else {
-                telemetry.dropped_accepted_shot_timestamps =
-                    telemetry.dropped_accepted_shot_timestamps.saturating_add(1);
-            }
-        }
-        outbox.0.push(cue);
     }
 }
 
@@ -1697,13 +1499,7 @@ fn authoritative_composed_fire(
     tick: Res<SimulationTick>,
     arena: Res<crate::movement::GreyboxArenaDefinition>,
     spatial_query: avian2d::prelude::SpatialQuery,
-    disconnected: Query<
-        Entity,
-        (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
-        ),
-    >,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     mut ids: ResMut<NextCombatIds>,
     mut telemetry: ResMut<WeaponTelemetry>,
     mut legacy_telemetry: ResMut<CombatTelemetry>,
@@ -1976,6 +1772,16 @@ fn authoritative_composed_fire(
                             attack_id,
                             delivery_index,
                         },
+                        ProjectileDeadline {
+                            expires_at_tick: tick.0.saturating_add(lifetime_ticks),
+                        },
+                        StraightFlight {
+                            origin: WorldPoint::from(muzzle),
+                            facing: angle,
+                            speed,
+                            maximum_range: range,
+                            launched_at_tick: tick.0,
+                        },
                         ComposedProjectileRuntime {
                             owner_entity: entity,
                             source,
@@ -1987,12 +1793,6 @@ fn authoritative_composed_fire(
                             radius,
                             landing: None,
                             recipe: recipe.clone(),
-                        },
-                        ProjectileRuntime {
-                            owner_entity: entity,
-                            velocity: Vec2::from_angle(angle) * speed,
-                            travelled: 0.0,
-                            expires_at_tick: tick.0.saturating_add(lifetime_ticks),
                         },
                         Position::from_xy(muzzle.x, muzzle.y),
                         Rotation::radians(angle),
@@ -2025,6 +1825,9 @@ fn authoritative_composed_fire(
                     AttackDelivery {
                         attack_id,
                         delivery_index: 0,
+                    },
+                    ProjectileDeadline {
+                        expires_at_tick: tick.0.saturating_add(flight_ticks),
                     },
                     LobbedFlight {
                         launch: WorldPoint::from(launch),
@@ -2070,8 +1873,8 @@ fn authoritative_composed_fire(
             emitted_deliveries,
         );
         if emitted_deliveries > 0 {
-            if trackers.0.len() < server::MAX_ACTIVE_ATTACK_TRACKERS {
-                trackers.0.insert(
+            if trackers.active.len() < server::MAX_ACTIVE_ATTACK_TRACKERS {
+                trackers.active.insert(
                     attack_id,
                     ActiveAttackTracker {
                         source,
@@ -2088,6 +1891,7 @@ fn authoritative_composed_fire(
             finish_attack_delivery(&mut trackers, attack_id);
         }
         telemetry.record_accepted_attack(preset_id, resolved.recipe_fingerprint);
+        legacy_telemetry.accepted_shots = legacy_telemetry.accepted_shots.saturating_add(1);
         let accepted_cue = CombatCue::AttackAccepted {
             event_id,
             tick: tick.0,
@@ -2119,7 +1923,6 @@ fn authoritative_composed_fire(
                     DeliveryMethod::MeleeArc { .. } => 0.0,
                 },
             );
-            legacy_telemetry.accepted_shots = legacy_telemetry.accepted_shots.saturating_add(1);
             legacy_telemetry.record(CombatLogRecord::Shot {
                 event_id: muzzle_event,
                 tick: tick.0,
@@ -2159,6 +1962,7 @@ fn authoritative_composed_fire(
             resulting_health: None,
             resulting_effects: None,
             resulting_motion: None,
+            outcome: WeaponTelemetryOutcome::AttackAccepted,
         });
     }
 }
@@ -2264,6 +2068,7 @@ fn queue_area_payloads(
         let TargetSelection::Area {
             radius,
             terrain_occlusion,
+            max_targets,
         } = bundle.target
         else {
             continue;
@@ -2279,7 +2084,11 @@ fn queue_area_payloads(
             .filter_map(|entity| fighters.get(entity).ok().map(|data| (entity, data)))
             .collect();
         candidates.sort_by_key(|(_, (_, _, _, network_id, _, _))| network_id.0);
+        let mut collected = 0_u8;
         for (target, (_, position, team, network_id, defeated, controlled)) in candidates {
+            if collected >= max_targets {
+                break;
+            }
             if defeated.is_some()
                 || controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner))
                 || (terrain_occlusion
@@ -2288,7 +2097,6 @@ fn queue_area_payloads(
             {
                 continue;
             }
-            let distance = landing.distance(position.0);
             pending.write(PendingPayload {
                 source,
                 delivery_index,
@@ -2296,29 +2104,75 @@ fn queue_area_payloads(
                 target,
                 target_network_id: *network_id,
                 position: landing,
-                engagement_distance: distance,
-                delivery_travel: distance,
+                engagement_distance: source.origin.as_vec2().distance(position.0),
+                delivery_travel: lob_launch_point(source, recipe).distance(landing),
                 contact_fraction: 1.0,
                 bundle: bundle.clone(),
             });
             queued += 1;
+            collected = collected.saturating_add(1);
         }
     }
     queued
 }
 
 #[cfg(feature = "server")]
+fn lob_launch_point(source: AttackSource, recipe: &WeaponRecipe) -> Vec2 {
+    let muzzle_offset = match recipe.delivery {
+        DeliveryMethod::Lobbed { muzzle_offset, .. } => muzzle_offset,
+        _ => 0.0,
+    };
+    muzzle_position(source.origin.as_vec2(), source.facing, muzzle_offset)
+}
+
+#[cfg(feature = "server")]
+fn record_delivery_termination(
+    ids: &mut NextCombatIds,
+    telemetry: &mut WeaponTelemetry,
+    tick: u64,
+    runtime: &ComposedProjectileRuntime,
+    position: Vec2,
+    outcome: WeaponTelemetryOutcome,
+) {
+    let Some(event_id) = ids.allocate_event() else {
+        return;
+    };
+    telemetry.record(WeaponTelemetryRecord {
+        tick,
+        event_id,
+        attack_id: runtime.source.attack_id,
+        preset_id: runtime.source.source_preset_id.unwrap_or(WeaponPresetId(0)),
+        recipe_fingerprint: runtime.source.recipe_fingerprint,
+        delivery_index: Some(runtime.delivery_index),
+        source: runtime.source.owner_network_entity_id,
+        target: None,
+        position: WorldPoint::from(position),
+        requested_value: 0,
+        applied_value: 0,
+        engagement_distance: 0.0,
+        delivery_travel: runtime.travelled,
+        hostile_contact: false,
+        effect: None,
+        resulting_health: None,
+        resulting_effects: None,
+        resulting_motion: None,
+        outcome,
+    });
+}
+
+#[cfg(feature = "server")]
 fn sweep_composed_projectiles(
     mut commands: Commands,
     tick: Res<SimulationTick>,
+    mut ids: ResMut<NextCombatIds>,
     mut trackers: ResMut<ActiveAttackTrackers>,
+    mut telemetry: ResMut<WeaponTelemetry>,
     mut pending: MessageWriter<PendingPayload>,
     mut deliveries: MessageWriter<PendingDelivery>,
     mut projectiles: Query<(
         Entity,
         &Position,
         &mut ComposedProjectileRuntime,
-        Option<&mut ProjectileRuntime>,
         Option<&LobbedFlight>,
     )>,
     fighters: Query<
@@ -2332,13 +2186,7 @@ fn sweep_composed_projectiles(
         ),
         With<Fighter>,
     >,
-    disconnected: Query<
-        Entity,
-        (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
-        ),
-    >,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     walls: Query<Entity, With<ArenaWall>>,
     spatial_query: avian2d::prelude::SpatialQuery,
 ) {
@@ -2363,16 +2211,37 @@ fn sweep_composed_projectiles(
         .collect();
     let wall_entities: HashSet<_> = walls.iter().collect();
     let mut ordered: Vec<_> = projectiles.iter_mut().collect();
-    ordered
-        .sort_by_key(|(_, _, runtime, _, _)| (runtime.source.attack_id.0, runtime.delivery_index));
-    for (entity, position, mut runtime, mut legacy_runtime, lob) in ordered {
+    ordered.sort_by_key(|(_, _, runtime, lob)| {
+        (
+            runtime.source.attack_id.0,
+            runtime.delivery_index,
+            lob.is_some(),
+        )
+    });
+    for (entity, position, mut runtime, lob) in ordered {
         let Some((_, _, _, _, owner_disconnected)) = fighter_lookup.get(&runtime.owner_entity)
         else {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
             commands.entity(entity).despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         };
         if *owner_disconnected {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
             commands.entity(entity).despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
@@ -2407,6 +2276,9 @@ fn sweep_composed_projectiles(
                 source: runtime.source,
                 delivery_index: runtime.delivery_index,
                 tick: tick.0,
+                engagement_distance: 0.0,
+                delivery_travel: lob_launch_point(runtime.source, &runtime.recipe)
+                    .distance(landing),
                 kind: PendingDeliveryKind::LobLanded {
                     position: WorldPoint::from(landing),
                 },
@@ -2414,6 +2286,14 @@ fn sweep_composed_projectiles(
             continue;
         }
         if tick.0 >= runtime.expires_at_tick || runtime.travelled >= runtime.maximum_range {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryExpired,
+            );
             commands.entity(entity).despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
@@ -2421,6 +2301,14 @@ fn sweep_composed_projectiles(
         let step = (runtime.velocity.length() / 60.0)
             .min((runtime.maximum_range - runtime.travelled).max(0.0));
         let Some(direction) = Dir2::new(runtime.velocity.normalize_or_zero()).ok() else {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
             commands.entity(entity).despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
@@ -2449,20 +2337,14 @@ fn sweep_composed_projectiles(
         );
         let Some(hit) = hit else {
             runtime.travelled += step;
-            if let Some(legacy_runtime) = legacy_runtime.as_deref_mut() {
-                legacy_runtime.travelled = runtime.travelled;
-            }
             commands
                 .entity(entity)
                 .insert(Position(position.0 + direction.as_vec2() * step));
             continue;
         };
         runtime.travelled += hit.distance.clamp(0.0, step);
-        if let Some(legacy_runtime) = legacy_runtime.as_deref_mut() {
-            legacy_runtime.travelled = runtime.travelled;
-        }
         let target = fighter_lookup.get(&hit.entity).copied();
-        if let Some((_, target_team, target_network_id, defeated, _)) = target
+        if let Some((target_position, target_team, target_network_id, defeated, _)) = target
             && !defeated
             && teams_are_hostile(runtime.source.team_id, target_team)
         {
@@ -2489,7 +2371,7 @@ fn sweep_composed_projectiles(
                     target: hit.entity,
                     target_network_id,
                     position: hit.point2,
-                    engagement_distance: position.0.distance(hit.point2),
+                    engagement_distance: runtime.source.origin.as_vec2().distance(target_position),
                     delivery_travel: runtime.travelled,
                     contact_fraction: (hit.distance / step.max(f32::EPSILON)).clamp(0.0, 1.0),
                     bundle: bundle.clone(),
@@ -2501,6 +2383,10 @@ fn sweep_composed_projectiles(
             source: runtime.source,
             delivery_index: runtime.delivery_index,
             tick: tick.0,
+            engagement_distance: target.map_or(0.0, |(position, ..)| {
+                runtime.source.origin.as_vec2().distance(position)
+            }),
+            delivery_travel: runtime.travelled,
             kind: PendingDeliveryKind::StraightImpact {
                 target: target.map(|(_, _, network_id, _, _)| network_id),
                 position: WorldPoint::from(hit.point2),
@@ -2517,13 +2403,7 @@ fn resolve_melee_attacks(
     mut pending: MessageWriter<PendingPayload>,
     mut deliveries: MessageWriter<PendingDelivery>,
     mut trackers: ResMut<ActiveAttackTrackers>,
-    disconnected: Query<
-        Entity,
-        (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
-        ),
-    >,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     fighters: Query<
         (
             Entity,
@@ -2604,6 +2484,8 @@ fn resolve_melee_attacks(
                 source: attack.source,
                 delivery_index: 0,
                 tick: attack.tick,
+                engagement_distance: attack.origin.distance(position.0),
+                delivery_travel: 0.0,
                 kind: PendingDeliveryKind::MeleeContact {
                     target: *network_id,
                     position: WorldPoint::from(position.0),
@@ -2646,6 +2528,41 @@ fn pending_delivery_kind_order(kind: &PendingDeliveryKind) -> u8 {
 }
 
 #[cfg(feature = "server")]
+fn record_delivery_telemetry(
+    telemetry: &mut WeaponTelemetry,
+    delivery: &PendingDelivery,
+    event_id: CombatEventId,
+    target: Option<NetworkEntityId>,
+    position: WorldPoint,
+    outcome: WeaponTelemetryOutcome,
+) {
+    telemetry.record(WeaponTelemetryRecord {
+        tick: delivery.tick,
+        event_id,
+        attack_id: delivery.source.attack_id,
+        preset_id: delivery
+            .source
+            .source_preset_id
+            .unwrap_or(WeaponPresetId(0)),
+        recipe_fingerprint: delivery.source.recipe_fingerprint,
+        delivery_index: Some(delivery.delivery_index),
+        source: delivery.source.owner_network_entity_id,
+        target,
+        position,
+        requested_value: 0,
+        applied_value: 0,
+        engagement_distance: delivery.engagement_distance,
+        delivery_travel: delivery.delivery_travel,
+        hostile_contact: target.is_some(),
+        effect: None,
+        resulting_health: None,
+        resulting_effects: None,
+        resulting_motion: None,
+        outcome,
+    });
+}
+
+#[cfg(feature = "server")]
 fn abort_composed_event_batch(
     commands: &mut Commands,
     trackers: &mut ActiveAttackTrackers,
@@ -2663,21 +2580,41 @@ fn abort_composed_event_batch(
         affected_attacks.insert(payload.source.attack_id);
     }
     for attack_id in affected_attacks {
-        trackers.0.remove(&attack_id);
+        trackers.active.remove(&attack_id);
     }
 }
 
 #[cfg(feature = "server")]
 fn finish_attack_delivery(trackers: &mut ActiveAttackTrackers, attack_id: AttackId) {
-    let Some(tracker) = trackers.0.get_mut(&attack_id) else {
+    let Some(tracker) = trackers.active.get_mut(&attack_id) else {
         return;
     };
     tracker.resolved_deliveries = tracker
         .resolved_deliveries
         .saturating_add(1)
         .min(tracker.expected_deliveries);
-    if tracker.resolved_deliveries >= tracker.expected_deliveries {
-        trackers.0.remove(&attack_id);
+    if tracker.resolved_deliveries >= tracker.expected_deliveries
+        && let Some(tracker) = trackers.active.remove(&attack_id)
+    {
+        trackers.completed.push(CompletedAttack {
+            source_preset_id: tracker.source.source_preset_id,
+            recipe_fingerprint: tracker.source.recipe_fingerprint,
+            had_hostile_contact: tracker.had_hostile_contact,
+        });
+    }
+}
+
+#[cfg(feature = "server")]
+fn flush_completed_attack_telemetry(
+    mut trackers: ResMut<ActiveAttackTrackers>,
+    mut telemetry: ResMut<WeaponTelemetry>,
+) {
+    for completed in trackers.completed.drain(..) {
+        telemetry.record_attack_completion(
+            completed.source_preset_id.unwrap_or(WeaponPresetId(0)),
+            completed.recipe_fingerprint,
+            completed.had_hostile_contact,
+        );
     }
 }
 
@@ -2744,13 +2681,7 @@ fn resolve_composed_payloads(
         >,
     )>,
     owners: Query<(&NetworkEntityId, Option<&lightyear::prelude::ControlledBy>), With<Fighter>>,
-    disconnected: Query<
-        Entity,
-        (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
-        ),
-    >,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
     let connected_owners: HashSet<_> = owners
@@ -2929,6 +2860,14 @@ fn resolve_composed_payloads(
                 };
                 legacy_telemetry.record_cue(cue.clone());
                 outbox.0.push(cue);
+                record_delivery_telemetry(
+                    &mut telemetry,
+                    &delivery,
+                    event_id,
+                    target,
+                    position,
+                    WeaponTelemetryOutcome::DeliveryImpact,
+                );
                 if delivery.source.legacy_compatibility {
                     let legacy_event = reserved_events
                         .next()
@@ -2983,6 +2922,14 @@ fn resolve_composed_payloads(
                 };
                 legacy_telemetry.record_cue(cue.clone());
                 outbox.0.push(cue);
+                record_delivery_telemetry(
+                    &mut telemetry,
+                    &delivery,
+                    event_id,
+                    None,
+                    position,
+                    WeaponTelemetryOutcome::DeliveryLanding,
+                );
             }
             PendingDeliveryKind::MeleeContact { target, position } => {
                 let cue = CombatCue::MeleeContact {
@@ -2998,6 +2945,14 @@ fn resolve_composed_payloads(
                 };
                 legacy_telemetry.record_cue(cue.clone());
                 outbox.0.push(cue);
+                record_delivery_telemetry(
+                    &mut telemetry,
+                    &delivery,
+                    event_id,
+                    Some(target),
+                    position,
+                    WeaponTelemetryOutcome::MeleeContact,
+                );
             }
         }
         if let Some(entity) = delivery.entity {
@@ -3007,7 +2962,7 @@ fn resolve_composed_payloads(
     for record in records {
         resolved_delivery_keys.insert((record.source.attack_id, record.delivery_index));
         if !connected_owners.contains(&record.source.owner_network_entity_id.0) {
-            trackers.0.remove(&record.source.attack_id);
+            trackers.active.remove(&record.source.attack_id);
             continue;
         }
         let Ok((
@@ -3056,12 +3011,7 @@ fn resolve_composed_payloads(
             ))
         {
             telemetry.record_hostile_delivery_contact(preset_id, record.source.recipe_fingerprint);
-            telemetry.record_hostile_contact(
-                preset_id,
-                record.source.recipe_fingerprint,
-                record.source.attack_id,
-            );
-            if let Some(tracker) = trackers.0.get_mut(&record.source.attack_id) {
+            if let Some(tracker) = trackers.active.get_mut(&record.source.attack_id) {
                 tracker.had_hostile_contact = true;
             }
         }
@@ -3227,6 +3177,7 @@ fn resolve_composed_payloads(
                         resulting_health: Some(health.0),
                         resulting_effects: Some(effects_state),
                         resulting_motion: motion_state,
+                        outcome: WeaponTelemetryOutcome::DamageApplied,
                     });
                 }
                 if let Some(defeat_event) = defeat_event {
@@ -3247,10 +3198,32 @@ fn resolve_composed_payloads(
                             CollisionLayers::new(FIGHTER_LAYER, avian2d::prelude::LayerMask::NONE),
                             ActiveEffects::default(),
                         ))
-                        .remove::<ExternalMotion>();
+                        .remove::<ExternalMotion>()
+                        .remove::<KnockbackFeedback>();
                     accumulated_effects.remove(&record.target);
                     accumulated_motion.remove(&record.target);
                     telemetry.record_defeat(preset_id, record.source.recipe_fingerprint);
+                    telemetry.record(WeaponTelemetryRecord {
+                        tick: tick.0,
+                        event_id: defeat_event,
+                        attack_id: record.source.attack_id,
+                        preset_id,
+                        recipe_fingerprint: record.source.recipe_fingerprint,
+                        delivery_index: Some(record.delivery_index),
+                        source: record.source.owner_network_entity_id,
+                        target: Some(*target_network_id),
+                        position: WorldPoint::from(record.position),
+                        requested_value: 0,
+                        applied_value: 0,
+                        engagement_distance: record.engagement_distance,
+                        delivery_travel: record.delivery_travel,
+                        hostile_contact: !owner_contact,
+                        effect: None,
+                        resulting_health: Some(0),
+                        resulting_effects: Some(ActiveEffects::default()),
+                        resulting_motion: None,
+                        outcome: WeaponTelemetryOutcome::Defeat,
+                    });
                     legacy_telemetry.defeats = legacy_telemetry.defeats.saturating_add(1);
                     let defeated_cue = CombatCue::FighterDefeated {
                         event_id: defeat_event,
@@ -3296,7 +3269,7 @@ fn resolve_composed_payloads(
                 PayloadEffectDefinition::Knockback {
                     speed,
                     duration_ticks,
-                    ..
+                    recipients,
                 } => {
                     let direction =
                         (record.position - record.source.origin.as_vec2()).normalize_or_zero();
@@ -3321,12 +3294,38 @@ fn resolve_composed_payloads(
                         },
                         presentation_profile_id: record.source.presentation_profile_id,
                     };
+                    telemetry.record(WeaponTelemetryRecord {
+                        tick: tick.0,
+                        event_id,
+                        attack_id: record.source.attack_id,
+                        preset_id,
+                        recipe_fingerprint: record.source.recipe_fingerprint,
+                        delivery_index: Some(record.delivery_index),
+                        source: record.source.owner_network_entity_id,
+                        target: Some(*target_network_id),
+                        position: WorldPoint::from(record.position),
+                        requested_value: 0,
+                        applied_value: 0,
+                        engagement_distance: record.engagement_distance,
+                        delivery_travel: record.delivery_travel,
+                        hostile_contact: !owner_contact,
+                        effect: Some(PayloadEffectDefinition::Knockback {
+                            speed,
+                            duration_ticks,
+                            recipients,
+                        }),
+                        resulting_health: Some(health.0),
+                        resulting_effects: Some(effects_state),
+                        resulting_motion: Some(motion),
+                        outcome: WeaponTelemetryOutcome::KnockbackApplied,
+                    });
                     deferred_effect_cues.push((record.target, effect_cue));
                 }
                 PayloadEffectDefinition::Slow {
                     movement_multiplier,
                     duration_ticks,
-                    ..
+                    stacking,
+                    recipients,
                 } => {
                     effects::refresh_strongest_slow(
                         &mut effects_state,
@@ -3353,6 +3352,32 @@ fn resolve_composed_payloads(
                             },
                             presentation_profile_id: record.source.presentation_profile_id,
                         };
+                        telemetry.record(WeaponTelemetryRecord {
+                            tick: tick.0,
+                            event_id,
+                            attack_id: record.source.attack_id,
+                            preset_id,
+                            recipe_fingerprint: record.source.recipe_fingerprint,
+                            delivery_index: Some(record.delivery_index),
+                            source: record.source.owner_network_entity_id,
+                            target: Some(*target_network_id),
+                            position: WorldPoint::from(record.position),
+                            requested_value: 0,
+                            applied_value: 0,
+                            engagement_distance: record.engagement_distance,
+                            delivery_travel: record.delivery_travel,
+                            hostile_contact: !owner_contact,
+                            effect: Some(PayloadEffectDefinition::Slow {
+                                movement_multiplier,
+                                duration_ticks,
+                                stacking,
+                                recipients,
+                            }),
+                            resulting_health: Some(health.0),
+                            resulting_effects: Some(effects_state),
+                            resulting_motion: motion_state,
+                            outcome: WeaponTelemetryOutcome::SlowApplied,
+                        });
                         deferred_effect_cues.push((record.target, effect_cue));
                     }
                 }
@@ -3371,7 +3396,13 @@ fn resolve_composed_payloads(
     }
     for (entity, motion) in accumulated_motion {
         if !defeated_this_tick.contains(&entity) {
-            commands.entity(entity).insert(motion);
+            commands.entity(entity).insert((
+                motion,
+                KnockbackFeedback {
+                    velocity: WorldPoint::from(motion.velocity),
+                    expires_at_tick: motion.expires_at_tick,
+                },
+            ));
         }
     }
     for (entity, cue) in deferred_effect_cues {
@@ -3390,420 +3421,289 @@ fn resolve_composed_payloads(
 pub struct CombatOutbox(pub Vec<CombatCue>);
 
 #[cfg(feature = "server")]
-fn sweep_projectiles(
-    mut commands: Commands,
+#[derive(Resource, Default, Debug)]
+pub struct CombatEvidenceSnapshots {
+    pub checkpoints: BTreeMap<String, CombatStateSnapshot>,
+    pub checkpoint_candidates: BTreeMap<String, Vec<(CombatStateSnapshot, u128)>>,
+    checkpoint_latched_snapshots: BTreeMap<String, CombatStateSnapshot>,
+    checkpoint_latch_ticks: BTreeMap<String, u16>,
+    pub checkpoint_timestamps: BTreeMap<String, u128>,
+    pub state_mutation_timestamps: Vec<(u64, u128)>,
+    pub last_encoded_snapshot: Option<String>,
+    pub saw_defeat: bool,
+    pub pending_checkpoints: Vec<CombatEvidenceCheckpoint>,
+}
+
+#[cfg(any(feature = "server", feature = "client"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CombatCheckpoint {
+    ActiveScatterFlight,
+    ActiveLobFlight,
+    ActiveSlow,
+    ActiveKnockback,
+    Defeat,
+    Reset,
+}
+
+#[cfg(any(feature = "server", feature = "client"))]
+impl CombatCheckpoint {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ActiveScatterFlight => "active_scatter_flight",
+            Self::ActiveLobFlight => "active_lob_flight",
+            Self::ActiveSlow => "active_slow",
+            Self::ActiveKnockback => "active_knockback",
+            Self::Defeat => "defeat",
+            Self::Reset => "reset",
+        }
+    }
+}
+
+#[cfg(any(feature = "server", feature = "client"))]
+#[derive(Message, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CombatEvidenceCheckpoint {
+    pub checkpoint: CombatCheckpoint,
+    pub snapshot: CombatStateSnapshot,
+}
+
+#[cfg(feature = "server")]
+fn capture_server_combat_checkpoints(
     tick: Res<SimulationTick>,
-    weapons: Res<WeaponDefinitions>,
-    mut ids: ResMut<NextCombatIds>,
-    mut impacts: MessageWriter<ProjectileImpact>,
-    mut projectiles: Query<
-        (Entity, &Position, &mut ProjectileRuntime, &ProjectileSource),
-        Without<ComposedProjectileRuntime>,
-    >,
+    mut evidence: ResMut<CombatEvidenceSnapshots>,
     fighters: Query<
         (
-            Entity,
-            &TeamId,
-            Option<&Defeated>,
             &NetworkEntityId,
-            Option<&lightyear::prelude::ControlledBy>,
+            Option<&SelectedBuild>,
+            Option<&ResolvedWeapon>,
+            Option<&WeaponState>,
+            Option<&ActiveEffects>,
+            Option<&Defeated>,
+            Option<&ExternalMotion>,
+            Option<&KnockbackFeedback>,
+            Option<&CurrentHealth>,
+            Option<&AuthoritativePose>,
+            &Position,
+            &Rotation,
+            Option<&AuthoritativeTick>,
         ),
         With<Fighter>,
     >,
-    disconnected: Query<
-        Entity,
+    projectiles: Query<
         (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
+            &Position,
+            Option<&AttackDelivery>,
+            Option<&ReplicatedAttackSource>,
+            Option<&LobbedFlight>,
+            Option<&ProjectileDeadline>,
+            Option<&StraightFlight>,
         ),
+        With<Projectile>,
     >,
-    walls: Query<Entity, With<ArenaWall>>,
-    spatial_query: avian2d::prelude::SpatialQuery,
 ) {
-    let disconnected: HashSet<_> = disconnected.iter().collect();
-    let fighter_info: HashMap<_, _> = fighters
-        .iter()
-        .map(|(entity, team, defeated, network_id, controlled)| {
-            (
-                entity,
-                (
-                    team.0,
-                    defeated.is_some(),
-                    *network_id,
-                    controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner)),
-                ),
-            )
+    if !env::var("BRAWLER_NETWORK_ASSERT_COMBAT").is_ok_and(|value| value == "1") {
+        return;
+    }
+    let expired_latches = evidence
+        .checkpoint_latch_ticks
+        .iter_mut()
+        .filter_map(|(checkpoint, ticks)| {
+            if *ticks == 0 {
+                Some(checkpoint.clone())
+            } else {
+                *ticks = ticks.saturating_sub(1);
+                None
+            }
         })
-        .collect();
-    let wall_entities: HashSet<_> = walls.iter().collect();
-    let mut ordered: Vec<_> = projectiles.iter_mut().collect();
-    ordered.sort_by_key(|(_, _, _, source)| source.shot_id.0);
-    for (entity, position, mut runtime, source) in ordered {
-        let Some((_, _, _, owner_disconnected)) = fighter_info.get(&runtime.owner_entity) else {
-            commands.entity(entity).despawn();
-            continue;
-        };
-        if *owner_disconnected {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let Some(weapon) = weapons.get(source.weapon_definition_id) else {
-            commands.entity(entity).despawn();
-            continue;
-        };
-        if tick.0 >= runtime.expires_at_tick || runtime.travelled >= weapon.maximum_range {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let remaining = projectile_step_distance(
-            weapon.projectile_speed,
-            weapon.maximum_range,
-            runtime.travelled,
-        );
-        let direction = runtime.velocity.normalize_or_zero();
-        let Some(direction) = Dir2::new(direction).ok() else {
-            commands.entity(entity).despawn();
-            continue;
-        };
-        let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-            FIGHTER_LAYER | INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
+        .collect::<Vec<_>>();
+    for checkpoint in expired_latches {
+        evidence.checkpoint_latch_ticks.remove(&checkpoint);
+        evidence.checkpoint_latched_snapshots.remove(&checkpoint);
+    }
+    let mut fighter_snapshots = fighters
+        .iter()
+        .map(
+            |(
+                network_id,
+                selected_build,
+                resolved_weapon,
+                weapon_state,
+                active_effects,
+                defeated,
+                _external_motion,
+                knockback_feedback,
+                health,
+                authoritative_pose,
+                position,
+                rotation,
+                authoritative_tick,
+            )| {
+                CombatFighterSnapshot {
+                    network_entity_id: *network_id,
+                    selected_build: selected_build.copied(),
+                    resolved_weapon: resolved_weapon.cloned(),
+                    weapon_state: weapon_state.copied(),
+                    active_effects: active_effects.copied(),
+                    knockback_feedback: knockback_feedback.copied(),
+                    defeated: defeated.copied(),
+                    health: health.map(|health| health.0),
+                    position: authoritative_pose
+                        .map_or_else(|| WorldPoint::from(position.0), |pose| pose.position),
+                    facing: authoritative_pose
+                        .map_or_else(|| rotation.as_radians(), |pose| pose.facing),
+                    authoritative_tick: authoritative_tick.copied().unwrap_or_default(),
+                }
+            },
         )
-        .with_excluded_entities([entity, runtime.owner_entity]);
-        let hit = spatial_query.cast_shape_predicate(
-            &Collider::circle(weapon.projectile_radius),
-            position.0,
-            0.0,
-            direction,
-            &avian2d::prelude::ShapeCastConfig::from_max_distance(remaining),
-            &filter,
-            &|candidate| {
-                fighter_info.get(&candidate).map_or_else(
-                    || wall_entities.contains(&candidate),
-                    |(team, defeated, _, owner_disconnected)| {
-                        teams_are_hostile(source.team_id, TeamId(*team))
-                            && !defeated
-                            && !owner_disconnected
-                    },
+        .collect::<Vec<_>>();
+    fighter_snapshots.sort_by_key(|fighter| fighter.network_entity_id.0);
+    let mut projectile_snapshots = projectiles
+        .iter()
+        .filter_map(
+            |(position, delivery, source, lobbed_flight, deadline, straight_flight)| {
+                CombatProjectileSnapshot::from_components(
+                    WorldPoint::from(position.0),
+                    delivery,
+                    source,
+                    lobbed_flight,
+                    deadline,
+                    straight_flight,
+                    tick.0,
                 )
             },
-        );
-        let Some(hit) = hit else {
-            let next_position = position.0 + direction.as_vec2() * remaining;
-            runtime.travelled += remaining;
-            commands.entity(entity).insert(Position(next_position));
-            if runtime.travelled >= weapon.maximum_range {
-                commands.entity(entity).despawn();
+        )
+        .collect::<Vec<_>>();
+    projectile_snapshots
+        .sort_by_key(|projectile| (projectile.attack_id.0, projectile.delivery_index));
+    let snapshot = CombatStateSnapshot {
+        authoritative_tick: tick.0,
+        fighters: fighter_snapshots,
+        projectiles: projectile_snapshots,
+    };
+    let Some(encoded) = encode_state_snapshot(&snapshot) else {
+        return;
+    };
+    if evidence.last_encoded_snapshot.as_deref() != Some(encoded.as_str()) {
+        if evidence.state_mutation_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+            evidence
+                .state_mutation_timestamps
+                .push((tick.0, unix_epoch_micros()));
+        }
+        evidence.last_encoded_snapshot = Some(encoded);
+    }
+    let has_scatter_flight = snapshot.projectiles.iter().any(|projectile| {
+        projectile.presentation_profile_id == Some(WeaponPresentationProfileId(2))
+            && projectile.lobbed_flight.is_none()
+    });
+    let has_lob_flight = snapshot
+        .projectiles
+        .iter()
+        .any(|projectile| projectile.lobbed_flight.is_some());
+    let has_slow = snapshot.fighters.iter().any(|fighter| {
+        fighter
+            .active_effects
+            .is_some_and(|effects| effects.slow.is_some())
+    });
+    let has_defeat = snapshot
+        .fighters
+        .iter()
+        .any(|fighter| fighter.defeated.is_some());
+    evidence.saw_defeat |= has_defeat;
+    let has_knockback = fighters
+        .iter()
+        .any(|(_, _, _, _, _, _, external_motion, _, _, _, _, _, _)| external_motion.is_some());
+    let has_reset = evidence.saw_defeat
+        && snapshot.fighters.iter().any(|fighter| {
+            fighter.network_entity_id == DUMMY_NETWORK_ENTITY && fighter.defeated.is_none()
+        });
+    for (checkpoint, active) in [
+        ("active_scatter_flight", has_scatter_flight),
+        ("active_lob_flight", has_lob_flight),
+        ("active_slow", has_slow),
+        ("active_knockback", has_knockback),
+        ("defeat", has_defeat),
+        ("reset", has_reset),
+    ] {
+        let repeat_checkpoint =
+            checkpoint.starts_with("active_") || checkpoint == "defeat" || checkpoint == "reset";
+        let latched = evidence
+            .checkpoint_latched_snapshots
+            .contains_key(checkpoint);
+        if (active || latched)
+            && (!evidence.checkpoints.contains_key(checkpoint) || repeat_checkpoint)
+        {
+            let current_snapshot = if matches!(checkpoint, "defeat" | "reset") {
+                CombatStateSnapshot {
+                    projectiles: Vec::new(),
+                    ..snapshot.clone()
+                }
+            } else {
+                snapshot.clone()
+            };
+            if active && !latched {
+                evidence
+                    .checkpoint_latched_snapshots
+                    .insert(checkpoint.to_string(), current_snapshot.clone());
+                evidence
+                    .checkpoint_latch_ticks
+                    .insert(checkpoint.to_string(), COMBAT_CHECKPOINT_LATCH_TICKS);
             }
-            continue;
-        };
-        let hit_distance = hit.distance.clamp(0.0, remaining);
-        runtime.travelled += hit_distance;
-        let travelled = runtime.travelled;
-        let impact_fraction = if remaining > 0.0 {
-            (hit_distance / remaining).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let Some(event_id) = ids.allocate_event() else {
-            commands.entity(entity).despawn();
-            continue;
-        };
-        let target_network_id = fighter_info
-            .get(&hit.entity)
-            .map(|(_, _, network_id, _)| *network_id);
-        impacts.write(ProjectileImpact {
-            event_id,
-            source: *source,
-            target: fighter_info.contains_key(&hit.entity).then_some(hit.entity),
-            target_network_id,
-            position: hit.point2,
-            normal: hit.normal1,
-            travelled,
-            impact_fraction,
-            band: distance_band(travelled),
-            requested_damage: fighter_info
-                .get(&hit.entity)
-                .map_or(0, |_| weapon.direct_damage),
-        });
-        commands.entity(entity).despawn();
+            let checkpoint_snapshot = evidence
+                .checkpoint_latched_snapshots
+                .get(checkpoint)
+                .cloned()
+                .unwrap_or(current_snapshot);
+            let timestamp = unix_epoch_micros();
+            let candidates = evidence
+                .checkpoint_candidates
+                .entry(checkpoint.to_string())
+                .or_default();
+            if candidates.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+                candidates.push((checkpoint_snapshot.clone(), timestamp));
+            }
+            if !evidence.checkpoints.contains_key(checkpoint) {
+                evidence
+                    .checkpoint_timestamps
+                    .insert(checkpoint.to_string(), timestamp);
+                evidence
+                    .checkpoints
+                    .insert(checkpoint.to_string(), checkpoint_snapshot.clone());
+            }
+            if evidence.pending_checkpoints.len() >= MAX_COMBAT_EVIDENCE_EVENTS {
+                continue;
+            }
+            let checkpoint = match checkpoint {
+                "active_scatter_flight" => CombatCheckpoint::ActiveScatterFlight,
+                "active_lob_flight" => CombatCheckpoint::ActiveLobFlight,
+                "active_slow" => CombatCheckpoint::ActiveSlow,
+                "active_knockback" => CombatCheckpoint::ActiveKnockback,
+                "defeat" => CombatCheckpoint::Defeat,
+                "reset" => CombatCheckpoint::Reset,
+                _ => unreachable!("combat evidence checkpoint is a known name"),
+            };
+            evidence.pending_checkpoints.push(CombatEvidenceCheckpoint {
+                checkpoint,
+                snapshot: checkpoint_snapshot,
+            });
+        }
     }
 }
 
 #[cfg(feature = "server")]
-fn queue_pending_damage(
-    mut impacts: MessageReader<ProjectileImpact>,
-    mut pending_damage: MessageWriter<PendingDamage>,
-) {
-    for impact in impacts.read() {
-        let (Some(target), Some(target_network_id)) = (impact.target, impact.target_network_id)
-        else {
-            continue;
-        };
-        pending_damage.write(PendingDamage {
-            event_id: impact.event_id,
-            source: impact.source,
-            target,
-            target_network_id,
-            requested_damage: impact.requested_damage,
-            travelled: impact.travelled,
-            impact_fraction: impact.impact_fraction,
-            band: impact.band,
-        });
-    }
-}
-
-#[cfg(feature = "server")]
-fn apply_pending_damage(
-    mut commands: Commands,
-    tick: Res<SimulationTick>,
-    fighters: Res<FighterDefinitions>,
-    mut ids: ResMut<NextCombatIds>,
-    mut pending_damage: MessageReader<PendingDamage>,
-    mut damage_applied: MessageWriter<DamageApplied>,
-    mut fighter_defeated: MessageWriter<FighterDefeated>,
-    mut telemetry: ResMut<CombatTelemetry>,
-    mut targets: Query<
-        (
-            &NetworkEntityId,
-            &FighterDefinitionId,
-            &mut CurrentHealth,
-            Option<&Defeated>,
-        ),
-        With<Fighter>,
+fn send_combat_evidence_checkpoints(
+    mut evidence: ResMut<CombatEvidenceSnapshots>,
+    mut senders: Query<
+        &mut lightyear::prelude::MessageSender<CombatEvidenceCheckpoint>,
+        With<LinkOf>,
     >,
 ) {
-    let mut damages: Vec<_> = pending_damage.read().copied().collect();
-    damages.sort_by(pending_damage_order);
-    let mut defeated_this_tick = HashSet::new();
-    for damage in damages {
-        let Ok((target_id, fighter_id, mut health, defeated)) = targets.get_mut(damage.target)
-        else {
-            continue;
-        };
-        let requested = damage.requested_damage;
-        let applied = applied_damage(requested, health.0);
-        if applied == 0 {
-            telemetry.hostile_fighter_hits = telemetry.hostile_fighter_hits.saturating_add(1);
-            match damage.band {
-                DistanceBand::Close => {
-                    telemetry.close_hits = telemetry.close_hits.saturating_add(1);
-                }
-                DistanceBand::Mid => telemetry.mid_hits = telemetry.mid_hits.saturating_add(1),
-                DistanceBand::Long => telemetry.long_hits = telemetry.long_hits.saturating_add(1),
-            }
-            continue;
-        }
-        let source = DamageSource::PlayerWeapon {
-            player_id: damage.source.player_id,
-            fighter_id: damage.source.owner_network_entity_id,
-            weapon_definition_id: damage.source.weapon_definition_id,
-            shot_id: damage.source.shot_id,
-        };
-        let defeats_target = health.0 == applied
-            && defeated.is_none()
-            && !defeated_this_tick.contains(&damage.target);
-        let (damage_event, defeat_event) = if defeats_target {
-            let Some((damage_event, defeat_event)) = ids.allocate_event_pair() else {
-                error!(
-                    tick = tick.0,
-                    target = target_id.0,
-                    shot_id = damage.source.shot_id.0,
-                    "combat event IDs exhausted before lethal damage"
-                );
-                continue;
-            };
-            (damage_event, Some(defeat_event))
-        } else {
-            let Some(damage_event) = ids.allocate_event() else {
-                error!(
-                    tick = tick.0,
-                    target = target_id.0,
-                    shot_id = damage.source.shot_id.0,
-                    "combat event IDs exhausted before damage"
-                );
-                continue;
-            };
-            (damage_event, None)
-        };
-        health.0 = health.0.saturating_sub(applied);
-        telemetry.hostile_fighter_hits = telemetry.hostile_fighter_hits.saturating_add(1);
-        match damage.band {
-            DistanceBand::Close => telemetry.close_hits = telemetry.close_hits.saturating_add(1),
-            DistanceBand::Mid => telemetry.mid_hits = telemetry.mid_hits.saturating_add(1),
-            DistanceBand::Long => telemetry.long_hits = telemetry.long_hits.saturating_add(1),
-        }
-        damage_applied.write(DamageApplied {
-            event_id: damage_event,
-            source,
-            target: *target_id,
-            requested,
-            amount: applied,
-            health_after: health.0,
-            distance_band: damage.band,
-        });
-        if let Some(defeat_event) = defeat_event {
-            defeated_this_tick.insert(damage.target);
-            let reset_delay = fighters
-                .get(*fighter_id)
-                .map_or(90, |definition| definition.defeat_reset_delay_ticks);
-            let reset_at_tick = tick.0.saturating_add(reset_delay);
-            commands.entity(damage.target).insert(Defeated {
-                event_id: defeat_event,
-                reset_at_tick,
-            });
-            commands.entity(damage.target).insert(CollisionLayers::new(
-                FIGHTER_LAYER,
-                avian2d::prelude::LayerMask::NONE,
-            ));
-            fighter_defeated.write(FighterDefeated {
-                event_id: defeat_event,
-                source,
-                target: *target_id,
-            });
+    let checkpoints = std::mem::take(&mut evidence.pending_checkpoints);
+    for mut sender in &mut senders {
+        for checkpoint in &checkpoints {
+            sender.send::<crate::protocol::CombatChannel>(checkpoint.clone());
         }
     }
 }
-
-#[cfg(feature = "server")]
-enum CombatOutcome {
-    Impact(ProjectileImpact),
-    Damage(DamageApplied),
-    Defeat(FighterDefeated),
-}
-
-#[cfg(feature = "server")]
-fn emit_combat_outcomes(
-    tick: Res<SimulationTick>,
-    mut impacts: MessageReader<ProjectileImpact>,
-    mut damage_applied: MessageReader<DamageApplied>,
-    mut fighter_defeated: MessageReader<FighterDefeated>,
-    mut telemetry: ResMut<CombatTelemetry>,
-    mut outbox: ResMut<CombatOutbox>,
-) {
-    let mut outcomes = Vec::new();
-    outcomes.extend(
-        impacts
-            .read()
-            .map(|impact| (impact.event_id.0, CombatOutcome::Impact(*impact))),
-    );
-    outcomes.extend(
-        damage_applied
-            .read()
-            .map(|damage| (damage.event_id.0, CombatOutcome::Damage(*damage))),
-    );
-    outcomes.extend(
-        fighter_defeated
-            .read()
-            .map(|defeat| (defeat.event_id.0, CombatOutcome::Defeat(*defeat))),
-    );
-    outcomes.sort_unstable_by_key(|(event_id, _)| *event_id);
-
-    for (_, outcome) in outcomes {
-        match outcome {
-            CombatOutcome::Impact(impact) => {
-                let cue = CombatCue::Impact {
-                    event_id: impact.event_id,
-                    tick: tick.0,
-                    source: impact.source.owner_network_entity_id,
-                    shot_id: impact.source.shot_id,
-                    weapon_definition_id: impact.source.weapon_definition_id,
-                    target: impact.target_network_id,
-                    position: WorldPoint::from(impact.position),
-                    normal: WorldPoint::from(impact.normal),
-                    distance_band: impact.band,
-                };
-                telemetry.record_cue(cue.clone());
-                outbox.0.push(cue);
-                telemetry.record(CombatLogRecord::Hit {
-                    tick: tick.0,
-                    event_id: impact.event_id,
-                    shot_id: impact.source.shot_id,
-                    source: impact.source.owner_network_entity_id,
-                    target: impact.target_network_id,
-                    weapon: impact.source.weapon_definition_id,
-                    position: WorldPoint::from(impact.position),
-                    distance: impact.travelled,
-                    band: impact.band,
-                });
-                info!(
-                    tick = tick.0,
-                    event_id = impact.event_id.0,
-                    shot_id = impact.source.shot_id.0,
-                    source = impact.source.owner_network_entity_id.0,
-                    target = ?impact.target_network_id,
-                    weapon = impact.source.weapon_definition_id.0,
-                    position = ?impact.position,
-                    distance = impact.travelled,
-                    distance_band = ?impact.band,
-                    "authoritative projectile impact"
-                );
-            }
-            CombatOutcome::Damage(damage) => {
-                telemetry.applied_damage = telemetry
-                    .applied_damage
-                    .saturating_add(u64::from(damage.amount));
-                let cue = CombatCue::Damage {
-                    event_id: damage.event_id,
-                    tick: tick.0,
-                    source: damage.source,
-                    target: damage.target,
-                    amount: damage.amount,
-                    health_after: damage.health_after,
-                    distance_band: damage.distance_band,
-                };
-                telemetry.record_cue(cue.clone());
-                outbox.0.push(cue);
-                telemetry.record(CombatLogRecord::Damage {
-                    tick: tick.0,
-                    event_id: damage.event_id,
-                    source: damage.source,
-                    target: damage.target,
-                    requested: damage.requested,
-                    applied: damage.amount,
-                    health_after: damage.health_after,
-                });
-                info!(
-                    tick = tick.0,
-                    event_id = damage.event_id.0,
-                    source = ?damage.source,
-                    target = damage.target.0,
-                    requested = damage.requested,
-                    applied = damage.amount,
-                    health_after = damage.health_after,
-                    distance_band = ?damage.distance_band,
-                    "authoritative damage applied"
-                );
-            }
-            CombatOutcome::Defeat(defeat) => {
-                telemetry.defeats = telemetry.defeats.saturating_add(1);
-                telemetry.record(CombatLogRecord::Defeat {
-                    tick: tick.0,
-                    event_id: defeat.event_id,
-                    source: Some(defeat.source),
-                    target: defeat.target,
-                });
-                let cue = CombatCue::Defeat {
-                    event_id: defeat.event_id,
-                    tick: tick.0,
-                    source: Some(defeat.source),
-                    target: defeat.target,
-                };
-                telemetry.record_cue(cue.clone());
-                outbox.0.push(cue);
-                info!(
-                    tick = tick.0,
-                    event_id = defeat.event_id.0,
-                    source = ?defeat.source,
-                    target = defeat.target.0,
-                    "authoritative fighter defeated"
-                );
-            }
-        }
-    }
-}
-
-#[cfg(feature = "server")]
-fn clear_defeated_projectiles() {}
 
 #[cfg(feature = "server")]
 fn publish_authoritative_tick(
@@ -3818,20 +3718,13 @@ fn publish_authoritative_tick(
 #[cfg(feature = "server")]
 fn cleanup_disconnected_projectiles(
     mut commands: Commands,
+    tick: Res<SimulationTick>,
+    mut ids: ResMut<NextCombatIds>,
     mut trackers: ResMut<ActiveAttackTrackers>,
-    disconnected: Query<
-        Entity,
-        (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
-        ),
-    >,
+    mut telemetry: ResMut<WeaponTelemetry>,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     fighters: Query<(Entity, Option<&lightyear::prelude::ControlledBy>), With<Fighter>>,
-    projectiles: Query<(
-        Entity,
-        Option<&ProjectileRuntime>,
-        Option<&ComposedProjectileRuntime>,
-    )>,
+    projectiles: Query<(Entity, &Position, &ComposedProjectileRuntime)>,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
     let mut fighter_entities = HashSet::new();
@@ -3842,16 +3735,20 @@ fn cleanup_disconnected_projectiles(
             disconnected_fighters.insert(fighter);
         }
     }
-    for (entity, legacy, composed) in &projectiles {
-        let owner_entity = legacy
-            .map(|projectile| projectile.owner_entity)
-            .or_else(|| composed.map(|projectile| projectile.owner_entity));
-        if owner_entity.is_some_and(|owner| {
-            disconnected_fighters.contains(&owner) || !fighter_entities.contains(&owner)
-        }) {
-            if let Some(projectile) = composed {
-                finish_attack_delivery(&mut trackers, projectile.source.attack_id);
-            }
+    for (entity, position, composed) in &projectiles {
+        let owner_entity = composed.owner_entity;
+        if disconnected_fighters.contains(&owner_entity)
+            || !fighter_entities.contains(&owner_entity)
+        {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                composed,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
+            finish_attack_delivery(&mut trackers, composed.source.attack_id);
             commands.entity(entity).despawn();
         }
     }
@@ -3861,10 +3758,7 @@ fn cleanup_disconnected_projectiles(
 fn send_combat_cues(
     mut outbox: ResMut<CombatOutbox>,
     mut telemetry: ResMut<CombatTelemetry>,
-    mut senders: Query<
-        &mut lightyear::prelude::MessageSender<CombatCue>,
-        With<lightyear::prelude::LinkOf>,
-    >,
+    mut senders: Query<&mut lightyear::prelude::MessageSender<CombatCue>, With<LinkOf>>,
 ) {
     // Deferred effect cues can be created after a later target's damage cue. Keep the retained
     // process evidence in the same event order as the wire batch sent to clients.
@@ -3909,7 +3803,6 @@ fn emit_combat_summary(
         dropped_records = telemetry.dropped_records,
         dropped_accepted_shot_timestamps = telemetry.dropped_accepted_shot_timestamps,
         weapon_dropped_records = weapon_telemetry.dropped_records,
-        weapon_contact_evictions = weapon_telemetry.contact_evictions,
         weapon_dropped_aggregate_entries = weapon_telemetry.dropped_aggregate_entries,
         "combat telemetry summary"
     );
@@ -3951,6 +3844,13 @@ struct ClientCombatObservation {
     cue_stream: Vec<CombatCue>,
     dropped_cue_timestamps: u64,
     dropped_cue_stream: u64,
+    checkpoints: BTreeMap<String, CombatStateSnapshot>,
+    checkpoint_matches: BTreeMap<String, Vec<CombatStateSnapshot>>,
+    expected_checkpoints: Vec<CombatEvidenceCheckpoint>,
+    snapshot_history: BTreeMap<u64, CombatStateSnapshot>,
+    checkpoint_timestamps: BTreeMap<String, u128>,
+    state_mutation_timestamps: Vec<(u64, u128)>,
+    last_encoded_snapshot: Option<String>,
     ready_file: Option<PathBuf>,
     started_at: Instant,
     wrote_ready: bool,
@@ -3967,6 +3867,13 @@ impl FromWorld for ClientCombatObservation {
             cue_stream: Vec::new(),
             dropped_cue_timestamps: 0,
             dropped_cue_stream: 0,
+            checkpoints: BTreeMap::new(),
+            checkpoint_matches: BTreeMap::new(),
+            expected_checkpoints: Vec::new(),
+            snapshot_history: BTreeMap::new(),
+            checkpoint_timestamps: BTreeMap::new(),
+            state_mutation_timestamps: Vec::new(),
+            last_encoded_snapshot: None,
             ready_file,
             started_at: Instant::now(),
             wrote_ready: false,
@@ -3985,6 +3892,20 @@ struct CombatEffect {
 struct CombatHealthBar {
     target: Entity,
     fill: bool,
+}
+
+#[cfg(feature = "client")]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct CombatStatusMarker {
+    target: Entity,
+    kind: CombatStatusKind,
+}
+
+#[cfg(feature = "client")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum CombatStatusKind {
+    Slow,
+    Knockback,
 }
 
 #[cfg(feature = "client")]
@@ -4010,12 +3931,15 @@ impl Plugin for ClientCombatPlugin {
                 Update,
                 (
                     receive_combat_cues,
+                    receive_combat_evidence_checkpoints,
                     ensure_projectile_visuals,
                     sync_projectile_visuals,
                     update_weapon_preview,
                     update_health_bars,
+                    update_durable_effect_markers,
                     update_combat_hud,
                     update_combat_effects,
+                    capture_client_combat_checkpoints,
                     record_headless_combat_observation,
                 )
                     .chain(),
@@ -4252,9 +4176,196 @@ fn receive_combat_cues(
 }
 
 #[cfg(feature = "client")]
+fn receive_combat_evidence_checkpoints(
+    mut observation: ResMut<ClientCombatObservation>,
+    mut receivers: Query<
+        Option<&mut lightyear::prelude::MessageReceiver<CombatEvidenceCheckpoint>>,
+        With<lightyear::prelude::client::Client>,
+    >,
+) {
+    for receiver in &mut receivers {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for checkpoint in receiver.receive() {
+            if observation.expected_checkpoints.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+                observation.expected_checkpoints.push(checkpoint);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn capture_client_combat_checkpoints(
+    mut observation: ResMut<ClientCombatObservation>,
+    fighters: Query<
+        (
+            &NetworkEntityId,
+            Option<&SelectedBuild>,
+            Option<&ResolvedWeapon>,
+            Option<&WeaponState>,
+            Option<&ActiveEffects>,
+            Option<&KnockbackFeedback>,
+            Option<&Defeated>,
+            Option<&CurrentHealth>,
+            Option<&AuthoritativePose>,
+            &Position,
+            &Rotation,
+            Option<&AuthoritativeTick>,
+        ),
+        With<Fighter>,
+    >,
+    projectiles: Query<
+        (
+            &Position,
+            Option<&AttackDelivery>,
+            Option<&ReplicatedAttackSource>,
+            Option<&LobbedFlight>,
+            Option<&ProjectileDeadline>,
+            Option<&StraightFlight>,
+        ),
+        With<Projectile>,
+    >,
+) {
+    if observation.ready_file.is_none() {
+        return;
+    }
+    let mut fighter_snapshots = fighters
+        .iter()
+        .map(
+            |(
+                network_id,
+                selected_build,
+                resolved_weapon,
+                weapon_state,
+                active_effects,
+                knockback_feedback,
+                defeated,
+                health,
+                authoritative_pose,
+                position,
+                rotation,
+                authoritative_tick,
+            )| CombatFighterSnapshot {
+                network_entity_id: *network_id,
+                selected_build: selected_build.copied(),
+                resolved_weapon: resolved_weapon.cloned(),
+                weapon_state: weapon_state.copied(),
+                active_effects: active_effects.copied(),
+                knockback_feedback: knockback_feedback.copied(),
+                defeated: defeated.copied(),
+                health: health.map(|health| health.0),
+                position: authoritative_pose
+                    .map_or_else(|| WorldPoint::from(position.0), |pose| pose.position),
+                facing: authoritative_pose
+                    .map_or_else(|| rotation.as_radians(), |pose| pose.facing),
+                authoritative_tick: authoritative_tick.copied().unwrap_or_default(),
+            },
+        )
+        .collect::<Vec<_>>();
+    fighter_snapshots.sort_by_key(|fighter| fighter.network_entity_id.0);
+    let authoritative_tick = fighter_snapshots
+        .iter()
+        .map(|fighter| fighter.authoritative_tick.0)
+        .max()
+        .unwrap_or(0);
+    let mut projectile_snapshots = projectiles
+        .iter()
+        .filter_map(
+            |(position, delivery, source, lobbed_flight, deadline, straight_flight)| {
+                CombatProjectileSnapshot::from_components(
+                    WorldPoint::from(position.0),
+                    delivery,
+                    source,
+                    lobbed_flight,
+                    deadline,
+                    straight_flight,
+                    authoritative_tick,
+                )
+            },
+        )
+        .collect::<Vec<_>>();
+    projectile_snapshots
+        .sort_by_key(|projectile| (projectile.attack_id.0, projectile.delivery_index));
+    let snapshot = CombatStateSnapshot {
+        authoritative_tick,
+        fighters: fighter_snapshots,
+        projectiles: projectile_snapshots,
+    };
+    observation
+        .snapshot_history
+        .insert(authoritative_tick, snapshot.clone());
+    while observation.snapshot_history.len() > MAX_COMBAT_SNAPSHOT_HISTORY {
+        observation.snapshot_history.pop_first();
+    }
+    let Some(encoded) = encode_state_snapshot(&snapshot) else {
+        return;
+    };
+    if observation.last_encoded_snapshot.as_deref() != Some(encoded.as_str()) {
+        if observation.state_mutation_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+            observation
+                .state_mutation_timestamps
+                .push((authoritative_tick, unix_epoch_micros()));
+        }
+        observation.last_encoded_snapshot = Some(encoded);
+    }
+    let expected_checkpoints = std::mem::take(&mut observation.expected_checkpoints);
+    let mut unmatched_checkpoints = Vec::new();
+    for expected in expected_checkpoints {
+        let checkpoint = expected.checkpoint.as_str();
+        if observation
+            .checkpoint_matches
+            .get(checkpoint)
+            .is_some_and(|matches| matches.len() >= 16)
+        {
+            continue;
+        }
+        let Some(snapshot) = observation
+            .snapshot_history
+            .values()
+            .chain(std::iter::once(&snapshot))
+            .find_map(|candidate| {
+                let candidate = if matches!(checkpoint, "defeat" | "reset") {
+                    CombatStateSnapshot {
+                        projectiles: Vec::new(),
+                        ..candidate.clone()
+                    }
+                } else {
+                    candidate.clone()
+                };
+                (candidate == expected.snapshot).then_some(candidate)
+            })
+        else {
+            if observation.checkpoints.contains_key(checkpoint) {
+                continue;
+            }
+            unmatched_checkpoints.push(expected);
+            continue;
+        };
+        let matches = observation
+            .checkpoint_matches
+            .entry(checkpoint.to_string())
+            .or_default();
+        if !matches.iter().any(|candidate| candidate == &snapshot) {
+            matches.push(snapshot.clone());
+        }
+        observation
+            .checkpoint_timestamps
+            .entry(checkpoint.to_string())
+            .or_insert_with(unix_epoch_micros);
+        observation
+            .checkpoints
+            .entry(checkpoint.to_string())
+            .or_insert(snapshot);
+    }
+    observation.expected_checkpoints = unmatched_checkpoints;
+}
+
+#[cfg(feature = "client")]
 fn record_headless_combat_observation(
     mut observation: ResMut<ClientCombatObservation>,
-    definitions: Res<FighterDefinitions>,
+    config: Res<crate::config::ClientNetworkConfig>,
+    automation: Res<crate::client::HeadlessAutomation>,
     fighters: Query<
         (
             &NetworkEntityId,
@@ -4270,34 +4381,66 @@ fn record_headless_combat_observation(
     let Some(path) = observation.ready_file.clone() else {
         return;
     };
-    if observation.wrote_ready || !observation.saw_defeat || !observation.saw_reset {
-        return;
-    }
-    let Some((_, health, weapon_state, fighter_definition_id, resolved, defeated)) = fighters
-        .iter()
-        .find(|(network_id, _, _, _, _, _)| network_id.0 == DUMMY_NETWORK_ENTITY.0)
-    else {
-        return;
-    };
-    let Some(resolved) = resolved else {
-        return;
-    };
-    let Some(fighter) = definitions.get(*fighter_definition_id) else {
-        return;
-    };
-    if health.0 != fighter.maximum_health
-        || weapon_state.ammo != resolved.recipe.economy.capacity()
-        || !matches!(weapon_state.phase, WeaponPhase::Ready)
-        || defeated.is_some()
+    if automation
+        .simulation_ticks
+        .is_some_and(|limit| automation.elapsed_ticks < limit)
     {
         return;
     }
+    if observation.wrote_ready
+        || !observation.saw_defeat
+        || !observation.saw_reset
+        || config.weapon_preset.is_some_and(|preset| {
+            required_client_checkpoints(preset)
+                .iter()
+                .any(|checkpoint| !observation.checkpoints.contains_key(*checkpoint))
+        })
+    {
+        return;
+    }
+    let Some(_) = fighters
+        .iter()
+        .filter(|(network_id, _, _, _, _, _)| network_id.0 != DUMMY_NETWORK_ENTITY.0)
+        .next()
+    else {
+        return;
+    };
     let mut report = format!(
-        "client_elapsed_ms={}\ndropped_cue_stream={}\ndropped_cue_timestamps={}\n",
+        "client_elapsed_ms={}\nclient_observation_epoch_us={}\ncue_count={}\nstate_mutation_count={}\npending_checkpoint_count={}\ndropped_cue_stream={}\ndropped_cue_timestamps={}\n",
         observation.started_at.elapsed().as_millis(),
+        unix_epoch_micros(),
+        observation.cue_stream.len(),
+        observation.state_mutation_timestamps.len(),
+        observation.expected_checkpoints.len(),
         observation.dropped_cue_stream,
         observation.dropped_cue_timestamps,
     );
+    for (checkpoint, snapshot) in &observation.checkpoints {
+        if let Some(encoded) = encode_state_snapshot(snapshot) {
+            let _ = writeln!(report, "checkpoint_{checkpoint}={encoded}");
+            let _ = writeln!(
+                report,
+                "checkpoint_{checkpoint}_tick={}",
+                snapshot.authoritative_tick
+            );
+        }
+        if let Some(timestamp) = observation.checkpoint_timestamps.get(checkpoint) {
+            let _ = writeln!(
+                report,
+                "checkpoint_{checkpoint}_observed_epoch_us={timestamp}"
+            );
+        }
+    }
+    for (checkpoint, snapshots) in &observation.checkpoint_matches {
+        for snapshot in snapshots {
+            if let Some(encoded) = encode_state_snapshot(snapshot) {
+                let _ = writeln!(report, "checkpoint_{checkpoint}_candidate={encoded}");
+            }
+        }
+    }
+    for (tick, timestamp) in &observation.state_mutation_timestamps {
+        let _ = writeln!(report, "state_mutation_tick={tick}_epoch_us={timestamp}");
+    }
     for (shot_id, timestamp) in &observation.cue_timestamps {
         let _ = writeln!(report, "cue_shot_id={}_epoch_us={}", shot_id.0, timestamp);
     }
@@ -4314,6 +4457,23 @@ fn record_headless_combat_observation(
             ?error,
             "headless combat observation write failed"
         ),
+    }
+}
+
+#[cfg(feature = "client")]
+fn required_client_checkpoints(preset_id: u16) -> &'static [&'static str] {
+    match preset_id {
+        1 => &["defeat", "reset"],
+        2 => &["active_scatter_flight", "defeat", "reset"],
+        3 => &[
+            "active_lob_flight",
+            "active_slow",
+            "active_knockback",
+            "defeat",
+            "reset",
+        ],
+        4 => &["active_knockback", "defeat", "reset"],
+        _ => &[],
     }
 }
 
@@ -4442,7 +4602,7 @@ fn update_weapon_preview(
         .iter()
         .map(|(visual, _, _, _)| visual.slot)
         .collect();
-    for slot in 0..10_u8 {
+    for slot in 0..client::MAX_PREVIEW_SEGMENTS as u8 {
         if !existing_slots.contains(&slot) {
             commands.spawn((
                 WeaponPreviewVisual { slot },
@@ -4538,6 +4698,7 @@ fn update_combat_hud(
             Option<&AuthoritativeTick>,
             Option<&SelectedBuild>,
             Option<&ResolvedWeapon>,
+            Option<&ActiveEffects>,
             Option<&Defeated>,
         ),
         (With<Fighter>, With<lightyear::prelude::Controlled>),
@@ -4545,8 +4706,16 @@ fn update_combat_hud(
     weapons: Res<WeaponDefinitions>,
     catalog: Option<Res<WeaponCatalogResource>>,
 ) {
-    let Some((player_id, health, state, authoritative_tick, build, resolved, defeated)) =
-        fighter.iter().next()
+    let Some((
+        player_id,
+        health,
+        state,
+        authoritative_tick,
+        build,
+        resolved,
+        active_effects,
+        defeated,
+    )) = fighter.iter().next()
     else {
         return;
     };
@@ -4590,11 +4759,89 @@ fn update_combat_hud(
         WeaponPhase::Cooldown { .. } | WeaponPhase::Reloading { .. } => "SYNCING".to_string(),
     };
     let phase = defeated.map_or(phase, |_| "DEFEATED".to_string());
+    let slow = active_effects
+        .and_then(|effects| effects.slow)
+        .zip(authoritative_tick)
+        .filter(|(slow, tick)| slow.expires_at_tick > tick.0)
+        .map_or_else(String::new, |(slow, tick)| {
+            format!("  SLOW {}t", slow.expires_at_tick.saturating_sub(tick.0))
+        });
     for mut value in &mut text {
         **value = format!(
-            "Player {}   Health {:>3}   {} {}/{}   {}",
-            player_id.0, health.0, weapon_name, state.ammo, capacity, phase
+            "Player {}   Health {:>3}   {} {}/{}   {}{}",
+            player_id.0, health.0, weapon_name, state.ammo, capacity, phase, slow
         );
+    }
+}
+
+#[cfg(feature = "client")]
+fn update_durable_effect_markers(
+    mut commands: Commands,
+    fighters: Query<
+        (
+            Entity,
+            &Position,
+            Option<&AuthoritativeTick>,
+            Option<&ActiveEffects>,
+            Option<&KnockbackFeedback>,
+            Option<&Defeated>,
+        ),
+        With<Fighter>,
+    >,
+    mut markers: Query<(Entity, &CombatStatusMarker, &mut Transform, &mut Sprite)>,
+) {
+    let desired: HashMap<_, _> = fighters
+        .iter()
+        .flat_map(
+            |(entity, position, authoritative_tick, active_effects, knockback, defeated)| {
+                if defeated.is_some() {
+                    return Vec::new();
+                }
+                let mut markers = Vec::with_capacity(2);
+                if active_effects.is_some_and(|effects| {
+                    effects.slow.is_some_and(|slow| {
+                        authoritative_tick.is_none_or(|tick| tick.0 < slow.expires_at_tick)
+                    })
+                }) {
+                    markers.push((
+                        CombatStatusMarker {
+                            target: entity,
+                            kind: CombatStatusKind::Slow,
+                        },
+                        (position.0, Color::srgba(0.25, 0.75, 1.0, 0.85)),
+                    ));
+                }
+                if knockback.is_some() {
+                    markers.push((
+                        CombatStatusMarker {
+                            target: entity,
+                            kind: CombatStatusKind::Knockback,
+                        },
+                        (position.0, Color::srgba(1.0, 0.55, 0.18, 0.85)),
+                    ));
+                }
+                markers
+            },
+        )
+        .collect();
+    let mut existing = HashSet::new();
+    for (marker_entity, marker, mut transform, mut sprite) in &mut markers {
+        if let Some((position, color)) = desired.get(marker) {
+            existing.insert(*marker);
+            transform.translation = position.extend(39.0);
+            sprite.color = *color;
+        } else {
+            commands.entity(marker_entity).despawn();
+        }
+    }
+    for (marker, (position, color)) in desired {
+        if !existing.contains(&marker) {
+            commands.spawn((
+                marker,
+                Sprite::from_color(color, Vec2::splat(13.0)),
+                Transform::from_translation(position.extend(39.0)),
+            ));
+        }
     }
 }
 
@@ -4620,18 +4867,6 @@ mod tests {
 
     #[cfg(feature = "client")]
     use core::time::Duration;
-
-    #[cfg(feature = "server")]
-    #[derive(Resource, Clone, Copy)]
-    struct TestPendingDamage(PendingDamage);
-
-    #[cfg(feature = "server")]
-    fn send_test_pending_damage(
-        fixture: Res<TestPendingDamage>,
-        mut pending_damage: MessageWriter<PendingDamage>,
-    ) {
-        pending_damage.write(fixture.0);
-    }
 
     #[test]
     fn authored_catalogs_validate_and_have_expected_values() {
@@ -4706,7 +4941,15 @@ mod tests {
     #[cfg(feature = "server")]
     #[test]
     fn fire_economy_boundaries_are_integer_and_deterministic() {
-        let weapon = WeaponDefinitions::default().entries[0];
+        let fighters = FighterDefinitions::default();
+        let fighter = fighters
+            .get(STANDARD_FIGHTER_DEFINITION)
+            .expect("standard fighter definition");
+        let recipe = WeaponCatalog::embedded()
+            .expect("embedded catalog")
+            .resolve_preset(WeaponPresetId(1), fighter)
+            .expect("pulse preset")
+            .recipe;
         let mut state = WeaponState {
             ammo: 1,
             phase: WeaponPhase::Ready,
@@ -4714,16 +4957,16 @@ mod tests {
         state.ammo -= 1;
         state.phase = WeaponPhase::Reloading { ready_at_tick: 61 };
         assert_eq!(state.ammo, 0);
-        advance_weapon_state(&mut state, &weapon, 60);
+        advance_composed_weapon_state(&mut state, &recipe, 60);
         assert_eq!(state.ammo, 0);
         assert_eq!(state.phase, WeaponPhase::Reloading { ready_at_tick: 61 });
-        advance_weapon_state(&mut state, &weapon, 61);
-        assert_eq!(state.ammo, weapon.magazine_capacity);
+        advance_composed_weapon_state(&mut state, &recipe, 61);
+        assert_eq!(state.ammo, recipe.economy.capacity());
         assert_eq!(state.phase, WeaponPhase::Ready);
         state.phase = WeaponPhase::Cooldown { ready_at_tick: 73 };
-        advance_weapon_state(&mut state, &weapon, 72);
+        advance_composed_weapon_state(&mut state, &recipe, 72);
         assert_eq!(state.phase, WeaponPhase::Cooldown { ready_at_tick: 73 });
-        advance_weapon_state(&mut state, &weapon, 73);
+        advance_composed_weapon_state(&mut state, &recipe, 73);
         assert_eq!(state.phase, WeaponPhase::Ready);
     }
 
@@ -4739,58 +4982,6 @@ mod tests {
 
         assert_eq!(health, CurrentHealth(77));
         assert_eq!(weapon.ammo, 3);
-    }
-
-    #[cfg(feature = "server")]
-    #[test]
-    fn pending_damage_order_uses_current_sweep_fraction_before_shot_id() {
-        let source = |shot_id| ProjectileSource {
-            shot_id: ShotId(shot_id),
-            player_id: PlayerId(1),
-            owner_network_entity_id: NetworkEntityId(1),
-            team_id: TeamId(0),
-            weapon_definition_id: PULSE_SIDEARM_DEFINITION,
-        };
-        let mut damages = [
-            PendingDamage {
-                event_id: CombatEventId(1),
-                source: source(1),
-                target: Entity::PLACEHOLDER,
-                target_network_id: NetworkEntityId(9),
-                requested_damage: 25,
-                travelled: 810.0,
-                impact_fraction: 0.9,
-                band: DistanceBand::Long,
-            },
-            PendingDamage {
-                event_id: CombatEventId(2),
-                source: source(2),
-                target: Entity::PLACEHOLDER,
-                target_network_id: NetworkEntityId(9),
-                requested_damage: 25,
-                travelled: 30.0,
-                impact_fraction: 0.1,
-                band: DistanceBand::Close,
-            },
-        ];
-
-        damages.sort_by(pending_damage_order);
-
-        assert_eq!(damages[0].source.shot_id, ShotId(2));
-        assert_eq!(damages[1].source.shot_id, ShotId(1));
-    }
-
-    #[cfg(feature = "server")]
-    #[test]
-    fn projectile_step_distance_accumulates_and_clamps_the_final_step() {
-        let mut travelled = 0.0;
-        for _ in 0..2 {
-            travelled += projectile_step_distance(900.0, 35.0, travelled);
-        }
-        assert!((travelled - 30.0).abs() < f32::EPSILON);
-        travelled += projectile_step_distance(900.0, 35.0, travelled);
-        assert!((travelled - 35.0).abs() < f32::EPSILON);
-        assert!(projectile_step_distance(900.0, 35.0, travelled).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -4813,68 +5004,6 @@ mod tests {
         assert_eq!(ids.allocate_event_pair(), None);
         assert_eq!(ids.next_event_id, u64::MAX - 1);
         assert_eq!(ids.allocate_event(), Some(CombatEventId(u64::MAX - 1)));
-    }
-
-    #[cfg(feature = "server")]
-    #[test]
-    fn lethal_damage_event_exhaustion_preserves_living_target_state() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<FighterDefinitions>()
-            .insert_resource(SimulationTick(7))
-            .insert_resource(NextCombatIds {
-                next_attack_id: 1,
-                next_shot_id: 1,
-                next_event_id: u64::MAX - 1,
-            })
-            .init_resource::<CombatTelemetry>()
-            .add_message::<PendingDamage>()
-            .add_message::<DamageApplied>()
-            .add_message::<FighterDefeated>()
-            .add_systems(
-                Update,
-                (send_test_pending_damage, apply_pending_damage).chain(),
-            );
-        let target = app
-            .world_mut()
-            .spawn((
-                Fighter,
-                NetworkEntityId(7),
-                STANDARD_FIGHTER_DEFINITION,
-                CurrentHealth(10),
-            ))
-            .id();
-        app.insert_resource(TestPendingDamage(PendingDamage {
-            event_id: CombatEventId(1),
-            source: ProjectileSource {
-                shot_id: ShotId(1),
-                player_id: PlayerId(1),
-                owner_network_entity_id: NetworkEntityId(1),
-                team_id: TeamId(0),
-                weapon_definition_id: PULSE_SIDEARM_DEFINITION,
-            },
-            target,
-            target_network_id: NetworkEntityId(7),
-            requested_damage: 25,
-            travelled: 10.0,
-            impact_fraction: 0.5,
-            band: DistanceBand::Close,
-        }));
-
-        app.update();
-
-        assert_eq!(app.world().get::<CurrentHealth>(target).unwrap().0, 10);
-        assert!(app.world().get::<Defeated>(target).is_none());
-        assert_eq!(
-            app.world()
-                .resource::<CombatTelemetry>()
-                .hostile_fighter_hits,
-            0
-        );
-        assert_eq!(
-            app.world().resource::<NextCombatIds>().next_event_id,
-            u64::MAX - 1
-        );
     }
 
     #[test]
@@ -4924,13 +5053,6 @@ mod tests {
     fn reset_deadline_is_inactive_before_and_active_at_the_deadline() {
         assert!(!reset_is_due(89, 90));
         assert!(reset_is_due(90, 90));
-    }
-
-    #[cfg(feature = "server")]
-    #[test]
-    fn applied_damage_clamps_overkill_without_underflow() {
-        assert_eq!(applied_damage(25, 10), 10);
-        assert_eq!(applied_damage(0, 10), 0);
     }
 
     #[cfg(feature = "client")]

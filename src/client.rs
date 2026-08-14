@@ -81,13 +81,13 @@ struct ClientShutdown {
 struct RosterLogState(Vec<(PlayerId, NetworkEntityId)>);
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
-struct HeadlessAutomation {
+pub(crate) struct HeadlessAutomation {
     move_axis: Vec2,
     aim_axis: Option<Vec2>,
     aim_at_dummy: bool,
     fire: bool,
-    simulation_ticks: Option<u32>,
-    elapsed_ticks: u32,
+    pub(crate) simulation_ticks: Option<u32>,
+    pub(crate) elapsed_ticks: u32,
 }
 
 #[derive(Resource, Debug)]
@@ -208,7 +208,7 @@ impl Default for PendingLocalActions {
 }
 
 const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
-const HEADLESS_FIRE_DURATION_TICKS: u32 = 240;
+const HEADLESS_FIRE_DURATION_TICKS: u32 = 480;
 const ACTION_ACTIVE_ITEM: u16 = 1 << 1;
 const ACTION_ULTIMATE: u16 = 1 << 2;
 const ACTION_INTERACT: u16 = 1 << 3;
@@ -581,33 +581,41 @@ fn apply_headless_input(
     {
         return;
     }
+    let controlled_position = controlled.iter().next().map(|position| position.0);
+    let dummy_position = fighters
+        .iter()
+        .find(|(network_id, _)| network_id.0 == 0)
+        .map(|(_, target)| target.0);
     let aim_axis = if automation.aim_at_dummy {
-        controlled.iter().next().and_then(|position| {
-            fighters
-                .iter()
-                .find(|(network_id, _)| network_id.0 == 0)
-                .map(|(_, target)| target.0 - position.0)
-                .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
-                .map(Vec2::normalize)
-        })
+        controlled_position
+            .zip(dummy_position)
+            .map(|(position, target)| target - position)
+            .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
+            .map(Vec2::normalize)
     } else {
         automation.aim_axis
     };
-    if automation.move_axis != Vec2::ZERO
-        || aim_axis.is_some()
-        || automation.aim_at_dummy
-        || automation.fire
-    {
+    let move_axis = if automation.aim_at_dummy && automation.move_axis != Vec2::ZERO {
+        controlled_position
+            .zip(dummy_position)
+            .map(|(position, target)| target - position)
+            .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
+            .map(Vec2::normalize)
+            .unwrap_or(automation.move_axis)
+    } else {
+        automation.move_axis
+    };
+    if move_axis != Vec2::ZERO || aim_axis.is_some() || automation.aim_at_dummy || automation.fire {
         if automation.elapsed_ticks == 0 {
             info!(
-                move_axis = ?automation.move_axis,
+                move_axis = ?move_axis,
                 aim_axis = ?aim_axis,
                 aim_at_dummy = automation.aim_at_dummy,
                 fire = automation.fire,
                 "headless movement automation enabled"
             );
         }
-        pending.move_axis = automation.move_axis;
+        pending.move_axis = move_axis;
         pending.aim_axis = aim_axis;
         let fire_held = automation.fire && automation.elapsed_ticks < HEADLESS_FIRE_DURATION_TICKS;
         pending.held_buttons = if fire_held {
@@ -1463,7 +1471,7 @@ fn send_weapon_selection_request(
 fn crossbeam_transport(config: &ClientNetworkConfig) -> bool {
     #[cfg(feature = "network-test")]
     {
-        return matches!(config.transport, NetworkTransport::Crossbeam);
+        matches!(config.transport, NetworkTransport::Crossbeam)
     }
     #[cfg(not(feature = "network-test"))]
     {

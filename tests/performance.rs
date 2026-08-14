@@ -5,10 +5,10 @@ use avian2d::prelude::{
 use bevy::{prelude::*, time::TimeUpdateStrategy};
 use brawler::{
     combat::{
-        ActiveEffects, AttackId, CurrentHealth, ExternalMotion, FighterDefinitionId,
-        FighterDefinitions, LobbedFlight, Projectile, ProjectileRuntime, ProjectileSource,
-        SelectedBuild, SelectedWeapon, ShotId, SlowEffect, TeamId, WeaponDefinitionId,
-        WeaponDefinitions, WeaponPhase, WeaponPresetId, WeaponState, default_fighter_runtime,
+        ActiveEffects, AttackId, AttackSource, ComposedProjectileRuntime, CurrentHealth,
+        ExternalMotion, FighterDefinitionId, FighterDefinitions, LobbedFlight, Projectile,
+        SelectedBuild, SelectedWeapon, SlowEffect, TeamId, WeaponDefinitionId, WeaponDefinitions,
+        WeaponPhase, WeaponPresetId, WeaponState, default_fighter_runtime,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -244,7 +244,6 @@ fn one_hundred_headless_fighters_stay_within_fixed_tick_budget() {
 fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_tick_budget() {
     let mut app = performance_app();
     let owners = spawn_headless_fighters(&mut app);
-    app.world_mut().resource_mut::<WeaponDefinitions>().entries[0].maximum_range = 100_000.0;
     // Make every path exercise the nearby fighter broad phase without allowing a friendly
     // pass-through to terminate the projectile. The two lanes adjacent to the cover bodies also
     // keep terrain candidates in the shape-cast neighborhood while staying just outside the wall.
@@ -256,24 +255,46 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
         }
     }
     let lanes = [-400.0, -312.0, -150.0, -48.0, 40.0, 150.0, 304.0, 392.0];
+    let recipe = app
+        .world()
+        .resource::<brawler::combat::WeaponCatalogResource>()
+        .0
+        .resolve_preset(
+            WeaponPresetId(1),
+            app.world()
+                .resource::<FighterDefinitions>()
+                .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
+                .expect("standard fighter definition"),
+        )
+        .expect("benchmark preset resolves");
     for index in 0_usize..200 {
         let lane = lanes[index % lanes.len()];
         let start_column = index / lanes.len();
         let position = Vec2::new(-700.0 + start_column as f32 * 20.0, lane);
         app.world_mut().spawn((
             Projectile,
-            ProjectileSource {
-                shot_id: ShotId(index as u64 + 1),
-                player_id: PlayerId(1),
-                owner_network_entity_id: NetworkEntityId(1),
-                team_id: TeamId(0),
-                weapon_definition_id: WeaponDefinitionId(1),
-            },
-            ProjectileRuntime {
+            ComposedProjectileRuntime {
                 owner_entity: owners[usize::from(index) % owners.len()],
+                source: AttackSource {
+                    attack_id: AttackId(index as u64 + 1),
+                    player_id: PlayerId(1),
+                    owner_network_entity_id: NetworkEntityId(1),
+                    team_id: TeamId(0),
+                    recipe_fingerprint: recipe.recipe_fingerprint,
+                    presentation_profile_id: recipe.presentation_profile_id,
+                    legacy_compatibility: false,
+                    source_preset_id: Some(WeaponPresetId(1)),
+                    origin: brawler::combat::WorldPoint::from(position),
+                    facing: 0.0,
+                },
+                delivery_index: 0,
                 velocity: Vec2::X * 900.0,
                 travelled: 0.0,
                 expires_at_tick: u64::MAX,
+                maximum_range: 100_000.0,
+                radius: 6.0,
+                landing: None,
+                recipe: recipe.recipe.clone(),
             },
             Position::from_xy(position.x, position.y),
             Rotation::IDENTITY,

@@ -26,6 +26,7 @@ use lightyear::prelude::{LocalTimeline, MessageReceiver};
 #[cfg(feature = "server")]
 use crate::timing::SIMULATION_TICK;
 use crate::{
+    combat::AuthoritativePose,
     gameplay::GameplaySet,
     protocol::{Fighter, FighterInput, QuantizedAxis2},
     timing::SimulationTick,
@@ -712,9 +713,17 @@ fn authoritative_movement(
                     .push((entity, input_state.0, input_state.1));
             }
         }
-        commands
-            .entity(entity)
-            .insert((position, rotation, velocity, freshness));
+        commands.entity(entity).insert((
+            position,
+            rotation,
+            velocity,
+            freshness,
+            AuthoritativePose {
+                position: crate::combat::WorldPoint::from(position.0),
+                facing,
+                tick: tick.0,
+            },
+        ));
         if activation_barrier.is_some_and(|barrier| {
             freshness
                 .last_fresh_tick

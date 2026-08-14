@@ -15,11 +15,12 @@ use brawler::{
         spawn_crossbeam_client,
     },
     combat::{
-        AttackDelivery, CaptureCombatCues, CombatCue, CombatEventId, CombatLogRecord,
-        CombatTelemetry, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions,
-        PULSE_SIDEARM_DEFINITION, Projectile, ProjectileRuntime, ProjectileSource, ResolvedWeapon,
-        SelectedBuild, SelectingWeapon, ShotId, SpawnState, TeamId, TestDummy, WeaponPhase,
-        WeaponPresetId, WeaponState,
+        ActiveEffects, AttackDelivery, AttackId, AttackSource, CaptureCombatCues, CombatCue,
+        CombatEventId, CombatLogRecord, CombatTelemetry, ComposedProjectileRuntime, CurrentHealth,
+        DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions, Projectile, ProjectileDeadline,
+        ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectingWeapon, SpawnState, TeamId,
+        TestDummy, WeaponPhase, WeaponPresetId, WeaponRecipeFingerprint, WeaponState,
+        WeaponTelemetry, WorldPoint,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -29,7 +30,8 @@ use brawler::{
     },
     protocol::{
         Fighter, FighterInput, NetworkEntityId, PlaceholderPlayer, PlayerId, ProtocolPlugin,
-        TestNativeInputMessage, send_forged_native_input_for_test,
+        SessionChannel, TestNativeInputMessage, WeaponSelectionDecision, WeaponSelectionRequest,
+        send_forged_native_input_for_test,
     },
     server::{
         ServerNetworkPlugin, ServerSession, ServerSessionPhase, spawn_crossbeam_link,
@@ -116,6 +118,205 @@ fn milestone_five_selection_resolves_distinct_presets_and_spawns_spread_deliveri
     let world = harness.server.world_mut();
     let mut deliveries = world.query_filtered::<&AttackDelivery, With<Projectile>>();
     assert_eq!(deliveries.iter(world).count(), 7);
+}
+
+#[test]
+fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| harness.client_is_active(0) && harness.selection_is_complete(0));
+    let accepted = harness
+        .server
+        .world()
+        .get::<ServerSession>(harness.server_links[0])
+        .and_then(|session| session.last_selection_response)
+        .filter(|outcome| outcome.decision == WeaponSelectionDecision::Accepted)
+        .expect("automatic accepted selection outcome");
+    let accepted_request = harness
+        .server
+        .world()
+        .get::<ServerSession>(harness.server_links[0])
+        .and_then(|session| session.last_selection_request)
+        .expect("accepted selection request");
+    harness.send_weapon_selection(0, accepted_request);
+    harness.send_weapon_selection(0, accepted_request);
+    harness.step();
+    let selected = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&SelectedBuild, &ResolvedWeapon), With<Fighter>>();
+        query
+            .iter(world)
+            .find(|(build, _)| build.source_preset_id == accepted.accepted_preset_id)
+            .map(|(build, resolved)| (*build, resolved.recipe_fingerprint))
+            .expect("accepted selection")
+    };
+    let duplicate = harness
+        .server
+        .world()
+        .get::<ServerSession>(harness.server_links[0])
+        .and_then(|session| session.last_selection_response)
+        .expect("duplicate outcome");
+    assert_eq!(duplicate, accepted);
+    assert_eq!(selected.0.source_preset_id, accepted.accepted_preset_id);
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .resource::<WeaponTelemetry>()
+            .selection_records
+            .len(),
+        1
+    );
+
+    harness.send_weapon_selection(
+        0,
+        WeaponSelectionRequest {
+            request_id: accepted.request_id.saturating_sub(1),
+            preset_id: WeaponPresetId(4),
+        },
+    );
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .get::<ServerSession>(harness.server_links[0])
+            .and_then(|session| session.last_selection_response)
+            .is_some_and(|outcome| outcome.decision == WeaponSelectionDecision::StaleRequest)
+    });
+    let stale = harness
+        .server
+        .world()
+        .get::<ServerSession>(harness.server_links[0])
+        .and_then(|session| session.last_selection_response)
+        .expect("stale outcome");
+    assert_eq!(stale.decision, WeaponSelectionDecision::StaleRequest);
+
+    harness.send_weapon_selection(
+        0,
+        WeaponSelectionRequest {
+            request_id: accepted.request_id.saturating_add(1),
+            preset_id: WeaponPresetId(4),
+        },
+    );
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .get::<ServerSession>(harness.server_links[0])
+            .and_then(|session| session.last_selection_response)
+            .is_some_and(|outcome| outcome.decision == WeaponSelectionDecision::NotSelecting)
+    });
+    let not_selecting = harness
+        .server
+        .world()
+        .get::<ServerSession>(harness.server_links[0])
+        .and_then(|session| session.last_selection_response)
+        .expect("not-selecting outcome");
+    assert_eq!(
+        not_selecting.decision,
+        WeaponSelectionDecision::NotSelecting
+    );
+    let final_build = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&SelectedBuild, With<Fighter>>();
+        query
+            .iter(world)
+            .find(|build| build.source_preset_id == accepted.accepted_preset_id)
+            .copied()
+            .expect("selection cannot be switched")
+    };
+    assert_eq!(final_build, selected.0);
+
+    // Re-entering selection here isolates the registered request path from the automatic
+    // first-selection helper and proves that an unknown preset cannot mutate the accepted build.
+    let fighter_entity = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<Entity, (With<Fighter>, Without<TestDummy>)>();
+        query.iter(world).next().expect("player fighter")
+    };
+    harness
+        .server
+        .world_mut()
+        .entity_mut(fighter_entity)
+        .insert(SelectingWeapon);
+    harness.send_weapon_selection(
+        0,
+        WeaponSelectionRequest {
+            request_id: accepted.request_id.saturating_add(2),
+            preset_id: WeaponPresetId(999),
+        },
+    );
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .get::<ServerSession>(harness.server_links[0])
+            .and_then(|session| session.last_selection_response)
+            .is_some_and(|outcome| outcome.decision == WeaponSelectionDecision::UnknownPreset)
+    });
+    let unknown = harness
+        .server
+        .world()
+        .get::<ServerSession>(harness.server_links[0])
+        .and_then(|session| session.last_selection_response)
+        .expect("unknown-preset outcome");
+    assert_eq!(unknown.decision, WeaponSelectionDecision::UnknownPreset);
+    let unchanged_build = harness
+        .server
+        .world()
+        .get::<SelectedBuild>(fighter_entity)
+        .copied()
+        .expect("accepted build remains authoritative");
+    assert_eq!(unchanged_build, final_build);
+}
+
+#[test]
+fn launcher_replication_preserves_flight_deadline_and_durable_slow_state() {
+    let mut harness = Harness::new(1);
+    harness.clients[0]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .weapon_preset = Some(3);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.selection_is_complete(0)
+    });
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.step();
+    let aim = harness.aim_at_dummy(0);
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(aim), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| harness.server_projectile_count() > 0);
+    let (server_deadline, server_flight) = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&ProjectileDeadline, &brawler::combat::LobbedFlight), With<Projectile>>();
+        let (deadline, flight) = query.iter(world).next().expect("server lobbed delivery");
+        (*deadline, *flight)
+    };
+    assert_eq!(server_deadline.expires_at_tick, server_flight.lands_at_tick);
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&ActiveEffects, With<TestDummy>>();
+        query.iter(world).any(|effects| effects.slow.is_some())
+    });
+    let telemetry = harness.server.world().resource::<WeaponTelemetry>();
+    assert!(
+        telemetry
+            .hostile_damage_events
+            .get(&WeaponPresetId(3))
+            .copied()
+            .unwrap_or(0)
+            > 0
+    );
+    harness.step_until(|harness| {
+        let world = harness.clients[0].world_mut();
+        let mut query = world.query_filtered::<(&NetworkEntityId, &ActiveEffects), With<Fighter>>();
+        query.iter(world).any(|(network_id, effects)| {
+            *network_id == DUMMY_NETWORK_ENTITY && effects.slow.is_some()
+        })
+    });
 }
 
 #[derive(Resource, Debug, Default)]
@@ -489,6 +690,15 @@ impl Harness {
         send_forged_native_input_for_test(&mut sender, target, end_tick, input);
     }
 
+    fn send_weapon_selection(&mut self, index: usize, request: WeaponSelectionRequest) {
+        let client_entity = self.client_entities[index];
+        let world = self.clients[index].world_mut();
+        let mut sender = world
+            .get_mut::<MessageSender<WeaponSelectionRequest>>(client_entity)
+            .expect("client selection sender");
+        sender.send::<SessionChannel>(request);
+    }
+
     fn server_positions(&mut self) -> Vec<(PlayerId, Position)> {
         let world = self.server.world_mut();
         let mut query =
@@ -716,7 +926,7 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
     });
     let first_tick_projectile_travelled = {
         let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<&ProjectileRuntime, With<Projectile>>();
+        let mut query = world.query_filtered::<&ComposedProjectileRuntime, With<Projectile>>();
         query
             .iter(world)
             .next()
@@ -817,10 +1027,7 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             .expect("authoritative reset record")
     };
     assert_eq!(reset_tick, reset_at_tick);
-    assert_eq!(
-        reset_position,
-        brawler::combat::WorldPoint::from(dummy_spawn.position)
-    );
+    assert_eq!(reset_position, WorldPoint::from(dummy_spawn.position));
     let reset_state = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(
@@ -2147,6 +2354,76 @@ fn hostile_input_and_client_pose_attempts_are_rejected_and_counted() {
 }
 
 #[test]
+fn client_owned_component_writes_cannot_mutate_authoritative_build_weapon_or_pose() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.client_ids(0).len() == 1
+            && harness.selection_is_complete(0)
+    });
+    let player_id = harness.controlled_player_id(0);
+    let (server_build, server_fingerprint, server_ammo, server_position) = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(
+            &PlayerId,
+            &SelectedBuild,
+            &ResolvedWeapon,
+            &WeaponState,
+            &Position,
+        ), With<Fighter>>();
+        let (_, build, resolved, weapon, position) = query
+            .iter(world)
+            .find(|(player, _, _, _, _)| **player == player_id)
+            .expect("server fighter");
+        (*build, resolved.recipe_fingerprint, *weapon, *position)
+    };
+    let client_entity = harness.controlled_entity(0);
+    {
+        let world = harness.clients[0].world_mut();
+        let mut forged_build = server_build;
+        forged_build.source_preset_id = Some(WeaponPresetId(4));
+        forged_build.recipe_fingerprint = Some(WeaponRecipeFingerprint(0xdead_beef));
+        let mut forged_resolved = world
+            .get::<ResolvedWeapon>(client_entity)
+            .expect("client resolved weapon")
+            .clone();
+        forged_resolved.recipe_fingerprint = WeaponRecipeFingerprint(0xdead_beef);
+        world.entity_mut(client_entity).insert((
+            forged_build,
+            forged_resolved,
+            WeaponState {
+                ammo: 0,
+                phase: WeaponPhase::Reloading { ready_at_tick: 1 },
+            },
+            Position::from_xy(9_000.0, 9_000.0),
+        ));
+    }
+    for _ in 0..12 {
+        harness.step();
+    }
+    let (actual_build, actual_fingerprint, actual_ammo, actual_position) = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(
+            &PlayerId,
+            &SelectedBuild,
+            &ResolvedWeapon,
+            &WeaponState,
+            &Position,
+        ), With<Fighter>>();
+        let (_, build, resolved, weapon, position) = query
+            .iter(world)
+            .find(|(player, _, _, _, _)| **player == player_id)
+            .expect("server fighter");
+        (*build, resolved.recipe_fingerprint, *weapon, *position)
+    };
+    assert_eq!(actual_build, server_build);
+    assert_eq!(actual_fingerprint, server_fingerprint);
+    assert_eq!(actual_ammo, server_ammo);
+    assert!((actual_position.0 - server_position.0).length() < 0.01);
+}
+
+#[test]
 fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     let mut harness = Harness::new(2);
     harness.step_until(|harness| {
@@ -2532,7 +2809,7 @@ fn disconnect_before_fixed_sweep_removes_near_impact_projectile_without_damage()
             .expect("projectile position")
             .0 = dummy_position.0 - Vec2::new(20.0, 0.0);
         world
-            .get_mut::<ProjectileRuntime>(projectile)
+            .get_mut::<ComposedProjectileRuntime>(projectile)
             .expect("projectile runtime")
             .velocity = Vec2::new(900.0, 0.0);
         (projectile, health)
@@ -2565,26 +2842,42 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
     let (projectile, health_before) = {
         let world = harness.server.world_mut();
         let mut dummy_query =
-            world.query_filtered::<(&Position, &CurrentHealth), With<TestDummy>>();
-        let (dummy_position, health) = dummy_query
+            world.query_filtered::<(&Position, &CurrentHealth, &ResolvedWeapon), With<TestDummy>>();
+        let (dummy_position, health, resolved) = dummy_query
             .single(world)
-            .map(|(position, health)| (*position, *health))
+            .map(|(position, health, resolved)| (*position, *health, resolved.clone()))
             .expect("dummy");
+        let source = AttackSource {
+            attack_id: AttackId(99_999),
+            player_id: PlayerId(99),
+            owner_network_entity_id: NetworkEntityId(99_999),
+            team_id: TeamId(0),
+            recipe_fingerprint: resolved.recipe_fingerprint,
+            presentation_profile_id: resolved.presentation_profile_id,
+            legacy_compatibility: false,
+            source_preset_id: resolved.source_preset_id,
+            origin: WorldPoint::from(dummy_position.0 - Vec2::new(20.0, 0.0)),
+            facing: 0.0,
+        };
         let projectile = world
             .spawn((
                 Projectile,
-                ProjectileSource {
-                    shot_id: ShotId(99_999),
-                    player_id: PlayerId(99),
-                    owner_network_entity_id: NetworkEntityId(99_999),
-                    team_id: TeamId(0),
-                    weapon_definition_id: PULSE_SIDEARM_DEFINITION,
+                AttackDelivery {
+                    attack_id: AttackId(99_999),
+                    delivery_index: 0,
                 },
-                ProjectileRuntime {
+                ReplicatedAttackSource { attack: source },
+                ComposedProjectileRuntime {
                     owner_entity: Entity::PLACEHOLDER,
+                    source,
+                    delivery_index: 0,
                     velocity: Vec2::new(900.0, 0.0),
                     travelled: 0.0,
                     expires_at_tick: u64::MAX,
+                    maximum_range: 1_000.0,
+                    radius: 6.0,
+                    landing: None,
+                    recipe: resolved.recipe,
                 },
                 Position(dummy_position.0 - Vec2::new(20.0, 0.0)),
                 Rotation::IDENTITY,

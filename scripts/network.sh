@@ -7,17 +7,26 @@ combat_assert="${BRAWLER_NETWORK_ASSERT_COMBAT:-0}"
 windowed_combat_demo="${BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO:-0}"
 windowed_controller_demo="${BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO:-0}"
 combat_report_file="${BRAWLER_NETWORK_COMBAT_REPORT_FILE:-}"
+combat_test_preset="${BRAWLER_NETWORK_COMBAT_TEST_PRESET:-}"
 network_run_id="${BRAWLER_NETWORK_RUN_ID:-network-script}"
 network_timeout_seconds="${BRAWLER_NETWORK_TIMEOUT_SECONDS:-}"
 startup_timeout_seconds=10
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
-server_binary="$repo_root/target/debug/brawler-server"
-client_binary="$repo_root/target/debug/brawler-client"
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
+if [[ "$target_dir" != /* ]]; then
+    target_dir="$repo_root/$target_dir"
+fi
+server_binary="$target_dir/debug/brawler-server"
+client_binary="$target_dir/debug/brawler-client"
 
 if [[ -z "$network_timeout_seconds" ]]; then
     if [[ "$headless" == "1" ]]; then
-        network_timeout_seconds=30
+        if [[ "$combat_assert" == "1" ]]; then
+            network_timeout_seconds=60
+        else
+            network_timeout_seconds=30
+        fi
     else
         network_timeout_seconds=0
     fi
@@ -126,8 +135,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-cargo build --locked --manifest-path "$repo_root/Cargo.toml" --no-default-features --features server --bin brawler-server
-cargo build --locked --manifest-path "$repo_root/Cargo.toml" --no-default-features --features client --bin brawler-client
+cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features server --bin brawler-server
+cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features client --bin brawler-client
 
 server_env=(env "BRAWLER_SERVER_READY_FILE=$ready_file")
 if [[ "$headless" == "1" ]]; then
@@ -138,6 +147,9 @@ if [[ "$headless" == "1" ]]; then
             "BRAWLER_NETWORK_COMBAT_READY_DIR=$combat_client_ready_dir"
             "BRAWLER_NETWORK_RUN_ID=$network_run_id"
         )
+        if [[ -n "$combat_test_preset" ]]; then
+            server_env+=("BRAWLER_NETWORK_COMBAT_TEST_PRESET=$combat_test_preset")
+        fi
         if [[ -n "$combat_report_file" ]]; then
             server_env+=("BRAWLER_NETWORK_COMBAT_REPORT_FILE=$combat_report_file")
         fi
@@ -174,7 +186,7 @@ done
 client_args=(--server "$network_addr")
 if [[ "$headless" == "1" ]]; then
     if [[ "$combat_assert" == "1" ]]; then
-        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 360 --fire)
+        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 1200 --fire)
     else
         client_args+=(--headless --exit-after-roster 2 --simulation-ticks 180)
     fi
@@ -199,8 +211,16 @@ if [[ "$headless" == "1" ]]; then
     if [[ "$combat_assert" == "1" ]]; then
         # Walk the two clients toward the neutral dummy so every authored M05 delivery family
         # reaches its acceptance range (scatter and melee are intentionally short-range).
-        client_one_args+=(--move-axis 1,0 --aim-dummy)
-        client_two_args+=(--move-axis -1,0 --aim-dummy)
+        if [[ "${BRAWLER_NETWORK_WEAPON_PRESET:-}" == "2" ]]; then
+            client_one_args+=(--move-axis 0,0 --aim-dummy)
+            client_two_args+=(--move-axis 0,0 --aim-dummy)
+        elif [[ "${BRAWLER_NETWORK_WEAPON_PRESET:-}" == "3" || "${BRAWLER_NETWORK_WEAPON_PRESET:-}" == "4" ]]; then
+            client_one_args+=(--move-axis 1,0 --aim-dummy)
+            client_two_args+=(--move-axis 0,0 --aim-dummy)
+        else
+            client_one_args+=(--move-axis 1,0 --aim-dummy)
+            client_two_args+=(--move-axis -1,0 --aim-dummy)
+        fi
     else
         client_one_args+=(--move-axis 1,0 --aim-axis 0,1)
         client_two_args+=(--move-axis -1,0 --aim-axis 0,-1)

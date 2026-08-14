@@ -9,10 +9,11 @@
 use crate::{
     VERSION,
     combat::{
-        ActiveEffects, AuthoritativeTick, CombatCue, CombatTelemetry, CurrentHealth, Defeated,
-        ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon, ServerCombatPlugin,
-        SpawnState, TestDummy, WeaponCatalogResource, WeaponPresetId, WeaponTelemetry,
-        WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, sandbox_team,
+        ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
+        CombatTelemetry, ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon,
+        ServerCombatPlugin, SpawnState, TestDummy, WeaponCatalogResource, WeaponPresetId,
+        WeaponTelemetry, WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime,
+        encode_state_snapshot, sandbox_team,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -48,7 +49,14 @@ use lightyear::prelude::{
     ControlledBy, InterpolationTarget, Lifetime, MessageReceiver, MessageSender, NetworkTarget,
     Replicate, ReplicationMetadata, ReplicationSender,
 };
-use std::{collections::HashSet, env, fmt::Write as _, fs, path::PathBuf, time::Instant};
+use std::{
+    collections::{BTreeMap, HashSet},
+    env,
+    fmt::Write as _,
+    fs,
+    path::PathBuf,
+    time::Instant,
+};
 
 /// Server-side session phase. Lightyear lifecycle components remain the connection truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -69,6 +77,7 @@ pub struct ServerSession {
     pub disconnect_requested: bool,
     pub last_selection_request: Option<WeaponSelectionRequest>,
     pub last_selection_outcome: Option<WeaponSelectionOutcome>,
+    pub last_selection_response: Option<WeaponSelectionOutcome>,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -307,16 +316,9 @@ fn verify_process_combat(
     mut check: ResMut<ProcessCombatCheck>,
     telemetry: Res<CombatTelemetry>,
     weapon_telemetry: Res<WeaponTelemetry>,
+    evidence: Res<CombatEvidenceSnapshots>,
     catalog: Res<WeaponCatalogResource>,
     fighters: Res<crate::combat::FighterDefinitions>,
-    dummy: Query<
-        (
-            &CurrentHealth,
-            &crate::combat::FighterDefinitionId,
-            Option<&Defeated>,
-        ),
-        With<TestDummy>,
-    >,
     sessions: Query<&ServerSession, With<LinkOf>>,
     selected_fighters: Query<(&SelectedBuild, &ResolvedWeapon), With<Fighter>>,
     mut app_exit: MessageWriter<AppExit>,
@@ -328,12 +330,6 @@ fn verify_process_combat(
         .iter()
         .filter(|session| matches!(session.phase, ServerSessionPhase::Active { .. }))
         .count();
-    let Some((health, fighter_definition_id, defeated)) = dummy.iter().next() else {
-        return;
-    };
-    let Some(fighter_definition) = fighters.get(*fighter_definition_id) else {
-        return;
-    };
     let accepted_attacks: u64 = weapon_telemetry.accepted_attacks.values().copied().sum();
     let Some(expected_preset_id) = check.expected_preset_id else {
         error!("combat process assertion is missing BRAWLER_NETWORK_WEAPON_PRESET");
@@ -348,6 +344,9 @@ fn verify_process_combat(
         );
         check.completed = true;
         app_exit.write(AppExit::error());
+        return;
+    };
+    let Some(fighter_definition) = fighters.get(crate::combat::STANDARD_FIGHTER_DEFINITION) else {
         return;
     };
     let Ok(expected_resolved) = catalog
@@ -398,8 +397,6 @@ fn verify_process_combat(
         || accepted_attacks < 4
         || telemetry.applied_damage == 0
         || telemetry.defeats == 0
-        || health.0 != fighter_definition.maximum_health
-        || defeated.is_some()
         || !tested_fighter
         || !expected_family_exercised
         || !clients_observed
@@ -514,6 +511,96 @@ fn verify_process_combat(
         app_exit.write(AppExit::error());
         return;
     }
+    let required_checkpoints = required_process_checkpoints(expected_preset_id);
+    let checkpoint_converged = required_checkpoints
+        .iter()
+        .all(|required| evidence.checkpoints.contains_key(*required))
+        && evidence.checkpoints.keys().all(|checkpoint| {
+            let client_one_snapshot =
+                parse_report_value(&client_one, &format!("checkpoint_{checkpoint}"));
+            let client_two_snapshot =
+                parse_report_value(&client_two, &format!("checkpoint_{checkpoint}"));
+            evidence
+                .checkpoint_candidates
+                .get(checkpoint)
+                .is_some_and(|candidates| {
+                    candidates.iter().any(|(snapshot, _)| {
+                        report_matches_snapshot(
+                            &client_one,
+                            &format!("checkpoint_{checkpoint}"),
+                            snapshot,
+                        ) && report_matches_snapshot(
+                            &client_two,
+                            &format!("checkpoint_{checkpoint}"),
+                            snapshot,
+                        )
+                    }) && client_one_snapshot.is_some()
+                        && client_two_snapshot.is_some()
+                })
+        });
+    if !checkpoint_converged {
+        for checkpoint in evidence.checkpoints.keys() {
+            let client_one_value =
+                parse_report_value(&client_one, &format!("checkpoint_{checkpoint}"));
+            let client_two_value =
+                parse_report_value(&client_two, &format!("checkpoint_{checkpoint}"));
+            let matches_both =
+                evidence
+                    .checkpoint_candidates
+                    .get(checkpoint)
+                    .is_some_and(|candidates| {
+                        candidates.iter().any(|(snapshot, _)| {
+                            report_matches_snapshot(
+                                &client_one,
+                                &format!("checkpoint_{checkpoint}"),
+                                snapshot,
+                            ) && report_matches_snapshot(
+                                &client_two,
+                                &format!("checkpoint_{checkpoint}"),
+                                snapshot,
+                            )
+                        })
+                    });
+            error!(
+                checkpoint,
+                server_candidates = evidence
+                    .checkpoint_candidates
+                    .get(checkpoint)
+                    .map_or(0, Vec::len),
+                client_one_present = client_one_value.is_some(),
+                client_two_present = client_two_value.is_some(),
+                matches_both,
+                "combat checkpoint diagnostic"
+            );
+        }
+        error!(
+            server_checkpoints = ?evidence.checkpoints.keys().collect::<Vec<_>>(),
+            "authoritative combat state snapshots did not converge on both clients"
+        );
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    }
+    let client_one_state_latencies =
+        checkpoint_latencies(&evidence.checkpoint_candidates, &client_one);
+    let client_two_state_latencies =
+        checkpoint_latencies(&evidence.checkpoint_candidates, &client_two);
+    let Some((client_one_state_median_us, client_one_state_p95_us)) =
+        median_p95(&client_one_state_latencies)
+    else {
+        error!("client one state convergence latency evidence is incomplete");
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    };
+    let Some((client_two_state_median_us, client_two_state_p95_us)) =
+        median_p95(&client_two_state_latencies)
+    else {
+        error!("client two state convergence latency evidence is incomplete");
+        check.completed = true;
+        app_exit.write(AppExit::error());
+        return;
+    };
     if let Some(report_path) = check.report_file.clone() {
         let client_one_cues = parse_client_cue_timestamps(&client_one);
         let client_two_cues = parse_client_cue_timestamps(&client_two);
@@ -542,8 +629,19 @@ fn verify_process_combat(
             app_exit.write(AppExit::error());
             return;
         }
+        let client_one_cue_count = parse_report_counter(&client_one, "cue_count");
+        let client_two_cue_count = parse_report_counter(&client_two, "cue_count");
+        if client_one_cue_count == 0 || client_two_cue_count == 0 {
+            error!(
+                client_one_cue_count,
+                client_two_cue_count, "client cue volume evidence is incomplete"
+            );
+            check.completed = true;
+            app_exit.write(AppExit::error());
+            return;
+        }
         let report = format!(
-            "run_id={}\nprofile={}\nserver_elapsed_ms={}\ntested_preset_id={}\ntested_recipe_fingerprint={}\ntested_accepted_attacks={}\ntested_emitted_deliveries={}\naccepted_shots={}\nhostile_hits={}\napplied_damage={}\ndefeats={}\nserver_dropped_cues={}\nserver_dropped_records={}\nserver_dropped_timestamps={}\nstate_converged=1\ncue_converged=1\nordered_cue_stream_converged=1\n{}client_one={}client_two={}",
+            "run_id={}\nprofile={}\nserver_elapsed_ms={}\ntested_preset_id={}\ntested_recipe_fingerprint={}\ntested_accepted_attacks={}\ntested_emitted_deliveries={}\naccepted_shots={}\nhostile_hits={}\napplied_damage={}\ndefeats={}\nserver_cue_count={}\nclient_one_cue_count={}\nclient_two_cue_count={}\nserver_state_mutation_count={}\nclient_one_state_mutation_count={}\nclient_two_state_mutation_count={}\nstate_convergence_client_one_us_median={}\nstate_convergence_client_one_us_p95={}\nstate_convergence_client_two_us_median={}\nstate_convergence_client_two_us_p95={}\nserver_dropped_cues={}\nserver_dropped_records={}\nserver_dropped_timestamps={}\nstate_converged={}\ncue_converged={}\nordered_cue_stream_converged={}\n{}client_one={}client_two={}",
             check.run_id,
             env::var("BRAWLER_NETWORK_PROFILE").unwrap_or_else(|_| "local".to_string()),
             check.started_at.elapsed().as_millis(),
@@ -555,9 +653,22 @@ fn verify_process_combat(
             telemetry.hostile_fighter_hits,
             telemetry.applied_damage,
             telemetry.defeats,
+            telemetry.cues.len(),
+            client_one_cue_count,
+            client_two_cue_count,
+            evidence.state_mutation_timestamps.len(),
+            parse_report_counter(&client_one, "state_mutation_count"),
+            parse_report_counter(&client_two, "state_mutation_count"),
+            client_one_state_median_us,
+            client_one_state_p95_us,
+            client_two_state_median_us,
+            client_two_state_p95_us,
             telemetry.dropped_cues,
             telemetry.dropped_records,
             telemetry.dropped_accepted_shot_timestamps,
+            u8::from(checkpoint_converged),
+            u8::from(cue_converged),
+            u8::from(cue_converged),
             latency_evidence,
             client_one,
             client_two,
@@ -596,6 +707,78 @@ fn parse_report_counter(contents: &str, key: &str) -> u64 {
         .find_map(|line| line.strip_prefix(&format!("{key}=")))
         .and_then(|value| value.parse().ok())
         .unwrap_or(0)
+}
+
+fn checkpoint_latencies(
+    server_candidates: &BTreeMap<String, Vec<(CombatStateSnapshot, u128)>>,
+    client_report: &str,
+) -> Vec<u128> {
+    server_candidates
+        .iter()
+        .filter_map(|(checkpoint, candidates)| {
+            let client_timestamp = parse_report_value(
+                client_report,
+                &format!("checkpoint_{checkpoint}_observed_epoch_us"),
+            )?
+            .parse::<u128>()
+            .ok()?;
+            let client_tick =
+                parse_report_value(client_report, &format!("checkpoint_{checkpoint}_tick"))?
+                    .parse::<u64>()
+                    .ok()?;
+            let (_, server_timestamp) = candidates
+                .iter()
+                .find(|(snapshot, _)| snapshot.authoritative_tick == client_tick)?;
+            client_timestamp.checked_sub(*server_timestamp)
+        })
+        .collect()
+}
+
+fn required_process_checkpoints(preset_id: WeaponPresetId) -> &'static [&'static str] {
+    match preset_id.0 {
+        2 => &["active_scatter_flight", "defeat", "reset"],
+        3 => &[
+            "active_lob_flight",
+            "active_slow",
+            "active_knockback",
+            "defeat",
+            "reset",
+        ],
+        4 => &["active_knockback", "defeat", "reset"],
+        _ => &["defeat", "reset"],
+    }
+}
+
+fn median_p95(values: &[u128]) -> Option<(u128, u128)> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let median = sorted[(sorted.len() - 1) / 2];
+    let p95_rank = (sorted.len() * 95).saturating_add(99) / 100;
+    let p95 = sorted[p95_rank.saturating_sub(1).min(sorted.len() - 1)];
+    Some((median, p95))
+}
+
+fn parse_report_value<'a>(contents: &'a str, key: &str) -> Option<&'a str> {
+    contents
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}=")))
+}
+
+fn report_matches_snapshot(
+    report: &str,
+    key: &str,
+    authoritative_snapshot: &CombatStateSnapshot,
+) -> bool {
+    let Some(encoded) = encode_state_snapshot(authoritative_snapshot) else {
+        return false;
+    };
+    parse_report_value(report, key) == Some(encoded.as_str())
+        || report
+            .lines()
+            .any(|line| line.strip_prefix(&format!("{key}_candidate=")) == Some(encoded.as_str()))
 }
 
 fn parse_client_cue_stream(contents: &str) -> Vec<CombatCue> {
@@ -697,6 +880,7 @@ fn initialize_sessions(
                 disconnect_requested: false,
                 last_selection_request: None,
                 last_selection_outcome: None,
+                last_selection_response: None,
             });
         }
     }
@@ -891,12 +1075,14 @@ fn process_weapon_selection(
                 .last_selection_request
                 .is_some_and(|previous| request.request_id < previous.request_id)
             {
-                sender.send::<SessionChannel>(WeaponSelectionOutcome {
+                let outcome = WeaponSelectionOutcome {
                     request_id: request.request_id,
                     decision: WeaponSelectionDecision::StaleRequest,
                     accepted_preset_id: None,
                     accepted_recipe_fingerprint: None,
-                });
+                };
+                session.last_selection_response = Some(outcome);
+                sender.send::<SessionChannel>(outcome);
                 continue;
             }
             if session
@@ -904,6 +1090,7 @@ fn process_weapon_selection(
                 .is_some_and(|previous| request.request_id == previous.request_id)
             {
                 if let Some(outcome) = session.last_selection_outcome {
+                    session.last_selection_response = Some(outcome);
                     sender.send::<SessionChannel>(outcome);
                 }
                 continue;
@@ -992,8 +1179,12 @@ fn process_weapon_selection(
                                     ),
                                 ))
                                 .remove::<SelectingWeapon>();
-                            telemetry
-                                .record_selection(request.preset_id, resolved.recipe_fingerprint);
+                            telemetry.record_selection(
+                                request.preset_id,
+                                resolved.recipe_fingerprint,
+                                tick.0,
+                                request.request_id,
+                            );
                             let _ = fighter_definition_id;
                             WeaponSelectionOutcome {
                                 request_id: request.request_id,
@@ -1027,6 +1218,7 @@ fn process_weapon_selection(
             };
             session.last_selection_request = Some(request);
             session.last_selection_outcome = Some(outcome);
+            session.last_selection_response = Some(outcome);
             sender.send::<SessionChannel>(outcome);
         }
     }
@@ -1256,5 +1448,31 @@ mod tests {
         );
         assert!(app.world().get::<Stopped>(server).is_some());
         assert!(app.should_exit().is_some_and(|exit| exit.is_success()));
+    }
+
+    #[test]
+    fn checkpoint_reports_fail_closed_on_missing_or_altered_state() {
+        let snapshot = CombatStateSnapshot {
+            authoritative_tick: 7,
+            fighters: Vec::new(),
+            projectiles: Vec::new(),
+        };
+        let encoded = encode_state_snapshot(&snapshot).expect("snapshot encoding");
+        let report = format!("checkpoint_reset={encoded}\n");
+        assert!(report_matches_snapshot(
+            &report,
+            "checkpoint_reset",
+            &snapshot
+        ));
+        assert!(!report_matches_snapshot(
+            "checkpoint_reset=00\n",
+            "checkpoint_reset",
+            &snapshot,
+        ));
+        assert!(!report_matches_snapshot(
+            "checkpoint_reset_missing=true\n",
+            "checkpoint_reset",
+            &snapshot,
+        ));
     }
 }

@@ -37,6 +37,12 @@ pub struct EngineWeaponLimits {
     pub max_radius: f32,
     pub max_knockback_speed: f32,
     pub max_angle_degrees: f32,
+    pub max_targets_per_delivery: u8,
+    pub max_fire_cooldown_ticks: u64,
+    pub max_refill_ticks: u64,
+    pub max_effect_duration_ticks: u64,
+    pub max_speed: f32,
+    pub max_distance: f32,
 }
 
 impl Default for EngineWeaponLimits {
@@ -53,15 +59,119 @@ impl Default for EngineWeaponLimits {
             max_radius: 512.0,
             max_knockback_speed: 900.0,
             max_angle_degrees: 180.0,
+            max_targets_per_delivery: 16,
+            max_fire_cooldown_ticks: 3_600,
+            max_refill_ticks: 3_600,
+            max_effect_duration_ticks: 3_600,
+            max_speed: 4_096.0,
+            max_distance: 4_096.0,
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum EconomyFamily {
+    Magazine,
+    Charges,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum FiringPatternKind {
+    Single,
+    Spread,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum DeliveryMethodKind {
+    Straight,
+    Lobbed,
+    MeleeArc,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum TargetSelectionKind {
+    Direct,
+    Area,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum PayloadEffectKind {
+    Damage,
+    Knockback,
+    Slow,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum RecipientPolicyKind {
+    Hostiles,
+    HostilesAndOwner,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct WeaponRecipePolicy {
     pub max_deliveries_per_attack: u8,
     pub max_payload_bundles: u8,
     pub max_effects_per_bundle: u8,
+    pub permitted_economy_families: Vec<EconomyFamily>,
+    pub permitted_firing_patterns: Vec<FiringPatternKind>,
+    pub permitted_delivery_methods: Vec<DeliveryMethodKind>,
+    pub permitted_target_selections: Vec<TargetSelectionKind>,
+    pub permitted_payload_effects: Vec<PayloadEffectKind>,
+    pub permitted_recipient_policies: Vec<RecipientPolicyKind>,
+    pub max_capacity: u8,
+    pub max_fire_cooldown_ticks: u64,
+    pub max_refill_ticks: u64,
+    pub max_effect_duration_ticks: u64,
+    pub max_projectile_lifetime_ticks: u64,
+    pub max_damage: u16,
+    pub max_speed: f32,
+    pub max_distance: f32,
+    pub max_radius: f32,
+    pub max_knockback_speed: f32,
+    pub max_angle_degrees: f32,
+    pub max_targets_per_delivery: u8,
+}
+
+impl Default for WeaponRecipePolicy {
+    fn default() -> Self {
+        Self {
+            max_deliveries_per_attack: 16,
+            max_payload_bundles: 4,
+            max_effects_per_bundle: 4,
+            permitted_economy_families: vec![EconomyFamily::Magazine, EconomyFamily::Charges],
+            permitted_firing_patterns: vec![FiringPatternKind::Single, FiringPatternKind::Spread],
+            permitted_delivery_methods: vec![
+                DeliveryMethodKind::Straight,
+                DeliveryMethodKind::Lobbed,
+                DeliveryMethodKind::MeleeArc,
+            ],
+            permitted_target_selections: vec![
+                TargetSelectionKind::Direct,
+                TargetSelectionKind::Area,
+            ],
+            permitted_payload_effects: vec![
+                PayloadEffectKind::Damage,
+                PayloadEffectKind::Knockback,
+                PayloadEffectKind::Slow,
+            ],
+            permitted_recipient_policies: vec![
+                RecipientPolicyKind::Hostiles,
+                RecipientPolicyKind::HostilesAndOwner,
+            ],
+            max_capacity: 32,
+            max_fire_cooldown_ticks: 3_600,
+            max_refill_ticks: 3_600,
+            max_effect_duration_ticks: 3_600,
+            max_projectile_lifetime_ticks: 600,
+            max_damage: 1_000,
+            max_speed: 4_096.0,
+            max_distance: 4_096.0,
+            max_radius: 512.0,
+            max_knockback_speed: 900.0,
+            max_angle_degrees: 180.0,
+            max_targets_per_delivery: 16,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -87,14 +197,13 @@ impl WeaponCatalog {
         if self.presets.len() != 4 {
             return Err("M05 requires exactly four weapon presets".to_string());
         }
-        if self.recipe_policy.max_deliveries_per_attack == 0
-            || self.recipe_policy.max_deliveries_per_attack > limits.max_deliveries_per_attack
-            || self.recipe_policy.max_payload_bundles == 0
-            || self.recipe_policy.max_payload_bundles > limits.max_payload_bundles
-            || self.recipe_policy.max_effects_per_bundle == 0
-            || self.recipe_policy.max_effects_per_bundle > limits.max_effects_per_bundle
+        validate_policy(&self.recipe_policy, limits)?;
+        if self
+            .presets
+            .windows(2)
+            .any(|window| window[0].id >= window[1].id)
         {
-            return Err("weapon recipe policy exceeds engine limits".to_string());
+            return Err("weapon presets must be in ascending ID order".to_string());
         }
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
@@ -110,7 +219,7 @@ impl WeaponCatalog {
             }
             preset
                 .configuration
-                .validate(self.recipe_policy, limits, None)?;
+                .validate(&self.recipe_policy, limits, None)?;
         }
         if ids.len() != 4 || !(1..=4).all(|id| ids.contains(&WeaponPresetId(id))) {
             return Err("weapon preset IDs must be exactly 1 through 4".to_string());
@@ -151,7 +260,7 @@ impl WeaponCatalog {
             Some(id),
             preset.configuration.clone(),
             fighter,
-            self.recipe_policy,
+            self.recipe_policy.clone(),
             EngineWeaponLimits::default(),
         )
     }
@@ -242,6 +351,7 @@ pub enum TargetSelection {
     Area {
         radius: f32,
         terrain_occlusion: bool,
+        max_targets: u8,
     },
 }
 
@@ -312,7 +422,7 @@ impl FromWorld for WeaponCatalogResource {
 impl WeaponConfiguration {
     pub fn validate(
         &self,
-        policy: WeaponRecipePolicy,
+        policy: &WeaponRecipePolicy,
         limits: EngineWeaponLimits,
         fighter_radius: Option<f32>,
     ) -> Result<(), String> {
@@ -320,7 +430,31 @@ impl WeaponConfiguration {
         if !matches!(self.presentation_profile_id.0, 1..=4) {
             return Err("unknown weapon presentation profile".to_string());
         }
-        if recipe.fire_cooldown_ticks == 0 || recipe.fire_cooldown_ticks > limits.max_deadline_ticks
+        let economy_family = match recipe.economy {
+            WeaponEconomy::Magazine { .. } => EconomyFamily::Magazine,
+            WeaponEconomy::Charges { .. } => EconomyFamily::Charges,
+        };
+        if !policy.permitted_economy_families.contains(&economy_family) {
+            return Err("economy family is disabled by catalog policy".to_string());
+        }
+        let firing_kind = match recipe.firing {
+            FiringPattern::Single => FiringPatternKind::Single,
+            FiringPattern::Spread { .. } => FiringPatternKind::Spread,
+        };
+        if !policy.permitted_firing_patterns.contains(&firing_kind) {
+            return Err("firing pattern is disabled by catalog policy".to_string());
+        }
+        let delivery_kind = match recipe.delivery {
+            DeliveryMethod::Straight { .. } => DeliveryMethodKind::Straight,
+            DeliveryMethod::Lobbed { .. } => DeliveryMethodKind::Lobbed,
+            DeliveryMethod::MeleeArc { .. } => DeliveryMethodKind::MeleeArc,
+        };
+        if !policy.permitted_delivery_methods.contains(&delivery_kind) {
+            return Err("delivery method is disabled by catalog policy".to_string());
+        }
+        if recipe.fire_cooldown_ticks == 0
+            || recipe.fire_cooldown_ticks > limits.max_deadline_ticks
+            || recipe.fire_cooldown_ticks > policy.max_fire_cooldown_ticks
         {
             return Err("invalid fire cooldown".to_string());
         }
@@ -328,8 +462,10 @@ impl WeaponConfiguration {
         let refill_ticks = recipe.economy.refill_ticks();
         if capacity == 0
             || capacity > limits.max_capacity
+            || capacity > policy.max_capacity
             || refill_ticks == 0
             || refill_ticks > limits.max_deadline_ticks
+            || refill_ticks > policy.max_refill_ticks
         {
             return Err("invalid weapon economy".to_string());
         }
@@ -358,12 +494,16 @@ impl WeaponConfiguration {
                 muzzle_offset,
             } => {
                 if !finite_range(speed, 0.0, limits.max_world_field)
+                    || !finite_range(speed, 0.0, policy.max_speed)
                     || !finite_range(radius, 0.0, limits.max_radius)
+                    || !finite_range(radius, 0.0, policy.max_radius)
                     || radius == 0.0
                     || !finite_range(range, 0.0, limits.max_world_field)
+                    || !finite_range(range, 0.0, policy.max_distance)
                     || range == 0.0
                     || lifetime_ticks == 0
                     || lifetime_ticks > limits.max_lifetime_ticks
+                    || lifetime_ticks > policy.max_projectile_lifetime_ticks
                     || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
                     || muzzle_offset == 0.0
                     || speed / 60.0 > range
@@ -379,11 +519,15 @@ impl WeaponConfiguration {
                 muzzle_offset,
             } => {
                 if !finite_range(distance, 0.0, limits.max_world_field)
+                    || !finite_range(distance, 0.0, policy.max_distance)
                     || distance == 0.0
                     || flight_ticks == 0
                     || flight_ticks > limits.max_lifetime_ticks
+                    || flight_ticks > policy.max_projectile_lifetime_ticks
                     || !finite_range(visual_arc_height, 0.0, limits.max_world_field)
+                    || !finite_range(visual_arc_height, 0.0, policy.max_distance)
                     || !finite_range(landing_clearance_radius, 0.0, limits.max_radius)
+                    || !finite_range(landing_clearance_radius, 0.0, policy.max_radius)
                     || landing_clearance_radius == 0.0
                     || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
                     || muzzle_offset == 0.0
@@ -403,8 +547,10 @@ impl WeaponConfiguration {
                 angle_degrees,
             } => {
                 if !finite_range(reach, 0.0, limits.max_world_field)
+                    || !finite_range(reach, 0.0, policy.max_distance)
                     || reach == 0.0
                     || !finite_range(angle_degrees, 0.0, limits.max_angle_degrees)
+                    || !finite_range(angle_degrees, 0.0, policy.max_angle_degrees)
                     || angle_degrees == 0.0
                 {
                     return Err("invalid melee delivery".to_string());
@@ -447,13 +593,29 @@ impl WeaponConfiguration {
             if !target_is_valid {
                 return Err("payload target is incompatible with delivery".to_string());
             }
-            if let TargetSelection::Area { radius, .. } = bundle.target
-                && (!finite_range(radius, 0.0, limits.max_radius) || radius == 0.0)
+            let target_kind = match bundle.target {
+                TargetSelection::Direct => TargetSelectionKind::Direct,
+                TargetSelection::Area { .. } => TargetSelectionKind::Area,
+            };
+            if !policy.permitted_target_selections.contains(&target_kind) {
+                return Err("target selection is disabled by catalog policy".to_string());
+            }
+            if let TargetSelection::Area {
+                radius,
+                max_targets,
+                ..
+            } = bundle.target
+                && (!finite_range(radius, 0.0, limits.max_radius)
+                    || !finite_range(radius, 0.0, policy.max_radius)
+                    || radius == 0.0
+                    || max_targets == 0
+                    || max_targets > policy.max_targets_per_delivery
+                    || max_targets > limits.max_targets_per_delivery)
             {
                 return Err("invalid area radius".to_string());
             }
             for effect in &bundle.effects {
-                validate_effect(*effect, limits)?;
+                validate_effect(*effect, policy, limits)?;
             }
         }
         if deliveries == 0 {
@@ -470,6 +632,7 @@ impl WeaponConfiguration {
 
 fn validate_effect(
     effect: PayloadEffectDefinition,
+    policy: &WeaponRecipePolicy,
     limits: EngineWeaponLimits,
 ) -> Result<(), String> {
     match effect {
@@ -480,8 +643,15 @@ fn validate_effect(
         } => {
             if amount == 0
                 || amount > limits.max_damage
+                || amount > policy.max_damage
                 || !valid_recipients(recipients, limits)
-                || !valid_falloff(falloff, limits)
+                || !policy
+                    .permitted_recipient_policies
+                    .contains(&recipient_kind(recipients))
+                || !policy
+                    .permitted_payload_effects
+                    .contains(&PayloadEffectKind::Damage)
+                || !valid_falloff(falloff, policy, limits)
             {
                 return Err("invalid damage effect".to_string());
             }
@@ -492,9 +662,17 @@ fn validate_effect(
             recipients,
         } => {
             if !finite_range(speed, 0.0, limits.max_knockback_speed)
+                || !finite_range(speed, 0.0, policy.max_knockback_speed)
                 || duration_ticks == 0
                 || duration_ticks > limits.max_deadline_ticks
+                || duration_ticks > policy.max_effect_duration_ticks
                 || !valid_recipients(recipients, limits)
+                || !policy
+                    .permitted_recipient_policies
+                    .contains(&recipient_kind(recipients))
+                || !policy
+                    .permitted_payload_effects
+                    .contains(&PayloadEffectKind::Knockback)
             {
                 return Err("invalid knockback effect".to_string());
             }
@@ -509,12 +687,73 @@ fn validate_effect(
                 || movement_multiplier == 0.0
                 || duration_ticks == 0
                 || duration_ticks > limits.max_deadline_ticks
+                || duration_ticks > policy.max_effect_duration_ticks
                 || !valid_recipients(recipients, limits)
+                || !policy
+                    .permitted_recipient_policies
+                    .contains(&recipient_kind(recipients))
+                || !policy
+                    .permitted_payload_effects
+                    .contains(&PayloadEffectKind::Slow)
                 || !matches!(stacking, SlowStacking::StrongestRefreshes)
             {
                 return Err("invalid slow effect".to_string());
             }
         }
+    }
+    Ok(())
+}
+
+fn recipient_kind(recipients: RecipientPolicy) -> RecipientPolicyKind {
+    match recipients {
+        RecipientPolicy::Hostiles => RecipientPolicyKind::Hostiles,
+        RecipientPolicy::HostilesAndOwner { .. } => RecipientPolicyKind::HostilesAndOwner,
+    }
+}
+
+fn validate_policy(policy: &WeaponRecipePolicy, limits: EngineWeaponLimits) -> Result<(), String> {
+    if policy.max_deliveries_per_attack == 0
+        || policy.max_deliveries_per_attack > limits.max_deliveries_per_attack
+        || policy.max_payload_bundles == 0
+        || policy.max_payload_bundles > limits.max_payload_bundles
+        || policy.max_effects_per_bundle == 0
+        || policy.max_effects_per_bundle > limits.max_effects_per_bundle
+        || policy.max_capacity == 0
+        || policy.max_capacity > limits.max_capacity
+        || policy.max_fire_cooldown_ticks == 0
+        || policy.max_fire_cooldown_ticks > limits.max_fire_cooldown_ticks
+        || policy.max_refill_ticks == 0
+        || policy.max_refill_ticks > limits.max_refill_ticks
+        || policy.max_effect_duration_ticks == 0
+        || policy.max_effect_duration_ticks > limits.max_effect_duration_ticks
+        || policy.max_projectile_lifetime_ticks == 0
+        || policy.max_projectile_lifetime_ticks > limits.max_lifetime_ticks
+        || policy.max_damage == 0
+        || policy.max_damage > limits.max_damage
+        || !finite_range(policy.max_speed, 0.0, limits.max_speed)
+        || !finite_range(policy.max_distance, 0.0, limits.max_distance)
+        || !finite_range(policy.max_radius, 0.0, limits.max_radius)
+        || !finite_range(policy.max_knockback_speed, 0.0, limits.max_knockback_speed)
+        || !finite_range(policy.max_angle_degrees, 0.0, limits.max_angle_degrees)
+        || policy.max_targets_per_delivery == 0
+        || policy.max_targets_per_delivery > limits.max_targets_per_delivery
+    {
+        return Err("weapon recipe policy exceeds engine limits".to_string());
+    }
+    validate_capability_list(&policy.permitted_economy_families, "economy")?;
+    validate_capability_list(&policy.permitted_firing_patterns, "firing pattern")?;
+    validate_capability_list(&policy.permitted_delivery_methods, "delivery")?;
+    validate_capability_list(&policy.permitted_target_selections, "target")?;
+    validate_capability_list(&policy.permitted_payload_effects, "payload effect")?;
+    validate_capability_list(&policy.permitted_recipient_policies, "recipient")?;
+    Ok(())
+}
+
+fn validate_capability_list<T: Ord>(values: &[T], name: &str) -> Result<(), String> {
+    if values.is_empty() || values.windows(2).any(|window| window[0] >= window[1]) {
+        return Err(format!(
+            "weapon recipe policy has duplicate or noncanonical {name} capabilities"
+        ));
     }
     Ok(())
 }
@@ -528,7 +767,11 @@ fn valid_recipients(recipients: RecipientPolicy, limits: EngineWeaponLimits) -> 
     }
 }
 
-fn valid_falloff(falloff: DamageFalloff, limits: EngineWeaponLimits) -> bool {
+fn valid_falloff(
+    falloff: DamageFalloff,
+    policy: &WeaponRecipePolicy,
+    limits: EngineWeaponLimits,
+) -> bool {
     match falloff {
         DamageFalloff::None => true,
         DamageFalloff::Linear {
@@ -537,7 +780,9 @@ fn valid_falloff(falloff: DamageFalloff, limits: EngineWeaponLimits) -> bool {
             minimum_scale,
         } => {
             finite_range(start_distance, 0.0, limits.max_world_field)
+                && finite_range(start_distance, 0.0, policy.max_distance)
                 && finite_range(end_distance, 0.0, limits.max_world_field)
+                && finite_range(end_distance, 0.0, policy.max_distance)
                 && end_distance > start_distance
                 && finite_range(minimum_scale, 0.0, 1.0)
                 && minimum_scale > 0.0
@@ -554,11 +799,7 @@ pub fn resolve_configuration(
         source_preset_id,
         configuration,
         fighter,
-        WeaponRecipePolicy {
-            max_deliveries_per_attack: 16,
-            max_payload_bundles: 4,
-            max_effects_per_bundle: 4,
-        },
+        WeaponRecipePolicy::default(),
         EngineWeaponLimits::default(),
     )
 }
@@ -573,7 +814,7 @@ pub fn resolve_configuration_with_policy(
     if !limits_within_engine_ceiling(limits) {
         return Err("weapon limits exceed code-owned engine ceilings".to_string());
     }
-    configuration.validate(policy, limits, Some(fighter.body_radius))?;
+    configuration.validate(&policy, limits, Some(fighter.body_radius))?;
     if let DeliveryMethod::Straight {
         radius,
         muzzle_offset,
@@ -740,6 +981,14 @@ fn limits_within_engine_ceiling(limits: EngineWeaponLimits) -> bool {
         && limits.max_knockback_speed <= ceiling.max_knockback_speed
         && limits.max_angle_degrees.is_finite()
         && limits.max_angle_degrees <= ceiling.max_angle_degrees
+        && limits.max_targets_per_delivery <= ceiling.max_targets_per_delivery
+        && limits.max_fire_cooldown_ticks <= ceiling.max_fire_cooldown_ticks
+        && limits.max_refill_ticks <= ceiling.max_refill_ticks
+        && limits.max_effect_duration_ticks <= ceiling.max_effect_duration_ticks
+        && limits.max_speed.is_finite()
+        && limits.max_speed <= ceiling.max_speed
+        && limits.max_distance.is_finite()
+        && limits.max_distance <= ceiling.max_distance
 }
 fn valid_display_name(value: &str) -> bool {
     !value.is_empty() && value.len() <= 48 && value.chars().all(|character| !character.is_control())
@@ -786,7 +1035,9 @@ mod tests {
         let a = WeaponCatalog::embedded().unwrap();
         let mut b = WeaponCatalog::embedded().unwrap();
         b.presets.reverse();
-        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(b.validate().is_err());
+        assert!(a.fingerprint().is_ok());
+        assert!(b.fingerprint().is_err());
     }
 
     #[test]
@@ -848,5 +1099,47 @@ mod tests {
                 recipients: RecipientPolicy::Hostiles,
             };
         assert!(catalog.validate().is_err());
+    }
+
+    #[test]
+    fn policy_narrows_damage_and_cannot_widen_engine_limits() {
+        let mut catalog = WeaponCatalog::embedded().unwrap();
+        catalog.recipe_policy.max_damage = 50;
+        catalog.presets[0].configuration.recipe.payload_bundles[0].effects[0] =
+            PayloadEffectDefinition::Damage {
+                amount: 51,
+                falloff: DamageFalloff::None,
+                recipients: RecipientPolicy::Hostiles,
+            };
+        assert!(catalog.validate().is_err());
+
+        let mut widened = WeaponCatalog::embedded().unwrap();
+        widened.recipe_policy.max_damage = EngineWeaponLimits::default().max_damage + 1;
+        assert!(widened.validate().is_err());
+    }
+
+    #[test]
+    fn policy_capabilities_disable_lob_and_reject_duplicate_entries() {
+        let mut catalog = WeaponCatalog::embedded().unwrap();
+        catalog
+            .recipe_policy
+            .permitted_delivery_methods
+            .retain(|method| *method != DeliveryMethodKind::Lobbed);
+        assert!(catalog.validate().is_err());
+
+        let mut duplicate = WeaponCatalog::embedded().unwrap();
+        duplicate
+            .recipe_policy
+            .permitted_payload_effects
+            .push(PayloadEffectKind::Slow);
+        assert!(duplicate.validate().is_err());
+    }
+
+    #[test]
+    fn policy_change_changes_content_fingerprint() {
+        let first = WeaponCatalog::embedded().unwrap();
+        let mut second = first.clone();
+        second.recipe_policy.max_damage -= 1;
+        assert_ne!(first.fingerprint(), second.fingerprint());
     }
 }
