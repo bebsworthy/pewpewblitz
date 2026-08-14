@@ -1,0 +1,53 @@
+//! Network integration scenarios extracted from the shared harness.
+
+use super::*;
+
+#[test]
+fn launcher_replication_preserves_flight_deadline_and_durable_slow_state() {
+    let mut harness = Harness::new(1);
+    harness.clients[0]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .weapon_preset = Some(3);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.selection_is_complete(0)
+    });
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.step();
+    let aim = harness.aim_at_dummy(0);
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(aim), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| harness.server_projectile_count() > 0);
+    let (server_deadline, server_flight) = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&ProjectileDeadline, &brawler::combat::LobbedFlight), With<Projectile>>();
+        let (deadline, flight) = query.iter(world).next().expect("server lobbed delivery");
+        (*deadline, *flight)
+    };
+    assert_eq!(server_deadline.expires_at_tick, server_flight.lands_at_tick);
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&ActiveEffects, With<TestDummy>>();
+        query.iter(world).any(|effects| effects.slow.is_some())
+    });
+    let telemetry = harness.server.world().resource::<WeaponTelemetry>();
+    assert!(
+        telemetry
+            .hostile_damage_events
+            .get(&WeaponPresetId(3))
+            .copied()
+            .unwrap_or(0)
+            > 0
+    );
+    harness.step_until(|harness| {
+        let world = harness.clients[0].world_mut();
+        let mut query = world.query_filtered::<(&NetworkEntityId, &ActiveEffects), With<Fighter>>();
+        query.iter(world).any(|(network_id, effects)| {
+            *network_id == DUMMY_NETWORK_ENTITY && effects.slow.is_some()
+        })
+    });
+}

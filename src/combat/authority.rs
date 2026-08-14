@@ -1,0 +1,551 @@
+//! Server-authoritative combat lifecycle, spatial targeting, and cue publication.
+#![allow(clippy::wildcard_imports)]
+
+use super::*;
+
+/// M04's legacy cue/log shape is a compatibility adapter for the original single straight
+/// direct-damage recipe. It is selected from the resolved recipe, never from a preset ID, and
+/// does not participate in acceptance, collision, damage, or telemetry aggregation decisions.
+#[cfg(feature = "server")]
+pub(super) fn legacy_compatibility_recipe(recipe: &WeaponRecipe) -> bool {
+    matches!(recipe.firing, FiringPattern::Single)
+        && matches!(recipe.delivery, DeliveryMethod::Straight { .. })
+        && matches!(
+            recipe.payload_bundles.as_slice(),
+            [PayloadBundleDefinition {
+                target: TargetSelection::Direct,
+                effects
+            }] if matches!(
+                effects.as_slice(),
+                [PayloadEffectDefinition::Damage {
+                    falloff: DamageFalloff::None,
+                    recipients: RecipientPolicy::Hostiles,
+                    ..
+                }]
+            )
+        )
+}
+
+pub(super) fn validate_definitions(
+    fighters: Res<FighterDefinitions>,
+    weapons: Res<WeaponDefinitions>,
+) {
+    fighters
+        .validate(&weapons)
+        .expect("code-authored fighter definitions must be valid");
+    weapons
+        .validate(&fighters)
+        .expect("code-authored weapon definitions must be valid");
+}
+
+#[cfg(feature = "server")]
+pub(super) fn spawn_test_dummy(
+    mut commands: Commands,
+    catalog: Res<WeaponCatalogResource>,
+    fighters: Res<FighterDefinitions>,
+    weapons: Res<WeaponDefinitions>,
+) {
+    if fighters.get(STANDARD_FIGHTER_DEFINITION).is_none()
+        || weapons.get(PULSE_SIDEARM_DEFINITION).is_none()
+    {
+        return;
+    }
+    let Some(fighter) = fighters.get(STANDARD_FIGHTER_DEFINITION) else {
+        return;
+    };
+    // Keep the dummy clear of the lower cover's collision body while leaving a deterministic
+    // horizontal approach lane for the short-range process-combat profiles. The process harness
+    // uses the open spawn row so every delivery family can reach the same target during its
+    // bounded run; deterministic/unit harnesses retain the lower-row placement.
+    let position = if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
+        Vec2::new(0.0, -300.0)
+    } else {
+        Vec2::new(0.0, -380.0)
+    };
+    let spawn_facing = fighter.spawn_facing;
+    let body_radius = fighter.body_radius;
+    let (fighter_definition, build, team, health, weapon) =
+        default_fighter_runtime(NEUTRAL_TEAM, &fighters, &weapons);
+    let resolved = catalog
+        .0
+        .resolve_preset(WeaponPresetId(PULSE_SIDEARM_DEFINITION.0), fighter)
+        .expect("dummy pulse preset must resolve");
+    let dummy = commands
+        .spawn((
+            Fighter,
+            crate::movement::InputFreshness::default(),
+            PlayerId(0),
+            DUMMY_NETWORK_ENTITY,
+            crate::protocol::PlaceholderState { spawn_slot: 255 },
+            fighter_definition,
+            build,
+            team,
+            health,
+            weapon,
+            Position::from_xy(position.x, position.y),
+            Rotation::radians(spawn_facing),
+            SpawnState {
+                position,
+                facing: spawn_facing,
+            },
+            LinearVelocity::default(),
+            AngularVelocity::default(),
+        ))
+        .id();
+    commands.entity(dummy).insert((
+        SelectedBuild {
+            primary_weapon: PULSE_SIDEARM_DEFINITION,
+            source_preset_id: Some(WeaponPresetId(PULSE_SIDEARM_DEFINITION.0)),
+            recipe_fingerprint: Some(resolved.recipe_fingerprint),
+        },
+        SelectedWeapon {
+            source_preset_id: WeaponPresetId(PULSE_SIDEARM_DEFINITION.0),
+            recipe_fingerprint: resolved.recipe_fingerprint,
+        },
+        resolved,
+        AuthoritativeTick::default(),
+        Collider::circle(body_radius),
+        RigidBody::Kinematic,
+        CustomPositionIntegration,
+        fighter_collision_layers(),
+        Replicate::to_clients(NetworkTarget::All),
+        InterpolationTarget::to_clients(NetworkTarget::All),
+        TestDummy,
+    ));
+}
+
+/// Marks the reserved stationary hostile practice target.
+#[cfg(feature = "server")]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TestDummy;
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn reset_due_fighters(
+    mut commands: Commands,
+    tick: Res<SimulationTick>,
+    fighters: Res<FighterDefinitions>,
+    weapons: Res<WeaponDefinitions>,
+    mut telemetry: ResMut<CombatTelemetry>,
+    mut ids: ResMut<NextCombatIds>,
+    mut outbox: ResMut<CombatOutbox>,
+    query: Query<(
+        Entity,
+        &NetworkEntityId,
+        &FighterDefinitionId,
+        &SelectedBuild,
+        Option<&ResolvedWeapon>,
+        &Defeated,
+        &SpawnState,
+    )>,
+) {
+    for (entity, network_id, fighter_id, build, resolved, defeated, spawn) in &query {
+        if !reset_is_due(tick.0, defeated.reset_at_tick) {
+            continue;
+        }
+        let Some(fighter) = fighters.get(*fighter_id) else {
+            continue;
+        };
+        let (capacity, refill_ticks) = resolved
+            .map_or_else(
+                || {
+                    weapons
+                        .get(build.primary_weapon)
+                        .map(|weapon| (weapon.magazine_capacity, weapon.reload_duration_ticks))
+                },
+                |weapon| {
+                    Some((
+                        weapon.recipe.economy.capacity(),
+                        weapon.recipe.economy.refill_ticks(),
+                    ))
+                },
+            )
+            .unwrap_or((0, 0));
+        if capacity == 0 || refill_ticks == 0 {
+            continue;
+        }
+        let Some(event_id) = ids.allocate_event() else {
+            continue;
+        };
+        let position = spawn.position;
+        commands
+            .entity(entity)
+            .insert((
+                CurrentHealth(fighter.maximum_health),
+                WeaponState {
+                    ammo: capacity,
+                    phase: WeaponPhase::Ready,
+                },
+                Position::from_xy(position.x, position.y),
+                Rotation::radians(spawn.facing),
+                fighter_collision_layers(),
+            ))
+            .remove::<Defeated>()
+            .remove::<ExternalMotion>()
+            .remove::<KnockbackFeedback>()
+            .insert(ActiveEffects::default());
+        telemetry.record(CombatLogRecord::Reset {
+            tick: tick.0,
+            event_id,
+            target: *network_id,
+            position: WorldPoint::from(position),
+        });
+        info!(
+            tick = tick.0,
+            event_id = event_id.0,
+            target = network_id.0,
+            position = ?position,
+            "authoritative fighter reset"
+        );
+        let cue = CombatCue::Reset {
+            event_id,
+            tick: tick.0,
+            target: *network_id,
+            position: WorldPoint::from(position),
+        };
+        telemetry.record_cue(cue.clone());
+        outbox.0.push(cue);
+        let _ = fighter;
+    }
+}
+
+#[cfg(feature = "server")]
+pub(super) fn expire_runtime_effects(
+    tick: Res<SimulationTick>,
+    mut commands: Commands,
+    mut fighters: Query<
+        (
+            Entity,
+            &mut ActiveEffects,
+            Option<&ExternalMotion>,
+            Option<&KnockbackFeedback>,
+            Option<&Defeated>,
+        ),
+        With<Fighter>,
+    >,
+) {
+    for (entity, mut effects, external_motion, knockback, defeated) in &mut fighters {
+        if defeated.is_some() {
+            effects.slow = None;
+            if external_motion.is_some() {
+                commands
+                    .entity(entity)
+                    .remove::<ExternalMotion>()
+                    .remove::<KnockbackFeedback>();
+            }
+            continue;
+        }
+        if effects
+            .slow
+            .is_some_and(|slow| tick.0 >= slow.expires_at_tick)
+        {
+            effects.slow = None;
+        }
+        if external_motion.is_some_and(|motion| tick.0 >= motion.expires_at_tick) {
+            commands
+                .entity(entity)
+                .remove::<ExternalMotion>()
+                .remove::<KnockbackFeedback>();
+        } else if knockback.is_some_and(|feedback| tick.0 >= feedback.expires_at_tick) {
+            commands.entity(entity).remove::<KnockbackFeedback>();
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+pub(super) fn payload_can_affect_target(
+    bundle: &PayloadBundleDefinition,
+    source: AttackSource,
+    target_team: TeamId,
+    target_network_id: NetworkEntityId,
+) -> bool {
+    if target_network_id == source.owner_network_entity_id {
+        return bundle.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                PayloadEffectDefinition::Damage {
+                    recipients: RecipientPolicy::HostilesAndOwner { .. },
+                    ..
+                } | PayloadEffectDefinition::Knockback {
+                    recipients: RecipientPolicy::HostilesAndOwner { .. },
+                    ..
+                }
+            )
+        });
+    }
+    teams_are_hostile(source.team_id, target_team)
+}
+
+#[cfg(feature = "server")]
+pub(super) fn area_line_of_sight_clear(
+    origin: Vec2,
+    target: Vec2,
+    spatial_query: &avian2d::prelude::SpatialQuery,
+) -> bool {
+    let delta = target - origin;
+    let distance = delta.length();
+    let Some(direction) = Dir2::new(delta.normalize_or_zero()).ok() else {
+        return true;
+    };
+    let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
+        INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
+    );
+    spatial_query
+        .cast_ray(origin, direction, distance.max(0.0), true, &filter)
+        .is_none()
+}
+
+#[cfg(feature = "server")]
+pub(super) fn terrain_muzzle_contact(
+    origin: Vec2,
+    muzzle: Vec2,
+    radius: f32,
+    spatial_query: &avian2d::prelude::SpatialQuery,
+) -> Option<(Vec2, Vec2)> {
+    let delta = muzzle - origin;
+    let distance = delta.length();
+    let direction = Dir2::new(delta.normalize_or_zero()).ok()?;
+    let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
+        INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
+    );
+    spatial_query
+        .cast_shape_predicate(
+            &Collider::circle(radius),
+            origin,
+            0.0,
+            direction,
+            &avian2d::prelude::ShapeCastConfig::from_max_distance(distance),
+            &filter,
+            &|_| true,
+        )
+        .map(|hit| (hit.point2, hit.normal1))
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn queue_area_payloads(
+    landing: Vec2,
+    source: AttackSource,
+    delivery_index: u8,
+    recipe: &WeaponRecipe,
+    fighters: &Query<
+        (
+            Entity,
+            &Position,
+            &TeamId,
+            &NetworkEntityId,
+            Option<&Defeated>,
+            Option<&lightyear::prelude::ControlledBy>,
+        ),
+        With<Fighter>,
+    >,
+    disconnected: &HashSet<Entity>,
+    spatial_query: &avian2d::prelude::SpatialQuery,
+    pending: &mut MessageWriter<PendingPayload>,
+) -> usize {
+    let mut queued = 0;
+    let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(FIGHTER_LAYER);
+    for (bundle_index, bundle) in recipe
+        .payload_bundles
+        .iter()
+        .enumerate()
+        .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Area { .. }))
+    {
+        let TargetSelection::Area {
+            radius,
+            terrain_occlusion,
+            max_targets,
+        } = bundle.target
+        else {
+            continue;
+        };
+        let candidate_entities = spatial_query.shape_intersections(
+            &Collider::circle(radius),
+            landing,
+            0.0,
+            &fighter_filter,
+        );
+        let mut candidates: Vec<_> = candidate_entities
+            .into_iter()
+            .filter_map(|entity| fighters.get(entity).ok().map(|data| (entity, data)))
+            .collect();
+        candidates.sort_by_key(|(_, (_, _, _, network_id, _, _))| network_id.0);
+        let mut collected = 0_u8;
+        for (target, (_, position, team, network_id, defeated, controlled)) in candidates {
+            if collected >= max_targets {
+                break;
+            }
+            if defeated.is_some()
+                || controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner))
+                || (terrain_occlusion
+                    && !area_line_of_sight_clear(landing, position.0, spatial_query))
+                || !payload_can_affect_target(bundle, source, *team, *network_id)
+            {
+                continue;
+            }
+            pending.write(PendingPayload {
+                source,
+                delivery_index,
+                bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                target,
+                target_network_id: *network_id,
+                position: landing,
+                engagement_distance: source.origin.as_vec2().distance(position.0),
+                delivery_travel: lob_launch_point(source, recipe).distance(landing),
+                contact_fraction: 1.0,
+                bundle: bundle.clone(),
+            });
+            queued += 1;
+            collected = collected.saturating_add(1);
+        }
+    }
+    queued
+}
+
+#[cfg(feature = "server")]
+pub(super) fn lob_launch_point(source: AttackSource, recipe: &WeaponRecipe) -> Vec2 {
+    let muzzle_offset = match recipe.delivery {
+        DeliveryMethod::Lobbed { muzzle_offset, .. } => muzzle_offset,
+        _ => 0.0,
+    };
+    muzzle_position(source.origin.as_vec2(), source.facing, muzzle_offset)
+}
+
+#[cfg(feature = "server")]
+pub(super) fn record_delivery_termination(
+    ids: &mut NextCombatIds,
+    telemetry: &mut WeaponTelemetry,
+    tick: u64,
+    runtime: &ComposedProjectileRuntime,
+    position: Vec2,
+    outcome: WeaponTelemetryOutcome,
+) {
+    let Some(event_id) = ids.allocate_event() else {
+        return;
+    };
+    telemetry.record(WeaponTelemetryRecord {
+        tick,
+        event_id,
+        attack_id: runtime.source.attack_id,
+        preset_id: runtime.source.source_preset_id.unwrap_or(WeaponPresetId(0)),
+        recipe_fingerprint: runtime.source.recipe_fingerprint,
+        delivery_index: Some(runtime.delivery_index),
+        source: runtime.source.owner_network_entity_id,
+        target: None,
+        position: WorldPoint::from(position),
+        requested_value: 0,
+        applied_value: 0,
+        engagement_distance: 0.0,
+        delivery_travel: runtime.travelled,
+        hostile_contact: false,
+        effect: None,
+        resulting_health: None,
+        resulting_effects: None,
+        resulting_motion: None,
+        outcome,
+    });
+}
+
+#[cfg(feature = "server")]
+pub(super) fn publish_authoritative_tick(
+    tick: Res<SimulationTick>,
+    mut fighters: Query<&mut AuthoritativeTick, With<Fighter>>,
+) {
+    for mut authoritative_tick in &mut fighters {
+        authoritative_tick.0 = tick.0;
+    }
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn cleanup_disconnected_projectiles(
+    mut commands: Commands,
+    tick: Res<SimulationTick>,
+    mut ids: ResMut<NextCombatIds>,
+    mut trackers: ResMut<ActiveAttackTrackers>,
+    mut telemetry: ResMut<WeaponTelemetry>,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
+    fighters: Query<(Entity, Option<&lightyear::prelude::ControlledBy>), With<Fighter>>,
+    projectiles: Query<(Entity, &Position, &ComposedProjectileRuntime)>,
+) {
+    let disconnected: HashSet<_> = disconnected.iter().collect();
+    let mut fighter_entities = HashSet::new();
+    let mut disconnected_fighters = HashSet::new();
+    for (fighter, controlled) in &fighters {
+        fighter_entities.insert(fighter);
+        if controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner)) {
+            disconnected_fighters.insert(fighter);
+        }
+    }
+    for (entity, position, composed) in &projectiles {
+        let owner_entity = composed.owner_entity;
+        if disconnected_fighters.contains(&owner_entity)
+            || !fighter_entities.contains(&owner_entity)
+        {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                composed,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
+            finish_attack_delivery(&mut trackers, composed.source.attack_id);
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+pub(super) fn send_combat_cues(
+    mut outbox: ResMut<CombatOutbox>,
+    mut telemetry: ResMut<CombatTelemetry>,
+    mut senders: Query<&mut lightyear::prelude::MessageSender<CombatCue>, With<LinkOf>>,
+) {
+    // Deferred effect cues can be created after a later target's damage cue. Keep the retained
+    // process evidence in the same event order as the wire batch sent to clients.
+    telemetry
+        .cues
+        .sort_by_key(|cue| combat_cue_key(cue).event_id.0);
+    let mut cues = std::mem::take(&mut outbox.0);
+    cues.sort_by_key(|cue| combat_cue_key(cue).event_id.0);
+    for mut sender in &mut senders {
+        for cue in &cues {
+            sender.send::<crate::protocol::CombatChannel>(cue.clone());
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+pub(super) fn emit_combat_summary(
+    mut summary_logged: ResMut<CombatSummaryLogged>,
+    telemetry: Res<CombatTelemetry>,
+    weapon_telemetry: Res<WeaponTelemetry>,
+    stopped: Query<(), (With<NetcodeServer>, With<Stopped>)>,
+) {
+    if summary_logged.0 || stopped.iter().next().is_none() {
+        return;
+    }
+    summary_logged.0 = true;
+    let hit_rate_basis_points = telemetry
+        .hostile_fighter_hits
+        .saturating_mul(10_000)
+        .checked_div(telemetry.accepted_shots)
+        .unwrap_or(0);
+    info!(
+        shots = telemetry.accepted_shots,
+        hostile_hits = telemetry.hostile_fighter_hits,
+        hit_rate_basis_points,
+        applied_damage = telemetry.applied_damage,
+        defeats = telemetry.defeats,
+        close_hits = telemetry.close_hits,
+        mid_hits = telemetry.mid_hits,
+        long_hits = telemetry.long_hits,
+        dropped_cues = telemetry.dropped_cues,
+        dropped_records = telemetry.dropped_records,
+        dropped_accepted_shot_timestamps = telemetry.dropped_accepted_shot_timestamps,
+        weapon_dropped_records = weapon_telemetry.dropped_records,
+        weapon_dropped_aggregate_entries = weapon_telemetry.dropped_aggregate_entries,
+        "combat telemetry summary"
+    );
+}

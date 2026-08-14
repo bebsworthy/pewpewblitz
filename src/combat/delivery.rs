@@ -1,5 +1,8 @@
 //! Pure geometry shared by server delivery systems and client previews.
 
+#[allow(clippy::wildcard_imports)]
+#[cfg(feature = "server")]
+use super::*;
 use bevy::prelude::Vec2;
 
 #[must_use]
@@ -72,6 +75,362 @@ pub fn repaired_landing_point(
         }
     }
     Some(launch + direction * clear)
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn sweep_composed_projectiles(
+    mut commands: Commands,
+    tick: Res<SimulationTick>,
+    mut ids: ResMut<NextCombatIds>,
+    mut trackers: ResMut<ActiveAttackTrackers>,
+    mut telemetry: ResMut<WeaponTelemetry>,
+    mut pending: MessageWriter<PendingPayload>,
+    mut deliveries: MessageWriter<PendingDelivery>,
+    mut projectiles: Query<(
+        Entity,
+        &Position,
+        &mut ComposedProjectileRuntime,
+        Option<&LobbedFlight>,
+    )>,
+    fighters: Query<
+        (
+            Entity,
+            &Position,
+            &TeamId,
+            &NetworkEntityId,
+            Option<&Defeated>,
+            Option<&lightyear::prelude::ControlledBy>,
+        ),
+        With<Fighter>,
+    >,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
+    walls: Query<Entity, With<ArenaWall>>,
+    spatial_query: avian2d::prelude::SpatialQuery,
+) {
+    let disconnected: HashSet<_> = disconnected.iter().collect();
+    let fighter_lookup: HashMap<_, _> = fighters
+        .iter()
+        .map(
+            |(entity, position, team, network_id, defeated, controlled)| {
+                (
+                    entity,
+                    (
+                        position.0,
+                        *team,
+                        *network_id,
+                        defeated.is_some(),
+                        controlled
+                            .is_some_and(|controlled| disconnected.contains(&controlled.owner)),
+                    ),
+                )
+            },
+        )
+        .collect();
+    let wall_entities: HashSet<_> = walls.iter().collect();
+    let mut ordered: Vec<_> = projectiles.iter_mut().collect();
+    ordered.sort_by_key(|(_, _, runtime, lob)| {
+        (
+            runtime.source.attack_id.0,
+            runtime.delivery_index,
+            lob.is_some(),
+        )
+    });
+    for (entity, position, mut runtime, lob) in ordered {
+        let Some((_, _, _, _, owner_disconnected)) = fighter_lookup.get(&runtime.owner_entity)
+        else {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
+            commands.entity(entity).despawn();
+            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
+            continue;
+        };
+        if *owner_disconnected {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
+            commands.entity(entity).despawn();
+            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
+            continue;
+        }
+        if let Some(lob) = lob {
+            if tick.0 < lob.lands_at_tick {
+                let progress = (tick.0.saturating_sub(lob.launched_at_tick) as f32)
+                    / (lob
+                        .lands_at_tick
+                        .saturating_sub(lob.launched_at_tick)
+                        .max(1) as f32);
+                let launch = lob.launch.as_vec2();
+                let landing = lob.landing.as_vec2();
+                commands
+                    .entity(entity)
+                    .insert(Position(launch.lerp(landing, progress.clamp(0.0, 1.0))));
+                continue;
+            }
+            let landing = lob.landing.as_vec2();
+            let _queued_payloads = queue_area_payloads(
+                landing,
+                runtime.source,
+                runtime.delivery_index,
+                &runtime.recipe,
+                &fighters,
+                &disconnected,
+                &spatial_query,
+                &mut pending,
+            );
+            deliveries.write(PendingDelivery {
+                entity: Some(entity),
+                source: runtime.source,
+                delivery_index: runtime.delivery_index,
+                tick: tick.0,
+                engagement_distance: 0.0,
+                delivery_travel: lob_launch_point(runtime.source, &runtime.recipe)
+                    .distance(landing),
+                kind: PendingDeliveryKind::LobLanded {
+                    position: WorldPoint::from(landing),
+                },
+            });
+            continue;
+        }
+        if tick.0 >= runtime.expires_at_tick || runtime.travelled >= runtime.maximum_range {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryExpired,
+            );
+            commands.entity(entity).despawn();
+            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
+            continue;
+        }
+        let step = (runtime.velocity.length() / 60.0)
+            .min((runtime.maximum_range - runtime.travelled).max(0.0));
+        let Some(direction) = Dir2::new(runtime.velocity.normalize_or_zero()).ok() else {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
+            commands.entity(entity).despawn();
+            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
+            continue;
+        };
+        let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
+            FIGHTER_LAYER | INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
+        )
+        .with_excluded_entities([entity, runtime.owner_entity]);
+        let hit = spatial_query.cast_shape_predicate(
+            &Collider::circle(runtime.radius),
+            position.0,
+            0.0,
+            direction,
+            &avian2d::prelude::ShapeCastConfig::from_max_distance(step),
+            &filter,
+            &|candidate| {
+                fighter_lookup.get(&candidate).map_or_else(
+                    || wall_entities.contains(&candidate),
+                    |(_, team, _, defeated, owner_disconnected)| {
+                        teams_are_hostile(runtime.source.team_id, *team)
+                            && !defeated
+                            && !owner_disconnected
+                    },
+                )
+            },
+        );
+        let Some(hit) = hit else {
+            runtime.travelled += step;
+            commands
+                .entity(entity)
+                .insert(Position(position.0 + direction.as_vec2() * step));
+            continue;
+        };
+        runtime.travelled += hit.distance.clamp(0.0, step);
+        let target = fighter_lookup.get(&hit.entity).copied();
+        if let Some((target_position, target_team, target_network_id, defeated, _)) = target
+            && !defeated
+            && teams_are_hostile(runtime.source.team_id, target_team)
+        {
+            for (bundle_index, bundle) in
+                runtime
+                    .recipe
+                    .payload_bundles
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, bundle)| {
+                        matches!(bundle.target, TargetSelection::Direct)
+                            && payload_can_affect_target(
+                                bundle,
+                                runtime.source,
+                                target_team,
+                                target_network_id,
+                            )
+                    })
+            {
+                pending.write(PendingPayload {
+                    source: runtime.source,
+                    delivery_index: runtime.delivery_index,
+                    bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                    target: hit.entity,
+                    target_network_id,
+                    position: hit.point2,
+                    engagement_distance: runtime.source.origin.as_vec2().distance(target_position),
+                    delivery_travel: runtime.travelled,
+                    contact_fraction: (hit.distance / step.max(f32::EPSILON)).clamp(0.0, 1.0),
+                    bundle: bundle.clone(),
+                });
+            }
+        }
+        deliveries.write(PendingDelivery {
+            entity: Some(entity),
+            source: runtime.source,
+            delivery_index: runtime.delivery_index,
+            tick: tick.0,
+            engagement_distance: target.map_or(0.0, |(position, ..)| {
+                runtime.source.origin.as_vec2().distance(position)
+            }),
+            delivery_travel: runtime.travelled,
+            kind: PendingDeliveryKind::StraightImpact {
+                target: target.map(|(_, _, network_id, _, _)| network_id),
+                position: WorldPoint::from(hit.point2),
+                normal: WorldPoint::from(hit.normal1),
+                distance_band: distance_band(runtime.travelled),
+            },
+        });
+    }
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_melee_attacks(
+    mut attacks: MessageReader<MeleeAttack>,
+    mut pending: MessageWriter<PendingPayload>,
+    mut deliveries: MessageWriter<PendingDelivery>,
+    mut trackers: ResMut<ActiveAttackTrackers>,
+    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
+    fighters: Query<
+        (
+            Entity,
+            &Position,
+            &TeamId,
+            &NetworkEntityId,
+            Option<&Defeated>,
+            Option<&lightyear::prelude::ControlledBy>,
+        ),
+        With<Fighter>,
+    >,
+    spatial_query: avian2d::prelude::SpatialQuery,
+    tuning: Res<MovementTuning>,
+) {
+    let disconnected: HashSet<_> = disconnected.iter().collect();
+    for attack in attacks.read() {
+        let owner_connected = fighters.iter().any(|(_, _, _, network_id, _, controlled)| {
+            *network_id == attack.source.owner_network_entity_id
+                && controlled.is_none_or(|controlled| !disconnected.contains(&controlled.owner))
+        });
+        if !owner_connected {
+            finish_attack_delivery(&mut trackers, attack.source.attack_id);
+            continue;
+        }
+        let Some((reach, angle)) = (match attack.recipe.delivery {
+            DeliveryMethod::MeleeArc {
+                reach,
+                angle_degrees,
+            } => Some((reach, angle_degrees)),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let mut queued_payloads = false;
+        let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(FIGHTER_LAYER);
+        let mut candidates: Vec<_> = spatial_query
+            .shape_intersections(
+                &Collider::circle(reach),
+                attack.origin,
+                0.0,
+                &fighter_filter,
+            )
+            .into_iter()
+            .filter_map(|entity| fighters.get(entity).ok())
+            .collect();
+        candidates.sort_by_key(|(_, _, _, network_id, _, _)| network_id.0);
+        for (target, position, team, network_id, defeated, controlled) in candidates {
+            if defeated.is_some()
+                || controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner))
+                || !payload_target_visible(attack.source, *team, *network_id)
+                || !sector_contains(
+                    attack.origin,
+                    attack.facing,
+                    reach,
+                    angle,
+                    position.0,
+                    tuning.radius,
+                )
+                || !area_line_of_sight_clear(attack.origin, position.0, &spatial_query)
+            {
+                continue;
+            }
+            let valid_bundles: Vec<_> = attack
+                .recipe
+                .payload_bundles
+                .iter()
+                .enumerate()
+                .filter(|(_, bundle)| {
+                    matches!(bundle.target, TargetSelection::Direct)
+                        && payload_can_affect_target(bundle, attack.source, *team, *network_id)
+                })
+                .collect();
+            if valid_bundles.is_empty() {
+                continue;
+            }
+            deliveries.write(PendingDelivery {
+                entity: None,
+                source: attack.source,
+                delivery_index: 0,
+                tick: attack.tick,
+                engagement_distance: attack.origin.distance(position.0),
+                delivery_travel: 0.0,
+                kind: PendingDeliveryKind::MeleeContact {
+                    target: *network_id,
+                    position: WorldPoint::from(position.0),
+                },
+            });
+            for (bundle_index, bundle) in valid_bundles {
+                pending.write(PendingPayload {
+                    source: attack.source,
+                    delivery_index: 0,
+                    bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                    target,
+                    target_network_id: *network_id,
+                    position: position.0,
+                    engagement_distance: attack.origin.distance(position.0),
+                    delivery_travel: 0.0,
+                    contact_fraction: 1.0,
+                    bundle: bundle.clone(),
+                });
+                queued_payloads = true;
+            }
+        }
+        if !queued_payloads {
+            finish_attack_delivery(&mut trackers, attack.source.attack_id);
+        }
+    }
 }
 
 #[cfg(test)]

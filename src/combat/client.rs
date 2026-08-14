@@ -1,13 +1,17 @@
 //! Client-only combat presentation geometry.
+#![allow(clippy::wildcard_imports)]
 
-use super::{
-    DeliveryMethod, FiringPattern, ResolvedWeapon, TargetSelection, delivery, spread_angles,
-};
-use bevy::prelude::{Color, Vec2};
+use super::*;
+use bevy::prelude::*;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::env;
+use std::path::PathBuf;
+use std::time::Instant;
 
 pub const MAX_PREVIEW_SEGMENTS: usize = 24;
 
 #[cfg(feature = "client")]
+#[allow(clippy::too_many_lines)]
 pub(super) fn preview_segments(
     origin: Vec2,
     facing: f32,
@@ -184,11 +188,792 @@ fn circle_overlaps_rect(center: Vec2, radius: f32, rect_center: Vec2, rect_size:
     closest.distance_squared(center) < radius * radius
 }
 
+#[cfg(feature = "client")]
+pub struct ClientCombatPlugin;
+
+#[cfg(feature = "client")]
+impl Plugin for ClientCombatPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FighterDefinitions>()
+            .init_resource::<WeaponDefinitions>()
+            .init_resource::<RecentCombatEvents>()
+            .init_resource::<ClientCombatObservation>()
+            .init_resource::<ClientCombatEvidenceStatus>()
+            .add_systems(Startup, validate_definitions)
+            .add_systems(
+                Update,
+                (
+                    receive_combat_cues,
+                    receive_combat_evidence_checkpoints,
+                    ensure_projectile_visuals,
+                    sync_projectile_visuals,
+                    update_weapon_preview,
+                    update_health_bars,
+                    update_durable_effect_markers,
+                    update_combat_hud,
+                    update_combat_effects,
+                    capture_client_combat_checkpoints,
+                    record_headless_combat_observation,
+                )
+                    .chain(),
+            );
+    }
+}
+
+/// Coordinates the headless client lifecycle with its process-level combat evidence contract.
+#[cfg(feature = "client")]
+#[derive(Resource, Debug)]
+pub struct ClientCombatEvidenceStatus {
+    required: bool,
+    pub(super) ready: bool,
+}
+
+#[cfg(feature = "client")]
+impl ClientCombatEvidenceStatus {
+    #[must_use]
+    pub fn permits_exit(&self) -> bool {
+        !self.required || self.ready
+    }
+}
+
+#[cfg(feature = "client")]
+impl FromWorld for ClientCombatEvidenceStatus {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            required: env::var_os("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE").is_some(),
+            ready: false,
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+#[derive(Resource, Default, Debug)]
+struct RecentCombatEvents {
+    ids: VecDeque<CombatEventId>,
+}
+
+/// Lets deterministic network tests consume the wire cue stream themselves instead of having
+/// the presentation system drain it first.
+#[cfg(feature = "client")]
+#[derive(Resource, Debug, Default)]
+pub struct CaptureCombatCues {
+    pub cues: Vec<CombatCue>,
+    pub dropped_cues: u64,
+}
+
+#[cfg(feature = "client")]
+fn remember_combat_event(recent: &mut RecentCombatEvents, event_id: CombatEventId) -> bool {
+    if recent.ids.contains(&event_id) {
+        return false;
+    }
+    recent.ids.push_back(event_id);
+    if recent.ids.len() > 256 {
+        recent.ids.pop_front();
+    }
+    true
+}
+
+#[cfg(feature = "client")]
+#[derive(Resource, Debug)]
+pub(super) struct ClientCombatObservation {
+    pub(super) saw_defeat: bool,
+    pub(super) saw_reset: bool,
+    pub(super) cue_timestamps: Vec<(ShotId, u128)>,
+    pub(super) cue_stream: Vec<CombatCue>,
+    pub(super) dropped_cue_timestamps: u64,
+    pub(super) dropped_cue_stream: u64,
+    pub(super) checkpoints: BTreeMap<String, CombatStateSnapshot>,
+    pub(super) checkpoint_matches: BTreeMap<String, Vec<CombatStateSnapshot>>,
+    pub(super) expected_checkpoints: Vec<CombatEvidenceCheckpoint>,
+    pub(super) snapshot_history: BTreeMap<u64, CombatStateSnapshot>,
+    pub(super) checkpoint_timestamps: BTreeMap<String, u128>,
+    pub(super) state_mutation_timestamps: Vec<(u64, u128)>,
+    pub(super) last_encoded_snapshot: Option<String>,
+    pub(super) ready_file: Option<PathBuf>,
+    pub(super) started_at: Instant,
+    pub(super) wrote_ready: bool,
+    pub(super) waiting_reported_at_tick: Option<u32>,
+}
+
+#[cfg(feature = "client")]
+impl FromWorld for ClientCombatObservation {
+    fn from_world(_: &mut World) -> Self {
+        let ready_file = env::var_os("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE").map(PathBuf::from);
+        Self {
+            saw_defeat: false,
+            saw_reset: false,
+            cue_timestamps: Vec::new(),
+            cue_stream: Vec::new(),
+            dropped_cue_timestamps: 0,
+            dropped_cue_stream: 0,
+            checkpoints: BTreeMap::new(),
+            checkpoint_matches: BTreeMap::new(),
+            expected_checkpoints: Vec::new(),
+            snapshot_history: BTreeMap::new(),
+            checkpoint_timestamps: BTreeMap::new(),
+            state_mutation_timestamps: Vec::new(),
+            last_encoded_snapshot: None,
+            ready_file,
+            started_at: Instant::now(),
+            wrote_ready: false,
+            waiting_reported_at_tick: None,
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+#[derive(Component)]
+struct CombatEffect {
+    timer: Timer,
+}
+
+#[cfg(feature = "client")]
+#[derive(Component)]
+struct CombatHealthBar {
+    target: Entity,
+    fill: bool,
+}
+
+#[cfg(feature = "client")]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct CombatStatusMarker {
+    target: Entity,
+    kind: CombatStatusKind,
+}
+
+#[cfg(feature = "client")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum CombatStatusKind {
+    Slow,
+    Knockback,
+}
+
+#[cfg(feature = "client")]
+#[derive(Component)]
+pub struct CombatHudText;
+
+#[cfg(feature = "client")]
+#[derive(Component)]
+pub struct WeaponSelectionText;
+
+#[cfg(feature = "client")]
+fn combat_cue_profile_id(cue: &CombatCue) -> u16 {
+    match cue {
+        CombatCue::AttackAccepted {
+            presentation_profile_id,
+            ..
+        }
+        | CombatCue::DeliveryImpact {
+            presentation_profile_id,
+            ..
+        }
+        | CombatCue::LobLanded {
+            presentation_profile_id,
+            ..
+        }
+        | CombatCue::MeleeContact {
+            presentation_profile_id,
+            ..
+        }
+        | CombatCue::DamageApplied {
+            presentation_profile_id,
+            ..
+        }
+        | CombatCue::EffectApplied {
+            presentation_profile_id,
+            ..
+        } => presentation_profile_id.0,
+        CombatCue::FighterDefeated {
+            presentation_profile_id,
+            ..
+        } => presentation_profile_id.map_or(1, |profile| profile.0),
+        _ => 1,
+    }
+}
+
+#[cfg(feature = "client")]
+fn combat_profile_color(profile_id: u16, fallback: Color) -> Color {
+    match profile_id {
+        2 => Color::srgb(1.0, 0.45, 0.12),
+        3 => Color::srgb(0.25, 0.7, 1.0),
+        4 => Color::srgb(0.85, 0.25, 1.0),
+        _ => fallback,
+    }
+}
+
+#[cfg(feature = "client")]
+fn combat_profile_size(profile_id: u16, fallback: Vec2) -> Vec2 {
+    match profile_id {
+        2 => fallback * 0.8,
+        3 => fallback * 1.25,
+        4 => fallback * 1.1,
+        _ => fallback,
+    }
+}
+
+#[cfg(feature = "client")]
+#[allow(clippy::too_many_lines)]
+fn receive_combat_cues(
+    mut commands: Commands,
+    mut recent: ResMut<RecentCombatEvents>,
+    mut observation: ResMut<ClientCombatObservation>,
+    mut capture: Option<ResMut<CaptureCombatCues>>,
+    mut receivers: Query<
+        Option<&mut lightyear::prelude::MessageReceiver<CombatCue>>,
+        With<lightyear::prelude::client::Client>,
+    >,
+    fighters: Query<(&NetworkEntityId, &Position), With<Fighter>>,
+    local_fighter: Query<&PlayerId, (With<Fighter>, With<lightyear::prelude::Controlled>)>,
+) {
+    let local_player = local_fighter.iter().next().copied();
+    for receiver in &mut receivers {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        let cues: Vec<_> = receiver.receive().collect();
+        for cue in cues {
+            match &cue {
+                CombatCue::Defeat { .. } | CombatCue::FighterDefeated { .. } => {
+                    observation.saw_defeat = true;
+                }
+                CombatCue::Reset { .. } | CombatCue::FighterReset { .. } => {
+                    observation.saw_reset = true;
+                }
+                _ => {}
+            }
+            let event_id = match &cue {
+                CombatCue::AttackAccepted { event_id, .. }
+                | CombatCue::DeliveryImpact { event_id, .. }
+                | CombatCue::LobLanded { event_id, .. }
+                | CombatCue::MeleeContact { event_id, .. }
+                | CombatCue::DamageApplied { event_id, .. }
+                | CombatCue::EffectApplied { event_id, .. }
+                | CombatCue::FighterDefeated { event_id, .. }
+                | CombatCue::FighterReset { event_id, .. }
+                | CombatCue::Muzzle { event_id, .. }
+                | CombatCue::Impact { event_id, .. }
+                | CombatCue::Damage { event_id, .. }
+                | CombatCue::Defeat { event_id, .. }
+                | CombatCue::Reset { event_id, .. } => *event_id,
+            };
+            if !remember_combat_event(&mut recent, event_id) {
+                continue;
+            }
+            let profile_id = combat_cue_profile_id(&cue);
+            if let Some(capture) = capture.as_mut() {
+                if capture.cues.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+                    capture.cues.push(cue.clone());
+                } else {
+                    capture.dropped_cues = capture.dropped_cues.saturating_add(1);
+                }
+            }
+            if observation.ready_file.is_some() {
+                if observation.cue_stream.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+                    observation.cue_stream.push(cue.clone());
+                } else {
+                    observation.dropped_cue_stream =
+                        observation.dropped_cue_stream.saturating_add(1);
+                }
+                let timestamp = match &cue {
+                    CombatCue::Muzzle { shot_id, .. } => Some(*shot_id),
+                    CombatCue::AttackAccepted { attack_id, .. } => Some(ShotId(attack_id.0)),
+                    _ => None,
+                };
+                if let Some(shot_id) = timestamp {
+                    if observation.cue_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+                        observation
+                            .cue_timestamps
+                            .push((shot_id, unix_epoch_micros()));
+                    } else {
+                        observation.dropped_cue_timestamps =
+                            observation.dropped_cue_timestamps.saturating_add(1);
+                    }
+                }
+            }
+            if matches!(
+                &cue,
+                CombatCue::Muzzle { .. }
+                    | CombatCue::Impact { .. }
+                    | CombatCue::Damage { .. }
+                    | CombatCue::Defeat { .. }
+                    | CombatCue::Reset { .. }
+            ) {
+                continue;
+            }
+            let target_position = match &cue {
+                CombatCue::Damage { target, .. }
+                | CombatCue::DamageApplied { target, .. }
+                | CombatCue::Defeat { target, .. }
+                | CombatCue::FighterDefeated { target, .. }
+                | CombatCue::EffectApplied { target, .. }
+                | CombatCue::MeleeContact { target, .. } => fighters
+                    .iter()
+                    .find(|(network_id, _)| **network_id == *target)
+                    .map(|(_, position)| position.0),
+                CombatCue::AttackAccepted { source, .. } => fighters
+                    .iter()
+                    .find(|(network_id, _)| **network_id == *source)
+                    .map(|(_, position)| position.0),
+                _ => None,
+            };
+            let local_hit = match &cue {
+                CombatCue::Damage {
+                    source: DamageSource::PlayerWeapon { player_id, .. },
+                    ..
+                }
+                | CombatCue::DamageApplied {
+                    source: DamageSource::PlayerWeapon { player_id, .. },
+                    ..
+                } => local_player == Some(*player_id),
+                _ => false,
+            };
+            let (position, color, size) = match cue {
+                CombatCue::AttackAccepted { .. } => (
+                    target_position.unwrap_or(Vec2::ZERO),
+                    combat_profile_color(profile_id, Color::srgb(1.0, 0.8, 0.2)),
+                    combat_profile_size(profile_id, Vec2::splat(16.0)),
+                ),
+                CombatCue::DeliveryImpact { position, .. }
+                | CombatCue::LobLanded { position, .. }
+                | CombatCue::MeleeContact { position, .. }
+                | CombatCue::Impact { position, .. } => (
+                    position.as_vec2(),
+                    combat_profile_color(profile_id, Color::srgb(1.0, 0.35, 0.1)),
+                    combat_profile_size(profile_id, Vec2::splat(28.0)),
+                ),
+                CombatCue::DamageApplied { .. } | CombatCue::Damage { .. } => (
+                    target_position.unwrap_or(Vec2::ZERO),
+                    combat_profile_color(
+                        profile_id,
+                        if local_hit {
+                            Color::srgb(1.0, 0.9, 0.2)
+                        } else {
+                            Color::srgb(1.0, 0.1, 0.1)
+                        },
+                    ),
+                    combat_profile_size(profile_id, Vec2::splat(18.0)),
+                ),
+                CombatCue::EffectApplied { .. } => (
+                    target_position.unwrap_or(Vec2::ZERO),
+                    combat_profile_color(profile_id, Color::srgb(0.3, 0.8, 1.0)),
+                    combat_profile_size(profile_id, Vec2::splat(24.0)),
+                ),
+                CombatCue::FighterDefeated { .. } | CombatCue::Defeat { .. } => (
+                    target_position.unwrap_or(Vec2::ZERO),
+                    combat_profile_color(profile_id, Color::srgb(0.9, 0.05, 0.05)),
+                    combat_profile_size(profile_id, Vec2::splat(64.0)),
+                ),
+                CombatCue::FighterReset { position, .. } | CombatCue::Reset { position, .. } => (
+                    position.as_vec2(),
+                    Color::srgb(0.2, 1.0, 0.4),
+                    Vec2::splat(42.0),
+                ),
+                CombatCue::Muzzle { position, .. } => (
+                    position.as_vec2(),
+                    Color::srgb(1.0, 0.8, 0.2),
+                    Vec2::splat(22.0),
+                ),
+            };
+            commands.spawn((
+                CombatEffect {
+                    timer: Timer::from_seconds(0.18, TimerMode::Once),
+                },
+                Sprite::from_color(color, size),
+                Transform::from_translation(position.extend(30.0)),
+            ));
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn ensure_projectile_visuals(
+    mut commands: Commands,
+    mut query: Query<
+        (
+            Entity,
+            Option<&Transform>,
+            Option<&mut Sprite>,
+            Option<&ProjectileSource>,
+            Option<&ReplicatedAttackSource>,
+            Option<&LobbedFlight>,
+        ),
+        With<Projectile>,
+    >,
+) {
+    for (entity, transform, sprite, source, replicated_attack, lobbed) in &mut query {
+        if transform.is_none() {
+            commands.entity(entity).insert(Transform::default());
+        }
+        let color = source.map_or(Color::srgb(1.0, 0.85, 0.2), |source| {
+            projectile_color(source.player_id)
+        });
+        let profile_id =
+            replicated_attack.map_or(1, |source| source.attack.presentation_profile_id.0);
+        let size = source.map_or(Vec2::new(20.0, 8.0), |_| match profile_id {
+            2 => Vec2::new(9.0, 5.0),
+            3 => Vec2::new(16.0, 16.0),
+            4 => Vec2::new(24.0, 6.0),
+            _ => Vec2::new(20.0, 8.0),
+        });
+        if let Some(mut sprite) = sprite {
+            sprite.color = color;
+            sprite.custom_size = Some(size);
+        } else {
+            commands.entity(entity).insert((
+                Sprite::from_color(color, size),
+                Name::new(if lobbed.is_some() {
+                    "Arc projectile"
+                } else {
+                    "Weapon delivery"
+                }),
+            ));
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn sync_projectile_visuals(
+    tick: Query<&AuthoritativeTick>,
+    mut query: Query<
+        (&Position, &Rotation, &mut Transform, Option<&LobbedFlight>),
+        With<Projectile>,
+    >,
+) {
+    let current_tick = tick.iter().next().map_or(0, |tick| tick.0);
+    for (position, rotation, mut transform, lobbed) in &mut query {
+        transform.translation.x = position.0.x;
+        transform.translation.y = position.0.y;
+        if let Some(lobbed) = lobbed {
+            let progress = (current_tick.saturating_sub(lobbed.launched_at_tick) as f32)
+                / (lobbed
+                    .lands_at_tick
+                    .saturating_sub(lobbed.launched_at_tick)
+                    .max(1) as f32);
+            transform.translation.z =
+                20.0 + delivery::lob_height(progress, lobbed.visual_arc_height);
+            transform.rotation = Quat::IDENTITY;
+        } else {
+            transform.translation.z = 20.0;
+            transform.rotation = Quat::from_rotation_z(rotation.as_radians());
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+#[derive(Component)]
+struct WeaponPreviewVisual {
+    slot: u8,
+}
+
+#[cfg(feature = "client")]
+fn update_weapon_preview(
+    mut commands: Commands,
+    arena: Res<crate::movement::GreyboxArenaDefinition>,
+    fighters: Query<
+        (&Position, &Rotation, Option<&ResolvedWeapon>),
+        (With<Fighter>, With<lightyear::prelude::Controlled>),
+    >,
+    mut visuals: Query<(
+        &WeaponPreviewVisual,
+        &mut Transform,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
+) {
+    let Some((position, rotation, resolved)) = fighters.iter().next() else {
+        for (_, _, _, mut visibility) in &mut visuals {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let Some(resolved) = resolved else {
+        for (_, _, _, mut visibility) in &mut visuals {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let origin = position.0;
+    let facing = rotation.as_radians();
+    let segments = preview_segments(origin, facing, resolved, &arena);
+    for (visual, mut transform, mut sprite, mut visibility) in &mut visuals {
+        let Some((center, angle, size, color)) = segments.get(usize::from(visual.slot)) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        *visibility = Visibility::Inherited;
+        transform.translation = center.extend(11.0);
+        transform.rotation = Quat::from_rotation_z(*angle);
+        sprite.color = *color;
+        sprite.custom_size = Some(*size);
+    }
+    let existing_slots: HashSet<_> = visuals
+        .iter()
+        .map(|(visual, _, _, _)| visual.slot)
+        .collect();
+    for slot in 0..MAX_PREVIEW_SEGMENTS as u8 {
+        if !existing_slots.contains(&slot) {
+            commands.spawn((
+                WeaponPreviewVisual { slot },
+                Sprite::from_color(Color::srgba(1.0, 1.0, 1.0, 0.0), Vec2::splat(1.0)),
+                Transform::default(),
+                Visibility::Hidden,
+            ));
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn update_health_bars(
+    mut commands: Commands,
+    fighters: Query<
+        (
+            Entity,
+            &Position,
+            &CurrentHealth,
+            &FighterDefinitionId,
+            Option<&Defeated>,
+        ),
+        With<Fighter>,
+    >,
+    definitions: Res<FighterDefinitions>,
+    mut bars: Query<(Entity, &CombatHealthBar, &mut Transform, &mut Sprite)>,
+) {
+    let fighter_data: HashMap<_, _> = fighters
+        .iter()
+        .map(|(entity, position, health, definition_id, defeated)| {
+            let maximum = definitions
+                .get(*definition_id)
+                .map_or(0, |definition| definition.maximum_health);
+            (entity, (position.0, health.0, maximum, defeated.is_some()))
+        })
+        .collect();
+    let existing: HashSet<_> = bars
+        .iter()
+        .map(|(_, bar, _, _)| (bar.target, bar.fill))
+        .collect();
+    for entity in fighter_data.keys().copied() {
+        if !existing.contains(&(entity, false)) {
+            commands.spawn((
+                CombatHealthBar {
+                    target: entity,
+                    fill: false,
+                },
+                Sprite::from_color(Color::srgb(0.04, 0.05, 0.07), Vec2::new(56.0, 7.0)),
+                Transform::from_xyz(0.0, 0.0, 35.0),
+            ));
+        }
+        if !existing.contains(&(entity, true)) {
+            commands.spawn((
+                CombatHealthBar {
+                    target: entity,
+                    fill: true,
+                },
+                Sprite::from_color(Color::srgb(0.2, 0.95, 0.35), Vec2::new(52.0, 5.0)),
+                Transform::from_xyz(0.0, 0.0, 36.0),
+            ));
+        }
+    }
+    for (bar_entity, bar, mut transform, mut sprite) in &mut bars {
+        let Some((position, health, maximum, defeated)) = fighter_data.get(&bar.target) else {
+            commands.entity(bar_entity).despawn();
+            continue;
+        };
+        let ratio = f32::from(*health) / f32::from((*maximum).max(1));
+        transform.translation.x = position.x;
+        transform.translation.y = position.y + 34.0;
+        if bar.fill {
+            transform.translation.x -= 26.0 * (1.0 - ratio);
+            transform.scale.x = ratio;
+            sprite.color = if *defeated {
+                Color::srgb(0.75, 0.08, 0.08)
+            } else {
+                Color::srgb(0.2, 0.95, 0.35)
+            };
+        } else {
+            transform.scale.x = 1.0;
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn update_combat_hud(
+    mut text: Query<&mut Text, With<CombatHudText>>,
+    fighter: Query<
+        (
+            &PlayerId,
+            &CurrentHealth,
+            &WeaponState,
+            Option<&AuthoritativeTick>,
+            Option<&SelectedBuild>,
+            Option<&ResolvedWeapon>,
+            Option<&ActiveEffects>,
+            Option<&Defeated>,
+        ),
+        (With<Fighter>, With<lightyear::prelude::Controlled>),
+    >,
+    weapons: Res<WeaponDefinitions>,
+    catalog: Option<Res<WeaponCatalogResource>>,
+) {
+    let Some((
+        player_id,
+        health,
+        state,
+        authoritative_tick,
+        build,
+        resolved,
+        active_effects,
+        defeated,
+    )) = fighter.iter().next()
+    else {
+        return;
+    };
+    let weapon_id = build.map_or(PULSE_SIDEARM_DEFINITION, |build| build.primary_weapon);
+    let capacity = resolved.map_or_else(
+        || {
+            weapons
+                .get(weapon_id)
+                .map_or(0, |weapon| weapon.magazine_capacity)
+        },
+        |resolved| resolved.recipe.economy.capacity(),
+    );
+    let weapon_name = resolved
+        .and_then(|resolved| resolved.source_preset_id)
+        .and_then(|id| catalog.as_ref().and_then(|catalog| catalog.0.preset(id)))
+        .map_or_else(
+            || {
+                if weapon_id == PULSE_SIDEARM_DEFINITION {
+                    "Pulse"
+                } else {
+                    "Weapon"
+                }
+            },
+            |preset| preset.display_name.as_str(),
+        );
+    let phase = match state.phase {
+        WeaponPhase::Ready => "READY".to_string(),
+        WeaponPhase::Cooldown { ready_at_tick } | WeaponPhase::Reloading { ready_at_tick }
+            if authoritative_tick.is_some() =>
+        {
+            let label = if matches!(state.phase, WeaponPhase::Cooldown { .. }) {
+                "COOLDOWN"
+            } else {
+                "RELOADING"
+            };
+            format!(
+                "{label} {}t",
+                ready_at_tick.saturating_sub(authoritative_tick.expect("checked above").0)
+            )
+        }
+        WeaponPhase::Cooldown { .. } | WeaponPhase::Reloading { .. } => "SYNCING".to_string(),
+    };
+    let phase = defeated.map_or(phase, |_| "DEFEATED".to_string());
+    let slow = active_effects
+        .and_then(|effects| effects.slow)
+        .zip(authoritative_tick)
+        .filter(|(slow, tick)| slow.expires_at_tick > tick.0)
+        .map_or_else(String::new, |(slow, tick)| {
+            format!("  SLOW {}t", slow.expires_at_tick.saturating_sub(tick.0))
+        });
+    for mut value in &mut text {
+        **value = format!(
+            "Player {}   Health {:>3}   {} {}/{}   {}{}",
+            player_id.0, health.0, weapon_name, state.ammo, capacity, phase, slow
+        );
+    }
+}
+
+#[cfg(feature = "client")]
+fn update_durable_effect_markers(
+    mut commands: Commands,
+    fighters: Query<
+        (
+            Entity,
+            &Position,
+            Option<&AuthoritativeTick>,
+            Option<&ActiveEffects>,
+            Option<&KnockbackFeedback>,
+            Option<&Defeated>,
+        ),
+        With<Fighter>,
+    >,
+    mut markers: Query<(Entity, &CombatStatusMarker, &mut Transform, &mut Sprite)>,
+) {
+    let desired: HashMap<_, _> = fighters
+        .iter()
+        .flat_map(
+            |(entity, position, authoritative_tick, active_effects, knockback, defeated)| {
+                if defeated.is_some() {
+                    return Vec::new();
+                }
+                let mut markers = Vec::with_capacity(2);
+                if active_effects.is_some_and(|effects| {
+                    effects.slow.is_some_and(|slow| {
+                        authoritative_tick.is_none_or(|tick| tick.0 < slow.expires_at_tick)
+                    })
+                }) {
+                    markers.push((
+                        CombatStatusMarker {
+                            target: entity,
+                            kind: CombatStatusKind::Slow,
+                        },
+                        (position.0, Color::srgba(0.25, 0.75, 1.0, 0.85)),
+                    ));
+                }
+                if knockback.is_some() {
+                    markers.push((
+                        CombatStatusMarker {
+                            target: entity,
+                            kind: CombatStatusKind::Knockback,
+                        },
+                        (position.0, Color::srgba(1.0, 0.55, 0.18, 0.85)),
+                    ));
+                }
+                markers
+            },
+        )
+        .collect();
+    let mut existing = HashSet::new();
+    for (marker_entity, marker, mut transform, mut sprite) in &mut markers {
+        if let Some((position, color)) = desired.get(marker) {
+            existing.insert(*marker);
+            transform.translation = position.extend(39.0);
+            sprite.color = *color;
+        } else {
+            commands.entity(marker_entity).despawn();
+        }
+    }
+    for (marker, (position, color)) in desired {
+        if !existing.contains(&marker) {
+            commands.spawn((
+                marker,
+                Sprite::from_color(color, Vec2::splat(13.0)),
+                Transform::from_translation(position.extend(39.0)),
+            ));
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn update_combat_effects(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    mut effects: Query<(Entity, &mut CombatEffect)>,
+) {
+    for (entity, mut effect) in &mut effects {
+        effect.timer.tick(time.delta());
+        if effect.timer.is_finished() {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 #[cfg(all(test, feature = "client"))]
 mod tests {
     use super::*;
     use crate::combat::{FighterDefinitions, WeaponCatalog, WeaponPresetId};
     use crate::movement::GreyboxArenaDefinition;
+    use crate::timing::SimulationTick;
+    use core::time::Duration;
 
     fn preview_for(id: u16) -> Vec<(Vec2, f32, Vec2, Color)> {
         let catalog = WeaponCatalog::embedded().unwrap();
@@ -221,5 +1006,140 @@ mod tests {
         assert_eq!(preview_for(2).len(), 8);
         assert_eq!(preview_for(3).len(), 14);
         assert_eq!(preview_for(4).len(), 10);
+    }
+
+    #[test]
+    fn combat_cue_event_ids_are_deduplicated_with_a_bounded_history() {
+        let mut recent = RecentCombatEvents::default();
+        assert!(remember_combat_event(&mut recent, CombatEventId(1)));
+        assert!(!remember_combat_event(&mut recent, CombatEventId(1)));
+        for event_id in 2..=257 {
+            assert!(remember_combat_event(&mut recent, CombatEventId(event_id)));
+        }
+        assert_eq!(recent.ids.len(), 256);
+        assert!(!recent.ids.contains(&CombatEventId(1)));
+        assert!(remember_combat_event(&mut recent, CombatEventId(1)));
+    }
+
+    #[test]
+    fn headless_exit_waits_for_required_combat_evidence() {
+        let mut status = ClientCombatEvidenceStatus {
+            required: true,
+            ready: false,
+        };
+        assert!(!status.permits_exit());
+        status.ready = true;
+        assert!(status.permits_exit());
+        assert!(
+            ClientCombatEvidenceStatus {
+                required: false,
+                ready: false,
+            }
+            .permits_exit()
+        );
+    }
+
+    #[test]
+    fn combat_effects_expire_after_the_bounded_presentation_lifetime() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                Duration::from_millis(100),
+            ))
+            .add_systems(Update, update_combat_effects);
+        let effect = app
+            .world_mut()
+            .spawn(CombatEffect {
+                timer: Timer::from_seconds(0.18, TimerMode::Once),
+            })
+            .id();
+
+        app.update();
+        assert!(app.world().get_entity(effect).is_ok());
+        app.update();
+        app.update();
+
+        assert!(app.world().get_entity(effect).is_err());
+    }
+
+    #[test]
+    fn combat_hud_reports_replicated_reload_and_defeat_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<WeaponDefinitions>()
+            .insert_resource(SimulationTick(999))
+            .add_systems(Update, update_combat_hud);
+        let hud = app
+            .world_mut()
+            .spawn((CombatHudText, Text::new("placeholder")))
+            .id();
+        app.world_mut().spawn((
+            Fighter,
+            lightyear::prelude::Controlled,
+            PlayerId(1),
+            CurrentHealth(42),
+            AuthoritativeTick(10),
+            WeaponState {
+                ammo: 0,
+                phase: WeaponPhase::Reloading { ready_at_tick: 25 },
+            },
+        ));
+
+        app.update();
+        assert_eq!(
+            app.world().get::<Text>(hud).expect("combat HUD").0,
+            "Player 1   Health  42   Pulse 0/6   RELOADING 15t"
+        );
+
+        app.world_mut().entity_mut(hud).insert(Text::new("stale"));
+        let fighter = app
+            .world_mut()
+            .query_filtered::<Entity, With<Fighter>>()
+            .single(app.world())
+            .expect("controlled fighter");
+        app.world_mut().entity_mut(fighter).insert(Defeated {
+            event_id: CombatEventId(1),
+            reset_at_tick: 100,
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<Text>(hud).expect("combat HUD").0,
+            "Player 1   Health  42   Pulse 0/6   DEFEATED"
+        );
+    }
+
+    #[test]
+    fn fighter_and_projectile_palettes_distinguish_replicated_sources() {
+        assert_ne!(fighter_color(PlayerId(1)), fighter_color(PlayerId(2)));
+        assert_ne!(projectile_color(PlayerId(1)), projectile_color(PlayerId(2)));
+        assert_ne!(fighter_color(PlayerId(1)), Color::srgb(0.95, 0.25, 0.1));
+    }
+
+    #[test]
+    fn projectile_presentation_keeps_authoritative_position_and_facing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_projectile_visuals);
+        let projectile = app
+            .world_mut()
+            .spawn((
+                Projectile,
+                Position::from_xy(120.0, -40.0),
+                Rotation::radians(std::f32::consts::FRAC_PI_2),
+                Transform::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let transform = app
+            .world()
+            .get::<Transform>(projectile)
+            .expect("projectile transform");
+        assert_eq!(transform.translation.truncate(), Vec2::new(120.0, -40.0));
+        assert!(
+            (transform.rotation.to_euler(EulerRot::ZYX).0 - std::f32::consts::FRAC_PI_2).abs()
+                < 0.001
+        );
     }
 }

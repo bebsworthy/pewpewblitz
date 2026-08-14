@@ -8,8 +8,8 @@
 | Roadmap | [roadmap.md](./roadmap.md) |
 | Status | Verifying |
 | Specification validation | Implementation authorized; validation feedback remains open |
-| Implementation | Code implementation complete; final milestone gates remain open |
-| Verification | Automated verification complete; visual/controller evidence pending |
+| Implementation | Architecture remediation complete: combat, client, server, movement, and network tests now follow cohesive ownership boundaries |
+| Verification | Final automated tree is green, including all twelve impairment runs; windowed render-profile and physical-controller evidence remains |
 | User validation/playtest | Not started |
 
 Update this table and the roadmap together whenever the milestone changes phase.
@@ -842,8 +842,11 @@ fixed-tick tests assert authoritative completed ticks directly.
   configuration, preset, and resolved-snapshot shapes; code-owned engine limits; canonical catalog
   validation; pure preset-independent structural/activation resolution and fingerprinting; exactly
   four built-in presets; and failure tests without enabling Bevy assets on the server.
-- [x] Split the combat module into cohesive submodules while preserving the existing public module,
-  plugin composition, M04 behavior, and feature gates.
+- [x] Finish splitting the combat module into cohesive submodules while preserving the existing
+  public module, plugin composition, M04 behavior, and feature gates. The first extraction left
+  authoritative gameplay, client presentation, evidence, and plugin composition concentrated in
+  the former `src/combat.rs`; completion requires the architecture-remediation gate in
+  `milestone-05b.md`.
 - [x] Generalize preset/recipe identity, authored enums, resolved weapon, runtime economy, attack
   source, internal buffers, and stable ordering; migrate pulse through lookup + resolution before
   adding a second preset.
@@ -891,9 +894,13 @@ fixed-tick tests assert authoritative completed ticks directly.
 - [ ] Set `User playtest` only after automated/network/visual gates pass and provide the exact
   commands, controls, scenarios, known limitations, and requested observations.
 
-## Automated verification evidence (2026-08-14)
+## Pre-remediation automated evidence (2026-08-14; superseded)
 
-The final implementation tree passes the following automated gates:
+The first implementation pass recorded the following results. They are historical evidence, not
+proof of the current tree: the architecture review reopened implementation, the remediation commit
+changed the evidence path, and the new pre-refactor baseline below contradicts the earlier Clippy
+and twelve-run claims. Final verification must replace this section with evidence from the remediated
+tree.
 
 - `cargo test --locked --lib -- --test-threads=1` — 61 passed.
 - `cargo test --locked --features network-test --test network -- --test-threads=1` — 35 passed,
@@ -923,6 +930,57 @@ and performance foundations. Delivery and payload events share one checked reser
 selection resets the native input epoch; source aggregates include preset and recipe fingerprint;
 and client/server evidence reports fail closed on bounded-history drops. Windowed keyboard/mouse plus
 physical-controller readability remain verification/playtest work.
+
+## Post-remediation automated evidence (2026-08-14)
+
+The architecture-remediation gate and root-cause record are detailed in
+[milestone-05b.md](./milestone-05b.md). On the final remediated tree:
+
+- `just lint` passed with format and role-specific Clippy warnings denied;
+- `just test` passed: 73 client tests, 60 server tests, 38 deterministic network tests, and 7
+  performance tests; the combined M05 load case measured 1.995 ms p95 and every measured p95 was
+  below 2 ms on the aarch64 macOS host;
+- `just server-features` proved the dedicated server excludes client presentation capabilities;
+- `just network-smoke` passed with two bounded headless clients;
+- `BRAWLER_NETWORK_PROFILE_RUNS=1 BRAWLER_NETWORK_PROFILE_PRESETS='1 2 3 4'
+  BRAWLER_NETWORK_PROFILE_BASE_PORT=6520 ./scripts/network-combat-profiles.sh` passed all twelve
+  local/typical/adverse runs with exact cue counts and converged named checkpoint evidence for
+  flights, slow, knockback, defeat, and reset as required by each preset.
+
+Automated verification is complete. The remaining verification work is the specified windowed
+30/60/high presentation pass, keyboard/mouse readability and counterplay observations, and the
+physical-controller selection/aim/fire/pause/disconnect/reconnect pass. Explicit specification
+validation, user feedback triage, and learn-from-errors closeout also remain before completion.
+
+### Remaining manual verification handoff
+
+Run these from the repository root on the target display/controller hardware:
+
+1. `just network` — use both selection overlays manually. Keyboard/mouse: A/D or arrows select,
+   Space/Enter confirms, WASD moves, mouse aims, mouse-left fires, and Escape pauses. Confirm no
+   movement/fire occurs before server acceptance and exercise all four presets across the two
+   clients.
+2. `just network-combat-30`, `just network-combat-60`, and `just network-combat-high` — record
+   display refresh and whether projectile, cone, landing/blast, blade-sector, hit/effect,
+   economy, defeat, and reset presentation remains readable without stale visuals. Repeat a
+   specific automated weapon with `BRAWLER_RENDER_PROFILE=30
+   BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1
+   BRAWLER_NETWORK_WEAPON_PRESET=1 ./scripts/network.sh`, substituting the other documented render
+   profile and preset values.
+3. Run `just network` with a physical Xbox-like controller. Use left stick to move, right stick to
+   aim, South/A to confirm selection, RT to fire, and Start to pause. Check all four selections,
+   preview stability around stick deadzones, cadence/economy, slow/knockback readability, and
+   close-range scatter/blade control. `just network-controller` may diagnose the synthetic input
+   path but is not physical-controller evidence.
+4. During the physical-controller run, disconnect/reconnect the controller and verify keyboard/
+   mouse fallback, device recovery, pause behavior, and absence of latched movement/fire. Close one
+   client during a spread/lob/effect and restart it with
+   `target/debug/brawler-client --server 127.0.0.1:5000 --client-id 1`; verify fresh selection,
+   durable current state, and no orphan/duplicate presentation.
+5. Record each weapon's readable preferred range, burst/recovery window, clearest counterplay,
+   any obviously dominant/nonviable value, display/controller hardware, and observed failures.
+   Accepted tuning or presentation changes require the affected automated and manual checks to be
+   rerun before moving to `User playtest`.
 
 ## Test plan
 
@@ -1073,36 +1131,36 @@ exists.
 - [x] Research questions are resolved or explicitly deferred with rationale.
 - [ ] Technical specification is validated by the user.
 - [ ] The locked M04 baseline is green before production implementation begins.
-- [ ] Content/rules and preset recipes are validated, content-fingerprinted, headless-safe, and
+- [x] Content/rules and preset recipes are validated, content-fingerprinted, headless-safe, and
   change values without combat-code rewrites.
-- [ ] Code-owned engine ceilings cannot be widened by content policy; canonical resolved snapshots
+- [x] Code-owned engine ceilings cannot be widened by content policy; canonical resolved snapshots
   remain bounded on the wire and every runtime/evidence collection has an explicit lifetime/cap.
-- [ ] Preset-independent structural and fighter-context activation resolution create immutable
+- [x] Preset-independent structural and fighter-context activation resolution create immutable
   server-owned snapshots and resolve a legal non-preset configuration fixture without adding a new
   weapon-specific system or preset-ID branch.
-- [ ] All four weapons use the shared economy/attack/payload/lifecycle pipeline and only focused
+- [x] All four weapons use the shared economy/attack/payload/lifecycle pipeline and only focused
   delivery-specific geometry.
 - [ ] Preset selection is server-looked-up/resolved, owner-mapped, idempotent, locked after
   acceptance, rejects client-authored specs, and is usable with controller and keyboard/mouse.
-- [ ] Straight spread, lob/area, melee, damage/falloff, knockback, and slow rules pass fixed-schedule
+- [x] Straight spread, lob/area, melee, damage/falloff, knockback, and slow rules pass fixed-schedule
   and network authority tests.
-- [ ] M04's approved disconnect-before-combat, same-tick projectile, impact-fraction ordering,
+- [x] M04's approved disconnect-before-combat, same-tick projectile, impact-fraction ordering,
   atomic event-ID, global cue ordering, neutral-hostility, bounded-evidence, and completed-tick
   publication contracts remain proven for the generalized pipeline.
-- [ ] Durable selected/effect/projectile state and stable transient feedback recover/converge under
+- [x] Durable selected/effect/projectile state and stable transient feedback recover/converge under
   late join, reconnect, loss, duplication, reordering, latency, and jitter.
-- [ ] Cleanup is correct on expiry, defeat, reset, target/source disconnect, reconnect, and stop.
-- [ ] Per-weapon attack/use/hit/damage/distance/defeat/self-damage telemetry is exact and locally
+- [x] Cleanup is correct on expiry, defeat, reset, target/source disconnect, reconnect, and stop.
+- [x] Per-weapon attack/use/hit/damage/distance/defeat/self-damage telemetry is exact and locally
   inspectable.
 - [ ] Each weapon has observed preferred distance, burst window, recovery window, and counterplay;
   numeric tuning changes are recorded without changing authority contracts.
 - [ ] Windowed and physical-controller checks make all selection, aim/range, economy, hit, area,
   effect, defeat, and reset states understandable.
-- [ ] Dedicated server remains free of renderer/window/audio/device-input/Bevy-asset features and
+- [x] Dedicated server remains free of renderer/window/audio/device-input/Bevy-asset features and
   the final performance/process gates pass.
-- [ ] Player-facing recipe editing, balance costs, persistent arsenal, entitlements, currency,
+- [x] Player-facing recipe editing, balance costs, persistent arsenal, entitlements, currency,
   loot, and progression remain outside M05 while their integration seams are explicit.
-- [ ] Bouncing, homing, curved, piercing, splitting, boomerang, and accumulating status behavior
+- [x] Bouncing, homing, curved, piercing, splitting, boomerang, and accumulating status behavior
   remains deferred.
 - [ ] User feedback is triaged, affected verification reruns, learn-from-errors is recorded, and
   roadmap/current milestone status is updated before completion.

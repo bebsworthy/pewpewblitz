@@ -1,0 +1,279 @@
+//! Ordered combat presentation cues and their process-evidence codec.
+
+use super::{
+    AttackId, CombatEventId, DistanceBand, ShotId, WeaponDefinitionId, WeaponPresentationProfileId,
+    WorldPoint,
+};
+use crate::protocol::{NetworkEntityId, PlayerId};
+use bevy::prelude::Message;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DamageSource {
+    PlayerWeapon {
+        player_id: PlayerId,
+        fighter_id: NetworkEntityId,
+        weapon_definition_id: WeaponDefinitionId,
+        shot_id: ShotId,
+    },
+    Environment {
+        cause_id: u16,
+    },
+}
+
+/// Cue variants used by deterministic/process evidence without serializing presentation payloads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CombatCueKind {
+    AttackAccepted,
+    DeliveryImpact,
+    LobLanded,
+    MeleeContact,
+    DamageApplied,
+    EffectApplied,
+    FighterDefeated,
+    FighterReset,
+    Muzzle,
+    Impact,
+    Damage,
+    Defeat,
+    Reset,
+}
+
+impl CombatCueKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AttackAccepted => "attack_accepted",
+            Self::DeliveryImpact => "delivery_impact",
+            Self::LobLanded => "lob_landed",
+            Self::MeleeContact => "melee_contact",
+            Self::DamageApplied => "damage_applied",
+            Self::EffectApplied => "effect_applied",
+            Self::FighterDefeated => "fighter_defeated",
+            Self::FighterReset => "fighter_reset",
+            Self::Muzzle => "muzzle",
+            Self::Impact => "impact",
+            Self::Damage => "damage",
+            Self::Defeat => "defeat",
+            Self::Reset => "reset",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "attack_accepted" => Some(Self::AttackAccepted),
+            "delivery_impact" => Some(Self::DeliveryImpact),
+            "lob_landed" => Some(Self::LobLanded),
+            "melee_contact" => Some(Self::MeleeContact),
+            "damage_applied" => Some(Self::DamageApplied),
+            "effect_applied" => Some(Self::EffectApplied),
+            "fighter_defeated" => Some(Self::FighterDefeated),
+            "fighter_reset" => Some(Self::FighterReset),
+            "muzzle" => Some(Self::Muzzle),
+            "impact" => Some(Self::Impact),
+            "damage" => Some(Self::Damage),
+            "defeat" => Some(Self::Defeat),
+            "reset" => Some(Self::Reset),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CombatEffectCue {
+    Knockback {
+        velocity: WorldPoint,
+        expires_at_tick: u64,
+    },
+    Slow {
+        movement_multiplier_milli: u16,
+        expires_at_tick: u64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CombatCueKey {
+    pub kind: CombatCueKind,
+    pub event_id: CombatEventId,
+}
+
+/// Ordered presentation facts. Durable values remain replicated components.
+#[derive(Message, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum CombatCue {
+    AttackAccepted {
+        event_id: CombatEventId,
+        tick: u64,
+        attack_id: AttackId,
+        source: NetworkEntityId,
+        weapon_definition_id: WeaponDefinitionId,
+        presentation_profile_id: WeaponPresentationProfileId,
+    },
+    DeliveryImpact {
+        event_id: CombatEventId,
+        tick: u64,
+        attack_id: AttackId,
+        delivery_index: u8,
+        source: NetworkEntityId,
+        weapon_definition_id: WeaponDefinitionId,
+        presentation_profile_id: WeaponPresentationProfileId,
+        target: Option<NetworkEntityId>,
+        position: WorldPoint,
+        normal: WorldPoint,
+        distance_band: DistanceBand,
+    },
+    LobLanded {
+        event_id: CombatEventId,
+        tick: u64,
+        attack_id: AttackId,
+        delivery_index: u8,
+        source: NetworkEntityId,
+        weapon_definition_id: WeaponDefinitionId,
+        presentation_profile_id: WeaponPresentationProfileId,
+        position: WorldPoint,
+    },
+    MeleeContact {
+        event_id: CombatEventId,
+        tick: u64,
+        attack_id: AttackId,
+        delivery_index: u8,
+        source: NetworkEntityId,
+        weapon_definition_id: WeaponDefinitionId,
+        presentation_profile_id: WeaponPresentationProfileId,
+        target: NetworkEntityId,
+        position: WorldPoint,
+    },
+    DamageApplied {
+        event_id: CombatEventId,
+        tick: u64,
+        attack_id: AttackId,
+        source: DamageSource,
+        target: NetworkEntityId,
+        amount: u16,
+        health_after: u16,
+        distance_band: DistanceBand,
+        presentation_profile_id: WeaponPresentationProfileId,
+    },
+    EffectApplied {
+        event_id: CombatEventId,
+        tick: u64,
+        attack_id: AttackId,
+        source: DamageSource,
+        target: NetworkEntityId,
+        effect: CombatEffectCue,
+        presentation_profile_id: WeaponPresentationProfileId,
+    },
+    FighterDefeated {
+        event_id: CombatEventId,
+        tick: u64,
+        attack_id: AttackId,
+        source: Option<DamageSource>,
+        target: NetworkEntityId,
+        presentation_profile_id: Option<WeaponPresentationProfileId>,
+    },
+    FighterReset {
+        event_id: CombatEventId,
+        tick: u64,
+        target: NetworkEntityId,
+        position: WorldPoint,
+    },
+    Muzzle {
+        event_id: CombatEventId,
+        tick: u64,
+        source: NetworkEntityId,
+        shot_id: ShotId,
+        weapon_definition_id: WeaponDefinitionId,
+        position: WorldPoint,
+    },
+    Impact {
+        event_id: CombatEventId,
+        tick: u64,
+        source: NetworkEntityId,
+        shot_id: ShotId,
+        weapon_definition_id: WeaponDefinitionId,
+        target: Option<NetworkEntityId>,
+        position: WorldPoint,
+        normal: WorldPoint,
+        distance_band: DistanceBand,
+    },
+    Damage {
+        event_id: CombatEventId,
+        tick: u64,
+        source: DamageSource,
+        target: NetworkEntityId,
+        amount: u16,
+        health_after: u16,
+        distance_band: DistanceBand,
+    },
+    Defeat {
+        event_id: CombatEventId,
+        tick: u64,
+        source: Option<DamageSource>,
+        target: NetworkEntityId,
+    },
+    Reset {
+        event_id: CombatEventId,
+        tick: u64,
+        target: NetworkEntityId,
+        position: WorldPoint,
+    },
+}
+
+#[must_use]
+pub fn combat_cue_key(cue: &CombatCue) -> CombatCueKey {
+    let (kind, event_id) = match cue {
+        CombatCue::AttackAccepted { event_id, .. } => (CombatCueKind::AttackAccepted, *event_id),
+        CombatCue::DeliveryImpact { event_id, .. } => (CombatCueKind::DeliveryImpact, *event_id),
+        CombatCue::LobLanded { event_id, .. } => (CombatCueKind::LobLanded, *event_id),
+        CombatCue::MeleeContact { event_id, .. } => (CombatCueKind::MeleeContact, *event_id),
+        CombatCue::DamageApplied { event_id, .. } => (CombatCueKind::DamageApplied, *event_id),
+        CombatCue::EffectApplied { event_id, .. } => (CombatCueKind::EffectApplied, *event_id),
+        CombatCue::FighterDefeated { event_id, .. } => (CombatCueKind::FighterDefeated, *event_id),
+        CombatCue::FighterReset { event_id, .. } => (CombatCueKind::FighterReset, *event_id),
+        CombatCue::Muzzle { event_id, .. } => (CombatCueKind::Muzzle, *event_id),
+        CombatCue::Impact { event_id, .. } => (CombatCueKind::Impact, *event_id),
+        CombatCue::Damage { event_id, .. } => (CombatCueKind::Damage, *event_id),
+        CombatCue::Defeat { event_id, .. } => (CombatCueKind::Defeat, *event_id),
+        CombatCue::Reset { event_id, .. } => (CombatCueKind::Reset, *event_id),
+    };
+    CombatCueKey { kind, event_id }
+}
+
+/// Encode a cue payload for the line-oriented process evidence file.
+#[must_use]
+pub fn encode_combat_cue(cue: &CombatCue) -> String {
+    let bytes = postcard::to_allocvec(cue).expect("combat cue serialization should be infallible");
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use core::fmt::Write as _;
+        let _ = write!(encoded, "{byte:02x}");
+    }
+    encoded
+}
+
+/// Decode a cue payload from the process evidence file.
+#[must_use]
+pub fn decode_combat_cue(encoded: &str) -> Option<CombatCue> {
+    if !encoded.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes = encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = hex_value(pair[0])?;
+            let low = hex_value(pair[1])?;
+            Some((high << 4) | low)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    postcard::from_bytes(&bytes).ok()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
