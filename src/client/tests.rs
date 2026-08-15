@@ -13,6 +13,23 @@ fn automatic_match_ready_waits_for_the_requested_roster() {
 }
 
 #[test]
+fn headless_match_command_rearms_during_countdown_for_waiting_retry() {
+    let match_id = crate::matchplay::MatchId(7);
+    assert!(should_rearm_headless_match_command(
+        true,
+        Some((match_id, MatchPhase::Waiting)),
+        match_id,
+        MatchPhase::Countdown { starts_at_tick: 90 },
+    ));
+    assert!(!should_rearm_headless_match_command(
+        false,
+        Some((match_id, MatchPhase::Waiting)),
+        match_id,
+        MatchPhase::Countdown { starts_at_tick: 90 },
+    ));
+}
+
+#[test]
 fn client_config_defaults_to_loopback_and_validates_roster_target() {
     let mut config = ClientNetworkConfig::new(1);
     assert!(config.validate().is_ok());

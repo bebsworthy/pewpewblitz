@@ -92,8 +92,7 @@ fn process_match_command_outcomes(
 fn send_match_command(
     config: Res<ClientNetworkConfig>,
     mut state: ResMut<MatchCommandState>,
-    keyboard: Option<Res<ButtonInput<KeyCode>>>,
-    gamepads: Query<&Gamepad>,
+    pending: Res<PendingLocalActions>,
     roots: Query<&MatchState, With<MatchRoot>>,
     controlled: Query<
         &MatchParticipant,
@@ -109,13 +108,18 @@ fn send_match_command(
     let Ok(participant) = controlled.single() else {
         return;
     };
-    let pressed = keyboard
-        .as_deref()
-        .is_some_and(|keys| keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter))
-        || gamepads
-            .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::South));
+    let pressed = pending.action_indicator & ACTION_INTERACT != 0;
     let automatic = automatic_match_command_enabled(&config, roster.iter().count());
+    if should_rearm_headless_match_command(
+        config.headless_simulation_ticks.is_some(),
+        state.sent_for_phase,
+        match_state.match_id,
+        match_state.phase,
+    ) {
+        // A countdown departure returns the same match ID to Waiting. Re-arm automation while the
+        // countdown is still observable so that the unchanged Waiting key can be sent again.
+        state.sent_for_phase = None;
+    }
     let command = match match_state.phase {
         MatchPhase::Waiting if !participant.ready && (pressed || automatic) => {
             Some(MatchCommand::SetReady(true))
@@ -151,6 +155,17 @@ fn send_match_command(
         });
     }
     state.sent_for_phase = Some((match_state.match_id, match_state.phase));
+}
+
+pub(super) fn should_rearm_headless_match_command(
+    automation_enabled: bool,
+    sent_for_phase: Option<(crate::matchplay::MatchId, MatchPhase)>,
+    match_id: crate::matchplay::MatchId,
+    phase: MatchPhase,
+) -> bool {
+    automation_enabled
+        && matches!(phase, MatchPhase::Countdown { .. })
+        && sent_for_phase == Some((match_id, MatchPhase::Waiting))
 }
 
 pub(super) fn automatic_match_command_enabled(

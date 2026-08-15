@@ -259,7 +259,9 @@ fn update_readiness_hud(
                 let roster = roster_presentation
                     .entries
                     .iter()
-                    .map(|(player, entry)| roster_entry_text(*player, entry, now))
+                    .map(|(player, entry)| {
+                        roster_entry_text(*player, entry, now, local_player == Some(*player))
+                    })
                     .collect::<Vec<_>>()
                     .join(" | ");
                 let show_roster =
@@ -421,7 +423,7 @@ fn countdown_label(state: Option<&MatchState>, now: u64) -> Option<String> {
     )
 }
 
-fn roster_entry_text(player: u64, entry: &CachedRosterEntry, now: u64) -> String {
+fn roster_entry_text(player: u64, entry: &CachedRosterEntry, now: u64, is_local: bool) -> String {
     let status = if entry.connected {
         match entry.status {
             CachedRosterStatus::Alive => "alive".to_string(),
@@ -443,7 +445,8 @@ fn roster_entry_text(player: u64, entry: &CachedRosterEntry, now: u64) -> String
     let weapon = entry
         .weapon_preset
         .map_or_else(|| "W?".to_string(), |preset| format!("W{preset}"));
-    format!("P{player} T{} {weapon} {status}", entry.team.0 + 1)
+    let local = if is_local { "YOU " } else { "" };
+    format!("{local}P{player} T{} {weapon} {status}", entry.team.0 + 1)
 }
 
 fn readiness_status(
@@ -520,7 +523,14 @@ mod tests {
             status: CachedRosterStatus::Ready,
             connected: false,
         };
-        assert_eq!(roster_entry_text(7, &entry, 100), "P7 T2 W3 disconnected");
+        assert_eq!(
+            roster_entry_text(7, &entry, 100, false),
+            "P7 T2 W3 disconnected"
+        );
+        assert_eq!(
+            roster_entry_text(7, &entry, 100, true),
+            "YOU P7 T2 W3 disconnected"
+        );
     }
 
     #[test]

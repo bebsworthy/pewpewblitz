@@ -16,18 +16,23 @@ Milestone 11 hardens and closes the v1 MVP. Additional mode families and systemi
 
 The milestones are not release promises. A milestone may be split during its technical-design pass, but its exit criteria may not be silently moved to a later gate.
 
-Milestone 07 has an approved post-M06 architecture-aligned specification and is being verified. Milestone
-06 completed on 2026-08-15 after green automated, process-network, performance, visual, controller,
-and audio verification plus an approved user playtest.
+Milestone 07 completed on 2026-08-15 after accepted external-review remediation passed its automated,
+network, role-isolation, performance, and process gates and the user approved closeout. The remaining
+supervised physical-controller, perceptual-audio, complete aspect-ratio/state-matrix, and human
+normal-duration observations were explicitly accepted as non-blocking and deferred to Milestone 11;
+they are not represented as passing evidence. Milestone 08 research is complete and its specification
+is now the current review. Milestone 06 completed on
+2026-08-15 after green automated, process-network, performance, visual, controller, and audio
+verification plus an approved user playtest.
 
 The milestone sections below are outcome briefs and research prompts, not prevalidated technical specifications. Type names, plugins, schedules, package boundaries, data formats, and algorithms remain provisional until the milestone research and specification are approved.
 
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 07 automated and partial native-window visual verification is green; physical-controller, audio, 1440x900, normal-duration, and user-playtest verification remains. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
-- **Current milestone:** Milestone 07 — Verifying
-- **Last completed milestone:** Milestone 06 — First map-recipe arena and presentation baseline
+- **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in specification review. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
+- **Current milestone:** Milestone 08 — Specification review
+- **Last completed milestone:** Milestone 07 — Wipeout match loop
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
 
@@ -38,6 +43,7 @@ Record deferred implementation and playtest feedback here. Every item needs its 
 | ID | Source | Item | Rationale | Review target |
 |---|---|---|---|---|
 | M03-PRED | Milestone 03 implementation decision | Run the impairment/latency comparison for owner prediction; the M04 harness records the authoritative owner baseline and keeps prediction disabled until a predicted comparison exists. | Prediction is intentionally not enabled without measured convergence and correction behavior. | Milestone 03 verification |
+| M07-SUPERVISED | Milestone 07 user closeout decision, 2026-08-15 | Run a supervised physical-controller and keyboard/mouse normal-duration 1v1; inspect the complete match-state HUD at 1440x900 and supported layouts; judge simultaneous combat audio and weapon/arena counterplay. | Automation and partial native-window inspection cannot supply a physical controller, perceptual audio judgment, a complete 1440x900 display, or human two-to-four-minute match judgment. The user accepted these as non-blocking for M07 without claiming they passed. | Milestone 11 hardening playtest |
 | FUT-ARSENAL | Product direction clarification, 2026-08-14 | Persistent account-owned arsenal of brawlers, saved build identity/revisions, production weapon editor, and acquisition/entitlement flow. | M05 establishes recipe/resolution/runtime boundaries and M08 proves bounded in-memory customization; accounts, storage, currency, loot, and unlock policy are outside v1. | Post-v1 product planning |
 | FUT-MAP-BUILDER | Product direction clarification, 2026-08-14 | Player-facing builder for bounded map recipes plus persistence, publishing, discovery, moderation, asset policy, and version migration. Players arrange approved presentation, terrain, geometry, entities, regions, spawns, and objective anchors but cannot author mode rules. | M06 must establish the recipe/preset/resolved/runtime boundary and server validation without expanding v1 into editor or platform services. | Future-version planning after M06 evidence |
 
@@ -169,8 +175,8 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 04 | Complete | Combat core | [milestone-04.md](./milestone-04.md) |
 | 05 | Verifying | Weapon composition and preset selection | [milestone-05.md](./milestone-05.md) |
 | 06 | Complete | First map-recipe arena and presentation baseline | [milestone-06.md](./milestone-06.md) |
-| 07 | Verifying | Wipeout match loop | [milestone-07.md](./milestone-07.md) |
-| 08 | Not started | Bounded brawler builds and abilities | Create when next |
+| 07 | Complete | Wipeout match loop | [milestone-07.md](./milestone-07.md) |
+| 08 | Specification review | Bounded brawler builds and abilities | [milestone-08.md](./milestone-08.md) |
 | 09 | Not started | Hot Zone | Create when next |
 | 10 | Not started | Flexible destructible terrain | Create when next |
 | 11 | Not started | MVP playtest hardening and closeout | Create when next |

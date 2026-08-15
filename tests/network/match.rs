@@ -153,6 +153,129 @@ fn countdown_cancellation_returns_to_waiting_and_clears_ready_quorum() {
 }
 
 #[test]
+fn countdown_departure_cancels_a_still_valid_two_versus_two_roster() {
+    let mut harness = Harness::new_match(4);
+    harness.step_until(|harness| {
+        (0..4).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+    });
+    let waiting = server_match(&mut harness);
+    for index in 0..4 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: 1,
+                match_id: waiting.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness
+        .step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Countdown { .. }));
+    harness.clients[0].world_mut().trigger(Disconnect {
+        entity: harness.client_entities[0],
+    });
+    harness.step_until(|harness| {
+        harness.server_ids().len() == 3
+            && matches!(server_match(harness).phase, MatchPhase::Waiting)
+    });
+    {
+        let world = harness.server.world_mut();
+        let mut participants = world.query_filtered::<&MatchParticipant, With<Fighter>>();
+        assert!(
+            participants
+                .iter(world)
+                .all(|participant| !participant.ready)
+        );
+    }
+    for _ in 0..200 {
+        harness.step();
+    }
+    assert!(matches!(
+        server_match(&mut harness).phase,
+        MatchPhase::Waiting
+    ));
+}
+
+#[test]
+fn same_frame_admission_assigns_stable_teams_by_remote_identity() {
+    fn assignments() -> Vec<TeamId> {
+        let mut harness = Harness::new_match(4);
+        harness.step_until(|harness| (0..4).all(|index| harness.client_is_active(index)));
+        (0..4)
+            .map(|index| {
+                let player = harness.controlled_player_id(index);
+                let world = harness.server.world_mut();
+                let mut query = world.query_filtered::<(&PlayerId, &TeamId), With<Fighter>>();
+                *query
+                    .iter(world)
+                    .find(|(candidate, _)| **candidate == player)
+                    .expect("admitted player has a team")
+                    .1
+            })
+            .collect()
+    }
+
+    let first = assignments();
+    let second = assignments();
+    assert_eq!(first, second);
+    assert_eq!(first, vec![TeamId(0), TeamId(1), TeamId(0), TeamId(1)]);
+}
+
+#[test]
+fn initial_admission_uses_the_shared_spawn_selector() {
+    let mut harness = Harness::new_match(4);
+    harness.step_until(|harness| (0..4).all(|index| harness.client_is_active(index)));
+    let state = server_match(&mut harness);
+    let tuning = *harness.server.world().resource::<MovementTuning>();
+    let spawn_points = harness
+        .server
+        .world()
+        .resource::<SpawnPointCatalog>()
+        .clone();
+    let mut fighters = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(
+            &PlayerId,
+            &TeamId,
+            &Position,
+            &SpawnAssignment,
+        ), (With<Fighter>, With<MatchParticipant>)>();
+        query
+            .iter(world)
+            .map(|(player, team, position, assignment)| (*player, *team, position.0, *assignment))
+            .collect::<Vec<_>>()
+    };
+    fighters.sort_by_key(|(player, _, _, _)| player.0);
+    let mut living = Vec::new();
+    for (player, team, position, assignment) in fighters {
+        let candidates = spawn_points
+            .0
+            .get(&team.0)
+            .unwrap()
+            .iter()
+            .map(|point| brawler::matchplay::SpawnCandidate {
+                id: point.spawn_point_id,
+                position: point.position,
+                facing: point.facing,
+            })
+            .collect();
+        let expected = brawler::matchplay::select_spawn(
+            candidates,
+            &living,
+            team,
+            tuning.radius * 2.0 + tuning.skin_width,
+            state.match_id,
+            player,
+            0,
+        )
+        .unwrap();
+        assert_eq!(assignment.spawn_point_id, expected.id);
+        assert_eq!(position, expected.position);
+        living.push((team, position));
+    }
+}
+
+#[test]
 #[allow(clippy::too_many_lines)]
 fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
     let mut harness = Harness::new_match(4);
@@ -903,6 +1026,7 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         engagement_distance: 200.0,
         kind: CombatOutcomeKind::Defeat,
     };
+    harness.arm_packet_impairment(0);
     harness
         .server
         .world_mut()
@@ -910,12 +1034,26 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         .0
         .push(fact);
     harness.step_until(|harness| {
-        harness
+        let server_has_respawn = harness
             .server
             .world()
             .get::<brawler::matchplay::RespawnState>(target.0)
-            .is_some()
+            .is_some();
+        let client_has_respawn = {
+            let world = harness.clients[0].world_mut();
+            let mut query = world.query::<(&NetworkEntityId, &brawler::matchplay::RespawnState)>();
+            query
+                .iter(world)
+                .any(|(network_id, _)| *network_id == target.2)
+        };
+        server_has_respawn && client_has_respawn && harness.packet_impairment(0).injected
     });
+    let impairment = harness.packet_impairment(0);
+    assert!(impairment.injected);
+    assert!(impairment.dropped_packets > 0);
+    assert!(impairment.delayed_packets > 0);
+    assert!(impairment.duplicated_packets > 0);
+    assert!(impairment.reordered_batches > 0);
     assert_eq!(server_match(&mut harness).team_scores, [1, 0]);
     let deadline = *harness
         .server
@@ -934,6 +1072,14 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         });
     harness.step();
     assert_eq!(server_match(&mut harness).team_scores, [1, 0]);
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .resource::<brawler::matchplay::MatchOutcomeDiagnostics>()
+            .duplicate_event,
+        1
+    );
     assert_eq!(
         harness
             .server
@@ -967,13 +1113,13 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
     let assignment = *harness
         .server
         .world()
-        .get::<brawler::map::SpawnAssignment>(target.0)
+        .get::<SpawnAssignment>(target.0)
         .unwrap();
     assert!(
         harness
             .server
             .world()
-            .resource::<brawler::map::SpawnPointCatalog>()
+            .resource::<SpawnPointCatalog>()
             .0
             .get(&target.3.0)
             .is_some_and(|points| points
@@ -984,10 +1130,72 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
     harness.step_until(|harness| {
         (0..2).all(|index| {
             let world = harness.clients[index].world_mut();
-            let mut query = world.query::<(&NetworkEntityId, &brawler::map::SpawnAssignment)>();
+            let mut query = world.query::<(&NetworkEntityId, &SpawnAssignment)>();
             query.iter(world).any(|(network_id, replicated)| {
                 *network_id == target_network_id && *replicated == assignment
             })
         })
+    });
+
+    let diagnostics_tick = harness.server.world().resource::<SimulationTick>().0;
+    let mut rejected = vec![
+        CombatOutcomeFact {
+            event_id: CombatEventId(fact.event_id.0 + 1),
+            attack_id: AttackId(fact.attack_id.0 + 1),
+            tick: diagnostics_tick.saturating_sub(1),
+            ..fact
+        },
+        CombatOutcomeFact {
+            event_id: CombatEventId(fact.event_id.0 + 2),
+            attack_id: AttackId(fact.attack_id.0 + 2),
+            tick: diagnostics_tick,
+            target_network_id: NetworkEntityId(u64::MAX - 1),
+            ..fact
+        },
+        CombatOutcomeFact {
+            event_id: CombatEventId(fact.event_id.0 + 3),
+            attack_id: AttackId(fact.attack_id.0 + 3),
+            tick: diagnostics_tick,
+            source_team: Some(target.3),
+            ..fact
+        },
+    ];
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<CombatOutcomeFacts>()
+        .0
+        .append(&mut rejected);
+    harness.step();
+    let diagnostics = *harness
+        .server
+        .world()
+        .resource::<brawler::matchplay::MatchOutcomeDiagnostics>();
+    assert_eq!(diagnostics.stale_tick, 1);
+    assert_eq!(diagnostics.unknown_or_wrong_match_target, 1);
+    assert_eq!(diagnostics.friendly_invalid_defeat, 1);
+    assert_eq!(server_match(&mut harness).team_scores, [1, 0]);
+
+    {
+        let world = harness.server.world_mut();
+        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRootMarker>>();
+        roots.single_mut(world).unwrap().target_score = 2;
+    }
+    let completion_tick = harness.server.world().resource::<SimulationTick>().0;
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<CombatOutcomeFacts>()
+        .0
+        .push(CombatOutcomeFact {
+            event_id: CombatEventId(fact.event_id.0 + 10),
+            attack_id: AttackId(fact.attack_id.0 + 10),
+            tick: completion_tick,
+            ..fact
+        });
+    harness.step_until(|harness| {
+        let server = server_match(harness);
+        matches!(server.phase, MatchPhase::Completed { .. })
+            && (0..2).all(|index| client_match(harness, index) == Some(server))
     });
 }

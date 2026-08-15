@@ -8,6 +8,15 @@ use crate::map::ResolvedMapIdentity;
 use bevy::prelude::*;
 use std::collections::{BTreeMap, VecDeque};
 
+/// Bounded, process-lifetime counters for authoritative outcome facts rejected by match scoring.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MatchOutcomeDiagnostics {
+    pub stale_tick: u64,
+    pub duplicate_event: u64,
+    pub unknown_or_wrong_match_target: u64,
+    pub friendly_invalid_defeat: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MatchSummary {
     pub match_id: MatchId,

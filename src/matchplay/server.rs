@@ -1,12 +1,12 @@
 //! Server-owned fixed-tick Wipeout lifecycle and scoring.
-#![allow(clippy::needless_pass_by_value)]
 
 use super::{
     ActiveCombatant, AuthoritativeFighterLifecyclePlugin, FighterLifecycleConfig, FighterReset,
-    MatchId, MatchMember, MatchParticipant, MatchParticipantSummary, MatchPhase, MatchResult,
-    MatchRoot, MatchState, MatchTelemetry, MatchTelemetryContext, RespawnState, SpawnCandidate,
-    SpawnProtection, WIPEOUT_RULES_REVISION, WipeoutRules, complete_fighter_lifecycle,
-    complete_phase, reset_fighter_runtime, score_result, select_spawn, timeout_result,
+    MatchId, MatchMember, MatchOutcomeDiagnostics, MatchParticipant, MatchParticipantSummary,
+    MatchPhase, MatchResult, MatchRoot, MatchSet, MatchState, MatchTelemetry,
+    MatchTelemetryContext, RespawnState, SpawnCandidate, WIPEOUT_RULES_REVISION, WipeoutRules,
+    complete_fighter_lifecycle, complete_phase, configure_match_schedule, fighter_runtime_values,
+    reset_fighter_runtime, score_result, select_spawn, timeout_result,
 };
 use crate::{
     combat::{
@@ -49,6 +49,18 @@ struct KnownMatchRoster {
 #[derive(Resource, Default, Debug)]
 struct RestartCleanupEpoch(Option<MatchId>);
 
+#[derive(Resource, Default, Debug)]
+struct CurrentMatchRoster {
+    match_id: Option<MatchId>,
+    counts: [u8; 2],
+    ready: bool,
+    participants: Vec<MatchParticipantSummary>,
+    participant_departed: bool,
+}
+
+#[derive(Resource, Default, Debug)]
+struct PendingMatchActivation(Option<MatchId>);
+
 impl Default for NextMatchId {
     fn default() -> Self {
         Self(1)
@@ -65,27 +77,7 @@ impl NextMatchId {
     }
 }
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MatchSet {
-    Lifecycle,
-    FighterLifecycle,
-    Outcomes,
-}
-
 pub struct WipeoutPlugin;
-
-fn configure_match_schedule(app: &mut App) {
-    app.configure_sets(
-        FixedUpdate,
-        (MatchSet::Lifecycle, MatchSet::FighterLifecycle).chain(),
-    );
-    app.configure_sets(
-        FixedPostUpdate,
-        MatchSet::Outcomes
-            .after(crate::combat::CombatSet::Damage)
-            .before(crate::combat::CombatSet::Lifecycle),
-    );
-}
 
 impl Plugin for WipeoutPlugin {
     fn build(&self, app: &mut App) {
@@ -94,21 +86,7 @@ impl Plugin for WipeoutPlugin {
             .get_resource::<WipeoutRules>()
             .copied()
             .unwrap_or_default();
-        let rules = if std::env::var("BRAWLER_NETWORK_ASSERT_MATCH").as_deref() == Ok("1") {
-            WipeoutRules {
-                target_score: 3,
-                countdown_ticks: 30,
-                active_limit_ticks: 1_200,
-                respawn_delay_ticks: 30,
-                spawn_protection_ticks: 10,
-                completed_input_lock_ticks: 10,
-                ..configured
-            }
-        } else {
-            configured
-        }
-        .validate()
-        .expect("Wipeout rules must be valid");
+        let rules = configured.validate().expect("Wipeout rules must be valid");
         configure_match_schedule(app);
         app.add_plugins(AuthoritativeFighterLifecyclePlugin)
             .insert_resource(rules)
@@ -119,9 +97,12 @@ impl Plugin for WipeoutPlugin {
             .init_resource::<RespawnOrdinals>()
             .init_resource::<ScoredCombatEvents>()
             .init_resource::<MatchTelemetry>()
+            .init_resource::<MatchOutcomeDiagnostics>()
             .init_resource::<PriorMatchPositions>()
             .init_resource::<KnownMatchRoster>()
             .init_resource::<RestartCleanupEpoch>()
+            .init_resource::<CurrentMatchRoster>()
+            .init_resource::<PendingMatchActivation>()
             .add_systems(
                 Startup,
                 initialize_match_root.after(MapStartupSet::Instantiate),
@@ -129,7 +110,11 @@ impl Plugin for WipeoutPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    advance_match_phase,
+                    refresh_match_roster,
+                    advance_waiting_and_countdown,
+                    activate_started_match,
+                    complete_active_match,
+                    restart_completed_match,
                     cleanup_restarted_match,
                     select_due_respawn_spawns,
                 )
@@ -152,7 +137,7 @@ impl Plugin for WipeoutPlugin {
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 fn record_match_movement(
     rules: Res<WipeoutRules>,
     mut prior: ResMut<PriorMatchPositions>,
@@ -173,6 +158,7 @@ fn record_match_movement(
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn initialize_match_root(
     mut commands: Commands,
     mut ids: ResMut<NextMatchId>,
@@ -195,37 +181,236 @@ fn initialize_match_root(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::type_complexity
-)]
-fn advance_match_phase(
-    mut commands: Commands,
-    tick: Res<SimulationTick>,
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+fn refresh_match_roster(
     rules: Res<WipeoutRules>,
-    mut ids: ResMut<NextMatchId>,
-    mut roots: Query<&mut MatchState, With<MatchRoot>>,
-    fighter_definitions: Res<FighterDefinitions>,
-    weapon_definitions: Res<WeaponDefinitions>,
-    weapon_telemetry: Res<WeaponTelemetry>,
-    resolved_map: Res<ResolvedMap>,
-    content_fingerprint: Res<crate::content::GameplayContentFingerprint>,
-    mut known_roster: ResMut<KnownMatchRoster>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    mut known: ResMut<KnownMatchRoster>,
+    mut current: ResMut<CurrentMatchRoster>,
     mut telemetry: ResMut<MatchTelemetry>,
-    mut participants: Query<
+    participants: Query<
         (
-            Entity,
             &PlayerId,
             &NetworkEntityId,
-            &mut MatchParticipant,
+            &MatchParticipant,
             &TeamId,
             &SelectedBuild,
             Option<&SelectedWeapon>,
         ),
         With<Fighter>,
     >,
-    lifecycle_fighters: Query<(
+) {
+    let Ok(state) = roots.single() else { return };
+    let mut counts = [0_u8; 2];
+    let mut players = BTreeSet::new();
+    let mut summaries = Vec::new();
+    let mut ready = true;
+    for (player, network_id, participant, team, build, selected) in &participants {
+        if participant.match_id != state.match_id || team.0 > 1 {
+            continue;
+        }
+        ready &= participant.ready && selected.is_some();
+        players.insert(player.0);
+        counts[usize::from(team.0)] = counts[usize::from(team.0)].saturating_add(1);
+        summaries.push(MatchParticipantSummary {
+            player_id: player.0,
+            network_entity_id: network_id.0,
+            team: *team,
+            selected_build: *build,
+        });
+        if matches!(state.phase, MatchPhase::Active { .. }) {
+            telemetry.record_participant_active_tick(*team, build.source_preset_id);
+        }
+    }
+    summaries.sort_by_key(|participant| participant.player_id);
+    ready &= counts
+        .into_iter()
+        .all(|count| count >= rules.minimum_participants_per_team);
+    let departed = known.match_id == Some(state.match_id)
+        && known.players.difference(&players).next().is_some();
+    if departed && matches!(state.phase, MatchPhase::Active { .. }) {
+        telemetry.record_disconnects(known.players.difference(&players).count());
+    }
+    known.match_id = Some(state.match_id);
+    known.players.clone_from(&players);
+    *current = CurrentMatchRoster {
+        match_id: Some(state.match_id),
+        counts,
+        ready,
+        participants: summaries,
+        participant_departed: departed,
+    };
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn advance_waiting_and_countdown(
+    tick: Res<SimulationTick>,
+    rules: Res<WipeoutRules>,
+    roster: Res<CurrentMatchRoster>,
+    mut activation: ResMut<PendingMatchActivation>,
+    mut roots: Query<&mut MatchState, With<MatchRoot>>,
+    mut participants: Query<&mut MatchParticipant, With<Fighter>>,
+) {
+    let Ok(mut state) = roots.single_mut() else {
+        return;
+    };
+    if roster.match_id != Some(state.match_id) {
+        return;
+    }
+    match state.phase {
+        MatchPhase::Waiting if roster.ready => {
+            if let Some(starts_at_tick) = tick.0.checked_add(rules.countdown_ticks) {
+                state.phase = MatchPhase::Countdown { starts_at_tick };
+            }
+        }
+        MatchPhase::Countdown { .. } if roster.participant_departed || !roster.ready => {
+            state.phase = MatchPhase::Waiting;
+            for mut participant in &mut participants {
+                if participant.match_id == state.match_id {
+                    participant.ready = false;
+                }
+            }
+        }
+        MatchPhase::Countdown { starts_at_tick } if tick.0 >= starts_at_tick => {
+            let Some(ends_at_tick) = tick.0.checked_add(rules.active_limit_ticks) else {
+                return;
+            };
+            state.phase = MatchPhase::Active { ends_at_tick };
+            activation.0 = Some(state.match_id);
+        }
+        _ => {}
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+fn activate_started_match(
+    mut commands: Commands,
+    tick: Res<SimulationTick>,
+    rules: Res<WipeoutRules>,
+    fighter_definitions: Res<FighterDefinitions>,
+    weapon_definitions: Res<WeaponDefinitions>,
+    weapon_telemetry: Res<WeaponTelemetry>,
+    resolved_map: Res<ResolvedMap>,
+    content_fingerprint: Res<crate::content::GameplayContentFingerprint>,
+    roster: Res<CurrentMatchRoster>,
+    mut activation: ResMut<PendingMatchActivation>,
+    mut telemetry: ResMut<MatchTelemetry>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    fighters: Query<(
+        Entity,
+        &MatchParticipant,
+        &crate::combat::FighterDefinitionId,
+        &SelectedBuild,
+        Option<&crate::combat::ResolvedWeapon>,
+        &SpawnState,
+    )>,
+) {
+    let Some(match_id) = activation.0.take() else {
+        return;
+    };
+    let Ok(state) = roots.single() else { return };
+    if state.match_id != match_id || !matches!(state.phase, MatchPhase::Active { .. }) {
+        return;
+    }
+    telemetry.begin_with_weapons(match_id, tick.0, &weapon_telemetry);
+    telemetry.set_context(MatchTelemetryContext {
+        map_identity: resolved_map.snapshot.identity,
+        content_fingerprint: *content_fingerprint,
+        rules_revision: state.rules_revision,
+        participants: roster.participants.clone(),
+    });
+    for (entity, participant, fighter_id, build, resolved, spawn) in &fighters {
+        if participant.match_id != match_id {
+            continue;
+        }
+        let Some((maximum_health, ammunition)) = fighter_runtime_values(
+            *fighter_id,
+            build,
+            resolved,
+            &fighter_definitions,
+            &weapon_definitions,
+        ) else {
+            continue;
+        };
+        reset_fighter_runtime(
+            &mut commands,
+            entity,
+            FighterReset {
+                maximum_health,
+                ammunition,
+                position: spawn.position,
+                facing: spawn.facing,
+                collision_mask: crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
+                    | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                protection_until: Some(tick.0.saturating_add(rules.spawn_protection_ticks)),
+                active: true,
+            },
+        );
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn complete_active_match(
+    mut commands: Commands,
+    tick: Res<SimulationTick>,
+    rules: Res<WipeoutRules>,
+    roster: Res<CurrentMatchRoster>,
+    mut roots: Query<&mut MatchState, With<MatchRoot>>,
+    participants: Query<(Entity, &MatchParticipant), With<Fighter>>,
+) {
+    let Ok(mut state) = roots.single_mut() else {
+        return;
+    };
+    let MatchPhase::Active { ends_at_tick } = state.phase else {
+        return;
+    };
+    let result = if roster.counts[0] == 0 || roster.counts[1] == 0 {
+        Some(match (roster.counts[0] == 0, roster.counts[1] == 0) {
+            (true, true) => MatchResult::Draw,
+            (true, false) => MatchResult::Forfeit {
+                winner: TeamId(1),
+                departed_team: TeamId(0),
+            },
+            (false, true) => MatchResult::Forfeit {
+                winner: TeamId(0),
+                departed_team: TeamId(1),
+            },
+            (false, false) => unreachable!(),
+        })
+    } else if tick.0 >= ends_at_tick {
+        Some(timeout_result(state.team_scores))
+    } else {
+        None
+    };
+    let Some(result) = result else { return };
+    state.phase = complete_phase(tick.0, rules.completed_input_lock_ticks, result)
+        .expect("validated completion deadline cannot overflow");
+    complete_match_fighters(
+        &mut commands,
+        participants.iter().filter_map(|(entity, participant)| {
+            (participant.match_id == state.match_id).then_some(entity)
+        }),
+    );
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+fn restart_completed_match(
+    mut commands: Commands,
+    tick: Res<SimulationTick>,
+    mut ids: ResMut<NextMatchId>,
+    fighter_definitions: Res<FighterDefinitions>,
+    weapon_definitions: Res<WeaponDefinitions>,
+    mut roots: Query<&mut MatchState, With<MatchRoot>>,
+    mut participants: Query<(Entity, &mut MatchParticipant), With<Fighter>>,
+    fighters: Query<(
         Entity,
         &crate::combat::FighterDefinitionId,
         &SelectedBuild,
@@ -236,195 +421,56 @@ fn advance_match_phase(
     let Ok(mut state) = roots.single_mut() else {
         return;
     };
-    let phase = state.phase;
-    let mut counts = [0_u8; 2];
-    let mut current_players = BTreeSet::new();
-    let mut participant_summaries = Vec::new();
-    let mut ready = true;
-    for (_, player, network_id, participant, team, build, selected) in &participants {
-        if participant.match_id != state.match_id || team.0 > 1 {
+    let MatchPhase::Completed {
+        restart_unlocked_at_tick,
+        ..
+    } = state.phase
+    else {
+        return;
+    };
+    if tick.0 < restart_unlocked_at_tick
+        || !participants
+            .iter()
+            .filter(|(_, participant)| participant.match_id == state.match_id)
+            .all(|(_, participant)| participant.restart_ready)
+    {
+        return;
+    }
+    let new_id = ids.allocate();
+    for (entity, mut participant) in &mut participants {
+        participant.match_id = new_id;
+        participant.ready = false;
+        participant.restart_ready = false;
+        commands.entity(entity).insert(MatchMember(new_id));
+        complete_fighter_lifecycle(&mut commands, entity);
+    }
+    for (entity, fighter_id, build, resolved, spawn) in &fighters {
+        let Some((maximum_health, ammunition)) = fighter_runtime_values(
+            *fighter_id,
+            build,
+            resolved,
+            &fighter_definitions,
+            &weapon_definitions,
+        ) else {
             continue;
-        }
-        ready &= participant.ready && selected.is_some();
-        current_players.insert(player.0);
-        counts[usize::from(team.0)] = counts[usize::from(team.0)].saturating_add(1);
-        participant_summaries.push(MatchParticipantSummary {
-            player_id: player.0,
-            network_entity_id: network_id.0,
-            team: *team,
-            selected_build: *build,
-        });
-        if matches!(phase, MatchPhase::Active { .. }) {
-            telemetry.record_participant_active_tick(*team, build.source_preset_id);
-        }
+        };
+        reset_fighter_runtime(
+            &mut commands,
+            entity,
+            FighterReset {
+                maximum_health,
+                ammunition,
+                position: spawn.position,
+                facing: spawn.facing,
+                collision_mask: LayerMask::NONE,
+                protection_until: None,
+                active: false,
+            },
+        );
     }
-    participant_summaries.sort_by_key(|participant| participant.player_id);
-    ready &= counts
-        .into_iter()
-        .all(|count| count >= rules.minimum_participants_per_team);
-    if known_roster.match_id == Some(state.match_id) {
-        if matches!(phase, MatchPhase::Active { .. }) {
-            telemetry.record_disconnects(known_roster.players.difference(&current_players).count());
-        }
-        known_roster.players = current_players;
-    } else {
-        known_roster.match_id = Some(state.match_id);
-        known_roster.players.clone_from(&current_players);
-    }
-    match phase {
-        MatchPhase::Waiting if ready => {
-            if let Some(starts_at_tick) = tick.0.checked_add(rules.countdown_ticks) {
-                state.phase = MatchPhase::Countdown { starts_at_tick };
-            }
-        }
-        MatchPhase::Countdown { .. } if !ready => {
-            state.phase = MatchPhase::Waiting;
-            for (_, _, _, mut participant, _, _, _) in &mut participants {
-                participant.ready = false;
-            }
-        }
-        MatchPhase::Countdown { starts_at_tick } if tick.0 >= starts_at_tick => {
-            let Some(ends_at_tick) = tick.0.checked_add(rules.active_limit_ticks) else {
-                return;
-            };
-            state.phase = MatchPhase::Active { ends_at_tick };
-            telemetry.begin_with_weapons(state.match_id, tick.0, &weapon_telemetry);
-            telemetry.set_context(MatchTelemetryContext {
-                map_identity: resolved_map.snapshot.identity,
-                content_fingerprint: *content_fingerprint,
-                rules_revision: state.rules_revision,
-                participants: participant_summaries,
-            });
-            for (entity, _, _, participant, _, _, _) in &mut participants {
-                if participant.match_id == state.match_id {
-                    let Ok((_, fighter_id, build, resolved, spawn)) =
-                        lifecycle_fighters.get(entity)
-                    else {
-                        continue;
-                    };
-                    let Some(fighter) = fighter_definitions.get(*fighter_id) else {
-                        continue;
-                    };
-                    let capacity = resolved.map_or_else(
-                        || {
-                            weapon_definitions
-                                .get(build.primary_weapon)
-                                .map_or(0, |weapon| weapon.magazine_capacity)
-                        },
-                        |weapon| weapon.recipe.economy.capacity(),
-                    );
-                    reset_fighter_runtime(
-                        &mut commands,
-                        entity,
-                        FighterReset {
-                            maximum_health: fighter.maximum_health,
-                            ammunition: capacity,
-                            position: spawn.position,
-                            facing: spawn.facing,
-                            collision_mask: crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                                | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
-                            protection_until: Some(
-                                tick.0.saturating_add(rules.spawn_protection_ticks),
-                            ),
-                            active: true,
-                        },
-                    );
-                }
-            }
-        }
-        MatchPhase::Active { .. } if counts[0] == 0 || counts[1] == 0 => {
-            let result = match (counts[0] == 0, counts[1] == 0) {
-                (true, true) => MatchResult::Draw,
-                (true, false) => MatchResult::Forfeit {
-                    winner: TeamId(1),
-                    departed_team: TeamId(0),
-                },
-                (false, true) => MatchResult::Forfeit {
-                    winner: TeamId(0),
-                    departed_team: TeamId(1),
-                },
-                (false, false) => unreachable!(),
-            };
-            state.phase = complete_phase(tick.0, rules.completed_input_lock_ticks, result)
-                .expect("validated completion deadline cannot overflow");
-            complete_match_fighters(
-                &mut commands,
-                participants
-                    .iter()
-                    .filter_map(|(entity, _, _, participant, _, _, _)| {
-                        (participant.match_id == state.match_id).then_some(entity)
-                    }),
-            );
-        }
-        MatchPhase::Active { ends_at_tick } if tick.0 >= ends_at_tick => {
-            state.phase = complete_phase(
-                tick.0,
-                rules.completed_input_lock_ticks,
-                timeout_result(state.team_scores),
-            )
-            .expect("validated match deadline cannot overflow");
-            complete_match_fighters(
-                &mut commands,
-                participants
-                    .iter()
-                    .filter_map(|(entity, _, _, participant, _, _, _)| {
-                        (participant.match_id == state.match_id).then_some(entity)
-                    }),
-            );
-        }
-        MatchPhase::Completed {
-            restart_unlocked_at_tick,
-            ..
-        } if tick.0 >= restart_unlocked_at_tick
-            && participants
-                .iter()
-                .filter(|(_, _, _, participant, _, _, _)| participant.match_id == state.match_id)
-                .all(|(_, _, _, participant, _, _, _)| participant.restart_ready) =>
-        {
-            let new_id = ids.allocate();
-            for (entity, _, _, mut participant, _, _, _) in &mut participants {
-                participant.match_id = new_id;
-                participant.ready = false;
-                participant.restart_ready = false;
-                commands
-                    .entity(entity)
-                    .insert(MatchMember(new_id))
-                    .remove::<ActiveCombatant>()
-                    .remove::<RespawnState>()
-                    .remove::<SpawnProtection>();
-            }
-            for (entity, fighter_id, build, resolved, spawn) in &lifecycle_fighters {
-                let Some(fighter) = fighter_definitions.get(*fighter_id) else {
-                    continue;
-                };
-                let capacity = resolved.map_or_else(
-                    || {
-                        weapon_definitions
-                            .get(build.primary_weapon)
-                            .map_or(0, |weapon| weapon.magazine_capacity)
-                    },
-                    |weapon| weapon.recipe.economy.capacity(),
-                );
-                reset_fighter_runtime(
-                    &mut commands,
-                    entity,
-                    FighterReset {
-                        maximum_health: fighter.maximum_health,
-                        ammunition: capacity,
-                        position: spawn.position,
-                        facing: spawn.facing,
-                        collision_mask: LayerMask::NONE,
-                        protection_until: None,
-                        active: false,
-                    },
-                );
-            }
-            state.match_id = new_id;
-            state.phase = MatchPhase::Waiting;
-            state.team_scores = [0, 0];
-        }
-        _ => {}
-    }
+    state.match_id = new_id;
+    state.phase = MatchPhase::Waiting;
+    state.team_scores = [0, 0];
 }
 
 fn complete_match_fighters(commands: &mut Commands, entities: impl IntoIterator<Item = Entity>) {
@@ -433,7 +479,11 @@ fn complete_match_fighters(commands: &mut Commands, entities: impl IntoIterator<
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
 fn select_due_respawn_spawns(
     tick: Res<SimulationTick>,
     roots: Query<&MatchState, With<MatchRoot>>,
@@ -553,13 +603,14 @@ fn cleanup_restarted_match(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn resolve_match_outcomes(
     mut commands: Commands,
     tick: Res<SimulationTick>,
     rules: Res<WipeoutRules>,
     mut facts: ResMut<CombatOutcomeFacts>,
     mut scored_events: ResMut<ScoredCombatEvents>,
+    mut diagnostics: ResMut<MatchOutcomeDiagnostics>,
     mut telemetry: ResMut<MatchTelemetry>,
     mut roots: Query<&mut MatchState, With<MatchRoot>>,
     participants: Query<(Entity, &NetworkEntityId, &TeamId, &MatchParticipant), With<Fighter>>,
@@ -580,13 +631,16 @@ fn resolve_match_outcomes(
     facts.0.sort_by_key(|fact| fact.event_id.0);
     let mut defeated_entities = Vec::new();
     for fact in facts.0.drain(..) {
+        telemetry.record(fact, rules.retained_match_records);
         if fact.tick != tick.0 {
+            diagnostics.stale_tick = diagnostics.stale_tick.saturating_add(1);
             continue;
         }
-        telemetry.record(fact, rules.retained_match_records);
-        if !matches!(fact.kind, CombatOutcomeKind::Defeat)
-            || !scored_events.ids.insert(fact.event_id.0)
-        {
+        if !matches!(fact.kind, CombatOutcomeKind::Defeat) {
+            continue;
+        }
+        if !scored_events.ids.insert(fact.event_id.0) {
+            diagnostics.duplicate_event = diagnostics.duplicate_event.saturating_add(1);
             continue;
         }
         let Some((target_entity, _, target_team, _)) =
@@ -594,12 +648,32 @@ fn resolve_match_outcomes(
                 **network_id == fact.target_network_id && participant.match_id == state.match_id
             })
         else {
+            diagnostics.unknown_or_wrong_match_target =
+                diagnostics.unknown_or_wrong_match_target.saturating_add(1);
             continue;
         };
+        if *target_team != fact.target_team {
+            diagnostics.unknown_or_wrong_match_target =
+                diagnostics.unknown_or_wrong_match_target.saturating_add(1);
+            continue;
+        }
         defeated_entities.push(target_entity);
         if let Some(source_team) = credited_defeat_team(&fact, *target_team) {
             let index = usize::from(source_team.0);
             increment_score(&mut state.team_scores[index]);
+        } else if fact
+            .source_network_id
+            .is_some_and(|source| source != fact.target_network_id)
+            && fact.source_team == Some(*target_team)
+        {
+            diagnostics.friendly_invalid_defeat =
+                diagnostics.friendly_invalid_defeat.saturating_add(1);
+            warn!(
+                event_id = fact.event_id.0,
+                target = fact.target_network_id.0,
+                team = target_team.0,
+                "ignored same-team defeat outcome"
+            );
         }
     }
     if let Some(result) = score_result(state.team_scores, state.target_score) {
@@ -637,6 +711,7 @@ pub(crate) fn credited_defeat_team(
     .then_some(source_team)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn capture_match_summary(
     tick: Res<SimulationTick>,
     rules: Res<WipeoutRules>,
@@ -694,6 +769,7 @@ mod schedule_tests {
         trace.0.push("combat lifecycle");
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn finalize(tick: Res<SimulationTick>, mut trace: ResMut<ScheduleTrace>) {
         assert_eq!(tick.0, 0);
         trace.0.push("finalize");

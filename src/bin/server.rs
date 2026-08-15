@@ -1,14 +1,14 @@
 //! Brawler's dedicated headless-server process.
 
 use bevy::app::AppExit;
-use brawler::config::ServerNetworkConfig;
+use brawler::config::{ServerNetworkConfig, WipeoutRulesProfile};
 use brawler::server::build_app_with_config;
 use core::{net::SocketAddr, time::Duration};
 use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>]"
+        "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--wipeout-rules <production|verification>]"
     );
 }
 
@@ -29,6 +29,13 @@ fn parse_args() -> Result<ServerNetworkConfig, String> {
             "--handshake-timeout-ms" => {
                 let millis: u64 = parse_value(&flag, args.next())?;
                 config.handshake_timeout = Duration::from_millis(millis);
+            }
+            "--wipeout-rules" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                config.wipeout_rules_profile = WipeoutRulesProfile::parse(&value)
+                    .ok_or_else(|| format!("invalid value for {flag}"))?;
             }
             "--help" | "-h" => {
                 usage();

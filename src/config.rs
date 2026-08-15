@@ -100,6 +100,28 @@ pub enum NetworkTransport {
     Crossbeam,
 }
 
+/// Explicit server-owned Wipeout rules profile. Production never changes rules from ambient
+/// verification environment variables.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WipeoutRulesProfile {
+    #[default]
+    Production,
+    ProcessVerification,
+}
+
+impl WipeoutRulesProfile {
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "production" | "default" => Some(Self::Production),
+            "verification" | "process-verification" | "process_verification" => {
+                Some(Self::ProcessVerification)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Runtime configuration for the dedicated server.
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
 pub struct ServerNetworkConfig {
@@ -110,6 +132,7 @@ pub struct ServerNetworkConfig {
     pub handshake_timeout: Duration,
     pub client_timeout: Duration,
     pub impairment_profile: NetworkImpairmentProfile,
+    pub wipeout_rules_profile: WipeoutRulesProfile,
 }
 
 impl Default for ServerNetworkConfig {
@@ -124,6 +147,7 @@ impl Default for ServerNetworkConfig {
             handshake_timeout: Duration::from_secs(3),
             client_timeout: Duration::from_secs(3),
             impairment_profile: NetworkImpairmentProfile::from_env(),
+            wipeout_rules_profile: WipeoutRulesProfile::Production,
         }
     }
 }
@@ -280,6 +304,19 @@ mod tests {
                 .receive_conditioner()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn wipeout_rules_profile_is_explicit_and_defaults_to_production() {
+        assert_eq!(
+            ServerNetworkConfig::default().wipeout_rules_profile,
+            WipeoutRulesProfile::Production
+        );
+        assert_eq!(
+            WipeoutRulesProfile::parse("verification"),
+            Some(WipeoutRulesProfile::ProcessVerification)
+        );
+        assert_eq!(WipeoutRulesProfile::parse("unexpected"), None);
     }
 
     #[test]

@@ -39,6 +39,13 @@ fn production_startup_instantiates_wipeout_map_and_match_without_practice_dummy(
 }
 
 #[test]
+fn shortened_wipeout_rules_require_the_explicit_verification_profile() {
+    let rules = wipeout_rules_for_profile(crate::config::WipeoutRulesProfile::ProcessVerification);
+    assert_eq!(rules.target_score, 3);
+    assert_eq!(rules.active_limit_ticks, 1_200);
+}
+
+#[test]
 fn started_unlinked_udp_server_requests_error_exit() {
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, StatesPlugin))

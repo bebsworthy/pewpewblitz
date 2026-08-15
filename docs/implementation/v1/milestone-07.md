@@ -6,12 +6,12 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Verifying |
+| Status | Complete |
 | Research | Complete; post-M06 source, architecture, pinned-reference, and primary-source review performed on 2026-08-15 |
 | Specification validation | Approved by the user on 2026-08-15 |
 | Implementation | Complete; initial implementation plus accepted feedback remediation implemented |
-| Verification | In progress; feedback regression gates are being rerun before the remaining physical-controller/audio and final playtest checks |
-| User validation/playtest | Not started |
+| Verification | Automated, deterministic-network, role-isolation, performance, and local four-process gates are green; unperformed supervised controller/audio/full-aspect/normal-duration observations are explicitly deferred to M11 |
+| User validation/playtest | Closeout approved by the user on 2026-08-15; this approval does not claim the deferred supervised observations were performed |
 
 Update this table and the roadmap together whenever the milestone changes phase. Milestone 06 is the
 accepted starting baseline: its automated, process-network, performance, visual, controller, and
@@ -650,13 +650,15 @@ red.
 - [x] Run format, role-specific Clippy/tests/builds, isolated server features, all deterministic
   network/performance suites, three-profile match process runs, and repeated-process fixed-port
   cleanup.
-- [ ] Run two-window keyboard/mouse and physical-controller 1v1 plus automated/headless 2v2 checks;
-  verify countdown, combat gating, score, respawn/protection, result, restart, disconnect, HUD, audio,
-  and all four M06 aspect ratios/render profiles.
+- [x] Record the verification disposition for two-window keyboard/mouse, physical-controller 1v1, and
+  automated/headless 2v2 checks. Automated 2v2 and partial native-window checks passed; the physical
+  controller, perceptual audio, 1440x900, and full human match observations were explicitly deferred
+  to the M11 hardening playtest by the user's 2026-08-15 closeout decision.
 - [x] Produce match telemetry summaries for all four weapon presets across controlled matches and
   record whether duration/range/counterplay evidence is adequate for the vertical-slice review.
-- [ ] Enter `User playtest` only after automated/network/visual gates pass; provide exact server/client
-  commands, controls, 1v1 and 2v2 options, scenarios, known limitations, and requested observations.
+- [x] Resolve the playtest gate. The user approved closeout on 2026-08-15 with the remaining supervised
+  observations recorded as known limitations and moved visibly to M11 rather than represented as
+  completed M07 evidence.
 
 ## Test plan
 
@@ -719,19 +721,21 @@ red.
 
 - [x] A real dedicated server plus four headless clients completes and restarts a shortened 2v2 match
   under local, typical, and adverse UDP profiles with identical final evidence and clean ports.
-- [ ] Production server plus two windowed clients completes a normal 1v1 match and restarts without
-  process restart; normal playtest duration is roughly two to four minutes.
+- [x] Record the normal 1v1 disposition: process restart behavior is covered by automated and native
+  window evidence; a human normal-duration 1v1 timing judgment was not performed and is explicitly
+  deferred to M11.
 - [x] Match additions retain fixed-step p95 `< 16.67 ms` in the 4-participant/projectile worst cases;
   telemetry and scoreboard work are bounded and do not scan historical records each tick.
 - [x] Isolated server features still exclude window, renderer, UI, text, asset, audio, PNG/Vorbis, and
   device-input capabilities and run with no `assets/` tree.
-- [ ] At 1280x720, 1440x900, 1024x768, and 960x540, persistent score/time, held scoreboard, countdown,
-  respawn/protection, results, restart quorum, readiness/error, health/weapon, and aim feedback do not
-  critically overlap or clip.
-- [ ] Physical Xbox-like controller and keyboard/mouse both select, ready, move/aim/fire, hold the
-  scoreboard, understand respawn/protection/result state, and restart without a pointer.
-- [ ] Countdown/score/defeat/respawn/result audio remains distinguishable during simultaneous combat,
-  respects caps/deduplication, and degrades visibly but safely without audio output/assets.
+- [x] Record the aspect-ratio disposition: 1280x720, 960x540, and a taller 4:3 layout were inspected and
+  resulting defects fixed; 1440x900 and the complete state matrix are explicitly deferred to M11.
+- [x] Record the input-device disposition: keyboard/mouse and automated action paths are covered;
+  physical Xbox-like controller comprehension and the complete held-scoreboard flow are explicitly
+  deferred to M11.
+- [x] Record the audio disposition: caps, deduplication, and asset/output-free degradation have
+  automated coverage; perceptual distinguishability during simultaneous combat is explicitly deferred
+  to M11.
 
 ### Evidence rules
 
@@ -766,7 +770,7 @@ Automated evidence on the implementation tree:
   initial baseline run exposed Rust 1.95 lint drift in pre-existing performance/network tests; those
   item-scoped warnings were repaired without changing their behavior.
 - `cargo test --all-targets --features client,server,network-test -- --test-threads=1` passed with
-  124 library tests, 53 deterministic/loopback network tests, and 8 performance tests.
+  128 library tests, 56 deterministic/loopback network tests, and 8 performance tests.
 - `cargo build --locked --no-default-features --features {client,server}` passed for both binaries,
   and `scripts/check-server-features.sh` confirmed the dedicated server still excludes client
   presentation/device capabilities.
@@ -797,9 +801,10 @@ The first final adverse sample produced no defeat in the shortened stochastic wi
 the rerun completed with full evidence, confirming the verifier fails closed rather than treating mere
 connectivity as match proof.
 
-Recovery evidence is intentionally layered: the deterministic suite injects duplicate/reordered
-commands and combat packets, asserts durable respawn/protection and current match state, and runs two
-restarts with exact server cleanup; local/typical/adverse real UDP runs add latency, jitter, loss,
+Recovery evidence is intentionally layered: the deterministic suite injects delayed, dropped,
+duplicated, and reordered raw packets plus duplicate/reordered commands, asserts durable phase,
+score, respawn/protection, result, and spawn-assignment convergence, and runs two restarts with exact
+server cleanup; local/typical/adverse real UDP runs add latency, jitter, statistical loss,
 client-observed completion, restart convergence, and process cleanup. Client presentation caches reset
 on match ID and retain only bounded current/disconnected roster facts, while cue histories and archived
 summaries retain their independently tested bounds.
@@ -818,8 +823,9 @@ the affected client Clippy/tests and the complete regression suite passed afterw
 The automation display cannot host a complete 1440x900 window, cannot supply a physical controller,
 and cannot establish whether audio transitions are perceptually distinguishable. It also does not
 replace a human normal-duration match, held-scoreboard, defeat/respawn/protection/result/restart, and
-counterplay judgment. Those checks remain required in the supervised user playtest before this
-milestone can enter `User playtest` or `Feedback review`.
+counterplay judgment. The user's 2026-08-15 closeout decision accepts these as non-blocking M07
+limitations and defers the supervised observations to the M11 hardening playtest. This is a disposition,
+not evidence that the checks passed.
 
 ## Implementation feedback — 2026-08-15
 
@@ -838,6 +844,70 @@ milestone's product scope:
 The affected unit, schedule, network, role-isolation, and process checks must be green before this
 feedback is considered verified. The remaining supervised visual/controller/audio observations are
 unchanged.
+
+## External implementation review — 2026-08-15
+
+The external Wipeout review was validated against the approved specification. All behavioral,
+coverage, presentation, and repository-organization findings were accepted; the duplicated render
+input read was treated as ownership debt rather than a demonstrated same-frame input race.
+
+| Finding | Decision and remediation |
+|---|---|
+| 2v2 countdown departure continued as 2v1 | Implemented now. A roster snapshot detects any departure during `Countdown`, returns the same match to `Waiting`, and clears every remaining ready flag. A four-client regression advances beyond the cancelled deadline and proves no activation. |
+| Monolithic phase system and duplicated reset derivation | Implemented now. Roster observation, waiting/countdown transition, active entry, active completion, restart, cleanup, and respawn selection are separate explicitly chained systems. Shared lifecycle code derives health/ammunition once for activation, respawn, and restart; schedule sets live at the match composition root and lint exceptions are item-scoped. |
+| Verification environment changed gameplay rules | Implemented now. Production defaults always use production rules. The process script selects a validated `WipeoutRulesProfile::ProcessVerification` through the explicit `--wipeout-rules verification` server option; the assertion environment flag only enables evidence collection. |
+| Wildcard matchplay API | Implemented now. `matchplay/mod.rs` exposes explicit public and crate-private items instead of wildcard re-exports. |
+| Missing deterministic match impairment evidence | Implemented now. The shared raw-link harness deterministically delays, drops, duplicates, and reorders packets, then proves current respawn, protection, spawn assignment, score, completed result, and match state converge. |
+| Process verifier accepted zero respawns | Implemented now. Process completion fails closed unless the archived match includes at least one completed respawn. |
+| Headless ready retry deadlocked after countdown cancellation | Implemented now. Observing countdown re-arms the prior Waiting command key, allowing the same `MatchId` to ready again after cancellation; a focused client regression covers the transition. |
+| Scoreboard omitted local marker | Implemented now. The held roster prefixes the local entry with `YOU`, independently of team color. |
+| Initial spawn bypassed the shared selector | Implemented now. Admission uses `select_spawn` with the same clearance, hostile-distance, stable-ID, match/player seed, and fallback policy as respawn; integration coverage reconstructs and compares every initial assignment. |
+| Missing attribution rejection diagnostics and off-tick visibility | Implemented now. Bounded process-lifetime counters cover stale ticks, duplicate event IDs, unknown/wrong-match targets, and friendly-invalid defeats; facts are retained in telemetry before scoring rejection and same-team defeats emit a warning. |
+| Match verifier lived outside its specified owner | Implemented now. Match process verification and report helpers live in `server/verification.rs`. |
+| Same-frame admission depended on query order | Implemented now. Pending link receivers are ordered by stable Lightyear `RemoteId` before identifier/team assignment; repeated four-client integration runs assert identical per-client teams. |
+| `INTERACT` was sampled independently for match commands | Implemented now. Ready/restart reads the shared `PendingLocalActions` interaction indicator populated by the native input sampler. |
+
+Feedback verification passed format, client-only/server-only/all-feature Clippy with `-D warnings`,
+the 128-library/56-network/8-performance full suite, server feature isolation, and a real local
+four-process match. The process match completed 3–3 as a draw with 6 defeats, 4 respawns, one bounded
+summary, and zero dropped records before restarting from match ID 1 to 2.
+
+## Closeout decision and learning review — 2026-08-15
+
+The user explicitly requested that Milestone 07 be closed after the accepted review findings were
+implemented and the affected automated, deterministic-network, role-isolation, performance, and real
+process checks passed. No known blocking authority, input, collision, cleanup, replication, telemetry,
+or match-loop defect remains. The supervised physical-controller, perceptual-audio, complete
+aspect-ratio/state-matrix, and human normal-duration 1v1 observations were not performed; they are
+accepted as non-blocking for this closeout and recorded in the roadmap backlog for M11. Milestone 08
+may proceed from specification review.
+
+Learn-from-errors findings and prevention:
+
+- Completion cleanup drifted because timeout, threshold, forfeit, respawn, and restart had independent
+  mutation paths. Keep lifecycle mutation behind one reusable seam, gate due work by current match and
+  phase, and test every completion cause for absence of stale lifecycle components.
+- Required waiting/results states were initially treated as presentation polish. Translate every
+  specified player-visible state and datum into focused HUD-model tests before calling presentation
+  complete.
+- Telemetry answered attacker/team questions but not target-preset or per-match drop questions. Define
+  the comparison questions and counter baselines before fixing the summary schema, then test sequential
+  matches as well as one match in isolation.
+- One large phase system, wildcard exports, and broad lint suppression obscured ownership. Keep schedule
+  sets at the composition root, split systems by lifecycle phase/state owner, expose explicit APIs, and
+  attach unavoidable lint exceptions to the smallest item.
+- Statistical process impairment and one roster-departure case were mistaken for complete deterministic
+  coverage. Distinguish deterministic packet transformation from statistical UDP profiles and test
+  both invalidating and still-valid roster changes, including 2v2 countdown departure.
+- Environment-controlled verification silently changed gameplay rules. Behavioral profiles must be
+  explicit validated configuration; evidence/assertion switches may observe but must not alter rules.
+- Initial admission and match commands bypassed shared spawn/input seams. New lifecycle and input paths
+  must reuse the authoritative selector and sampled action state, with equivalence tests at first spawn,
+  respawn, and restart.
+
+These prevention rules are captured in the milestone checklist and repository architecture guidance.
+No new reusable skill was created: the failures are project-specific applications of the existing Bevy
+ECS/scheduling guidance rather than a distinct repeatable workflow.
 
 ## Risks and follow-up decisions
 
@@ -865,7 +935,8 @@ unchanged.
 ## Exit checklist
 
 - [x] Specification is validated by the user before production implementation begins.
-- [ ] M06 accepted baseline is green on the exact M07 starting commit.
+- [x] M06 accepted baseline was green on the exact M07 starting commit, as recorded in Tracking and the
+  implementation evidence.
 - [x] Built-in arena resolves through concrete Wipeout requirements with new stable mode semantics;
   sandbox dummy requirements are not silently reinterpreted.
 - [x] Server-owned fixed-tick match state covers waiting/countdown/active/completed, teams, capacity,
@@ -884,11 +955,14 @@ unchanged.
   unbounded telemetry state while preserving map/session/loadout identity as specified.
 - [x] Match telemetry captures every required metric with bounded raw evidence and drop counters and
   is sufficient for the first weapon/arena comparison.
-- [ ] Normal playtest match duration is roughly two to four minutes and score/time/roster/defeat/
-  respawn/protection/result/restart are readable on controller and keyboard/mouse.
-- [ ] Role feature isolation, fixed-step performance, local/typical/adverse process evidence, aspect
-  ratios, audio, and all M03–M06 authority/combat/map regressions remain green.
-- [ ] Combat vertical-slice playtest and technical gate review are recorded; blocking authority,
-  input, collision, readability, cleanup, or match-loop findings are resolved before M08 research.
-- [ ] User feedback is triaged, affected verification rerun, learn-from-errors recorded, and roadmap
-  status updated before completion.
+- [x] Normal-duration and full controller/keyboard readability observations have an explicit closeout
+  disposition: not performed in M07, accepted by the user as non-blocking, and deferred to M11 without
+  claiming a passing result.
+- [x] Role feature isolation, fixed-step performance, local/typical/adverse process evidence, and all
+  automated M03–M06 authority/combat/map regressions remain green; unperformed 1440x900, physical-
+  controller, and perceptual-audio observations have the explicit M11 disposition above.
+- [x] Combat vertical-slice technical review and partial native-window review are recorded; all blocking
+  authority, input, collision, readability, cleanup, replication, telemetry, and match-loop findings
+  were resolved. The user approved the documented human-observation deferral before M08 implementation.
+- [x] User feedback is triaged, affected verification rerun, learn-from-errors recorded, deferred checks
+  entered in the roadmap backlog, and roadmap status updated for completion.

@@ -1,3 +1,4 @@
 # Local upstream source checkouts used for research.
 /references/
 /target/
+.DS_Store

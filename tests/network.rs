@@ -3,7 +3,7 @@ use bevy::{
     app::App,
     platform::time::Instant,
     prelude::{
-        Entity, IntoScheduleConfigs, Messages, MinimalPlugins, Or, PreUpdate, Query, ResMut,
+        Entity, IntoScheduleConfigs, Messages, MinimalPlugins, Or, PreUpdate, Query, Res, ResMut,
         Resource, Vec2, With, Without,
     },
     state::app::StatesPlugin,
@@ -33,8 +33,8 @@ use brawler::{
         MapCatalogResource, MapEntityPlacement, MapInstanceId, MapInstanceMember,
         MapLayoutRequirements, MapPlacementId, MapPresentationProfileId,
         MapPresetId as ArenaPresetId, MapRegionPlacement, MapRoot, MapShape, PlayableBounds,
-        RegionId, RegionProfileId, ResolvedMap, ResolvedMapSnapshot, SpawnPointId, TeamSpawnPoint,
-        VisualPlacementKind, install_resolved_map,
+        RegionId, RegionProfileId, ResolvedMap, ResolvedMapSnapshot, SpawnAssignment,
+        SpawnPointCatalog, SpawnPointId, TeamSpawnPoint, VisualPlacementKind, install_resolved_map,
     },
     matchplay::{
         ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot as MatchRootMarker,

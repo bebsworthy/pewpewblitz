@@ -47,7 +47,7 @@ cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$targ
     BRAWLER_SERVER_READY_FILE="$ready_file" \
     BRAWLER_NETWORK_ASSERT_MATCH=1 \
     BRAWLER_NETWORK_MATCH_REPORT_FILE="$report_file" \
-    "$target_dir/debug/brawler-server" --bind "$network_addr") &
+    "$target_dir/debug/brawler-server" --bind "$network_addr" --wipeout-rules verification) &
 server_pid=$!
 
 deadline=$((SECONDS + 10))

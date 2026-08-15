@@ -185,7 +185,7 @@ fn duplicate_and_reordered_fire_inputs_do_not_bypass_server_cadence() {
 }
 
 #[test]
-fn duplicate_and_reordered_cue_packets_converge_to_one_full_payload_stream() {
+fn delayed_dropped_duplicated_and_reordered_packets_converge_to_one_full_cue_stream() {
     let mut harness = Harness::new(2);
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -211,7 +211,7 @@ fn duplicate_and_reordered_cue_packets_converge_to_one_full_payload_stream() {
             .accepted_shots
             >= 1
     });
-    harness.arm_cue_packet_impairment(0);
+    harness.arm_packet_impairment(0);
     harness.step_until(|harness| {
         harness
             .server
@@ -228,7 +228,7 @@ fn duplicate_and_reordered_cue_packets_converge_to_one_full_payload_stream() {
             .resource::<CombatTelemetry>()
             .cues
             .len();
-        harness.cue_packet_impairment(0).injected
+        harness.packet_impairment(0).injected
             && harness.client_cues(0).len() == expected_len
             && harness.client_cues(1).len() == expected_len
     });
@@ -239,8 +239,10 @@ fn duplicate_and_reordered_cue_packets_converge_to_one_full_payload_stream() {
         .resource::<CombatTelemetry>()
         .cues
         .clone();
-    let impairment = harness.cue_packet_impairment(0);
+    let impairment = harness.packet_impairment(0);
     assert!(impairment.duplicated_packets > 0);
+    assert!(impairment.dropped_packets > 0);
+    assert!(impairment.delayed_packets > 0);
     assert!(impairment.reordered_batches > 0);
     assert_eq!(harness.client_cues(0), expected.as_slice());
     assert_eq!(harness.client_cues(1), expected.as_slice());

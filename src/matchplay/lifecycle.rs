@@ -45,6 +45,25 @@ pub(crate) struct FighterReset {
     pub active: bool,
 }
 
+pub(crate) fn fighter_runtime_values(
+    fighter_id: crate::combat::FighterDefinitionId,
+    build: &SelectedBuild,
+    resolved: Option<&crate::combat::ResolvedWeapon>,
+    fighters: &FighterDefinitions,
+    weapons: &WeaponDefinitions,
+) -> Option<(u16, u8)> {
+    let maximum_health = fighters.get(fighter_id)?.maximum_health;
+    let ammunition = resolved.map_or_else(
+        || {
+            weapons
+                .get(build.primary_weapon)
+                .map_or(0, |weapon| weapon.magazine_capacity)
+        },
+        |weapon| weapon.recipe.economy.capacity(),
+    );
+    Some((maximum_health, ammunition))
+}
+
 pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, reset: FighterReset) {
     let mut fighter = commands.entity(entity);
     fighter
@@ -136,24 +155,18 @@ fn respawn_due_fighters(
         if participant.match_id != state.match_id || tick.0 < respawn.respawn_at_tick {
             continue;
         }
-        let Some(fighter) = fighters.get(*fighter_id) else {
+        let Some((maximum_health, ammunition)) =
+            fighter_runtime_values(*fighter_id, build, resolved, &fighters, &weapons)
+        else {
             continue;
         };
-        let capacity = resolved.map_or_else(
-            || {
-                weapons
-                    .get(build.primary_weapon)
-                    .map_or(0, |weapon| weapon.magazine_capacity)
-            },
-            |weapon| weapon.recipe.economy.capacity(),
-        );
         telemetry.record_respawn(network_id.0, tick.0);
         reset_fighter_runtime(
             &mut commands,
             entity,
             FighterReset {
-                maximum_health: fighter.maximum_health,
-                ammunition: capacity,
+                maximum_health,
+                ammunition,
                 position: spawn.position,
                 facing: spawn.facing,
                 collision_mask: crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER

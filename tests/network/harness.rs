@@ -15,16 +15,18 @@ impl bevy::prelude::Plugin for MismatchedProtocolPlugin {
 }
 
 #[derive(Resource, Debug, Default)]
-pub(super) struct CuePacketImpairment {
+pub(super) struct DeterministicPacketImpairment {
     pub(super) armed: bool,
     pub(super) injected: bool,
     pub(super) duplicated_packets: u32,
+    pub(super) dropped_packets: u32,
+    pub(super) delayed_packets: u32,
     pub(super) reordered_batches: u32,
     pub(super) held_packet: Option<lightyear::link::RecvPayload>,
 }
 
-fn impair_cue_packets(
-    mut impairment: ResMut<CuePacketImpairment>,
+fn impair_packets(
+    mut impairment: ResMut<DeterministicPacketImpairment>,
     mut links: Query<&mut Link, With<Client>>,
 ) {
     if !impairment.armed || impairment.injected {
@@ -32,8 +34,16 @@ fn impair_cue_packets(
     }
     for mut link in &mut links {
         let mut packets: Vec<_> = link.recv.drain().collect();
+        if impairment.held_packet.is_none() {
+            impairment.held_packet = packets.pop();
+            for packet in packets {
+                link.recv.push_raw(packet);
+            }
+            continue;
+        }
         if let Some(held_packet) = impairment.held_packet.take() {
             packets.push(held_packet);
+            impairment.delayed_packets = impairment.delayed_packets.saturating_add(1);
         }
         if packets.len() < 2 {
             impairment.held_packet = packets.pop();
@@ -43,8 +53,10 @@ fn impair_cue_packets(
             continue;
         }
         packets.reverse();
-        let duplicate = packets[1].clone();
-        packets.insert(2, duplicate);
+        packets.remove(0);
+        impairment.dropped_packets = impairment.dropped_packets.saturating_add(1);
+        let duplicate = packets[0].clone();
+        packets.insert(1, duplicate);
         for packet in packets {
             link.recv.push_raw(packet);
         }
@@ -55,12 +67,33 @@ fn impair_cue_packets(
     }
 }
 
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 fn activate_legacy_test_fighters(
     mut commands: bevy::prelude::Commands,
-    fighters: Query<Entity, (With<Fighter>, Without<ActiveCombatant>)>,
+    spawn_points: Res<SpawnPointCatalog>,
+    fighters: Query<
+        (Entity, &PlayerId, &TeamId, &SpawnAssignment),
+        (With<Fighter>, Without<ActiveCombatant>),
+    >,
 ) {
-    for entity in &fighters {
-        commands.entity(entity).insert(ActiveCombatant);
+    for (entity, player, team, assignment) in &fighters {
+        let ordinal = player.0.saturating_sub(1) / 2;
+        let Some(spawn) = spawn_points.deterministic_point(team.0, ordinal) else {
+            continue;
+        };
+        commands.entity(entity).insert((
+            ActiveCombatant,
+            SpawnState {
+                position: spawn.position,
+                facing: spawn.facing,
+            },
+            Position::from_xy(spawn.position.x, spawn.position.y),
+            Rotation::radians(spawn.facing),
+            SpawnAssignment {
+                spawn_point_id: spawn.spawn_point_id,
+                ..*assignment
+            },
+        ));
     }
 }
 
@@ -194,10 +227,10 @@ impl Harness {
             client.add_plugins(MismatchedProtocolPlugin);
         }
         client
-            .insert_resource(CuePacketImpairment::default())
+            .insert_resource(DeterministicPacketImpairment::default())
             .add_systems(
                 PreUpdate,
-                impair_cue_packets
+                impair_packets
                     .after(LinkSystems::Receive)
                     .before(TransportSystems::Receive)
                     .before(MessageSystems::Receive),
@@ -251,21 +284,23 @@ impl Harness {
         &self.client_cues[index]
     }
 
-    pub(super) fn arm_cue_packet_impairment(&mut self, index: usize) {
+    pub(super) fn arm_packet_impairment(&mut self, index: usize) {
         self.clients[index]
             .world_mut()
-            .resource_mut::<CuePacketImpairment>()
+            .resource_mut::<DeterministicPacketImpairment>()
             .armed = true;
     }
 
-    pub(super) fn cue_packet_impairment(&self, index: usize) -> CuePacketImpairment {
+    pub(super) fn packet_impairment(&self, index: usize) -> DeterministicPacketImpairment {
         let impairment = self.clients[index]
             .world()
-            .resource::<CuePacketImpairment>();
-        CuePacketImpairment {
+            .resource::<DeterministicPacketImpairment>();
+        DeterministicPacketImpairment {
             armed: impairment.armed,
             injected: impairment.injected,
             duplicated_packets: impairment.duplicated_packets,
+            dropped_packets: impairment.dropped_packets,
+            delayed_packets: impairment.delayed_packets,
             reordered_batches: impairment.reordered_batches,
             held_packet: None,
         }
