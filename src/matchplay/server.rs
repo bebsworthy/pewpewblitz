@@ -2,24 +2,24 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use super::{
-    ActiveCombatant, MatchId, MatchMember, MatchParticipant, MatchParticipantSummary, MatchPhase,
-    MatchResult, MatchRoot, MatchState, MatchTelemetry, MatchTelemetryContext, RespawnState,
-    SpawnCandidate, SpawnProtection, WIPEOUT_RULES_REVISION, WipeoutRules, complete_phase,
-    score_result, select_spawn, timeout_result,
+    ActiveCombatant, AuthoritativeFighterLifecyclePlugin, FighterLifecycleConfig, FighterReset,
+    MatchId, MatchMember, MatchParticipant, MatchParticipantSummary, MatchPhase, MatchResult,
+    MatchRoot, MatchState, MatchTelemetry, MatchTelemetryContext, RespawnState, SpawnCandidate,
+    SpawnProtection, WIPEOUT_RULES_REVISION, WipeoutRules, complete_fighter_lifecycle,
+    complete_phase, reset_fighter_runtime, score_result, select_spawn, timeout_result,
 };
 use crate::{
     combat::{
-        ActiveAttackTrackers, ActiveEffects, CombatOutbox, CombatOutcomeFacts, CombatOutcomeKind,
-        CurrentHealth, Defeated, FighterDefinitions, MeleeAttack, PendingDelivery, PendingPayload,
-        SelectedBuild, SelectedWeapon, SpawnState, TeamId, WeaponDefinitions, WeaponPhase,
-        WeaponState, WeaponTelemetry,
+        ActiveAttackTrackers, CombatOutbox, CombatOutcomeFacts, CombatOutcomeKind, Defeated,
+        FighterDefinitions, MeleeAttack, PendingDelivery, PendingPayload, SelectedBuild,
+        SelectedWeapon, SpawnState, TeamId, WeaponDefinitions, WeaponTelemetry,
     },
     gameplay::GameplaySet,
     map::{MapStartupSet, ResolvedMap, WIPEOUT_MODE_DEFINITION},
     protocol::{Fighter, FighterInput, NetworkEntityId, PlayerId},
     timing::SimulationTick,
 };
-use avian2d::prelude::{CollisionLayers, LinearVelocity, Position, Rotation};
+use avian2d::prelude::{LayerMask, Position};
 use bevy::prelude::*;
 use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 use lightyear::prelude::{NetworkTarget, Replicate};
@@ -68,12 +68,17 @@ impl NextMatchId {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MatchSet {
     Lifecycle,
+    FighterLifecycle,
     Outcomes,
 }
 
 pub struct WipeoutPlugin;
 
 fn configure_match_schedule(app: &mut App) {
+    app.configure_sets(
+        FixedUpdate,
+        (MatchSet::Lifecycle, MatchSet::FighterLifecycle).chain(),
+    );
     app.configure_sets(
         FixedPostUpdate,
         MatchSet::Outcomes
@@ -105,7 +110,11 @@ impl Plugin for WipeoutPlugin {
         .validate()
         .expect("Wipeout rules must be valid");
         configure_match_schedule(app);
-        app.insert_resource(rules)
+        app.add_plugins(AuthoritativeFighterLifecyclePlugin)
+            .insert_resource(rules)
+            .insert_resource(FighterLifecycleConfig {
+                spawn_protection_ticks: rules.spawn_protection_ticks,
+            })
             .init_resource::<NextMatchId>()
             .init_resource::<RespawnOrdinals>()
             .init_resource::<ScoredCombatEvents>()
@@ -122,8 +131,7 @@ impl Plugin for WipeoutPlugin {
                 (
                     advance_match_phase,
                     cleanup_restarted_match,
-                    expire_protection,
-                    respawn_due_fighters,
+                    select_due_respawn_spawns,
                 )
                     .chain()
                     .in_set(GameplaySet::Lifecycle)
@@ -217,7 +225,7 @@ fn advance_match_phase(
         ),
         With<Fighter>,
     >,
-    restart_fighters: Query<(
+    lifecycle_fighters: Query<(
         Entity,
         &crate::combat::FighterDefinitionId,
         &SelectedBuild,
@@ -247,7 +255,7 @@ fn advance_match_phase(
             selected_build: *build,
         });
         if matches!(phase, MatchPhase::Active { .. }) {
-            telemetry.record_participant_active_tick(*team);
+            telemetry.record_participant_active_tick(*team, build.source_preset_id);
         }
     }
     participant_summaries.sort_by_key(|participant| participant.player_id);
@@ -289,12 +297,38 @@ fn advance_match_phase(
             });
             for (entity, _, _, participant, _, _, _) in &mut participants {
                 if participant.match_id == state.match_id {
-                    commands.entity(entity).insert((
-                        ActiveCombatant,
-                        SpawnProtection {
-                            expires_at_tick: tick.0.saturating_add(rules.spawn_protection_ticks),
+                    let Ok((_, fighter_id, build, resolved, spawn)) =
+                        lifecycle_fighters.get(entity)
+                    else {
+                        continue;
+                    };
+                    let Some(fighter) = fighter_definitions.get(*fighter_id) else {
+                        continue;
+                    };
+                    let capacity = resolved.map_or_else(
+                        || {
+                            weapon_definitions
+                                .get(build.primary_weapon)
+                                .map_or(0, |weapon| weapon.magazine_capacity)
                         },
-                    ));
+                        |weapon| weapon.recipe.economy.capacity(),
+                    );
+                    reset_fighter_runtime(
+                        &mut commands,
+                        entity,
+                        FighterReset {
+                            maximum_health: fighter.maximum_health,
+                            ammunition: capacity,
+                            position: spawn.position,
+                            facing: spawn.facing,
+                            collision_mask: crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
+                                | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                            protection_until: Some(
+                                tick.0.saturating_add(rules.spawn_protection_ticks),
+                            ),
+                            active: true,
+                        },
+                    );
                 }
             }
         }
@@ -313,9 +347,14 @@ fn advance_match_phase(
             };
             state.phase = complete_phase(tick.0, rules.completed_input_lock_ticks, result)
                 .expect("validated completion deadline cannot overflow");
-            for (entity, _, _, _, _, _, _) in &mut participants {
-                commands.entity(entity).remove::<ActiveCombatant>();
-            }
+            complete_match_fighters(
+                &mut commands,
+                participants
+                    .iter()
+                    .filter_map(|(entity, _, _, participant, _, _, _)| {
+                        (participant.match_id == state.match_id).then_some(entity)
+                    }),
+            );
         }
         MatchPhase::Active { ends_at_tick } if tick.0 >= ends_at_tick => {
             state.phase = complete_phase(
@@ -324,9 +363,14 @@ fn advance_match_phase(
                 timeout_result(state.team_scores),
             )
             .expect("validated match deadline cannot overflow");
-            for (entity, _, _, _, _, _, _) in &mut participants {
-                commands.entity(entity).remove::<ActiveCombatant>();
-            }
+            complete_match_fighters(
+                &mut commands,
+                participants
+                    .iter()
+                    .filter_map(|(entity, _, _, participant, _, _, _)| {
+                        (participant.match_id == state.match_id).then_some(entity)
+                    }),
+            );
         }
         MatchPhase::Completed {
             restart_unlocked_at_tick,
@@ -349,7 +393,7 @@ fn advance_match_phase(
                     .remove::<RespawnState>()
                     .remove::<SpawnProtection>();
             }
-            for (entity, fighter_id, build, resolved, spawn) in &restart_fighters {
+            for (entity, fighter_id, build, resolved, spawn) in &lifecycle_fighters {
                 let Some(fighter) = fighter_definitions.get(*fighter_id) else {
                     continue;
                 };
@@ -361,33 +405,94 @@ fn advance_match_phase(
                     },
                     |weapon| weapon.recipe.economy.capacity(),
                 );
-                commands
-                    .entity(entity)
-                    .insert((
-                        CurrentHealth(fighter.maximum_health),
-                        WeaponState {
-                            ammo: capacity,
-                            phase: WeaponPhase::Ready,
-                        },
-                        Position::from_xy(spawn.position.x, spawn.position.y),
-                        Rotation::radians(spawn.facing),
-                        LinearVelocity::ZERO,
-                        ActiveEffects::default(),
-                        crate::movement::InputFreshness::default(),
-                        CollisionLayers::new(
-                            crate::movement::FIGHTER_LAYER,
-                            avian2d::prelude::LayerMask::NONE,
-                        ),
-                    ))
-                    .remove::<Defeated>()
-                    .remove::<crate::combat::ExternalMotion>()
-                    .remove::<crate::combat::KnockbackFeedback>();
+                reset_fighter_runtime(
+                    &mut commands,
+                    entity,
+                    FighterReset {
+                        maximum_health: fighter.maximum_health,
+                        ammunition: capacity,
+                        position: spawn.position,
+                        facing: spawn.facing,
+                        collision_mask: LayerMask::NONE,
+                        protection_until: None,
+                        active: false,
+                    },
+                );
             }
             state.match_id = new_id;
             state.phase = MatchPhase::Waiting;
             state.team_scores = [0, 0];
         }
         _ => {}
+    }
+}
+
+fn complete_match_fighters(commands: &mut Commands, entities: impl IntoIterator<Item = Entity>) {
+    for entity in entities {
+        complete_fighter_lifecycle(commands, entity);
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn select_due_respawn_spawns(
+    tick: Res<SimulationTick>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    spawn_points: Res<crate::map::SpawnPointCatalog>,
+    tuning: Res<crate::movement::MovementTuning>,
+    mut ordinals: ResMut<RespawnOrdinals>,
+    living: Query<(&TeamId, &Position, Option<&Defeated>), With<Fighter>>,
+    mut due: Query<(
+        &PlayerId,
+        &TeamId,
+        &MatchParticipant,
+        &RespawnState,
+        &mut SpawnState,
+        &mut crate::map::SpawnAssignment,
+    )>,
+) {
+    let Ok(state) = roots.single() else { return };
+    if !matches!(state.phase, MatchPhase::Active { .. }) {
+        return;
+    }
+    for (player_id, team, participant, respawn, mut spawn, mut assignment) in &mut due {
+        if participant.match_id != state.match_id || tick.0 < respawn.respawn_at_tick {
+            continue;
+        }
+        let living: Vec<_> = living
+            .iter()
+            .filter(|(_, _, defeated)| defeated.is_none())
+            .map(|(team, position, _)| (*team, position.0))
+            .collect();
+        let ordinal = ordinals.0.entry(player_id.0).or_default();
+        let candidates = spawn_points
+            .0
+            .get(&team.0)
+            .into_iter()
+            .flatten()
+            .map(|point| SpawnCandidate {
+                id: point.spawn_point_id,
+                position: point.position,
+                facing: point.facing,
+            })
+            .collect();
+        let selected = select_spawn(
+            candidates,
+            &living,
+            *team,
+            tuning.radius * 2.0 + tuning.skin_width,
+            participant.match_id,
+            *player_id,
+            *ordinal,
+        )
+        .unwrap_or(SpawnCandidate {
+            id: assignment.spawn_point_id,
+            position: spawn.position,
+            facing: spawn.facing,
+        });
+        *ordinal = ordinal.saturating_add(1);
+        assignment.spawn_point_id = selected.id;
+        spawn.position = selected.position;
+        spawn.facing = selected.facing;
     }
 }
 
@@ -500,14 +605,14 @@ fn resolve_match_outcomes(
     if let Some(result) = score_result(state.team_scores, state.target_score) {
         state.phase = complete_phase(tick.0, rules.completed_input_lock_ticks, result)
             .expect("validated completion deadline cannot overflow");
-        for (entity, _, _, participant) in &participants {
-            if participant.match_id == state.match_id {
-                commands
-                    .entity(entity)
-                    .remove::<ActiveCombatant>()
-                    .remove::<RespawnState>();
-            }
-        }
+        complete_match_fighters(
+            &mut commands,
+            participants
+                .iter()
+                .filter_map(|(entity, _, _, participant)| {
+                    (participant.match_id == state.match_id).then_some(entity)
+                }),
+        );
     } else {
         for entity in defeated_entities {
             commands.entity(entity).insert(RespawnState {
@@ -552,139 +657,6 @@ fn capture_match_summary(
             &weapons,
         ),
         MatchPhase::Waiting | MatchPhase::Countdown { .. } => {}
-    }
-}
-
-fn expire_protection(
-    mut commands: Commands,
-    tick: Res<SimulationTick>,
-    protected: Query<(Entity, &SpawnProtection)>,
-) {
-    for (entity, protection) in &protected {
-        if tick.0 >= protection.expires_at_tick {
-            commands.entity(entity).remove::<SpawnProtection>();
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn respawn_due_fighters(
-    mut commands: Commands,
-    tick: Res<SimulationTick>,
-    rules: Res<WipeoutRules>,
-    fighters: Res<FighterDefinitions>,
-    weapons: Res<WeaponDefinitions>,
-    spawn_points: Res<crate::map::SpawnPointCatalog>,
-    tuning: Res<crate::movement::MovementTuning>,
-    mut ordinals: ResMut<RespawnOrdinals>,
-    mut telemetry: ResMut<MatchTelemetry>,
-    living: Query<(&TeamId, &Position, Option<&Defeated>), With<Fighter>>,
-    query: Query<(
-        Entity,
-        &PlayerId,
-        &NetworkEntityId,
-        &TeamId,
-        &MatchParticipant,
-        &crate::combat::FighterDefinitionId,
-        &SelectedBuild,
-        Option<&crate::combat::ResolvedWeapon>,
-        &RespawnState,
-        &SpawnState,
-        &crate::map::SpawnAssignment,
-    )>,
-) {
-    for (
-        entity,
-        player_id,
-        network_id,
-        team,
-        participant,
-        fighter_id,
-        build,
-        resolved,
-        respawn,
-        spawn,
-        assignment,
-    ) in &query
-    {
-        if tick.0 < respawn.respawn_at_tick {
-            continue;
-        }
-        let Some(fighter) = fighters.get(*fighter_id) else {
-            continue;
-        };
-        let capacity = resolved.map_or_else(
-            || {
-                weapons
-                    .get(build.primary_weapon)
-                    .map_or(0, |weapon| weapon.magazine_capacity)
-            },
-            |weapon| weapon.recipe.economy.capacity(),
-        );
-        let living: Vec<_> = living
-            .iter()
-            .filter(|(_, _, defeated)| defeated.is_none())
-            .map(|(team, position, _)| (*team, position.0))
-            .collect();
-        let ordinal = ordinals.0.entry(player_id.0).or_default();
-        let candidates = spawn_points
-            .0
-            .get(&team.0)
-            .into_iter()
-            .flatten()
-            .map(|point| SpawnCandidate {
-                id: point.spawn_point_id,
-                position: point.position,
-                facing: point.facing,
-            })
-            .collect();
-        let selected = select_spawn(
-            candidates,
-            &living,
-            *team,
-            tuning.radius * 2.0 + tuning.skin_width,
-            participant.match_id,
-            *player_id,
-            *ordinal,
-        )
-        .unwrap_or(SpawnCandidate {
-            id: assignment.spawn_point_id,
-            position: spawn.position,
-            facing: spawn.facing,
-        });
-        *ordinal = ordinal.saturating_add(1);
-        telemetry.record_respawn(network_id.0, tick.0);
-        commands
-            .entity(entity)
-            .insert((
-                CurrentHealth(fighter.maximum_health),
-                WeaponState {
-                    ammo: capacity,
-                    phase: WeaponPhase::Ready,
-                },
-                Position::from_xy(selected.position.x, selected.position.y),
-                Rotation::radians(selected.facing),
-                LinearVelocity::ZERO,
-                ActiveEffects::default(),
-                CollisionLayers::new(
-                    crate::movement::FIGHTER_LAYER,
-                    crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                        | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
-                ),
-                SpawnProtection {
-                    expires_at_tick: tick.0.saturating_add(rules.spawn_protection_ticks),
-                },
-                crate::map::SpawnAssignment {
-                    map_instance_id: assignment.map_instance_id,
-                    spawn_point_id: selected.id,
-                },
-                SpawnState {
-                    position: selected.position,
-                    facing: selected.facing,
-                },
-            ))
-            .remove::<Defeated>()
-            .remove::<RespawnState>();
     }
 }
 

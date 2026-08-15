@@ -377,7 +377,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<MapInstanceId>().replicate_once();
         app.component::<ResolvedMapIdentity>().replicate_once();
         app.component::<ResolvedMapSnapshot>().replicate_once();
-        app.component::<SpawnAssignment>().replicate_once();
+        app.component::<SpawnAssignment>().replicate();
         app.component::<PlayerId>().replicate_once();
         app.component::<NetworkEntityId>().replicate_once();
         app.component::<PlaceholderState>().replicate();

@@ -9,8 +9,8 @@
 | Status | Verifying |
 | Research | Complete; post-M06 source, architecture, pinned-reference, and primary-source review performed on 2026-08-15 |
 | Specification validation | Approved by the user on 2026-08-15 |
-| Implementation | Complete; authoritative lifecycle, protocol, presentation, telemetry, and process automation implemented |
-| Verification | In progress; automated, role-isolation, performance, three-profile process, and partial native-window visual gates are green; physical-controller/audio and final playtest checks remain |
+| Implementation | Complete; initial implementation plus accepted feedback remediation implemented |
+| Verification | In progress; feedback regression gates are being rerun before the remaining physical-controller/audio and final playtest checks |
 | User validation/playtest | Not started |
 
 Update this table and the roadmap together whenever the milestone changes phase. Milestone 06 is the
@@ -820,6 +820,24 @@ and cannot establish whether audio transitions are perceptually distinguishable.
 replace a human normal-duration match, held-scoreboard, defeat/respawn/protection/result/restart, and
 counterplay judgment. Those checks remain required in the supervised user playtest before this
 milestone can enter `User playtest` or `Feedback review`.
+
+## Implementation feedback — 2026-08-15
+
+All six review findings were accepted as specification gaps and corrected without expanding the
+milestone's product scope:
+
+| Finding | Decision and remediation |
+|---|---|
+| Respawn after completion | Implemented now. All completion causes use one fighter cleanup operation that removes active, respawn, and protection state; respawn and protection expiry also require the current match to be active. Threshold and forfeit regression coverage asserts no lifecycle state survives results. |
+| Missing waiting/results presentation | Implemented now. The HUD shell has a large waiting prompt with readiness progress and a large result overlay with winner/draw/forfeit, final score, margin, restart lock/prompt, and quorum progress derived from authoritative state and ticks. |
+| Missing preset death evidence | Implemented now. Summaries archive credited defeats, suffered deaths, participant-active ticks, and derived per-participant-minute rates by preset; the process report fails closed when preset defeat/death evidence is absent. |
+| Stale replicated spawn assignment | Implemented now. `SpawnAssignment` uses change replication so deterministic respawn selection reaches clients. |
+| Missing reusable lifecycle seam | Implemented now. `AuthoritativeFighterLifecyclePlugin` and `matchplay/lifecycle.rs` own activation/reset mechanics, due respawn, protection expiry, and completion cleanup; Wipeout retains phase and scoring decisions. |
+| Cumulative per-match drop evidence | Implemented now. Each live match stores its starting global drop counter and archives only the saturating delta; a later clean match reports zero drops after an earlier overflowing match. |
+
+The affected unit, schedule, network, role-isolation, and process checks must be green before this
+feedback is considered verified. The remaining supervised visual/controller/audio observations are
+unchanged.
 
 ## Risks and follow-up decisions
 

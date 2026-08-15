@@ -247,6 +247,18 @@ fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
         .step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Completed { .. }));
     let completed = server_match(&mut harness);
     assert_eq!(completed.team_scores, [1, 0]);
+    {
+        let world = harness.server.world_mut();
+        let mut stale_lifecycle = world.query_filtered::<(), (
+            With<MatchParticipant>,
+            Or<(
+                With<ActiveCombatant>,
+                With<brawler::matchplay::RespawnState>,
+                With<brawler::matchplay::SpawnProtection>,
+            )>,
+        )>();
+        assert_eq!(stale_lifecycle.iter(world).count(), 0);
+    }
     harness
         .step_until(|harness| (0..4).all(|index| client_match(harness, index) == Some(completed)));
     harness.send_match_command(
@@ -448,6 +460,21 @@ fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
         server_match(&mut harness).phase,
         MatchPhase::Active { .. }
     ));
+    let pending_respawn = {
+        let tick = harness.server.world().resource::<SimulationTick>().0;
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(Entity, &TeamId), With<MatchParticipant>>();
+        let entity = query.iter(world).find(|(_, team)| team.0 == 1).unwrap().0;
+        world.entity_mut(entity).insert((
+            brawler::matchplay::RespawnState {
+                respawn_at_tick: tick.saturating_add(1),
+            },
+            brawler::matchplay::SpawnProtection {
+                expires_at_tick: tick.saturating_add(100),
+            },
+        ));
+        entity
+    };
     let second = team_zero_clients[1];
     harness.clients[second].world_mut().trigger(Disconnect {
         entity: harness.client_entities[second],
@@ -464,6 +491,20 @@ fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
             ..
         }
     ));
+    assert!(
+        harness
+            .server
+            .world()
+            .get::<brawler::matchplay::RespawnState>(pending_respawn)
+            .is_none()
+    );
+    assert!(
+        harness
+            .server
+            .world()
+            .get::<brawler::matchplay::SpawnProtection>(pending_respawn)
+            .is_none()
+    );
     let completed = server_match(&mut harness);
     let team_one_clients: Vec<_> = (0..4)
         .filter(|index| !team_zero_clients.contains(index))
@@ -923,18 +964,30 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
             .get::<brawler::matchplay::SpawnProtection>(target.0)
             .is_some()
     );
-    let assignment = harness
+    let assignment = *harness
         .server
         .world()
         .get::<brawler::map::SpawnAssignment>(target.0)
         .unwrap();
-    let catalog = harness
-        .server
-        .world()
-        .resource::<brawler::map::SpawnPointCatalog>();
-    assert!(catalog.0.get(&target.3.0).is_some_and(|points| {
-        points
-            .iter()
-            .any(|point| point.spawn_point_id == assignment.spawn_point_id)
-    }));
+    assert!(
+        harness
+            .server
+            .world()
+            .resource::<brawler::map::SpawnPointCatalog>()
+            .0
+            .get(&target.3.0)
+            .is_some_and(|points| points
+                .iter()
+                .any(|point| point.spawn_point_id == assignment.spawn_point_id))
+    );
+    let target_network_id = target.2;
+    harness.step_until(|harness| {
+        (0..2).all(|index| {
+            let world = harness.clients[index].world_mut();
+            let mut query = world.query::<(&NetworkEntityId, &brawler::map::SpawnAssignment)>();
+            query.iter(world).any(|(network_id, replicated)| {
+                *network_id == target_network_id && *replicated == assignment
+            })
+        })
+    });
 }

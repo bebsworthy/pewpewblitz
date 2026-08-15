@@ -320,6 +320,12 @@ fn verify_process_match(
         check.completed = true;
         return;
     }
+    if !has_preset_outcome_evidence(summary) {
+        error!("match summary omitted preset defeat/death evidence");
+        app_exit.write(AppExit::error());
+        check.completed = true;
+        return;
+    }
     let weapon_preset_ids = summary
         .weapon_aggregates
         .iter()
@@ -336,8 +342,12 @@ fn verify_process_match(
         .iter()
         .map(|(_, aggregate)| aggregate.attacks_with_hostile_contact)
         .sum::<u64>();
+    let preset_defeats = format_preset_counts(&summary.credited_defeats_by_preset);
+    let preset_deaths = format_preset_counts(&summary.suffered_deaths_by_preset);
+    let preset_death_rates =
+        format_preset_rates(&summary.suffered_deaths_per_participant_minute_by_preset);
     let report = format!(
-        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\n",
+        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\n",
         initial.0,
         state.match_id.0,
         participant_count,
@@ -355,10 +365,13 @@ fn verify_process_match(
         summary.participant_active_ticks_by_team[0],
         summary.participant_active_ticks_by_team[1],
         telemetry.records.len(),
-        telemetry.dropped_records,
+        summary.dropped_records,
         telemetry.summaries.len(),
         summary.weapon_aggregates.len(),
         weapon_preset_ids,
+        preset_defeats,
+        preset_deaths,
+        preset_death_rates,
         accepted_attacks,
         attacks_with_hostile_contact,
     );
@@ -373,6 +386,30 @@ fn verify_process_match(
     info!(%report, "authoritative Wipeout process verification complete");
     check.completed = true;
     app_exit.write(AppExit::Success);
+}
+
+fn has_preset_outcome_evidence(summary: &crate::matchplay::MatchSummary) -> bool {
+    !summary.credited_defeats_by_preset.is_empty()
+        && !summary.suffered_deaths_by_preset.is_empty()
+        && !summary
+            .suffered_deaths_per_participant_minute_by_preset
+            .is_empty()
+}
+
+fn format_preset_counts(values: &[(WeaponPresetId, u32)]) -> String {
+    values
+        .iter()
+        .map(|(preset, count)| format!("{}:{count}", preset.0))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_preset_rates(values: &[(WeaponPresetId, f64)]) -> String {
+    values
+        .iter()
+        .map(|(preset, rate)| format!("{}:{rate:.3}", preset.0))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn configure_new_link(trigger: On<Add, LinkOf>, mut commands: Commands) {

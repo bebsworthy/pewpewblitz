@@ -1,7 +1,7 @@
 use super::{MatchId, MatchResult};
 use crate::combat::{
-    CombatOutcomeFact, CombatOutcomeKind, DistanceBand, SelectedBuild, TeamId, WeaponTelemetry,
-    WeaponTelemetryAggregate, WeaponTelemetryKey, distance_band,
+    CombatOutcomeFact, CombatOutcomeKind, DistanceBand, SelectedBuild, TeamId, WeaponPresetId,
+    WeaponTelemetry, WeaponTelemetryAggregate, WeaponTelemetryKey, distance_band,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::ResolvedMapIdentity;
@@ -23,9 +23,14 @@ pub struct MatchSummary {
     pub applied_damage_by_distance: [u64; 3],
     pub credited_defeats_by_team: [u32; 2],
     pub suffered_deaths_by_team: [u32; 2],
+    pub credited_defeats_by_preset: Vec<(WeaponPresetId, u32)>,
+    pub suffered_deaths_by_preset: Vec<(WeaponPresetId, u32)>,
     pub participant_active_ticks_by_team: [u64; 2],
+    pub participant_active_ticks_by_preset: Vec<(WeaponPresetId, u64)>,
     pub credited_defeats_per_participant_minute: [f64; 2],
     pub suffered_deaths_per_participant_minute: [f64; 2],
+    pub credited_defeats_per_participant_minute_by_preset: Vec<(WeaponPresetId, f64)>,
+    pub suffered_deaths_per_participant_minute_by_preset: Vec<(WeaponPresetId, f64)>,
     pub protected_contacts: u32,
     pub respawns: u32,
     pub fight_duration_ticks: Vec<u64>,
@@ -61,6 +66,8 @@ struct LiveMatchTelemetry {
     damage_by_distance: [u64; 3],
     defeats_by_team: [u32; 2],
     deaths_by_team: [u32; 2],
+    defeats_by_preset: BTreeMap<WeaponPresetId, u32>,
+    deaths_by_preset: BTreeMap<WeaponPresetId, u32>,
     protected_contacts: u32,
     respawns: u32,
     first_damage_by_target: BTreeMap<u64, u64>,
@@ -69,9 +76,11 @@ struct LiveMatchTelemetry {
     respawn_to_defeat_ticks: Vec<u64>,
     movement_ticks_by_player: BTreeMap<u64, (u64, u64)>,
     participant_active_ticks_by_team: [u64; 2],
+    participant_active_ticks_by_preset: BTreeMap<WeaponPresetId, u64>,
     disconnects: u32,
     weapon_aggregate_start: BTreeMap<WeaponTelemetryKey, WeaponTelemetryAggregate>,
     context: Option<MatchTelemetryContext>,
+    dropped_records_at_start: u64,
 }
 
 #[derive(Resource, Debug, Default)]
@@ -99,6 +108,8 @@ impl MatchTelemetry {
             damage_by_distance: [0; 3],
             defeats_by_team: [0; 2],
             deaths_by_team: [0; 2],
+            defeats_by_preset: BTreeMap::new(),
+            deaths_by_preset: BTreeMap::new(),
             protected_contacts: 0,
             respawns: 0,
             first_damage_by_target: BTreeMap::new(),
@@ -107,9 +118,11 @@ impl MatchTelemetry {
             respawn_to_defeat_ticks: Vec::new(),
             movement_ticks_by_player: BTreeMap::new(),
             participant_active_ticks_by_team: [0; 2],
+            participant_active_ticks_by_preset: BTreeMap::new(),
             disconnects: 0,
             weapon_aggregate_start: BTreeMap::new(),
             context: None,
+            dropped_records_at_start: self.dropped_records,
         });
     }
 
@@ -133,13 +146,20 @@ impl MatchTelemetry {
         }
     }
 
-    pub fn record_participant_active_tick(&mut self, team: TeamId) {
+    pub fn record_participant_active_tick(&mut self, team: TeamId, preset: Option<WeaponPresetId>) {
         if let Some(live) = self.live.as_mut()
             && team.0 <= 1
         {
             let index = usize::from(team.0);
             live.participant_active_ticks_by_team[index] =
                 live.participant_active_ticks_by_team[index].saturating_add(1);
+            if let Some(preset) = preset {
+                let ticks = live
+                    .participant_active_ticks_by_preset
+                    .entry(preset)
+                    .or_default();
+                *ticks = ticks.saturating_add(1);
+            }
         }
     }
 
@@ -200,6 +220,15 @@ impl MatchTelemetry {
                     live.damage_by_distance[index].saturating_add(u64::from(amount));
             }
             CombatOutcomeKind::Defeat => {
+                let target_preset = live.context.as_ref().and_then(|context| {
+                    context
+                        .participants
+                        .iter()
+                        .find(|participant| {
+                            participant.network_entity_id == fact.target_network_id.0
+                        })
+                        .and_then(|participant| participant.selected_build.source_preset_id)
+                });
                 if let Some(first_damage) = live
                     .first_damage_by_target
                     .remove(&fact.target_network_id.0)
@@ -217,12 +246,20 @@ impl MatchTelemetry {
                     let index = usize::from(fact.target_team.0);
                     live.deaths_by_team[index] = live.deaths_by_team[index].saturating_add(1);
                 }
+                if let Some(preset) = target_preset {
+                    let deaths = live.deaths_by_preset.entry(preset).or_default();
+                    *deaths = deaths.saturating_add(1);
+                }
                 if let Some(source) = fact.source_team
                     && source.0 <= 1
                     && source != fact.target_team
                 {
                     let index = usize::from(source.0);
                     live.defeats_by_team[index] = live.defeats_by_team[index].saturating_add(1);
+                    if let Some(preset) = fact.preset_id {
+                        let defeats = live.defeats_by_preset.entry(preset).or_default();
+                        *defeats = defeats.saturating_add(1);
+                    }
                 }
             }
             CombatOutcomeKind::Damage { .. } => {}
@@ -270,6 +307,14 @@ impl MatchTelemetry {
                 (*key, rate)
             })
             .collect();
+        let credited_defeats_per_participant_minute_by_preset = per_preset_participant_minute(
+            &live.defeats_by_preset,
+            &live.participant_active_ticks_by_preset,
+        );
+        let suffered_deaths_per_participant_minute_by_preset = per_preset_participant_minute(
+            &live.deaths_by_preset,
+            &live.participant_active_ticks_by_preset,
+        );
         self.summaries.push_back(MatchSummary {
             match_id: live.match_id,
             map_identity: live.context.as_ref().map(|context| context.map_identity),
@@ -295,7 +340,13 @@ impl MatchTelemetry {
             applied_damage_by_distance: live.damage_by_distance,
             credited_defeats_by_team: live.defeats_by_team,
             suffered_deaths_by_team: live.deaths_by_team,
+            credited_defeats_by_preset: live.defeats_by_preset.into_iter().collect(),
+            suffered_deaths_by_preset: live.deaths_by_preset.into_iter().collect(),
             participant_active_ticks_by_team: live.participant_active_ticks_by_team,
+            participant_active_ticks_by_preset: live
+                .participant_active_ticks_by_preset
+                .into_iter()
+                .collect(),
             credited_defeats_per_participant_minute: per_participant_minute(
                 live.defeats_by_team,
                 live.participant_active_ticks_by_team,
@@ -304,6 +355,8 @@ impl MatchTelemetry {
                 live.deaths_by_team,
                 live.participant_active_ticks_by_team,
             ),
+            credited_defeats_per_participant_minute_by_preset,
+            suffered_deaths_per_participant_minute_by_preset,
             protected_contacts: live.protected_contacts,
             respawns: live.respawns,
             fight_duration_ticks: live.fight_duration_ticks,
@@ -316,9 +369,30 @@ impl MatchTelemetry {
             weapon_aggregates,
             weapon_hostile_contact_rates,
             disconnects: live.disconnects,
-            dropped_records: self.dropped_records,
+            dropped_records: self
+                .dropped_records
+                .saturating_sub(live.dropped_records_at_start),
         });
     }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn per_preset_participant_minute(
+    counts: &BTreeMap<WeaponPresetId, u32>,
+    active_ticks: &BTreeMap<WeaponPresetId, u64>,
+) -> Vec<(WeaponPresetId, f64)> {
+    active_ticks
+        .iter()
+        .map(|(preset, ticks)| {
+            let count = counts.get(preset).copied().unwrap_or(0);
+            let rate = if *ticks == 0 {
+                0.0
+            } else {
+                f64::from(count) * 3_600.0 / *ticks as f64
+            };
+            (*preset, rate)
+        })
+        .collect()
 }
 
 #[allow(clippy::cast_precision_loss)]

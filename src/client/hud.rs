@@ -14,6 +14,9 @@ struct MatchHudText;
 #[derive(Component)]
 struct CountdownHudText;
 
+#[derive(Component)]
+struct MatchPhaseOverlayText;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CachedRosterEntry {
     team: TeamId,
@@ -36,6 +39,16 @@ enum CachedRosterStatus {
 struct MatchRosterPresentation {
     match_id: Option<crate::matchplay::MatchId>,
     entries: BTreeMap<u64, CachedRosterEntry>,
+}
+
+#[derive(Default)]
+struct PhasePresentationFacts {
+    participant_count: usize,
+    ready_count: usize,
+    restart_ready_count: usize,
+    local_selected: bool,
+    local_ready: bool,
+    local_restart_ready: bool,
 }
 
 pub struct ClientReadinessHudPlugin;
@@ -95,6 +108,26 @@ fn spawn_readiness_hud(mut commands: Commands) {
         },
         Visibility::Hidden,
     ));
+    commands
+        .spawn((
+            MatchPhaseOverlayText,
+            Text::new(""),
+            TextFont::from_font_size(34.0),
+            TextColor(Color::WHITE),
+            TextLayout::new(Justify::Center, LineBreak::WordBoundary),
+            GlobalZIndex(220),
+            Node {
+                position_type: PositionType::Absolute,
+                left: percent(25.0),
+                right: percent(25.0),
+                top: percent(27.0),
+                padding: UiRect::all(px(28.0)),
+                border_radius: BorderRadius::all(px(12.0)),
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .insert(BackgroundColor(Color::srgba(0.025, 0.035, 0.055, 0.92)));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -126,6 +159,7 @@ fn update_readiness_hud(
             With<ReadinessHudText>,
             Without<MatchHudText>,
             Without<CountdownHudText>,
+            Without<MatchPhaseOverlayText>,
         ),
     >,
     mut match_text: Query<
@@ -134,6 +168,7 @@ fn update_readiness_hud(
             With<MatchHudText>,
             Without<ReadinessHudText>,
             Without<CountdownHudText>,
+            Without<MatchPhaseOverlayText>,
         ),
     >,
     mut countdown_text: Query<
@@ -142,6 +177,16 @@ fn update_readiness_hud(
             With<CountdownHudText>,
             Without<ReadinessHudText>,
             Without<MatchHudText>,
+            Without<MatchPhaseOverlayText>,
+        ),
+    >,
+    mut phase_overlay: Query<
+        (&mut Text, &mut Visibility),
+        (
+            With<MatchPhaseOverlayText>,
+            Without<ReadinessHudText>,
+            Without<MatchHudText>,
+            Without<CountdownHudText>,
         ),
     >,
 ) {
@@ -166,40 +211,29 @@ fn update_readiness_hud(
             *visibility = Visibility::Hidden;
         }
     }
-    if let Some(state) = match_state {
-        if roster_presentation.match_id != Some(state.match_id) {
-            roster_presentation.match_id = Some(state.match_id);
-            roster_presentation.entries.clear();
-        }
-        for entry in roster_presentation.entries.values_mut() {
-            entry.connected = false;
-        }
-        for (player, team, participant, build, respawn, protection, defeated) in &participants {
-            if participant.match_id != state.match_id {
-                continue;
-            }
-            roster_presentation.entries.insert(
-                player.0,
-                CachedRosterEntry {
-                    team: *team,
-                    weapon_preset: build
-                        .and_then(|build| build.source_preset_id.map(|preset| preset.0)),
-                    status: if let Some(respawn) = respawn {
-                        CachedRosterStatus::Respawning(respawn.respawn_at_tick)
-                    } else if let Some(protection) = protection {
-                        CachedRosterStatus::Protected(protection.expires_at_tick)
-                    } else if defeated.is_some() {
-                        CachedRosterStatus::Defeated
-                    } else if participant.restart_ready {
-                        CachedRosterStatus::RestartReady
-                    } else if participant.ready {
-                        CachedRosterStatus::Ready
-                    } else {
-                        CachedRosterStatus::Alive
-                    },
-                    connected: true,
-                },
-            );
+    let local_player = fighter.map(|(player, _)| player.0);
+    let phase_facts = sync_roster_and_collect_phase_facts(
+        match_state,
+        local_player,
+        participants.iter(),
+        &mut roster_presentation,
+    );
+    for (mut text, mut visibility) in &mut phase_overlay {
+        if let Some(label) = phase_overlay_label(
+            match_state,
+            now,
+            phase_facts.participant_count,
+            phase_facts.ready_count,
+            phase_facts.restart_ready_count,
+            phase_facts.local_selected,
+            phase_facts.local_ready,
+            phase_facts.local_restart_ready,
+        ) {
+            text.0 = label;
+            *visibility = Visibility::Inherited;
+        } else {
+            text.0.clear();
+            *visibility = Visibility::Hidden;
         }
     }
     for mut text in &mut match_text {
@@ -241,6 +275,136 @@ fn update_readiness_hud(
                 )
             },
         );
+    }
+}
+
+fn sync_roster_and_collect_phase_facts<'a>(
+    state: Option<&MatchState>,
+    local_player: Option<u64>,
+    participants: impl Iterator<
+        Item = (
+            &'a PlayerId,
+            &'a TeamId,
+            &'a MatchParticipant,
+            Option<&'a crate::combat::SelectedBuild>,
+            Option<&'a RespawnState>,
+            Option<&'a SpawnProtection>,
+            Option<&'a crate::combat::Defeated>,
+        ),
+    >,
+    roster: &mut MatchRosterPresentation,
+) -> PhasePresentationFacts {
+    let Some(state) = state else {
+        return PhasePresentationFacts::default();
+    };
+    if roster.match_id != Some(state.match_id) {
+        roster.match_id = Some(state.match_id);
+        roster.entries.clear();
+    }
+    for entry in roster.entries.values_mut() {
+        entry.connected = false;
+    }
+    let mut facts = PhasePresentationFacts::default();
+    for (player, team, participant, build, respawn, protection, defeated) in participants {
+        if participant.match_id != state.match_id {
+            continue;
+        }
+        facts.participant_count += 1;
+        facts.ready_count += usize::from(participant.ready && build.is_some());
+        facts.restart_ready_count += usize::from(participant.restart_ready);
+        if local_player == Some(player.0) {
+            facts.local_ready = participant.ready;
+            facts.local_restart_ready = participant.restart_ready;
+            facts.local_selected = build.is_some();
+        }
+        roster.entries.insert(
+            player.0,
+            CachedRosterEntry {
+                team: *team,
+                weapon_preset: build
+                    .and_then(|build| build.source_preset_id.map(|preset| preset.0)),
+                status: if let Some(respawn) = respawn {
+                    CachedRosterStatus::Respawning(respawn.respawn_at_tick)
+                } else if let Some(protection) = protection {
+                    CachedRosterStatus::Protected(protection.expires_at_tick)
+                } else if defeated.is_some() {
+                    CachedRosterStatus::Defeated
+                } else if participant.restart_ready {
+                    CachedRosterStatus::RestartReady
+                } else if participant.ready {
+                    CachedRosterStatus::Ready
+                } else {
+                    CachedRosterStatus::Alive
+                },
+                connected: true,
+            },
+        );
+    }
+    facts
+}
+
+#[allow(clippy::too_many_arguments)]
+fn phase_overlay_label(
+    state: Option<&MatchState>,
+    now: u64,
+    participant_count: usize,
+    ready_count: usize,
+    restart_ready_count: usize,
+    local_selected: bool,
+    local_ready: bool,
+    local_restart_ready: bool,
+) -> Option<String> {
+    let state = state?;
+    match state.phase {
+        MatchPhase::Waiting => {
+            if !local_selected {
+                return None;
+            }
+            let prompt = if local_ready {
+                "READY - WAITING FOR OPPONENTS"
+            } else {
+                "PRESS SPACE / ENTER / A TO READY"
+            };
+            Some(format!(
+                "GET READY\n{prompt}\n\n{ready_count}/{participant_count} fighters ready"
+            ))
+        }
+        MatchPhase::Completed {
+            result,
+            restart_unlocked_at_tick,
+            ..
+        } => {
+            let title = match result {
+                crate::matchplay::MatchResult::TeamVictory { team } => {
+                    format!("TEAM {} WINS", team.0 + 1)
+                }
+                crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
+                crate::matchplay::MatchResult::Forfeit {
+                    winner,
+                    departed_team,
+                } => format!(
+                    "TEAM {} WINS\nTEAM {} FORFEITED",
+                    winner.0 + 1,
+                    departed_team.0 + 1
+                ),
+            };
+            let margin = state.team_scores[0].abs_diff(state.team_scores[1]);
+            let restart = if now < restart_unlocked_at_tick {
+                format!(
+                    "Restart unlocks in {}",
+                    restart_unlocked_at_tick.saturating_sub(now).div_ceil(60)
+                )
+            } else if local_restart_ready {
+                "Ready for restart - waiting for quorum".to_string()
+            } else {
+                "Press SPACE / ENTER / A to ready for restart".to_string()
+            };
+            Some(format!(
+                "{title}\n\nFINAL  {} - {}  |  MARGIN {margin}\n\n{restart}\n{restart_ready_count}/{participant_count} restart ready",
+                state.team_scores[0], state.team_scores[1]
+            ))
+        }
+        MatchPhase::Countdown { .. } | MatchPhase::Active { .. } => None,
     }
 }
 
@@ -377,5 +541,38 @@ mod tests {
             ends_at_tick: 1_000,
         };
         assert_eq!(countdown_label(Some(&state), 120), None);
+    }
+
+    #[test]
+    fn phase_overlay_explains_ready_and_completed_restart_states() {
+        let mut state = MatchState {
+            match_id: crate::matchplay::MatchId(1),
+            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+            phase: MatchPhase::Waiting,
+            team_scores: [3, 1],
+            target_score: 10,
+            rules_revision: 1,
+        };
+        assert_eq!(
+            phase_overlay_label(Some(&state), 0, 4, 0, 0, false, false, false),
+            None
+        );
+        let waiting = phase_overlay_label(Some(&state), 0, 4, 2, 0, true, false, false).unwrap();
+        assert!(waiting.contains("PRESS SPACE / ENTER / A TO READY"));
+        assert!(waiting.contains("2/4 fighters ready"));
+
+        state.phase = MatchPhase::Completed {
+            completed_at_tick: 100,
+            restart_unlocked_at_tick: 160,
+            result: crate::matchplay::MatchResult::Forfeit {
+                winner: TeamId(0),
+                departed_team: TeamId(1),
+            },
+        };
+        let locked = phase_overlay_label(Some(&state), 100, 4, 4, 2, true, true, false).unwrap();
+        assert!(locked.contains("TEAM 2 FORFEITED"));
+        assert!(locked.contains("FINAL  3 - 1  |  MARGIN 2"));
+        assert!(locked.contains("Restart unlocks in 1"));
+        assert!(locked.contains("2/4 restart ready"));
     }
 }

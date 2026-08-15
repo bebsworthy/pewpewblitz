@@ -315,6 +315,17 @@ fn match_telemetry_is_bounded_and_derives_tick_metrics() {
     assert_eq!(summary.time_to_first_hostile_damage_ticks, Some(30));
     assert_eq!(summary.applied_damage_by_distance, [15, 0, 0]);
     assert_eq!(summary.score_margin, 1);
+    assert_eq!(summary.dropped_records, 1);
+
+    telemetry.begin(MatchId(8), 200);
+    telemetry.complete(
+        200,
+        [0, 0],
+        MatchResult::Draw,
+        2,
+        &crate::combat::WeaponTelemetry::default(),
+    );
+    assert_eq!(telemetry.summaries.back().unwrap().dropped_records, 0);
 }
 
 #[test]
@@ -355,6 +366,62 @@ fn match_summary_archives_only_weapon_deltas_for_the_active_match() {
     assert_eq!(summary.weapon_hostile_contact_rates, vec![(key, 0.75)]);
 }
 
+fn two_preset_telemetry_context() -> MatchTelemetryContext {
+    MatchTelemetryContext {
+        map_identity: crate::map::ResolvedMapIdentity {
+            instance_id: crate::map::MapInstanceId(1),
+            source_preset_id: None,
+            recipe_id: crate::map::MapRecipeId(1),
+            recipe_revision: 1,
+            recipe_fingerprint: crate::map::MapRecipeFingerprint(1),
+        },
+        content_fingerprint: crate::content::GameplayContentFingerprint(1),
+        rules_revision: 1,
+        participants: [
+            (1, 1, TeamId(0), 1, crate::combat::WeaponPresetId(1)),
+            (2, 2, TeamId(1), 2, crate::combat::WeaponPresetId(2)),
+        ]
+        .into_iter()
+        .map(
+            |(player_id, network_entity_id, team, weapon, preset)| MatchParticipantSummary {
+                player_id,
+                network_entity_id,
+                team,
+                selected_build: crate::combat::SelectedBuild {
+                    primary_weapon: crate::combat::WeaponDefinitionId(weapon),
+                    source_preset_id: Some(preset),
+                    recipe_fingerprint: None,
+                },
+            },
+        )
+        .collect(),
+    }
+}
+
+fn assert_two_preset_rates(summary: &MatchSummary) {
+    use crate::combat::WeaponPresetId;
+    assert_eq!(
+        summary.credited_defeats_by_preset,
+        vec![(WeaponPresetId(1), 2)]
+    );
+    assert_eq!(
+        summary.suffered_deaths_by_preset,
+        vec![(WeaponPresetId(2), 2)]
+    );
+    assert_eq!(
+        summary.participant_active_ticks_by_preset,
+        vec![(WeaponPresetId(1), 2), (WeaponPresetId(2), 4)]
+    );
+    assert_eq!(
+        summary.credited_defeats_per_participant_minute_by_preset,
+        vec![(WeaponPresetId(1), 3_600.0), (WeaponPresetId(2), 0.0)]
+    );
+    assert_eq!(
+        summary.suffered_deaths_per_participant_minute_by_preset,
+        vec![(WeaponPresetId(1), 0.0), (WeaponPresetId(2), 1_800.0)]
+    );
+}
+
 #[test]
 fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() {
     use crate::combat::{
@@ -372,7 +439,7 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
             source_team: Some(TeamId(0)),
             target_network_id: NetworkEntityId(2),
             target_team: TeamId(1),
-            preset_id: None,
+            preset_id: Some(crate::combat::WeaponPresetId(1)),
             recipe_fingerprint: None,
             position: WorldPoint { x: 0.0, y: 0.0 },
             engagement_distance: 300.0,
@@ -382,6 +449,7 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
 
     let mut telemetry = MatchTelemetry::default();
     telemetry.begin(MatchId(11), 100);
+    telemetry.set_context(two_preset_telemetry_context());
     telemetry.record(fact(1, 110, CombatOutcomeKind::Damage { amount: 10 }), 32);
     telemetry.record(fact(2, 120, CombatOutcomeKind::Defeat), 32);
     telemetry.record_respawn(2, 130);
@@ -391,10 +459,10 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
     telemetry.record_movement(1, true);
     telemetry.record_movement(1, false);
     for _ in 0..2 {
-        telemetry.record_participant_active_tick(TeamId(0));
+        telemetry.record_participant_active_tick(TeamId(0), Some(crate::combat::WeaponPresetId(1)));
     }
     for _ in 0..4 {
-        telemetry.record_participant_active_tick(TeamId(1));
+        telemetry.record_participant_active_tick(TeamId(1), Some(crate::combat::WeaponPresetId(2)));
     }
     telemetry.complete(
         180,
@@ -415,6 +483,7 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
     assert!(summary.credited_defeats_per_participant_minute[1].abs() < f64::EPSILON);
     assert!(summary.suffered_deaths_per_participant_minute[0].abs() < f64::EPSILON);
     assert!((summary.suffered_deaths_per_participant_minute[1] - 1_800.0).abs() < f64::EPSILON);
+    assert_two_preset_rates(summary);
 
     telemetry.begin(MatchId(12), 200);
     telemetry.complete(
