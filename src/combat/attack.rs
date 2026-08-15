@@ -271,6 +271,7 @@ fn emit_attack_deliveries(
                     },
                     ComposedProjectileRuntime {
                         owner_entity: entity,
+                        source_entity: entity,
                         source,
                         delivery_index,
                         velocity: Vec2::from_angle(angle) * speed,
@@ -328,6 +329,7 @@ fn emit_attack_deliveries(
                 },
                 ComposedProjectileRuntime {
                     owner_entity: entity,
+                    source_entity: entity,
                     source,
                     delivery_index: 0,
                     velocity: Vec2::ZERO,
@@ -430,6 +432,7 @@ fn record_accepted_attack(
         tick,
         attack_id,
         source: source.owner_network_entity_id,
+        position: WorldPoint::from(origin),
         weapon_definition_id,
         presentation_profile_id: source.presentation_profile_id,
     };
@@ -509,13 +512,15 @@ pub(super) fn authoritative_composed_fire(
     spatial_query: avian2d::prelude::SpatialQuery,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     mut ids: ResMut<NextCombatIds>,
-    mut telemetry: ResMut<WeaponTelemetry>,
+    mut gameplay_telemetry: AbilityWeaponTelemetry,
     mut legacy_telemetry: ResMut<CombatTelemetry>,
     evidence: Res<CombatEvidenceMode>,
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut outbox: ResMut<CombatOutbox>,
     mut melee: MessageWriter<MeleeAttack>,
     active_combatants: Query<(), With<crate::matchplay::ActiveCombatant>>,
+    dashing: Query<(), With<crate::abilities::DashRuntime>>,
+    mut passive_states: Query<&mut crate::builds::PassiveRuntimeState>,
     query: Query<
         (
             Entity,
@@ -556,7 +561,9 @@ pub(super) fn authoritative_composed_fire(
         match_participant,
     ) in query
     {
-        if controlled_by.is_some_and(|controlled| disconnected.contains(&controlled.owner)) {
+        if dashing.contains(entity)
+            || controlled_by.is_some_and(|controlled| disconnected.contains(&controlled.owner))
+        {
             continue;
         }
         if defeated.is_some()
@@ -574,14 +581,28 @@ pub(super) fn authoritative_composed_fire(
         if !held || !matches!(state.phase, WeaponPhase::Ready) {
             if held && state.ammo == 0 && matches!(state.phase, WeaponPhase::Ready) {
                 state.phase = WeaponPhase::Reloading {
-                    ready_at_tick: tick.0.saturating_add(recipe.economy.refill_ticks()),
+                    ready_at_tick: tick.0.saturating_add(consume_quick_cycle(
+                        entity,
+                        *network_id,
+                        tick.0,
+                        recipe.economy.refill_ticks(),
+                        &mut passive_states,
+                        &mut gameplay_telemetry.ability,
+                    )),
                 };
             }
             continue;
         }
         if state.ammo == 0 {
             state.phase = WeaponPhase::Reloading {
-                ready_at_tick: tick.0.saturating_add(recipe.economy.refill_ticks()),
+                ready_at_tick: tick.0.saturating_add(consume_quick_cycle(
+                    entity,
+                    *network_id,
+                    tick.0,
+                    recipe.economy.refill_ticks(),
+                    &mut passive_states,
+                    &mut gameplay_telemetry.ability,
+                )),
             };
             continue;
         }
@@ -623,7 +644,14 @@ pub(super) fn authoritative_composed_fire(
         state.ammo = state.ammo.saturating_sub(1);
         state.phase = if state.ammo == 0 {
             WeaponPhase::Reloading {
-                ready_at_tick: tick.0.saturating_add(recipe.economy.refill_ticks()),
+                ready_at_tick: tick.0.saturating_add(consume_quick_cycle(
+                    entity,
+                    *network_id,
+                    tick.0,
+                    recipe.economy.refill_ticks(),
+                    &mut passive_states,
+                    &mut gameplay_telemetry.ability,
+                )),
             }
         } else {
             WeaponPhase::Cooldown {
@@ -632,6 +660,7 @@ pub(super) fn authoritative_composed_fire(
         };
         let preset_id = resolved.source_preset_id;
         let source = AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
             attack_id,
             player_id: *player_id,
             owner_network_entity_id: *network_id,
@@ -687,11 +716,49 @@ pub(super) fn authoritative_composed_fire(
             },
             evidence.enabled,
             &mut trackers,
-            &mut telemetry,
+            &mut gameplay_telemetry.weapon,
             &mut legacy_telemetry,
             &mut outbox,
         );
     }
+}
+
+#[cfg(feature = "server")]
+fn consume_quick_cycle(
+    entity: Entity,
+    owner_network_id: NetworkEntityId,
+    tick: u64,
+    base_ticks: u64,
+    states: &mut Query<&mut crate::builds::PassiveRuntimeState>,
+    telemetry: &mut crate::abilities::AbilityTelemetry,
+) -> u64 {
+    let Ok(mut state) = states.get_mut(entity) else {
+        return base_ticks;
+    };
+    let ticks = consume_quick_cycle_state(&mut state, base_ticks);
+    if ticks < base_ticks {
+        telemetry.record(crate::abilities::AbilityTelemetryRecord {
+            tick,
+            owner_network_id,
+            kind: crate::abilities::AbilityTelemetryKind::PassiveModified {
+                passive_id: crate::builds::PassiveDefinitionId(5),
+                amount: u16::try_from(base_ticks.saturating_sub(ticks)).unwrap_or(u16::MAX),
+            },
+        });
+    }
+    ticks
+}
+
+#[cfg(feature = "server")]
+fn consume_quick_cycle_state(
+    state: &mut crate::builds::PassiveRuntimeState,
+    base_ticks: u64,
+) -> u64 {
+    if !state.quick_cycle_primed {
+        return base_ticks;
+    }
+    state.quick_cycle_primed = false;
+    crate::abilities::apply_quick_cycle_ticks(base_ticks)
 }
 
 #[cfg(test)]
@@ -701,6 +768,35 @@ mod tests {
     fn delivery_indices_are_stable_within_one_attack() {
         assert_eq!(delivery_key(AttackId(7), 3), (7, 3));
         assert_eq!(delivery_count(FiringPattern::Single), 1);
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn quick_cycle_is_consumed_once_for_magazine_and_charge_refills() {
+        for economy in [
+            WeaponEconomy::Magazine {
+                capacity: 6,
+                refill_ticks: 60,
+            },
+            WeaponEconomy::Charges {
+                capacity: 2,
+                recharge_ticks: 60,
+            },
+        ] {
+            let mut state = crate::builds::PassiveRuntimeState {
+                quick_cycle_primed: true,
+                ..Default::default()
+            };
+            assert_eq!(
+                consume_quick_cycle_state(&mut state, economy.refill_ticks()),
+                36
+            );
+            assert!(!state.quick_cycle_primed);
+            assert_eq!(
+                consume_quick_cycle_state(&mut state, economy.refill_ticks()),
+                60
+            );
+        }
     }
 
     #[cfg(feature = "server")]

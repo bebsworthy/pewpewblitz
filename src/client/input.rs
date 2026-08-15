@@ -273,13 +273,30 @@ pub(super) fn apply_headless_input(
     automation: Res<HeadlessAutomation>,
     mut pending: ResMut<PendingLocalActions>,
     statuses: Query<&ClientJoinStatus, With<Client>>,
-    controlled: Query<(&Position, &crate::combat::TeamId), (With<Fighter>, With<Controlled>)>,
+    controlled: Query<
+        (
+            &Position,
+            &crate::combat::TeamId,
+            Option<&crate::builds::AbilityState>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
+        ),
+        (With<Fighter>, With<Controlled>),
+    >,
     fighters: Query<
         (
             &NetworkEntityId,
             &Position,
             &crate::combat::TeamId,
             Option<&crate::combat::Defeated>,
+        ),
+        With<Fighter>,
+    >,
+    sentries: Query<&crate::abilities::SentryIdentity, With<crate::abilities::Sentry>>,
+    sentry_owners: Query<
+        (
+            &crate::combat::TeamId,
+            &crate::builds::AbilityState,
+            &crate::builds::ResolvedMatchLoadout,
         ),
         With<Fighter>,
     >,
@@ -290,20 +307,31 @@ pub(super) fn apply_headless_input(
     {
         return;
     }
-    if automation
-        .simulation_ticks
-        .is_some_and(|limit| automation.elapsed_ticks >= limit)
-    {
+    if headless_automation_complete(&automation) {
         return;
     }
     let controlled_fighter = controlled.iter().next();
-    let controlled_position = controlled_fighter.map(|(position, _)| position.0);
+    let controlled_position = controlled_fighter.map(|(position, _, _, _)| position.0);
+    let enemy_sentry_deployed = controlled_fighter
+        .is_some_and(|(_, team, _, _)| sentries.iter().any(|identity| identity.team_id != *team));
+    let enemy_sentry_imminent = controlled_fighter.is_some_and(|(_, team, _, _)| {
+        sentry_owners.iter().any(|(owner_team, ability, loadout)| {
+            *owner_team != *team
+                && loadout.ultimate.kind == crate::builds::UltimateKind::Sentry
+                && (ability.charge >= 800
+                    || matches!(
+                        ability.phase,
+                        crate::builds::AbilityPhase::Ready
+                            | crate::builds::AbilityPhase::Deployed { .. }
+                    ))
+        })
+    });
     let target_position = fighters
         .iter()
         .find(|(network_id, _, _, _)| network_id.0 == 0)
         .map(|(_, target, _, _)| target.0)
         .or_else(|| {
-            let (controlled_position, controlled_team) = controlled_fighter?;
+            let (controlled_position, controlled_team, _, _) = controlled_fighter?;
             fighters
                 .iter()
                 .filter(|(_, _, team, defeated)| **team != *controlled_team && defeated.is_none())
@@ -318,27 +346,41 @@ pub(super) fn apply_headless_input(
         .zip(target_position)
         .map(|(position, target)| target - position)
         .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON);
+    let movement_delta = controlled_position
+        .zip(target_position)
+        .and_then(|(position, target)| headless_navigation_delta(position, target));
     let aim_axis = if automation.aim_at_dummy {
         aim_delta.map(Vec2::normalize)
     } else {
         automation.aim_axis
     };
+    let (ability, loadout) =
+        controlled_fighter.map_or((None, None), |(_, _, ability, loadout)| (ability, loadout));
+    let (ultimate_ready, sentry_ready, sentry_deployed) =
+        headless_ultimate_state(automation.ultimate, ability, loadout);
     let move_axis = if automation.aim_at_dummy && automation.move_axis != Vec2::ZERO {
-        controlled_position
-            .zip(target_position)
-            .map(|(position, target)| target - position)
-            .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
-            .map_or(automation.move_axis, Vec2::normalize)
+        headless_combat_move_axis(
+            automation.move_axis,
+            aim_delta,
+            movement_delta,
+            sentry_ready || sentry_deployed,
+        )
     } else {
         automation.move_axis
     };
-    if move_axis != Vec2::ZERO || aim_axis.is_some() || automation.aim_at_dummy || automation.fire {
+    if move_axis != Vec2::ZERO
+        || aim_axis.is_some()
+        || automation.aim_at_dummy
+        || automation.fire
+        || automation.ultimate
+    {
         if automation.elapsed_ticks == 0 {
             info!(
                 move_axis = ?move_axis,
                 aim_axis = ?aim_axis,
                 aim_at_dummy = automation.aim_at_dummy,
                 fire = automation.fire,
+                ultimate = automation.ultimate,
                 "headless movement automation enabled"
             );
         }
@@ -349,14 +391,77 @@ pub(super) fn apply_headless_input(
         } else {
             None
         };
-        let fire_held = automation.fire && automation.elapsed_ticks < HEADLESS_FIRE_DURATION_TICKS;
-        pending.held_buttons = if fire_held {
-            FighterInput::PRIMARY_FIRE
-        } else {
-            0
-        };
+        let fire_held = automation.fire
+            && automation.elapsed_ticks < HEADLESS_FIRE_DURATION_TICKS
+            && !enemy_sentry_deployed
+            && !enemy_sentry_imminent;
+        let ultimate_held = ultimate_ready && automation.elapsed_ticks.is_multiple_of(12);
+        pending.held_buttons = (u8::from(fire_held) * FighterInput::PRIMARY_FIRE)
+            | (u8::from(ultimate_held) * FighterInput::ULTIMATE);
         pending.active_device = ActiveInputDevice::KeyboardMouse;
     }
+}
+
+fn headless_automation_complete(automation: &HeadlessAutomation) -> bool {
+    automation
+        .simulation_ticks
+        .is_some_and(|limit| automation.elapsed_ticks >= limit)
+}
+
+pub(super) fn headless_navigation_delta(position: Vec2, target: Vec2) -> Option<Vec2> {
+    let direct = target - position;
+    let delta = if direct.x.abs() > 300.0 {
+        if position.y < 170.0 {
+            Vec2::Y
+        } else if position.y > 190.0 {
+            Vec2::NEG_Y
+        } else {
+            Vec2::new(direct.x.signum(), 0.0)
+        }
+    } else {
+        direct
+    };
+    (delta.is_finite() && delta.length_squared() > f32::EPSILON).then_some(delta)
+}
+
+pub(super) fn headless_ultimate_state(
+    enabled: bool,
+    ability: Option<&crate::builds::AbilityState>,
+    loadout: Option<&crate::builds::ResolvedMatchLoadout>,
+) -> (bool, bool, bool) {
+    let ready = enabled
+        && ability
+            .is_some_and(|ability| matches!(ability.phase, crate::builds::AbilityPhase::Ready));
+    let sentry =
+        loadout.is_some_and(|loadout| loadout.ultimate.kind == crate::builds::UltimateKind::Sentry);
+    let deployed = enabled
+        && sentry
+        && ability.is_some_and(|ability| {
+            matches!(ability.phase, crate::builds::AbilityPhase::Deployed { .. })
+        });
+    (ready, ready && sentry, deployed)
+}
+
+pub(super) fn headless_combat_move_axis(
+    fallback: Vec2,
+    target_delta: Option<Vec2>,
+    navigation_delta: Option<Vec2>,
+    sentry_standoff: bool,
+) -> Vec2 {
+    navigation_delta.map_or(fallback, |delta| {
+        let target_distance = target_delta.map_or(f32::INFINITY, Vec2::length);
+        if sentry_standoff && target_distance < 320.0 {
+            -delta.normalize()
+        } else if sentry_standoff && target_distance <= 400.0 {
+            Vec2::ZERO
+        } else if target_distance > 130.0 {
+            delta.normalize()
+        } else if target_distance < 90.0 {
+            -delta.normalize()
+        } else {
+            Vec2::ZERO
+        }
+    })
 }
 
 pub(super) fn advance_headless_automation(
@@ -404,7 +509,7 @@ pub(super) fn write_client_input(
     trace: Option<ResMut<LiveInputTrace>>,
     context: Res<ClientInputContext>,
     playable: Res<ClientPlayableGate>,
-    selecting: Query<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>,
+    selecting: Query<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>,
     mut query: Query<&mut ActionState<FighterInput>, With<InputMarker<FighterInput>>>,
 ) {
     let mut trace = trace.filter(|trace| trace.enabled);

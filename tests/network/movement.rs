@@ -12,6 +12,12 @@ fn native_input_moves_the_server_owned_fighter_and_replicates_position() {
     });
 
     let initial = harness.server_positions();
+    let resolved_speed = {
+        let world = harness.server.world_mut();
+        let mut query =
+            world.query_filtered::<&brawler::builds::ResolvedMatchLoadout, With<Fighter>>();
+        query.single(world).unwrap().fighter_stats.movement_speed
+    };
     assert_eq!(initial.len(), 1);
     harness.set_controlled_input(0, FighterInput::from_axes(Vec2::X, Some(Vec2::X), 0));
 
@@ -20,7 +26,7 @@ fn native_input_moves_the_server_owned_fighter_and_replicates_position() {
         harness.step();
         let current = harness.server_positions()[0].1;
         assert!(
-            (current.0 - previous.0).length() <= MovementTuning::default().speed / 60.0 + 0.1,
+            (current.0 - previous.0).length() <= resolved_speed / 60.0 + 0.1,
             "one tick displacement exceeded the authoritative speed limit: {previous:?} -> {current:?}"
         );
         previous = current;
@@ -361,7 +367,7 @@ fn hostile_input_and_client_pose_attempts_are_rejected_and_counted() {
 }
 
 #[test]
-fn client_owned_component_writes_cannot_mutate_authoritative_build_weapon_or_pose() {
+fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_pose() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -370,7 +376,16 @@ fn client_owned_component_writes_cannot_mutate_authoritative_build_weapon_or_pos
             && harness.selection_is_complete(0)
     });
     let player_id = harness.controlled_player_id(0);
-    let (server_build, server_fingerprint, server_ammo, server_position) = {
+    let (
+        server_build,
+        server_fingerprint,
+        server_ammo,
+        server_position,
+        server_loadout,
+        server_ability,
+        server_passives,
+        server_health,
+    ) = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(
             &PlayerId,
@@ -378,12 +393,25 @@ fn client_owned_component_writes_cannot_mutate_authoritative_build_weapon_or_pos
             &ResolvedWeapon,
             &WeaponState,
             &Position,
+            &brawler::builds::ResolvedMatchLoadout,
+            &brawler::builds::AbilityState,
+            &brawler::builds::PassiveRuntimeState,
+            &CurrentHealth,
         ), With<Fighter>>();
-        let (_, build, resolved, weapon, position) = query
+        let (_, build, resolved, weapon, position, loadout, ability, passives, health) = query
             .iter(world)
-            .find(|(player, _, _, _, _)| **player == player_id)
+            .find(|(player, ..)| **player == player_id)
             .expect("server fighter");
-        (*build, resolved.recipe_fingerprint, *weapon, *position)
+        (
+            *build,
+            resolved.recipe_fingerprint,
+            *weapon,
+            *position,
+            loadout.clone(),
+            *ability,
+            *passives,
+            *health,
+        )
     };
     let client_entity = harness.controlled_entity(0);
     {
@@ -396,6 +424,9 @@ fn client_owned_component_writes_cannot_mutate_authoritative_build_weapon_or_pos
             .expect("client resolved weapon")
             .clone();
         forged_resolved.recipe_fingerprint = WeaponRecipeFingerprint(0xdead_beef);
+        let mut forged_loadout = server_loadout.clone();
+        forged_loadout.total_points = 0;
+        forged_loadout.fighter_stats.maximum_health = u16::MAX;
         world.entity_mut(client_entity).insert((
             forged_build,
             forged_resolved,
@@ -404,12 +435,32 @@ fn client_owned_component_writes_cannot_mutate_authoritative_build_weapon_or_pos
                 phase: WeaponPhase::Reloading { ready_at_tick: 1 },
             },
             Position::from_xy(9_000.0, 9_000.0),
+            forged_loadout,
+            brawler::builds::AbilityState {
+                charge: 1_000,
+                phase: brawler::builds::AbilityPhase::Ready,
+            },
+            brawler::builds::PassiveRuntimeState {
+                adrenaline_until_tick: Some(u64::MAX),
+                adrenaline_rearm_at_tick: Some(u64::MAX),
+                quick_cycle_primed: true,
+            },
+            CurrentHealth(u16::MAX),
         ));
     }
     for _ in 0..12 {
         harness.step();
     }
-    let (actual_build, actual_fingerprint, actual_ammo, actual_position) = {
+    let (
+        actual_build,
+        actual_fingerprint,
+        actual_ammo,
+        actual_position,
+        actual_loadout,
+        actual_ability,
+        actual_passives,
+        actual_health,
+    ) = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(
             &PlayerId,
@@ -417,17 +468,34 @@ fn client_owned_component_writes_cannot_mutate_authoritative_build_weapon_or_pos
             &ResolvedWeapon,
             &WeaponState,
             &Position,
+            &brawler::builds::ResolvedMatchLoadout,
+            &brawler::builds::AbilityState,
+            &brawler::builds::PassiveRuntimeState,
+            &CurrentHealth,
         ), With<Fighter>>();
-        let (_, build, resolved, weapon, position) = query
+        let (_, build, resolved, weapon, position, loadout, ability, passives, health) = query
             .iter(world)
-            .find(|(player, _, _, _, _)| **player == player_id)
+            .find(|(player, ..)| **player == player_id)
             .expect("server fighter");
-        (*build, resolved.recipe_fingerprint, *weapon, *position)
+        (
+            *build,
+            resolved.recipe_fingerprint,
+            *weapon,
+            *position,
+            loadout.clone(),
+            *ability,
+            *passives,
+            *health,
+        )
     };
     assert_eq!(actual_build, server_build);
     assert_eq!(actual_fingerprint, server_fingerprint);
     assert_eq!(actual_ammo, server_ammo);
     assert!((actual_position.0 - server_position.0).length() < 0.01);
+    assert_eq!(actual_loadout, server_loadout);
+    assert_eq!(actual_ability, server_ability);
+    assert_eq!(actual_passives, server_passives);
+    assert_eq!(actual_health, server_health);
 }
 
 #[test]
@@ -518,7 +586,8 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         };
         overlap.set_controlled_input(index, FighterInput::from_axes(direction, None, 0));
     }
-    for _ in 0..140 {
+    // Runner's resolved 360-unit movement speed reaches the midpoint after the input epoch clears.
+    for _ in 0..126 {
         overlap.step();
     }
     let overlap_poses = overlap.server_poses();

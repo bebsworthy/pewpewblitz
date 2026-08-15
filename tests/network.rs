@@ -10,6 +10,7 @@ use bevy::{
     time::TimeUpdateStrategy,
 };
 use brawler::{
+    builds::{BuildPresetId, SelectedBuild as SelectedBrawlerBuild},
     client::{
         ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions,
         spawn_crossbeam_client,
@@ -17,10 +18,10 @@ use brawler::{
     combat::{
         ActiveAttackTrackers, ActiveEffects, AttackDelivery, AttackId, AttackSource,
         CaptureCombatCues, CombatCue, CombatEventId, CombatLogRecord, CombatOutbox,
-        CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTelemetry,
-        ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
+        CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind,
+        CombatTelemetry, ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
         FighterDefinitions, MeleeAttack, PendingDelivery, PendingPayload, Projectile,
-        ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectingWeapon,
+        ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectingBuild,
         SpawnState, TeamId, TestDummy, TestDummyFixture, TestDummyResetDeadline, WeaponPhase,
         WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
     },
@@ -45,9 +46,9 @@ use brawler::{
         InputValidationState, MovementTuning,
     },
     protocol::{
-        Fighter, FighterInput, MatchCommand, MatchCommandDecision, MatchCommandRequest,
-        NetworkEntityId, PlaceholderPlayer, PlayerId, ProtocolPlugin, SessionChannel,
-        TestNativeInputMessage, WeaponSelectionDecision, WeaponSelectionRequest,
+        BuildSelection, BuildSelectionDecision, BuildSelectionRequest, Fighter, FighterInput,
+        MatchCommand, MatchCommandDecision, MatchCommandRequest, NetworkEntityId,
+        PlaceholderPlayer, PlayerId, ProtocolPlugin, SessionChannel, TestNativeInputMessage,
         send_forged_native_input_for_test,
     },
     server::{
@@ -70,6 +71,8 @@ use serde::{Deserialize, Serialize};
 mod harness;
 use harness::*;
 
+#[path = "network/builds.rs"]
+mod builds;
 #[path = "network/combat_composed.rs"]
 mod combat_composed;
 #[path = "network/combat_projectiles.rs"]

@@ -363,7 +363,7 @@ impl Harness {
     pub(super) fn selection_is_complete(&mut self, index: usize) -> bool {
         let world = self.clients[index].world_mut();
         let mut query =
-            world.query_filtered::<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>();
+            world.query_filtered::<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>();
         query.iter(world).next().is_none()
     }
 
@@ -460,11 +460,11 @@ impl Harness {
         send_forged_native_input_for_test(&mut sender, target, end_tick, input);
     }
 
-    pub(super) fn send_weapon_selection(&mut self, index: usize, request: WeaponSelectionRequest) {
+    pub(super) fn send_build_selection(&mut self, index: usize, request: BuildSelectionRequest) {
         let client_entity = self.client_entities[index];
         let world = self.clients[index].world_mut();
         let mut sender = world
-            .get_mut::<MessageSender<WeaponSelectionRequest>>(client_entity)
+            .get_mut::<MessageSender<BuildSelectionRequest>>(client_entity)
             .expect("client selection sender");
         sender.send::<SessionChannel>(request);
     }

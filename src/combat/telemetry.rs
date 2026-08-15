@@ -5,11 +5,22 @@ use super::{
     DistanceBand, ExternalMotion, NetworkEntityId, PayloadEffectDefinition, ShotId,
     WeaponDefinitionId, WeaponPresetId, WeaponRecipeFingerprint, WorldPoint,
 };
+#[cfg(feature = "server")]
+use bevy::ecs::system::SystemParam;
+#[cfg(feature = "server")]
+use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
 use std::collections::BTreeMap;
 
 pub(super) const MAX_COMBAT_EVIDENCE_EVENTS: usize = 512;
 pub(super) const MAX_COMBAT_RECORDS: usize = 512;
+
+#[cfg(feature = "server")]
+#[derive(SystemParam)]
+pub(crate) struct AbilityWeaponTelemetry<'w> {
+    pub weapon: ResMut<'w, WeaponTelemetry>,
+    pub ability: ResMut<'w, crate::abilities::AbilityTelemetry>,
+}
 
 /// Server counters retained across sandbox resets.
 #[derive(Resource, Clone, Debug, Default, PartialEq)]

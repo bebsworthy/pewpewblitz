@@ -24,6 +24,7 @@ pub struct MatchSummary {
     pub content_fingerprint: Option<GameplayContentFingerprint>,
     pub rules_revision: u16,
     pub participants: Vec<MatchParticipantSummary>,
+    pub active_started_at_tick: u64,
     pub active_duration_ticks: u64,
     pub time_to_first_hostile_damage_ticks: Option<u64>,
     pub final_scores: [u16; 2],
@@ -47,6 +48,7 @@ pub struct MatchSummary {
     pub movement_ticks_by_player: Vec<(u64, u64, u64)>,
     pub weapon_aggregates: Vec<(WeaponTelemetryKey, WeaponTelemetryAggregate)>,
     pub weapon_hostile_contact_rates: Vec<(WeaponTelemetryKey, f64)>,
+    pub ability_telemetry: crate::abilities::AbilityTelemetry,
     pub disconnects: u32,
     pub dropped_records: u64,
 }
@@ -57,6 +59,10 @@ pub struct MatchParticipantSummary {
     pub network_entity_id: u64,
     pub team: TeamId,
     pub selected_build: SelectedBuild,
+    pub selected_brawler_build: Option<crate::builds::SelectedBuild>,
+    pub total_points: Option<u8>,
+    pub ultimate_id: Option<crate::builds::UltimateDefinitionId>,
+    pub passive_ids: Option<[crate::builds::PassiveDefinitionId; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +94,7 @@ struct LiveMatchTelemetry {
     participant_active_ticks_by_preset: BTreeMap<WeaponPresetId, u64>,
     disconnects: u32,
     weapon_aggregate_start: BTreeMap<WeaponTelemetryKey, WeaponTelemetryAggregate>,
+    ability_telemetry_start: Option<crate::abilities::AbilityTelemetry>,
     context: Option<MatchTelemetryContext>,
     dropped_records_at_start: u64,
 }
@@ -130,6 +137,7 @@ impl MatchTelemetry {
             participant_active_ticks_by_preset: BTreeMap::new(),
             disconnects: 0,
             weapon_aggregate_start: BTreeMap::new(),
+            ability_telemetry_start: None,
             context: None,
             dropped_records_at_start: self.dropped_records,
         });
@@ -143,6 +151,23 @@ impl MatchTelemetry {
         {
             live.weapon_aggregate_start
                 .clone_from(&weapons.source_aggregates);
+        }
+    }
+
+    #[cfg(feature = "server")]
+    pub(crate) fn begin_with_sources(
+        &mut self,
+        match_id: MatchId,
+        tick: u64,
+        weapons: &WeaponTelemetry,
+        abilities: &crate::abilities::AbilityTelemetry,
+    ) {
+        self.begin_with_weapons(match_id, tick, weapons);
+        if let Some(live) = self.live.as_mut()
+            && live.match_id == match_id
+            && live.ability_telemetry_start.is_none()
+        {
+            live.ability_telemetry_start = Some(abilities.clone());
         }
     }
 
@@ -271,7 +296,7 @@ impl MatchTelemetry {
                     }
                 }
             }
-            CombatOutcomeKind::Damage { .. } => {}
+            CombatOutcomeKind::Damage { .. } | CombatOutcomeKind::DeployableDestroyed => {}
         }
     }
 
@@ -283,6 +308,43 @@ impl MatchTelemetry {
         result: MatchResult,
         maximum_summaries: usize,
         weapons: &WeaponTelemetry,
+    ) {
+        self.complete_internal(tick, scores, result, maximum_summaries, weapons, None);
+    }
+
+    #[cfg(feature = "server")]
+    pub(crate) fn complete_with_abilities(
+        &mut self,
+        tick: u64,
+        scores: [u16; 2],
+        result: MatchResult,
+        maximum_summaries: usize,
+        weapons: &WeaponTelemetry,
+        abilities: &crate::abilities::AbilityTelemetry,
+    ) {
+        self.complete_internal(
+            tick,
+            scores,
+            result,
+            maximum_summaries,
+            weapons,
+            Some(abilities),
+        );
+    }
+
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::too_many_arguments,
+        clippy::too_many_lines
+    )]
+    fn complete_internal(
+        &mut self,
+        tick: u64,
+        scores: [u16; 2],
+        result: MatchResult,
+        maximum_summaries: usize,
+        weapons: &WeaponTelemetry,
+        abilities: Option<&crate::abilities::AbilityTelemetry>,
     ) {
         let Some(live) = self.live.take() else {
             return;
@@ -339,6 +401,7 @@ impl MatchTelemetry {
                 .context
                 .as_ref()
                 .map_or_else(Vec::new, |context| context.participants.clone()),
+            active_started_at_tick: live.active_start_tick,
             active_duration_ticks: tick.saturating_sub(live.active_start_tick),
             time_to_first_hostile_damage_ticks: live
                 .first_hostile_damage_tick
@@ -377,6 +440,12 @@ impl MatchTelemetry {
                 .collect(),
             weapon_aggregates,
             weapon_hostile_contact_rates,
+            ability_telemetry: abilities
+                .zip(live.ability_telemetry_start.as_ref())
+                .map_or_else(
+                    crate::abilities::AbilityTelemetry::default,
+                    |(end, start)| end.delta_since(start, live.active_start_tick),
+                ),
             disconnects: live.disconnects,
             dropped_records: self
                 .dropped_records

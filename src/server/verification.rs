@@ -8,6 +8,7 @@ pub(super) fn verify_process_match(
     mut check: ResMut<ProcessMatchCheck>,
     roots: Query<&MatchState, With<MatchRoot>>,
     telemetry: Res<crate::matchplay::MatchTelemetry>,
+    build_telemetry: Res<crate::builds::BuildTelemetry>,
     participants: Query<&MatchParticipant, With<Fighter>>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
@@ -19,6 +20,7 @@ pub(super) fn verify_process_match(
     let Some(summary) = telemetry.summaries.back() else {
         return;
     };
+    let ability_telemetry = &summary.ability_telemetry;
     if state.match_id.0 <= initial.0 || !matches!(state.phase, MatchPhase::Waiting) {
         return;
     }
@@ -75,8 +77,92 @@ pub(super) fn verify_process_match(
     let preset_deaths = format_preset_counts(&summary.suffered_deaths_by_preset);
     let preset_death_rates =
         format_preset_rates(&summary.suffered_deaths_per_participant_minute_by_preset);
+    let build_preset_ids = summary
+        .participants
+        .iter()
+        .filter_map(|participant| participant.selected_brawler_build)
+        .filter_map(|build| build.source_build_preset_id)
+        .map(|id| id.0.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let custom_builds = summary
+        .participants
+        .iter()
+        .filter_map(|participant| participant.selected_brawler_build)
+        .filter(|build| build.source_build_preset_id.is_none())
+        .count();
+    let build_fingerprints = summary
+        .participants
+        .iter()
+        .filter_map(|participant| participant.selected_brawler_build)
+        .map(|build| build.recipe_fingerprint.0.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let build_total_points = summary
+        .participants
+        .iter()
+        .filter_map(|participant| participant.total_points)
+        .map(|points| points.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let passive_ids = summary
+        .participants
+        .iter()
+        .filter_map(|participant| participant.passive_ids)
+        .map(|passives| format!("{}+{}", passives[0].0, passives[1].0))
+        .collect::<Vec<_>>()
+        .join(",");
+    let ultimate_ids = summary
+        .participants
+        .iter()
+        .filter_map(|participant| participant.ultimate_id)
+        .map(|id| id.0.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let first_full_charge_ticks = ability_telemetry
+        .first_full_charge_tick_by_owner
+        .iter()
+        .map(|(owner, tick)| format!("{}:{tick}", owner.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    let first_full_charge_active_ticks = ability_telemetry
+        .first_full_charge_tick_by_owner
+        .iter()
+        .map(|(owner, tick)| {
+            format!(
+                "{}:{}",
+                owner.0,
+                tick.saturating_sub(summary.active_started_at_tick)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let ability_uses_by_owner = ability_telemetry
+        .uses_by_owner
+        .iter()
+        .map(|(owner, uses)| format!("{}:{uses}", owner.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    let passive_triggers = ability_telemetry
+        .passive_triggers
+        .iter()
+        .map(|(passive, triggers)| format!("{}:{triggers}", passive.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    let charge_dealt_by_owner = ability_telemetry
+        .charge_damage_dealt_by_owner
+        .iter()
+        .map(|(owner, damage)| format!("{}:{damage}", owner.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    let charge_received_by_owner = ability_telemetry
+        .charge_damage_received_by_owner
+        .iter()
+        .map(|(owner, damage)| format!("{}:{damage}", owner.0))
+        .collect::<Vec<_>>()
+        .join(",");
     let report = format!(
-        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\n",
+        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_preset_ids={}\ncustom_builds={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nbuild_selections={}\nbuild_dropped_records={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_terrain_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\n",
         initial.0,
         state.match_id.0,
         participant_count,
@@ -98,11 +184,49 @@ pub(super) fn verify_process_match(
         telemetry.summaries.len(),
         summary.weapon_aggregates.len(),
         weapon_preset_ids,
+        build_preset_ids,
+        custom_builds,
+        build_fingerprints,
+        build_total_points,
+        ultimate_ids,
+        passive_ids,
+        first_full_charge_ticks,
+        first_full_charge_active_ticks,
+        ability_uses_by_owner,
+        charge_dealt_by_owner,
+        charge_received_by_owner,
+        passive_triggers,
         preset_defeats,
         preset_deaths,
         preset_death_rates,
         accepted_attacks,
         attacks_with_hostile_contact,
+        build_telemetry.selections.len(),
+        build_telemetry.dropped_records,
+        ability_telemetry.attempts,
+        ability_telemetry.accepts,
+        ability_telemetry.dash_uses,
+        ability_telemetry.sentry_uses,
+        ability_telemetry.sentry_shots,
+        ability_telemetry.dropped_records,
+        ability_telemetry.wasted_charge,
+        ability_telemetry.ready_to_use_delay_ticks,
+        ability_telemetry.ready_to_use_count,
+        ability_telemetry.rejections_by_reason,
+        ability_telemetry.dash_requested_distance_milli_by_owner,
+        ability_telemetry.dash_actual_distance_milli_by_owner,
+        ability_telemetry.dash_terrain_truncations_by_owner,
+        ability_telemetry.dash_contacts_by_owner,
+        ability_telemetry.dash_interruptions_by_owner,
+        ability_telemetry.ability_damage_by_owner,
+        ability_telemetry.ability_targets_by_owner,
+        ability_telemetry.ability_defeats_by_owner,
+        ability_telemetry.sentry_cleanup_reasons,
+        ability_telemetry.concurrent_sentry_high_water,
+        ability_telemetry.sentries,
+        ability_telemetry.passive_active_ticks,
+        ability_telemetry.passive_modified_amounts,
+        ability_telemetry.passive_unused_triggers,
     );
     if let Some(path) = &check.report_file
         && let Err(error) = fs::write(path, report.as_bytes())

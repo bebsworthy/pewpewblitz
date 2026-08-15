@@ -799,7 +799,7 @@ pub(super) fn record_headless_combat_observation(
     }
     if !observation.wrote_ready && observation.waiting_reported_at_tick.is_none() {
         let required = config
-            .weapon_preset
+            .build_preset
             .map(required_client_checkpoints)
             .unwrap_or_default();
         let missing = required
@@ -836,7 +836,7 @@ pub(super) fn record_headless_combat_observation(
     if observation.wrote_ready
         || !observation.saw_defeat
         || !observation.saw_reset
-        || config.weapon_preset.is_some_and(|preset| {
+        || config.build_preset.is_some_and(|preset| {
             required_client_checkpoints(preset)
                 .iter()
                 .any(|checkpoint| !observation.checkpoints.contains_key(*checkpoint))

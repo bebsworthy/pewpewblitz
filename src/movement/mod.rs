@@ -155,7 +155,7 @@ fn authoritative_movement(
             Option<&ActionState<FighterInput>>,
             Option<&NativeBuffer<FighterInput>>,
             Option<&crate::combat::Defeated>,
-            Option<&crate::combat::SelectingWeapon>,
+            Option<&crate::combat::SelectingBuild>,
             Option<&crate::combat::AwaitingPostSelectionInput>,
             Option<&crate::combat::ActiveEffects>,
             Option<&crate::combat::ExternalMotion>,
@@ -164,6 +164,9 @@ fn authoritative_movement(
         ),
         With<Fighter>,
     >,
+    loadouts: Query<&crate::builds::ResolvedMatchLoadout>,
+    passive_states: Query<&crate::builds::PassiveRuntimeState>,
+    ability_states: Query<&crate::builds::AbilityState>,
 ) {
     let config = MoveAndSlideConfig {
         move_and_slide_iterations: tuning.move_iterations,
@@ -189,7 +192,10 @@ fn authoritative_movement(
         active_combatant,
     ) in &fighters
     {
-        if defeated.is_some()
+        if ability_states
+            .get(entity)
+            .is_ok_and(|state| matches!(state.phase, crate::builds::AbilityPhase::Dashing { .. }))
+            || defeated.is_some()
             || selecting.is_some()
             || (participant.is_some() && active_combatant.is_none())
         {
@@ -235,8 +241,17 @@ fn authoritative_movement(
             .map_or(1.0, |slow| {
                 f32::from(slow.movement_multiplier_milli) / 1000.0
             });
+        let resolved_speed = loadouts
+            .get(entity)
+            .map_or(tuning.speed, |loadout| loadout.fighter_stats.movement_speed);
+        let adrenaline_multiplier = passive_states
+            .get(entity)
+            .ok()
+            .and_then(|state| state.adrenaline_until_tick)
+            .filter(|deadline| tick.0 < *deadline)
+            .map_or(1.0, |_| 1.15);
         let desired_velocity = if activation_ready {
-            movement * tuning.speed * movement_multiplier
+            movement * resolved_speed * movement_multiplier * adrenaline_multiplier
                 + external_motion
                     .filter(|motion| tick.0 < motion.expires_at_tick)
                     .map_or(Vec2::ZERO, |motion| motion.velocity)

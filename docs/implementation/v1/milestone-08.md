@@ -6,12 +6,12 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Specification review |
+| Status | Feedback review |
 | Research | Complete; product, live M07 worktree, pinned references, exact dependency sources, primary documentation, and external specification review incorporated on 2026-08-15 |
-| Specification validation | Awaiting user review |
-| Implementation | Not started; awaiting specification validation and an exact green M08 starting baseline |
-| Verification | Not started |
-| User validation/playtest | Not started |
+| Specification validation | Validated by the user's explicit implementation request on 2026-08-15 |
+| Implementation | Complete for the validated M08 gameplay/editor/process scope from commit `098122a32c33651f920763a04bea200d44a36a69` |
+| Verification | Automated technical gate green on 2026-08-15: format, both role Clippy graphs, server feature isolation, 149 unit tests, 60 network tests, 9 performance tests, shortened local/typical/adverse/custom reports, and production-rules named/custom reports |
+| User validation/playtest | Native aspect-ratio/editor/active-HUD inspection complete; awaiting physical-controller, perceptual-audio, complete state-matrix, and human balance observations |
 
 Milestone 07 completed on 2026-08-15 after feedback triage, remediation, technical-gate verification,
 learning review, and explicit user closeout. Its remaining supervised physical-controller, perceptual-
@@ -673,47 +673,51 @@ subset after each slice.
 
 - [x] Reconcile this specification with M07 feedback remediation, technical-gate acceptance, learning
   review, explicit user closeout, and the supervised observations deferred to M11.
-- [ ] Record the exact M08 starting commit after the accepted M07 implementation is committed.
-- [ ] Re-run the complete accepted M07 format, role Clippy/tests/builds, server feature graph,
+- [x] Record the exact M08 starting commit after the accepted M07 implementation is committed.
+  Starting commit: `098122a32c33651f920763a04bea200d44a36a69`.
+- [x] Re-run the complete accepted M07 format, role Clippy/tests/builds, server feature graph,
   deterministic network/performance suites, process profiles, and relevant visual baseline.
-- [ ] Add build stable IDs, catalog/engine limits, candidate/resolved shapes, canonical fingerprint,
+  Format, both role graphs, deterministic network/performance suites, shortened process profiles,
+  production-rules comparisons, and the relevant native visual baseline reran on 2026-08-15;
+  M07's explicitly deferred supervised observations remain assigned to M11.
+- [x] Add build stable IDs, catalog/engine limits, candidate/resolved shapes, canonical fingerprint,
   shared content envelope contribution, and four legal named recipes with pure validation tests.
 
 ### Build resolution and selection
 
-- [ ] Implement preset/custom Pulse resolution, discrete transformations, budget/slot/family rules,
+- [x] Implement preset/custom Pulse resolution, discrete transformations, budget/slot/family rules,
   body-stat resolution, wire-size bounds, and exhaustive invalid/equivalent-recipe tests.
-- [ ] Replace the one-time weapon transaction with link-scoped waiting build selection/replacement,
+- [x] Replace the one-time weapon transaction with link-scoped waiting build selection/replacement,
   request idempotency, ready lock, atomic runtime install, input epoch reset, and restart retention.
-- [ ] Migrate server/client/harness/config/automation selection callers without retaining parallel
+- [x] Migrate server/client/harness/config/automation selection callers without retaining parallel
   weapon/build selection authorities or preset-specific runtime branches.
 
 ### Passive and outcome foundation
 
-- [ ] Add generic combat source/target identity and deployable damage routing while preserving all
+- [x] Add generic combat source/target identity and deployable damage routing while preserving all
   primary weapon, score, cue, telemetry, recovery, and one-defeat-per-life behavior.
-- [ ] Add resolved per-fighter stats and all six passive rules with explicit fixed-post fact fan-out,
+- [x] Add resolved per-fighter stats and all six passive rules with explicit fixed-post fact fan-out,
   deterministic rounding, trigger/rearm state, lifecycle cleanup, and schedule trace tests.
-- [ ] Add ultimate charge observation/economy and replicated ability/passive state; prove every
+- [x] Add ultimate charge observation/economy and replicated ability/passive state; prove every
   excluded charge source and same-tick/idempotency rule.
 
 ### Dash vertical slice
 
-- [ ] Implement server activation validation, terrain-safe cast endpoint, fixed-tick dash movement,
+- [x] Implement server activation validation, terrain-safe cast endpoint, fixed-tick dash movement,
   primary/motion gating, bounded target sweep, generic payload/outcome, interruption, and cleanup.
-- [ ] Add dash cues, HUD state, client trail/contact presentation, telemetry, pure geometry tests,
+- [x] Add dash cues, HUD state, client trail/contact presentation, telemetry, pure geometry tests,
   small-App schedule tests, deterministic network authority/recovery, and process evidence.
 
 ### Sentry vertical slice
 
-- [ ] Implement clear placement, stable IDs/ownership index, dedicated collision layer, replication,
+- [x] Implement clear placement, stable IDs/ownership index, dedicated collision layer, replication,
   health/damage, stable hostile acquisition, line of sight, straight fire, and one-owner bound.
-- [ ] Unify expiry/destruction/owner defeat/disconnect/completion/restart/replacement cleanup and add
+- [x] Unify expiry/destruction/owner defeat/disconnect/completion/restart/replacement cleanup and add
   sentry cues, HUD/world presentation, audio, telemetry, recovery, and accumulation tests.
 
 ### Client editor, verification, and gate review
 
-- [ ] Complete controller/keyboard preset/custom editor, cost/rejection feedback, loadout HUD,
+- [x] Complete controller/keyboard preset/custom editor, cost/rejection feedback, loadout HUD,
   ultimate/passive/deployable presentation, aspect-ratio layouts, and headless automation controls.
 - [ ] Run all automated, process, performance, feature-isolation, visual, physical-controller, audio,
   normal-match, repeated-match, and all-build comparison gates; record exact evidence.
@@ -724,22 +728,22 @@ subset after each slice.
 
 ### Pure validation and rule tests
 
-- [ ] Catalog rejects schema, count, duplicate ID/key, unknown cross-reference, invalid finite/bound,
+- [x] Catalog rejects schema, count, duplicate ID/key, unknown cross-reference, invalid finite/bound,
   authored ceiling widening, illegal preset, cost overflow, and serialized-size violations.
-- [ ] Candidate validation covers unknown IDs, duplicate passives, wrong slot count, frame-family
+- [x] Candidate validation covers unknown IDs, duplicate passives, wrong slot count, frame-family
   conflict, every budget boundary, custom axis enum, incompatible choice, and all four presets.
-- [ ] All 27 custom Pulse combinations resolve deterministically; legal results pass M05 structural
+- [x] All 27 custom Pulse combinations resolve deterministically; legal results pass M05 structural
   validation, have no preset identity, fingerprint canonically, produce exact 45/60/81-tick
   Compact/Standard/Long lifetimes, and never exceed engine bounds.
-- [ ] Passive arithmetic covers health/speed resolution, damage distance boundaries/interpolation/
+- [x] Passive arithmetic covers health/speed resolution, damage distance boundaries/interpolation/
   rounding, Adrenal trigger/rearm/non-refresh behavior, `Magazine` and `Charges` Quick Cycle prime/
   consume, Tenacity minimum duration, and simultaneous trigger/defeat cleanup.
-- [ ] Charge covers cap/overflow, dealt/received multipliers, all excluded sources, simultaneous
+- [x] Charge covers cap/overflow, dealt/received multipliers, all excluded sources, simultaneous
   facts, use/reset, defeat retention, restart clearing, and stable event idempotency.
-- [ ] Dash geometry covers clear/full/truncated/zero paths, bounds, stable target ordering, maximum
+- [x] Dash geometry covers clear/full/truncated/zero paths, bounds, stable target ordering, maximum
   targets, once-per-target 35 damage plus 450 world units/s knockback lasting six ticks, deadline,
   and interruption.
-- [ ] Sentry rules cover the 96/88/80/72/64/56 placement sequence, 20-unit radius, obstruction,
+- [x] Sentry rules cover the 96/88/80/72/64/56 placement sequence, 20-unit radius, obstruction,
   occupancy, acquisition distance/LOS/stable tie, cooldown/lifetime, affiliation,
   health/destruction, owner lookup, and every cleanup reason. A fixed-schedule test proves no
   acquisition before the six-tick boundary and stable reacquisition ordering across two consecutive
@@ -747,48 +751,48 @@ subset after each slice.
 
 ### Small-App/ECS and schedule tests
 
-- [ ] Explicit trace proves build replacement precedes input epoch, ultimate activation precedes
+- [x] Explicit trace proves build replacement precedes input epoch, ultimate activation precedes
   movement/fire, dash/sentry contacts precede damage, fact observers precede Wipeout drain, lifecycle
   follows scoring, and tick advancement remains last.
-- [ ] Atomic accepted replacement installs exactly one resolved loadout and fresh runtime; every
+- [x] Atomic accepted replacement installs exactly one resolved loadout and fresh runtime; every
   rejected or duplicate request leaves the prior entity state byte-equivalent.
-- [ ] Movement/health/respawn use resolved stats; charge survives defeat but all other transient
+- [x] Movement/health/respawn use resolved stats; charge survives defeat but all other transient
   ability/passive/dash/sentry state follows the specified lifecycle.
-- [ ] Primary weapons behave identically without passives and apply each passive only through the
+- [x] Primary weapons behave identically without passives and apply each passive only through the
   resolved inventory; no preset/build ID switches execution.
-- [ ] Dash cannot move/fire/damage outside active phase, through terrain, twice per press, after
+- [x] Dash cannot move/fire/damage outside active phase, through terrain, twice per press, after
   defeat, or beyond its target/deadline bounds.
-- [ ] Sentry cannot spawn illegally, target allies/defeated/inactive/occluded fighters, exceed one
+- [x] Sentry cannot spawn illegally, target allies/defeated/inactive/occluded fighters, exceed one
   owner instance, survive cleanup, or award a Wipeout point when destroyed. Accepted activation and
   a later attributed shot both exercise the ordinary owner spawn-protection break rule.
-- [ ] Repeated build replacement and at least three match restarts retain exact catalog/map/process
+- [x] Repeated build replacement and at least three match restarts retain exact catalog/map/process
   roots while leaving zero stale ability/deployable/projectile/effect/fact/input entities/state.
 
 ### Deterministic network tests
 
-- [ ] Four clients select the four named builds, converge accepted identities/resolved loadouts,
+- [x] Four clients select the four named builds, converge accepted identities/resolved loadouts,
   ready, complete/restart a match, and may legally replace builds in the next waiting phase.
-- [ ] A legal custom recipe resolves/replicates/fires through ordinary systems; over-budget/invalid/
+- [x] A legal custom recipe resolves/replicates/fires through ordinary systems; over-budget/invalid/
   stale/wrong-match/wrong-phase/ready-locked requests are link-scoped and cannot mutate another player.
-- [ ] Clients cannot authoritatively change build identity, resolved stats/weapon, passive inventory,
+- [x] Clients cannot authoritatively change build identity, resolved stats/weapon, passive inventory,
   charge, ability phase, dash pose/damage, sentry owner/target/health/deadline, or cleanup.
-- [ ] Delay/loss/duplication/reordering converge current loadout, ability/passive state, sentry state,
+- [x] Delay/loss/duplication/reordering converge current loadout, ability/passive state, sentry state,
   charge, cues where guaranteed, match score/result, and restart cleanup without replay history.
-- [ ] Owner defeat/disconnect and sentry destruction/expiry are distinct and identical on all peers;
+- [x] Owner defeat/disconnect and sentry destruction/expiry are distinct and identical on all peers;
   late/current replication recovers live sentry and HUD state.
-- [ ] All preset/custom telemetry keys and outcome attribution use stable IDs/fingerprints and agree
+- [x] All preset/custom telemetry keys and outcome attribution use stable IDs/fingerprints and agree
   with authoritative state without relying on local `Entity` identity.
 
 ### Process, performance, visual, controller, and audio verification
 
-- [ ] Dedicated server plus four headless clients completes shortened local/typical/adverse matches
+- [x] Dedicated server plus four headless clients completes shortened local/typical/adverse matches
   exercising four builds, both ultimates, every passive across profiles, one custom recipe, restart,
   clean port reuse, and zero evidence drops.
-- [ ] Fixed-step p95 remains `< 16.67 ms` in a four-fighter worst case with maximum legal primary
+- [x] Fixed-step p95 remains `< 16.67 ms` in a four-fighter worst case with maximum legal primary
   deliveries, four simultaneous dashes or sentries as allowed, mixed damageables, telemetry, and HUD.
-- [ ] Targeting, outcome fan-out, passive work, and cleanup remain bounded by explicit live-entity/
+- [x] Targeting, outcome fan-out, passive work, and cleanup remain bounded by explicit live-entity/
   record ceilings and do not scan archived summaries per tick.
-- [ ] Isolated server features exclude window/render/UI/text/assets/audio/device input and run without
+- [x] Isolated server features exclude window/render/UI/text/assets/audio/device input and run without
   an asset tree; no new dependency or client feature enters the server graph.
 - [ ] At 1280x720, 1440x900, 1024x768, and 960x540, editor, cost/error detail, match strip, loadout,
   meter, passive state, sentry health, scoreboard, respawn, and results remain legible.
@@ -818,6 +822,102 @@ subset after each slice.
 - Visual/controller/audio checks complement automated authority, recovery, timing, and cleanup tests;
   they do not replace them.
 
+## Implementation and verification evidence
+
+Implementation reached the automated technical gate on 2026-08-15 and moved to `User playtest`.
+The slice adds a typed build catalog and resolver, four ordinary presets and 27 bounded custom Pulse
+combinations, waiting-phase server replacement, six resolved passives, fact-driven ultimate charge,
+collision-safe dash, targetable replicated sentries, build editor/HUD/audio/visual presentation,
+stable source/target attribution, and bounded build/ability telemetry. Selection acceptance remains
+the hard input-epoch boundary; restart retains the recipe as a default while reopening server
+confirmation/replacement.
+
+Automated evidence on the implementation tree:
+
+- `cargo fmt --all --check`, client/server role Clippy with `-D warnings`, `git diff --check`, and
+  `scripts/check-server-features.sh` passed. The isolated server graph still excludes window,
+  render, UI, text, asset, audio, and device-input capabilities.
+- The final suite passed 149 library tests, 60 deterministic/real-loopback network tests, and 9
+  performance tests. The final M08 four-live-sentry target/fire/cleanup case measured fixed-tick p95
+  `2.102917 ms` on Apple Silicon/macOS, below the `16.67 ms` budget; the composed M05 worst case was
+  `2.779916 ms` and the 100-fighter/200-projectile case was `2.755875 ms`.
+- The deterministic build tests prove all 27 custom axes, canonical passive order, exact preset/body
+  stats, duplicate/family/unknown/over-budget rejection, bounded telemetry, and atomic retained
+  state after stale, wrong-match, ready-locked, wrong-phase, and over-budget requests. The impaired
+  ability scenario proves authoritative dash/sentry damage and phases, durable sentry replication,
+  sentry fire breaking owner protection, zero score for sentry cleanup, and owner-defeat cleanup.
+- The final coverage audit additionally snapshots the complete accepted build runtime across every
+  duplicate/rejected request, proves selection clears dirty input/freshness and installs the new
+  input epoch, shape-casts Dash against a real terrain collider, caps stable Dash contacts at eight,
+  blocks primary fire and defeated reactivation, and verifies charge retention plus passive cleanup
+  across respawn. Sentry tests now cover exact placement/cadence, one-owner enforcement, client
+  forgery resistance, impaired durable recovery, and distinct owner-defeat, owner-disconnect,
+  destruction, expiry, completion/restart, and replacement cleanup paths on server and peers.
+- Final real-process local/typical/adverse runs each used four named builds, all six passives, both
+  ultimates, ordinary native input, target-10/3,600-active-tick verification rules, one completed
+  respawn-capable match, restart from match ID `1` to `2`, and zero build/ability/match evidence
+  drops. Representative sentry shots were local `1`, typical `7`, and adverse `2`; every run also
+  recorded at least four accepted ultimate uses and per-owner full-charge/use distributions.
+- A separate final local process run replaced Duelist with the legal default custom Pulse. It
+  archived `custom_builds=1`, build cost `10`, non-preset fingerprint `2572635754965715910`, 52
+  hostile contacts, 6 dash uses, 2 sentry uses, 3 sentry shots, restart, and zero evidence drops.
+- Reports now retain stable build fingerprints/costs, ultimate/passive IDs, per-owner charge damage
+  dealt/received, absolute and active-relative first-full-charge ticks, accepted uses,
+  event-passive triggers, and bounded drop counters.
+- Production-rules process comparisons completed for four named presets and for a lineup replacing
+  Duelist with the legal custom Pulse. The named run ended 10–2 after 2,216 active ticks with six
+  accepted ultimate uses and first readiness at 839–1,389 active ticks. The custom run ended 9–10
+  after 3,802 active ticks with 11 uses and readiness at 767–932 active ticks. Both retained four
+  participants through restart and dropped zero records. The custom lineup produced a materially
+  longer, closer, higher-contact automation pattern, but both readiness distributions are well below
+  the 2,700–5,400-tick hypothesis; human counterplay/tuning judgment remains required before changing
+  the accepted 5/3 charge rule.
+
+Native visual inspection used the real client through the temporary addressable macOS bundle helper.
+The editor was inspected at exact logical 1280x720, 1440x900, 1024x768, and 960x540 sizes; the compact
+960x540 pass also exercised active four-client combat, the two-line loadout/charge/passive HUD, a live
+Sentry with replicated health/lifetime, and the waiting/restart overlay. Keyboard navigation edited
+all six custom fields and displayed the exact authoritative over-budget rejection. This pass fixed
+unsupported arrow glyphs, roster wrapping, right-panel justification, and small-window combat-HUD
+clipping. The automation backend could not synthesize Tab for the scoreboard, and no physical
+controller or perceptual audio judgment was available, so the complete state matrix, controller,
+audio, and human normal-duration observations remain open rather than represented as passing.
+The final local hardware audit found paired 8BitDo NES30 Pro and Xbox Wireless Controller devices,
+but both were disconnected; macOS reported only the built-in speakers as the active audio output.
+
+### Technical-review remediation verification — 2026-08-15
+
+After the authorized feedback pass:
+
+- `cargo test --locked --features client,server --lib` passed 156/156 focused tests;
+- `cargo test --locked --no-default-features --features network-test --test network --
+  --test-threads=1` passed 61/61 separate-App, Crossbeam, UDP, authority, recovery, and replication
+  scenarios;
+- client-only and server-only binary checks passed, and `cargo clippy --locked --features
+  client,server --lib --bins -- -D warnings` passed;
+- `cargo test --locked --no-default-features --features network-test --test performance --
+  --nocapture` passed 9/9; the latest four-live-Sentry rerun measured 2.130708 ms p95 on aarch64
+  macOS;
+- a clean real-process local run completed and restarted a four-build match with zero evidence drops.
+  Its archived match telemetry included a typed placement rejection, requested/actual Dash distance,
+  ready-to-use delay and wasted charge, a MatchCompleted Sentry cleanup with 526-tick lifetime and
+  16 shots, concurrent high-water 1, and passive active/modified/unused aggregates. The retained
+  report is `/tmp/brawler-m08-remediation-clean.report` for this workspace session.
+- the follow-up Sentry presentation/source sweep added immutable positions to outcome cues, typed
+  Ultimate/Deployable damage attribution, a bounded `SentryFired` cue/audio/visual path, complete
+  replicated-identity gates for fighter/projectile visuals, and authoritative cue evidence. The
+  focused Sentry network case proves one travelling round deals exactly 10 damage, emits from the
+  deployable position, and reports `DamageSource::Deployable`; client/server role Clippy and binary
+  checks remained green. This intentionally revises the registered cue wire shape, so mixed old/new
+  processes are incompatible and all peers must be rebuilt together.
+- a synchronized four-process rerun completed and restarted with the revised cue protocol, six
+  authoritative Sentry shots, and zero dropped combat/build/ability evidence. Its retained report is
+  `/tmp/brawler-m08-sentry-cue-fix.report`. One prior valid 10–0 process sample spawned its Sentry too
+  late to acquire a target and was correctly rejected by the harness's nonzero-shot gate.
+
+Physical-controller and perceptual-audio observations remain open; this automated remediation does
+not represent them as passing.
+
 ## Playtest handoff requirements
 
 When verification is green, provide:
@@ -832,16 +932,105 @@ When verification is green, provide:
   feel distinct, ultimate readiness/use is clear, sentry ownership/counterplay is readable, dash is
   controllable, and normal match duration/counterplay remain healthy.
 
+### Playtest handoff — 2026-08-15
+
+Use an unused port in three terminals:
+
+```bash
+cargo run --locked --no-default-features --features server --bin brawler-server -- --bind 127.0.0.1:5400
+cargo run --locked --no-default-features --features client --bin brawler-client -- --server 127.0.0.1:5400 --client-id 101
+cargo run --locked --no-default-features --features client --bin brawler-client -- --server 127.0.0.1:5400 --client-id 102
+```
+
+Editor controls are Left/Right or A/D plus Space/Enter; controller equivalents are D-pad/left stick
+plus South. On Custom, Up/Down chooses power, reach, magazine, ultimate, passive 1, or passive 2;
+Left/Right changes the value, and Escape/East returns to Runner. After acceptance, Space/Enter/South
+readies or requests restart. Combat is WASD/left stick, mouse/right stick aim, mouse-left/right
+trigger primary, E/right bumper ultimate, Tab/Select scoreboard, and Escape/Start pause.
+
+Suggested pass:
+
+1. Runner: take hostile primary damage, judge the Adrenal window, then dash toward an enemy and into
+   cover to inspect contact, truncation, control, and trail readability.
+2. Bruiser: compare 120 health/288 speed and Tenacity against Runner, then use Dash after a defeat to
+   confirm charge retention and transient-state cleanup.
+3. Controller: deploy Sentry in clear space and beside cover; inspect placement, team/owner marker,
+   target LOS, fire cadence, health, destruction, owner-defeat cleanup, and expiry.
+4. Duelist: test the 120-unit Blade danger zone and Close Quarters scaling, then compare its
+   lightweight movement and dash approach against ranged kiting.
+5. Custom: first try Heavy/Long/Expanded + Sentry to see over-budget feedback; then use the legal
+   12-point Heavy/Long/Standard + Dash + Lightweight + Tenacity recipe and confirm it has no named
+   preset identity. After restart, replace it with another legal build before ready.
+6. Complete at least one normal-duration match while noting first ultimate readiness, uses per
+   participant, scoreboard/result/restart behavior, and whether at least two builds produce visibly
+   different approaches.
+
+For the repeatable automated evidence path:
+
+```bash
+BRAWLER_NETWORK_ADDR=127.0.0.1:5401 BRAWLER_NETWORK_PROFILE=local BRAWLER_NETWORK_MATCH_REPORT_FILE=/tmp/brawler-m08-playtest.report ./scripts/network-match.sh
+BRAWLER_NETWORK_ADDR=127.0.0.1:5401 BRAWLER_NETWORK_PROFILE=local BRAWLER_NETWORK_CUSTOM_BUILD_CLIENT=4 BRAWLER_NETWORK_MATCH_REPORT_FILE=/tmp/brawler-m08-custom-playtest.report ./scripts/network-match.sh
+```
+
+Please report aspect ratio(s), input device, whether every editor field and rejection was clear,
+ultimate readiness/use clarity, dash controllability, sentry ownership/counterplay readability,
+audio distinction, approximate first-readiness/use counts, match duration, and any build that felt
+strictly dominant or failed to create a recognizable play pattern.
+
 ## Feedback review
 
-Not started. Record every user item as implemented now, deferred to the v1/future backlog, rejected
-with rationale, or awaiting evidence. Authority, wire, lifecycle, budget, slot, charge-source,
-deployable-targetability, or active-item changes require renewed specification review.
+Technical review received and triaged on 2026-08-15. The user authorized the remediation pass with
+“go”; authority-affecting corrections below therefore use this renewed specification review rather
+than silently changing the accepted contract.
+
+| Review item | Decision | Resolution |
+|---|---|---|
+| Close Quarters rounded after weapon falloff and then rounded again | Implemented now | Damage stays floating-point through falloff, recipient scaling, and Close Quarters, then clamps and rounds once. The 25 × 0.5 × 1.15 = 14 regression is covered in reservation and application math. |
+| Ability telemetry omitted most required aggregates and cleanup reasons | Implemented now | Match-scoped summaries now retain rejection reasons, ready/use delay, wasted charge, Dash distance/truncation/contact/interruption, per-Sentry lifecycle/shots/hits/damage/destruction/reason/high-water, ability damage/targets/defeats, and passive active/modified/unused aggregates. The process report exposes those archived aggregates. |
+| Left-stick vertical and W/S could not navigate custom fields | Implemented now | W/S and independent LeftStickY hysteresis navigate all six fields; horizontal and vertical stick edges are tested independently. |
+| Ready could resubmit an accepted selection | Implemented now | Client submission remains gated by replicated `SelectingBuild`; accepted fighters leave that state before ready input is handled. |
+| Charge paused during Dash/Sentry deployment | Implemented now | Hostile-primary dealt/received charge accrues during active ability phases; cleanup settles to Ready when the retained charge is full. |
+| `Environment` source identity is absent | Deferred | No M08 system authors environmental combat. Adding a dormant wire variant would churn the registered protocol without proving a source policy. Add it with the first authoritative environmental source, before that source can emit outcomes; tracked as `M08-ENV-SOURCE`. |
+| Sentry cleanup paths were inline and reasons/cues diverged | Implemented now | All lifecycle paths request one typed cleanup transaction, which removes deliveries/payloads, settles owner state, records one reason/lifetime, and emits at most one removal cue. |
+| Deployable damage was an incidental query result | Implemented now | Every M08 combat source has an explicit Fighter/Deployable target policy; non-damage control effects reject deployables. |
+| Weapon costs and Pulse lifetimes could drift | Implemented now | Preset base costs are authored in `builds.ron`; custom Pulse uses the authored Pulse base cost and derives lifetime with `ceil(range × 60 / speed)`. |
+| Dash used proximity rather than radii, did not validate playable bounds, and ignored its replicated deadline | Implemented now | Segment contacts use attacker-plus-target radii, each authoritative pose checks playable bounds, and both the fixed duration and replicated deadline terminate execution. |
+| Sentry placement counted defeated fighters as blockers | Implemented now | Defeated fighters are excluded from the placement occupancy query. |
+| Build transaction remains in `server/mod.rs`; parallel legacy/build `SelectedBuild` components remain | Deferred | Both are real organization/API debt, but moving the authority transaction and retiring a registered replicated compatibility component during feedback remediation has disproportionate schedule/wire risk. Track the paired migration as `M08-BUILD-BOUNDARY` for the M11 hardening gate. |
+| Wildcard build-model export and unreachable `InvalidSlots` were unexplained | Implemented now | Build exports are explicit; `InvalidSlots` is documented as a forward-compatible wire decision made unreachable by the fixed two-slot recipe. |
+| Client panic when a Sentry removal cue reached combat audio | Implemented now | `DeployableRemoved` now resolves to the bounded Sentry/ready one-shot instead of entering the state-sound unreachable branch; the exact cue mapping has a regression test. Late-input mismatch diagnostics in the same report are non-fatal Lightyear corrections and were not the panic source. |
+| Sentry projectile blinked without travelling or damaging; replicated Sentry briefly appeared at screen center | Implemented now | Projectile lifecycle now distinguishes the owning fighter from the physical firing entity, so Sentry rounds are not canceled as orphaned while still excluding the Sentry from its own sweep. Client visuals wait for replicated position/rotation instead of rendering a default origin pose, and removal cues carry the actual deployable position. A separate-App authority test requires one round to travel and deal exactly 10 hostile damage. |
+| Same-class sweep found missing Sentry fire feedback, origin-fallback combat effects, fallback projectile identity, stale fighter-team visuals, and weapon-shaped ability attribution | Implemented now | Sentry shots emit one ordered cue with bounded audio/visual feedback and authoritative evidence. Attack/damage/effect/defeat cues carry event-time positions, ability and deployable outcomes retain typed source IDs, projectiles wait for pose plus both source identities, and fighters wait for team identity and refresh when it changes. Cleanup emits no visual cue when neither deployable nor owner has a trustworthy position. |
 
 ## Learn-from-errors review
 
-Not started. Before closeout, record mistakes, causes, prevention, and reusable lessons. Improve a
-project/Codex skill only when the learning recurs beyond this milestone and is genuinely reusable.
+Implementation-phase review complete; append playtest/feedback learning before closeout:
+
+- The initial native visual path was not addressable as an application. Cause: a bare Bevy binary
+  has no stable macOS bundle identity. Prevention: keep the temporary bundle helper and exact
+  `--window-size` path as the repeatable native visual harness without changing production topology.
+- The first compact visual pass exposed unsupported glyphs, right-justified spill, and a one-line HUD
+  that exceeded 960x540. Cause: layout tests covered text content but not exact native raster bounds.
+  Prevention: pair HUD assertions with the four required logical sizes and include active/deployed
+  states, not only the editor.
+- Initial process telemetry stored absolute first-charge ticks only. Cause: process-lifetime ability
+  telemetry lacked the archived match's active origin. Prevention: archive `active_started_at_tick`
+  and report active-relative readiness alongside the absolute diagnostic value.
+- The first coverage pass put all ability systems in the activation set despite defining a movement
+  set. Cause: system chaining preserved behavior while obscuring the intended phase boundary.
+  Prevention: trace production set labels and keep activation/deferred/movement/fire ordering visible
+  at composition.
+- Broad cleanup claims initially relied on shared code inspection plus one owner-defeat scenario.
+  Cause: one cleanup helper made distinct lifecycle reasons look equivalent without peer evidence.
+  Prevention: maintain a reason matrix covering replacement, completion/restart, owner defeat,
+  disconnect, destruction, and expiry, including impaired peer convergence and forged-client state.
+- An attempted “late join” Sentry test contradicted the accepted M07 policy that rejects new joins
+  during active matches. Prevention: distinguish late packet/current durable recovery from admission
+  policy, and do not expand matchmaking semantics to satisfy a loosely worded recovery test.
+
+No new reusable skill is justified yet: the lessons are repository-specific applications of the
+existing Bevy/ECS, native visual, and milestone-process guidance. The final learning review remains
+open only for user-playtest findings.
 
 ## Risks and follow-up decisions
 
@@ -874,21 +1063,22 @@ project/Codex skill only when the learning recurs beyond this milestone and is g
 
 ## Exit checklist
 
-- [ ] User validates this specification before production implementation begins.
+- [x] User validates this specification before production implementation begins.
 - [x] M07 feedback/learning and combat vertical-slice technical gate are complete; the user explicitly
   accepted its supervised-observation deferral and closed the milestone.
-- [ ] M08 records and revalidates the exact starting baseline.
-- [ ] Catalog, candidate, resolved loadout, and runtime state are distinct, bounded, fingerprinted,
+- [x] M08 records and revalidates the exact starting baseline, including process and native visual
+  reruns against commit `098122a32c33651f920763a04bea200d44a36a69`.
+- [x] Catalog, candidate, resolved loadout, and runtime state are distinct, bounded, fingerprinted,
   deterministic, and server-authoritative.
-- [ ] Four named presets and at least one legal non-preset custom Pulse use the same resolver/runtime
+- [x] Four named presets and at least one legal non-preset custom Pulse use the same resolver/runtime
   paths; no preset-ID behavior branch exists.
 - [ ] The 12-point budget, exact slots, duplicate/family rules, and server rejection create visible
   legal/illegal tradeoffs with readable controller feedback.
-- [ ] Six passives, two ultimates, charge, per-fighter stats, ability damage, and deployables obey the
+- [x] Six passives, two ultimates, charge, per-fighter stats, ability damage, and deployables obey the
   specified fixed-tick authority, attribution, recovery, and lifecycle contracts.
-- [ ] Dash is collision-safe/readable; sentry targeting, targetability, ownership, lifetime, and every
+- [x] Dash is collision-safe/readable; sentry targeting, targetability, ownership, lifetime, and every
   cleanup path are deterministic and bounded.
-- [ ] Four clients and real processes converge loadout/ability/deployable/match state under impairment,
+- [x] Four clients and real processes converge loadout/ability/deployable/match state under impairment,
   reject forged client authority, restart cleanly, and retain isolated headless server composition.
 - [ ] Visual, physical-controller, keyboard/mouse, audio, normal-match, performance, telemetry, and
   repeated-match gates are complete with recorded evidence.

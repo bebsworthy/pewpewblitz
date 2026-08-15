@@ -170,6 +170,7 @@ impl ServerNetworkConfig {
 
 /// Runtime configuration for one client process.
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ClientNetworkConfig {
     pub server_addr: SocketAddr,
     pub local_addr: SocketAddr,
@@ -186,11 +187,13 @@ pub struct ClientNetworkConfig {
     pub headless_aim: Option<(i8, i8)>,
     pub headless_aim_at_dummy: bool,
     pub headless_fire: bool,
+    pub headless_ultimate: bool,
     pub headless_simulation_ticks: Option<u32>,
-    pub weapon_preset: Option<u16>,
+    pub build_preset: Option<u16>,
     pub windowed_combat_demo: Option<WindowedCombatDemo>,
     pub windowed_controller_demo: Option<WindowedControllerDemo>,
     pub render_profile: RenderProfile,
+    pub window_size: Option<(u16, u16)>,
 }
 
 /// Enables the reproducible, windowed aim-at-dummy/fire smoke scenario.
@@ -224,11 +227,13 @@ impl ClientNetworkConfig {
             headless_aim: None,
             headless_aim_at_dummy: false,
             headless_fire: false,
+            headless_ultimate: false,
             headless_simulation_ticks: None,
-            weapon_preset: None,
+            build_preset: None,
             windowed_combat_demo: None,
             windowed_controller_demo: None,
             render_profile: RenderProfile::from_env(),
+            window_size: None,
         }
     }
 
@@ -243,10 +248,15 @@ impl ClientNetworkConfig {
             return Err("--simulation-ticks must be greater than zero".to_string());
         }
         if self
-            .weapon_preset
-            .is_some_and(|preset| !(1..=4).contains(&preset))
+            .build_preset
+            .is_some_and(|preset| !(1..=5).contains(&preset))
         {
-            return Err("--weapon-preset must be between 1 and 4".to_string());
+            return Err("--build-preset must be between 1 and 5 (5 selects custom)".to_string());
+        }
+        if self.window_size.is_some_and(|(width, height)| {
+            !(640..=3_840).contains(&width) || !(360..=2_160).contains(&height)
+        }) {
+            return Err("--window-size must be between 640x360 and 3840x2160".to_string());
         }
         let automation_enabled = self.headless
             || self.windowed_combat_demo.is_some()
@@ -259,6 +269,9 @@ impl ClientNetworkConfig {
         }
         if self.headless_fire && !automation_enabled {
             return Err("--fire requires --headless or --combat-demo".to_string());
+        }
+        if self.headless_ultimate && !automation_enabled {
+            return Err("--ultimate requires --headless or --combat-demo".to_string());
         }
         if self.headless_aim_at_dummy && !automation_enabled {
             return Err("--aim-dummy requires --headless or --combat-demo".to_string());

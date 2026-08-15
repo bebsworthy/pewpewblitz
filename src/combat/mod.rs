@@ -21,6 +21,8 @@ pub mod outcomes;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod telemetry;
+#[cfg(feature = "server")]
+pub(crate) use telemetry::AbilityWeaponTelemetry;
 
 #[allow(clippy::wildcard_imports)]
 use authority::*;
@@ -46,13 +48,14 @@ use evidence::{
 #[cfg(feature = "server")]
 use evidence::{capture_server_combat_checkpoints, send_combat_evidence_checkpoints};
 
+pub use crate::builds::SelectingBuild;
 pub use crate::content::GameplayContentFingerprint;
 #[cfg(feature = "client")]
 pub use client::ClientCombatEvidenceStatus;
 #[cfg(feature = "client")]
 pub(crate) use client::DeduplicatedCombatCue;
 #[cfg(feature = "client")]
-pub use client::{CaptureCombatCues, ClientCombatPlugin, CombatHudText, WeaponSelectionText};
+pub use client::{BuildSelectionText, CaptureCombatCues, ClientCombatPlugin, CombatHudText};
 pub use cues::*;
 pub use definitions::{
     DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,

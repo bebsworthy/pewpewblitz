@@ -27,6 +27,7 @@ pub struct AttackId(pub u64);
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct AttackSource {
+    pub kind: CombatSourceKind,
     pub attack_id: AttackId,
     pub player_id: PlayerId,
     pub owner_network_entity_id: NetworkEntityId,
@@ -39,6 +40,18 @@ pub struct AttackSource {
     pub facing: f32,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CombatSourceKind {
+    PrimaryWeapon,
+    Ultimate {
+        ultimate_id: crate::builds::UltimateDefinitionId,
+    },
+    Deployable {
+        ultimate_id: crate::builds::UltimateDefinitionId,
+        deployable_id: crate::builds::DeployableId,
+    },
+}
+
 /// Replicated attack identity carried by composed delivery entities. The server remains the
 /// authority for the private runtime recipe; clients use this bounded identity for presentation
 /// and diagnostics only.
@@ -46,19 +59,6 @@ pub struct AttackSource {
 pub struct ReplicatedAttackSource {
     pub attack: AttackSource,
 }
-
-/// Replicated identity installed by the server during the one-time selection transaction.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SelectedWeapon {
-    pub source_preset_id: WeaponPresetId,
-    pub recipe_fingerprint: WeaponRecipeFingerprint,
-}
-
-/// Presence means that an accepted fighter has not crossed the sandbox weapon gate yet.
-#[derive(
-    Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect,
-)]
-pub struct SelectingWeapon;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AwaitingPostSelectionInput {
@@ -229,7 +229,10 @@ pub struct SpawnState {
 #[cfg(feature = "server")]
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct ComposedProjectileRuntime {
+    /// Fighter whose connection/lifecycle owns the attack.
     pub owner_entity: Entity,
+    /// Physical entity that emitted the delivery and must be excluded from its collision sweep.
+    pub source_entity: Entity,
     pub source: AttackSource,
     pub delivery_index: u8,
     pub velocity: Vec2,

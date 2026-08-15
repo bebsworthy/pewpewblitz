@@ -3,6 +3,31 @@
 use super::*;
 
 #[test]
+fn build_editor_stick_has_independent_vertical_and_horizontal_edges() {
+    let mut x_ready = true;
+    let mut y_ready = true;
+    assert_eq!(
+        editor_axis_edges(Vec2::new(0.0, 0.8), &mut x_ready, &mut y_ready),
+        (false, false, true, false),
+    );
+    assert_eq!(
+        editor_axis_edges(Vec2::new(0.0, 0.8), &mut x_ready, &mut y_ready),
+        (false, false, false, false),
+        "a held stick must not repeat without crossing the neutral hysteresis",
+    );
+    let _ = editor_axis_edges(Vec2::ZERO, &mut x_ready, &mut y_ready);
+    assert_eq!(
+        editor_axis_edges(Vec2::new(0.8, 0.0), &mut x_ready, &mut y_ready),
+        (false, true, false, false),
+    );
+    let _ = editor_axis_edges(Vec2::ZERO, &mut x_ready, &mut y_ready);
+    assert_eq!(
+        editor_axis_edges(Vec2::new(0.0, -0.8), &mut x_ready, &mut y_ready),
+        (false, false, false, true),
+    );
+}
+
+#[test]
 fn automatic_match_ready_waits_for_the_requested_roster() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;
@@ -35,6 +60,38 @@ fn client_config_defaults_to_loopback_and_validates_roster_target() {
     assert!(config.validate().is_ok());
     config.exit_after_roster = Some(0);
     assert!(config.validate().is_err());
+}
+
+#[test]
+fn headless_custom_build_and_cover_lane_movement_are_bounded() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.headless = true;
+    config.build_preset = Some(5);
+    assert!(config.validate().is_ok());
+    config.build_preset = Some(6);
+    assert!(config.validate().is_err());
+    config.build_preset = Some(5);
+    config.window_size = Some((960, 540));
+    assert!(config.validate().is_ok());
+    config.window_size = Some((639, 540));
+    assert!(config.validate().is_err());
+
+    assert_eq!(
+        headless_navigation_delta(Vec2::new(-768.0, 0.0), Vec2::new(768.0, 0.0)),
+        Some(Vec2::Y)
+    );
+    assert_eq!(
+        headless_navigation_delta(Vec2::new(-500.0, 180.0), Vec2::new(500.0, 180.0)),
+        Some(Vec2::X)
+    );
+    assert_eq!(
+        headless_combat_move_axis(Vec2::X, Some(Vec2::new(350.0, 0.0)), Some(Vec2::X), true),
+        Vec2::ZERO
+    );
+    assert_eq!(
+        headless_combat_move_axis(Vec2::X, Some(Vec2::new(100.0, 0.0)), Some(Vec2::X), false),
+        Vec2::ZERO
+    );
 }
 
 #[test]

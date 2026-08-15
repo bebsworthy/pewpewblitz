@@ -18,7 +18,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<InputDeviceActivity>()
             .init_resource::<ClientInputContext>()
             .init_resource::<ClientPlayableGate>()
-            .init_resource::<WeaponSelectionState>()
+            .init_resource::<BuildSelectionState>()
             .init_resource::<MatchCommandState>()
             .init_resource::<InputTuning>()
             .add_systems(
@@ -48,11 +48,11 @@ impl Plugin for ClientNetworkPlugin {
                 (
                     send_client_hello,
                     process_join_outcome,
-                    process_weapon_selection_outcomes,
-                    send_weapon_selection_request,
+                    process_build_selection_outcomes,
+                    send_build_selection_request,
                     process_match_command_outcomes,
                     send_match_command,
-                    update_weapon_selection_overlay,
+                    update_build_selection_overlay,
                     disconnect_rejected_client,
                     observe_client_lifecycle,
                     log_replicated_roster,
@@ -96,7 +96,7 @@ fn send_match_command(
     roots: Query<&MatchState, With<MatchRoot>>,
     controlled: Query<
         &MatchParticipant,
-        (With<Fighter>, With<Controlled>, Without<SelectingWeapon>),
+        (With<Fighter>, With<Controlled>, Without<SelectingBuild>),
     >,
     authoritative_ticks: Query<&AuthoritativeTick, (With<Fighter>, With<Controlled>)>,
     roster: Query<(), (With<Remote>, With<Fighter>)>,
@@ -296,9 +296,9 @@ pub(super) fn send_client_hello(
     }
 }
 
-pub(super) fn process_weapon_selection_outcomes(
-    mut state: ResMut<WeaponSelectionState>,
-    mut receivers: Query<Option<&mut MessageReceiver<WeaponSelectionOutcome>>, With<Client>>,
+pub(super) fn process_build_selection_outcomes(
+    mut state: ResMut<BuildSelectionState>,
+    mut receivers: Query<Option<&mut MessageReceiver<BuildSelectionOutcome>>, With<Client>>,
 ) {
     for receiver in &mut receivers {
         let Some(mut receiver) = receiver else {
@@ -311,15 +311,17 @@ pub(super) fn process_weapon_selection_outcomes(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn send_weapon_selection_request(
+#[allow(clippy::too_many_lines)]
+pub(super) fn send_build_selection_request(
     config: Res<ClientNetworkConfig>,
-    mut state: ResMut<WeaponSelectionState>,
-    catalog: Res<WeaponCatalogResource>,
+    mut state: ResMut<BuildSelectionState>,
+    catalog: Res<crate::builds::BuildCatalogResource>,
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     gamepads: Query<&Gamepad>,
-    fighters: Query<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>,
+    fighters: Query<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>,
+    matches: Query<&MatchState, With<MatchRoot>>,
     statuses: Query<&ClientJoinStatus, With<Client>>,
-    mut senders: Query<&mut MessageSender<WeaponSelectionRequest>, With<Client>>,
+    mut senders: Query<&mut MessageSender<BuildSelectionRequest>, With<Client>>,
 ) {
     if !statuses
         .iter()
@@ -327,6 +329,14 @@ pub(super) fn send_weapon_selection_request(
         || fighters.iter().next().is_none()
     {
         return;
+    }
+    let Ok(match_state) = matches.single() else {
+        return;
+    };
+    if state.last_match_id != Some(match_state.match_id) {
+        state.last_match_id = Some(match_state.match_id);
+        state.last_sent = None;
+        state.last_outcome = None;
     }
     let keyboard = keyboard.as_deref();
     let left = keyboard.is_some_and(|keys| {
@@ -339,21 +349,56 @@ pub(super) fn send_weapon_selection_request(
     }) || gamepads
         .iter()
         .any(|gamepad| gamepad.just_pressed(GamepadButton::DPadRight));
+    let up = keyboard.is_some_and(|keys| {
+        keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::KeyW)
+    }) || gamepads
+        .iter()
+        .any(|gamepad| gamepad.just_pressed(GamepadButton::DPadUp));
+    let down = keyboard.is_some_and(|keys| {
+        keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::KeyS)
+    }) || gamepads
+        .iter()
+        .any(|gamepad| gamepad.just_pressed(GamepadButton::DPadDown));
+    let cancel = keyboard.is_some_and(|keys| keys.just_pressed(KeyCode::Escape))
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::East));
+    if cancel && state.current_index == 4 {
+        state.current_index = 0;
+        state.custom_field = 0;
+        return;
+    }
     let stick_x = gamepads
         .iter()
         .find_map(|gamepad| gamepad.get(GamepadAxis::LeftStickX))
         .unwrap_or(0.0);
-    let analog_left = stick_x < -0.6 && state.analog_ready;
-    let analog_right = stick_x > 0.6 && state.analog_ready;
-    if stick_x.abs() < 0.3 {
-        state.analog_ready = true;
-    }
+    let stick_y = gamepads
+        .iter()
+        .find_map(|gamepad| gamepad.get(GamepadAxis::LeftStickY))
+        .unwrap_or(0.0);
+    let BuildSelectionState {
+        analog_x_ready,
+        analog_y_ready,
+        ..
+    } = &mut *state;
+    let (analog_left, analog_right, analog_up, analog_down) =
+        editor_axis_edges(Vec2::new(stick_x, stick_y), analog_x_ready, analog_y_ready);
     if left || analog_left {
-        state.analog_ready = false;
-        state.current_index = (state.current_index + 3) % 4;
+        if state.current_index == 4 {
+            edit_custom_recipe(&mut state, -1);
+        } else {
+            state.current_index = (state.current_index + 4) % 5;
+        }
     } else if right || analog_right {
-        state.analog_ready = false;
-        state.current_index = (state.current_index + 1) % 4;
+        if state.current_index == 4 {
+            edit_custom_recipe(&mut state, 1);
+        } else {
+            state.current_index = (state.current_index + 1) % 5;
+        }
+    } else if state.current_index == 4 && (up || analog_up) {
+        state.custom_field = (state.custom_field + 5) % 6;
+    } else if state.current_index == 4 && (down || analog_down) {
+        state.custom_field = (state.custom_field + 1) % 6;
     }
     let confirm = keyboard
         .is_some_and(|keys| keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter))
@@ -372,21 +417,130 @@ pub(super) fn send_weapon_selection_request(
     if state.last_sent.is_some() && !confirm {
         return;
     }
-    if let Some(preset) = config.weapon_preset {
-        state.current_index = usize::from(preset.saturating_sub(1).min(3));
+    if let Some(preset) = config.build_preset {
+        state.current_index = usize::from(preset.saturating_sub(1).min(4));
     }
-    let Some(preset) = catalog.0.presets.get(state.current_index) else {
-        return;
-    };
     state.next_request_id = state.next_request_id.saturating_add(1).max(1);
-    let request = WeaponSelectionRequest {
+    let request = BuildSelectionRequest {
         request_id: state.next_request_id,
-        preset_id: preset.id,
+        match_id: match_state.match_id,
+        selection: catalog
+            .0
+            .presets
+            .get(state.current_index)
+            .map_or(BuildSelection::Custom(state.custom_recipe), |preset| {
+                BuildSelection::Preset(preset.id)
+            }),
     };
     for mut sender in &mut senders {
         sender.send::<SessionChannel>(request);
     }
     state.last_sent = Some(request.request_id);
+}
+
+pub(super) fn editor_axis_edges(
+    stick: Vec2,
+    x_ready: &mut bool,
+    y_ready: &mut bool,
+) -> (bool, bool, bool, bool) {
+    if stick.x.abs() < 0.3 {
+        *x_ready = true;
+    }
+    if stick.y.abs() < 0.3 {
+        *y_ready = true;
+    }
+    let horizontal = stick.x.abs() >= stick.y.abs();
+    let left = horizontal && stick.x < -0.6 && *x_ready;
+    let right = horizontal && stick.x > 0.6 && *x_ready;
+    let up = !horizontal && stick.y > 0.6 && *y_ready;
+    let down = !horizontal && stick.y < -0.6 && *y_ready;
+    if left || right {
+        *x_ready = false;
+    }
+    if up || down {
+        *y_ready = false;
+    }
+    (left, right, up, down)
+}
+
+fn edit_custom_recipe(state: &mut BuildSelectionState, delta: i8) {
+    use crate::builds::{
+        PassiveDefinitionId, PulseMagazine, PulsePower, PulseReach, UltimateDefinitionId,
+        WeaponChoice,
+    };
+    let WeaponChoice::CustomPulse {
+        mut power,
+        mut reach,
+        mut magazine,
+    } = state.custom_recipe.weapon
+    else {
+        return;
+    };
+    let step = |current: u16, count: u16| {
+        u16::try_from(
+            ((i32::from(current) - 1 + i32::from(delta)).rem_euclid(i32::from(count))) + 1,
+        )
+        .expect("bounded editor field index fits u16")
+    };
+    match state.custom_field {
+        0 => {
+            power = [PulsePower::Light, PulsePower::Balanced, PulsePower::Heavy][usize::from(
+                step(
+                    match power {
+                        PulsePower::Light => 1,
+                        PulsePower::Balanced => 2,
+                        PulsePower::Heavy => 3,
+                    },
+                    3,
+                ) - 1,
+            )];
+        }
+        1 => {
+            reach = [PulseReach::Compact, PulseReach::Standard, PulseReach::Long][usize::from(
+                step(
+                    match reach {
+                        PulseReach::Compact => 1,
+                        PulseReach::Standard => 2,
+                        PulseReach::Long => 3,
+                    },
+                    3,
+                ) - 1,
+            )];
+        }
+        2 => {
+            magazine = [
+                PulseMagazine::Quick,
+                PulseMagazine::Standard,
+                PulseMagazine::Expanded,
+            ][usize::from(
+                step(
+                    match magazine {
+                        PulseMagazine::Quick => 1,
+                        PulseMagazine::Standard => 2,
+                        PulseMagazine::Expanded => 3,
+                    },
+                    3,
+                ) - 1,
+            )];
+        }
+        3 => {
+            state.custom_recipe.ultimate =
+                UltimateDefinitionId(step(state.custom_recipe.ultimate.0, 2));
+        }
+        4 => {
+            state.custom_recipe.passives[0] =
+                PassiveDefinitionId(step(state.custom_recipe.passives[0].0, 6));
+        }
+        _ => {
+            state.custom_recipe.passives[1] =
+                PassiveDefinitionId(step(state.custom_recipe.passives[1].0, 6));
+        }
+    }
+    state.custom_recipe.weapon = WeaponChoice::CustomPulse {
+        power,
+        reach,
+        magazine,
+    };
 }
 
 pub(super) fn crossbeam_transport(config: &ClientNetworkConfig) -> bool {
@@ -401,65 +555,110 @@ pub(super) fn crossbeam_transport(config: &ClientNetworkConfig) -> bool {
     }
 }
 
-pub(super) fn update_weapon_selection_overlay(
-    state: Res<WeaponSelectionState>,
-    catalog: Res<WeaponCatalogResource>,
-    fighters: Query<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>,
-    mut overlay: Query<(&mut Text, &mut Visibility), With<WeaponSelectionText>>,
+#[allow(clippy::too_many_lines)]
+pub(super) fn update_build_selection_overlay(
+    state: Res<BuildSelectionState>,
+    catalog: Res<crate::builds::BuildCatalogResource>,
+    weapons: Res<crate::combat::WeaponCatalogResource>,
+    fighter_definitions: Res<crate::combat::FighterDefinitions>,
+    fighters: Query<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>,
+    mut overlay: Query<(&mut Text, &mut Visibility), With<BuildSelectionText>>,
 ) {
     let selecting = fighters.iter().next().is_some();
-    let Some(preset) = catalog.0.presets.get(state.current_index) else {
-        return;
+    let preset = catalog.0.presets.get(state.current_index);
+    let current = preset.map_or("Custom Pulse", |preset| preset.display_name.as_str());
+    let recipe = preset.map_or(state.custom_recipe, |preset| preset.recipe);
+    let ultimate = catalog
+        .0
+        .ultimates
+        .iter()
+        .find(|definition| definition.id == recipe.ultimate)
+        .map_or("Unknown ultimate", |definition| {
+            definition.display_name.as_str()
+        });
+    let passive_name = |id| {
+        catalog
+            .0
+            .passives
+            .iter()
+            .find(|definition| definition.id == id)
+            .map_or("Unknown passive", |definition| {
+                definition.display_name.as_str()
+            })
     };
-    let current = preset.display_name.as_str();
-    let recipe = &preset.configuration.recipe;
-    let pattern = match recipe.firing {
-        crate::combat::FiringPattern::Single => "single",
-        crate::combat::FiringPattern::Spread { delivery_count, .. } => {
-            if delivery_count == 7 {
-                "7-pellet spread"
-            } else {
-                "spread"
-            }
-        }
-    };
-    let range = match recipe.delivery {
-        crate::combat::DeliveryMethod::Straight { range, .. } => format!("range {range:.0}"),
-        crate::combat::DeliveryMethod::Lobbed {
-            distance,
-            max_flight_ticks,
-            ..
-        } => format!("aimed landing up to {distance:.0} / up to {max_flight_ticks}t flight"),
-        crate::combat::DeliveryMethod::MeleeArc {
+    let loadout_line = format!(
+        "{ultimate} | {} + {}",
+        passive_name(recipe.passives[0]),
+        passive_name(recipe.passives[1])
+    );
+    let custom_line = match recipe.weapon {
+        crate::builds::WeaponChoice::CustomPulse {
+            power,
             reach,
-            angle_degrees,
-        } => format!("reach {reach:.0} / {angle_degrees:.0} deg"),
+            magazine,
+        } => {
+            let fields = [
+                "Power",
+                "Reach",
+                "Magazine",
+                "Ultimate",
+                "Passive 1",
+                "Passive 2",
+            ];
+            format!(
+                "Custom Pulse: {power:?} / {reach:?} / {magazine:?} | editing {}",
+                fields[state.custom_field]
+            )
+        }
+        crate::builds::WeaponChoice::Preset(id) => format!("Weapon preset {}", id.0),
     };
-    let recovery = format!("{}t recovery", recipe.economy.refill_ticks());
-    let profile = match preset.id.0 {
+    let profile = match preset.map_or(0, |preset| preset.id.0) {
         1 => "steady mid-range pressure; cover and rushes counter it",
         2 => "close burst; cone, falloff, and reload punish misses",
         3 => "cover/group punish; telegraphed landing and dead zone",
         4 => "close displacement burst; kite outside danger range",
-        _ => "server-authored preset",
+        _ => "custom fields: power, reach, magazine, ultimate, passive 1, passive 2",
     };
+    let preview = crate::builds::resolve_build_recipe(
+        &catalog.0,
+        &weapons.0,
+        &fighter_definitions.entries[0],
+        recipe,
+        preset.map(|preset| preset.id),
+    )
+    .map_or_else(
+        |error| format!("PROVISIONAL: invalid ({error:?})"),
+        |loadout| format!("PROVISIONAL: {}/12 points", loadout.total_points),
+    );
     let status = state
         .last_outcome
         .map_or("Awaiting server".to_string(), |outcome| {
             match outcome.decision {
-                WeaponSelectionDecision::Accepted => {
+                BuildSelectionDecision::Accepted => {
                     "Accepted; waiting for replicated state".to_string()
                 }
-                WeaponSelectionDecision::UnknownPreset => {
-                    "Server rejected: unknown preset".to_string()
+                BuildSelectionDecision::UnknownId => {
+                    "Server rejected: unknown content ID".to_string()
                 }
-                WeaponSelectionDecision::NotSelecting => {
-                    "Server rejected: selection is locked".to_string()
+                BuildSelectionDecision::WrongMatch => "Server rejected: wrong match".to_string(),
+                BuildSelectionDecision::WrongPhase => {
+                    "Server rejected: selection phase closed".to_string()
                 }
-                WeaponSelectionDecision::StaleRequest => {
-                    "Server rejected: stale request".to_string()
+                BuildSelectionDecision::ReadyLocked => {
+                    "Server rejected: ready locks the build".to_string()
                 }
-                WeaponSelectionDecision::ResolutionFailed => {
+                BuildSelectionDecision::Stale => "Server rejected: stale request".to_string(),
+                BuildSelectionDecision::InvalidSlots => {
+                    "Server rejected: invalid slots".to_string()
+                }
+                BuildSelectionDecision::InvalidCombination => {
+                    "Server rejected: invalid combination".to_string()
+                }
+                BuildSelectionDecision::OverBudget => "Server rejected: over 12 points".to_string(),
+                BuildSelectionDecision::CandidateTooLarge => {
+                    "Server rejected: candidate too large".to_string()
+                }
+                BuildSelectionDecision::ResolutionFailed => {
                     "Server rejected: recipe failed validation".to_string()
                 }
             }
@@ -471,7 +670,7 @@ pub(super) fn update_weapon_selection_overlay(
             Visibility::Hidden
         };
         **text = format!(
-            "Select weapon: A/D or arrows | D-pad/stick | Space / South\n{current} | {pattern} | {range} | {recovery}\n{profile}\n{status}"
+            "Select build: Left/Right or A/D changes choice | Up/Down changes custom field | Space / South confirms | Esc / East returns\n{current} | {custom_line}\n{loadout_line}\n{profile}\n{preview}\n{status}"
         );
     }
 }

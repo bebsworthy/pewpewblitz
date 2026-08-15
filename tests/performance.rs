@@ -7,8 +7,8 @@ use brawler::{
     combat::{
         ActiveEffects, AttackId, AttackSource, ComposedProjectileRuntime, CurrentHealth,
         ExternalMotion, FighterDefinitionId, FighterDefinitions, LobbedFlight, Projectile,
-        SelectedBuild, SelectedWeapon, SlowEffect, TeamId, WeaponDefinitionId, WeaponDefinitions,
-        WeaponPhase, WeaponPresetId, WeaponState, default_fighter_runtime,
+        SelectedBuild, SlowEffect, TeamId, WeaponDefinitionId, WeaponDefinitions, WeaponPhase,
+        WeaponPresetId, WeaponState, default_fighter_runtime,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -130,10 +130,6 @@ fn spawn_m05_fighter(
                 primary_weapon: WeaponDefinitionId(preset_id),
                 source_preset_id: Some(source_preset_id),
                 recipe_fingerprint: Some(resolved.recipe_fingerprint),
-            },
-            SelectedWeapon {
-                source_preset_id,
-                recipe_fingerprint: resolved.recipe_fingerprint,
             },
             resolved.clone(),
             team,
@@ -292,6 +288,98 @@ fn m07_four_participant_match_telemetry_stays_within_fixed_tick_budget() {
 }
 
 #[test]
+fn m08_four_sentries_target_fire_and_cleanup_within_fixed_tick_budget() {
+    let mut app = performance_app();
+    let match_id = {
+        let world = app.world_mut();
+        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
+        let mut state = roots.single_mut(world).expect("one match root");
+        state.phase = MatchPhase::Active {
+            ends_at_tick: u64::MAX,
+        };
+        state.match_id
+    };
+    let build_catalog = app
+        .world()
+        .resource::<brawler::builds::BuildCatalogResource>()
+        .0
+        .clone();
+    let weapon_catalog = app
+        .world()
+        .resource::<brawler::combat::WeaponCatalogResource>()
+        .0
+        .clone();
+    let fighter_definition = *app
+        .world()
+        .resource::<FighterDefinitions>()
+        .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
+        .unwrap();
+    let controller = brawler::builds::resolve_build_recipe(
+        &build_catalog,
+        &weapon_catalog,
+        &fighter_definition,
+        build_catalog.presets[2].recipe,
+        Some(build_catalog.presets[2].id),
+    )
+    .unwrap();
+    let mut owners = Vec::new();
+    for (index, (position, facing, team)) in [
+        (Vec2::new(-650.0, -420.0), 0.0, TeamId(0)),
+        (Vec2::new(-650.0, 420.0), 0.0, TeamId(0)),
+        (Vec2::new(650.0, -420.0), std::f32::consts::PI, TeamId(1)),
+        (Vec2::new(650.0, 420.0), std::f32::consts::PI, TeamId(1)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let player_id = 40_000 + u64::try_from(index).unwrap();
+        let entity = spawn_m05_fighter(&mut app, player_id, 3, position, team, false);
+        app.world_mut().entity_mut(entity).insert((
+            controller.identity,
+            controller.clone(),
+            brawler::builds::AbilityState {
+                charge: 1_000,
+                phase: brawler::builds::AbilityPhase::Ready,
+            },
+            brawler::builds::PassiveRuntimeState::default(),
+            ActiveEffects::default(),
+            MatchParticipant {
+                match_id,
+                ready: true,
+                restart_ready: false,
+            },
+            MatchMember(match_id),
+            ActiveCombatant,
+            Rotation::radians(facing),
+        ));
+        owners.push(entity);
+    }
+    app.update();
+    let tick = app.world().resource::<brawler::timing::SimulationTick>().0;
+    for entity in &owners {
+        app.world_mut().entity_mut(*entity).insert((
+            ActionState(FighterInput::from_axes(
+                Vec2::ZERO,
+                None,
+                FighterInput::ULTIMATE,
+            )),
+            InputFreshness {
+                last_fresh_tick: Some(tick),
+            },
+        ));
+    }
+    app.update();
+    remove_benchmark_actions(&mut app, &owners);
+    let sentry_count = {
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<Entity, With<brawler::abilities::Sentry>>();
+        query.iter(world).count()
+    };
+    assert_eq!(sentry_count, 4);
+    fixed_tick_p95(&mut app, "m08-four-live-sentries", 120);
+}
+
+#[test]
 #[allow(clippy::cast_precision_loss)]
 fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_tick_budget() {
     let mut app = performance_app();
@@ -327,7 +415,9 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
             Projectile,
             ComposedProjectileRuntime {
                 owner_entity: owners[index % owners.len()],
+                source_entity: owners[index % owners.len()],
                 source: AttackSource {
+                    kind: brawler::combat::CombatSourceKind::PrimaryWeapon,
                     attack_id: AttackId(index as u64 + 1),
                     player_id: PlayerId(1),
                     owner_network_entity_id: NetworkEntityId(1),

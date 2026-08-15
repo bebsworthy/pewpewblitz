@@ -42,7 +42,7 @@ pub(crate) enum MatchSet {
 }
 
 #[cfg(feature = "server")]
-fn configure_match_schedule(app: &mut bevy::prelude::App) {
+pub(crate) fn configure_match_schedule(app: &mut bevy::prelude::App) {
     use bevy::prelude::*;
 
     app.configure_sets(

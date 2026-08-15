@@ -8,7 +8,7 @@ use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--weapon-preset <1-4>] [--headless --exit-after-roster <N> --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --simulation-ticks <N>] [--combat-demo | --controller-demo]"
+        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo]"
     );
 }
 
@@ -48,10 +48,12 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut headless_aim = None;
     let mut headless_aim_at_dummy = false;
     let mut headless_fire = false;
+    let mut headless_ultimate = false;
     let mut headless_simulation_ticks = None;
-    let mut weapon_preset = None;
+    let mut build_preset = None;
     let mut windowed_combat_demo = false;
     let mut windowed_controller_demo = false;
+    let mut window_size = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--client-id" => client_id = Some(parse_value(&flag, args.next())?),
@@ -64,14 +66,16 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--aim-axis" => headless_aim = Some(parse_axis(&flag, args.next())?),
             "--aim-dummy" => headless_aim_at_dummy = true,
             "--fire" => headless_fire = true,
+            "--ultimate" => headless_ultimate = true,
             "--simulation-ticks" => {
                 headless_simulation_ticks = Some(parse_value(&flag, args.next())?);
             }
-            "--weapon-preset" | "--weapon" => {
-                weapon_preset = Some(parse_value(&flag, args.next())?);
+            "--build-preset" | "--weapon-preset" | "--weapon" => {
+                build_preset = Some(parse_value(&flag, args.next())?);
             }
             "--combat-demo" => windowed_combat_demo = true,
             "--controller-demo" => windowed_controller_demo = true,
+            "--window-size" => window_size = Some(parse_window_size(&flag, args.next())?),
             "--help" | "-h" => {
                 usage();
                 process::exit(0);
@@ -97,10 +101,12 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.headless_aim = headless_aim;
     config.headless_aim_at_dummy = headless_aim_at_dummy;
     config.headless_fire = headless_fire;
+    config.headless_ultimate = headless_ultimate;
     config.headless_simulation_ticks = headless_simulation_ticks;
-    config.weapon_preset = weapon_preset;
+    config.build_preset = build_preset;
     config.windowed_combat_demo = windowed_combat_demo.then_some(WindowedCombatDemo);
     config.windowed_controller_demo = windowed_controller_demo.then_some(WindowedControllerDemo);
+    config.window_size = window_size;
     if windowed_combat_demo {
         config.headless_aim_at_dummy = true;
         config.headless_fire = true;
@@ -109,6 +115,21 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
         .validate()
         .map_err(|error| format!("invalid client configuration: {error}"))?;
     Ok(config)
+}
+
+fn parse_window_size(flag: &str, value: Option<String>) -> Result<(u16, u16), String> {
+    let value = value.ok_or_else(|| format!("{flag} requires WIDTHxHEIGHT"))?;
+    let (width, height) = value
+        .split_once(['x', 'X'])
+        .ok_or_else(|| format!("{flag} requires WIDTHxHEIGHT"))?;
+    Ok((
+        width
+            .parse()
+            .map_err(|_| format!("invalid width for {flag}"))?,
+        height
+            .parse()
+            .map_err(|_| format!("invalid height for {flag}"))?,
+    ))
 }
 
 fn main() -> AppExit {

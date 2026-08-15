@@ -1,0 +1,28 @@
+(
+    schema_version: 1,
+    balance_revision: BuildRevision(1),
+    weapon_costs: [
+        (weapon_id: WeaponPresetId(1), point_cost: 4),
+        (weapon_id: WeaponPresetId(2), point_cost: 5),
+        (weapon_id: WeaponPresetId(3), point_cost: 5),
+        (weapon_id: WeaponPresetId(4), point_cost: 4),
+    ],
+    ultimates: [
+        (id: UltimateDefinitionId(1), key: "dash", display_name: "Dash", kind: Dash, point_cost: 3),
+        (id: UltimateDefinitionId(2), key: "sentry", display_name: "Sentry", kind: Sentry, point_cost: 4),
+    ],
+    passives: [
+        (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2),
+        (id: PassiveDefinitionId(2), key: "reinforced-frame", display_name: "Reinforced Frame", kind: ReinforcedFrame, point_cost: 2),
+        (id: PassiveDefinitionId(3), key: "adrenal-response", display_name: "Adrenal Response", kind: AdrenalResponse, point_cost: 2),
+        (id: PassiveDefinitionId(4), key: "close-quarters", display_name: "Close Quarters", kind: CloseQuarters, point_cost: 2),
+        (id: PassiveDefinitionId(5), key: "quick-cycle", display_name: "Quick Cycle", kind: QuickCycle, point_cost: 2),
+        (id: PassiveDefinitionId(6), key: "tenacity", display_name: "Tenacity", kind: Tenacity, point_cost: 1),
+    ],
+    presets: [
+        (id: BuildPresetId(1), key: "runner", display_name: "Runner", recipe: (weapon: Preset(WeaponPresetId(1)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(1), PassiveDefinitionId(3)))),
+        (id: BuildPresetId(2), key: "bruiser", display_name: "Bruiser", recipe: (weapon: Preset(WeaponPresetId(2)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(2), PassiveDefinitionId(6)))),
+        (id: BuildPresetId(3), key: "controller", display_name: "Controller", recipe: (weapon: Preset(WeaponPresetId(3)), ultimate: UltimateDefinitionId(2), passives: (PassiveDefinitionId(5), PassiveDefinitionId(6)))),
+        (id: BuildPresetId(4), key: "duelist", display_name: "Duelist", recipe: (weapon: Preset(WeaponPresetId(4)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(4), PassiveDefinitionId(1)))),
+    ],
+)

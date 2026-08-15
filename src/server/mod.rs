@@ -5,10 +5,9 @@ use crate::{
     VERSION,
     combat::{
         ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
-        CombatTelemetry, ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon,
-        ServerCombatPlugin, SpawnState, TeamId, TestDummy, WeaponCatalogResource, WeaponPresetId,
-        WeaponTelemetry, WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime,
-        encode_state_snapshot,
+        CombatTelemetry, ResolvedWeapon, SelectedBuild, SelectingBuild, ServerCombatPlugin,
+        SpawnState, TeamId, TestDummy, WeaponCatalogResource, WeaponPresetId, WeaponTelemetry,
+        WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -22,10 +21,10 @@ use crate::{
         MovementTuning,
     },
     protocol::{
-        ClientHello, DEVELOPMENT_PRIVATE_KEY, Fighter, FighterInput, JoinOutcome, JoinRejection,
-        MatchCommand, MatchCommandDecision, MatchCommandOutcome, MatchCommandRequest,
-        NetworkEntityId, PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin,
-        SessionChannel, WeaponSelectionDecision, WeaponSelectionOutcome, WeaponSelectionRequest,
+        BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest, ClientHello,
+        DEVELOPMENT_PRIVATE_KEY, Fighter, FighterInput, JoinOutcome, JoinRejection, MatchCommand,
+        MatchCommandDecision, MatchCommandOutcome, MatchCommandRequest, NetworkEntityId,
+        PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin, SessionChannel,
     },
 };
 use avian2d::prelude::{
@@ -82,9 +81,9 @@ pub struct ServerSession {
     pub deadline: Duration,
     pub last_outcome: Option<JoinOutcome>,
     pub disconnect_requested: bool,
-    pub last_selection_request: Option<WeaponSelectionRequest>,
-    pub last_selection_outcome: Option<WeaponSelectionOutcome>,
-    pub last_selection_response: Option<WeaponSelectionOutcome>,
+    pub last_selection_request: Option<BuildSelectionRequest>,
+    pub last_selection_outcome: Option<BuildSelectionOutcome>,
+    pub last_selection_response: Option<BuildSelectionOutcome>,
     pub last_match_request: Option<MatchCommandRequest>,
     pub last_match_outcome: Option<MatchCommandOutcome>,
 }
@@ -248,6 +247,7 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ProcessMovementCheck>()
             .init_resource::<ProcessCombatCheck>()
             .init_resource::<ProcessMatchCheck>()
+            .init_resource::<crate::builds::BuildTelemetry>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
             .add_systems(
@@ -260,7 +260,9 @@ impl Plugin for ServerNetworkPlugin {
                     observe_server_endpoint,
                     initialize_sessions,
                     process_client_hellos,
-                    process_weapon_selection,
+                    process_build_selection,
+                    crate::abilities::cleanup_requested_sentries,
+                    ApplyDeferred,
                     process_match_commands,
                     ApplyDeferred,
                     enforce_session_deadlines,
@@ -275,7 +277,11 @@ impl Plugin for ServerNetworkPlugin {
                 Last,
                 (forward_app_exit_to_server_stop, finish_server_shutdown).chain(),
             )
-            .add_plugins((ServerCombatPlugin, WipeoutPlugin));
+            .add_plugins((
+                ServerCombatPlugin,
+                WipeoutPlugin,
+                crate::abilities::ServerAbilityPlugin,
+            ));
     }
 }
 
@@ -525,7 +531,7 @@ fn process_client_hellos(
                                         fighter_definition,
                                         team,
                                         health,
-                                        SelectingWeapon,
+                                        SelectingBuild,
                                         ActiveEffects::default(),
                                         AuthoritativeTick::default(),
                                         SpawnState {
@@ -593,19 +599,23 @@ fn process_client_hellos(
     }
 }
 
-/// Resolve a preset request against the server's embedded catalog. The request is scoped to the
-/// receiving link; it never carries a fighter/entity target or any client-authored recipe data.
-#[allow(clippy::too_many_lines)]
-fn process_weapon_selection(
+/// Resolve a bounded build request against server-owned catalogs and the current waiting match.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn process_build_selection(
     mut commands: Commands,
-    catalog: Res<WeaponCatalogResource>,
+    builds: Res<crate::builds::BuildCatalogResource>,
+    weapons: Res<WeaponCatalogResource>,
     definitions: Res<crate::combat::FighterDefinitions>,
     tick: Res<crate::timing::SimulationTick>,
     mut telemetry: ResMut<WeaponTelemetry>,
+    mut build_telemetry: ResMut<crate::builds::BuildTelemetry>,
+    match_root: Query<&MatchState, With<MatchRoot>>,
+    sentries: Query<&crate::abilities::SentryIdentity, With<crate::abilities::Sentry>>,
+    mut sentry_cleanup_requests: MessageWriter<crate::abilities::SentryCleanupRequest>,
     mut sessions: Query<(
         Entity,
-        &mut MessageReceiver<WeaponSelectionRequest>,
-        &mut MessageSender<WeaponSelectionOutcome>,
+        &mut MessageReceiver<BuildSelectionRequest>,
+        &mut MessageSender<BuildSelectionOutcome>,
         &mut ServerSession,
         Has<Disconnected>,
     )>,
@@ -614,7 +624,8 @@ fn process_weapon_selection(
             Entity,
             &ControlledBy,
             &crate::combat::FighterDefinitionId,
-            Option<&SelectingWeapon>,
+            &NetworkEntityId,
+            &MatchParticipant,
             Option<&mut NativeBuffer<FighterInput>>,
             Option<&mut ActionState<FighterInput>>,
             Option<&mut InputFreshness>,
@@ -622,10 +633,10 @@ fn process_weapon_selection(
         With<Fighter>,
     >,
 ) {
-    // Commands are deferred until the explicit ApplyDeferred boundary after this system. Keep
-    // an in-tick lock as well, so two queued requests cannot both observe SelectingWeapon and
-    // schedule competing accepted builds for the same fighter.
     let mut accepted_fighters_this_tick = HashSet::new();
+    let Ok(match_state) = match_root.single() else {
+        return;
+    };
     for (connection, mut receiver, mut sender, mut session, disconnected) in &mut sessions {
         if disconnected {
             receiver.receive().for_each(drop);
@@ -637,11 +648,12 @@ fn process_weapon_selection(
                 .last_selection_request
                 .is_some_and(|previous| request.request_id < previous.request_id)
             {
-                let outcome = WeaponSelectionOutcome {
+                let outcome = BuildSelectionOutcome {
                     request_id: request.request_id,
-                    decision: WeaponSelectionDecision::StaleRequest,
-                    accepted_preset_id: None,
-                    accepted_recipe_fingerprint: None,
+                    match_id: request.match_id,
+                    decision: BuildSelectionDecision::Stale,
+                    accepted_identity: None,
+                    accepted_total_points: None,
                 };
                 session.last_selection_response = Some(outcome);
                 sender.send::<SessionChannel>(outcome);
@@ -660,39 +672,73 @@ fn process_weapon_selection(
 
             let fighter = fighter_query
                 .iter_mut()
-                .find(|(_, controlled, _, _, _, _, _)| controlled.owner == connection);
+                .find(|(_, controlled, _, _, _, _, _, _)| controlled.owner == connection);
             let outcome = if let Some((
                 fighter_entity,
                 _,
                 fighter_definition_id,
-                selecting,
+                fighter_network_id,
+                participant,
                 mut input_buffer,
                 mut action,
                 mut input_freshness,
             )) = fighter
             {
-                if selecting.is_none() || accepted_fighters_this_tick.contains(&fighter_entity) {
-                    WeaponSelectionOutcome {
+                if request.match_id != match_state.match_id
+                    || participant.match_id != match_state.match_id
+                {
+                    BuildSelectionOutcome {
                         request_id: request.request_id,
-                        decision: WeaponSelectionDecision::NotSelecting,
-                        accepted_preset_id: None,
-                        accepted_recipe_fingerprint: None,
+                        match_id: request.match_id,
+                        decision: BuildSelectionDecision::WrongMatch,
+                        accepted_identity: None,
+                        accepted_total_points: None,
                     }
-                } else if catalog.0.preset(request.preset_id).is_none() {
-                    WeaponSelectionOutcome {
+                } else if !matches!(match_state.phase, MatchPhase::Waiting) {
+                    BuildSelectionOutcome {
                         request_id: request.request_id,
-                        decision: WeaponSelectionDecision::UnknownPreset,
-                        accepted_preset_id: None,
-                        accepted_recipe_fingerprint: None,
+                        match_id: request.match_id,
+                        decision: BuildSelectionDecision::WrongPhase,
+                        accepted_identity: None,
+                        accepted_total_points: None,
+                    }
+                } else if participant.ready {
+                    BuildSelectionOutcome {
+                        request_id: request.request_id,
+                        match_id: request.match_id,
+                        decision: BuildSelectionDecision::ReadyLocked,
+                        accepted_identity: None,
+                        accepted_total_points: None,
+                    }
+                } else if accepted_fighters_this_tick.contains(&fighter_entity) {
+                    BuildSelectionOutcome {
+                        request_id: request.request_id,
+                        match_id: request.match_id,
+                        decision: BuildSelectionDecision::Stale,
+                        accepted_identity: None,
+                        accepted_total_points: None,
                     }
                 } else {
-                    let resolved = definitions
-                        .get(*fighter_definition_id)
-                        .ok_or_else(|| "fighter definition missing".to_string())
-                        .and_then(|fighter_definition| {
-                            catalog
-                                .0
-                                .resolve_preset(request.preset_id, fighter_definition)
+                    let (recipe, source_preset) = match request.selection {
+                        crate::protocol::BuildSelection::Preset(id) => builds
+                            .0
+                            .preset(id)
+                            .map_or((None, Some(id)), |preset| (Some(preset.recipe), Some(id))),
+                        crate::protocol::BuildSelection::Custom(recipe) => (Some(recipe), None),
+                    };
+                    let resolved = recipe
+                        .ok_or(crate::builds::BuildResolutionError::UnknownId)
+                        .and_then(|recipe| {
+                            let fighter = definitions
+                                .get(*fighter_definition_id)
+                                .ok_or(crate::builds::BuildResolutionError::ResolutionFailed)?;
+                            crate::builds::resolve_build_recipe(
+                                &builds.0,
+                                &weapons.0,
+                                fighter,
+                                recipe,
+                                source_preset,
+                            )
                         });
                     match resolved {
                         Ok(resolved) => {
@@ -710,22 +756,39 @@ fn process_weapon_selection(
                             if let Some(input_freshness) = input_freshness.as_mut() {
                                 **input_freshness = InputFreshness::default();
                             }
-                            let capacity = resolved.recipe.economy.capacity();
+                            let capacity = resolved.primary_weapon.recipe.economy.capacity();
+                            let legacy_preset = resolved.primary_weapon.source_preset_id;
+                            for identity in &sentries {
+                                if identity.owner_network_id == *fighter_network_id {
+                                    sentry_cleanup_requests.write(
+                                        crate::abilities::SentryCleanupRequest {
+                                            deployable_id: identity.deployable_id,
+                                            reason: crate::abilities::SentryCleanupReason::BuildReplaced,
+                                            requested_at_tick: tick.0,
+                                        },
+                                    );
+                                }
+                            }
                             commands
                                 .entity(fighter_entity)
                                 .insert((
                                     SelectedBuild {
                                         primary_weapon: crate::combat::WeaponDefinitionId(
-                                            request.preset_id.0,
+                                            legacy_preset.map_or(1, |id| id.0),
                                         ),
-                                        source_preset_id: Some(request.preset_id),
-                                        recipe_fingerprint: Some(resolved.recipe_fingerprint),
+                                        source_preset_id: legacy_preset,
+                                        recipe_fingerprint: Some(
+                                            resolved.primary_weapon.recipe_fingerprint,
+                                        ),
                                     },
-                                    SelectedWeapon {
-                                        source_preset_id: request.preset_id,
-                                        recipe_fingerprint: resolved.recipe_fingerprint,
-                                    },
+                                    resolved.identity,
+                                    resolved.primary_weapon.clone(),
                                     resolved.clone(),
+                                    crate::builds::AbilityState::default(),
+                                    crate::builds::PassiveRuntimeState::default(),
+                                    crate::combat::CurrentHealth(
+                                        resolved.fighter_stats.maximum_health,
+                                    ),
                                     crate::combat::WeaponState {
                                         ammo: capacity,
                                         phase: crate::combat::WeaponPhase::Ready,
@@ -740,42 +803,71 @@ fn process_weapon_selection(
                                             | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
                                     ),
                                 ))
-                                .remove::<SelectingWeapon>();
-                            telemetry.record_selection(
-                                request.preset_id,
-                                resolved.recipe_fingerprint,
-                                tick.0,
-                                request.request_id,
-                            );
-                            let _ = fighter_definition_id;
-                            WeaponSelectionOutcome {
+                                .remove::<SelectingBuild>()
+                                .remove::<crate::abilities::DashRuntime>()
+                                .remove::<crate::abilities::UltimateInputLatch>();
+                            if let Some(preset_id) = legacy_preset {
+                                telemetry.record_selection(
+                                    preset_id,
+                                    resolved.primary_weapon.recipe_fingerprint,
+                                    tick.0,
+                                    request.request_id,
+                                );
+                            }
+                            build_telemetry.record(crate::builds::BuildSelectionTelemetryRecord {
+                                tick: tick.0,
                                 request_id: request.request_id,
-                                decision: WeaponSelectionDecision::Accepted,
-                                accepted_preset_id: Some(request.preset_id),
-                                accepted_recipe_fingerprint: Some(resolved.recipe_fingerprint),
+                                owner_network_id: *fighter_network_id,
+                                identity: resolved.identity,
+                                total_points: resolved.total_points,
+                                weapon_fingerprint: resolved.primary_weapon.recipe_fingerprint,
+                                ultimate_id: resolved.ultimate.id,
+                                passive_ids: resolved.passives.map(|passive| passive.id),
+                            });
+                            let _ = fighter_definition_id;
+                            BuildSelectionOutcome {
+                                request_id: request.request_id,
+                                match_id: request.match_id,
+                                decision: BuildSelectionDecision::Accepted,
+                                accepted_identity: Some(resolved.identity),
+                                accepted_total_points: Some(resolved.total_points),
                             }
                         }
                         Err(error) => {
-                            warn!(
-                                ?error,
-                                preset_id = request.preset_id.0,
-                                "weapon selection resolution failed"
-                            );
-                            WeaponSelectionOutcome {
+                            warn!(?error, "build selection resolution failed");
+                            BuildSelectionOutcome {
                                 request_id: request.request_id,
-                                decision: WeaponSelectionDecision::ResolutionFailed,
-                                accepted_preset_id: None,
-                                accepted_recipe_fingerprint: None,
+                                match_id: request.match_id,
+                                decision: match error {
+                                    crate::builds::BuildResolutionError::UnknownId => {
+                                        BuildSelectionDecision::UnknownId
+                                    }
+                                    crate::builds::BuildResolutionError::InvalidCombination => {
+                                        BuildSelectionDecision::InvalidCombination
+                                    }
+                                    crate::builds::BuildResolutionError::OverBudget => {
+                                        BuildSelectionDecision::OverBudget
+                                    }
+                                    crate::builds::BuildResolutionError::CandidateTooLarge => {
+                                        BuildSelectionDecision::CandidateTooLarge
+                                    }
+                                    crate::builds::BuildResolutionError::ResolutionFailed => {
+                                        BuildSelectionDecision::ResolutionFailed
+                                    }
+                                },
+                                accepted_identity: None,
+                                accepted_total_points: None,
                             }
                         }
                     }
                 }
             } else {
-                WeaponSelectionOutcome {
+                BuildSelectionOutcome {
                     request_id: request.request_id,
-                    decision: WeaponSelectionDecision::NotSelecting,
-                    accepted_preset_id: None,
-                    accepted_recipe_fingerprint: None,
+                    match_id: request.match_id,
+                    decision: BuildSelectionDecision::ResolutionFailed,
+                    accepted_identity: None,
+                    accepted_total_points: None,
                 }
             };
             session.last_selection_request = Some(request);
@@ -800,7 +892,8 @@ fn process_match_commands(
         (
             &ControlledBy,
             &mut MatchParticipant,
-            Option<&SelectedWeapon>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
+            Option<&SelectingBuild>,
         ),
         With<Fighter>,
     >,
@@ -837,17 +930,19 @@ fn process_match_commands(
             }
             let participant = fighters
                 .iter_mut()
-                .find(|(controlled, _, _)| controlled.owner == connection);
+                .find(|(controlled, _, _, _)| controlled.owner == connection);
             let decision = if request.match_id != match_state.match_id {
                 MatchCommandDecision::WrongMatch
-            } else if let Some((_, mut participant, selected)) = participant {
+            } else if let Some((_, mut participant, selected, selecting)) = participant {
                 match (request.command, match_state.phase) {
-                    (MatchCommand::SetReady(value), MatchPhase::Waiting) if selected.is_some() => {
+                    (MatchCommand::SetReady(value), MatchPhase::Waiting)
+                        if selected.is_some() && selecting.is_none() =>
+                    {
                         participant.ready = value;
                         MatchCommandDecision::Accepted
                     }
                     (MatchCommand::SetReady(value), MatchPhase::Countdown { .. })
-                        if selected.is_some() =>
+                        if selected.is_some() && selecting.is_none() =>
                     {
                         participant.ready = value;
                         MatchCommandDecision::Accepted
@@ -989,9 +1084,10 @@ fn wipeout_rules_for_profile(profile: crate::config::WipeoutRulesProfile) -> Wip
     match profile {
         crate::config::WipeoutRulesProfile::Production => WipeoutRules::default(),
         crate::config::WipeoutRulesProfile::ProcessVerification => WipeoutRules {
-            target_score: 3,
+            minimum_participants_per_team: 2,
+            target_score: 10,
             countdown_ticks: 30,
-            active_limit_ticks: 1_200,
+            active_limit_ticks: 3_600,
             respawn_delay_ticks: 30,
             spawn_protection_ticks: 10,
             completed_input_lock_ticks: 10,

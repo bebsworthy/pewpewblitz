@@ -41,8 +41,9 @@ fn production_startup_instantiates_wipeout_map_and_match_without_practice_dummy(
 #[test]
 fn shortened_wipeout_rules_require_the_explicit_verification_profile() {
     let rules = wipeout_rules_for_profile(crate::config::WipeoutRulesProfile::ProcessVerification);
-    assert_eq!(rules.target_score, 3);
-    assert_eq!(rules.active_limit_ticks, 1_200);
+    assert_eq!(rules.target_score, 10);
+    assert_eq!(rules.minimum_participants_per_team, 2);
+    assert_eq!(rules.active_limit_ticks, 3_600);
 }
 
 #[test]

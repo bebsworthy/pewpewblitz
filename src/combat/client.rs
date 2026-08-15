@@ -227,7 +227,11 @@ impl Plugin for ClientCombatPlugin {
                     receive_combat_cues,
                     receive_combat_evidence_checkpoints,
                     ensure_projectile_visuals,
+                    ensure_sentry_visuals,
+                    ensure_dash_trails,
                     sync_projectile_visuals,
+                    sync_sentry_visuals,
+                    sync_dash_trails,
                     update_weapon_preview,
                     update_health_bars,
                     update_durable_effect_markers,
@@ -238,6 +242,106 @@ impl Plugin for ClientCombatPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+#[cfg(feature = "client")]
+#[derive(Component)]
+struct DashTrailVisual {
+    target: Entity,
+    last_position: Vec2,
+}
+
+#[cfg(feature = "client")]
+fn ensure_dash_trails(
+    mut commands: Commands,
+    fighters: Query<(Entity, &Position, &crate::builds::AbilityState), With<Fighter>>,
+    trails: Query<&DashTrailVisual>,
+) {
+    let existing: HashSet<_> = trails.iter().map(|trail| trail.target).collect();
+    for (entity, position, ability) in &fighters {
+        if matches!(ability.phase, crate::builds::AbilityPhase::Dashing { .. })
+            && !existing.contains(&entity)
+        {
+            commands.spawn((
+                DashTrailVisual {
+                    target: entity,
+                    last_position: position.0,
+                },
+                Sprite::from_color(Color::srgba(0.25, 0.9, 1.0, 0.55), Vec2::ONE),
+                Transform::from_translation(position.0.extend(10.0)),
+                Name::new("Dash Trail"),
+            ));
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn sync_dash_trails(
+    mut commands: Commands,
+    fighters: Query<(&Position, &crate::builds::AbilityState), With<Fighter>>,
+    mut trails: Query<(Entity, &mut DashTrailVisual, &mut Transform, &mut Sprite)>,
+) {
+    for (entity, mut trail, mut transform, mut sprite) in &mut trails {
+        let Ok((position, ability)) = fighters.get(trail.target) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if !matches!(ability.phase, crate::builds::AbilityPhase::Dashing { .. }) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let delta = position.0 - trail.last_position;
+        if delta.length_squared() > f32::EPSILON {
+            transform.translation = trail.last_position.midpoint(position.0).extend(10.0);
+            transform.rotation = Quat::from_rotation_z(delta.y.atan2(delta.x));
+            sprite.custom_size = Some(Vec2::new(delta.length().max(2.0), 14.0));
+            trail.last_position = position.0;
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn ensure_sentry_visuals(
+    mut commands: Commands,
+    sentries: Query<
+        (
+            Entity,
+            &crate::abilities::SentryIdentity,
+            &Position,
+            &Rotation,
+            Option<&Transform>,
+        ),
+        With<crate::abilities::Sentry>,
+    >,
+) {
+    for (entity, identity, position, rotation, transform) in &sentries {
+        if transform.is_none() {
+            let color = if identity.team_id.0 == 0 {
+                Color::srgb(0.2, 0.75, 1.0)
+            } else {
+                Color::srgb(1.0, 0.35, 0.15)
+            };
+            commands.entity(entity).insert((
+                Transform {
+                    translation: position.0.extend(12.0),
+                    rotation: Quat::from_rotation_z(rotation.as_radians()),
+                    ..default()
+                },
+                Sprite::from_color(color, Vec2::splat(38.0)),
+                Name::new("Sentry"),
+            ));
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+fn sync_sentry_visuals(
+    mut sentries: Query<(&Position, &Rotation, &mut Transform), With<crate::abilities::Sentry>>,
+) {
+    for (position, rotation, mut transform) in &mut sentries {
+        transform.translation = position.0.extend(12.0);
+        transform.rotation = Quat::from_rotation_z(rotation.as_radians());
     }
 }
 
@@ -375,7 +479,7 @@ pub struct CombatHudText;
 
 #[cfg(feature = "client")]
 #[derive(Component)]
-pub struct WeaponSelectionText;
+pub struct BuildSelectionText;
 
 #[cfg(feature = "client")]
 fn combat_cue_profile_id(cue: &CombatCue) -> u16 {
@@ -401,6 +505,10 @@ fn combat_cue_profile_id(cue: &CombatCue) -> u16 {
             ..
         }
         | CombatCue::EffectApplied {
+            presentation_profile_id,
+            ..
+        }
+        | CombatCue::SentryFired {
             presentation_profile_id,
             ..
         } => presentation_profile_id.0,
@@ -444,7 +552,6 @@ fn receive_combat_cues(
         Option<&mut lightyear::prelude::MessageReceiver<CombatCue>>,
         With<lightyear::prelude::client::Client>,
     >,
-    fighters: Query<(&NetworkEntityId, &Position), With<Fighter>>,
     local_fighter: Query<&PlayerId, (With<Fighter>, With<lightyear::prelude::Controlled>)>,
 ) {
     let local_player = local_fighter.iter().next().copied();
@@ -472,6 +579,8 @@ fn receive_combat_cues(
                 | CombatCue::EffectApplied { event_id, .. }
                 | CombatCue::FighterDefeated { event_id, .. }
                 | CombatCue::FighterReset { event_id, .. }
+                | CombatCue::SentryFired { event_id, .. }
+                | CombatCue::DeployableRemoved { event_id, .. }
                 | CombatCue::Muzzle { event_id, .. }
                 | CombatCue::Impact { event_id, .. }
                 | CombatCue::Damage { event_id, .. }
@@ -523,22 +632,6 @@ fn receive_combat_cues(
                 continue;
             }
             presented_cues.write(DeduplicatedCombatCue(cue.clone()));
-            let target_position = match &cue {
-                CombatCue::Damage { target, .. }
-                | CombatCue::DamageApplied { target, .. }
-                | CombatCue::Defeat { target, .. }
-                | CombatCue::FighterDefeated { target, .. }
-                | CombatCue::EffectApplied { target, .. }
-                | CombatCue::MeleeContact { target, .. } => fighters
-                    .iter()
-                    .find(|(network_id, _)| **network_id == *target)
-                    .map(|(_, position)| position.0),
-                CombatCue::AttackAccepted { source, .. } => fighters
-                    .iter()
-                    .find(|(network_id, _)| **network_id == *source)
-                    .map(|(_, position)| position.0),
-                _ => None,
-            };
             let local_hit = match &cue {
                 CombatCue::Damage {
                     source: DamageSource::PlayerWeapon { player_id, .. },
@@ -547,12 +640,18 @@ fn receive_combat_cues(
                 | CombatCue::DamageApplied {
                     source: DamageSource::PlayerWeapon { player_id, .. },
                     ..
+                }
+                | CombatCue::DamageApplied {
+                    source:
+                        DamageSource::Ultimate { player_id, .. }
+                        | DamageSource::Deployable { player_id, .. },
+                    ..
                 } => local_player == Some(*player_id),
                 _ => false,
             };
             let (position, color, size) = match cue {
-                CombatCue::AttackAccepted { .. } => (
-                    target_position.unwrap_or(Vec2::ZERO),
+                CombatCue::AttackAccepted { position, .. } => (
+                    position.as_vec2(),
                     combat_profile_color(profile_id, Color::srgb(1.0, 0.8, 0.2)),
                     combat_profile_size(profile_id, Vec2::splat(16.0)),
                 ),
@@ -564,8 +663,8 @@ fn receive_combat_cues(
                     combat_profile_color(profile_id, Color::srgb(1.0, 0.35, 0.1)),
                     combat_profile_size(profile_id, Vec2::splat(28.0)),
                 ),
-                CombatCue::DamageApplied { .. } | CombatCue::Damage { .. } => (
-                    target_position.unwrap_or(Vec2::ZERO),
+                CombatCue::DamageApplied { position, .. } => (
+                    position.as_vec2(),
                     combat_profile_color(
                         profile_id,
                         if local_hit {
@@ -576,13 +675,13 @@ fn receive_combat_cues(
                     ),
                     combat_profile_size(profile_id, Vec2::splat(18.0)),
                 ),
-                CombatCue::EffectApplied { .. } => (
-                    target_position.unwrap_or(Vec2::ZERO),
+                CombatCue::EffectApplied { position, .. } => (
+                    position.as_vec2(),
                     combat_profile_color(profile_id, Color::srgb(0.3, 0.8, 1.0)),
                     combat_profile_size(profile_id, Vec2::splat(24.0)),
                 ),
-                CombatCue::FighterDefeated { .. } | CombatCue::Defeat { .. } => (
-                    target_position.unwrap_or(Vec2::ZERO),
+                CombatCue::FighterDefeated { position, .. } => (
+                    position.as_vec2(),
                     combat_profile_color(profile_id, Color::srgb(0.9, 0.05, 0.05)),
                     combat_profile_size(profile_id, Vec2::splat(64.0)),
                 ),
@@ -596,6 +695,25 @@ fn receive_combat_cues(
                     Color::srgb(1.0, 0.8, 0.2),
                     Vec2::splat(22.0),
                 ),
+                CombatCue::SentryFired { position, .. } => (
+                    position.as_vec2(),
+                    Color::srgb(0.25, 0.8, 1.0),
+                    Vec2::new(20.0, 10.0),
+                ),
+                CombatCue::DeployableRemoved {
+                    position, reason, ..
+                } => (
+                    position.as_vec2(),
+                    if matches!(reason, crate::abilities::SentryCleanupReason::Destroyed) {
+                        Color::srgb(1.0, 0.25, 0.1)
+                    } else {
+                        Color::srgb(0.35, 0.75, 1.0)
+                    },
+                    Vec2::splat(46.0),
+                ),
+                CombatCue::Damage { .. } | CombatCue::Defeat { .. } => {
+                    continue;
+                }
             };
             commands.spawn((
                 CombatEffect {
@@ -614,30 +732,35 @@ fn ensure_projectile_visuals(
     mut query: Query<
         (
             Entity,
+            &Position,
+            &Rotation,
             Option<&Transform>,
             Option<&mut Sprite>,
-            Option<&ProjectileSource>,
-            Option<&ReplicatedAttackSource>,
+            &ProjectileSource,
+            &ReplicatedAttackSource,
             Option<&LobbedFlight>,
         ),
         With<Projectile>,
     >,
 ) {
-    for (entity, transform, sprite, source, replicated_attack, lobbed) in &mut query {
+    for (entity, position, rotation, transform, sprite, source, replicated_attack, lobbed) in
+        &mut query
+    {
         if transform.is_none() {
-            commands.entity(entity).insert(Transform::default());
+            commands.entity(entity).insert(Transform {
+                translation: position.0.extend(20.0),
+                rotation: Quat::from_rotation_z(rotation.as_radians()),
+                ..default()
+            });
         }
-        let color = source.map_or(Color::srgb(1.0, 0.85, 0.2), |source| {
-            projectile_color(source.player_id)
-        });
-        let profile_id =
-            replicated_attack.map_or(1, |source| source.attack.presentation_profile_id.0);
-        let size = source.map_or(Vec2::new(20.0, 8.0), |_| match profile_id {
+        let color = projectile_color(source.player_id);
+        let profile_id = replicated_attack.attack.presentation_profile_id.0;
+        let size = match profile_id {
             2 => Vec2::new(9.0, 5.0),
             3 => Vec2::new(16.0, 16.0),
             4 => Vec2::new(24.0, 6.0),
             _ => Vec2::new(20.0, 8.0),
-        });
+        };
         if let Some(mut sprite) = sprite {
             sprite.color = color;
             sprite.custom_size = Some(size);
@@ -762,6 +885,7 @@ fn update_health_bars(
             &CurrentHealth,
             &FighterDefinitionId,
             Option<&Defeated>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
         ),
         With<Fighter>,
     >,
@@ -770,12 +894,19 @@ fn update_health_bars(
 ) {
     let fighter_data: HashMap<_, _> = fighters
         .iter()
-        .map(|(entity, position, health, definition_id, defeated)| {
-            let maximum = definitions
-                .get(*definition_id)
-                .map_or(0, |definition| definition.maximum_health);
-            (entity, (position.0, health.0, maximum, defeated.is_some()))
-        })
+        .map(
+            |(entity, position, health, definition_id, defeated, loadout)| {
+                let maximum = loadout.map_or_else(
+                    || {
+                        definitions
+                            .get(*definition_id)
+                            .map_or(0, |definition| definition.maximum_health)
+                    },
+                    |loadout| loadout.fighter_stats.maximum_health,
+                );
+                (entity, (position.0, health.0, maximum, defeated.is_some()))
+            },
+        )
         .collect();
     let existing: HashSet<_> = bars
         .iter()
@@ -826,6 +957,7 @@ fn update_health_bars(
 }
 
 #[cfg(feature = "client")]
+#[allow(clippy::too_many_lines)]
 fn update_combat_hud(
     mut text: Query<&mut Text, With<CombatHudText>>,
     fighter: Query<
@@ -838,11 +970,23 @@ fn update_combat_hud(
             Option<&ResolvedWeapon>,
             Option<&ActiveEffects>,
             Option<&Defeated>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
+            Option<&crate::builds::AbilityState>,
+            Option<&crate::builds::PassiveRuntimeState>,
         ),
         (With<Fighter>, With<lightyear::prelude::Controlled>),
     >,
     weapons: Res<WeaponDefinitions>,
     catalog: Option<Res<WeaponCatalogResource>>,
+    build_catalog: Option<Res<crate::builds::BuildCatalogResource>>,
+    sentries: Query<
+        (
+            &crate::abilities::SentryIdentity,
+            &CurrentHealth,
+            &crate::abilities::SentryDeadline,
+        ),
+        With<crate::abilities::Sentry>,
+    >,
 ) {
     let Some((
         player_id,
@@ -853,6 +997,9 @@ fn update_combat_hud(
         resolved,
         active_effects,
         defeated,
+        loadout,
+        ability,
+        passive_state,
     )) = fighter.iter().next()
     else {
         return;
@@ -897,6 +1044,55 @@ fn update_combat_hud(
         WeaponPhase::Cooldown { .. } | WeaponPhase::Reloading { .. } => "SYNCING".to_string(),
     };
     let phase = defeated.map_or(phase, |_| "DEFEATED".to_string());
+    let maximum_health = loadout.map_or(100, |loadout| loadout.fighter_stats.maximum_health);
+    let build_name = loadout
+        .and_then(|loadout| loadout.identity.source_build_preset_id)
+        .and_then(|id| {
+            build_catalog
+                .as_ref()
+                .and_then(|catalog| catalog.0.preset(id))
+        })
+        .map_or("Custom", |preset| preset.display_name.as_str());
+    let ultimate = ability.map_or_else(
+        || "ULT --".to_string(),
+        |ability| {
+            let phase = match ability.phase {
+                crate::builds::AbilityPhase::Charging => "charging",
+                crate::builds::AbilityPhase::Ready => "READY",
+                crate::builds::AbilityPhase::Dashing { .. } => "DASHING",
+                crate::builds::AbilityPhase::Deployed { .. } => "DEPLOYED",
+            };
+            format!("ULT {:>3}% {phase}", ability.charge / 10)
+        },
+    );
+    let passive = passive_state.map_or_else(String::new, |state| {
+        let adrenaline = state.adrenaline_until_tick.map_or_else(
+            || "ready".to_string(),
+            |deadline| {
+                format!(
+                    "{}t",
+                    authoritative_tick.map_or(0, |tick| deadline.saturating_sub(tick.0))
+                )
+            },
+        );
+        let quick_cycle = if state.quick_cycle_primed {
+            "primed"
+        } else {
+            "idle"
+        };
+        format!("  ADR {adrenaline} QC {quick_cycle}")
+    });
+    let sentry = sentries
+        .iter()
+        .find(|(identity, _, _)| identity.owner_player_id == *player_id)
+        .map_or_else(String::new, |(_, health, deadline)| {
+            format!(
+                "  SENTRY {}hp {}t",
+                health.0,
+                authoritative_tick
+                    .map_or(0, |tick| deadline.expires_at_tick.saturating_sub(tick.0))
+            )
+        });
     let slow = active_effects
         .and_then(|effects| effects.slow)
         .zip(authoritative_tick)
@@ -906,8 +1102,19 @@ fn update_combat_hud(
         });
     for mut value in &mut text {
         **value = format!(
-            "Player {}   Health {:>3}   {} {}/{}   {}{}",
-            player_id.0, health.0, weapon_name, state.ammo, capacity, phase, slow
+            "Player {}   {}   Health {:>3}/{:>3}   {} {}/{}   {}{}\n{}{}{}",
+            player_id.0,
+            build_name,
+            health.0,
+            maximum_health,
+            weapon_name,
+            state.ammo,
+            capacity,
+            phase,
+            slow,
+            ultimate,
+            passive,
+            sentry
         );
     }
 }
@@ -1141,7 +1348,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().get::<Text>(hud).expect("combat HUD").0,
-            "Player 1   Health  42   Pulse 0/6   RELOADING 15t"
+            "Player 1   Custom   Health  42/100   Pulse 0/6   RELOADING 15t\nULT --"
         );
 
         app.world_mut().entity_mut(hud).insert(Text::new("stale"));
@@ -1156,7 +1363,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().get::<Text>(hud).expect("combat HUD").0,
-            "Player 1   Health  42   Pulse 0/6   DEFEATED"
+            "Player 1   Custom   Health  42/100   Pulse 0/6   DEFEATED\nULT --"
         );
     }
 
@@ -1192,6 +1399,84 @@ mod tests {
         assert!(
             (transform.rotation.to_euler(EulerRot::ZYX).0 - std::f32::consts::FRAC_PI_2).abs()
                 < 0.001
+        );
+    }
+
+    #[test]
+    fn replicated_delivery_visuals_wait_for_an_authoritative_pose() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (ensure_projectile_visuals, ensure_sentry_visuals).chain(),
+        );
+        let projectile = app.world_mut().spawn(Projectile).id();
+        let sentry = app
+            .world_mut()
+            .spawn((
+                crate::abilities::Sentry,
+                crate::abilities::SentryIdentity {
+                    deployable_id: crate::builds::DeployableId(1),
+                    owner_player_id: PlayerId(1),
+                    owner_network_id: NetworkEntityId(1),
+                    team_id: TeamId(0),
+                    ultimate_id: crate::builds::UltimateDefinitionId(2),
+                    match_id: crate::matchplay::MatchId(1),
+                },
+            ))
+            .id();
+
+        app.update();
+        assert!(app.world().get::<Transform>(projectile).is_none());
+        assert!(app.world().get::<Transform>(sentry).is_none());
+
+        app.world_mut()
+            .entity_mut(projectile)
+            .insert((Position::from_xy(120.0, -40.0), Rotation::radians(0.5)));
+        app.world_mut()
+            .entity_mut(sentry)
+            .insert((Position::from_xy(-90.0, 75.0), Rotation::radians(-0.25)));
+        app.update();
+
+        assert!(
+            app.world().get::<Transform>(projectile).is_none(),
+            "a pose without both replicated source identities must remain hidden"
+        );
+        app.world_mut().entity_mut(projectile).insert((
+            ProjectileSource {
+                shot_id: ShotId(9),
+                player_id: PlayerId(1),
+                owner_network_entity_id: NetworkEntityId(1),
+                team_id: TeamId(0),
+                weapon_definition_id: WeaponDefinitionId(1),
+            },
+            ReplicatedAttackSource {
+                attack: AttackSource {
+                    kind: CombatSourceKind::PrimaryWeapon,
+                    attack_id: AttackId(9),
+                    player_id: PlayerId(1),
+                    owner_network_entity_id: NetworkEntityId(1),
+                    team_id: TeamId(0),
+                    recipe_fingerprint: WeaponRecipeFingerprint(1),
+                    presentation_profile_id: WeaponPresentationProfileId(1),
+                    legacy_compatibility: false,
+                    source_preset_id: None,
+                    origin: WorldPoint { x: 120.0, y: -40.0 },
+                    facing: 0.5,
+                },
+            },
+        ));
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<Transform>(projectile)
+                .unwrap()
+                .translation,
+            Vec3::new(120.0, -40.0, 20.0)
+        );
+        assert_eq!(
+            app.world().get::<Transform>(sentry).unwrap().translation,
+            Vec3::new(-90.0, 75.0, 12.0)
         );
     }
 }

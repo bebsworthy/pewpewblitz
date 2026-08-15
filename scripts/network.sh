@@ -196,10 +196,10 @@ client_one_args=("${client_args[@]}" --client-id 1)
 client_two_args=("${client_args[@]}" --client-id 2)
 
 if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
-    client_one_args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
+    client_one_args+=(--build-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
 fi
 if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO:-}" ]]; then
-    client_two_args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO")
+    client_two_args+=(--build-preset "$BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO")
 fi
 if [[ "$windowed_combat_demo" == "1" ]]; then
     client_one_args+=(--combat-demo)

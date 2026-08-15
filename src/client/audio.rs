@@ -22,6 +22,10 @@ enum SoundKind {
     Reset,
     Ready,
     Error,
+    Dash,
+    Sentry,
+    ChargeReady,
+    Passive,
 }
 
 #[derive(Resource, Default)]
@@ -41,12 +45,74 @@ impl Plugin for ClientAudioPlugin {
             Update,
             (
                 play_combat_audio,
+                play_ability_audio,
                 play_reload_audio,
                 play_session_audio,
                 play_match_audio,
             )
                 .after(crate::map::MapPresentationSet::Readiness),
         );
+    }
+}
+
+fn play_ability_audio(
+    mut commands: Commands,
+    handles: Option<Res<ClientAssetHandles>>,
+    asset_server: Res<AssetServer>,
+    abilities: Query<
+        &crate::builds::AbilityState,
+        (
+            With<Fighter>,
+            With<Controlled>,
+            Changed<crate::builds::AbilityState>,
+        ),
+    >,
+    passives: Query<
+        &crate::builds::PassiveRuntimeState,
+        (
+            With<Fighter>,
+            With<Controlled>,
+            Changed<crate::builds::PassiveRuntimeState>,
+        ),
+    >,
+    sentries: Query<&crate::abilities::SentryIdentity, Added<crate::abilities::Sentry>>,
+    active: Query<(), With<ClientAudioOneShot>>,
+) {
+    let Some(handles) = handles else { return };
+    let mut sounds = Vec::new();
+    for ability in &abilities {
+        match ability.phase {
+            crate::builds::AbilityPhase::Dashing { .. } => {
+                sounds.push((SoundKind::Dash, handles.defeat.clone(), 1.45));
+            }
+            crate::builds::AbilityPhase::Ready => {
+                sounds.push((SoundKind::ChargeReady, handles.ready.clone(), 1.25));
+            }
+            crate::builds::AbilityPhase::Charging
+            | crate::builds::AbilityPhase::Deployed { .. } => {}
+        }
+    }
+    if passives
+        .iter()
+        .any(|state| state.adrenaline_until_tick.is_some() || state.quick_cycle_primed)
+    {
+        sounds.push((SoundKind::Passive, handles.impact.clone(), 1.35));
+    }
+    for _ in &sentries {
+        sounds.push((SoundKind::Sentry, handles.ready.clone(), 0.75));
+    }
+    let available = MAX_ACTIVE_ONE_SHOTS.saturating_sub(active.iter().count());
+    for (_kind, handle, speed) in sounds.into_iter().take(available) {
+        if asset_server.is_loaded(&handle) {
+            commands.spawn((
+                ClientAudioOneShot,
+                AudioPlayer::new(handle),
+                PlaybackSettings {
+                    speed,
+                    ..PlaybackSettings::DESPAWN
+                },
+            ));
+        }
     }
 }
 
@@ -131,12 +197,18 @@ fn play_combat_audio(
             }
             continue;
         }
-        let handle = match kind {
-            SoundKind::Fire => handles.fire.clone(),
-            SoundKind::Impact => handles.impact.clone(),
-            SoundKind::Defeat => handles.defeat.clone(),
-            SoundKind::Reset => handles.ready.clone(),
-            SoundKind::Ready | SoundKind::Error => unreachable!("session sound is not combat"),
+        let Some(handle) = (match kind {
+            SoundKind::Fire => Some(handles.fire.clone()),
+            SoundKind::Impact => Some(handles.impact.clone()),
+            SoundKind::Defeat => Some(handles.defeat.clone()),
+            SoundKind::Reset | SoundKind::Sentry => Some(handles.ready.clone()),
+            SoundKind::Ready
+            | SoundKind::Error
+            | SoundKind::Dash
+            | SoundKind::ChargeReady
+            | SoundKind::Passive => None,
+        }) else {
+            continue;
         };
         if !asset_server.is_loaded(&handle) {
             continue;
@@ -154,9 +226,14 @@ const fn live_limit_for(kind: SoundKind) -> usize {
     match kind {
         SoundKind::Fire => MAX_ACTIVE_ONE_SHOTS - 4,
         SoundKind::Impact => MAX_ACTIVE_ONE_SHOTS - 2,
-        SoundKind::Defeat | SoundKind::Reset | SoundKind::Ready | SoundKind::Error => {
-            MAX_ACTIVE_ONE_SHOTS
-        }
+        SoundKind::Defeat
+        | SoundKind::Reset
+        | SoundKind::Ready
+        | SoundKind::Error
+        | SoundKind::Dash
+        | SoundKind::Sentry
+        | SoundKind::ChargeReady
+        | SoundKind::Passive => MAX_ACTIVE_ONE_SHOTS,
     }
 }
 
@@ -238,6 +315,9 @@ fn combat_sound(cue: &CombatCue) -> Option<(SoundKind, u64)> {
         | CombatCue::MeleeContact { attack_id, .. } => Some((SoundKind::Impact, attack_id.0)),
         CombatCue::FighterDefeated { attack_id, .. } => Some((SoundKind::Defeat, attack_id.0)),
         CombatCue::FighterReset { event_id, .. } => Some((SoundKind::Reset, event_id.0)),
+        CombatCue::SentryFired { event_id, .. } | CombatCue::DeployableRemoved { event_id, .. } => {
+            Some((SoundKind::Sentry, event_id.0))
+        }
         CombatCue::DamageApplied { .. }
         | CombatCue::EffectApplied { .. }
         | CombatCue::Muzzle { .. }
@@ -288,5 +368,32 @@ mod tests {
         assert!(live_limit_for(SoundKind::Fire) < live_limit_for(SoundKind::Impact));
         assert!(live_limit_for(SoundKind::Impact) < live_limit_for(SoundKind::Defeat));
         assert_eq!(live_limit_for(SoundKind::Error), MAX_ACTIVE_ONE_SHOTS);
+    }
+
+    #[test]
+    fn deployable_removal_is_a_supported_combat_sound() {
+        let cue = CombatCue::DeployableRemoved {
+            event_id: crate::combat::CombatEventId(91),
+            tick: 100,
+            owner: NetworkEntityId(7),
+            deployable_id: crate::builds::DeployableId(3),
+            position: crate::combat::WorldPoint { x: 20.0, y: 30.0 },
+            reason: crate::abilities::SentryCleanupReason::Destroyed,
+        };
+        assert_eq!(combat_sound(&cue), Some((SoundKind::Sentry, 91)));
+    }
+
+    #[test]
+    fn sentry_fire_is_a_supported_combat_sound() {
+        let cue = CombatCue::SentryFired {
+            event_id: crate::combat::CombatEventId(92),
+            tick: 100,
+            owner: NetworkEntityId(7),
+            deployable_id: crate::builds::DeployableId(3),
+            target: NetworkEntityId(8),
+            position: crate::combat::WorldPoint { x: 20.0, y: 30.0 },
+            presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
+        };
+        assert_eq!(combat_sound(&cue), Some((SoundKind::Sentry, 92)));
     }
 }

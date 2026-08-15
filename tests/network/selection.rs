@@ -3,16 +3,16 @@
 use super::*;
 
 #[test]
-fn milestone_five_selection_resolves_distinct_presets_and_spawns_spread_deliveries() {
+fn build_selection_resolves_distinct_primary_weapons_and_spawns_spread_deliveries() {
     let mut harness = Harness::new(2);
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .weapon_preset = Some(2);
+        .build_preset = Some(2);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .weapon_preset = Some(4);
+        .build_preset = Some(4);
 
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -26,7 +26,7 @@ fn milestone_five_selection_resolves_distinct_presets_and_spawns_spread_deliveri
         (0..2).all(|index| {
             let world = harness.clients[index].world_mut();
             let mut query = world
-                .query_filtered::<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>();
+                .query_filtered::<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>();
             query.iter(world).next().is_none()
         })
     });
@@ -71,7 +71,7 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
         .world()
         .get::<ServerSession>(harness.server_links[0])
         .and_then(|session| session.last_selection_response)
-        .filter(|outcome| outcome.decision == WeaponSelectionDecision::Accepted)
+        .filter(|outcome| outcome.decision == BuildSelectionDecision::Accepted)
         .expect("automatic accepted selection outcome");
     let accepted_request = harness
         .server
@@ -79,15 +79,16 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
         .get::<ServerSession>(harness.server_links[0])
         .and_then(|session| session.last_selection_request)
         .expect("accepted selection request");
-    harness.send_weapon_selection(0, accepted_request);
-    harness.send_weapon_selection(0, accepted_request);
+    harness.send_build_selection(0, accepted_request);
+    harness.send_build_selection(0, accepted_request);
     harness.step();
     let selected = {
         let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<(&SelectedBuild, &ResolvedWeapon), With<Fighter>>();
+        let mut query =
+            world.query_filtered::<(&SelectedBrawlerBuild, &ResolvedWeapon), With<Fighter>>();
         query
             .iter(world)
-            .find(|(build, _)| build.source_preset_id == accepted.accepted_preset_id)
+            .find(|(build, _)| Some(**build) == accepted.accepted_identity)
             .map(|(build, resolved)| (*build, resolved.recipe_fingerprint))
             .expect("accepted selection")
     };
@@ -98,7 +99,7 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
         .and_then(|session| session.last_selection_response)
         .expect("duplicate outcome");
     assert_eq!(duplicate, accepted);
-    assert_eq!(selected.0.source_preset_id, accepted.accepted_preset_id);
+    assert_eq!(Some(selected.0), accepted.accepted_identity);
     assert_eq!(
         harness
             .server
@@ -109,11 +110,12 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
         1
     );
 
-    harness.send_weapon_selection(
+    harness.send_build_selection(
         0,
-        WeaponSelectionRequest {
+        BuildSelectionRequest {
             request_id: accepted.request_id.saturating_sub(1),
-            preset_id: WeaponPresetId(4),
+            match_id: accepted.match_id,
+            selection: BuildSelection::Preset(BuildPresetId(4)),
         },
     );
     harness.step_until(|harness| {
@@ -122,7 +124,7 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
             .world()
             .get::<ServerSession>(harness.server_links[0])
             .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| outcome.decision == WeaponSelectionDecision::StaleRequest)
+            .is_some_and(|outcome| outcome.decision == BuildSelectionDecision::Stale)
     });
     let stale = harness
         .server
@@ -130,13 +132,14 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
         .get::<ServerSession>(harness.server_links[0])
         .and_then(|session| session.last_selection_response)
         .expect("stale outcome");
-    assert_eq!(stale.decision, WeaponSelectionDecision::StaleRequest);
+    assert_eq!(stale.decision, BuildSelectionDecision::Stale);
 
-    harness.send_weapon_selection(
+    harness.send_build_selection(
         0,
-        WeaponSelectionRequest {
+        BuildSelectionRequest {
             request_id: accepted.request_id.saturating_add(1),
-            preset_id: WeaponPresetId(4),
+            match_id: accepted.match_id,
+            selection: BuildSelection::Preset(BuildPresetId(4)),
         },
     );
     harness.step_until(|harness| {
@@ -145,46 +148,38 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
             .world()
             .get::<ServerSession>(harness.server_links[0])
             .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| outcome.decision == WeaponSelectionDecision::NotSelecting)
+            .is_some_and(|outcome| outcome.decision == BuildSelectionDecision::Accepted)
     });
-    let not_selecting = harness
+    let replacement = harness
         .server
         .world()
         .get::<ServerSession>(harness.server_links[0])
         .and_then(|session| session.last_selection_response)
-        .expect("not-selecting outcome");
-    assert_eq!(
-        not_selecting.decision,
-        WeaponSelectionDecision::NotSelecting
-    );
+        .expect("replacement outcome");
+    assert_eq!(replacement.decision, BuildSelectionDecision::Accepted);
     let final_build = {
         let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<&SelectedBuild, With<Fighter>>();
+        let mut query = world.query_filtered::<&SelectedBrawlerBuild, With<Fighter>>();
         query
             .iter(world)
-            .find(|build| build.source_preset_id == accepted.accepted_preset_id)
+            .find(|build| Some(**build) == replacement.accepted_identity)
             .copied()
-            .expect("selection cannot be switched")
+            .expect("replacement selection is installed")
     };
-    assert_eq!(final_build, selected.0);
+    assert_ne!(final_build, selected.0);
 
-    // Re-entering selection here isolates the registered request path from the automatic
-    // first-selection helper and proves that an unknown preset cannot mutate the accepted build.
+    // Prove that an unknown build preset cannot mutate the accepted replacement.
     let fighter_entity = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<Entity, (With<Fighter>, Without<TestDummy>)>();
         query.iter(world).next().expect("player fighter")
     };
-    harness
-        .server
-        .world_mut()
-        .entity_mut(fighter_entity)
-        .insert(SelectingWeapon);
-    harness.send_weapon_selection(
+    harness.send_build_selection(
         0,
-        WeaponSelectionRequest {
+        BuildSelectionRequest {
             request_id: accepted.request_id.saturating_add(2),
-            preset_id: WeaponPresetId(999),
+            match_id: accepted.match_id,
+            selection: BuildSelection::Preset(BuildPresetId(999)),
         },
     );
     harness.step_until(|harness| {
@@ -193,7 +188,7 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
             .world()
             .get::<ServerSession>(harness.server_links[0])
             .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| outcome.decision == WeaponSelectionDecision::UnknownPreset)
+            .is_some_and(|outcome| outcome.decision == BuildSelectionDecision::UnknownId)
     });
     let unknown = harness
         .server
@@ -201,11 +196,11 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
         .get::<ServerSession>(harness.server_links[0])
         .and_then(|session| session.last_selection_response)
         .expect("unknown-preset outcome");
-    assert_eq!(unknown.decision, WeaponSelectionDecision::UnknownPreset);
+    assert_eq!(unknown.decision, BuildSelectionDecision::UnknownId);
     let unchanged_build = harness
         .server
         .world()
-        .get::<SelectedBuild>(fighter_entity)
+        .get::<SelectedBrawlerBuild>(fighter_entity)
         .copied()
         .expect("accepted build remains authoritative");
     assert_eq!(unchanged_build, final_build);

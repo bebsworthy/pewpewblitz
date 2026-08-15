@@ -277,12 +277,60 @@ fn initial_admission_uses_the_shared_spawn_selector() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
+fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() {
     let mut harness = Harness::new_match(4);
     harness.step_until(|harness| {
         (0..4).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
     });
     let waiting = server_match(&mut harness);
+    for index in 0..4 {
+        harness.send_build_selection(
+            index,
+            BuildSelectionRequest {
+                request_id: 10,
+                match_id: waiting.match_id,
+                selection: BuildSelection::Preset(BuildPresetId(u16::try_from(index + 1).unwrap())),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        harness.server_links.iter().all(|link| {
+            harness
+                .server
+                .world()
+                .get::<ServerSession>(*link)
+                .and_then(|session| session.last_selection_response)
+                .is_some_and(|outcome| {
+                    outcome.request_id == 10 && outcome.decision == BuildSelectionDecision::Accepted
+                })
+        })
+    });
+    for index in 0..4 {
+        let player = harness.controlled_player_id(index);
+        let world = harness.server.world_mut();
+        let mut query = world
+            .query_filtered::<(&PlayerId, &brawler::builds::ResolvedMatchLoadout), With<Fighter>>();
+        assert_eq!(
+            query
+                .iter(world)
+                .find(|(candidate, _)| **candidate == player)
+                .map(|(_, loadout)| loadout.identity.source_build_preset_id)
+                .unwrap(),
+            Some(BuildPresetId(u16::try_from(index + 1).unwrap()))
+        );
+    }
+    harness.step_until(|harness| {
+        (0..4).all(|index| {
+            let entity = harness.controlled_entity(index);
+            harness.clients[index]
+                .world()
+                .get::<brawler::builds::ResolvedMatchLoadout>(entity)
+                .is_some_and(|loadout| {
+                    loadout.identity.source_build_preset_id
+                        == Some(BuildPresetId(u16::try_from(index + 1).unwrap()))
+                })
+        })
+    });
     let mut teams = [0_u8; 2];
     {
         let world = harness.server.world_mut();
@@ -355,10 +403,12 @@ fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
             event_id: CombatEventId(50_000),
             tick,
             attack_id: AttackId(50_000),
+            source_kind: CombatSourceKind::PrimaryWeapon,
             source_player: Some(source.0),
             source_network_id: Some(source.1),
             source_team: Some(source.2),
             target_network_id: target.1,
+            target_kind: brawler::combat::CombatTargetKind::Fighter,
             target_team: target.2,
             preset_id: Some(WeaponPresetId(1)),
             recipe_fingerprint: None,
@@ -455,6 +505,59 @@ fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
     assert!(world.resource::<Messages<PendingDelivery>>().is_empty());
     assert!(world.resource::<Messages<MeleeAttack>>().is_empty());
 
+    let _ = world;
+    for index in 0..4 {
+        harness.send_build_selection(
+            index,
+            BuildSelectionRequest {
+                request_id: 20,
+                match_id: restarted.match_id,
+                selection: BuildSelection::Preset(BuildPresetId(
+                    u16::try_from((index + 1) % 4 + 1).unwrap(),
+                )),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        (0..4).all(|index| {
+            let player = harness.controlled_player_id(index);
+            let expected = BuildPresetId(u16::try_from((index + 1) % 4 + 1).unwrap());
+            let world = harness.server.world_mut();
+            let mut query = world.query_filtered::<
+                (&PlayerId, &brawler::builds::ResolvedMatchLoadout),
+                With<Fighter>,
+            >();
+            query.iter(world).any(|(candidate, loadout)| {
+                *candidate == player && loadout.identity.source_build_preset_id == Some(expected)
+            })
+        })
+    });
+    for index in 0..4 {
+        let player = harness.controlled_player_id(index);
+        let expected = BuildPresetId(u16::try_from((index + 1) % 4 + 1).unwrap());
+        let world = harness.server.world_mut();
+        let mut query = world
+            .query_filtered::<(&PlayerId, &brawler::builds::ResolvedMatchLoadout), With<Fighter>>();
+        assert_eq!(
+            query
+                .iter(world)
+                .find(|(candidate, _)| **candidate == player)
+                .map(|(_, loadout)| loadout.identity.source_build_preset_id)
+                .unwrap(),
+            Some(expected)
+        );
+    }
+    harness.step_until(|harness| {
+        (0..4).all(|index| {
+            let entity = harness.controlled_entity(index);
+            let expected = BuildPresetId(u16::try_from((index + 1) % 4 + 1).unwrap());
+            harness.clients[index]
+                .world()
+                .get::<brawler::builds::ResolvedMatchLoadout>(entity)
+                .is_some_and(|loadout| loadout.identity.source_build_preset_id == Some(expected))
+        })
+    });
+
     for index in 0..4 {
         harness.send_match_command(
             index,
@@ -481,10 +584,12 @@ fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
             event_id: CombatEventId(50_001),
             tick: second_tick,
             attack_id: AttackId(50_001),
+            source_kind: CombatSourceKind::PrimaryWeapon,
             source_player: Some(source.0),
             source_network_id: Some(source.1),
             source_team: Some(source.2),
             target_network_id: target.1,
+            target_kind: brawler::combat::CombatTargetKind::Fighter,
             target_team: target.2,
             preset_id: Some(WeaponPresetId(1)),
             recipe_fingerprint: None,
@@ -512,6 +617,89 @@ fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
     let twice_restarted = server_match(&mut harness);
     assert!(twice_restarted.match_id.0 > restarted.match_id.0);
     assert!(matches!(twice_restarted.phase, MatchPhase::Waiting));
+    for index in 0..4 {
+        harness.send_build_selection(
+            index,
+            BuildSelectionRequest {
+                request_id: 30,
+                match_id: twice_restarted.match_id,
+                selection: BuildSelection::Preset(BuildPresetId(u16::try_from(index + 1).unwrap())),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        (0..4).all(|index| {
+            let player = harness.controlled_player_id(index);
+            let expected = BuildPresetId(u16::try_from(index + 1).unwrap());
+            let world = harness.server.world_mut();
+            let mut query = world.query_filtered::<
+                (&PlayerId, &brawler::builds::ResolvedMatchLoadout),
+                With<Fighter>,
+            >();
+            query.iter(world).any(|(candidate, loadout)| {
+                *candidate == player && loadout.identity.source_build_preset_id == Some(expected)
+            })
+        })
+    });
+    for index in 0..4 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: if index == 0 { 105 } else { 104 },
+                match_id: twice_restarted.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness.step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Active { .. }));
+    {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&mut MatchState, With<MatchRootMarker>>();
+        query.single_mut(world).unwrap().target_score = 1;
+    }
+    let third_tick = harness.server.world().resource::<SimulationTick>().0;
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<CombatOutcomeFacts>()
+        .0
+        .push(CombatOutcomeFact {
+            event_id: CombatEventId(50_002),
+            tick: third_tick,
+            attack_id: AttackId(50_002),
+            source_kind: CombatSourceKind::PrimaryWeapon,
+            source_player: Some(source.0),
+            source_network_id: Some(source.1),
+            source_team: Some(source.2),
+            target_network_id: target.1,
+            target_kind: brawler::combat::CombatTargetKind::Fighter,
+            target_team: target.2,
+            preset_id: Some(WeaponPresetId(1)),
+            recipe_fingerprint: None,
+            position: WorldPoint { x: 0.0, y: 0.0 },
+            engagement_distance: 100.0,
+            kind: CombatOutcomeKind::Defeat,
+        });
+    harness
+        .step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Completed { .. }));
+    let third_completed = server_match(&mut harness);
+    for _ in 0..60 {
+        harness.step();
+    }
+    for index in 0..4 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: if index == 0 { 106 } else { 105 },
+                match_id: third_completed.match_id,
+                command: MatchCommand::ReadyForRestart,
+            },
+        );
+    }
+    harness.step_until(|harness| server_match(harness).match_id != third_completed.match_id);
+    let thrice_restarted = server_match(&mut harness);
+    assert!(thrice_restarted.match_id.0 > twice_restarted.match_id.0);
+    assert!(matches!(thrice_restarted.phase, MatchPhase::Waiting));
     let world = harness.server.world_mut();
     let mut roots = world.query_filtered::<(), With<MatchRootMarker>>();
     assert_eq!(roots.iter(world).count(), 1);
@@ -519,12 +707,25 @@ fn four_clients_complete_and_restart_one_authoritative_wipeout_match() {
     assert_eq!(fighters.iter(world).count(), 4);
     let mut projectiles = world.query_filtered::<(), With<Projectile>>();
     assert_eq!(projectiles.iter(world).count(), 0);
+    let mut sentries = world.query_filtered::<(), With<brawler::abilities::Sentry>>();
+    assert_eq!(sentries.iter(world).count(), 0);
+    let mut runtime = world.query_filtered::<(
+        &brawler::builds::AbilityState,
+        &brawler::builds::PassiveRuntimeState,
+    ), With<Fighter>>();
+    assert!(runtime.iter(world).all(|(ability, passives)| {
+        *ability == brawler::builds::AbilityState::default()
+            && *passives == brawler::builds::PassiveRuntimeState::default()
+    }));
+    assert!(world.resource::<CombatOutcomeFacts>().0.is_empty());
+    assert!(world.resource::<ActiveAttackTrackers>().active.is_empty());
+    assert!(world.resource::<CombatOutbox>().0.is_empty());
     assert_eq!(
         world
             .resource::<brawler::matchplay::MatchTelemetry>()
             .summaries
             .len(),
-        2
+        3
     );
 }
 
@@ -801,10 +1002,12 @@ fn fighter_intent_is_gated_in_waiting_countdown_and_completed() {
             event_id: CombatEventId(60_000),
             tick,
             attack_id: AttackId(60_000),
+            source_kind: CombatSourceKind::PrimaryWeapon,
             source_player: Some(source.0),
             source_network_id: Some(source.1),
             source_team: Some(source.2),
             target_network_id: target.1,
+            target_kind: brawler::combat::CombatTargetKind::Fighter,
             target_team: target.2,
             preset_id: Some(WeaponPresetId(1)),
             recipe_fingerprint: None,
@@ -1006,6 +1209,11 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
     let defeat_event = CombatEventId(70_000);
     harness.server.world_mut().entity_mut(target.0).insert((
         CurrentHealth(0),
+        brawler::builds::AbilityState {
+            charge: 777,
+            phase: brawler::builds::AbilityPhase::Charging,
+        },
+        brawler::builds::PassiveRuntimeState::default(),
         Defeated {
             event_id: defeat_event,
         },
@@ -1015,10 +1223,12 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         event_id: defeat_event,
         tick,
         attack_id: AttackId(70_000),
+        source_kind: CombatSourceKind::PrimaryWeapon,
         source_player: Some(source.1),
         source_network_id: Some(source.2),
         source_team: Some(source.3),
         target_network_id: target.2,
+        target_kind: brawler::combat::CombatTargetKind::Fighter,
         target_team: target.3,
         preset_id: source.6.source_preset_id,
         recipe_fingerprint: source.6.recipe_fingerprint,
@@ -1032,7 +1242,15 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         .world_mut()
         .resource_mut::<CombatOutcomeFacts>()
         .0
-        .push(fact);
+        .extend([
+            CombatOutcomeFact {
+                event_id: CombatEventId(69_999),
+                attack_id: AttackId(69_999),
+                kind: CombatOutcomeKind::Damage { amount: 10 },
+                ..fact
+            },
+            fact,
+        ]);
     harness.step_until(|harness| {
         let server_has_respawn = harness
             .server
@@ -1054,6 +1272,13 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
     assert!(impairment.delayed_packets > 0);
     assert!(impairment.duplicated_packets > 0);
     assert!(impairment.reordered_batches > 0);
+    let triggered_passive = harness
+        .server
+        .world()
+        .get::<brawler::builds::PassiveRuntimeState>(target.0)
+        .unwrap();
+    assert!(triggered_passive.adrenaline_until_tick.is_some());
+    assert!(triggered_passive.adrenaline_rearm_at_tick.is_some());
     assert_eq!(server_match(&mut harness).team_scores, [1, 0]);
     let deadline = *harness
         .server
@@ -1103,6 +1328,23 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         Some(&target.5)
     );
     assert!(harness.server.world().get::<Defeated>(target.0).is_none());
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<brawler::builds::AbilityState>(target.0),
+        Some(&brawler::builds::AbilityState {
+            charge: 807,
+            phase: brawler::builds::AbilityPhase::Charging,
+        })
+    );
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<brawler::builds::PassiveRuntimeState>(target.0),
+        Some(&brawler::builds::PassiveRuntimeState::default())
+    );
     assert!(
         harness
             .server

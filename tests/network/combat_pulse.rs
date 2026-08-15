@@ -539,10 +539,12 @@ fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
             | CombatCue::EffectApplied { event_id, .. }
             | CombatCue::FighterDefeated { event_id, .. }
             | CombatCue::FighterReset { event_id, .. }
+            | CombatCue::SentryFired { event_id, .. }
             | CombatCue::Muzzle { event_id, .. }
             | CombatCue::Impact { event_id, .. }
             | CombatCue::Damage { event_id, .. }
             | CombatCue::Defeat { event_id, .. }
+            | CombatCue::DeployableRemoved { event_id, .. }
             | CombatCue::Reset { event_id, .. } => event_id.0,
         })
         .collect();

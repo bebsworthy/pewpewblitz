@@ -4,8 +4,8 @@
 use crate::{
     VERSION,
     combat::{
-        AuthoritativeTick, ClientCombatEvidenceStatus, ClientCombatPlugin, CombatHudText,
-        ResolvedWeapon, SelectingWeapon, WeaponCatalogResource, WeaponSelectionText,
+        AuthoritativeTick, BuildSelectionText, ClientCombatEvidenceStatus, ClientCombatPlugin,
+        CombatHudText, ResolvedWeapon, SelectingBuild,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
@@ -17,10 +17,10 @@ use crate::{
         trigger_pressed,
     },
     protocol::{
+        BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
         ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, MatchCommand,
         MatchCommandOutcome, MatchCommandRequest, NetworkEntityId, PlayerId, ProtocolFingerprint,
-        ProtocolPlugin, SessionChannel, WeaponSelectionDecision, WeaponSelectionOutcome,
-        WeaponSelectionRequest,
+        ProtocolPlugin, SessionChannel,
     },
 };
 use avian2d::prelude::{AngularVelocity, LinearVelocity, PhysicsSystems, Position, Rotation};
@@ -33,7 +33,7 @@ use bevy::{
     log::LogPlugin,
     prelude::*,
     state::app::StatesPlugin,
-    window::{PresentMode, PrimaryWindow, WindowCloseRequested},
+    window::{PresentMode, PrimaryWindow, WindowCloseRequested, WindowResolution},
     winit::{UpdateMode, WinitSettings},
 };
 use core::time::Duration;
@@ -104,17 +104,22 @@ pub(crate) struct HeadlessAutomation {
     aim_axis: Option<Vec2>,
     aim_at_dummy: bool,
     fire: bool,
+    ultimate: bool,
     pub(crate) simulation_ticks: Option<u32>,
     pub(crate) elapsed_ticks: u32,
 }
 
 #[derive(Resource, Debug)]
-struct WeaponSelectionState {
+struct BuildSelectionState {
     next_request_id: u64,
     current_index: usize,
     last_sent: Option<u64>,
-    last_outcome: Option<WeaponSelectionOutcome>,
-    analog_ready: bool,
+    last_outcome: Option<BuildSelectionOutcome>,
+    last_match_id: Option<crate::matchplay::MatchId>,
+    analog_x_ready: bool,
+    analog_y_ready: bool,
+    custom_field: usize,
+    custom_recipe: crate::builds::BrawlerBuildRecipe,
 }
 
 #[derive(Resource, Debug, Default)]
@@ -124,14 +129,29 @@ struct MatchCommandState {
     last_outcome: Option<MatchCommandOutcome>,
 }
 
-impl Default for WeaponSelectionState {
+impl Default for BuildSelectionState {
     fn default() -> Self {
         Self {
             next_request_id: 0,
             current_index: 0,
             last_sent: None,
             last_outcome: None,
-            analog_ready: true,
+            last_match_id: None,
+            analog_x_ready: true,
+            analog_y_ready: true,
+            custom_field: 0,
+            custom_recipe: crate::builds::BrawlerBuildRecipe {
+                weapon: crate::builds::WeaponChoice::CustomPulse {
+                    power: crate::builds::PulsePower::Balanced,
+                    reach: crate::builds::PulseReach::Standard,
+                    magazine: crate::builds::PulseMagazine::Standard,
+                },
+                ultimate: crate::builds::UltimateDefinitionId(1),
+                passives: [
+                    crate::builds::PassiveDefinitionId(1),
+                    crate::builds::PassiveDefinitionId(6),
+                ],
+            },
         }
     }
 }
@@ -148,6 +168,7 @@ impl FromWorld for HeadlessAutomation {
                 .map(|(x, y)| Vec2::new(f32::from(x), f32::from(y))),
             aim_at_dummy: config.headless_aim_at_dummy,
             fire: config.headless_fire,
+            ultimate: config.headless_ultimate,
             simulation_ticks: config.headless_simulation_ticks,
             elapsed_ticks: 0,
         }
@@ -245,7 +266,7 @@ impl Default for PendingLocalActions {
 }
 
 const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
-const HEADLESS_FIRE_DURATION_TICKS: u32 = 1_800;
+const HEADLESS_FIRE_DURATION_TICKS: u32 = 6_000;
 const ACTION_ACTIVE_ITEM: u16 = 1 << 1;
 const ACTION_ULTIMATE: u16 = 1 << 2;
 const ACTION_INTERACT: u16 = 1 << 3;
@@ -345,6 +366,7 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     let headless = config.headless;
     let client_id = config.client_id;
     let render_profile = config.render_profile;
+    let window_size = config.window_size;
     let mut app = App::new();
     app.insert_resource(config);
     if headless {
@@ -366,6 +388,9 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
                     primary_window: Some(Window {
                         title: format!("Brawler Client {client_id}"),
                         present_mode,
+                        resolution: window_size.map_or_else(Default::default, |(width, height)| {
+                            WindowResolution::new(u32::from(width), u32::from(height))
+                        }),
                         ..default()
                     }),
                     ..default()

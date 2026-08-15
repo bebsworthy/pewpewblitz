@@ -20,8 +20,9 @@ Milestone 07 completed on 2026-08-15 after accepted external-review remediation 
 network, role-isolation, performance, and process gates and the user approved closeout. The remaining
 supervised physical-controller, perceptual-audio, complete aspect-ratio/state-matrix, and human
 normal-duration observations were explicitly accepted as non-blocking and deferred to Milestone 11;
-they are not represented as passing evidence. Milestone 08 research is complete and its specification
-is now the current review. Milestone 06 completed on
+they are not represented as passing evidence. Milestone 08 has reached its green automated technical
+gate and is in feedback review. Milestone 09 has completed research and is in specification review;
+its implementation remains gated on Milestone 08 closeout. Milestone 06 completed on
 2026-08-15 after green automated, process-network, performance, visual, controller, and audio
 verification plus an approved user playtest.
 
@@ -30,8 +31,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in specification review. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
-- **Current milestone:** Milestone 08 — Specification review
+- **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in feedback review after an authorized technical-review remediation pass. Milestone 09 is in specification review, with implementation gated on M08 closeout. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
+- **Current milestone:** Milestone 08 — Feedback review; Milestone 09 — Specification review (implementation gated on M08 closeout)
 - **Last completed milestone:** Milestone 07 — Wipeout match loop
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -44,6 +45,8 @@ Record deferred implementation and playtest feedback here. Every item needs its 
 |---|---|---|---|---|
 | M03-PRED | Milestone 03 implementation decision | Run the impairment/latency comparison for owner prediction; the M04 harness records the authoritative owner baseline and keeps prediction disabled until a predicted comparison exists. | Prediction is intentionally not enabled without measured convergence and correction behavior. | Milestone 03 verification |
 | M07-SUPERVISED | Milestone 07 user closeout decision, 2026-08-15 | Run a supervised physical-controller and keyboard/mouse normal-duration 1v1; inspect the complete match-state HUD at 1440x900 and supported layouts; judge simultaneous combat audio and weapon/arena counterplay. | Automation and partial native-window inspection cannot supply a physical controller, perceptual audio judgment, a complete 1440x900 display, or human two-to-four-minute match judgment. The user accepted these as non-blocking for M07 without claiming they passed. | Milestone 11 hardening playtest |
+| M08-ENV-SOURCE | Milestone 08 technical review, 2026-08-15 | Add `Environment` to stable combat source identity with an explicit attribution/exclusion policy when the first authoritative environmental damage source is introduced. | M08 has no environmental outcome author; adding a dormant registered variant now would create wire churn without exercised behavior. | First environmental-damage milestone, no later than M11 hardening review |
+| M08-BUILD-BOUNDARY | Milestone 08 technical review, 2026-08-15 | Extract the waiting-phase build transaction from `server/mod.rs` into `builds/server.rs` and retire the legacy replicated combat `SelectedBuild` in favor of one loadout identity/runtime authority model. | This is valid organization/API debt, but combining a large authority extraction with removal of a registered compatibility component during feedback remediation adds avoidable schedule and protocol risk. | Milestone 11 hardening review |
 | FUT-ARSENAL | Product direction clarification, 2026-08-14 | Persistent account-owned arsenal of brawlers, saved build identity/revisions, production weapon editor, and acquisition/entitlement flow. | M05 establishes recipe/resolution/runtime boundaries and M08 proves bounded in-memory customization; accounts, storage, currency, loot, and unlock policy are outside v1. | Post-v1 product planning |
 | FUT-MAP-BUILDER | Product direction clarification, 2026-08-14 | Player-facing builder for bounded map recipes plus persistence, publishing, discovery, moderation, asset policy, and version migration. Players arrange approved presentation, terrain, geometry, entities, regions, spawns, and objective anchors but cannot author mode rules. | M06 must establish the recipe/preset/resolved/runtime boundary and server validation without expanding v1 into editor or platform services. | Future-version planning after M06 evidence |
 
@@ -176,8 +179,8 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 05 | Verifying | Weapon composition and preset selection | [milestone-05.md](./milestone-05.md) |
 | 06 | Complete | First map-recipe arena and presentation baseline | [milestone-06.md](./milestone-06.md) |
 | 07 | Complete | Wipeout match loop | [milestone-07.md](./milestone-07.md) |
-| 08 | Specification review | Bounded brawler builds and abilities | [milestone-08.md](./milestone-08.md) |
-| 09 | Not started | Hot Zone | Create when next |
+| 08 | Feedback review | Bounded brawler builds and abilities | [milestone-08.md](./milestone-08.md) |
+| 09 | Specification review | Hot Zone | [milestone-09.md](./milestone-09.md) |
 | 10 | Not started | Flexible destructible terrain | Create when next |
 | 11 | Not started | MVP playtest hardening and closeout | Create when next |
 

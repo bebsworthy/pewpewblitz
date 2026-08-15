@@ -82,7 +82,7 @@ fn spawn_readiness_hud(mut commands: Commands) {
         Text::new("WIPEOUT | waiting for fighter"),
         TextFont::from_font_size(16.0),
         TextColor(Color::srgb(0.78, 0.82, 0.88)),
-        TextLayout::new(Justify::Right, LineBreak::WordBoundary),
+        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
         GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
@@ -263,7 +263,7 @@ fn update_readiness_hud(
                         roster_entry_text(*player, entry, now, local_player == Some(*player))
                     })
                     .collect::<Vec<_>>()
-                    .join(" | ");
+                    .join("\n");
                 let show_roster =
                     pending.scoreboard_held || !matches!(state.phase, MatchPhase::Active { .. });
                 let roster = if show_roster {

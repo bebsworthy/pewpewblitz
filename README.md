@@ -59,10 +59,14 @@ just clean
 ```
 
 The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. The client accepts
-`--server`, required `--client-id`, and `--weapon-preset 1..4` (`1` Pulse, `2` Scatter, `3` Arc,
-`4` Blade), plus bounded automation flags `--headless --exit-after-roster 2
---move-axis X,Y --aim-axis X,Y --aim-dummy --fire --simulation-ticks N`. `--combat-demo` enables the
+`--server`, required `--client-id`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
+`4` Duelist, `5` the default legal custom Pulse), plus bounded automation flags `--headless --exit-after-roster 2
+--move-axis X,Y --aim-axis X,Y --aim-dummy --fire --ultimate --simulation-ticks N`. `--combat-demo` enables the
 same authoritative aim-at-dummy/fire loop in a windowed client for a reproducible visual smoke run.
+Use `--window-size WIDTHxHEIGHT` to reproduce a supported visual-check layout.
+On macOS, `scripts/macos-client-bundle.sh` creates a temporary addressable `.app` wrapper around the
+already-built client for native visual automation; it prints the wrapper path and does not modify the
+production application composition.
 `--controller-demo` creates a synthetic gamepad only for the windowed controller-path smoke; it
 still uses the normal gamepad sampler and native input buffer, but does not substitute for a
 physical controller.
@@ -74,7 +78,9 @@ For the supervised combat path, use `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_
 ./scripts/network.sh`. Its legacy combat verifier composes an explicit test-only dummy fixture and
 waits for server-verified shots, hits, damage, defeat, reset, and both client observations; production
 Wipeout composition has no practice dummy. Use `scripts/network-match.sh` for the current four-client
-match, respawn, telemetry, and restart process gate.
+match, respawn, telemetry, and restart process gate. It defaults to the shortened verification rules;
+set `BRAWLER_NETWORK_WIPEOUT_RULES=production`, raise `BRAWLER_NETWORK_SIMULATION_TICKS`, and set a
+matching `BRAWLER_NETWORK_MATCH_TIMEOUT_SECONDS` for a controlled normal-duration comparison.
 `BRAWLER_NETWORK_PROFILE=local|typical|adverse` applies the corresponding Lightyear receive
 conditioner; `just network-combat-profiles` repeats all three profiles and reports median/p95
 convergence timings.
@@ -86,15 +92,18 @@ remains running when one windowed client closes so the remaining roster can be o
 that client with the same individual command and `--client-id`; set
 `BRAWLER_NETWORK_TIMEOUT_SECONDS` to add a bounded windowed-session deadline when needed.
 
-Milestones 03–07 provide movement, combat, the first authored arena, and a complete Wipeout loop. At
-weapon selection, use Left/Right or A/D and Space/Enter to confirm; on a controller use the D-pad or
-left stick and South. In Waiting, Space/Enter or South readies the participant, and the same input
+Milestones 03–08 provide movement, combat, the first authored arena, a complete Wipeout loop, and
+bounded brawler builds. At build selection, use Left/Right or A/D to choose a preset and Space/Enter
+to confirm; on a controller use the D-pad or left stick and South. On Custom, Up/Down selects one of
+six fields and Left/Right changes its value; Escape or East returns to Runner. In Waiting,
+Space/Enter or South readies the participant, and the same input
 requests the next match after the completed-phase lock. During play, use WASD to move, mouse position
-to aim, and mouse-left to fire; Q/E remain reserved for active item/ultimate inputs. A connected
-controller uses the left stick for movement, right stick for aim, right trigger to fire, the other
-trigger for reserved gameplay input, and Start for pause. Hold Tab or controller Select for the full
-roster scoreboard. The HUD shows match phase, score/time/result, roster/weapon/readiness, respawn and
-protection state, health, ammo, and cooldown/reload; fighters also show debug health bars.
+to aim, mouse-left to fire, and E to use the charged ultimate; Q remains reserved for the future
+active-item slot. A connected controller uses the left stick for movement, right stick for aim,
+right trigger to fire, right bumper for the ultimate, and Start for pause. Hold Tab or controller
+Select for the full roster scoreboard. The HUD shows match phase, score/time/result,
+roster/loadout/readiness, respawn and protection state, health, ammo, ultimate meter/phase, passive
+state, sentry health/lifetime, and cooldown/reload; fighters also show debug health bars.
 The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
 block fighters and weapon delivery, while client sprites, audio, and HUD state remain presentation-only.
 For a reproducible single-shooter visual combat pass, run `just network-combat`; it starts two

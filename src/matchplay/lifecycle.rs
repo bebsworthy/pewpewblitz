@@ -64,6 +64,18 @@ pub(crate) fn fighter_runtime_values(
     Some((maximum_health, ammunition))
 }
 
+fn resolved_runtime_values(
+    loadout: Option<&crate::builds::ResolvedMatchLoadout>,
+    fallback: Option<(u16, u8)>,
+) -> Option<(u16, u8)> {
+    loadout.map_or(fallback, |loadout| {
+        Some((
+            loadout.fighter_stats.maximum_health,
+            loadout.primary_weapon.recipe.economy.capacity(),
+        ))
+    })
+}
+
 pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, reset: FighterReset) {
     let mut fighter = commands.entity(entity);
     fighter
@@ -84,6 +96,8 @@ pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, res
         .remove::<RespawnState>()
         .remove::<SpawnProtection>()
         .remove::<ActiveCombatant>()
+        .remove::<crate::abilities::DashRuntime>()
+        .remove::<crate::abilities::UltimateInputLatch>()
         .remove::<crate::combat::ExternalMotion>()
         .remove::<crate::combat::KnockbackFeedback>();
     if reset.active {
@@ -99,6 +113,8 @@ pub(crate) fn complete_fighter_lifecycle(commands: &mut Commands, entity: Entity
         .entity(entity)
         .insert((LinearVelocity::ZERO, ActiveEffects::default()))
         .remove::<ActiveCombatant>()
+        .remove::<crate::abilities::DashRuntime>()
+        .remove::<crate::abilities::UltimateInputLatch>()
         .remove::<RespawnState>()
         .remove::<SpawnProtection>()
         .remove::<crate::combat::ExternalMotion>()
@@ -143,6 +159,7 @@ fn respawn_due_fighters(
         &crate::combat::FighterDefinitionId,
         &SelectedBuild,
         Option<&crate::combat::ResolvedWeapon>,
+        Option<&crate::builds::ResolvedMatchLoadout>,
         &RespawnState,
         &SpawnState,
     )>,
@@ -151,13 +168,16 @@ fn respawn_due_fighters(
     if !matches!(state.phase, MatchPhase::Active { .. }) {
         return;
     }
-    for (entity, network_id, participant, fighter_id, build, resolved, respawn, spawn) in &query {
+    for (entity, network_id, participant, fighter_id, build, resolved, loadout, respawn, spawn) in
+        &query
+    {
         if participant.match_id != state.match_id || tick.0 < respawn.respawn_at_tick {
             continue;
         }
-        let Some((maximum_health, ammunition)) =
-            fighter_runtime_values(*fighter_id, build, resolved, &fighters, &weapons)
-        else {
+        let Some((maximum_health, ammunition)) = resolved_runtime_values(
+            loadout,
+            fighter_runtime_values(*fighter_id, build, resolved, &fighters, &weapons),
+        ) else {
             continue;
         };
         telemetry.record_respawn(network_id.0, tick.0);
@@ -175,5 +195,8 @@ fn respawn_due_fighters(
                 active: true,
             },
         );
+        commands
+            .entity(entity)
+            .insert(crate::builds::PassiveRuntimeState::default());
     }
 }

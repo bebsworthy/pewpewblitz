@@ -107,7 +107,7 @@ fn spawn_client_hud(mut commands: Commands) {
         Text::new("Input: keyboard/mouse | gameplay"),
         TextFont::from_font_size(16.0),
         TextColor(Color::srgb(0.75, 0.9, 1.0)),
-        TextLayout::new(Justify::Right, LineBreak::WordBoundary),
+        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
         GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
@@ -122,16 +122,18 @@ fn spawn_client_hud(mut commands: Commands) {
         Text::new("Health ---   Pulse --/--   READY"),
         TextFont::from_font_size(20.0),
         TextColor(Color::srgb(1.0, 0.85, 0.35)),
+        TextLayout::linebreak(LineBreak::WordBoundary),
         GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
             left: px(16.0),
+            right: px(16.0),
             top: px(16.0),
             ..default()
         },
     ));
     commands.spawn((
-        WeaponSelectionText,
+        BuildSelectionText,
         Text::new("Select weapon: A/D or arrows | Space / South to confirm\nPulse Sidearm"),
         TextFont::from_font_size(22.0),
         TextColor(Color::srgb(0.85, 0.95, 1.0)),
@@ -170,7 +172,7 @@ fn ensure_fighter_visuals(
         (
             Entity,
             &NetworkEntityId,
-            Option<&crate::combat::TeamId>,
+            Ref<crate::combat::TeamId>,
             Has<Controlled>,
             Option<&mut Sprite>,
         ),
@@ -178,29 +180,16 @@ fn ensure_fighter_visuals(
     >,
 ) {
     for (entity, network_id, team, controlled, sprite) in &mut query {
-        if sprite.is_none() {
-            let sprite = if network_id.0 == 0 {
-                Sprite::from_color(Color::srgb(0.72, 0.76, 0.82), Vec2::new(52.0, 32.0))
-            } else if let Some(assets) = assets.as_ref() {
-                let image = if team.is_some_and(|team| team.0 == 1) {
-                    assets.team_red.clone()
-                } else {
-                    assets.team_blue.clone()
-                };
-                let mut sprite = Sprite::from_image(image);
-                sprite.custom_size = Some(Vec2::splat(52.0));
-                sprite
-            } else {
-                let color = if team.is_some_and(|team| team.0 == 1) {
-                    Color::srgb(1.0, 0.42, 0.12)
-                } else {
-                    Color::srgb(0.12, 0.72, 0.96)
-                };
-                Sprite::from_color(color, Vec2::new(48.0, 30.0))
-            };
+        let needs_sprite = sprite.is_none();
+        if needs_sprite || team.is_changed() {
+            let replacement = fighter_sprite(*network_id, *team, assets.as_deref());
+            if let Some(mut sprite) = sprite {
+                *sprite = replacement;
+                continue;
+            }
             commands
                 .entity(entity)
-                .insert((FighterVisual, sprite))
+                .insert((FighterVisual, replacement))
                 .with_children(|parent| {
                     parent.spawn((
                         Text2d::new("^"),
@@ -211,6 +200,32 @@ fn ensure_fighter_visuals(
                 });
         }
     }
+}
+
+fn fighter_sprite(
+    network_id: NetworkEntityId,
+    team: crate::combat::TeamId,
+    assets: Option<&ClientAssetHandles>,
+) -> Sprite {
+    if network_id.0 == 0 {
+        return Sprite::from_color(Color::srgb(0.72, 0.76, 0.82), Vec2::new(52.0, 32.0));
+    }
+    if let Some(assets) = assets {
+        let image = if team.0 == 1 {
+            assets.team_red.clone()
+        } else {
+            assets.team_blue.clone()
+        };
+        let mut sprite = Sprite::from_image(image);
+        sprite.custom_size = Some(Vec2::splat(52.0));
+        return sprite;
+    }
+    let color = if team.0 == 1 {
+        Color::srgb(1.0, 0.42, 0.12)
+    } else {
+        Color::srgb(0.12, 0.72, 0.96)
+    };
+    Sprite::from_color(color, Vec2::new(48.0, 30.0))
 }
 
 /// Keep render-only replicated fighters visually aligned with Lightyear's interpolated pose.
@@ -396,5 +411,42 @@ fn exit_on_close_requested(
 ) {
     if close_requests.read().next().is_some() {
         app_exit.write(AppExit::Success);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fighter_visual_waits_for_team_and_refreshes_when_team_changes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, ensure_fighter_visuals);
+        let fighter = app
+            .world_mut()
+            .spawn((Fighter, Remote, NetworkEntityId(7)))
+            .id();
+
+        app.update();
+        assert!(app.world().get::<Sprite>(fighter).is_none());
+
+        app.world_mut()
+            .entity_mut(fighter)
+            .insert(crate::combat::TeamId(1));
+        app.update();
+        assert_eq!(
+            app.world().get::<Sprite>(fighter).unwrap().color,
+            Color::srgb(1.0, 0.42, 0.12)
+        );
+
+        app.world_mut()
+            .entity_mut(fighter)
+            .insert(crate::combat::TeamId(0));
+        app.update();
+        assert_eq!(
+            app.world().get::<Sprite>(fighter).unwrap().color,
+            Color::srgb(0.12, 0.72, 0.96)
+        );
     }
 }

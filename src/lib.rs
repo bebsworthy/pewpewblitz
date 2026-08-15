@@ -1,5 +1,7 @@
 //! Reusable application composition for Brawler's client and dedicated server.
 
+pub mod abilities;
+pub mod builds;
 pub mod combat;
 pub mod config;
 pub mod content;

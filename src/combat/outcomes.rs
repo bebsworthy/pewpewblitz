@@ -9,6 +9,13 @@ pub enum CombatOutcomeKind {
     ProtectedContact,
     Damage { amount: u16 },
     Defeat,
+    DeployableDestroyed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CombatTargetKind {
+    Fighter,
+    Deployable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -16,10 +23,12 @@ pub struct CombatOutcomeFact {
     pub event_id: CombatEventId,
     pub tick: u64,
     pub attack_id: AttackId,
+    pub source_kind: super::CombatSourceKind,
     pub source_player: Option<PlayerId>,
     pub source_network_id: Option<NetworkEntityId>,
     pub source_team: Option<TeamId>,
     pub target_network_id: NetworkEntityId,
+    pub target_kind: CombatTargetKind,
     pub target_team: TeamId,
     pub preset_id: Option<WeaponPresetId>,
     pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,

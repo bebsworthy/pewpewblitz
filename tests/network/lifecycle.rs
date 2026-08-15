@@ -312,6 +312,7 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
             .map(|(position, health, resolved)| (*position, *health, resolved.clone()))
             .expect("dummy");
         let source = AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
             attack_id: AttackId(99_999),
             player_id: PlayerId(99),
             owner_network_entity_id: NetworkEntityId(99_999),
@@ -333,6 +334,7 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
                 ReplicatedAttackSource { attack: source },
                 ComposedProjectileRuntime {
                     owner_entity: Entity::PLACEHOLDER,
+                    source_entity: Entity::PLACEHOLDER,
                     source,
                     delivery_index: 0,
                     velocity: Vec2::new(900.0, 0.0),

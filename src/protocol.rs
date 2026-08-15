@@ -26,12 +26,13 @@ use lightyear::prelude::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::builds::{AbilityState, PassiveRuntimeState, ResolvedMatchLoadout};
 use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
     CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback,
     LobbedFlight, Projectile, ProjectileDeadline, ProjectileSource, ReplicatedAttackSource,
-    ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon, StraightFlight, TeamId,
-    WeaponDefinitionId, WeaponState,
+    ResolvedWeapon, SelectedBuild, SelectingBuild, StraightFlight, TeamId, WeaponDefinitionId,
+    WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -43,10 +44,10 @@ use crate::matchplay::{
 use crate::timing::SIMULATION_TICK;
 
 /// Netcode protocol ID. Bump this for incompatible wire-level changes.
-pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5239;
+pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 8;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 9;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -97,7 +98,7 @@ pub struct ProtocolFingerprint(pub u64);
 pub struct PlayerId(pub u64);
 
 /// Stable server-assigned network entity identity.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NetworkEntityId(pub u64);
 
 /// Marker for an authoritative fighter replicated to every connected client.
@@ -230,26 +231,42 @@ pub struct ClientHello {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WeaponSelectionRequest {
+pub struct BuildSelectionRequest {
     pub request_id: u64,
-    pub preset_id: crate::combat::WeaponPresetId,
+    pub match_id: crate::matchplay::MatchId,
+    pub selection: BuildSelection,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WeaponSelectionDecision {
+pub enum BuildSelection {
+    Preset(crate::builds::BuildPresetId),
+    Custom(crate::builds::BrawlerBuildRecipe),
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildSelectionDecision {
     Accepted,
-    UnknownPreset,
-    NotSelecting,
-    StaleRequest,
+    Stale,
+    WrongMatch,
+    WrongPhase,
+    ReadyLocked,
+    UnknownId,
+    /// Reserved for forward-compatible variable-length recipes; M08's `[PassiveDefinitionId; 2]`
+    /// wire type makes this decision unreachable for current clients.
+    InvalidSlots,
+    InvalidCombination,
+    OverBudget,
     ResolutionFailed,
+    CandidateTooLarge,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WeaponSelectionOutcome {
+pub struct BuildSelectionOutcome {
     pub request_id: u64,
-    pub decision: WeaponSelectionDecision,
-    pub accepted_preset_id: Option<crate::combat::WeaponPresetId>,
-    pub accepted_recipe_fingerprint: Option<crate::combat::WeaponRecipeFingerprint>,
+    pub match_id: crate::matchplay::MatchId,
+    pub decision: BuildSelectionDecision,
+    pub accepted_identity: Option<crate::builds::SelectedBuild>,
+    pub accepted_total_points: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -329,15 +346,16 @@ fn interpolate_network_pose(
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::combat::WeaponCatalogResource>()
+            .add_plugins(crate::builds::BuildContentPlugin)
             .add_plugins(crate::map::MapContentPlugin)
             .add_systems(Startup, initialize_content_fingerprint);
         app.register_message::<ClientHello>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<JoinOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<WeaponSelectionRequest>()
+        app.register_message::<BuildSelectionRequest>()
             .add_direction(NetworkDirection::ClientToServer);
-        app.register_message::<WeaponSelectionOutcome>()
+        app.register_message::<BuildSelectionOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<MatchCommandRequest>()
             .add_direction(NetworkDirection::ClientToServer);
@@ -384,8 +402,16 @@ impl Plugin for ProtocolPlugin {
         app.component::<FighterDefinitionId>().replicate_once();
         app.component::<WeaponDefinitionId>().replicate_once();
         app.component::<SelectedBuild>().replicate();
-        app.component::<SelectedWeapon>().replicate();
-        app.component::<SelectingWeapon>().replicate();
+        app.component::<crate::builds::SelectedBuild>().replicate();
+        app.component::<ResolvedMatchLoadout>().replicate();
+        app.component::<AbilityState>().replicate();
+        app.component::<PassiveRuntimeState>().replicate();
+        app.component::<crate::abilities::Sentry>().replicate_once();
+        app.component::<crate::abilities::SentryIdentity>()
+            .replicate_once();
+        app.component::<crate::abilities::SentryDeadline>()
+            .replicate_once();
+        app.component::<SelectingBuild>().replicate();
         app.component::<ResolvedWeapon>().replicate();
         app.component::<ActiveEffects>().replicate();
         app.component::<KnockbackFeedback>().replicate();
@@ -419,9 +445,10 @@ impl Plugin for ProtocolPlugin {
 fn initialize_content_fingerprint(
     weapons: Res<crate::combat::WeaponCatalogResource>,
     maps: Res<crate::map::MapCatalogResource>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     mut commands: Commands,
 ) {
-    let fingerprint = crate::content::gameplay_content_fingerprint(&weapons.0, &maps.0)
+    let fingerprint = crate::content::gameplay_content_fingerprint(&weapons.0, &maps.0, &builds.0)
         .expect("embedded gameplay catalogs must fingerprint");
     commands.insert_resource(fingerprint);
 }

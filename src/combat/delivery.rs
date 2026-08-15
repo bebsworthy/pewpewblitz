@@ -103,7 +103,7 @@ pub(super) fn sweep_composed_projectiles(
             Option<&Defeated>,
             Option<&lightyear::prelude::ControlledBy>,
         ),
-        With<Fighter>,
+        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
     >,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     walls: Query<Entity, With<ArenaWall>>,
@@ -138,7 +138,9 @@ pub(super) fn sweep_composed_projectiles(
         )
     });
     for (entity, position, mut runtime, lob) in ordered {
-        let Some((_, _, _, _, owner_disconnected)) = fighter_lookup.get(&runtime.owner_entity)
+        let Some((_, _, _, _, owner_disconnected)) = fighter_lookup
+            .values()
+            .find(|(_, _, network_id, _, _)| *network_id == runtime.source.owner_network_entity_id)
         else {
             record_delivery_termination(
                 &mut ids,
@@ -148,7 +150,7 @@ pub(super) fn sweep_composed_projectiles(
                 position.0,
                 WeaponTelemetryOutcome::DeliveryCancelled,
             );
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         };
@@ -161,7 +163,7 @@ pub(super) fn sweep_composed_projectiles(
                 position.0,
                 WeaponTelemetryOutcome::DeliveryCancelled,
             );
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         }
@@ -213,7 +215,7 @@ pub(super) fn sweep_composed_projectiles(
                 position.0,
                 WeaponTelemetryOutcome::DeliveryExpired,
             );
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         }
@@ -228,14 +230,17 @@ pub(super) fn sweep_composed_projectiles(
                 position.0,
                 WeaponTelemetryOutcome::DeliveryCancelled,
             );
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         };
         let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-            FIGHTER_LAYER | INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
+            FIGHTER_LAYER
+                | crate::movement::DEPLOYABLE_LAYER
+                | INDESTRUCTIBLE_TERRAIN_LAYER
+                | DESTRUCTIBLE_TERRAIN_LAYER,
         )
-        .with_excluded_entities([entity, runtime.owner_entity]);
+        .with_excluded_entities([entity, runtime.owner_entity, runtime.source_entity]);
         let hit = spatial_query.cast_shape_predicate(
             &Collider::circle(runtime.radius),
             position.0,
@@ -333,7 +338,7 @@ pub(super) fn resolve_melee_attacks(
             Option<&Defeated>,
             Option<&lightyear::prelude::ControlledBy>,
         ),
-        With<Fighter>,
+        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
     >,
     spatial_query: avian2d::prelude::SpatialQuery,
     tuning: Res<MovementTuning>,
@@ -358,7 +363,9 @@ pub(super) fn resolve_melee_attacks(
             continue;
         };
         let mut queued_payloads = false;
-        let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(FIGHTER_LAYER);
+        let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
+            FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER,
+        );
         let mut candidates: Vec<_> = spatial_query
             .shape_intersections(
                 &Collider::circle(reach),

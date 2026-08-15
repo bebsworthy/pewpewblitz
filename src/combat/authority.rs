@@ -91,10 +91,6 @@ pub(super) fn spawn_test_dummy(
             source_preset_id: Some(WeaponPresetId(PULSE_SIDEARM_DEFINITION.0)),
             recipe_fingerprint: Some(resolved.recipe_fingerprint),
         },
-        SelectedWeapon {
-            source_preset_id: WeaponPresetId(PULSE_SIDEARM_DEFINITION.0),
-            recipe_fingerprint: resolved.recipe_fingerprint,
-        },
         resolved,
         AuthoritativeTick::default(),
         Collider::circle(body_radius),
@@ -230,7 +226,7 @@ pub(super) fn expire_runtime_effects(
             Option<&KnockbackFeedback>,
             Option<&Defeated>,
         ),
-        With<Fighter>,
+        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
     >,
 ) {
     for (entity, mut effects, external_motion, knockback, defeated) in &mut fighters {
@@ -346,14 +342,16 @@ pub(super) fn queue_area_payloads(
             Option<&Defeated>,
             Option<&lightyear::prelude::ControlledBy>,
         ),
-        With<Fighter>,
+        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
     >,
     disconnected: &HashSet<Entity>,
     spatial_query: &avian2d::prelude::SpatialQuery,
     pending: &mut MessageWriter<PendingPayload>,
 ) -> usize {
     let mut queued = 0;
-    let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(FIGHTER_LAYER);
+    let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
+        FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER,
+    );
     for (bundle_index, bundle) in recipe
         .payload_bundles
         .iter()
@@ -500,7 +498,7 @@ pub(super) fn cleanup_disconnected_projectiles(
                 WeaponTelemetryOutcome::DeliveryCancelled,
             );
             finish_attack_delivery(&mut trackers, composed.source.attack_id);
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }

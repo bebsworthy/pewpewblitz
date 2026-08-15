@@ -47,14 +47,24 @@ fn projectile_filters_allied_fighters_and_consumes_on_terrain() {
     }
     let server_health: Vec<_> = {
         let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<(&PlayerId, &CurrentHealth), With<Fighter>>();
+        let mut query = world.query_filtered::<(
+            &PlayerId,
+            &CurrentHealth,
+            &brawler::builds::ResolvedMatchLoadout,
+        ), With<Fighter>>();
         query
             .iter(world)
-            .filter(|(player, _)| player.0 != 0)
-            .map(|(player, health)| (*player, *health))
+            .filter(|(player, _, _)| player.0 != 0)
+            .map(|(player, health, loadout)| {
+                (*player, *health, loadout.fighter_stats.maximum_health)
+            })
             .collect()
     };
-    assert!(server_health.iter().all(|(_, health)| health.0 == 100));
+    assert!(
+        server_health
+            .iter()
+            .all(|(_, health, maximum)| health.0 == *maximum)
+    );
     assert_eq!(
         harness
             .server
