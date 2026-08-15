@@ -6,19 +6,24 @@ use crate::{
     combat::{
         ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
         CombatTelemetry, ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon,
-        ServerCombatPlugin, SpawnState, TestDummy, WeaponCatalogResource, WeaponPresetId,
+        ServerCombatPlugin, SpawnState, TeamId, TestDummy, WeaponCatalogResource, WeaponPresetId,
         WeaponTelemetry, WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime,
-        encode_state_snapshot, sandbox_team,
+        encode_state_snapshot,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
     map::{AuthoritativeMapPlugin, MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
+    matchplay::{
+        MatchMember, MatchParticipant, MatchPhase, MatchRoot, MatchState, WipeoutPlugin,
+        WipeoutRules, assigned_team,
+    },
     movement::{
         AuthoritativeMovementPlugin, AvianNetworkPlugin, InputFreshness, InputValidationState,
         MovementTuning,
     },
     protocol::{
         ClientHello, DEVELOPMENT_PRIVATE_KEY, Fighter, FighterInput, JoinOutcome, JoinRejection,
+        MatchCommand, MatchCommandDecision, MatchCommandOutcome, MatchCommandRequest,
         NetworkEntityId, PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin,
         SessionChannel, WeaponSelectionDecision, WeaponSelectionOutcome, WeaponSelectionRequest,
     },
@@ -80,6 +85,8 @@ pub struct ServerSession {
     pub last_selection_request: Option<WeaponSelectionRequest>,
     pub last_selection_outcome: Option<WeaponSelectionOutcome>,
     pub last_selection_response: Option<WeaponSelectionOutcome>,
+    pub last_match_request: Option<MatchCommandRequest>,
+    pub last_match_outcome: Option<MatchCommandOutcome>,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -113,6 +120,25 @@ struct ProcessCombatCheck {
     expected_preset_id: Option<WeaponPresetId>,
     started_at: Instant,
     completed: bool,
+}
+
+#[derive(Resource, Debug)]
+struct ProcessMatchCheck {
+    enabled: bool,
+    report_file: Option<PathBuf>,
+    initial_match_id: Option<crate::matchplay::MatchId>,
+    completed: bool,
+}
+
+impl FromWorld for ProcessMatchCheck {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            enabled: env::var("BRAWLER_NETWORK_ASSERT_MATCH").as_deref() == Ok("1"),
+            report_file: env::var_os("BRAWLER_NETWORK_MATCH_REPORT_FILE").map(PathBuf::from),
+            initial_match_id: None,
+            completed: false,
+        }
+    }
 }
 
 impl FromWorld for ProcessCombatCheck {
@@ -221,6 +247,7 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ServerStartup>()
             .init_resource::<ProcessMovementCheck>()
             .init_resource::<ProcessCombatCheck>()
+            .init_resource::<ProcessMatchCheck>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
             .add_systems(
@@ -234,11 +261,13 @@ impl Plugin for ServerNetworkPlugin {
                     initialize_sessions,
                     process_client_hellos,
                     process_weapon_selection,
+                    process_match_commands,
                     ApplyDeferred,
                     enforce_session_deadlines,
                     disconnect_rejected_sessions,
                     verify_process_movement,
                     verify_process_combat,
+                    verify_process_match,
                 )
                     .chain(),
             )
@@ -246,8 +275,104 @@ impl Plugin for ServerNetworkPlugin {
                 Last,
                 (forward_app_exit_to_server_stop, finish_server_shutdown).chain(),
             )
-            .add_plugins(ServerCombatPlugin);
+            .add_plugins((ServerCombatPlugin, WipeoutPlugin));
     }
+}
+
+fn verify_process_match(
+    mut check: ResMut<ProcessMatchCheck>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    telemetry: Res<crate::matchplay::MatchTelemetry>,
+    participants: Query<&MatchParticipant, With<Fighter>>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    if !check.enabled || check.completed {
+        return;
+    }
+    let Ok(state) = roots.single() else {
+        return;
+    };
+    let initial = *check.initial_match_id.get_or_insert(state.match_id);
+    let Some(summary) = telemetry.summaries.back() else {
+        return;
+    };
+    if state.match_id.0 <= initial.0 || !matches!(state.phase, MatchPhase::Waiting) {
+        return;
+    }
+    let participant_count = participants
+        .iter()
+        .filter(|participant| participant.match_id == state.match_id)
+        .count();
+    let (Some(map_identity), Some(content_fingerprint)) =
+        (summary.map_identity, summary.content_fingerprint)
+    else {
+        error!("match summary omitted map or content identity");
+        app_exit.write(AppExit::error());
+        check.completed = true;
+        return;
+    };
+    if summary.participants.len() != 4 {
+        error!(
+            participant_count = summary.participants.len(),
+            "match summary omitted initial participant identity"
+        );
+        app_exit.write(AppExit::error());
+        check.completed = true;
+        return;
+    }
+    let weapon_preset_ids = summary
+        .weapon_aggregates
+        .iter()
+        .map(|(key, _)| key.preset_id.0.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let accepted_attacks = summary
+        .weapon_aggregates
+        .iter()
+        .map(|(_, aggregate)| aggregate.accepted_attacks)
+        .sum::<u64>();
+    let attacks_with_hostile_contact = summary
+        .weapon_aggregates
+        .iter()
+        .map(|(_, aggregate)| aggregate.attacks_with_hostile_contact)
+        .sum::<u64>();
+    let report = format!(
+        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\n",
+        initial.0,
+        state.match_id.0,
+        participant_count,
+        summary.participants.len(),
+        map_identity.instance_id.0,
+        map_identity.recipe_fingerprint.0,
+        content_fingerprint.0,
+        summary.rules_revision,
+        summary.final_scores[0],
+        summary.final_scores[1],
+        summary.result,
+        summary.active_duration_ticks,
+        summary.suffered_deaths_by_team.iter().sum::<u32>(),
+        summary.respawns,
+        summary.participant_active_ticks_by_team[0],
+        summary.participant_active_ticks_by_team[1],
+        telemetry.records.len(),
+        telemetry.dropped_records,
+        telemetry.summaries.len(),
+        summary.weapon_aggregates.len(),
+        weapon_preset_ids,
+        accepted_attacks,
+        attacks_with_hostile_contact,
+    );
+    if let Some(path) = &check.report_file
+        && let Err(error) = fs::write(path, report.as_bytes())
+    {
+        error!(path = %path.display(), ?error, "match report write failed");
+        app_exit.write(AppExit::error());
+        check.completed = true;
+        return;
+    }
+    info!(%report, "authoritative Wipeout process verification complete");
+    check.completed = true;
+    app_exit.write(AppExit::Success);
 }
 
 fn configure_new_link(trigger: On<Add, LinkOf>, mut commands: Commands) {
@@ -343,6 +468,8 @@ fn initialize_sessions(
                 last_selection_request: None,
                 last_selection_outcome: None,
                 last_selection_response: None,
+                last_match_request: None,
+                last_match_outcome: None,
             });
         }
     }
@@ -358,6 +485,7 @@ fn process_client_hellos(
     spawn_points: Res<SpawnPointCatalog>,
     resolved_map: Res<ResolvedMap>,
     movement_tuning: Res<MovementTuning>,
+    wipeout_rules: Res<WipeoutRules>,
     fighters: Res<crate::combat::FighterDefinitions>,
     weapons: Res<crate::combat::WeaponDefinitions>,
     mut ids: ResMut<NextSessionIds>,
@@ -369,8 +497,19 @@ fn process_client_hellos(
         Has<Disconnected>,
     )>,
     placeholders: Query<(), (With<Fighter>, Without<TestDummy>)>,
+    match_root: Query<&MatchState, With<MatchRoot>>,
+    participants: Query<(&TeamId, &MatchParticipant), With<Fighter>>,
 ) {
     let mut active_count = placeholders.iter().count();
+    let Ok(match_state) = match_root.single() else {
+        return;
+    };
+    let mut team_counts = [0_u8; 2];
+    for (team, participant) in &participants {
+        if participant.match_id == match_state.match_id && team.0 <= 1 {
+            team_counts[usize::from(team.0)] = team_counts[usize::from(team.0)].saturating_add(1);
+        }
+    }
     for (connection, mut receiver, mut sender, mut session, disconnected) in receivers.iter_mut() {
         if disconnected {
             receiver.receive().for_each(drop);
@@ -394,11 +533,8 @@ fn process_client_hellos(
                     }
                 }
                 ServerSessionPhase::AwaitingHello => {
-                    let outcome = if active_count >= config.max_clients {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::ServerFull,
-                        }
-                    } else if hello.protocol_version != crate::protocol::SUPPORTED_PROTOCOL_VERSION
+                    let outcome = if hello.protocol_version
+                        != crate::protocol::SUPPORTED_PROTOCOL_VERSION
                     {
                         JoinOutcome::Rejected {
                             reason: JoinRejection::ProtocolVersionMismatch,
@@ -415,6 +551,23 @@ fn process_client_hellos(
                         JoinOutcome::Rejected {
                             reason: JoinRejection::ContentMismatch,
                         }
+                    } else if !matches!(match_state.phase, MatchPhase::Waiting) {
+                        JoinOutcome::Rejected {
+                            reason: JoinRejection::MatchInProgress,
+                        }
+                    } else if active_count >= config.max_clients {
+                        JoinOutcome::Rejected {
+                            reason: JoinRejection::ServerFull,
+                        }
+                    } else if assigned_team(
+                        team_counts,
+                        wipeout_rules.maximum_participants_per_team,
+                    )
+                    .is_none()
+                    {
+                        JoinOutcome::Rejected {
+                            reason: JoinRejection::MatchFull,
+                        }
                     } else {
                         match ids.allocate() {
                             Some((player_id, network_entity_id)) => {
@@ -422,7 +575,11 @@ fn process_client_hellos(
                                     player_id,
                                     network_entity_id,
                                 };
-                                let assigned_team = sandbox_team(player_id);
+                                let assigned_team = assigned_team(
+                                    team_counts,
+                                    wipeout_rules.maximum_participants_per_team,
+                                )
+                                .expect("capacity was checked before identifier allocation");
                                 let spawn_ordinal = player_id.0.saturating_sub(1) / 2;
                                 let spawn_point = spawn_points
                                     .deterministic_point(assigned_team.0, spawn_ordinal)
@@ -456,6 +613,12 @@ fn process_client_hellos(
                                     ))
                                     .id();
                                 commands.entity(fighter_entity).insert((
+                                    MatchParticipant {
+                                        match_id: match_state.match_id,
+                                        ready: false,
+                                        restart_ready: false,
+                                    },
+                                    MatchMember(match_state.match_id),
                                     SpawnAssignment {
                                         map_instance_id: resolved_map.snapshot.identity.instance_id,
                                         spawn_point_id: spawn_point.spawn_point_id,
@@ -482,6 +645,8 @@ fn process_client_hellos(
                                     network_entity_id,
                                 };
                                 active_count += 1;
+                                team_counts[usize::from(assigned_team.0)] =
+                                    team_counts[usize::from(assigned_team.0)].saturating_add(1);
                                 accepted
                             }
                             None => JoinOutcome::Rejected {
@@ -689,6 +854,100 @@ fn process_weapon_selection(
             session.last_selection_request = Some(request);
             session.last_selection_outcome = Some(outcome);
             session.last_selection_response = Some(outcome);
+            sender.send::<SessionChannel>(outcome);
+        }
+    }
+}
+
+fn process_match_commands(
+    tick: Res<crate::timing::SimulationTick>,
+    match_root: Query<&MatchState, With<MatchRoot>>,
+    mut sessions: Query<(
+        Entity,
+        &mut MessageReceiver<MatchCommandRequest>,
+        &mut MessageSender<MatchCommandOutcome>,
+        &mut ServerSession,
+        Has<Disconnected>,
+    )>,
+    mut fighters: Query<
+        (
+            &ControlledBy,
+            &mut MatchParticipant,
+            Option<&SelectedWeapon>,
+        ),
+        With<Fighter>,
+    >,
+) {
+    let Ok(match_state) = match_root.single() else {
+        return;
+    };
+    for (connection, mut receiver, mut sender, mut session, disconnected) in &mut sessions {
+        if disconnected {
+            receiver.receive().for_each(drop);
+            continue;
+        }
+        let requests: Vec<_> = receiver.receive().collect();
+        for request in requests {
+            if session
+                .last_match_request
+                .is_some_and(|previous| request.request_id < previous.request_id)
+            {
+                sender.send::<SessionChannel>(MatchCommandOutcome {
+                    request_id: request.request_id,
+                    match_id: request.match_id,
+                    decision: MatchCommandDecision::Stale,
+                });
+                continue;
+            }
+            if session
+                .last_match_request
+                .is_some_and(|previous| request.request_id == previous.request_id)
+            {
+                if let Some(outcome) = session.last_match_outcome {
+                    sender.send::<SessionChannel>(outcome);
+                }
+                continue;
+            }
+            let participant = fighters
+                .iter_mut()
+                .find(|(controlled, _, _)| controlled.owner == connection);
+            let decision = if request.match_id != match_state.match_id {
+                MatchCommandDecision::WrongMatch
+            } else if let Some((_, mut participant, selected)) = participant {
+                match (request.command, match_state.phase) {
+                    (MatchCommand::SetReady(value), MatchPhase::Waiting) if selected.is_some() => {
+                        participant.ready = value;
+                        MatchCommandDecision::Accepted
+                    }
+                    (MatchCommand::SetReady(value), MatchPhase::Countdown { .. })
+                        if selected.is_some() =>
+                    {
+                        participant.ready = value;
+                        MatchCommandDecision::Accepted
+                    }
+                    (
+                        MatchCommand::ReadyForRestart,
+                        MatchPhase::Completed {
+                            restart_unlocked_at_tick,
+                            ..
+                        },
+                    ) if tick.0 < restart_unlocked_at_tick => MatchCommandDecision::Locked,
+                    (MatchCommand::ReadyForRestart, MatchPhase::Completed { .. }) => {
+                        participant.restart_ready = true;
+                        MatchCommandDecision::Accepted
+                    }
+                    _ => MatchCommandDecision::WrongPhase,
+                }
+            } else {
+                MatchCommandDecision::NotParticipant
+            };
+            let outcome = MatchCommandOutcome {
+                request_id: request.request_id,
+                match_id: request.match_id,
+                decision,
+            };
+            session.last_match_request = Some(request);
+            session.last_match_outcome = Some(outcome);
             sender.send::<SessionChannel>(outcome);
         }
     }

@@ -13,6 +13,9 @@ use brawler::{
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
     map::AuthoritativeMapPlugin,
+    matchplay::{
+        ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot, MatchState,
+    },
     movement::{
         AuthoritativeMovementPlugin, AvianNetworkPlugin, DESTRUCTIBLE_TERRAIN_LAYER, FIGHTER_LAYER,
         INDESTRUCTIBLE_TERRAIN_LAYER, InputFreshness, PROJECTILE_LAYER, fighter_collision_layers,
@@ -124,7 +127,7 @@ fn spawn_m05_fighter(
             NetworkEntityId(player_id),
             FighterDefinitionId(fighter.id.0),
             SelectedBuild {
-                primary_weapon: WeaponDefinitionId(u16::from(preset_id)),
+                primary_weapon: WeaponDefinitionId(preset_id),
                 source_preset_id: Some(source_preset_id),
                 recipe_fingerprint: Some(resolved.recipe_fingerprint),
             },
@@ -243,6 +246,53 @@ fn one_hundred_headless_fighters_stay_within_fixed_tick_budget() {
 }
 
 #[test]
+fn m07_four_participant_match_telemetry_stays_within_fixed_tick_budget() {
+    let mut app = performance_app();
+    let match_id = {
+        let world = app.world_mut();
+        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
+        let mut state = roots.single_mut(world).expect("one match root");
+        state.phase = MatchPhase::Active {
+            ends_at_tick: u64::MAX,
+        };
+        state.match_id
+    };
+    let mut owners = Vec::new();
+    for (index, (preset, position, team)) in [
+        (1, Vec2::new(-220.0, -100.0), TeamId(0)),
+        (2, Vec2::new(-220.0, 100.0), TeamId(0)),
+        (3, Vec2::new(220.0, -100.0), TeamId(1)),
+        (4, Vec2::new(220.0, 100.0), TeamId(1)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let entity = spawn_m05_fighter(
+            &mut app,
+            30_000 + u64::try_from(index).expect("benchmark index fits"),
+            preset,
+            position,
+            team,
+            true,
+        );
+        app.world_mut().entity_mut(entity).insert((
+            MatchParticipant {
+                match_id,
+                ready: true,
+                restart_ready: false,
+            },
+            MatchMember(match_id),
+            ActiveCombatant,
+        ));
+        owners.push(entity);
+    }
+    app.update();
+    remove_benchmark_actions(&mut app, &owners);
+    fixed_tick_p95(&mut app, "m07-four-participant-match-telemetry", 120);
+}
+
+#[test]
+#[allow(clippy::cast_precision_loss)]
 fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_tick_budget() {
     let mut app = performance_app();
     let owners = spawn_headless_fighters(&mut app);
@@ -276,7 +326,7 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
         app.world_mut().spawn((
             Projectile,
             ComposedProjectileRuntime {
-                owner_entity: owners[usize::from(index) % owners.len()],
+                owner_entity: owners[index % owners.len()],
                 source: AttackSource {
                     attack_id: AttackId(index as u64 + 1),
                     player_id: PlayerId(1),
@@ -330,6 +380,7 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
 }
 
 #[test]
+#[allow(clippy::cast_precision_loss)]
 fn m05_scatter_burst_worst_case_stays_within_fixed_tick_budget() {
     let mut app = performance_app();
     let mut owners = Vec::with_capacity(32);
@@ -382,6 +433,7 @@ fn m05_scatter_burst_worst_case_stays_within_fixed_tick_budget() {
 }
 
 #[test]
+#[allow(clippy::cast_precision_loss)]
 fn m05_simultaneous_lob_landings_with_area_candidates_stay_within_fixed_tick_budget() {
     let mut app = performance_app();
     let mut owners = Vec::with_capacity(16);
@@ -457,6 +509,7 @@ fn m05_simultaneous_lob_landings_with_area_candidates_stay_within_fixed_tick_bud
 }
 
 #[test]
+#[allow(clippy::cast_precision_loss)]
 fn m05_simultaneous_blade_sectors_with_candidates_stay_within_fixed_tick_budget() {
     let mut app = performance_app();
     let mut owners = Vec::with_capacity(32);
@@ -514,6 +567,7 @@ fn m05_simultaneous_blade_sectors_with_candidates_stay_within_fixed_tick_budget(
 }
 
 #[test]
+#[allow(clippy::cast_precision_loss)]
 fn m05_one_hundred_active_effect_states_stay_within_fixed_tick_budget() {
     let mut app = performance_app();
     for index in 0..100 {
@@ -549,6 +603,7 @@ fn m05_one_hundred_active_effect_states_stay_within_fixed_tick_budget() {
 }
 
 #[test]
+#[allow(clippy::cast_precision_loss)]
 fn m05_combined_worst_case_fixed_tick_stays_within_budget() {
     let mut app = performance_app();
     for index in 0..100 {

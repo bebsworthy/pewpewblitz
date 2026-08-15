@@ -3,8 +3,8 @@ use bevy::{
     app::App,
     platform::time::Instant,
     prelude::{
-        Entity, IntoScheduleConfigs, MinimalPlugins, PreUpdate, Query, ResMut, Resource, Vec2,
-        With, Without,
+        Entity, IntoScheduleConfigs, Messages, MinimalPlugins, Or, PreUpdate, Query, ResMut,
+        Resource, Vec2, With, Without,
     },
     state::app::StatesPlugin,
     time::TimeUpdateStrategy,
@@ -15,12 +15,14 @@ use brawler::{
         spawn_crossbeam_client,
     },
     combat::{
-        ActiveEffects, AttackDelivery, AttackId, AttackSource, CaptureCombatCues, CombatCue,
-        CombatEventId, CombatLogRecord, CombatTelemetry, ComposedProjectileRuntime, CurrentHealth,
-        DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions, Projectile, ProjectileDeadline,
-        ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectingWeapon, SpawnState, TeamId,
-        TestDummy, WeaponPhase, WeaponPresetId, WeaponRecipeFingerprint, WeaponState,
-        WeaponTelemetry, WorldPoint,
+        ActiveAttackTrackers, ActiveEffects, AttackDelivery, AttackId, AttackSource,
+        CaptureCombatCues, CombatCue, CombatEventId, CombatLogRecord, CombatOutbox,
+        CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTelemetry,
+        ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
+        FighterDefinitions, MeleeAttack, PendingDelivery, PendingPayload, Projectile,
+        ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectingWeapon,
+        SpawnState, TeamId, TestDummy, TestDummyFixture, TestDummyResetDeadline, WeaponPhase,
+        WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
     },
     config::{
         ClientNetworkConfig, NetworkImpairmentProfile, NetworkTransport, ServerNetworkConfig,
@@ -34,13 +36,18 @@ use brawler::{
         RegionId, RegionProfileId, ResolvedMap, ResolvedMapSnapshot, SpawnPointId, TeamSpawnPoint,
         VisualPlacementKind, install_resolved_map,
     },
+    matchplay::{
+        ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot as MatchRootMarker,
+        MatchState,
+    },
     movement::{
         ArenaWall, AuthoritativeMovementPlugin, AvianNetworkPlugin, InputTuning,
         InputValidationState, MovementTuning,
     },
     protocol::{
-        Fighter, FighterInput, NetworkEntityId, PlaceholderPlayer, PlayerId, ProtocolPlugin,
-        SessionChannel, TestNativeInputMessage, WeaponSelectionDecision, WeaponSelectionRequest,
+        Fighter, FighterInput, MatchCommand, MatchCommandDecision, MatchCommandRequest,
+        NetworkEntityId, PlaceholderPlayer, PlayerId, ProtocolPlugin, SessionChannel,
+        TestNativeInputMessage, WeaponSelectionDecision, WeaponSelectionRequest,
         send_forged_native_input_for_test,
     },
     server::{
@@ -77,6 +84,8 @@ mod lifecycle;
 mod lifecycle_roster;
 #[path = "network/map.rs"]
 mod map;
+#[path = "network/match.rs"]
+mod matchplay;
 #[path = "network/movement.rs"]
 mod movement;
 #[path = "network/movement_input.rs"]

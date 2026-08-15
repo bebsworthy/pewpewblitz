@@ -22,7 +22,7 @@ fn server_config_rejects_unbounded_values() {
 }
 
 #[test]
-fn production_startup_instantiates_map_before_practice_dummy() {
+fn production_startup_instantiates_wipeout_map_and_match_without_practice_dummy() {
     let mut app = build_app_with_config(ServerNetworkConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         ..default()
@@ -33,7 +33,9 @@ fn production_startup_instantiates_map_before_practice_dummy() {
     assert!(app.world().contains_resource::<ResolvedMap>());
     let world = app.world_mut();
     let mut dummies = world.query_filtered::<Entity, With<TestDummy>>();
-    assert_eq!(dummies.iter(world).count(), 1);
+    assert_eq!(dummies.iter(world).count(), 0);
+    let mut matches = world.query_filtered::<&MatchState, With<MatchRoot>>();
+    assert_eq!(matches.iter(world).count(), 1);
 }
 
 #[test]

@@ -368,6 +368,7 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
     let server_config = ServerNetworkConfig {
         bind_addr: "127.0.0.1:0".parse().expect("loopback address"),
@@ -460,6 +461,16 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
         connected,
         "real UDP client did not complete connect/hello/replication: {final_state:?}"
     );
+    {
+        let world = server.world_mut();
+        let entities: Vec<_> = world
+            .query_filtered::<Entity, (With<Fighter>, Without<TestDummy>)>()
+            .iter(world)
+            .collect();
+        for entity in entities {
+            world.entity_mut(entity).insert(ActiveCombatant);
+        }
+    }
 
     let initial_x = {
         let world = server.world_mut();

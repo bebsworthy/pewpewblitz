@@ -62,6 +62,7 @@ fn milestone_five_selection_resolves_distinct_presets_and_spawns_spread_deliveri
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| harness.client_is_active(0) && harness.selection_is_complete(0));

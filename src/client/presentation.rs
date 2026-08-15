@@ -47,6 +47,18 @@ fn spawn_client_camera(mut commands: Commands) {
         }),
         Transform::from_xyz(0.0, 0.0, 1000.0),
     ));
+    commands.spawn((
+        Camera2d,
+        IsDefaultUiCamera,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        // UI ignores render layers. Keeping this camera off layer 0 makes it a dedicated
+        // overlay pass so arena sprites can never depth-sort over HUD nodes.
+        RenderLayers::layer(31),
+    ));
 }
 
 fn spawn_pause_overlay(mut commands: Commands) {
@@ -62,6 +74,7 @@ fn spawn_pause_overlay(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.88)),
+            GlobalZIndex(300),
             Visibility::Hidden,
         ))
         .with_children(|parent| {
@@ -80,10 +93,11 @@ fn spawn_client_hud(mut commands: Commands) {
         TextFont::from_font_size(16.0),
         TextColor(Color::WHITE),
         TextLayout::linebreak(LineBreak::WordBoundary),
+        GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
             left: px(16.0),
-            bottom: px(16.0),
+            bottom: px(32.0),
             width: percent(52.0),
             ..default()
         },
@@ -94,10 +108,11 @@ fn spawn_client_hud(mut commands: Commands) {
         TextFont::from_font_size(16.0),
         TextColor(Color::srgb(0.75, 0.9, 1.0)),
         TextLayout::new(Justify::Right, LineBreak::WordBoundary),
+        GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
             right: px(16.0),
-            bottom: px(16.0),
+            bottom: px(32.0),
             width: percent(42.0),
             ..default()
         },
@@ -107,6 +122,7 @@ fn spawn_client_hud(mut commands: Commands) {
         Text::new("Health ---   Pulse --/--   READY"),
         TextFont::from_font_size(20.0),
         TextColor(Color::srgb(1.0, 0.85, 0.35)),
+        GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
             left: px(16.0),
@@ -116,15 +132,18 @@ fn spawn_client_hud(mut commands: Commands) {
     ));
     commands.spawn((
         WeaponSelectionText,
-        Text::new("Select weapon: A/D or arrows • Space / South to confirm\nPulse Sidearm"),
+        Text::new("Select weapon: A/D or arrows | Space / South to confirm\nPulse Sidearm"),
         TextFont::from_font_size(22.0),
         TextColor(Color::srgb(0.85, 0.95, 1.0)),
+        GlobalZIndex(200),
+        BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.88)),
         Visibility::Inherited,
         Node {
             position_type: PositionType::Absolute,
-            left: percent(25.0),
-            right: percent(25.0),
+            left: percent(22.0),
+            right: percent(22.0),
             top: percent(18.0),
+            padding: UiRect::all(px(12.0)),
             ..default()
         },
     ));
@@ -133,6 +152,7 @@ fn spawn_client_hud(mut commands: Commands) {
         Text::new("SCOREBOARD\nLocal fighter roster is authoritative"),
         TextFont::from_font_size(22.0),
         TextColor(Color::WHITE),
+        GlobalZIndex(250),
         Node {
             position_type: PositionType::Absolute,
             right: px(24.0),
@@ -183,7 +203,7 @@ fn ensure_fighter_visuals(
                 .insert((FighterVisual, sprite))
                 .with_children(|parent| {
                     parent.spawn((
-                        Text2d::new(if controlled { "◎ ▲" } else { "▲" }),
+                        Text2d::new("^"),
                         TextFont::from_font_size(if controlled { 22.0 } else { 18.0 }),
                         TextColor(Color::WHITE),
                         Transform::from_xyz(0.0, 30.0, 2.0),

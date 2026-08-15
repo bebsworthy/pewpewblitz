@@ -37,13 +37,16 @@ use crate::content::GameplayContentFingerprint;
 use crate::map::{
     MapInstanceId, MapRoot, ResolvedMapIdentity, ResolvedMapSnapshot, SpawnAssignment,
 };
+use crate::matchplay::{
+    MatchParticipant, MatchRoot as MatchRootMarker, MatchState, RespawnState, SpawnProtection,
+};
 use crate::timing::SIMULATION_TICK;
 
 /// Netcode protocol ID. Bump this for incompatible wire-level changes.
-pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5238;
+pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5239;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 7;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 8;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -249,6 +252,36 @@ pub struct WeaponSelectionOutcome {
     pub accepted_recipe_fingerprint: Option<crate::combat::WeaponRecipeFingerprint>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchCommand {
+    SetReady(bool),
+    ReadyForRestart,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchCommandRequest {
+    pub request_id: u64,
+    pub match_id: crate::matchplay::MatchId,
+    pub command: MatchCommand,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchCommandDecision {
+    Accepted,
+    Stale,
+    WrongMatch,
+    WrongPhase,
+    NotParticipant,
+    Locked,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchCommandOutcome {
+    pub request_id: u64,
+    pub match_id: crate::matchplay::MatchId,
+    pub decision: MatchCommandDecision,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum JoinOutcome {
     Accepted {
@@ -268,6 +301,8 @@ pub enum JoinRejection {
     ContentMismatch,
     HandshakeTimeout,
     ServerFull,
+    MatchFull,
+    MatchInProgress,
     IdentifierExhausted,
 }
 
@@ -304,6 +339,10 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<WeaponSelectionOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<MatchCommandRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<MatchCommandOutcome>()
+            .add_direction(NetworkDirection::ServerToClient);
         app.add_plugins(InputPlugin::<FighterInput> {
             config: InputConfig {
                 send_interval: SIMULATION_TICK,
@@ -329,6 +368,11 @@ impl Plugin for ProtocolPlugin {
         .add_direction(NetworkDirection::ServerToClient);
 
         app.component::<Fighter>().replicate_once();
+        app.component::<MatchRootMarker>().replicate_once();
+        app.component::<MatchState>().replicate();
+        app.component::<MatchParticipant>().replicate();
+        app.component::<RespawnState>().replicate();
+        app.component::<SpawnProtection>().replicate();
         app.component::<MapRoot>().replicate_once();
         app.component::<MapInstanceId>().replicate_once();
         app.component::<ResolvedMapIdentity>().replicate_once();
@@ -431,6 +475,8 @@ mod tests {
 
         assert!(app.is_message_registered::<ClientHello>());
         assert!(app.is_message_registered::<JoinOutcome>());
+        assert!(app.is_message_registered::<MatchCommandRequest>());
+        assert!(app.is_message_registered::<MatchCommandOutcome>());
         assert!(app.is_message_registered::<CombatCue>());
         assert!(app.world().contains_resource::<MessageRegistry>());
         assert!(app.world().contains_resource::<ChannelRegistry>());
@@ -440,6 +486,11 @@ mod tests {
         }));
         let components = app.world().resource::<ComponentRegistry>();
         assert!(components.is_registered::<Fighter>());
+        assert!(components.is_registered::<MatchRootMarker>());
+        assert!(components.is_registered::<MatchState>());
+        assert!(components.is_registered::<MatchParticipant>());
+        assert!(components.is_registered::<RespawnState>());
+        assert!(components.is_registered::<SpawnProtection>());
         assert!(components.is_registered::<PlayerId>());
         assert!(components.is_registered::<NetworkEntityId>());
         assert!(components.is_registered::<PlaceholderState>());

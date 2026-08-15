@@ -3,6 +3,16 @@
 use super::*;
 
 #[test]
+fn automatic_match_ready_waits_for_the_requested_roster() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.headless = true;
+    config.headless_simulation_ticks = Some(2_000);
+    config.exit_after_roster = Some(4);
+    assert!(!automatic_match_command_enabled(&config, 2));
+    assert!(automatic_match_command_enabled(&config, 4));
+}
+
+#[test]
 fn client_config_defaults_to_loopback_and_validates_roster_target() {
     let mut config = ClientNetworkConfig::new(1);
     assert!(config.validate().is_ok());

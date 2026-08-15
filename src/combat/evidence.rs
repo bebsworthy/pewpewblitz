@@ -1026,7 +1026,6 @@ mod tests {
         let mut source = snapshot();
         source.fighters[0].defeated = Some(Defeated {
             event_id: CombatEventId(9),
-            reset_at_tick: 120,
         });
         source.fighters[0].health = Some(0);
         let defeat = normalize_checkpoint_snapshot(CombatCheckpoint::Defeat, source);

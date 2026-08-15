@@ -30,6 +30,7 @@ struct ClientAudioState {
     was_playable: bool,
     was_error: bool,
     suppressed: u64,
+    last_match: Option<(crate::matchplay::MatchId, MatchPhase, [u16; 2])>,
 }
 
 pub struct ClientAudioPlugin;
@@ -38,9 +39,62 @@ impl Plugin for ClientAudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClientAudioState>().add_systems(
             Update,
-            (play_combat_audio, play_reload_audio, play_session_audio)
+            (
+                play_combat_audio,
+                play_reload_audio,
+                play_session_audio,
+                play_match_audio,
+            )
                 .after(crate::map::MapPresentationSet::Readiness),
         );
+    }
+}
+
+fn play_match_audio(
+    mut commands: Commands,
+    handles: Option<Res<ClientAssetHandles>>,
+    asset_server: Res<AssetServer>,
+    matches: Query<&MatchState, (With<MatchRoot>, Changed<MatchState>)>,
+    mut state: ResMut<ClientAudioState>,
+    active: Query<(), With<ClientAudioOneShot>>,
+) {
+    let Some(current) = matches.iter().next() else {
+        return;
+    };
+    let previous = state.last_match;
+    state.last_match = Some((current.match_id, current.phase, current.team_scores));
+    let Some(handles) = handles else {
+        return;
+    };
+    if active.iter().count() >= MAX_ACTIVE_ONE_SHOTS {
+        state.suppressed = state.suppressed.saturating_add(1);
+        return;
+    }
+    let sound = if matches!(current.phase, MatchPhase::Completed { .. })
+        && !previous.is_some_and(|(id, phase, _)| {
+            id == current.match_id && matches!(phase, MatchPhase::Completed { .. })
+        }) {
+        Some(handles.defeat.clone())
+    } else if previous
+        .is_some_and(|(id, _, scores)| id == current.match_id && scores != current.team_scores)
+    {
+        Some(handles.impact.clone())
+    } else if previous.is_none_or(|(id, phase, _)| id != current.match_id || phase != current.phase)
+        && matches!(
+            current.phase,
+            MatchPhase::Countdown { .. } | MatchPhase::Active { .. }
+        )
+    {
+        Some(handles.ready.clone())
+    } else {
+        None
+    };
+    if let Some(handle) = sound.filter(|handle| asset_server.is_loaded(handle)) {
+        commands.spawn((
+            ClientAudioOneShot,
+            AudioPlayer::new(handle),
+            PlaybackSettings::DESPAWN,
+        ));
     }
 }
 

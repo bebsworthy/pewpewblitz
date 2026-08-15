@@ -69,7 +69,7 @@ fn maximum_policy_resolved_map(
         None,
         instance_id,
         catalog,
-        &MapLayoutRequirements::sandbox(),
+        &MapLayoutRequirements::wipeout(),
         brawler::map::EngineMapLimits::default(),
     )
     .unwrap()
@@ -130,7 +130,7 @@ fn late_join_and_map_root_replacement_converge_from_durable_state() {
         .resolve_preset(
             ArenaPresetId(1),
             MapInstanceId(2),
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
         )
         .unwrap();
     install_resolved_map(harness.server.world_mut(), replacement).unwrap();
@@ -157,7 +157,7 @@ fn map_content_mismatch_rejects_before_fighter_spawn() {
         .0
         .presets[0]
         .recipe
-        .revision = 2;
+        .revision = 3;
     harness.step_until(|harness| {
         let world = harness.clients[0].world_mut();
         let mut query = world.query_filtered::<&ClientJoinStatus, With<Client>>();

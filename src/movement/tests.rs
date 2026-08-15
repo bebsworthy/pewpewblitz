@@ -80,7 +80,7 @@ fn camera_and_spawn_bounds_are_stable() {
         .resolve_preset(
             crate::map::MapPresetId(1),
             crate::map::MapInstanceId(1),
-            &crate::map::MapLayoutRequirements::sandbox(),
+            &crate::map::MapLayoutRequirements::wipeout(),
         )
         .unwrap();
     assert_eq!(

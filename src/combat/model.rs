@@ -193,7 +193,6 @@ pub struct AuthoritativeTick(pub u64);
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub struct Defeated {
     pub event_id: CombatEventId,
-    pub reset_at_tick: u64,
 }
 
 /// Stable shot identity, never a Bevy entity identity.

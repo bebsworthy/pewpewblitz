@@ -4,23 +4,27 @@
 use crate::{
     VERSION,
     combat::{
-        ClientCombatEvidenceStatus, ClientCombatPlugin, CombatHudText, ResolvedWeapon,
-        SelectingWeapon, WeaponCatalogResource, WeaponSelectionText,
+        AuthoritativeTick, ClientCombatEvidenceStatus, ClientCombatPlugin, CombatHudText,
+        ResolvedWeapon, SelectingWeapon, WeaponCatalogResource, WeaponSelectionText,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
+    matchplay::{
+        MatchParticipant, MatchPhase, MatchRoot, MatchState, RespawnState, SpawnProtection,
+    },
     movement::{
         AvianNetworkPlugin, CAMERA_VERTICAL_SPAN, InputTuning, committed_aim, radial_deadzone,
         trigger_pressed,
     },
     protocol::{
-        ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, NetworkEntityId, PlayerId,
-        ProtocolFingerprint, ProtocolPlugin, SessionChannel, WeaponSelectionDecision,
-        WeaponSelectionOutcome, WeaponSelectionRequest,
+        ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, MatchCommand,
+        MatchCommandOutcome, MatchCommandRequest, NetworkEntityId, PlayerId, ProtocolFingerprint,
+        ProtocolPlugin, SessionChannel, WeaponSelectionDecision, WeaponSelectionOutcome,
+        WeaponSelectionRequest,
     },
 };
 use avian2d::prelude::{AngularVelocity, LinearVelocity, PhysicsSystems, Position, Rotation};
-use bevy::camera::ScalingMode;
+use bevy::camera::{ScalingMode, visibility::RenderLayers};
 use bevy::{
     app::{RunFixedMainLoop, RunFixedMainLoopSystems, ScheduleRunnerPlugin},
     ecs::error::{FallbackErrorHandler, error},
@@ -111,6 +115,13 @@ struct WeaponSelectionState {
     last_sent: Option<u64>,
     last_outcome: Option<WeaponSelectionOutcome>,
     analog_ready: bool,
+}
+
+#[derive(Resource, Debug, Default)]
+struct MatchCommandState {
+    next_request_id: u64,
+    sent_for_phase: Option<(crate::matchplay::MatchId, MatchPhase)>,
+    last_outcome: Option<MatchCommandOutcome>,
 }
 
 impl Default for WeaponSelectionState {
@@ -234,7 +245,7 @@ impl Default for PendingLocalActions {
 }
 
 const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
-const HEADLESS_FIRE_DURATION_TICKS: u32 = 480;
+const HEADLESS_FIRE_DURATION_TICKS: u32 = 1_800;
 const ACTION_ACTIVE_ITEM: u16 = 1 << 1;
 const ACTION_ULTIMATE: u16 = 1 << 2;
 const ACTION_INTERACT: u16 = 1 << 3;

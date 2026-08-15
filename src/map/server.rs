@@ -60,7 +60,7 @@ fn initialize_authoritative_map(world: &mut World) {
         .resolve_preset(
             BUILT_IN_MAP_PRESET,
             instance_id,
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
         )
         .expect("embedded built-in map must resolve");
     install_resolved_map(world, resolved).expect("resolved built-in map must instantiate");
@@ -106,20 +106,8 @@ pub fn install_resolved_map(world: &mut World, resolved: ResolvedMap) -> Result<
             geometry.shape,
         );
     }
-    let dummy = snapshot
-        .mode_anchors
-        .iter()
-        .find(|anchor| anchor.definition_id == PRACTICE_DUMMY_ANCHOR_DEFINITION)
-        .and_then(|anchor| match anchor.shape {
-            ModeAnchorShape::Point { position, facing } => {
-                Some(PracticeDummySpawn { position, facing })
-            }
-            ModeAnchorShape::Area { .. } => None,
-        })
-        .ok_or_else(|| "resolved map has no practice dummy point anchor".to_string())?;
     world.insert_resource(PlayableBounds(snapshot.playable_bounds));
     world.insert_resource(SpawnPointCatalog(resolved.spawn_points_by_team.clone()));
-    world.insert_resource(dummy);
     world.insert_resource(resolved);
     Ok(())
 }
@@ -149,7 +137,6 @@ pub fn teardown_authoritative_map(world: &mut World) {
     world.remove_resource::<ResolvedMap>();
     world.remove_resource::<PlayableBounds>();
     world.remove_resource::<SpawnPointCatalog>();
-    world.remove_resource::<PracticeDummySpawn>();
 }
 
 fn spawn_wall(

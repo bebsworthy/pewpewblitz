@@ -5,6 +5,7 @@ pub mod config;
 pub mod content;
 pub mod gameplay;
 pub mod map;
+pub mod matchplay;
 pub mod movement;
 pub mod protocol;
 pub mod timing;

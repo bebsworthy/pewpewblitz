@@ -55,6 +55,18 @@ fn impair_cue_packets(
     }
 }
 
+fn activate_legacy_test_fighters(
+    mut commands: bevy::prelude::Commands,
+    fighters: Query<Entity, (With<Fighter>, Without<ActiveCombatant>)>,
+) {
+    for entity in &fighters {
+        commands.entity(entity).insert(ActiveCombatant);
+    }
+}
+
+#[derive(Resource)]
+struct LegacySandboxActivation;
+
 pub(super) struct Harness {
     pub(super) server: App,
     pub(super) server_entity: Entity,
@@ -68,6 +80,15 @@ pub(super) struct Harness {
 impl Harness {
     pub(super) fn new(client_count: usize) -> Self {
         Self::new_with_options(client_count, None, false)
+    }
+
+    pub(super) fn new_match(client_count: usize) -> Self {
+        let mut harness = Self::new(client_count);
+        harness
+            .server
+            .world_mut()
+            .remove_resource::<LegacySandboxActivation>();
+        harness
     }
 
     pub(super) fn new_with_protocol(client_count: usize, client_protocol_id: Option<u64>) -> Self {
@@ -90,19 +111,31 @@ impl Harness {
         };
 
         let mut server = App::new();
-        server.insert_resource(server_config.clone()).add_plugins((
-            MinimalPlugins,
-            StatesPlugin,
-            ServerPlugins {
-                tick_duration: SIMULATION_TICK,
-            },
-            GameplayPlugin,
-            ProtocolPlugin,
-            AvianNetworkPlugin,
-            AuthoritativeMapPlugin,
-            AuthoritativeMovementPlugin,
-            ServerNetworkPlugin,
-        ));
+        server.insert_resource(TestDummyFixture {
+            position: Vec2::new(0.0, -320.0),
+            facing: 0.0,
+        });
+        server.insert_resource(LegacySandboxActivation);
+        server
+            .insert_resource(server_config.clone())
+            .add_plugins((
+                MinimalPlugins,
+                StatesPlugin,
+                ServerPlugins {
+                    tick_duration: SIMULATION_TICK,
+                },
+                GameplayPlugin,
+                ProtocolPlugin,
+                AvianNetworkPlugin,
+                AuthoritativeMapPlugin,
+                AuthoritativeMovementPlugin,
+                ServerNetworkPlugin,
+            ))
+            .add_systems(
+                bevy::prelude::Update,
+                activate_legacy_test_fighters
+                    .run_if(bevy::prelude::resource_exists::<LegacySandboxActivation>),
+            );
         server.finish();
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
@@ -398,6 +431,15 @@ impl Harness {
         let mut sender = world
             .get_mut::<MessageSender<WeaponSelectionRequest>>(client_entity)
             .expect("client selection sender");
+        sender.send::<SessionChannel>(request);
+    }
+
+    pub(super) fn send_match_command(&mut self, index: usize, request: MatchCommandRequest) {
+        let client_entity = self.client_entities[index];
+        let world = self.clients[index].world_mut();
+        let mut sender = world
+            .get_mut::<MessageSender<MatchCommandRequest>>(client_entity)
+            .expect("client match command sender");
         sender.send::<SessionChannel>(request);
     }
 

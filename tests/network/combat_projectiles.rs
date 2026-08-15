@@ -31,10 +31,10 @@ fn projectile_filters_allied_fighters_and_consumes_on_terrain() {
             } else {
                 0.0
             });
-            if player_one_team.is_none() {
-                player_one_team = Some(*team);
+            if let Some(player_one_team) = player_one_team {
+                *team = player_one_team;
             } else {
-                *team = player_one_team.expect("first player team");
+                player_one_team = Some(*team);
             }
         }
     }
@@ -275,7 +275,6 @@ fn posthumous_projectile_retains_original_source_attribution() {
         CurrentHealth(0),
         Defeated {
             event_id: CombatEventId(10_000),
-            reset_at_tick: u64::MAX,
         },
     ));
 

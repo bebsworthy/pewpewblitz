@@ -3,6 +3,7 @@
 use super::*;
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
     let mut harness = Harness::new(2);
     harness.step_until(|harness| {
@@ -84,8 +85,8 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
 
     let reset_at_tick = {
         let world = harness.server.world_mut();
-        let mut defeated = world.query_filtered::<&Defeated, With<TestDummy>>();
-        defeated.single(world).expect("dummy defeat").reset_at_tick
+        let mut defeated = world.query_filtered::<&TestDummyResetDeadline, With<TestDummy>>();
+        defeated.single(world).expect("dummy defeat deadline").0
     };
     // Disturb every durable pose/state field after defeat so reset verification cannot pass by
     // observing the unchanged spawn state. The authored SpawnState and original collision layers
@@ -271,6 +272,7 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn newly_spawned_projectile_can_hit_the_target_in_its_first_fixed_tick() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| {
@@ -507,7 +509,7 @@ fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
     }
 
     for index in 0..2 {
-        let right_side = harness.controlled_player_id(index).0 % 2 == 0;
+        let right_side = harness.controlled_player_id(index).0.is_multiple_of(2);
         harness.set_controlled_input(
             index,
             FighterInput::from_axes(

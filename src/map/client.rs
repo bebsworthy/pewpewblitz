@@ -335,7 +335,7 @@ mod tests {
             .resolve_preset(
                 MapPresetId(1),
                 MapInstanceId(instance),
-                &MapLayoutRequirements::sandbox(),
+                &MapLayoutRequirements::wipeout(),
             )
             .unwrap()
             .snapshot

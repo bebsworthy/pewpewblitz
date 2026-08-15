@@ -569,7 +569,6 @@ fn apply_runtime_effects(
 pub(super) fn resolve_composed_payloads(
     mut commands: Commands,
     tick: Res<SimulationTick>,
-    fighters: Res<FighterDefinitions>,
     mut ids: ResMut<NextCombatIds>,
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut payloads: MessageReader<PendingPayload>,
@@ -577,17 +576,18 @@ pub(super) fn resolve_composed_payloads(
     mut telemetry: ResMut<WeaponTelemetry>,
     mut legacy_telemetry: ResMut<CombatTelemetry>,
     mut outbox: ResMut<CombatOutbox>,
+    mut outcome_facts: ResMut<CombatOutcomeFacts>,
     mut target_queries: ParamSet<(
         Query<
             (
                 &NetworkEntityId,
-                &FighterDefinitionId,
                 &TeamId,
                 &mut CurrentHealth,
                 Option<&mut ActiveEffects>,
                 Option<&ExternalMotion>,
                 Option<&Defeated>,
                 Option<&lightyear::prelude::ControlledBy>,
+                Option<&TestDummy>,
             ),
             With<Fighter>,
         >,
@@ -605,6 +605,11 @@ pub(super) fn resolve_composed_payloads(
     )>,
     owners: Query<(&NetworkEntityId, Option<&lightyear::prelude::ControlledBy>), With<Fighter>>,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
+    mut match_access: ParamSet<(
+        Query<(), With<crate::matchplay::MatchParticipant>>,
+        Query<(), With<crate::matchplay::ActiveCombatant>>,
+        Query<(), With<crate::matchplay::SpawnProtection>>,
+    )>,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
     let connected_owners: HashSet<_> = owners
@@ -691,18 +696,45 @@ pub(super) fn resolve_composed_payloads(
         }
         let Ok((
             target_network_id,
-            fighter_id,
             target_team,
             mut health,
             active_effects,
             external_motion,
             defeated,
             controlled_by,
+            test_dummy,
         )) = targets.get_mut(record.target)
         else {
             continue;
         };
         if controlled_by.is_some_and(|controlled| disconnected.contains(&controlled.owner)) {
+            continue;
+        }
+        let match_participant = match_access.p0().contains(record.target);
+        let active_combatant = match_access.p1().contains(record.target);
+        if match_participant && !active_combatant {
+            continue;
+        }
+        if match_access.p2().contains(record.target)
+            && teams_are_hostile(record.source.team_id, *target_team)
+        {
+            if let Some(event_id) = reserved_events.next() {
+                outcome_facts.0.push(CombatOutcomeFact {
+                    event_id,
+                    tick: tick.0,
+                    attack_id: record.source.attack_id,
+                    source_player: Some(record.source.player_id),
+                    source_network_id: Some(record.source.owner_network_entity_id),
+                    source_team: Some(record.source.team_id),
+                    target_network_id: *target_network_id,
+                    target_team: *target_team,
+                    preset_id: record.source.source_preset_id,
+                    recipe_fingerprint: Some(record.source.recipe_fingerprint),
+                    position: WorldPoint::from(record.position),
+                    engagement_distance: record.engagement_distance,
+                    kind: CombatOutcomeKind::ProtectedContact,
+                });
+            }
             continue;
         }
         let mut effects_state = accumulated_effects
@@ -903,27 +935,41 @@ pub(super) fn resolve_composed_payloads(
                         resulting_motion: motion_state,
                         outcome: WeaponTelemetryOutcome::DamageApplied,
                     });
+                    outcome_facts.0.push(CombatOutcomeFact {
+                        event_id: damage_event,
+                        tick: tick.0,
+                        attack_id: record.source.attack_id,
+                        source_player: Some(record.source.player_id),
+                        source_network_id: Some(record.source.owner_network_entity_id),
+                        source_team: Some(record.source.team_id),
+                        target_network_id: *target_network_id,
+                        target_team: *target_team,
+                        preset_id: record.source.source_preset_id,
+                        recipe_fingerprint: Some(record.source.recipe_fingerprint),
+                        position: WorldPoint::from(record.position),
+                        engagement_distance: record.engagement_distance,
+                        kind: CombatOutcomeKind::Damage { amount: applied },
+                    });
                 }
                 if let Some(defeat_event) = defeat_event {
                     defeated_this_tick.insert(record.target);
                     target_defeated = true;
-                    let reset_at_tick = tick.0.saturating_add(
-                        fighters
-                            .get(*fighter_id)
-                            .map_or(90, |definition| definition.defeat_reset_delay_ticks),
-                    );
                     commands
                         .entity(record.target)
                         .insert((
                             Defeated {
                                 event_id: defeat_event,
-                                reset_at_tick,
                             },
                             CollisionLayers::new(FIGHTER_LAYER, avian2d::prelude::LayerMask::NONE),
                             ActiveEffects::default(),
                         ))
                         .remove::<ExternalMotion>()
                         .remove::<KnockbackFeedback>();
+                    if test_dummy.is_some() {
+                        commands
+                            .entity(record.target)
+                            .insert(TestDummyResetDeadline(tick.0.saturating_add(90)));
+                    }
                     accumulated_effects.remove(&record.target);
                     accumulated_motion.remove(&record.target);
                     telemetry.record_defeat(preset_id, record.source.recipe_fingerprint);
@@ -959,6 +1005,21 @@ pub(super) fn resolve_composed_payloads(
                     };
                     legacy_telemetry.record_cue(defeated_cue.clone());
                     outbox.0.push(defeated_cue);
+                    outcome_facts.0.push(CombatOutcomeFact {
+                        event_id: defeat_event,
+                        tick: tick.0,
+                        attack_id: record.source.attack_id,
+                        source_player: Some(record.source.player_id),
+                        source_network_id: Some(record.source.owner_network_entity_id),
+                        source_team: Some(record.source.team_id),
+                        target_network_id: *target_network_id,
+                        target_team: *target_team,
+                        preset_id: record.source.source_preset_id,
+                        recipe_fingerprint: Some(record.source.recipe_fingerprint),
+                        position: WorldPoint::from(record.position),
+                        engagement_distance: record.engagement_distance,
+                        kind: CombatOutcomeKind::Defeat,
+                    });
                     if let Some(legacy_defeat_event) = legacy_defeat_event {
                         let legacy_cue = CombatCue::Defeat {
                             event_id: legacy_defeat_event,

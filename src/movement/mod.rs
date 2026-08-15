@@ -159,6 +159,8 @@ fn authoritative_movement(
             Option<&crate::combat::AwaitingPostSelectionInput>,
             Option<&crate::combat::ActiveEffects>,
             Option<&crate::combat::ExternalMotion>,
+            Option<&crate::matchplay::MatchParticipant>,
+            Option<&crate::matchplay::ActiveCombatant>,
         ),
         With<Fighter>,
     >,
@@ -183,9 +185,14 @@ fn authoritative_movement(
         activation_barrier,
         active_effects,
         external_motion,
+        participant,
+        active_combatant,
     ) in &fighters
     {
-        if defeated.is_some() || selecting.is_some() {
+        if defeated.is_some()
+            || selecting.is_some()
+            || (participant.is_some() && active_combatant.is_none())
+        {
             continue;
         }
         let previous_position = position.0;

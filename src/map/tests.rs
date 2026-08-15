@@ -28,9 +28,12 @@ fn authoritative_plugin_instantiates_one_root_and_exact_collider_set() {
     assert_eq!(walls, 10);
     assert_eq!(world.resource::<ResolvedMap>().snapshot.geometry.len(), 6);
     assert_eq!(world.resource::<SpawnPointCatalog>().0.len(), 2);
-    assert_eq!(
-        world.resource::<PracticeDummySpawn>().position,
-        Vec2::new(0.0, -320.0)
+    assert!(
+        world
+            .resource::<ResolvedMap>()
+            .snapshot
+            .mode_anchors
+            .is_empty()
     );
 
     app.update();
@@ -61,7 +64,7 @@ fn replacement_cleans_only_the_previous_map_generation() {
         .resolve_preset(
             BUILT_IN_MAP_PRESET,
             MapInstanceId(2),
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
         )
         .unwrap();
     install_resolved_map(app.world_mut(), replacement).unwrap();

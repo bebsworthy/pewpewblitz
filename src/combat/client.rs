@@ -1018,7 +1018,7 @@ mod tests {
             .resolve_preset(
                 ArenaPresetId(1),
                 MapInstanceId(1),
-                &MapLayoutRequirements::sandbox(),
+                &MapLayoutRequirements::wipeout(),
             )
             .unwrap();
         preview_segments(Vec2::ZERO, 0.0, None, &resolved, &map.snapshot)
@@ -1053,7 +1053,7 @@ mod tests {
             .resolve_preset(
                 ArenaPresetId(1),
                 MapInstanceId(1),
-                &MapLayoutRequirements::sandbox(),
+                &MapLayoutRequirements::wipeout(),
             )
             .unwrap();
         let segments = preview_segments(Vec2::ZERO, 0.0, Some(180.0), &resolved, &map.snapshot);
@@ -1152,7 +1152,6 @@ mod tests {
             .expect("controlled fighter");
         app.world_mut().entity_mut(fighter).insert(Defeated {
             event_id: CombatEventId(1),
-            reset_at_tick: 100,
         });
         app.update();
         assert_eq!(

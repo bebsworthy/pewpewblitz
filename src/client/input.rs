@@ -28,7 +28,7 @@ pub(super) fn sample_local_input(
     mouse_motion: Option<Res<AccumulatedMouseMotion>>,
     gamepads: Query<(Entity, &Gamepad)>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera2d>, Without<IsDefaultUiCamera>)>,
     fighters: Query<(&Position, Option<&ResolvedWeapon>), (With<Fighter>, With<Controlled>)>,
 ) {
     let Some(keyboard) = keyboard else {
@@ -273,8 +273,16 @@ pub(super) fn apply_headless_input(
     automation: Res<HeadlessAutomation>,
     mut pending: ResMut<PendingLocalActions>,
     statuses: Query<&ClientJoinStatus, With<Client>>,
-    controlled: Query<&Position, (With<Fighter>, With<Controlled>)>,
-    fighters: Query<(&NetworkEntityId, &Position), With<Fighter>>,
+    controlled: Query<(&Position, &crate::combat::TeamId), (With<Fighter>, With<Controlled>)>,
+    fighters: Query<
+        (
+            &NetworkEntityId,
+            &Position,
+            &crate::combat::TeamId,
+            Option<&crate::combat::Defeated>,
+        ),
+        With<Fighter>,
+    >,
 ) {
     if !statuses
         .iter()
@@ -288,13 +296,26 @@ pub(super) fn apply_headless_input(
     {
         return;
     }
-    let controlled_position = controlled.iter().next().map(|position| position.0);
-    let dummy_position = fighters
+    let controlled_fighter = controlled.iter().next();
+    let controlled_position = controlled_fighter.map(|(position, _)| position.0);
+    let target_position = fighters
         .iter()
-        .find(|(network_id, _)| network_id.0 == 0)
-        .map(|(_, target)| target.0);
+        .find(|(network_id, _, _, _)| network_id.0 == 0)
+        .map(|(_, target, _, _)| target.0)
+        .or_else(|| {
+            let (controlled_position, controlled_team) = controlled_fighter?;
+            fighters
+                .iter()
+                .filter(|(_, _, team, defeated)| **team != *controlled_team && defeated.is_none())
+                .min_by(|(_, left, _, _), (_, right, _, _)| {
+                    left.0
+                        .distance_squared(controlled_position.0)
+                        .total_cmp(&right.0.distance_squared(controlled_position.0))
+                })
+                .map(|(_, target, _, _)| target.0)
+        });
     let aim_delta = controlled_position
-        .zip(dummy_position)
+        .zip(target_position)
         .map(|(position, target)| target - position)
         .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON);
     let aim_axis = if automation.aim_at_dummy {
@@ -304,7 +325,7 @@ pub(super) fn apply_headless_input(
     };
     let move_axis = if automation.aim_at_dummy && automation.move_axis != Vec2::ZERO {
         controlled_position
-            .zip(dummy_position)
+            .zip(target_position)
             .map(|(position, target)| target - position)
             .filter(|delta| delta.is_finite() && delta.length_squared() > f32::EPSILON)
             .map_or(automation.move_axis, Vec2::normalize)
@@ -366,7 +387,7 @@ fn controlled_lob_range(
 
 pub(super) fn mouse_aim(
     windows: &Query<&Window, With<PrimaryWindow>>,
-    cameras: &Query<(&Camera, &GlobalTransform), With<Camera2d>>,
+    cameras: &Query<(&Camera, &GlobalTransform), (With<Camera2d>, Without<IsDefaultUiCamera>)>,
     fighters: &Query<(&Position, Option<&ResolvedWeapon>), (With<Fighter>, With<Controlled>)>,
 ) -> Option<(Vec2, f32)> {
     let cursor = windows.iter().next()?.cursor_position()?;

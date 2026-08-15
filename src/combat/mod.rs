@@ -17,14 +17,15 @@ pub mod delivery;
 pub mod effects;
 pub mod evidence;
 pub mod model;
+pub mod outcomes;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod telemetry;
 
-#[cfg(feature = "server")]
-pub use authority::TestDummy;
 #[allow(clippy::wildcard_imports)]
 use authority::*;
+#[cfg(feature = "server")]
+pub use authority::{TestDummy, TestDummyFixture, TestDummyResetDeadline};
 
 #[cfg(all(test, feature = "server"))]
 use attack::advance_composed_weapon_state;
@@ -68,6 +69,7 @@ pub use evidence::{
 #[cfg(feature = "server")]
 pub use evidence::{CombatEvidenceSnapshots, CombatOutbox};
 pub use model::*;
+pub use outcomes::*;
 #[cfg(feature = "server")]
 pub use server::ServerCombatPlugin;
 use telemetry::MAX_COMBAT_EVIDENCE_EVENTS;

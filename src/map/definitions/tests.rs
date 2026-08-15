@@ -7,7 +7,7 @@ fn resolved_builtin() -> (MapContentCatalog, ResolvedMap) {
         .resolve_preset(
             MapPresetId(1),
             MapInstanceId(1),
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
         )
         .expect("built-in preset resolves");
     (catalog, resolved)
@@ -22,7 +22,7 @@ fn embedded_catalog_resolves_exact_bounded_arena() {
     assert_eq!(resolved.snapshot.spawn_areas.len(), 2);
     assert_eq!(resolved.snapshot.spawn_points.len(), 8);
     assert_eq!(resolved.snapshot.regions.len(), 1);
-    assert_eq!(resolved.snapshot.mode_anchors.len(), 1);
+    assert!(resolved.snapshot.mode_anchors.is_empty());
     assert_eq!(
         resolved.snapshot.playable_bounds.min,
         Vec2::new(-896.0, -576.0)
@@ -56,7 +56,7 @@ fn canonical_recipe_identity_ignores_order_rotation_equivalence_and_signed_zero(
         None,
         MapInstanceId(2),
         &catalog,
-        &MapLayoutRequirements::sandbox(),
+        &MapLayoutRequirements::wipeout(),
         EngineMapLimits::default(),
     )
     .unwrap();
@@ -71,7 +71,7 @@ fn canonical_recipe_identity_ignores_order_rotation_equivalence_and_signed_zero(
         None,
         MapInstanceId(3),
         &catalog,
-        &MapLayoutRequirements::sandbox(),
+        &MapLayoutRequirements::wipeout(),
         EngineMapLimits::default(),
     )
     .unwrap();
@@ -92,7 +92,7 @@ fn legal_non_preset_recipe_uses_the_same_resolver() {
         None,
         MapInstanceId(8),
         &catalog,
-        &MapLayoutRequirements::sandbox(),
+        &MapLayoutRequirements::wipeout(),
         EngineMapLimits::default(),
     )
     .unwrap();
@@ -112,27 +112,14 @@ fn duplicate_global_placement_and_missing_anchor_fail_closed() {
             None,
             MapInstanceId(2),
             &catalog,
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
             EngineMapLimits::default(),
         )
         .unwrap_err()
         .contains("globally unique")
     );
 
-    let mut missing_anchor = catalog.presets[0].recipe.clone();
-    missing_anchor.mode_anchors.clear();
-    assert!(
-        resolve_map_recipe(
-            &missing_anchor,
-            None,
-            MapInstanceId(2),
-            &catalog,
-            &MapLayoutRequirements::sandbox(),
-            EngineMapLimits::default(),
-        )
-        .unwrap_err()
-        .contains("mode-anchor")
-    );
+    assert!(catalog.presets[0].recipe.mode_anchors.is_empty());
 }
 
 #[test]
@@ -146,7 +133,7 @@ fn blocked_and_wrong_facing_spawns_fail_closed() {
             None,
             MapInstanceId(2),
             &catalog,
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
             EngineMapLimits::default(),
         )
         .is_err()
@@ -160,7 +147,7 @@ fn blocked_and_wrong_facing_spawns_fail_closed() {
             None,
             MapInstanceId(2),
             &catalog,
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
             EngineMapLimits::default(),
         )
         .is_err()
@@ -168,24 +155,28 @@ fn blocked_and_wrong_facing_spawns_fail_closed() {
 }
 
 #[test]
-fn blocked_practice_anchor_fails_before_runtime_depenetration() {
+fn wipeout_rejects_unapproved_mode_anchors() {
     let catalog = MapContentCatalog::embedded().unwrap();
     let mut blocked = catalog.presets[0].recipe.clone();
-    blocked.mode_anchors[0].shape = ModeAnchorShape::Point {
-        position: Vec2::new(0.0, -256.0),
-        facing: std::f32::consts::FRAC_PI_2,
-    };
+    blocked.mode_anchors.push(ModeAnchorPlacement {
+        placement_id: MapPlacementId(400),
+        anchor_id: ModeAnchorId(1),
+        definition_id: PRACTICE_DUMMY_ANCHOR_DEFINITION,
+        shape: ModeAnchorShape::Point {
+            position: Vec2::ZERO,
+            facing: 0.0,
+        },
+    });
     assert!(
         resolve_map_recipe(
             &blocked,
             None,
             MapInstanceId(2),
             &catalog,
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
             EngineMapLimits::default(),
         )
-        .unwrap_err()
-        .contains("mode anchor point")
+        .is_err()
     );
 }
 
@@ -218,7 +209,7 @@ fn code_owned_recipe_and_snapshot_byte_limits_fail_closed() {
             None,
             MapInstanceId(2),
             &catalog,
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
             recipe_limit,
         )
         .unwrap_err()
@@ -230,7 +221,7 @@ fn code_owned_recipe_and_snapshot_byte_limits_fail_closed() {
         None,
         MapInstanceId(2),
         &catalog,
-        &MapLayoutRequirements::sandbox(),
+        &MapLayoutRequirements::wipeout(),
         EngineMapLimits::default(),
     )
     .unwrap();
@@ -245,7 +236,7 @@ fn code_owned_recipe_and_snapshot_byte_limits_fail_closed() {
             None,
             MapInstanceId(2),
             &catalog,
-            &MapLayoutRequirements::sandbox(),
+            &MapLayoutRequirements::wipeout(),
             snapshot_limit,
         )
         .unwrap_err()

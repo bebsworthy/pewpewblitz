@@ -19,6 +19,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<ClientInputContext>()
             .init_resource::<ClientPlayableGate>()
             .init_resource::<WeaponSelectionState>()
+            .init_resource::<MatchCommandState>()
             .init_resource::<InputTuning>()
             .add_systems(
                 Startup,
@@ -49,6 +50,8 @@ impl Plugin for ClientNetworkPlugin {
                     process_join_outcome,
                     process_weapon_selection_outcomes,
                     send_weapon_selection_request,
+                    process_match_command_outcomes,
+                    send_match_command,
                     update_weapon_selection_overlay,
                     disconnect_rejected_client,
                     observe_client_lifecycle,
@@ -69,6 +72,95 @@ impl Plugin for ClientNetworkPlugin {
             );
         app.add_observer(add_controlled_input_marker);
     }
+}
+
+fn process_match_command_outcomes(
+    mut state: ResMut<MatchCommandState>,
+    mut receivers: Query<Option<&mut MessageReceiver<MatchCommandOutcome>>, With<Client>>,
+) {
+    for receiver in &mut receivers {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for outcome in receiver.receive() {
+            state.last_outcome = Some(outcome);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn send_match_command(
+    config: Res<ClientNetworkConfig>,
+    mut state: ResMut<MatchCommandState>,
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    gamepads: Query<&Gamepad>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    controlled: Query<
+        &MatchParticipant,
+        (With<Fighter>, With<Controlled>, Without<SelectingWeapon>),
+    >,
+    authoritative_ticks: Query<&AuthoritativeTick, (With<Fighter>, With<Controlled>)>,
+    roster: Query<(), (With<Remote>, With<Fighter>)>,
+    mut senders: Query<&mut MessageSender<MatchCommandRequest>, With<Client>>,
+) {
+    let Ok(match_state) = roots.single() else {
+        return;
+    };
+    let Ok(participant) = controlled.single() else {
+        return;
+    };
+    let pressed = keyboard
+        .as_deref()
+        .is_some_and(|keys| keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter))
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::South));
+    let automatic = automatic_match_command_enabled(&config, roster.iter().count());
+    let command = match match_state.phase {
+        MatchPhase::Waiting if !participant.ready && (pressed || automatic) => {
+            Some(MatchCommand::SetReady(true))
+        }
+        MatchPhase::Completed {
+            restart_unlocked_at_tick,
+            ..
+        } if !participant.restart_ready
+            && authoritative_ticks
+                .iter()
+                .next()
+                .is_some_and(|tick| tick.0 >= restart_unlocked_at_tick)
+            && (pressed || automatic) =>
+        {
+            Some(MatchCommand::ReadyForRestart)
+        }
+        _ => None,
+    };
+    let Some(command) = command else {
+        return;
+    };
+    if config.headless_simulation_ticks.is_some()
+        && state.sent_for_phase == Some((match_state.match_id, match_state.phase))
+    {
+        return;
+    }
+    state.next_request_id = state.next_request_id.saturating_add(1).max(1);
+    for mut sender in &mut senders {
+        sender.send::<SessionChannel>(MatchCommandRequest {
+            request_id: state.next_request_id,
+            match_id: match_state.match_id,
+            command,
+        });
+    }
+    state.sent_for_phase = Some((match_state.match_id, match_state.phase));
+}
+
+pub(super) fn automatic_match_command_enabled(
+    config: &ClientNetworkConfig,
+    roster_count: usize,
+) -> bool {
+    config.headless_simulation_ticks.is_some()
+        && config
+            .exit_after_roster
+            .is_none_or(|target| roster_count >= target)
 }
 
 pub(super) fn spawn_client_connection(
@@ -326,7 +418,7 @@ pub(super) fn update_weapon_selection_overlay(
         crate::combat::DeliveryMethod::MeleeArc {
             reach,
             angle_degrees,
-        } => format!("reach {reach:.0} / {angle_degrees:.0}°"),
+        } => format!("reach {reach:.0} / {angle_degrees:.0} deg"),
     };
     let recovery = format!("{}t recovery", recipe.economy.refill_ticks());
     let profile = match preset.id.0 {
@@ -364,7 +456,7 @@ pub(super) fn update_weapon_selection_overlay(
             Visibility::Hidden
         };
         **text = format!(
-            "Select weapon: A/D or arrows • D-pad/stick • Space / South\n{current} • {pattern} • {range} • {recovery}\n{profile}\n{status}"
+            "Select weapon: A/D or arrows | D-pad/stick | Space / South\n{current} | {pattern} | {range} | {recovery}\n{profile}\n{status}"
         );
     }
 }

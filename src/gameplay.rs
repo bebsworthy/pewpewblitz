@@ -43,6 +43,12 @@ impl Plugin for GameplayPlugin {
                 .chain(),
         )
         .add_systems(
+            FixedUpdate,
+            ApplyDeferred
+                .after(GameplaySet::Lifecycle)
+                .before(GameplaySet::Input),
+        )
+        .add_systems(
             FixedPostUpdate,
             advance_simulation_tick.in_set(crate::combat::CombatSet::Finalize),
         );

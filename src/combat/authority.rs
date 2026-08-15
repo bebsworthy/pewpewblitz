@@ -42,7 +42,7 @@ pub(super) fn validate_definitions(
 pub(super) fn spawn_test_dummy(
     mut commands: Commands,
     catalog: Res<WeaponCatalogResource>,
-    map_spawn: Res<crate::map::PracticeDummySpawn>,
+    map_spawn: Res<TestDummyFixture>,
     fighters: Res<FighterDefinitions>,
     weapons: Res<WeaponDefinitions>,
 ) {
@@ -112,6 +112,18 @@ pub(super) fn spawn_test_dummy(
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TestDummy;
 
+/// Explicit opt-in fixture; production Wipeout composition never inserts it.
+#[cfg(feature = "server")]
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct TestDummyFixture {
+    pub position: Vec2,
+    pub facing: f32,
+}
+
+#[cfg(feature = "server")]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TestDummyResetDeadline(pub u64);
+
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reset_due_fighters(
@@ -122,18 +134,21 @@ pub(super) fn reset_due_fighters(
     mut telemetry: ResMut<CombatTelemetry>,
     mut ids: ResMut<NextCombatIds>,
     mut outbox: ResMut<CombatOutbox>,
-    query: Query<(
-        Entity,
-        &NetworkEntityId,
-        &FighterDefinitionId,
-        &SelectedBuild,
-        Option<&ResolvedWeapon>,
-        &Defeated,
-        &SpawnState,
-    )>,
+    query: Query<
+        (
+            Entity,
+            &NetworkEntityId,
+            &FighterDefinitionId,
+            &SelectedBuild,
+            Option<&ResolvedWeapon>,
+            &TestDummyResetDeadline,
+            &SpawnState,
+        ),
+        With<TestDummy>,
+    >,
 ) {
-    for (entity, network_id, fighter_id, build, resolved, defeated, spawn) in &query {
-        if !reset_is_due(tick.0, defeated.reset_at_tick) {
+    for (entity, network_id, fighter_id, build, resolved, deadline, spawn) in &query {
+        if !reset_is_due(tick.0, deadline.0) {
             continue;
         }
         let Some(fighter) = fighters.get(*fighter_id) else {
@@ -174,6 +189,7 @@ pub(super) fn reset_due_fighters(
                 fighter_collision_layers(),
             ))
             .remove::<Defeated>()
+            .remove::<TestDummyResetDeadline>()
             .remove::<ExternalMotion>()
             .remove::<KnockbackFeedback>()
             .insert(ActiveEffects::default());

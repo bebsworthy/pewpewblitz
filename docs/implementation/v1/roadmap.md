@@ -16,17 +16,17 @@ Milestone 11 hardens and closes the v1 MVP. Additional mode families and systemi
 
 The milestones are not release promises. A milestone may be split during its technical-design pass, but its exit criteria may not be silently moved to a later gate.
 
-Milestone 06 has a post-M05 architecture-aligned specification. The user confirmed the M05 playtest
-and validated M05 on 2026-08-15; the post-Arc automated baseline and twelve-run impairment matrix
-were rerun successfully before M06 implementation began.
+Milestone 07 has an approved post-M06 architecture-aligned specification and is being verified. Milestone
+06 completed on 2026-08-15 after green automated, process-network, performance, visual, controller,
+and audio verification plus an approved user playtest.
 
 The milestone sections below are outcome briefs and research prompts, not prevalidated technical specifications. Type names, plugins, schedules, package boundaries, data formats, and algorithms remain provisional until the milestone research and specification are approved.
 
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 06 is complete after green automated, headless, performance, process-network, and user-approved visual/controller/audio verification. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
-- **Current milestone:** Milestone 06 — Complete; awaiting authorization to begin Milestone 07 research
+- **Overall status:** Milestone 07 automated and partial native-window visual verification is green; physical-controller, audio, 1440x900, normal-duration, and user-playtest verification remains. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
+- **Current milestone:** Milestone 07 — Verifying
 - **Last completed milestone:** Milestone 06 — First map-recipe arena and presentation baseline
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -169,7 +169,7 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 04 | Complete | Combat core | [milestone-04.md](./milestone-04.md) |
 | 05 | Verifying | Weapon composition and preset selection | [milestone-05.md](./milestone-05.md) |
 | 06 | Complete | First map-recipe arena and presentation baseline | [milestone-06.md](./milestone-06.md) |
-| 07 | Not started | Wipeout match loop | Create when next |
+| 07 | Verifying | Wipeout match loop | [milestone-07.md](./milestone-07.md) |
 | 08 | Not started | Bounded brawler builds and abilities | Create when next |
 | 09 | Not started | Hot Zone | Create when next |
 | 10 | Not started | Flexible destructible terrain | Create when next |

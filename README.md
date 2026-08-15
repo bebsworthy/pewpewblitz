@@ -1,8 +1,8 @@
 # Brawler
 
 Brawler is a server-authoritative top-down arena shooter. The current v1 slice includes typed weapon
-and map recipes, four weapon profiles, a server-resolved arena, replicated map/combat state, and a
-client-only presentation shell over the Lightyear Netcode/UDP connection.
+and map recipes, four weapon profiles, a server-resolved Wipeout arena, replicated match/map/combat
+state, and a client-only presentation shell over the Lightyear Netcode/UDP connection.
 
 ## Toolchain
 
@@ -18,7 +18,7 @@ just
 
 `just` lists the development recipes. Use `just run` for one server and one client, `just network`
 for one server and two distinguishable client windows, `just network-combat` for two windows with
-client 1 firing at the neutral dummy, `just network-controller` for a synthetic controller-path
+client 1 automatically engaging its opponent, `just network-controller` for a synthetic controller-path
 window smoke, or `just network-smoke` for a bounded headless process check.
 `just verify` runs the automated development-cycle gates, and `just user-test`
 runs verification first and then starts the interactive end-of-cycle scenario. Close either window
@@ -71,8 +71,10 @@ connection outcome and stable `(player_id, network_entity_id)` roster entries. `
 also requires a server-side movement/facing assertion before it succeeds.
 
 For the supervised combat path, use `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_COMBAT=1
-./scripts/network.sh`. It runs two clients that aim at the stable test dummy, holds fire briefly,
-and waits for server-verified shots, hits, damage, defeat, reset, and both client observations.
+./scripts/network.sh`. Its legacy combat verifier composes an explicit test-only dummy fixture and
+waits for server-verified shots, hits, damage, defeat, reset, and both client observations; production
+Wipeout composition has no practice dummy. Use `scripts/network-match.sh` for the current four-client
+match, respawn, telemetry, and restart process gate.
 `BRAWLER_NETWORK_PROFILE=local|typical|adverse` applies the corresponding Lightyear receive
 conditioner; `just network-combat-profiles` repeats all three profiles and reports median/p95
 convergence timings.
@@ -84,17 +86,20 @@ remains running when one windowed client closes so the remaining roster can be o
 that client with the same individual command and `--client-id`; set
 `BRAWLER_NETWORK_TIMEOUT_SECONDS` to add a bounded windowed-session deadline when needed.
 
-Milestones 03–06 provide the movement, combat, and first authored-arena slices. In a windowed client, use WASD to
-move, mouse position to aim, and mouse-left to hold pulse fire; Q/E remain reserved for the active
-item/ultimate inputs, Space or Enter interacts, and Escape toggles the local pause overlay. A
-connected controller uses the left stick for movement, right stick for aim, right trigger for pulse
-fire, the other trigger for reserved gameplay input, South for interact, and Start for pause. The
-local HUD shows health, ammo, cooldown/reload, and defeat state; fighters also show debug health bars.
+Milestones 03–07 provide movement, combat, the first authored arena, and a complete Wipeout loop. At
+weapon selection, use Left/Right or A/D and Space/Enter to confirm; on a controller use the D-pad or
+left stick and South. In Waiting, Space/Enter or South readies the participant, and the same input
+requests the next match after the completed-phase lock. During play, use WASD to move, mouse position
+to aim, and mouse-left to fire; Q/E remain reserved for active item/ultimate inputs. A connected
+controller uses the left stick for movement, right stick for aim, right trigger to fire, the other
+trigger for reserved gameplay input, and Start for pause. Hold Tab or controller Select for the full
+roster scoreboard. The HUD shows match phase, score/time/result, roster/weapon/readiness, respawn and
+protection state, health, ammo, and cooldown/reload; fighters also show debug health bars.
 The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
 block fighters and weapon delivery, while client sprites, audio, and HUD state remain presentation-only.
 For a reproducible single-shooter visual combat pass, run `just network-combat`; it starts two
 windowed clients, with client 1 using `--combat-demo` and client 2 idle. The demo uses the same native
-input buffer while continuously aiming at and firing on the neutral dummy. To launch the processes
+input buffer while continuously aiming at and firing on the opposing fighter. To launch the processes
 manually, start `brawler-server`, then run one client with `--client-id 1 --combat-demo` and the
 second without `--combat-demo`; enabling the flag on both clients intentionally produces one
 projectile stream from each player toward the dummy.

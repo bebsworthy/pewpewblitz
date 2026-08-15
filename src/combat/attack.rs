@@ -178,6 +178,7 @@ fn emit_attack_deliveries(
     outbox: &mut CombatOutbox,
     melee: &mut MessageWriter<MeleeAttack>,
     lob_landing: Option<Vec2>,
+    match_member: Option<crate::matchplay::MatchMember>,
 ) -> u64 {
     let recipe = &resolved.recipe;
     let attack_id = source.attack_id;
@@ -250,7 +251,7 @@ fn emit_attack_deliveries(
                     emitted_deliveries = emitted_deliveries.saturating_add(1);
                     continue;
                 }
-                commands.spawn((
+                let mut projectile = commands.spawn((
                     Projectile,
                     source_component,
                     ReplicatedAttackSource { attack: source },
@@ -290,6 +291,9 @@ fn emit_attack_deliveries(
                     Replicate::to_clients(NetworkTarget::All),
                     InterpolationTarget::to_clients(NetworkTarget::All),
                 ));
+                if let Some(match_member) = match_member {
+                    projectile.insert(match_member);
+                }
                 emitted_deliveries = emitted_deliveries.saturating_add(1);
             }
         }
@@ -304,7 +308,7 @@ fn emit_attack_deliveries(
             let launch = muzzle_position(origin, facing, muzzle_offset);
             let flight_ticks =
                 resolved_lob_flight_ticks(distance, origin.distance(landing), max_flight_ticks);
-            commands.spawn((
+            let mut projectile = commands.spawn((
                 Projectile,
                 source_component,
                 ReplicatedAttackSource { attack: source },
@@ -339,6 +343,9 @@ fn emit_attack_deliveries(
                 Replicate::to_clients(NetworkTarget::All),
                 InterpolationTarget::to_clients(NetworkTarget::All),
             ));
+            if let Some(match_member) = match_member {
+                projectile.insert(match_member);
+            }
             emitted_deliveries = 1;
         }
         DeliveryMethod::MeleeArc { .. } => {
@@ -508,6 +515,7 @@ pub(super) fn authoritative_composed_fire(
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut outbox: ResMut<CombatOutbox>,
     mut melee: MessageWriter<MeleeAttack>,
+    active_combatants: Query<(), With<crate::matchplay::ActiveCombatant>>,
     query: Query<
         (
             Entity,
@@ -524,6 +532,7 @@ pub(super) fn authoritative_composed_fire(
             Option<&ActionState<FighterInput>>,
             Option<&Defeated>,
             Option<&AwaitingPostSelectionInput>,
+            Option<&crate::matchplay::MatchParticipant>,
         ),
         With<Fighter>,
     >,
@@ -544,12 +553,16 @@ pub(super) fn authoritative_composed_fire(
         action,
         defeated,
         activation_barrier,
+        match_participant,
     ) in query
     {
         if controlled_by.is_some_and(|controlled| disconnected.contains(&controlled.owner)) {
             continue;
         }
-        if defeated.is_some() || activation_barrier.is_some() {
+        if defeated.is_some()
+            || activation_barrier.is_some()
+            || (match_participant.is_some() && !active_combatants.contains(entity))
+        {
             continue;
         }
         let recipe = &resolved.recipe;
@@ -598,6 +611,9 @@ pub(super) fn authoritative_composed_fire(
             continue;
         };
         let event_id = reserved_events[0];
+        commands
+            .entity(entity)
+            .remove::<crate::matchplay::SpawnProtection>();
         let legacy_muzzle_event = if legacy_compatibility {
             Some(reserved_events[1])
         } else {
@@ -652,6 +668,8 @@ pub(super) fn authoritative_composed_fire(
             &mut outbox,
             &mut melee,
             lob_landing,
+            match_participant
+                .map(|participant| crate::matchplay::MatchMember(participant.match_id)),
         );
         record_accepted_attack(
             AcceptedAttackRecord {

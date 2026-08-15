@@ -8,10 +8,12 @@ use super::model::*;
 
 pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 1;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 1;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 1;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const SANDBOX_LAYOUT_SCHEMA_VERSION: u16 = 1;
+pub const WIPEOUT_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const PRACTICE_DUMMY_ANCHOR_DEFINITION: ModeAnchorDefinitionId = ModeAnchorDefinitionId(1);
 pub const SANDBOX_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(1);
+pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct EngineMapLimits {
@@ -125,6 +127,20 @@ pub struct MapLayoutRequirements {
 
 impl MapLayoutRequirements {
     #[must_use]
+    pub fn wipeout() -> Self {
+        Self {
+            mode_definition_id: WIPEOUT_MODE_DEFINITION,
+            schema_version: WIPEOUT_LAYOUT_SCHEMA_VERSION,
+            allowed_team_slots: vec![0, 1],
+            spawn_areas_per_team: 1..=1,
+            spawn_points_per_team: 3..=8,
+            required_anchors: Vec::new(),
+            allowed_region_profiles: vec![RegionProfileId(1)],
+            allowed_entity_profiles: vec![EntityDefinitionId(1)],
+        }
+    }
+
+    #[must_use]
     pub fn sandbox() -> Self {
         Self {
             mode_definition_id: SANDBOX_MODE_DEFINITION,
@@ -208,7 +224,7 @@ impl MapContentCatalog {
         postcard::to_allocvec(&(
             MAP_FINGERPRINT_FORMAT_VERSION,
             EngineMapLimits::default(),
-            SANDBOX_LAYOUT_SCHEMA_VERSION,
+            (SANDBOX_LAYOUT_SCHEMA_VERSION, WIPEOUT_LAYOUT_SCHEMA_VERSION),
             canonical,
         ))
         .map_err(|error| format!("map catalog fingerprint serialization failed: {error}"))

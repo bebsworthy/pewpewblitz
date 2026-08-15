@@ -17,7 +17,8 @@ pub use client::{
 pub use definitions::{
     EngineMapLimits, MapCatalogResource, MapContentCatalog, MapContentPlugin,
     MapLayoutRequirements, MapPreset, MapRecipePolicy, PRACTICE_DUMMY_ANCHOR_DEFINITION,
-    SANDBOX_LAYOUT_SCHEMA_VERSION, resolve_map_recipe,
+    SANDBOX_LAYOUT_SCHEMA_VERSION, WIPEOUT_LAYOUT_SCHEMA_VERSION, WIPEOUT_MODE_DEFINITION,
+    resolve_map_recipe,
 };
 pub use model::*;
 #[cfg(feature = "server")]

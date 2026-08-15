@@ -209,6 +209,7 @@ fn late_join_receives_current_poses_without_duplicating_static_arena() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn hostile_input_and_client_pose_attempts_are_rejected_and_counted() {
     let mut harness = Harness::new(2);
     harness.step_until(|harness| {
@@ -298,8 +299,10 @@ fn hostile_input_and_client_pose_attempts_are_rejected_and_counted() {
         future_tick,
         FighterInput::default(),
     );
-    let mut malformed = FighterInput::default();
-    malformed.gameplay_buttons = 0x80;
+    let malformed = FighterInput {
+        gameplay_buttons: 0x80,
+        ..FighterInput::default()
+    };
     let malformed_tick = harness.server_tick().saturating_add(1);
     harness.send_forged_input(
         0,

@@ -39,6 +39,12 @@ pub struct ServerCombatPlugin;
 #[cfg(feature = "server")]
 impl Plugin for ServerCombatPlugin {
     fn build(&self, app: &mut App) {
+        if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
+            app.insert_resource(TestDummyFixture {
+                position: Vec2::new(0.0, -320.0),
+                facing: 0.0,
+            });
+        }
         app.init_resource::<FighterDefinitions>()
             .init_resource::<WeaponDefinitions>()
             .init_resource::<MovementTuning>()
@@ -47,6 +53,7 @@ impl Plugin for ServerCombatPlugin {
             .init_resource::<WeaponTelemetry>()
             .init_resource::<ActiveAttackTrackers>()
             .init_resource::<CombatOutbox>()
+            .init_resource::<CombatOutcomeFacts>()
             .init_resource::<CombatEvidenceSnapshots>()
             .init_resource::<CombatSummaryLogged>()
             .insert_resource(CombatEvidenceMode {
@@ -57,16 +64,20 @@ impl Plugin for ServerCombatPlugin {
             .add_message::<PendingDelivery>()
             .add_systems(
                 Startup,
-                (validate_definitions, spawn_test_dummy)
+                (
+                    validate_definitions,
+                    spawn_test_dummy.run_if(resource_exists::<TestDummyFixture>),
+                )
                     .chain()
                     .after(crate::map::MapStartupSet::Instantiate),
             )
             .add_systems(
                 FixedUpdate,
                 (
-                    reset_due_fighters.in_set(GameplaySet::Lifecycle),
+                    reset_due_fighters
+                        .run_if(resource_exists::<TestDummyFixture>)
+                        .in_set(GameplaySet::Lifecycle),
                     expire_runtime_effects.in_set(GameplaySet::Lifecycle),
-                    ApplyDeferred.after(GameplaySet::Lifecycle),
                     authoritative_composed_fire.in_set(GameplaySet::Fire),
                     ApplyDeferred.after(GameplaySet::Fire),
                 ),

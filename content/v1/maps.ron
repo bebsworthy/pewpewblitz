@@ -18,7 +18,7 @@
         ],
         permitted_region_profiles: [RegionProfileId(1)],
         permitted_entity_definitions: [EntityDefinitionId(1)],
-        permitted_mode_definitions: [ModeDefinitionId(1)],
+        permitted_mode_definitions: [ModeDefinitionId(1), ModeDefinitionId(2)],
         permitted_anchor_definitions: [ModeAnchorDefinitionId(1)],
     ),
     presentation_themes: [
@@ -42,6 +42,7 @@
     ],
     mode_definitions: [
         (id: ModeDefinitionId(1), key: "sandbox-base"),
+        (id: ModeDefinitionId(2), key: "wipeout"),
     ],
     anchor_definitions: [
         (id: ModeAnchorDefinitionId(1), key: "practice-dummy-spawn"),
@@ -53,9 +54,9 @@
             display_name: "Crossroads Facility",
             recipe: (
                 recipe_id: MapRecipeId(1),
-                revision: 1,
+                revision: 2,
                 recipe_version: 1,
-                mode_definition_id: ModeDefinitionId(1),
+                mode_definition_id: ModeDefinitionId(2),
                 presentation_theme_id: MapPresentationThemeId(1),
                 playable_bounds: (min: Vec2(-896.0, -576.0), max: Vec2(896.0, 576.0)),
                 camera_bounds: (min: Vec2(-896.0, -576.0), max: Vec2(896.0, 576.0)),
@@ -88,9 +89,7 @@
                     (placement_id: MapPlacementId(316), spawn_point_id: SpawnPointId(7), team_slot: 1, position: Vec2(768.0, 96.0), facing: 3.1415927),
                     (placement_id: MapPlacementId(317), spawn_point_id: SpawnPointId(8), team_slot: 1, position: Vec2(768.0, 288.0), facing: 3.1415927),
                 ],
-                mode_anchors: [
-                    (placement_id: MapPlacementId(400), anchor_id: ModeAnchorId(1), definition_id: ModeAnchorDefinitionId(1), shape: Point(position: Vec2(0.0, -320.0), facing: 0.0)),
-                ],
+                mode_anchors: [],
             ),
         ),
     ],
