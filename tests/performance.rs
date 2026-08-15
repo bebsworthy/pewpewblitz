@@ -12,6 +12,7 @@ use brawler::{
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
+    map::AuthoritativeMapPlugin,
     movement::{
         AuthoritativeMovementPlugin, AvianNetworkPlugin, DESTRUCTIBLE_TERRAIN_LAYER, FIGHTER_LAYER,
         INDESTRUCTIBLE_TERRAIN_LAYER, InputFreshness, PROJECTILE_LAYER, fighter_collision_layers,
@@ -35,6 +36,7 @@ fn performance_app() -> App {
         GameplayPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
+        AuthoritativeMapPlugin,
         AuthoritativeMovementPlugin,
         ServerNetworkPlugin,
     ));
@@ -245,8 +247,8 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
     let mut app = performance_app();
     let owners = spawn_headless_fighters(&mut app);
     // Make every path exercise the nearby fighter broad phase without allowing a friendly
-    // pass-through to terminate the projectile. The two lanes adjacent to the cover bodies also
-    // keep terrain candidates in the shape-cast neighborhood while staying just outside the wall.
+    // pass-through to terminate the projectile. The lanes remain clear of the resolved map's
+    // north/south cover while keeping perimeter terrain in the broad-phase workload.
     {
         let world = app.world_mut();
         let mut fighters = world.query::<&mut TeamId>();
@@ -254,7 +256,7 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
             team.0 = 0;
         }
     }
-    let lanes = [-400.0, -312.0, -150.0, -48.0, 40.0, 150.0, 304.0, 392.0];
+    let lanes = [-500.0, -460.0, -420.0, -380.0, 380.0, 420.0, 460.0, 500.0];
     let recipe = app
         .world()
         .resource::<brawler::combat::WeaponCatalogResource>()

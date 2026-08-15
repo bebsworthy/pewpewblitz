@@ -42,6 +42,7 @@ pub(super) fn validate_definitions(
 pub(super) fn spawn_test_dummy(
     mut commands: Commands,
     catalog: Res<WeaponCatalogResource>,
+    map_spawn: Res<crate::map::PracticeDummySpawn>,
     fighters: Res<FighterDefinitions>,
     weapons: Res<WeaponDefinitions>,
 ) {
@@ -53,16 +54,8 @@ pub(super) fn spawn_test_dummy(
     let Some(fighter) = fighters.get(STANDARD_FIGHTER_DEFINITION) else {
         return;
     };
-    // Keep the dummy clear of the lower cover's collision body while leaving a deterministic
-    // horizontal approach lane for the short-range process-combat profiles. The process harness
-    // uses the open spawn row so every delivery family can reach the same target during its
-    // bounded run; deterministic/unit harnesses retain the lower-row placement.
-    let position = if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
-        Vec2::new(0.0, -300.0)
-    } else {
-        Vec2::new(0.0, -380.0)
-    };
-    let spawn_facing = fighter.spawn_facing;
+    let position = map_spawn.position;
+    let spawn_facing = map_spawn.facing;
     let body_radius = fighter.body_radius;
     let (fighter_definition, build, team, health, weapon) =
         default_fighter_runtime(NEUTRAL_TEAM, &fighters, &weapons);

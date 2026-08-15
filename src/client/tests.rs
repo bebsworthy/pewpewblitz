@@ -141,6 +141,7 @@ fn keyboard_movement_is_sampled_from_the_window_input_resource() {
         .insert_resource(keyboard)
         .init_resource::<PendingLocalActions>()
         .init_resource::<ClientInputContext>()
+        .insert_resource(ClientPlayableGate(true))
         .init_resource::<InputDeviceActivity>()
         .init_resource::<InputTuning>()
         .add_systems(Update, sample_local_input);
@@ -189,6 +190,7 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
     app.add_plugins(MinimalPlugins)
         .insert_resource(ButtonInput::<KeyCode>::default())
         .init_resource::<PendingLocalActions>()
+        .insert_resource(ClientPlayableGate(true))
         .init_resource::<ClientInputContext>()
         .init_resource::<InputDeviceActivity>()
         .init_resource::<InputTuning>()
@@ -235,6 +237,7 @@ fn controller_sample_reaches_native_fighter_action_buffer() {
     app.add_plugins(MinimalPlugins)
         .insert_resource(ButtonInput::<KeyCode>::default())
         .init_resource::<PendingLocalActions>()
+        .insert_resource(ClientPlayableGate(true))
         .init_resource::<ClientInputContext>()
         .init_resource::<InputDeviceActivity>()
         .init_resource::<InputTuning>()
@@ -364,35 +367,20 @@ fn controller_cancel_does_not_toggle_pause() {
 
 #[test]
 fn camera_clamp_uses_viewport_aspect_and_centers_oversized_axes() {
-    let arena = GreyboxArenaDefinition::default();
-    let landscape = clamp_camera_center(Vec2::new(900.0, 0.0), arena, Vec2::new(16.0, 9.0));
-    assert!((landscape.x - 160.0).abs() < 0.001);
+    let bounds = crate::map::AxisAlignedMapRect {
+        min: Vec2::new(-896.0, -576.0),
+        max: Vec2::new(896.0, 576.0),
+    };
+    let landscape = clamp_camera_center(Vec2::new(900.0, 0.0), bounds, Vec2::new(16.0, 9.0));
+    assert!((landscape.x - 256.0).abs() < 0.001);
 
-    let portrait = clamp_camera_center(Vec2::new(900.0, 0.0), arena, Vec2::new(9.0, 16.0));
+    let portrait = clamp_camera_center(Vec2::new(900.0, 0.0), bounds, Vec2::new(9.0, 16.0));
     assert!(portrait.x > landscape.x);
-    assert!(portrait.x <= arena.max.x);
+    assert!(portrait.x <= bounds.max.x);
 
-    let oversized = clamp_camera_center(Vec2::new(900.0, 400.0), arena, Vec2::new(4000.0, 100.0));
+    let oversized = clamp_camera_center(Vec2::new(900.0, 400.0), bounds, Vec2::new(4000.0, 100.0));
     assert!(oversized.x.abs() < 0.001);
-    assert!((oversized.y - 140.0).abs() < 0.001);
-}
-
-#[test]
-fn client_arena_spawns_visible_geometry_for_every_blocker() {
-    let arena = GreyboxArenaDefinition::default();
-    let expected_visuals =
-        arena.perimeter_visual_shapes().len() * 2 + arena.cover_shapes().len() * 2;
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .insert_resource(arena)
-        .add_systems(Startup, spawn_client_arena);
-
-    app.update();
-
-    let mut visuals = app
-        .world_mut()
-        .query_filtered::<Entity, With<ArenaVisual>>();
-    assert_eq!(visuals.iter(app.world()).count(), expected_visuals);
+    assert!((oversized.y - 216.0).abs() < 0.001);
 }
 
 #[test]
@@ -408,6 +396,7 @@ fn paused_input_writes_neutral_and_clears_latched_actions() {
         .init_resource::<PendingLocalActions>()
         .init_resource::<FixedTickCount>()
         .insert_resource(ClientInputContext::Paused)
+        .insert_resource(ClientPlayableGate(true))
         .add_systems(Update, write_client_input)
         .add_systems(FixedUpdate, |mut ticks: ResMut<FixedTickCount>| {
             ticks.0 = ticks.0.saturating_add(1);

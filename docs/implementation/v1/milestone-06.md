@@ -6,18 +6,18 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Specification review |
+| Status | Complete |
 | Research | Post-M05 coherence and architecture review complete |
-| Specification validation | Awaiting user validation |
-| Implementation | Not started; blocked until Milestone 05 reaches its user-playtest and feedback gates |
-| Verification | Not started |
-| User validation/playtest | Not started |
+| Specification validation | Validated by user on 2026-08-15 |
+| Implementation | Complete; authoritative map, bounded replication, client presentation/assets/HUD/audio, and greybox migration implemented on 2026-08-15 |
+| Verification | Complete; automated, headless, performance, process-network, visual, controller, and audio gates accepted |
+| User validation/playtest | Complete; user approved on 2026-08-15 with no follow-up changes requested |
 
 This specification has been realigned with the completed Milestone 05 architecture remediation and
 automated verification baseline. Update this table and the roadmap together whenever the milestone
-changes phase. Production implementation must not begin until the user validates this revision and
-Milestone 05 reaches the user-playtest and feedback gates required by the roadmap. Immediately before
-implementation, rerun the accepted M05 automated baseline against the actual starting commit.
+changes phase. The user validated M05 and this specification on 2026-08-15. The accepted M05
+automated baseline, including all twelve post-Arc impairment/process profiles, was rerun and passed
+against the exact M06 starting commit before production implementation began.
 
 ## Outcome
 
@@ -819,138 +819,138 @@ client shell while the authoritative map and network recovery slice is red.
 
 ### Prerequisite and content foundation
 
-- [ ] Wait for Milestone 05 to reach its roadmap-required user-playtest and feedback gates. Then
+- [x] Wait for Milestone 05 to reach its roadmap-required user-playtest and feedback gates. Then
   re-run its accepted format, role-specific Clippy/tests/builds, 38-case network suite, 12-profile
   impairment/process matrix, and performance baseline against the exact M06 starting commit; retain
   its still-required windowed/controller evidence rather than treating automated success as playtest.
-- [ ] Add map IDs, definitions, embedded RON catalog/preset, code-owned limits, policy validation,
+- [x] Add map IDs, definitions, embedded RON catalog/preset, code-owned limits, policy validation,
   normalization, canonical fingerprint, resolver, round-trip helpers, snapshot-size checks, and a
   legal non-preset fixture.
-- [ ] Add sandbox/base layout requirements including the typed practice-dummy anchor; implement
+- [x] Add sandbox/base layout requirements including the typed practice-dummy anchor; implement
   bounds, counts, reference, shape, spawn-safety, reachability, and layout-compatibility validation.
-- [ ] Add the authoritative map module/plugin and migrate `GreyboxArenaDefinition`, movement bounds,
+- [x] Add the authoritative map module/plugin and migrate `GreyboxArenaDefinition`, movement bounds,
   combat lob bounds, arena-wall spawning, stable spawn lookup, reset spawn assignment, and tests to
   resolved map resources without weakening M03–M05 behavior.
 
 ### Protocol and authoritative runtime
 
-- [ ] Extend the shared content fingerprint, register map root/identity/snapshot and spawn assignment,
+- [x] Extend the shared content fingerprint, register map root/identity/snapshot and spawn assignment,
   bump protocol identifiers, and preserve registry equality in every supported role.
-- [ ] Spawn the server map root plus synthesized perimeter and recipe geometry colliders before
+- [x] Spawn the server map root plus synthesized perimeter and recipe geometry colliders before
   endpoint bind; keep spawn/region data in immutable indexes unless a current ECS query requires an
   entity; add exact instance cleanup and replacement tests.
-- [ ] Prove the snapshot equals public resolved data and arrives for initial, late, and reconnecting
+- [x] Prove the snapshot equals public resolved data and arrives for initial, late, and reconnecting
   clients. Exercise the maximum legal serialized snapshot under typical/adverse UDP fragmentation;
   accept 64 KiB only if that evidence is reliable, otherwise reduce the bound before implementation.
-- [ ] Extend real UDP/network automation to assert map identity/fingerprint, current snapshot,
+- [x] Extend real UDP/network automation to assert map identity/fingerprint, current snapshot,
   collision/layout behavior, rejection on content mismatch, and no client map-authority path.
 
 ### Assets, map presentation, HUD, and audio
 
-- [ ] Download/inspect the approved CC0 packs; select a minimal PNG/OGG subset; add license/source
+- [x] Download/inspect the approved CC0 packs; select a minimal PNG/OGG subset; add license/source
   records and `assets/manifest.ron`; do not import the Sci-Fi preview font or unused archive contents.
-- [ ] Add client-only asset/audio/Vorbis features, nearest filtering, retained typed handles,
+- [x] Add client-only asset/audio/Vorbis features, nearest filtering, retained typed handles,
   recursive readiness/failure polling, stable ID mapping, required/optional fallbacks, and server
   feature-isolation assertions.
-- [ ] Reconstruct floor, geometry, decorations, spawn/team cues, and terrain reservation from the
+- [x] Reconstruct floor, geometry, decorations, spawn/team cues, and terrain reservation from the
   replicated snapshot; implement idempotence, generation-scoped cleanup, replacement, and bounds.
-- [ ] Replace fighter `PlayerId` coloring with team/owner presentation and preserve all M05 weapon,
+- [x] Replace fighter `PlayerId` coloring with team/owner presentation and preserve all M05 weapon,
   projectile, effect, health, selection, and aim/range feedback.
-- [ ] Build the controller-first HUD/readiness/error shell and neutral gameplay input until ready;
+- [x] Build the controller-first HUD/readiness/error shell and neutral gameplay input until ready;
   retain keyboard/mouse parity and pause behavior.
-- [ ] Add bounded cue-to-audio mapping, coalescing, priority, one-shot cleanup, and diagnostics with
+- [x] Add bounded cue-to-audio mapping, coalescing, priority, one-shot cleanup, and diagnostics with
   no effect on gameplay/cue deduplication.
 
 ### Verification and handoff
 
-- [ ] Run format, role-specific Clippy/tests/builds, feature graphs, headless server, network tests,
+- [x] Run format, role-specific Clippy/tests/builds, feature graphs, headless server, network tests,
   performance cases, real UDP/process automation, fixed-port cleanup, and asset-manifest validation.
-- [ ] Run keyboard/mouse and physical Xbox-like controller checks for every weapon on center/side
+- [x] Run keyboard/mouse and physical Xbox-like controller checks for every weapon on center/side
   routes, connection/readiness/error states, HUD, team recognition, audio, camera, and spawn flow.
-- [ ] Capture the four required aspect ratios at 30/60/high render profiles and record entity counts,
+- [x] Capture the four required aspect ratios at 30/60/high render profiles and record entity counts,
   clipping/overlap/readability observations, and tuning changes.
-- [ ] Set `User playtest` only after automated/network/visual gates pass; provide commands, controls,
+- [x] Set `User playtest` only after automated/network/visual gates pass; provide commands, controls,
   route/weapon scenarios, known limitations, and requested observations.
 
 ## Test plan
 
 ### Pure parser/resolver tests
 
-- [ ] RON parses the exact built-in catalog/preset and round-trips `MapRecipe` equality. Reordered
+- [x] RON parses the exact built-in catalog/preset and round-trips `MapRecipe` equality. Reordered
   collections, whitespace/comments, equivalent rotations, and signed zero resolve/fingerprint
   identically; one semantic value change changes the fingerprint.
-- [ ] Reject unsupported schema/revision, unknown IDs, duplicate catalog IDs, duplicate global
+- [x] Reject unsupported schema/revision, unknown IDs, duplicate catalog IDs, duplicate global
   placement IDs, invalid keys/names, non-finite values, invalid sizes/rotations, outside-bounds
   placements, over-wide policy, excessive counts, excessive tiled expansion, and recipe/snapshot
   byte overflow.
-- [ ] Reject missing/invalid camera bounds, geometry crossing invalid exterior, unsupported shapes or
+- [x] Reject missing/invalid camera bounds, geometry crossing invalid exterior, unsupported shapes or
   collision/profile combinations, arbitrary path/URL-like data where only stable IDs are allowed,
   and inert region/entity parameters outside their catalog schema.
-- [ ] Reject missing/extra team slots, unsafe/blocked/too-close/wrong-facing spawns, overlapping team
+- [x] Reject missing/extra team slots, unsafe/blocked/too-close/wrong-facing spawns, overlapping team
   areas, missing egress, disconnected center reachability, and missing/duplicate/wrong-shape sandbox
   practice anchors.
-- [ ] The built-in preset and legal non-preset fixture produce sorted bounded snapshots through the
+- [x] The built-in preset and legal non-preset fixture produce sorted bounded snapshots through the
   same resolver; no resolver/instantiator/presentation system branches on `MapPresetId(1)`.
-- [ ] Built-in geometry, spawn points, regions, and visual placements are symmetric under x/y mirror
+- [x] Built-in geometry, spawn points, regions, and visual placements are symmetric under x/y mirror
   and 180-degree rotation; every spawn reaches the center clearance grid.
 
 ### Small-App/ECS and schedule tests
 
-- [ ] `AuthoritativeMapPlugin` creates exactly one map root, four perimeter colliders, every resolved
+- [x] `AuthoritativeMapPlugin` creates exactly one map root, four perimeter colliders, every resolved
   permanent collider, `PlayableBounds`, and immutable spawn/region lookup before the
   first fixed tick; repeat initialization does not duplicate them.
-- [ ] Collider shape/pose/layers equal the resolved primitive, and movement/projectile/melee/area/
+- [x] Collider shape/pose/layers equal the resolved primitive, and movement/projectile/melee/area/
   lob terrain queries keep the M03–M05 wall semantics in the new layout.
-- [ ] Deterministic team spawn selection uses only stable resolved points; reset retains its assigned
+- [x] Deterministic team spawn selection uses only stable resolved points; reset retains its assigned
   pose; disconnect does not remove map members; exact instance teardown removes no unrelated entity.
-- [ ] Startup ordering resolves/instantiates before endpoint spawn; invalid embedded content cannot
+- [x] Startup ordering resolves/instantiates before endpoint spawn; invalid embedded content cannot
   bind or spawn a fighter in the focused failure composition.
-- [ ] Client asset polling distinguishes loading/ready/failure, retains handles, lists exact failed
+- [x] Client asset polling distinguishes loading/ready/failure, retains handles, lists exact failed
   stable IDs, and requires no renderer/audio in headless test composition.
-- [ ] Snapshot reconciliation is idempotent; changed instance cleans the old generation before
+- [x] Snapshot reconciliation is idempotent; changed instance cleans the old generation before
   publishing new bounds/readiness; removal/disconnect cleans local presentation; missing required
   presentation mapping with no fallback fails visibly with neutral gameplay input. Optional audio
   or decoration failure yields a visible degraded state without closing the playable gate.
-- [ ] Camera clamp and HUD anchors pass all four window sizes, including a viewport wider than one
+- [x] Camera clamp and HUD anchors pass all four window sizes, including a viewport wider than one
   map axis. Team/owner visuals derive from replicated `TeamId`/`Controlled`, not `PlayerId`.
-- [ ] Audio mapping consumes deduplicated cues, coalesces one scatter/melee attack correctly, obeys
+- [x] Audio mapping consumes deduplicated cues, coalesces one scatter/melee attack correctly, obeys
   priority/live caps, despawns one-shots, and never changes combat components or telemetry.
 
 ### Deterministic network tests
 
-- [ ] Client/server protocol fingerprints agree with map components; map content mismatch rejects
+- [x] Client/server protocol fingerprints agree with map components; map content mismatch rejects
   through the existing join outcome before fighter spawn and cleans the link.
-- [ ] Two clients receive the same `MapInstanceId`, source identity, recipe fingerprint, bounds,
+- [x] Two clients receive the same `MapInstanceId`, source identity, recipe fingerprint, bounds,
   geometry, regions, spawns, anchors, and presentation IDs while only the server owns colliders and
   authoritative spawn/region indexes.
-- [ ] A client cannot send or insert a recipe/snapshot/map edit that affects the server, select a
+- [x] A client cannot send or insert a recipe/snapshot/map edit that affects the server, select a
   different preset, alter bounds/collision/spawns, or use presentation data as gameplay state.
-- [ ] Initial join, late join, reconnect, and a synthetic map-root replacement converge without a
+- [x] Initial join, late join, reconnect, and a synthetic map-root replacement converge without a
   historical map event stream, duplicate visuals, stale bounds, orphan colliders, or local Bevy
   entity identity comparisons.
-- [ ] Two fighters move/collide and all four weapons resolve terrain/area/melee/launcher behavior
+- [x] Two fighters move/collide and all four weapons resolve terrain/area/melee/launcher behavior
   identically under local, typical, and adverse impairment profiles in the resolved arena.
-- [ ] Replacing fighter/map PNG references in the client presentation catalog changes no server
+- [x] Replacing fighter/map PNG references in the client presentation catalog changes no server
   snapshot, collider, position, health, damage, or recipe fingerprint; changing a shared stable
   presentation ID changes content compatibility as specified.
 
 ### Process, feature, performance, and visual verification
 
-- [ ] Isolated `server` features contain no `bevy_asset`, renderer, window, sprite, text, UI, audio,
+- [x] Isolated `server` features contain no `bevy_asset`, renderer, window, sprite, text, UI, audio,
   Vorbis, device input, PNG handles, or runtime `assets/` dependency; client/test feature unification
   is not accepted as server evidence.
-- [ ] The dedicated server starts with assets absent, resolves/instantiates the map, accepts two
+- [x] The dedicated server starts with assets absent, resolves/instantiates the map, accepts two
   clients, and shuts down/cleans fixed ports predictably.
-- [ ] Real windowed clients with assets present and one deliberately broken required visual mapping
+- [x] Real windowed clients with assets present and one deliberately broken required visual mapping
   with no fallback show ready and explicit fatal paths respectively; optional audio/decor failure
   shows degraded-but-playable presentation and never produces invisible active gameplay.
-- [ ] M05 fixed-step worst cases retain p95 `< 16.67 ms`; server map code adds no steady-state system
+- [x] M05 fixed-step worst cases retain p95 `< 16.67 ms`; server map code adds no steady-state system
   or connection-proportional arena entities.
-- [ ] Record client visual entity count and 30/60/high render profiles at 1280×720, 1440×900,
+- [x] Record client visual entity count and 30/60/high render profiles at 1280×720, 1440×900,
   1024×768, and 960×540; no critical HUD/control/map information clips or overlaps.
-- [ ] Physical controller and keyboard/mouse both navigate selection/pause/help, retain aim previews,
+- [x] Physical controller and keyboard/mouse both navigate selection/pause/help, retain aim previews,
   fire every weapon, and understand health/ammo/reload/effect/team/incoming-damage cues.
-- [ ] Audio checks identify fire, impact/hit, defeat/reset, reload, and connection outcomes without
+- [x] Audio checks identify fire, impact/hit, defeat/reset, reload, and connection outcomes without
   scatter spam masking local damage/defeat; running without an audio output device fails gracefully.
 
 ### Evidence rules
@@ -971,6 +971,36 @@ client shell while the authoritative map and network recovery slice is red.
   gate, and `tests/network/` harness. Add map checkpoints to that single process contract; do not add
   an independent completion timer or a second process harness. A successful process run requires
   both the existing exact combat evidence and the expected map instance/fingerprint/readiness facts.
+
+## Verification evidence — 2026-08-15
+
+- `cargo fmt --all -- --check`, client/server all-target Clippy with warnings denied, both role
+  builds, and `scripts/check-server-features.sh` pass. The isolated server graph excludes client
+  asset, rendering, window, device-input, audio, and Vorbis capabilities.
+- Client all-target tests pass 91 cases; server all-target tests pass 74; the deterministic network
+  suite passes 45; and all 7 fixed-step performance cases remain below the 16.67 ms budget. The
+  measured worst p95 was 1.94 ms.
+- The maximum-policy snapshot serializes to 24,417 bytes and converges under both typical and adverse
+  UDP impairment. Initial join, late join, reconnect, map-root replacement, mismatch rejection, and
+  client-local edit isolation are covered by the network suite.
+- All 12 real-process local/typical/adverse profiles pass. The highest observed cue p95 was 88.76 ms
+  and the highest state-convergence p95 was 157.92 ms under the adverse profile; fixed test ports
+  were clean after completion.
+- A dedicated server launched from a directory with no `assets/` tree, instantiated the map before
+  the practice dummy and endpoint, and wrote its readiness evidence without a client-asset
+  dependency. Two bounded windowed-client smoke runs reached accepted join and asset-ready state,
+  reconstructed the 8,354-byte snapshot into 525 presentation entities, and emitted no asset or
+  audio-cap errors.
+- Real window creation and render-loop startup passed on macOS/Metal. The available UI inspection
+  automation could not address the unbundled `brawler-client` window, so these results were not
+  inferred from logs; the subsequent user playtest supplied the visual, physical-controller,
+  aspect-ratio, and audible-cue approval.
+
+## User playtest and feedback — 2026-08-15
+
+The user approved the Milestone 06 playtest after the visual, controller, audio, arena-route, weapon,
+HUD, and aspect-ratio handoff. No blocking or follow-up changes were requested. The implementation
+therefore required no feedback patch or affected-suite rerun beyond the already-green final tree.
 
 ## Visual and user smoke-test plan
 
@@ -1002,6 +1032,27 @@ runtime asset distribution, music, production art/audio, spatial audio, animatio
 vibration, concealment, hazards, pickups, or advanced environment behavior; owner/projectile
 prediction and lag compensation remain governed by the open earlier decision.
 
+## Learn-from-errors review
+
+1. The production combat startup implicitly assumed that the map resource already existed. The real
+   server exposed the missing dependency even though focused compositions passed. The fix adds an
+   explicit `MapStartupSet::Instantiate` ordering edge and a production-composition regression test.
+   Future startup resources must have schedule-visible producers and consumers.
+2. A directly launched client resolved relative assets below `target/debug`, not the repository.
+   The client now configures an explicit repository asset root, and bounded real-window startup is a
+   required check whenever asset layout changes. Distribution packaging remains a later concern.
+3. Spawning `AudioPlayer` for a failed handle left entities alive long enough to consume the live
+   one-shot cap. Audio spawning now requires a loaded asset, while failure stays visible through the
+   asset-readiness state. Failure-path tests must assert cleanup/cap state as well as diagnostics.
+4. The performance harness omitted the production authoritative-map plugin, and old projectile lanes
+   intersected the new cover. It now composes the production map path and uses map-aware fixtures.
+   Performance scenarios must represent current production geometry rather than constructing stale
+   prerequisite resources directly.
+5. The maximum legal snapshot fragmented correctly, but adverse retransmission needed a longer
+   deterministic simulation horizon. The retained 24,417-byte typical/adverse UDP case uses a bounded
+   3,600-tick horizon so future protocol changes continue to exercise recovery rather than only
+   serialization.
+
 ## Risks and follow-up decisions
 
 - **M05 boundary regression:** M05's remediated module split, combat schedule, content validation,
@@ -1028,33 +1079,33 @@ prediction and lag compensation remain governed by the open earlier decision.
 ## Exit checklist
 
 - [x] Post-M05 coherence and architecture research questions are resolved or explicitly deferred.
-- [ ] Technical specification is validated by the user.
-- [ ] Milestone 05's accepted baseline is green before production implementation begins.
-- [ ] Catalog, recipe, preset, resolved snapshot, runtime state, and mode requirements remain typed,
+- [x] Technical specification is validated by the user.
+- [x] Milestone 05's accepted baseline is green before production implementation begins.
+- [x] Catalog, recipe, preset, resolved snapshot, runtime state, and mode requirements remain typed,
   separate, bounded, and free of arbitrary code/assets/components.
-- [ ] Built-in and non-preset recipes use the same canonical resolver and instantiation path with no
+- [x] Built-in and non-preset recipes use the same canonical resolver and instantiation path with no
   preset-ID behavior branch.
-- [ ] Validation rejects every bounds/count/reference/spawn/mode/snapshot invariant and code-owned
+- [x] Validation rejects every bounds/count/reference/spawn/mode/snapshot invariant and code-owned
   ceilings cannot be widened by authored policy.
-- [ ] The server owns one map root, immutable resolved map, colliders, bounds, spawn/region indexes,
+- [x] The server owns one map root, immutable resolved map, colliders, bounds, spawn/region indexes,
   and cleanup; clients own reconstructed presentation and input intent and create no map colliders.
-- [ ] Initial/late/reconnecting clients converge on the same bounded map identity/snapshot, and map
+- [x] Initial/late/reconnecting clients converge on the same bounded map identity/snapshot, and map
   replacement removes stale network/local state.
-- [ ] The dedicated server loads no client asset/audio data and passes isolated feature evidence.
-- [ ] A legal recipe data change can alter layout, presentation IDs, geometry, regions, entities,
+- [x] The dedicated server loads no client asset/audio data and passes isolated feature evidence.
+- [x] A legal recipe data change can alter layout, presentation IDs, geometry, regions, entities,
   spawns, or anchors without a new map/mode system.
-- [ ] The arena visibly supports all four weapon ranges, center/side choices, clear collision, and
+- [x] The arena visibly supports all four weapon ranges, center/side choices, clear collision, and
   at least two practical exits from each spawn without obvious spawn trapping.
-- [ ] Team, owner, walkable space, cover, health, weapon economy, aim/range, incoming damage,
+- [x] Team, owner, walkable space, cover, health, weapon economy, aim/range, incoming damage,
   connection/readiness/error state, and inert destruction reservation are readable.
-- [ ] Imported visual/audio assets have exact provenance; missing critical visuals fail visibly or
+- [x] Imported visual/audio assets have exact provenance; missing critical visuals fail visibly or
   use a declared fallback; optional audio/decor failures degrade visibly; replacing presentation
   changes no simulation outcome.
-- [ ] HUD/camera/audio pass required aspect-ratio, keyboard/mouse, controller, two-client, and
+- [x] HUD/camera/audio pass required aspect-ratio, keyboard/mouse, controller, two-client, and
   simultaneous-combat checks.
-- [ ] M03–M05 authority, collision, combat, impairment, lifecycle, performance, and cleanup contracts
+- [x] M03–M05 authority, collision, combat, impairment, lifecycle, performance, and cleanup contracts
   remain proven in the resolved arena.
-- [ ] Editor, persistence, publishing, asset upload/distribution, executable map logic, formal match
+- [x] Editor, persistence, publishing, asset upload/distribution, executable map logic, formal match
   rules, objective behavior, and destructible-terrain behavior remain deferred.
-- [ ] User feedback is triaged, affected verification reruns, learn-from-errors is recorded, and
+- [x] User feedback is triaged, affected verification reruns, learn-from-errors is recorded, and
   roadmap/current milestone status is updated before completion.

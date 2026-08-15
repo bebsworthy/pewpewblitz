@@ -100,7 +100,7 @@ fn resolved_lob_landing(
     facing: f32,
     aim_distance: Option<crate::protocol::QuantizedAimDistance>,
     recipe: &WeaponRecipe,
-    arena: &crate::movement::GreyboxArenaDefinition,
+    bounds: &crate::map::PlayableBounds,
     spatial_query: &avian2d::prelude::SpatialQuery,
 ) -> Option<Vec2> {
     let DeliveryMethod::Lobbed {
@@ -114,8 +114,8 @@ fn resolved_lob_landing(
     let requested_distance = requested_lob_distance(distance, aim_distance);
     let desired = origin + Vec2::from_angle(facing) * requested_distance;
     let bounded = desired.clamp(
-        arena.min + Vec2::splat(landing_clearance_radius),
-        arena.max - Vec2::splat(landing_clearance_radius),
+        bounds.0.min + Vec2::splat(landing_clearance_radius),
+        bounds.0.max - Vec2::splat(landing_clearance_radius),
     );
     let terrain_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
         INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
@@ -498,7 +498,7 @@ fn record_accepted_attack(
 pub(super) fn authoritative_composed_fire(
     mut commands: Commands,
     tick: Res<SimulationTick>,
-    arena: Res<crate::movement::GreyboxArenaDefinition>,
+    bounds: Res<crate::map::PlayableBounds>,
     spatial_query: avian2d::prelude::SpatialQuery,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     mut ids: ResMut<NextCombatIds>,
@@ -579,7 +579,7 @@ pub(super) fn authoritative_composed_fire(
             facing,
             input.aim_distance,
             recipe,
-            &arena,
+            &bounds,
             &spatial_query,
         );
         if matches!(recipe.delivery, DeliveryMethod::Lobbed { .. }) && lob_landing.is_none() {

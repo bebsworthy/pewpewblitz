@@ -1,8 +1,8 @@
 # Brawler
 
-Brawler is a server-authoritative top-down arena shooter. Milestone 04 adds the first authoritative
-combat slice: pulse fire, swept projectiles, replicated health/ammo/defeat state, ordered combat
-cues, and sandbox reset over the Lightyear Netcode/UDP connection.
+Brawler is a server-authoritative top-down arena shooter. The current v1 slice includes typed weapon
+and map recipes, four weapon profiles, a server-resolved arena, replicated map/combat state, and a
+client-only presentation shell over the Lightyear Netcode/UDP connection.
 
 ## Toolchain
 
@@ -84,14 +84,14 @@ remains running when one windowed client closes so the remaining roster can be o
 that client with the same individual command and `--client-id`; set
 `BRAWLER_NETWORK_TIMEOUT_SECONDS` to add a bounded windowed-session deadline when needed.
 
-Milestones 03–04 provide the greybox movement and combat slices. In a windowed client, use WASD to
+Milestones 03–06 provide the movement, combat, and first authored-arena slices. In a windowed client, use WASD to
 move, mouse position to aim, and mouse-left to hold pulse fire; Q/E remain reserved for the active
 item/ultimate inputs, Space or Enter interacts, and Escape toggles the local pause overlay. A
 connected controller uses the left stick for movement, right stick for aim, right trigger for pulse
 fire, the other trigger for reserved gameplay input, South for interact, and Start for pause. The
 local HUD shows health, ammo, cooldown/reload, and defeat state; fighters also show debug health bars.
-The greybox arena has visible perimeter collision markers and two visible central cover blocks; both
-block fighters and pulse projectiles.
+The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
+block fighters and weapon delivery, while client sprites, audio, and HUD state remain presentation-only.
 For a reproducible single-shooter visual combat pass, run `just network-combat`; it starts two
 windowed clients, with client 1 using `--combat-demo` and client 2 idle. The demo uses the same native
 input buffer while continuously aiming at and firing on the neutral dummy. To launch the processes
@@ -114,4 +114,6 @@ Do not use `--all-features` as a supported application build: client and server 
 
 ## Repository conventions
 
-Future authored data and runtime assets will be added under a documented milestone once they have a real consumer. Until then, no empty asset/map/content directories are created. Third-party art, audio, fonts, and code must record provenance and license information alongside the content when introduced.
+Authoritative authored gameplay data lives under `content/v1/` and is compiled into both roles.
+Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
+recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.

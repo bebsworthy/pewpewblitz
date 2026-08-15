@@ -55,7 +55,12 @@ impl Plugin for ServerCombatPlugin {
             .add_message::<MeleeAttack>()
             .add_message::<PendingPayload>()
             .add_message::<PendingDelivery>()
-            .add_systems(Startup, (validate_definitions, spawn_test_dummy).chain())
+            .add_systems(
+                Startup,
+                (validate_definitions, spawn_test_dummy)
+                    .chain()
+                    .after(crate::map::MapStartupSet::Instantiate),
+            )
             .add_systems(
                 FixedUpdate,
                 (

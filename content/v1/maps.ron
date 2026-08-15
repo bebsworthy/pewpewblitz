@@ -1,0 +1,97 @@
+(
+    schema_version: 1,
+    policy: (
+        max_geometry: 256,
+        max_visual_instances: 1024,
+        max_entities: 128,
+        max_regions: 32,
+        max_spawn_areas: 8,
+        max_spawn_points: 32,
+        max_mode_anchors: 32,
+        permitted_collision_profiles: [CollisionProfileId(1)],
+        permitted_presentation_profiles: [
+            MapPresentationProfileId(1),
+            MapPresentationProfileId(2),
+            MapPresentationProfileId(3),
+            MapPresentationProfileId(4),
+            MapPresentationProfileId(5),
+        ],
+        permitted_region_profiles: [RegionProfileId(1)],
+        permitted_entity_definitions: [EntityDefinitionId(1)],
+        permitted_mode_definitions: [ModeDefinitionId(1)],
+        permitted_anchor_definitions: [ModeAnchorDefinitionId(1)],
+    ),
+    presentation_themes: [
+        (id: MapPresentationThemeId(1), key: "facility-greybox"),
+    ],
+    presentation_profiles: [
+        (id: MapPresentationProfileId(1), key: "facility-floor"),
+        (id: MapPresentationProfileId(2), key: "facility-wall"),
+        (id: MapPresentationProfileId(3), key: "destruction-reservation"),
+        (id: MapPresentationProfileId(4), key: "team-spawn"),
+        (id: MapPresentationProfileId(5), key: "inert-decoration"),
+    ],
+    collision_profiles: [
+        (id: CollisionProfileId(1), key: "permanent-terrain"),
+    ],
+    region_profiles: [
+        (id: RegionProfileId(1), key: "destructible-reservation"),
+    ],
+    entity_definitions: [
+        (id: EntityDefinitionId(1), key: "inert-decoration"),
+    ],
+    mode_definitions: [
+        (id: ModeDefinitionId(1), key: "sandbox-base"),
+    ],
+    anchor_definitions: [
+        (id: ModeAnchorDefinitionId(1), key: "practice-dummy-spawn"),
+    ],
+    presets: [
+        (
+            id: MapPresetId(1),
+            key: "crossroads-facility",
+            display_name: "Crossroads Facility",
+            recipe: (
+                recipe_id: MapRecipeId(1),
+                revision: 1,
+                recipe_version: 1,
+                mode_definition_id: ModeDefinitionId(1),
+                presentation_theme_id: MapPresentationThemeId(1),
+                playable_bounds: (min: Vec2(-896.0, -576.0), max: Vec2(896.0, 576.0)),
+                camera_bounds: (min: Vec2(-896.0, -576.0), max: Vec2(896.0, 576.0)),
+                geometry: [
+                    (placement_id: MapPlacementId(1), collision_profile_id: CollisionProfileId(1), presentation_profile_id: Some(MapPresentationProfileId(2)), position: Vec2(0.0, -256.0), rotation: 0.0, shape: Rectangle(half_extents: Vec2(160.0, 32.0))),
+                    (placement_id: MapPlacementId(2), collision_profile_id: CollisionProfileId(1), presentation_profile_id: Some(MapPresentationProfileId(2)), position: Vec2(0.0, 256.0), rotation: 0.0, shape: Rectangle(half_extents: Vec2(160.0, 32.0))),
+                    (placement_id: MapPlacementId(3), collision_profile_id: CollisionProfileId(1), presentation_profile_id: Some(MapPresentationProfileId(2)), position: Vec2(-384.0, 0.0), rotation: 0.0, shape: Rectangle(half_extents: Vec2(32.0, 128.0))),
+                    (placement_id: MapPlacementId(4), collision_profile_id: CollisionProfileId(1), presentation_profile_id: Some(MapPresentationProfileId(2)), position: Vec2(384.0, 0.0), rotation: 0.0, shape: Rectangle(half_extents: Vec2(32.0, 128.0))),
+                    (placement_id: MapPlacementId(5), collision_profile_id: CollisionProfileId(1), presentation_profile_id: Some(MapPresentationProfileId(2)), position: Vec2(-576.0, 0.0), rotation: 0.0, shape: Rectangle(half_extents: Vec2(32.0, 96.0))),
+                    (placement_id: MapPlacementId(6), collision_profile_id: CollisionProfileId(1), presentation_profile_id: Some(MapPresentationProfileId(2)), position: Vec2(576.0, 0.0), rotation: 0.0, shape: Rectangle(half_extents: Vec2(32.0, 96.0))),
+                ],
+                visuals: [
+                    (placement_id: MapPlacementId(100), presentation_profile_id: MapPresentationProfileId(1), position: Vec2(0.0, 0.0), rotation: 0.0, kind: TiledRectangle(half_extents: Vec2(896.0, 576.0), cell_size: Vec2(64.0, 64.0))),
+                ],
+                entities: [],
+                regions: [
+                    (placement_id: MapPlacementId(200), region_id: RegionId(1), profile_id: RegionProfileId(1), presentation_profile_id: MapPresentationProfileId(3), position: Vec2(0.0, 0.0), rotation: 0.0, shape: Rectangle(half_extents: Vec2(96.0, 96.0))),
+                ],
+                spawn_areas: [
+                    (placement_id: MapPlacementId(300), team_slot: 0, bounds: (min: Vec2(-864.0, -384.0), max: Vec2(-672.0, 384.0))),
+                    (placement_id: MapPlacementId(301), team_slot: 1, bounds: (min: Vec2(672.0, -384.0), max: Vec2(864.0, 384.0))),
+                ],
+                spawn_points: [
+                    (placement_id: MapPlacementId(310), spawn_point_id: SpawnPointId(1), team_slot: 0, position: Vec2(-768.0, -288.0), facing: 0.0),
+                    (placement_id: MapPlacementId(311), spawn_point_id: SpawnPointId(2), team_slot: 0, position: Vec2(-768.0, -96.0), facing: 0.0),
+                    (placement_id: MapPlacementId(312), spawn_point_id: SpawnPointId(3), team_slot: 0, position: Vec2(-768.0, 96.0), facing: 0.0),
+                    (placement_id: MapPlacementId(313), spawn_point_id: SpawnPointId(4), team_slot: 0, position: Vec2(-768.0, 288.0), facing: 0.0),
+                    (placement_id: MapPlacementId(314), spawn_point_id: SpawnPointId(5), team_slot: 1, position: Vec2(768.0, -288.0), facing: 3.1415927),
+                    (placement_id: MapPlacementId(315), spawn_point_id: SpawnPointId(6), team_slot: 1, position: Vec2(768.0, -96.0), facing: 3.1415927),
+                    (placement_id: MapPlacementId(316), spawn_point_id: SpawnPointId(7), team_slot: 1, position: Vec2(768.0, 96.0), facing: 3.1415927),
+                    (placement_id: MapPlacementId(317), spawn_point_id: SpawnPointId(8), team_slot: 1, position: Vec2(768.0, 288.0), facing: 3.1415927),
+                ],
+                mode_anchors: [
+                    (placement_id: MapPlacementId(400), anchor_id: ModeAnchorId(1), definition_id: ModeAnchorDefinitionId(1), shape: Point(position: Vec2(0.0, -320.0), facing: 0.0)),
+                ],
+            ),
+        ),
+    ],
+)

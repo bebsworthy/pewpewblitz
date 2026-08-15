@@ -28,18 +28,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
-    CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId,
-    GameplayContentFingerprint, KnockbackFeedback, LobbedFlight, Projectile, ProjectileDeadline,
-    ProjectileSource, ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectedWeapon,
-    SelectingWeapon, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
+    CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback,
+    LobbedFlight, Projectile, ProjectileDeadline, ProjectileSource, ReplicatedAttackSource,
+    ResolvedWeapon, SelectedBuild, SelectedWeapon, SelectingWeapon, StraightFlight, TeamId,
+    WeaponDefinitionId, WeaponState,
+};
+use crate::content::GameplayContentFingerprint;
+use crate::map::{
+    MapInstanceId, MapRoot, ResolvedMapIdentity, ResolvedMapSnapshot, SpawnAssignment,
 };
 use crate::timing::SIMULATION_TICK;
 
 /// Netcode protocol ID. Bump this for incompatible wire-level changes.
-pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5237;
+pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5238;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 6;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 7;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -290,6 +294,7 @@ fn interpolate_network_pose(
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::combat::WeaponCatalogResource>()
+            .add_plugins(crate::map::MapContentPlugin)
             .add_systems(Startup, initialize_content_fingerprint);
         app.register_message::<ClientHello>()
             .add_direction(NetworkDirection::ClientToServer);
@@ -324,6 +329,11 @@ impl Plugin for ProtocolPlugin {
         .add_direction(NetworkDirection::ServerToClient);
 
         app.component::<Fighter>().replicate_once();
+        app.component::<MapRoot>().replicate_once();
+        app.component::<MapInstanceId>().replicate_once();
+        app.component::<ResolvedMapIdentity>().replicate_once();
+        app.component::<ResolvedMapSnapshot>().replicate_once();
+        app.component::<SpawnAssignment>().replicate_once();
         app.component::<PlayerId>().replicate_once();
         app.component::<NetworkEntityId>().replicate_once();
         app.component::<PlaceholderState>().replicate();
@@ -363,13 +373,12 @@ impl Plugin for ProtocolPlugin {
 }
 
 fn initialize_content_fingerprint(
-    catalog: Res<crate::combat::WeaponCatalogResource>,
+    weapons: Res<crate::combat::WeaponCatalogResource>,
+    maps: Res<crate::map::MapCatalogResource>,
     mut commands: Commands,
 ) {
-    let fingerprint = catalog
-        .0
-        .fingerprint()
-        .expect("embedded weapon catalog must fingerprint");
+    let fingerprint = crate::content::gameplay_content_fingerprint(&weapons.0, &maps.0)
+        .expect("embedded gameplay catalogs must fingerprint");
     commands.insert_resource(fingerprint);
 }
 

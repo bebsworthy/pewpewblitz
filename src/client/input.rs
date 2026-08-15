@@ -382,6 +382,7 @@ pub(super) fn write_client_input(
     mut pending: ResMut<PendingLocalActions>,
     trace: Option<ResMut<LiveInputTrace>>,
     context: Res<ClientInputContext>,
+    playable: Res<ClientPlayableGate>,
     selecting: Query<(), (With<Fighter>, With<Controlled>, With<SelectingWeapon>)>,
     mut query: Query<&mut ActionState<FighterInput>, With<InputMarker<FighterInput>>>,
 ) {
@@ -399,21 +400,23 @@ pub(super) fn write_client_input(
         }
         return;
     };
-    let input =
-        if matches!(*context, ClientInputContext::Paused) || selecting.iter().next().is_some() {
-            pending.latched_buttons = 0;
-            FighterInput::default()
-        } else {
-            let buttons = pending.held_buttons | pending.latched_buttons;
-            let input = FighterInput::from_axes_with_aim_distance(
-                pending.move_axis,
-                pending.aim_axis,
-                pending.aim_distance,
-                buttons,
-            );
-            pending.latched_buttons = 0;
-            input
-        };
+    let input = if !playable.0
+        || matches!(*context, ClientInputContext::Paused)
+        || selecting.iter().next().is_some()
+    {
+        pending.latched_buttons = 0;
+        FighterInput::default()
+    } else {
+        let buttons = pending.held_buttons | pending.latched_buttons;
+        let input = FighterInput::from_axes_with_aim_distance(
+            pending.move_axis,
+            pending.aim_axis,
+            pending.aim_distance,
+            buttons,
+        );
+        pending.latched_buttons = 0;
+        input
+    };
     action.0 = input;
     let write_state = (
         input.move_axis.to_vec2(),

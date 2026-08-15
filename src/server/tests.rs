@@ -22,6 +22,21 @@ fn server_config_rejects_unbounded_values() {
 }
 
 #[test]
+fn production_startup_instantiates_map_before_practice_dummy() {
+    let mut app = build_app_with_config(ServerNetworkConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        ..default()
+    });
+    app.finish();
+    app.cleanup();
+    app.update();
+    assert!(app.world().contains_resource::<ResolvedMap>());
+    let world = app.world_mut();
+    let mut dummies = world.query_filtered::<Entity, With<TestDummy>>();
+    assert_eq!(dummies.iter(world).count(), 1);
+}
+
+#[test]
 fn started_unlinked_udp_server_requests_error_exit() {
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, StatesPlugin))

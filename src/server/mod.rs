@@ -12,9 +12,10 @@ use crate::{
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
+    map::{AuthoritativeMapPlugin, MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
     movement::{
-        AuthoritativeMovementPlugin, AvianNetworkPlugin, GreyboxArenaDefinition, InputFreshness,
-        InputValidationState, MovementTuning,
+        AuthoritativeMovementPlugin, AvianNetworkPlugin, InputFreshness, InputValidationState,
+        MovementTuning,
     },
     protocol::{
         ClientHello, DEVELOPMENT_PRIVATE_KEY, Fighter, FighterInput, JoinOutcome, JoinRejection,
@@ -222,7 +223,10 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ProcessCombatCheck>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
-            .add_systems(Startup, spawn_server_endpoint)
+            .add_systems(
+                Startup,
+                spawn_server_endpoint.after(MapStartupSet::Instantiate),
+            )
             .add_systems(
                 Update,
                 (
@@ -350,8 +354,9 @@ fn process_client_hellos(
     mut commands: Commands,
     config: Res<ServerNetworkConfig>,
     fingerprint: Res<ProtocolFingerprint>,
-    content_fingerprint: Res<crate::combat::GameplayContentFingerprint>,
-    arena: Res<GreyboxArenaDefinition>,
+    content_fingerprint: Res<crate::content::GameplayContentFingerprint>,
+    spawn_points: Res<SpawnPointCatalog>,
+    resolved_map: Res<ResolvedMap>,
     movement_tuning: Res<MovementTuning>,
     fighters: Res<crate::combat::FighterDefinitions>,
     weapons: Res<crate::combat::WeaponDefinitions>,
@@ -417,22 +422,22 @@ fn process_client_hellos(
                                     player_id,
                                     network_entity_id,
                                 };
-                                let spawn_position = arena.spawn_position(player_id.0);
+                                let assigned_team = sandbox_team(player_id);
+                                let spawn_ordinal = player_id.0.saturating_sub(1) / 2;
+                                let spawn_point = spawn_points
+                                    .deterministic_point(assigned_team.0, spawn_ordinal)
+                                    .expect("validated map has a spawn for each sandbox team");
+                                let spawn_position = spawn_point.position;
+                                let spawn_facing = spawn_point.facing;
                                 let (fighter_definition, _build, team, health, _weapon) =
-                                    default_fighter_runtime(
-                                        sandbox_team(player_id),
-                                        &fighters,
-                                        &weapons,
-                                    );
+                                    default_fighter_runtime(assigned_team, &fighters, &weapons);
                                 let fighter_entity = commands
                                     .spawn((
                                         Fighter,
                                         player_id,
                                         network_entity_id,
                                         PlaceholderState {
-                                            spawn_slot: u64::from(
-                                                GreyboxArenaDefinition::spawn_slot(player_id.0),
-                                            ),
+                                            spawn_slot: u64::from(spawn_point.spawn_point_id.0),
                                         },
                                         fighter_definition,
                                         team,
@@ -442,15 +447,19 @@ fn process_client_hellos(
                                         AuthoritativeTick::default(),
                                         SpawnState {
                                             position: spawn_position,
-                                            facing: movement_tuning.spawn_facing,
+                                            facing: spawn_facing,
                                         },
                                         Position::from_xy(spawn_position.x, spawn_position.y),
-                                        Rotation::radians(movement_tuning.spawn_facing),
+                                        Rotation::radians(spawn_facing),
                                         LinearVelocity::default(),
                                         AngularVelocity::default(),
                                     ))
                                     .id();
                                 commands.entity(fighter_entity).insert((
+                                    SpawnAssignment {
+                                        map_instance_id: resolved_map.snapshot.identity.instance_id,
+                                        spawn_point_id: spawn_point.spawn_point_id,
+                                    },
                                     Collider::circle(movement_tuning.radius),
                                     RigidBody::Kinematic,
                                     CustomPositionIntegration,
@@ -780,6 +789,7 @@ pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
             GameplayPlugin,
             ProtocolPlugin,
             AvianNetworkPlugin,
+            AuthoritativeMapPlugin,
             AuthoritativeMovementPlugin,
             ServerNetworkPlugin,
             DedicatedServerPlugin,

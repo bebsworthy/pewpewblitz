@@ -1,5 +1,6 @@
 //! Authored weapon content, validation, and preset-independent resolution.
 
+use crate::content::{GameplayContentFingerprint, fnv1a64};
 use bevy::prelude::{Component, FromWorld, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -20,9 +21,6 @@ pub struct WeaponPresentationProfileId(pub u16);
     Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Default,
 )]
 pub struct WeaponRecipeFingerprint(pub u64);
-
-#[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct GameplayContentFingerprint(pub u64);
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct EngineWeaponLimits {
@@ -233,19 +231,23 @@ impl WeaponCatalog {
     }
 
     pub fn fingerprint(&self) -> Result<GameplayContentFingerprint, String> {
+        let bytes = self.canonical_fingerprint_material()?;
+        Ok(GameplayContentFingerprint(fnv1a64(&bytes)))
+    }
+
+    pub fn canonical_fingerprint_material(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
         let mut canonical = self.clone();
         canonical.presets.sort_by_key(|preset| preset.id);
         for preset in &mut canonical.presets {
             normalize_recipe(&mut preset.configuration.recipe);
         }
-        let bytes = postcard::to_allocvec(&(
+        postcard::to_allocvec(&(
             FINGERPRINT_FORMAT_VERSION,
             EngineWeaponLimits::default(),
             canonical,
         ))
-        .map_err(|error| format!("weapon fingerprint serialization failed: {error}"))?;
-        Ok(GameplayContentFingerprint(fnv1a64(&bytes)))
+        .map_err(|error| format!("weapon fingerprint serialization failed: {error}"))
     }
 
     pub fn resolve_preset(
@@ -841,11 +843,5 @@ fn limits_within_engine_ceiling(limits: EngineWeaponLimits) -> bool {
 fn valid_display_name(value: &str) -> bool {
     !value.is_empty() && value.len() <= 48 && value.chars().all(|character| !character.is_control())
 }
-fn fnv1a64(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
-    })
-}
-
 #[cfg(test)]
 mod tests;

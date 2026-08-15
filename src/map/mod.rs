@@ -1,0 +1,27 @@
+//! Typed map content, authoritative runtime state, and client reconstruction boundaries.
+
+#[cfg(feature = "client")]
+mod client;
+mod definitions;
+mod model;
+#[cfg(feature = "server")]
+mod server;
+#[cfg(all(test, feature = "server"))]
+mod tests;
+
+#[cfg(feature = "client")]
+pub use client::{
+    ClientMapReadiness, MapPresentationMember, MapPresentationPlugin, MapPresentationSet,
+    PresentedMap, perimeter_visual_shapes,
+};
+pub use definitions::{
+    EngineMapLimits, MapCatalogResource, MapContentCatalog, MapContentPlugin,
+    MapLayoutRequirements, MapPreset, MapRecipePolicy, PRACTICE_DUMMY_ANCHOR_DEFINITION,
+    SANDBOX_LAYOUT_SCHEMA_VERSION, resolve_map_recipe,
+};
+pub use model::*;
+#[cfg(feature = "server")]
+pub use server::{
+    AuthoritativeMapPlugin, BUILT_IN_MAP_PRESET, MapStartupSet, NextMapInstanceId,
+    install_resolved_map, perimeter_wall_shapes, teardown_authoritative_map,
+};

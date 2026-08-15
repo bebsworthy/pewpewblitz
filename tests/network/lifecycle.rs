@@ -233,6 +233,15 @@ fn disconnect_cleans_owned_placeholder_and_reconnect_allocates_fresh_ids() {
     assert_ne!(first_ids[0], second_ids[1]);
     assert_eq!(harness.client_ids(index), second_ids);
     assert_eq!(harness.server_static_arena_count(), static_count);
+    let server_snapshot = harness
+        .server
+        .world()
+        .resource::<ResolvedMap>()
+        .snapshot
+        .clone();
+    let client_world = harness.clients[index].world_mut();
+    let mut maps = client_world.query_filtered::<&ResolvedMapSnapshot, With<MapRoot>>();
+    assert_eq!(maps.iter(client_world).next(), Some(&server_snapshot));
 }
 
 #[test]
@@ -375,6 +384,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
         GameplayPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
+        AuthoritativeMapPlugin,
         AuthoritativeMovementPlugin,
         ServerNetworkPlugin,
     ));
@@ -404,6 +414,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
 
     let mut client_config = ClientNetworkConfig::new(1);
     client_config.server_addr = server_addr;
+    client_config.headless = true;
     let mut client = App::new();
     client.insert_resource(client_config).add_plugins((
         MinimalPlugins,
@@ -420,6 +431,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
     client.cleanup();
 
     let mut connected = false;
+    let mut final_state = (false, false, false);
     for _ in 0..240 {
         now += SIMULATION_TICK;
         client.insert_resource(TimeUpdateStrategy::ManualInstant(now));
@@ -438,6 +450,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
         let server_spawned = server_query.iter(server_world).next().is_some();
         let mut remote_query = client.world_mut().query_filtered::<Entity, With<Remote>>();
         let client_replicated = remote_query.iter(client.world()).next().is_some();
+        final_state = (client_connected, server_spawned, client_replicated);
         if client_connected && server_spawned && client_replicated {
             connected = true;
             break;
@@ -445,7 +458,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
     }
     assert!(
         connected,
-        "real UDP client did not complete connect/hello/replication"
+        "real UDP client did not complete connect/hello/replication: {final_state:?}"
     );
 
     let initial_x = {

@@ -17,8 +17,8 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<HeadlessAutomation>()
             .init_resource::<InputDeviceActivity>()
             .init_resource::<ClientInputContext>()
+            .init_resource::<ClientPlayableGate>()
             .init_resource::<WeaponSelectionState>()
-            .init_resource::<GreyboxArenaDefinition>()
             .init_resource::<InputTuning>()
             .add_systems(
                 Startup,
@@ -167,7 +167,7 @@ pub(super) fn update_controller_demo_gamepad(
 pub(super) fn send_client_hello(
     config: Res<ClientNetworkConfig>,
     fingerprint: Res<ProtocolFingerprint>,
-    content_fingerprint: Res<crate::combat::GameplayContentFingerprint>,
+    content_fingerprint: Res<crate::content::GameplayContentFingerprint>,
     time: Res<Time<Real>>,
     mut query: Query<
         (&mut ClientJoinStatus, &mut MessageSender<ClientHello>),

@@ -99,6 +99,7 @@ impl Harness {
             GameplayPlugin,
             ProtocolPlugin,
             AvianNetworkPlugin,
+            AuthoritativeMapPlugin,
             AuthoritativeMovementPlugin,
             ServerNetworkPlugin,
         ));
@@ -141,6 +142,7 @@ impl Harness {
     ) {
         let mut config = ClientNetworkConfig::new(client_id);
         config.transport = NetworkTransport::Crossbeam;
+        config.headless = true;
         if let Some(protocol_id) = client_protocol_id {
             config.network_protocol_id = protocol_id;
         }
@@ -415,8 +417,7 @@ impl Harness {
     pub(super) fn server_static_arena_count(&mut self) -> usize {
         let world = self.server.world_mut();
         let mut walls = world.query_filtered::<Entity, With<ArenaWall>>();
-        let mut markers = world.query_filtered::<Entity, With<SpawnMarker>>();
-        walls.iter(world).count() + markers.iter(world).count()
+        walls.iter(world).count()
     }
 
     pub(super) fn server_projectile_count(&mut self) -> usize {

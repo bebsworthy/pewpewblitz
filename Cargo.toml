@@ -44,6 +44,7 @@ network-test = [
 ]
 bevy-client = [
   "bevy/bevy_asset",
+  "bevy/bevy_audio",
   "bevy/bevy_core_pipeline",
   "bevy/bevy_gilrs",
   "bevy/bevy_render",
@@ -56,6 +57,7 @@ bevy-client = [
   "bevy/default_font",
   "bevy/gamepad",
   "bevy/png",
+  "bevy/vorbis",
   "bevy/keyboard",
   "bevy/mouse",
 ]

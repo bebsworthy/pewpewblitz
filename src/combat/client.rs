@@ -17,7 +17,7 @@ pub(super) fn preview_segments(
     facing: f32,
     aim_distance: Option<f32>,
     resolved: &ResolvedWeapon,
-    arena: &crate::movement::GreyboxArenaDefinition,
+    map: &crate::map::ResolvedMapSnapshot,
 ) -> Vec<(Vec2, f32, Vec2, Color)> {
     let mut segments = Vec::with_capacity(MAX_PREVIEW_SEGMENTS);
     match resolved.recipe.delivery {
@@ -85,21 +85,23 @@ pub(super) fn preview_segments(
             let desired =
                 origin + direction * aim_distance.unwrap_or(distance).clamp(0.0, distance);
             let bounded = desired.clamp(
-                arena.min + Vec2::splat(landing_clearance_radius),
-                arena.max - Vec2::splat(landing_clearance_radius),
+                map.playable_bounds.min + Vec2::splat(landing_clearance_radius),
+                map.playable_bounds.max - Vec2::splat(landing_clearance_radius),
             );
             let repaired_landing = delivery::repaired_landing_point(
                 origin,
                 bounded,
                 landing_clearance_radius,
                 |candidate| {
-                    arena
-                        .perimeter_wall_shapes()
-                        .into_iter()
-                        .chain(arena.cover_shapes())
-                        .all(|(center, size)| {
-                            !circle_overlaps_rect(candidate, landing_clearance_radius, center, size)
-                        })
+                    map.geometry.iter().all(|geometry| {
+                        !circle_overlaps_map_shape(
+                            candidate,
+                            landing_clearance_radius,
+                            geometry.position,
+                            geometry.rotation,
+                            geometry.shape,
+                        )
+                    })
                 },
             );
             let landing = repaired_landing.unwrap_or(bounded);
@@ -183,15 +185,31 @@ fn segment_between(start: Vec2, end: Vec2, width: f32, color: Color) -> (Vec2, f
     )
 }
 
-fn circle_overlaps_rect(center: Vec2, radius: f32, rect_center: Vec2, rect_size: Vec2) -> bool {
-    let rect_min = rect_center - rect_size * 0.5;
-    let rect_max = rect_center + rect_size * 0.5;
-    let closest = center.clamp(rect_min, rect_max);
-    closest.distance_squared(center) < radius * radius
+fn circle_overlaps_map_shape(
+    center: Vec2,
+    radius: f32,
+    shape_center: Vec2,
+    rotation: f32,
+    shape: crate::map::MapShape,
+) -> bool {
+    match shape {
+        crate::map::MapShape::Circle {
+            radius: shape_radius,
+        } => center.distance_squared(shape_center) < (radius + shape_radius).powi(2),
+        crate::map::MapShape::Rectangle { half_extents } => {
+            let local = Vec2::from_angle(-rotation).rotate(center - shape_center);
+            let closest = local.clamp(-half_extents, half_extents);
+            local.distance_squared(closest) < radius * radius
+        }
+    }
 }
 
 #[cfg(feature = "client")]
 pub struct ClientCombatPlugin;
+
+/// A combat cue that passed the bounded client deduplication gate.
+#[derive(Message, Clone, Debug)]
+pub(crate) struct DeduplicatedCombatCue(pub CombatCue);
 
 #[cfg(feature = "client")]
 impl Plugin for ClientCombatPlugin {
@@ -201,6 +219,7 @@ impl Plugin for ClientCombatPlugin {
             .init_resource::<RecentCombatEvents>()
             .init_resource::<ClientCombatObservation>()
             .init_resource::<ClientCombatEvidenceStatus>()
+            .add_message::<DeduplicatedCombatCue>()
             .add_systems(Startup, validate_definitions)
             .add_systems(
                 Update,
@@ -414,12 +433,13 @@ fn combat_profile_size(profile_id: u16, fallback: Vec2) -> Vec2 {
 }
 
 #[cfg(feature = "client")]
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn receive_combat_cues(
     mut commands: Commands,
     mut recent: ResMut<RecentCombatEvents>,
     mut observation: ResMut<ClientCombatObservation>,
     mut capture: Option<ResMut<CaptureCombatCues>>,
+    mut presented_cues: MessageWriter<DeduplicatedCombatCue>,
     mut receivers: Query<
         Option<&mut lightyear::prelude::MessageReceiver<CombatCue>>,
         With<lightyear::prelude::client::Client>,
@@ -502,6 +522,7 @@ fn receive_combat_cues(
             ) {
                 continue;
             }
+            presented_cues.write(DeduplicatedCombatCue(cue.clone()));
             let target_position = match &cue {
                 CombatCue::Damage { target, .. }
                 | CombatCue::DamageApplied { target, .. }
@@ -670,7 +691,7 @@ struct WeaponPreviewVisual {
 #[cfg(feature = "client")]
 fn update_weapon_preview(
     mut commands: Commands,
-    arena: Res<crate::movement::GreyboxArenaDefinition>,
+    maps: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
     pending: Res<crate::client::PendingLocalActions>,
     fighters: Query<
         (&Position, &Rotation, Option<&ResolvedWeapon>),
@@ -683,6 +704,12 @@ fn update_weapon_preview(
         &mut Visibility,
     )>,
 ) {
+    let Some(map) = maps.iter().max_by_key(|map| map.identity.instance_id) else {
+        for (_, _, _, mut visibility) in &mut visuals {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
     let Some((position, rotation, resolved)) = fighters.iter().next() else {
         for (_, _, _, mut visibility) in &mut visuals {
             *visibility = Visibility::Hidden;
@@ -697,7 +724,7 @@ fn update_weapon_preview(
     };
     let origin = position.0;
     let facing = rotation.as_radians();
-    let segments = preview_segments(origin, facing, pending.aim_distance, resolved, &arena);
+    let segments = preview_segments(origin, facing, pending.aim_distance, resolved, map);
     for (visual, mut transform, mut sprite, mut visibility) in &mut visuals {
         let Some((center, angle, size, color)) = segments.get(usize::from(visual.slot)) else {
             *visibility = Visibility::Hidden;
@@ -974,7 +1001,9 @@ fn update_combat_effects(
 mod tests {
     use super::*;
     use crate::combat::{FighterDefinitions, WeaponCatalog, WeaponPresetId};
-    use crate::movement::GreyboxArenaDefinition;
+    use crate::map::{
+        MapContentCatalog, MapInstanceId, MapLayoutRequirements, MapPresetId as ArenaPresetId,
+    };
     use crate::timing::SimulationTick;
     use core::time::Duration;
 
@@ -984,13 +1013,15 @@ mod tests {
         let resolved = catalog
             .resolve_preset(WeaponPresetId(id), &fighter)
             .unwrap();
-        preview_segments(
-            Vec2::ZERO,
-            0.0,
-            None,
-            &resolved,
-            &GreyboxArenaDefinition::default(),
-        )
+        let map_catalog = MapContentCatalog::embedded().unwrap();
+        let map = map_catalog
+            .resolve_preset(
+                ArenaPresetId(1),
+                MapInstanceId(1),
+                &MapLayoutRequirements::sandbox(),
+            )
+            .unwrap();
+        preview_segments(Vec2::ZERO, 0.0, None, &resolved, &map.snapshot)
     }
 
     #[test]
@@ -1017,13 +1048,15 @@ mod tests {
         let catalog = WeaponCatalog::embedded().unwrap();
         let fighter = FighterDefinitions::default().entries[0];
         let resolved = catalog.resolve_preset(WeaponPresetId(3), &fighter).unwrap();
-        let segments = preview_segments(
-            Vec2::ZERO,
-            0.0,
-            Some(180.0),
-            &resolved,
-            &GreyboxArenaDefinition::default(),
-        );
+        let map_catalog = MapContentCatalog::embedded().unwrap();
+        let map = map_catalog
+            .resolve_preset(
+                ArenaPresetId(1),
+                MapInstanceId(1),
+                &MapLayoutRequirements::sandbox(),
+            )
+            .unwrap();
+        let segments = preview_segments(Vec2::ZERO, 0.0, Some(180.0), &resolved, &map.snapshot);
 
         assert!((segments[0].2.x - 180.0).abs() < 0.001);
     }

@@ -101,12 +101,10 @@ pub struct AuthoritativeMovementPlugin;
 
 impl Plugin for AuthoritativeMovementPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GreyboxArenaDefinition>()
-            .init_resource::<MovementTuning>()
+        app.init_resource::<MovementTuning>()
             .init_resource::<InputTuning>()
             .init_resource::<AuthoritativeInputTrace>()
             .insert_resource(Gravity(Vec2::ZERO))
-            .add_systems(Startup, spawn_greybox_arena)
             .add_systems(
                 FixedUpdate,
                 authoritative_movement.in_set(GameplaySet::Simulation),
@@ -135,45 +133,6 @@ impl Plugin for AuthoritativeMovementPlugin {
     }
 }
 
-fn spawn_greybox_arena(mut commands: Commands, arena: Res<GreyboxArenaDefinition>) {
-    for (position, size) in arena.perimeter_wall_shapes() {
-        commands.spawn((
-            ArenaWall,
-            RigidBody::Static,
-            Collider::rectangle(size.x, size.y),
-            CollisionLayers::new(
-                INDESTRUCTIBLE_TERRAIN_LAYER,
-                FIGHTER_LAYER | PROJECTILE_LAYER | DEPLOYABLE_LAYER,
-            ),
-            Position::from_xy(position.x, position.y),
-            Rotation::IDENTITY,
-            Transform::from_translation(position.extend(0.0)),
-        ));
-    }
-    for (position, size) in arena.cover_shapes() {
-        commands.spawn((
-            ArenaWall,
-            RigidBody::Static,
-            Collider::rectangle(size.x, size.y),
-            terrain_collision_layers(),
-            Position::from_xy(position.x, position.y),
-            Rotation::IDENTITY,
-            Transform::from_translation(position.extend(0.0)),
-        ));
-    }
-    for (side, x) in arena.spawn_x.into_iter().enumerate() {
-        for (row, y) in arena.spawn_y.into_iter().enumerate() {
-            commands.spawn((
-                SpawnMarker(
-                    u8::try_from(side * arena.spawn_y.len() + row)
-                        .expect("spawn marker fits in u8"),
-                ),
-                Position::from_xy(x, y),
-            ));
-        }
-    }
-}
-
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 fn authoritative_movement(
@@ -181,7 +140,7 @@ fn authoritative_movement(
     mut trace: ResMut<AuthoritativeInputTrace>,
     time: Res<Time<Fixed>>,
     tick: Res<SimulationTick>,
-    arena: Res<GreyboxArenaDefinition>,
+    bounds: Res<crate::map::PlayableBounds>,
     tuning: Res<MovementTuning>,
     input_tuning: Res<InputTuning>,
     move_and_slide: MoveAndSlide,
@@ -295,11 +254,11 @@ fn authoritative_movement(
         velocity.0 = output.projected_velocity;
 
         let facing = rotation.as_radians();
-        if !pose_is_valid(position.0, facing, *arena, tuning.radius) {
+        if !pose_is_valid(position.0, facing, *bounds, tuning.radius) {
             let repaired_position = if position.0.is_finite() {
-                arena.clamp_position(position.0, tuning.radius)
+                bounds.0.clamp_circle(position.0, tuning.radius)
             } else {
-                arena.spawn_position(1)
+                bounds.0.center()
             };
             position.0 = repaired_position;
             if !facing.is_finite() {

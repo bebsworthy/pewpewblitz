@@ -439,13 +439,28 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     let wall_client = (0..2)
         .find(|&index| harness.controlled_player_id(index).0 == 1)
         .expect("player one client");
+    let wall_fighter = {
+        let player = harness.controlled_player_id(wall_client);
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(Entity, &PlayerId), With<Fighter>>();
+        query
+            .iter(world)
+            .find(|(_, candidate)| **candidate == player)
+            .map(|(entity, _)| entity)
+            .expect("wall test fighter")
+    };
+    harness
+        .server
+        .world_mut()
+        .entity_mut(wall_fighter)
+        .insert(Position::from_xy(-768.0, -420.0));
     harness.set_controlled_input(wall_client, FighterInput::from_axes(Vec2::X, None, 0));
-    for _ in 0..300 {
+    for _ in 0..360 {
         harness.step();
     }
     let wall_pose = harness.server_poses()[0];
     assert!(
-        (774.5..=776.0).contains(&wall_pose.1.0.x),
+        (870.5..=872.0).contains(&wall_pose.1.0.x),
         "wall_pose={wall_pose:?}"
     );
 
@@ -458,14 +473,14 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         harness.step();
     }
     let after_slide = harness.server_poses()[0].1.0;
-    assert!((774.5..=776.0).contains(&after_slide.x));
+    assert!((870.5..=872.0).contains(&after_slide.x));
     assert!(after_slide.y > before_slide.y + 100.0);
     for _ in 0..240 {
         harness.step();
     }
     let corner_pose = harness.server_poses()[0].1.0;
-    assert!((774.5..=776.0).contains(&corner_pose.x));
-    assert!((474.5..=476.0).contains(&corner_pose.y));
+    assert!((870.5..=872.0).contains(&corner_pose.x));
+    assert!((550.5..=552.0).contains(&corner_pose.y));
 
     let mut overlap = Harness::new(2);
     overlap.step_until(|harness| {
@@ -473,20 +488,25 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
             && harness.client_is_active(1)
             && harness.server_ids().len() == 2
     });
-    let second_entity = {
+    let fighter_entities = {
         let world = overlap.server.world_mut();
         let mut query = world.query_filtered::<(Entity, &PlayerId), With<Fighter>>();
-        query
+        let mut fighters: Vec<_> = query
             .iter(world)
-            .find(|(_, player)| player.0 == 2)
-            .map(|(entity, _)| entity)
-            .expect("second fighter should exist")
+            .filter(|(_, player)| player.0 != 0)
+            .map(|(entity, player)| (entity, player.0))
+            .collect();
+        fighters.sort_by_key(|(_, player)| *player);
+        fighters
     };
-    overlap
-        .server
-        .world_mut()
-        .entity_mut(second_entity)
-        .insert(Position::from_xy(620.0, -300.0));
+    for (entity, player) in fighter_entities {
+        let x = if player == 1 { -620.0 } else { 620.0 };
+        overlap
+            .server
+            .world_mut()
+            .entity_mut(entity)
+            .insert(Position::from_xy(x, -420.0));
+    }
     for index in 0..2 {
         let direction = if overlap.controlled_player_id(index).0 == 1 {
             Vec2::X
@@ -506,24 +526,33 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
 }
 
 #[test]
-fn configured_arena_and_movement_resources_drive_spawn_and_collider_tuning() {
+fn configured_map_recipe_drives_authoritative_spawn_pose() {
     let mut harness = Harness::new(1);
     {
-        let mut arena = harness
+        let mut catalog = harness
             .server
             .world_mut()
-            .resource_mut::<GreyboxArenaDefinition>();
-        arena.spawn_x = [-700.0, 700.0];
+            .resource_mut::<MapCatalogResource>();
+        for point in &mut catalog.0.presets[0].recipe.spawn_points {
+            if point.team_slot == 0 {
+                point.position.x = -800.0;
+                point.facing = 0.25;
+            }
+        }
     }
-    harness
-        .server
-        .world_mut()
-        .resource_mut::<MovementTuning>()
-        .spawn_facing = 1.25;
+    for client in &mut harness.clients {
+        let mut catalog = client.world_mut().resource_mut::<MapCatalogResource>();
+        for point in &mut catalog.0.presets[0].recipe.spawn_points {
+            if point.team_slot == 0 {
+                point.position.x = -800.0;
+                point.facing = 0.25;
+            }
+        }
+    }
     harness.step_until(|harness| harness.client_is_active(0) && harness.server_ids().len() == 1);
     let pose = harness.server_poses()[0];
-    assert!((pose.1.0.x + 700.0).abs() < 0.5);
-    assert!((pose.2.as_radians() - 1.25).abs() < 0.01);
+    assert!((pose.1.0.x + 800.0).abs() < 0.5);
+    assert!((pose.2.as_radians() - 0.25).abs() < 0.01);
 }
 
 #[test]
@@ -542,11 +571,11 @@ fn authoritative_move_and_slide_depenetrates_a_spawned_inside_cover_fighter() {
         .server
         .world_mut()
         .entity_mut(fighter)
-        .insert(Position::from_xy(0.0, -220.0));
+        .insert(Position::from_xy(0.0, -256.0));
     harness.set_controlled_input(0, FighterInput::default());
     for _ in 0..4 {
         harness.step();
     }
     let pose = harness.server_poses()[0].1.0;
-    assert!(pose.x.abs() >= 114.0 || (pose.y + 220.0).abs() >= 84.0);
+    assert!(pose.x.abs() >= 184.0 || (pose.y + 256.0).abs() >= 56.0);
 }

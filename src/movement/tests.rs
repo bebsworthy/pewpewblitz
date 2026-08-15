@@ -75,66 +75,45 @@ fn absent_remote_input_does_not_refresh_freshness() {
 
 #[test]
 fn camera_and_spawn_bounds_are_stable() {
-    let arena = GreyboxArenaDefinition::default();
-    assert_eq!(arena.spawn_position(1), Vec2::new(-620.0, -300.0));
-    assert_eq!(arena.spawn_position(2), Vec2::new(620.0, -300.0));
-    assert_eq!(arena.spawn_position(5), Vec2::new(-620.0, 100.0));
-    assert_eq!(arena.spawn_position(8), Vec2::new(620.0, 300.0));
-    assert_eq!(GreyboxArenaDefinition::spawn_slot(1), 0);
-    assert_eq!(GreyboxArenaDefinition::spawn_slot(8), 7);
-    let perimeter = arena.perimeter_wall_shapes();
-    assert!((perimeter[0].0.x - (arena.min.x - ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
-    assert!((perimeter[1].0.x - (arena.max.x + ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
-    assert!((perimeter[2].0.y - (arena.min.y - ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
-    assert!((perimeter[3].0.y - (arena.max.y + ARENA_WALL_THICKNESS / 2.0)).abs() < 0.001);
+    let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+    let resolved = catalog
+        .resolve_preset(
+            crate::map::MapPresetId(1),
+            crate::map::MapInstanceId(1),
+            &crate::map::MapLayoutRequirements::sandbox(),
+        )
+        .unwrap();
     assert_eq!(
-        arena.cover_shapes()[0],
-        (Vec2::new(0.0, -220.0), Vec2::new(180.0, 120.0))
+        resolved.snapshot.camera_bounds.min,
+        Vec2::new(-896.0, -576.0)
+    );
+    assert_eq!(resolved.snapshot.camera_bounds.max, Vec2::new(896.0, 576.0));
+    assert_eq!(
+        resolved.spawn_points_by_team[&0][0].position,
+        Vec2::new(-768.0, -288.0)
     );
     assert_eq!(
-        arena.clamp_position(Vec2::new(9_000.0, -9_000.0), 24.0),
-        Vec2::new(776.0, -476.0)
+        resolved.spawn_points_by_team[&1][3].position,
+        Vec2::new(768.0, 288.0)
     );
-}
-
-#[test]
-fn perimeter_visual_shapes_are_in_bounds_and_follow_collision_faces() {
-    let arena = GreyboxArenaDefinition::default();
-    let visuals = arena.perimeter_visual_shapes();
-
     assert_eq!(
-        visuals[0],
-        (Vec2::new(-788.0, 0.0), Vec2::new(24.0, 1000.0))
+        resolved
+            .snapshot
+            .playable_bounds
+            .clamp_circle(Vec2::new(9_000.0, -9_000.0), 24.0),
+        Vec2::new(872.0, -552.0)
     );
-    assert_eq!(visuals[1], (Vec2::new(788.0, 0.0), Vec2::new(24.0, 1000.0)));
-    assert_eq!(
-        visuals[2],
-        (Vec2::new(0.0, -488.0), Vec2::new(1600.0, 24.0))
-    );
-    assert_eq!(visuals[3], (Vec2::new(0.0, 488.0), Vec2::new(1600.0, 24.0)));
-
-    for (position, size) in visuals {
-        let min = position - size / 2.0;
-        let max = position + size / 2.0;
-        assert!(min.x >= arena.min.x);
-        assert!(min.y >= arena.min.y);
-        assert!(max.x <= arena.max.x);
-        assert!(max.y <= arena.max.y);
-    }
-
-    let edges = arena.perimeter_visual_edge_shapes();
-    assert_eq!(edges[0], (Vec2::new(-779.0, 0.0), Vec2::new(6.0, 1000.0)));
-    assert_eq!(edges[1], (Vec2::new(779.0, 0.0), Vec2::new(6.0, 1000.0)));
-    assert_eq!(edges[2], (Vec2::new(0.0, -479.0), Vec2::new(1600.0, 6.0)));
-    assert_eq!(edges[3], (Vec2::new(0.0, 479.0), Vec2::new(1600.0, 6.0)));
 }
 
 #[test]
 fn pose_validation_uses_fighter_center_bounds() {
-    let arena = GreyboxArenaDefinition::default();
-    assert!(pose_is_valid(Vec2::new(776.0, 0.0), 0.0, arena, 24.0));
-    assert!(!pose_is_valid(Vec2::new(800.0, 0.0), 0.0, arena, 24.0));
-    assert!(!pose_is_valid(Vec2::new(0.0, -500.0), 0.0, arena, 24.0));
+    let bounds = crate::map::PlayableBounds(crate::map::AxisAlignedMapRect {
+        min: Vec2::new(-896.0, -576.0),
+        max: Vec2::new(896.0, 576.0),
+    });
+    assert!(pose_is_valid(Vec2::new(872.0, 0.0), 0.0, bounds, 24.0));
+    assert!(!pose_is_valid(Vec2::new(896.0, 0.0), 0.0, bounds, 24.0));
+    assert!(!pose_is_valid(Vec2::new(0.0, -576.0), 0.0, bounds, 24.0));
 }
 
 #[cfg(feature = "server")]

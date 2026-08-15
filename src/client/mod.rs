@@ -5,13 +5,13 @@ use crate::{
     VERSION,
     combat::{
         ClientCombatEvidenceStatus, ClientCombatPlugin, CombatHudText, ResolvedWeapon,
-        SelectingWeapon, WeaponCatalogResource, WeaponSelectionText, fighter_color,
+        SelectingWeapon, WeaponCatalogResource, WeaponSelectionText,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
     movement::{
-        AvianNetworkPlugin, CAMERA_VERTICAL_SPAN, GreyboxArenaDefinition, InputTuning,
-        committed_aim, radial_deadzone, trigger_pressed,
+        AvianNetworkPlugin, CAMERA_VERTICAL_SPAN, InputTuning, committed_aim, radial_deadzone,
+        trigger_pressed,
     },
     protocol::{
         ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, NetworkEntityId, PlayerId,
@@ -47,16 +47,19 @@ use lightyear::prelude::{ConfirmedHistory, Controlled, Interpolated};
 use lightyear::prelude::{MessageReceiver, MessageSender, PingManager, ReplicationReceiver, UdpIo};
 use std::env;
 
+mod assets;
+mod audio;
+mod hud;
 mod input;
 mod presentation;
 mod session;
+pub(crate) use assets::ClientAssetHandles;
 #[allow(clippy::wildcard_imports)]
 use input::*;
 pub use presentation::{ClientPresentationPlugin, MovementPresentationPlugin};
 #[cfg(test)]
 use presentation::{
-    clamp_camera_center, spawn_client_arena, update_client_hud,
-    write_interpolated_fighter_pose_to_transform,
+    clamp_camera_center, update_client_hud, write_interpolated_fighter_pose_to_transform,
 };
 pub use session::ClientNetworkPlugin;
 #[cfg(test)]
@@ -149,6 +152,16 @@ pub enum ClientInputContext {
     #[default]
     Gameplay,
     Paused,
+}
+
+/// Local presentation/readiness gate. Headless automation has no asset requirement.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClientPlayableGate(pub bool);
+
+impl FromWorld for ClientPlayableGate {
+    fn from_world(world: &mut World) -> Self {
+        Self(world.resource::<ClientNetworkConfig>().headless)
+    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -316,9 +329,6 @@ struct ScoreboardOverlay;
 #[derive(Component)]
 struct FighterVisual;
 
-#[derive(Component)]
-struct ArenaVisual;
-
 /// Build the windowed or headless client application.
 pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     let headless = config.headless;
@@ -334,14 +344,22 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         .add_plugins(LogPlugin::default());
     } else {
         let (present_mode, winit_settings) = render_profile_settings(render_profile);
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: format!("Brawler Client {client_id}"),
-                present_mode,
-                ..default()
-            }),
-            ..default()
-        }))
+        app.add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+                    ..default()
+                })
+                .set(ImagePlugin::default_nearest())
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: format!("Brawler Client {client_id}"),
+                        present_mode,
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .insert_resource(winit_settings);
         info!(
             profile = render_profile.name(),

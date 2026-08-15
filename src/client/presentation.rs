@@ -10,13 +10,7 @@ impl Plugin for MovementPresentationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (
-                spawn_client_arena,
-                spawn_client_camera,
-                spawn_pause_overlay,
-                spawn_client_hud,
-            )
-                .chain(),
+            (spawn_client_camera, spawn_pause_overlay, spawn_client_hud).chain(),
         )
         .add_systems(
             Update,
@@ -38,46 +32,6 @@ impl Plugin for MovementPresentationPlugin {
                 .after(PhysicsSystems::Writeback)
                 .before(TransformSystems::Propagate),
         );
-    }
-}
-
-pub(super) fn spawn_client_arena(mut commands: Commands, arena: Res<GreyboxArenaDefinition>) {
-    let border_color = Color::srgb(0.08, 0.34, 0.58);
-    let boundary_color = Color::srgb(0.40, 0.86, 1.0);
-    let cover_color = Color::srgb(0.08, 0.34, 0.68);
-    let cover_edge_color = Color::srgb(0.68, 0.92, 1.0);
-    for (position, size) in arena.perimeter_visual_shapes() {
-        commands.spawn((
-            ArenaVisual,
-            Sprite::from_color(border_color, size),
-            Transform::from_translation(position.extend(-2.0)),
-        ));
-    }
-    // The collision bodies remain outside the playable bounds. This in-bounds layer is
-    // deliberately thick enough to survive a compact window and a camera at any arena edge;
-    // only its inner edge is bright so the HUD remains readable when the camera reaches a wall.
-    for (position, size) in arena.perimeter_visual_edge_shapes() {
-        commands.spawn((
-            ArenaVisual,
-            Sprite::from_color(boundary_color, size),
-            Transform::from_translation(position.extend(1.0)),
-        ));
-    }
-    for (position, size) in arena.cover_shapes() {
-        commands.spawn((
-            ArenaVisual,
-            Sprite::from_color(cover_color, size),
-            // Keep blocker bodies above the arena markers/background so the complete cover,
-            // rather than only its edge strip, remains visible in the window.
-            Transform::from_translation(position.extend(2.0)),
-        ));
-        commands.spawn((
-            ArenaVisual,
-            Sprite::from_color(cover_edge_color, Vec2::new(size.x, 10.0)),
-            Transform::from_translation(
-                (position + Vec2::new(0.0, size.y / 2.0 - 5.0)).extend(3.0),
-            ),
-        ));
     }
 }
 
@@ -191,24 +145,50 @@ fn spawn_client_hud(mut commands: Commands) {
 
 fn ensure_fighter_visuals(
     mut commands: Commands,
+    assets: Option<Res<ClientAssetHandles>>,
     mut query: Query<
-        (Entity, &PlayerId, &NetworkEntityId, Option<&mut Sprite>),
+        (
+            Entity,
+            &NetworkEntityId,
+            Option<&crate::combat::TeamId>,
+            Has<Controlled>,
+            Option<&mut Sprite>,
+        ),
         (With<Fighter>, With<Remote>),
     >,
 ) {
-    for (entity, player_id, network_id, sprite) in &mut query {
+    for (entity, network_id, team, controlled, sprite) in &mut query {
         if sprite.is_none() {
-            if network_id.0 == 0 {
-                commands.entity(entity).insert((
-                    FighterVisual,
-                    Sprite::from_color(Color::srgb(0.95, 0.25, 0.1), Vec2::new(52.0, 32.0)),
-                ));
-                continue;
-            }
-            commands.entity(entity).insert((
-                FighterVisual,
-                Sprite::from_color(fighter_color(*player_id), Vec2::new(48.0, 28.0)),
-            ));
+            let sprite = if network_id.0 == 0 {
+                Sprite::from_color(Color::srgb(0.72, 0.76, 0.82), Vec2::new(52.0, 32.0))
+            } else if let Some(assets) = assets.as_ref() {
+                let image = if team.is_some_and(|team| team.0 == 1) {
+                    assets.team_red.clone()
+                } else {
+                    assets.team_blue.clone()
+                };
+                let mut sprite = Sprite::from_image(image);
+                sprite.custom_size = Some(Vec2::splat(52.0));
+                sprite
+            } else {
+                let color = if team.is_some_and(|team| team.0 == 1) {
+                    Color::srgb(1.0, 0.42, 0.12)
+                } else {
+                    Color::srgb(0.12, 0.72, 0.96)
+                };
+                Sprite::from_color(color, Vec2::new(48.0, 30.0))
+            };
+            commands
+                .entity(entity)
+                .insert((FighterVisual, sprite))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text2d::new(if controlled { "◎ ▲" } else { "▲" }),
+                        TextFont::from_font_size(if controlled { 22.0 } else { 18.0 }),
+                        TextColor(Color::WHITE),
+                        Transform::from_xyz(0.0, 30.0, 2.0),
+                    ));
+                });
         }
     }
 }
@@ -250,10 +230,13 @@ pub(super) fn write_interpolated_fighter_pose_to_transform(
 }
 
 fn follow_controlled_camera(
-    arena: Res<GreyboxArenaDefinition>,
+    map: Option<Res<crate::map::PresentedMap>>,
     fighters: Query<&Position, (With<Fighter>, With<Controlled>, Without<ArenaCamera>)>,
     mut cameras: Query<(&Camera, &mut Transform), With<ArenaCamera>>,
 ) {
+    let Some(map) = map else {
+        return;
+    };
     let Some(position) = fighters.iter().next().map(|position| position.0) else {
         return;
     };
@@ -262,7 +245,7 @@ fn follow_controlled_camera(
             .logical_viewport_size()
             .filter(|size| size.x > 0.0 && size.y > 0.0)
             .unwrap_or(Vec2::new(16.0, 9.0));
-        let center = clamp_camera_center(position, *arena, viewport);
+        let center = clamp_camera_center(position, map.camera_bounds, viewport);
         transform.translation.x = center.x;
         transform.translation.y = center.y;
     }
@@ -270,7 +253,7 @@ fn follow_controlled_camera(
 
 pub(super) fn clamp_camera_center(
     position: Vec2,
-    arena: GreyboxArenaDefinition,
+    bounds: crate::map::AxisAlignedMapRect,
     viewport: Vec2,
 ) -> Vec2 {
     let aspect = if viewport.y > 0.0 {
@@ -280,16 +263,16 @@ pub(super) fn clamp_camera_center(
     };
     let half_height = CAMERA_VERTICAL_SPAN / 2.0;
     let half_width = half_height * aspect.max(0.0);
-    let min = arena.min + Vec2::new(half_width, half_height);
-    let max = arena.max - Vec2::new(half_width, half_height);
+    let min = bounds.min + Vec2::new(half_width, half_height);
+    let max = bounds.max - Vec2::new(half_width, half_height);
     Vec2::new(
         if min.x > max.x {
-            f32::midpoint(arena.min.x, arena.max.x)
+            f32::midpoint(bounds.min.x, bounds.max.x)
         } else {
             position.x.clamp(min.x, max.x)
         },
         if min.y > max.y {
-            f32::midpoint(arena.min.y, arena.max.y)
+            f32::midpoint(bounds.min.y, bounds.max.y)
         } else {
             position.y.clamp(min.y, max.y)
         },
@@ -377,7 +360,13 @@ impl Plugin for ClientPresentationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClientPresentation>()
             .add_systems(Update, exit_on_close_requested)
-            .add_plugins(MovementPresentationPlugin);
+            .add_plugins((
+                crate::map::MapPresentationPlugin,
+                assets::ClientAssetPlugin,
+                audio::ClientAudioPlugin,
+                hud::ClientReadinessHudPlugin,
+                MovementPresentationPlugin,
+            ));
     }
 }
 

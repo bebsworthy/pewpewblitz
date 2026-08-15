@@ -10,7 +10,7 @@
 | Specification validation | Implementation authorized; validation feedback remains open |
 | Implementation | Architecture remediation complete: combat, client, server, movement, and network tests now follow cohesive ownership boundaries |
 | Verification | Arc Launcher playtest amendments pass role-specific lint, unit, network, and performance suites; twelve impairment runs plus windowed render-profile and physical-controller evidence require rerun |
-| User validation/playtest | Not started |
+| User validation/playtest | Complete; user validated M05 on 2026-08-15 with no blocking follow-up requested |
 
 Update this table and the roadmap together whenever the milestone changes phase.
 
@@ -958,6 +958,21 @@ Automated verification is complete. The remaining verification work is the speci
 30/60/high presentation pass, keyboard/mouse readability and counterplay observations, and the
 physical-controller selection/aim/fire/pause/disconnect/reconnect pass. Explicit specification
 validation, user feedback triage, and learn-from-errors closeout also remain before completion.
+
+## User validation and M06 prerequisite handoff (2026-08-15)
+
+The user confirmed that the M05 playtest is complete and validated the milestone with no blocking
+follow-up requested. The post-Arc amendment twelve-run local/typical/adverse process matrix was then
+rerun on the exact M06 starting commit for all four presets. Every run exited successfully with
+matching server/two-client cue counts and converged named durable-state evidence. Profile summaries:
+
+- local: fire-to-cue p95 16.296 ms / 14.539 ms; durable-state p95 19.082 ms / 14.433 ms;
+- typical: fire-to-cue p95 54.423 ms / 53.262 ms; durable-state p95 53.321 ms / 60.823 ms;
+- adverse: fire-to-cue p95 77.678 ms / 79.947 ms; durable-state p95 154.928 ms / 272.120 ms.
+
+Together with the fresh format, 74-test library, 40-test network, 7-test performance, and both
+role-specific Clippy passes, this satisfies M06's prerequisite baseline. Remaining unchecked M05
+closeout items stay visible here and are not silently claimed complete.
 
 ## Arc Launcher playtest-amendment evidence (2026-08-15)
 

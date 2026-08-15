@@ -22,11 +22,21 @@ use brawler::{
         TestDummy, WeaponPhase, WeaponPresetId, WeaponRecipeFingerprint, WeaponState,
         WeaponTelemetry, WorldPoint,
     },
-    config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
+    config::{
+        ClientNetworkConfig, NetworkImpairmentProfile, NetworkTransport, ServerNetworkConfig,
+    },
     gameplay::GameplayPlugin,
+    map::{
+        AuthoritativeMapPlugin, CollisionProfileId, EntityDefinitionId, GeometryPlacement,
+        MapCatalogResource, MapEntityPlacement, MapInstanceId, MapInstanceMember,
+        MapLayoutRequirements, MapPlacementId, MapPresentationProfileId,
+        MapPresetId as ArenaPresetId, MapRegionPlacement, MapRoot, MapShape, PlayableBounds,
+        RegionId, RegionProfileId, ResolvedMap, ResolvedMapSnapshot, SpawnPointId, TeamSpawnPoint,
+        VisualPlacementKind, install_resolved_map,
+    },
     movement::{
-        ArenaWall, AuthoritativeMovementPlugin, AvianNetworkPlugin, GreyboxArenaDefinition,
-        InputTuning, InputValidationState, MovementTuning, SpawnMarker,
+        ArenaWall, AuthoritativeMovementPlugin, AvianNetworkPlugin, InputTuning,
+        InputValidationState, MovementTuning,
     },
     protocol::{
         Fighter, FighterInput, NetworkEntityId, PlaceholderPlayer, PlayerId, ProtocolPlugin,
@@ -65,6 +75,8 @@ mod combat_recovery;
 mod lifecycle;
 #[path = "network/lifecycle_roster.rs"]
 mod lifecycle_roster;
+#[path = "network/map.rs"]
+mod map;
 #[path = "network/movement.rs"]
 mod movement;
 #[path = "network/movement_input.rs"]

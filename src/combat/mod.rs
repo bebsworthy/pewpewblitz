@@ -45,18 +45,21 @@ use evidence::{
 #[cfg(feature = "server")]
 use evidence::{capture_server_combat_checkpoints, send_combat_evidence_checkpoints};
 
+pub use crate::content::GameplayContentFingerprint;
 #[cfg(feature = "client")]
 pub use client::ClientCombatEvidenceStatus;
+#[cfg(feature = "client")]
+pub(crate) use client::DeduplicatedCombatCue;
 #[cfg(feature = "client")]
 pub use client::{CaptureCombatCues, ClientCombatPlugin, CombatHudText, WeaponSelectionText};
 pub use cues::*;
 pub use definitions::{
-    DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, GameplayContentFingerprint,
-    PayloadBundleDefinition, PayloadEffectDefinition, RecipientPolicy, ResolvedWeapon,
-    SlowStacking, TargetSelection, WeaponCatalog, WeaponCatalogResource, WeaponConfiguration,
-    WeaponEconomy, WeaponPresentationProfileId, WeaponPresetDefinition, WeaponPresetId,
-    WeaponRecipe, WeaponRecipeFingerprint, WeaponRecipePolicy, linear_falloff,
-    resolve_configuration, spread_angles,
+    DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,
+    PayloadEffectDefinition, RecipientPolicy, ResolvedWeapon, SlowStacking, TargetSelection,
+    WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponEconomy,
+    WeaponPresentationProfileId, WeaponPresetDefinition, WeaponPresetId, WeaponRecipe,
+    WeaponRecipeFingerprint, WeaponRecipePolicy, linear_falloff, resolve_configuration,
+    spread_angles,
 };
 pub use evidence::{
     CombatCheckpoint, CombatEvidenceCheckpoint, CombatFighterSnapshot, CombatProjectileSnapshot,

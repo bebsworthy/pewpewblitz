@@ -119,6 +119,21 @@ fn launcher_replication_preserves_flight_deadline_and_durable_slow_state() {
     });
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
+    {
+        let player = harness.controlled_player_id(0);
+        let world = harness.server.world_mut();
+        let mut query =
+            world.query_filtered::<(Entity, &PlayerId), (With<Fighter>, Without<TestDummy>)>();
+        let entity = query
+            .iter(world)
+            .find(|(_, candidate)| **candidate == player)
+            .map(|(entity, _)| entity)
+            .expect("launcher source fighter");
+        world
+            .entity_mut(entity)
+            .insert(Position::from_xy(-500.0, -320.0));
+    }
+    harness.step();
     let aim = harness.aim_at_dummy(0);
     harness.set_controlled_input(
         0,
