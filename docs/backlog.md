@@ -27,6 +27,7 @@ is either absent from all of those lists or present only as an unstated assumpti
 | GAP-NET-INTERNET | Internet play beyond LAN | v1 verifies two local clients; NAT traversal, relay, STUN/TURN, or port-forwarding documentation appears in no milestone, backlog, or the outside-v1 list (only "global hosting" is named). The first thing players will want post-v1. | Review finding; roadmap network policy |
 | GAP-COMBAT-SUPPORT | Support/Controller payload family | Healing, healing-reduction, shields, shield-break, stun/root/silence, pull, mark/reveal, damage-over-time, buff/debuff payloads are specified in doc 03 but have no home in M01–11, the future backlog, or outside-v1. Doc 02 names Support as an emergent role. | `03-weapons-and-abilities.md` payloads/effects; `02-fighter-model.md` roles |
 | GAP-ABILITY-ULTIMATES | Remaining ultimate candidates | Temporary personal shield, healing/repair field, area pull/knockback, and short-lived wall placement ultimates are undispositioned (v1 implements only dash + sentry). | `03-weapons-and-abilities.md` ultimate abilities |
+| GAP-ITEM-EQUIPMENT | Collectible equippable items | Add account-owned item instances referencing authored equipment definitions, legal equipment slots, inventory/entitlement validation, and deterministic resolution of stat modifiers, passive effects, and capabilities into the immutable match loadout. Scope must also decide stacking/conflicts/caps, revisions and migrations, acquisition/drops/crafting, rarity/levels/affixes, and inventory UI. Mid-match loot/equipping is a separate feature. | Product direction, 2026-08-15; `02-fighter-model.md` collectible equipment direction; `03-weapons-and-abilities.md` collectible equipment model |
 | GAP-UI-SETTINGS | Settings screen and local persistence | M11 schedules input remapping/deadzone/controller settings but no settings UI, controls-help display, or saving settings to disk across runs. Required by M11's own scope. | Roadmap M11 |
 | GAP-AUDIO-SETTINGS | Audio settings and music | No music/menu audio is ever named (only placeholder SFX cues in M06/M07) and no master/SFX/music volume controls exist. | Roadmap M06/M11 |
 | GAP-PERF-CLIENT | Client performance targets | No client FPS target, frame-time budget, or minimum-spec Mac definition; M11 measures only server tick/bandwidth. | Roadmap M11 |
@@ -85,7 +86,9 @@ concealment, spell-created concealment, speedway/slow surfaces, and one readable
 |---|---|---|
 | All | Unreviewed — recorded 2026-08-15, not yet accepted into any roadmap | Future-version scoping after v1 closeout (M11) |
 
-Related existing backlog rows that overlap and should be triaged together: `FUT-ARSENAL`,
+`GAP-ITEM-EQUIPMENT` elaborates the equipment part of `FUT-ARSENAL`; scope and schedule them
+together, while preserving the distinction between saved brawler/build identity and owned item
+instances. Other existing backlog rows that overlap and should be triaged together include
 `FUT-MAP-BUILDER`, `M03-PRED`, and the roadmap's future-version candidate backlog (advanced
 projectiles, systemic status interaction, environment surfaces and concealment, player map builder,
 Heist, Gem Grab, Solo Showdown).

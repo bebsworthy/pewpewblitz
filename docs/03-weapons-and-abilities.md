@@ -284,6 +284,25 @@ Good first candidates:
 - reduce incoming crowd-control duration;
 - improve objective interaction speed while below half health.
 
+## Collectible equipment model
+
+Passive definitions describe reusable gameplay effects; they are not themselves inventory or
+ownership records. In a future equipment system, an authored item definition may grant one or more
+bounded stat modifiers, passive effects, or capabilities. A player-owned item instance references
+that definition, while the authoritative server validates the proposed equipment and flattens its
+grants into the immutable resolved match loadout.
+
+For example, an authored pair of boots could trade maximum health for movement speed and grant the
+same damage-triggered movement effect used by an existing passive. Runtime movement and passive
+systems would read the resolved speed and effect grant; they would not branch on the boots' item ID,
+rarity, acquisition history, or owner.
+
+Before collectible equipment ships, its content policy must define slot types, stacking and
+conflict rules, modifier ordering, stat caps, item revisions/migrations, and whether any persistent
+item properties can vary. Acquisition, drops, crafting, random affixes, item levels, inventory UI,
+and entitlement storage are later product systems. This direction assumes equipment is selected
+before a match; mid-match loot and equipment changes are a separate, substantially larger feature.
+
 ## Active items
 
 Active items are optional after the core loop works and are not required for the first product-iteration gate. Candidates:

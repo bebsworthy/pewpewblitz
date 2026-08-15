@@ -137,6 +137,8 @@ tradeoff direction, and authority contracts remain intact and the change is reco
 - accounts, authentication, entitlements, inventories, acquisition, currencies, loot, unlocks,
   persistence, saved arsenals, build revision history, cloud storage, sharing, import/export, or a
   production weapon editor;
+- collectible item instances, equipment catalogs or inventory UI, item rarity/levels/affixes,
+  drops, crafting, item migrations, or mid-match equipping;
 - arbitrary numeric sliders, custom scripts, behavior graphs, user-defined effects, asset upload,
   remote content, or client-selected resolved ECS/component data;
 - active items, consumables, cooldown item slot, equipment pickups, ultimate swapping during active
@@ -406,6 +408,20 @@ The actual resolved loadout is immutable outside a legal waiting replacement. Mu
 deadlines, triggers, health, weapon economy, pose, and deployable state never live in the candidate
 recipe. Enforce a code-owned maximum serialized candidate and resolved snapshot size (candidate
 target at most 128 bytes; resolved target at most 4 KiB) and fail closed if exceeded.
+
+#### Future collectible-equipment compatibility
+
+M08's `PassiveDefinitionId` identifies a bounded authored gameplay effect for build selection; it
+must not be treated as a permanent player-owned item identity. A future `ItemDefinition` may grant
+resolved stat modifiers, passive effects, or capabilities, while a separate account-owned item
+instance supplies selection and entitlement identity. The server would validate those instances
+and fold their definition-derived grants into `ResolvedMatchLoadout` before the match.
+
+M08 runtime systems should therefore dispatch from `ResolvedPassive` and resolved fighter/ability
+data, not from a preset, candidate recipe, collectible instance, rarity, or ownership record. This
+keeps future equipment additive to resolution and persistence boundaries. M08 does not implement
+item definitions, item instances, inventory, entitlement checks, aggregation rules, or equipment
+UI; those require a separately reviewed milestone.
 
 Retire the M05 `SelectedWeapon`/`SelectingWeapon` selection contract after migrating compatibility
 tests. Preserve public re-exports only where integration tests or current sibling modules need them;

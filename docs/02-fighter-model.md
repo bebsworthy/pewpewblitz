@@ -187,6 +187,32 @@ preset recipes to establish the composition/resolution/runtime boundaries. Miles
 bounded in-memory build customization. Persistent arsenal storage, editing history, acquisition,
 currency, loot, and unlock policy remain later work and must not leak into combat systems.
 
+## Collectible equipment direction
+
+A future arsenal may include collectible, equippable items that grant bounded stat modifiers,
+passive effects, or capabilities. This extends the existing loadout pipeline rather than replacing
+it. Keep the following concerns distinct:
+
+1. **Item definition:** developer-authored gameplay grants, slot/family tags, compatibility rules,
+   presentation references, and balance revision.
+2. **Item instance:** a player-owned stable identity referencing an item definition, plus only the
+   persistent properties the product eventually supports.
+3. **Equipment selection:** the item-instance identities proposed for the brawler's legal slots.
+4. **Resolved equipment grants:** the immutable, definition-derived modifiers, effects, and
+   capabilities folded into the match loadout after server validation.
+5. **Runtime state:** cooldowns, trigger windows, charges, and active effects created by those
+   grants during play.
+
+The server must validate ownership or entitlement, slots, conflicts, stacking rules, caps, and
+content revisions before producing the resolved match loadout. Combat systems consume only the
+resolved stats and grants; they do not query inventory, rarity, drop source, or account ownership,
+and an item instance ID must never become authority for a gameplay value.
+
+Milestone 08's passive choices are the first bounded effect definitions in this direction, not
+collectible objects. Pre-match equipment is the expected future extension. Equipping loot during an
+active match would add pickup, inventory mutation, loadout-transition, replication, and balance
+rules and therefore remains a separate feature decision.
+
 ## Roles as outcomes, not classes
 
 Avoid hard-coded classes initially. Roles should emerge from build choices:
