@@ -45,7 +45,10 @@ fn spawn_client_camera(mut commands: Commands) {
             },
             ..OrthographicProjection::default_2d()
         }),
-        Transform::from_xyz(0.0, 0.0, 1000.0),
+        // Keep the camera at Bevy's standard 2D depth origin. The default projection's
+        // -1000..1000 clip range then contains every arena presentation layer, including
+        // floor/objective overlays at negative z and combat effects at positive z.
+        Transform::default(),
     ));
     commands.spawn((
         Camera2d,
@@ -417,6 +420,30 @@ fn exit_on_close_requested(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arena_camera_clip_range_contains_all_presentation_layers() {
+        const MIN_PRESENTATION_Z: f32 = -10.0;
+        const MAX_PRESENTATION_Z: f32 = 39.0;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Startup, spawn_client_camera);
+        app.update();
+
+        let world = app.world_mut();
+        let mut cameras = world.query_filtered::<(&Transform, &Projection), With<ArenaCamera>>();
+        let (transform, projection) = cameras.single(world).unwrap();
+        let Projection::Orthographic(projection) = projection else {
+            panic!("arena camera must remain orthographic")
+        };
+        let nearest_visible_z = transform.translation.z - projection.far;
+        let furthest_visible_z = transform.translation.z - projection.near;
+
+        assert_eq!(transform.translation.z, 0.0);
+        assert!(nearest_visible_z <= MIN_PRESENTATION_Z);
+        assert!(furthest_visible_z >= MAX_PRESENTATION_Z);
+    }
 
     #[test]
     fn fighter_visual_waits_for_team_and_refreshes_when_team_changes() {

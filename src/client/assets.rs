@@ -13,7 +13,6 @@ pub const CLIENT_ASSET_MANIFEST: &str = include_str!("../../assets/manifest.ron"
 pub(crate) struct ClientAssetHandles {
     pub team_blue: Handle<Image>,
     pub team_red: Handle<Image>,
-    pub facility_tileset: Handle<Image>,
     pub fire: Handle<AudioSource>,
     pub impact: Handle<AudioSource>,
     pub defeat: Handle<AudioSource>,
@@ -26,7 +25,6 @@ impl ClientAssetHandles {
         Self {
             team_blue: asset_server.load("brawler/fighters/team_blue.png"),
             team_red: asset_server.load("brawler/fighters/team_red.png"),
-            facility_tileset: asset_server.load("brawler/maps/facility_tileset.png"),
             fire: asset_server.load("brawler/audio/fire.ogg"),
             impact: asset_server.load("brawler/audio/impact.ogg"),
             defeat: asset_server.load("brawler/audio/defeat.ogg"),
@@ -35,7 +33,7 @@ impl ClientAssetHandles {
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 8] {
+    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 7] {
         [
             (
                 "fighter.team_blue",
@@ -46,11 +44,6 @@ impl ClientAssetHandles {
                 "fighter.team_red",
                 true,
                 asset_server.load_state(&self.team_red),
-            ),
-            (
-                "map.facility_tileset",
-                false,
-                asset_server.load_state(&self.facility_tileset),
             ),
             ("audio.fire", false, asset_server.load_state(&self.fire)),
             ("audio.impact", false, asset_server.load_state(&self.impact)),
@@ -214,8 +207,8 @@ mod tests {
             ClientAssetReadiness::Ready
         );
         assert_eq!(
-            readiness_from_observations(false, vec!["audio.fire", "map.facility_tileset"]),
-            ClientAssetReadiness::Degraded(vec!["audio.fire", "map.facility_tileset"])
+            readiness_from_observations(false, vec!["audio.fire", "audio.impact"]),
+            ClientAssetReadiness::Degraded(vec!["audio.fire", "audio.impact"])
         );
     }
 }

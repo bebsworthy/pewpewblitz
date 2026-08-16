@@ -78,8 +78,6 @@ fn reconcile_map_snapshot(
     mut meshes: ResMut<Assets<Mesh>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     catalog: Res<MapCatalogResource>,
-    asset_server: Option<Res<AssetServer>>,
-    assets: Option<Res<crate::client::ClientAssetHandles>>,
     presented: Option<Res<PresentedMap>>,
     snapshots: Query<(Entity, &ResolvedMapSnapshot), With<MapRoot>>,
     members: Query<(Entity, &MapPresentationMember)>,
@@ -111,19 +109,7 @@ fn reconcile_map_snapshot(
         commands.insert_resource(crate::client::ClientPlayableGate(false));
         return;
     }
-    let facility_image = assets.as_ref().and_then(|assets| {
-        asset_server
-            .as_ref()
-            .is_some_and(|server| server.is_loaded(&assets.facility_tileset))
-            .then_some(&assets.facility_tileset)
-    });
-    spawn_snapshot_visuals(
-        &mut commands,
-        &mut meshes,
-        &mut color_materials,
-        snapshot,
-        facility_image,
-    );
+    spawn_snapshot_visuals(&mut commands, &mut meshes, &mut color_materials, snapshot);
     info!(
         instance_id = snapshot.identity.instance_id.0,
         snapshot_bytes = postcard::to_allocvec(snapshot).map_or(0, |bytes| bytes.len()),
@@ -311,7 +297,6 @@ fn spawn_snapshot_visuals(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
     snapshot: &ResolvedMapSnapshot,
-    facility_image: Option<&Handle<Image>>,
 ) {
     let marker = MapPresentationMember {
         instance_id: snapshot.identity.instance_id,
@@ -382,22 +367,9 @@ fn spawn_snapshot_visuals(
             5 => (Color::srgb(0.18, 0.24, 0.30), Vec2::splat(32.0), 0.0),
             _ => (Color::srgb(0.12, 0.18, 0.24), Vec2::splat(32.0), 0.0),
         };
-        let sprite = if visual.presentation_profile_id.0 == 1 {
-            facility_image.map_or_else(
-                || Sprite::from_color(color, size),
-                |image| Sprite {
-                    image: image.clone(),
-                    rect: Some(Rect::new(16.0, 32.0, 32.0, 48.0)),
-                    custom_size: Some(size),
-                    ..default()
-                },
-            )
-        } else {
-            Sprite::from_color(color, size)
-        };
         commands.spawn((
             marker,
-            sprite,
+            Sprite::from_color(color, size),
             Transform {
                 translation: visual.position.extend(z),
                 rotation: Quat::from_rotation_z(visual.rotation),
@@ -576,6 +548,28 @@ mod tests {
                 .iter(app.world())
                 .all(|member| member.instance_id == MapInstanceId(2))
         );
+    }
+
+    #[test]
+    fn floor_visuals_use_the_subdued_primitive_palette() {
+        let snapshot = snapshot(1);
+        let expected_floor_tiles = snapshot.visual_instances.len();
+        let mut app = app_with_snapshot(snapshot);
+        app.update();
+
+        let world = app.world_mut();
+        let mut visuals = world.query::<(&Sprite, &Transform)>();
+        let floor_tiles: Vec<_> = visuals
+            .iter(world)
+            .filter(|(_, transform)| (transform.translation.z + 10.0).abs() < f32::EPSILON)
+            .collect();
+
+        assert_eq!(floor_tiles.len(), expected_floor_tiles);
+        assert!(floor_tiles.iter().all(|(sprite, _)| {
+            sprite.image == Handle::<Image>::default()
+                && sprite.rect.is_none()
+                && sprite.color == Color::srgb(0.055, 0.075, 0.10)
+        }));
     }
 
     #[test]
