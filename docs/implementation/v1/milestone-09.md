@@ -50,9 +50,10 @@ and result without replaying capture history.
    objective. The map recipe places data; it does not carry executable capture rules.
 4. Use fighter-center containment against the normalized resolved area shape. Count only fighters in
    the current match with `ActiveCombatant`, positive authoritative `CurrentHealth`, a valid team 0/1,
-   and finite authoritative `Position`. Defeated/respawning/selecting fighters, sentries, projectiles,
-   dummies, disconnected entities, and other match generations never occupy the zone. Spawn-protected
-   living fighters do count.
+   finite authoritative `Position`, and a `NetworkEntityId` present in the common roster's accepted,
+   currently connected participant set for that match. Defeated/respawning/selecting fighters,
+   sentries, projectiles, dummies, disconnected or stale-but-not-yet-despawned fighter entities, and
+   other match generations never occupy the zone. Spawn-protected living fighters do count.
 5. Resolve the complete occupancy snapshot once per fixed tick after authoritative movement/physics
    and combat damage are visible. Empty means `[0, 0]`; single-team means at least one occupant for
    exactly one team; contested means both teams have at least one occupant. Simultaneous entry is not
@@ -80,6 +81,14 @@ and result without replaying capture history.
     values but never extrapolates authoritative progress beyond the last replicated value.
 11. Extend the existing bounded match telemetry and process evidence path. Do not add an analytics
     service, objective input, physics sensor collider, mode scripting framework, or new dependency.
+12. Add a generation-tagged `MatchClock { match_id, completed_tick }` to the match root. Keep the
+    existing fighter `AuthoritativeTick` unchanged. Client match deadlines are presentable only when
+    the clock, match envelope, and concrete mode state carry the same match ID.
+13. Treat `Active { ends_at_tick }` as the half-open interval from activation tick through
+    `ends_at_tick - 1`. The activation tick is the first eligible objective evaluation and
+    `ends_at_tick` is the first tick that cannot add progress, giving exactly `active_limit_ticks`
+    evaluations. On the boundary tick, a pre-game mode deadline system checks existing/recovered
+    threshold state before timeout and common completion locks the match before input or simulation.
 
 Changing the authority boundary, occupancy eligibility, same-tick rule, progress model, target or
 timer semantics, map/mode selection ownership, durable recovery shape, or common/mode plugin boundary
@@ -191,24 +200,26 @@ visible. Evaluate the full sorted roster first, then perform one progress mutati
 The required order is:
 
 ```text
+fixed lifecycle -> pre-game forfeit/deadline outcome and completion when due
 fixed input/abilities/movement/fire
   -> Avian physics
   -> projectile/melee/payload damage and current-health mutation
   -> ability/passive outcome observers
   -> Hot Zone occupancy snapshot and one progress step
      OR Wipeout defeat scoring
-  -> common forfeit precedence, then one mode threshold/timeout outcome consumption
+  -> one eligible-tick mode threshold outcome consumption
   -> lifecycle cleanup, telemetry/cues, authoritative tick publication
 ```
 
 ### How do late join, reconnect, and restart recover?
 
 The replicated map snapshot contains the exact area anchor; `MatchState.phase` contains the relevant
-countdown/active/restart deadline or completed result; the match root's `AuthoritativeTick` supplies
-the shared deadline clock; and `HotZoneState` contains current progress and occupancy. Ordinary
-component replication therefore supplies a current-state snapshot to every accepted client. No
-historical capture event is required. M07's no-session-resumption policy remains: reconnect creates a
-new participant under the current admission rule, while an active match rejects joining.
+countdown/active/restart deadline or completed result; the match root's generation-tagged `MatchClock`
+supplies the shared deadline clock; and `HotZoneState` contains current progress and occupancy.
+Ordinary component replication therefore supplies a current-state snapshot to every accepted client,
+while matching match IDs prevent separately arriving revisions from being combined across a restart.
+No historical capture event is required. M07's no-session-resumption policy remains: reconnect creates
+a new participant under the current admission rule, while an active match rejects joining.
 
 Restart allocates the new match ID, resets both progress totals/status/occupants/evaluation tick,
 retains the installed map/mode/loadouts under the established lifecycle rules, and clears all
@@ -236,7 +247,7 @@ Cargo pins.
 | 2026-08-15 | `references/lightyear/book/src/concepts/replication/{protocol,replicate}.md` and [Lightyear 0.29 documentation](https://docs.rs/lightyear/0.29.0/lightyear/) | Registered ordinary components on a replicated entity provide durable current-state convergence; no event history is needed for objective recovery. | Replicate mode state on the existing match root; reserve cues for presentation. |
 | 2026-08-15 | Installed Bevy 0.19.1 `bevy_app/src/main_schedule.rs` and [versioned `FixedPostUpdate` docs](https://docs.rs/bevy/0.19.1/bevy/app/struct.FixedPostUpdate.html) | Fixed game rules belong in fixed schedules, and post-fixed logic can explicitly react after movement/physics/damage. | Add an explicit mode-rule set inside the existing fixed-post transaction. |
 | 2026-08-15 | Installed Avian 0.7 source and [Avian 0.7 documentation](https://docs.rs/avian2d/0.7.0/avian2d/) | Authoritative `Position` is already the simulation pose; one simple zone does not justify sensors or another query pipeline. | Use normalized point-in-shape math after physics and keep the objective non-colliding. |
-| 2026-08-16 | User-provided M09 specification review, checked against live `MatchPhase`, `AuthoritativeTick`, map anchor, and schedule code | Timer clock ownership, common/mode result handoff, circle-boundary tests, restart state visibility, evaluation epoch, diagnostics, sentry exclusion, and verification target bounds needed stronger contracts. | Pin the match-root clock, one-slot `ModeRuleOutcome`, exact f32 boundary policy, in-place restart reset, plain next-evaluation tick, saturating diagnostics, explicit sentry test, and target minimum below. |
+| 2026-08-16 | User-provided M09 specification review, checked against live `MatchPhase`, `AuthoritativeTick`, map anchor, fact consumption, roster, telemetry, and schedule code | The root clock lacked a generation tag; deadline-tick eligibility was ambiguous; disconnected fighter eligibility, common fact draining/respawn ownership, diagnostic ownership, and mode-summary meanings needed explicit contracts. | Add `MatchClock`, use a half-open active interval, gate occupancy through the connected roster, define a shared read-then-clear fact transaction and common respawn system, keep outcome diagnostics common, and fully type mode summaries. |
 
 ## Technical specification
 
@@ -324,8 +335,12 @@ Add stable catalog definitions:
 
 Preset 2 reuses Crossroads Facility's bounds, six permanent obstacles, floor tiling, destructible
 reservation, team spawn areas, and eight spawn points. It has a distinct recipe ID/revision, selects
-mode 3, and adds one circular area anchor at `(0, 0)` with radius `160`. Add a dedicated objective
-presentation profile rather than assigning gameplay meaning to the destructible-reservation region.
+mode 3, and adds one circular area anchor at `(0, 0)` with radius `160`. Add
+`HOT_ZONE_OBJECTIVE_PRESENTATION_PROFILE` to the catalog. Client presentation uses one code-owned
+mapping from `HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION` to that profile; the anchor continues to own exact
+geometry and identity, while the profile owns only color/material/line styling. This does not add a
+presentation field to the anchor wire shape or assign gameplay meaning to the destructible-reservation
+region. Catalog validation and a client test require the mapping and profile to exist.
 
 Catalog validation accepts exactly the two known ascending presets for this gate and resolves every
 preset through its mode-specific requirements. `MapLayoutRequirements::hot_zone()` requires teams
@@ -354,8 +369,9 @@ MatchState component
     Completed { completed_at_tick, restart_unlocked_at_tick, result }
   rules_revision
 
-AuthoritativeTick component on MatchRoot
-  current completed authoritative simulation tick
+MatchClock component on MatchRoot
+  match_id
+  completed_tick
 
 WipeoutState component (present only for Wipeout)
   team_scores: [u16; 2]
@@ -378,22 +394,31 @@ HotZoneState component (present only for Hot Zone)
 
 The phase variants are the replicated deadline/result contract: countdown, active timeout, completed
 result, and restart unlock remain fields of `MatchPhase`, not separate optional fields on
-`MatchState`. Add the already registered `AuthoritativeTick` to the replicated `MatchRoot` and update
-it in fixed finalize beside the existing fighter copies. Match HUDs derive countdown/remaining/restart
-time only from the matching root's phase deadline minus that root's replicated tick, using saturating
-arithmetic and `SIMULATION_TICK_HZ`. They do not use a client-local `SimulationTick`, wall time, render
-time, or Lightyear interpolation timeline. This gives every client the same generation-scoped clock
-reference; missing/mismatched root tick shows `syncing` rather than an invented timer.
+`MatchState`. Register and replicate the new `MatchClock`; do not reuse or change the fighter-owned
+`AuthoritativeTick`. Update `MatchClock.completed_tick` in fixed finalize before
+`SimulationTick` advances. The explicitly chained restart transaction assigns the new match ID and
+current tick to the clock before any downstream system observes the new generation.
+
+Match HUDs derive countdown/remaining/restart time only from the phase deadline minus
+`MatchClock.completed_tick`, using saturating arithmetic and `SIMULATION_TICK_HZ`. They do not use a
+client-local `SimulationTick`, wall time, render time, or Lightyear interpolation timeline. A client
+uses the clock only when `MatchClock.match_id == MatchState.match_id` and the concrete mode state's
+match ID also agrees. Because replicated component updates are not an atomic multi-component
+transaction, every other arrival order displays `syncing` rather than combining a new match phase
+with the prior generation's tick.
 
 The mode state lives on the `MatchRoot` and carries the same `match_id`. Exactly one of
 `WipeoutState` and `HotZoneState` is present for the process-selected mode. Restart does not remove and
-reinsert that component: the mode restart system mutates the existing component in place, assigning
-the new match ID and reset totals/status/evaluation deadline in the same system execution that updates
-`MatchState`. No deferred interval can expose both or neither mode state. Runtime mode switching is
-out of scope.
+reinsert that component. A common prepare system allocates one `PendingMatchRestart { previous_id,
+next_id, restart_tick }`; the installed mode's reset system mutates its existing component in place;
+and a common commit system updates `MatchState`, `MatchClock`, and participants and consumes the slot.
+These systems are an explicit chain with no intervening observer, deferred flush, or replication
+extraction, and downstream systems run only after commit. Thus the fixed schedule exposes one fully
+committed generation, while client readiness still treats separately arriving network component
+revisions as non-atomic and requires matching IDs. Runtime mode switching is out of scope.
 
-Common code never interprets a mode's totals. The only common↔mode handoff is this bounded server-only
-resource:
+Common code never interprets or resets a mode's totals. The only common↔mode *completion-result*
+handoff is this bounded server-only resource:
 
 ```text
 ModeRuleOutcome resource
@@ -406,13 +431,15 @@ PendingModeRuleOutcome
   result: MatchResult
 ```
 
-The installed mode system may write the empty slot only in `MatchSet::ModeRules`. The common
-completion system in `MatchSet::Outcomes` always consumes it with `take()`, validates the current
-match ID and exact `SimulationTick`, and either commits one result or discards it as stale after
-incrementing a saturating diagnostic. Common forfeit resolution has precedence, but still takes and
-discards any same-tick mode outcome. The slot is also explicitly cleared on activation, completion,
-and restart. A second write in one tick is rejected and counted; there is no dynamic dispatch,
-unbounded message retention, or outcome that can survive to fire again on the next tick.
+The installed mode may write the empty slot in exactly two places: its pre-game deadline system in
+`MatchSet::DeadlineRules` when `SimulationTick >= ends_at_tick`, or its post-damage scoring/progress
+system in `MatchSet::ModeRules` on an eligible active tick. The common consumers in
+`MatchSet::PreGameOutcomes` and `MatchSet::Outcomes` always use `take()`, validate the current match ID
+and exact `SimulationTick`, and either commit one result or discard it as stale after incrementing a
+saturating diagnostic. Common pre-game forfeit resolution has precedence and still takes/discards any
+same-tick deadline outcome. The slot is explicitly empty after either consumer and cleared on
+activation, completion, and restart. A second write in one tick is rejected and counted; there is no
+dynamic dispatch, unbounded retention, or outcome that can survive into gameplay or the next tick.
 
 Extract common rule values into validated `MatchLifecycleRules`: team capacity, countdown, active
 limit, respawn delay, spawn protection, completed-input lock, movement telemetry epsilon, and bounded
@@ -421,8 +448,20 @@ defaults share the existing three-minute active limit and lifecycle timings. The
 uses a 30-tick progress target and otherwise shortens deadlines without changing semantics.
 `HotZoneRules::validate` requires `target_progress_ticks >= 2` and
 `target_progress_ticks <= active_limit_ticks.min(u64::from(u16::MAX))`, so an uncontested match can
-complete before timeout and threshold-versus-timeout precedence remains testable. Other lifecycle
+complete before timeout. `MatchState.rules_revision` is the revision of the installed, validated
+common-plus-mode rules composition, not only the lifecycle or mode fragment. Other lifecycle
 deadlines retain their nonzero and checked-combination validation.
+
+If activation occurs at tick `A` with active limit `L`, the phase stores
+`ends_at_tick = A.checked_add(L)`. Objective evaluation is permitted exactly for ticks
+`A..ends_at_tick`; the activation tick is eligible after that tick's movement, physics, and damage,
+and the deadline tick is not. Thus an uninterrupted controller receives exactly `L` opportunities and
+a target of `L` completes on `ends_at_tick - 1`. At `ends_at_tick`, a mode first recognizes any
+already-present target state produced by recovery/injected test setup and emits `Threshold`; otherwise
+it emits `Timeout`. The pre-game common consumer commits that result and locks fighters before input,
+abilities, movement, fire, or physics for the boundary tick. This makes threshold-over-timeout
+precedence explicit without granting an extra capture or combat evaluation. Waiting, countdown, and
+completed phases never evaluate occupancy.
 
 Forfeit remains common and takes precedence once a team has no connected participants. Threshold
 completion takes precedence over timeout on the same tick. A mode result is resolved once, then the
@@ -435,21 +474,31 @@ duplicated, wrong-shaped, or from a map/mode mismatch. Cache only the stable nor
 in a server resource scoped to the installed map instance; the replicated anchor remains the source
 for client presentation.
 
+The common roster snapshot carries a sorted set of connected `NetworkEntityId` values for its match
+ID. A fighter enters that set only while its owning session is accepted, its controlling link is
+present and not disconnected, and its `MatchParticipant.match_id` matches the root. Both forfeit and
+Hot Zone occupancy read this same fixed-tick snapshot. Session cleanup may despawn the fighter later;
+loss of connected-roster membership alone makes a lingering fighter ineligible on the fixed tick that
+resolves the forfeit.
+
 Each active tick:
 
-1. If `SimulationTick < next_evaluation_tick`, return without mutation and increment the duplicate-
+1. The pre-game deadline phase has already completed the match when the current tick is at or after
+   `ends_at_tick`; the post-damage Hot Zone system therefore does not run for a deadline tick.
+2. If `SimulationTick < next_evaluation_tick`, return without mutation and increment the duplicate-
    evaluation counter. If it is greater, record the skipped-tick distance but evaluate the current
    state only once; never catch progress up for positions that were not observed.
-2. Iterate eligible fighters and reject a participant whose match ID differs, team is outside 0/1,
-   health is zero, or position is non-finite.
-3. Test the fighter center against the zone in zone-local coordinates. A point on the circle or
+3. Iterate eligible fighters and reject a participant whose match ID differs, whose network identity
+   is absent from the matching connected-roster set, whose team is outside 0/1, whose health is zero,
+   or whose position is non-finite.
+4. Test the fighter center against the zone in zone-local coordinates. A point on the circle or
    rectangle boundary counts as inside. Increment each team count with checked/saturating `u8` math.
-4. Derive `Empty`, `Controlled(team)`, or `Contested` from the complete counts.
-5. If controlled, increment only that team's progress by one, capped at target. Otherwise increment
+5. Derive `Empty`, `Controlled(team)`, or `Contested` from the complete counts.
+6. If controlled, increment only that team's progress by one, capped at target. Otherwise increment
    neither. Write occupant counts, status, progress, and
    `next_evaluation_tick = SimulationTick.saturating_add(1)` together. Activation initializes the
    field to its first eligible authoritative tick; restart resets it for the next activation.
-6. Resolve threshold result after the mutation. If both totals are at target due only to injected or
+7. Resolve threshold result after the mutation. If both totals are at target due only to injected or
    recovery test state, compare totals and return draw when equal; normal play cannot advance both on
    one tick.
 
@@ -461,10 +510,12 @@ circle (`center +/- (160, 0)` and `center +/- (0, 160)`); near-boundary tests us
 inside/outside values. Rectangle comparisons use inclusive component bounds. Clients may repeat this
 math only for presentation and never author occupancy.
 
-`HotZoneDiagnostics` uses saturating scalar counters for duplicate evaluation, skipped evaluation
-ticks, stale/duplicate mode outcomes, and invalid fighters; it does not append one allocation or raw
-record per fault. Any sampled raw evidence goes through the existing bounded match record deque and
-its dropped-record counter, so repeated impairment cannot grow memory.
+`HotZoneDiagnostics` uses saturating scalar counters only for duplicate evaluation, skipped evaluation
+ticks, invalid/ineligible fighters, and occupant-count saturation. Common
+`MatchOutcomeDiagnostics` owns stale-mode-outcome, duplicate-mode-outcome, wrong-match outcome, and
+wrong-tick outcome counters because either mode can trigger them. Neither resource appends an
+allocation or raw record per fault. Any sampled raw evidence goes through the existing bounded match
+record deque and its dropped-record counter, so repeated impairment cannot grow memory.
 
 ### Scheduling and deferred-command boundaries
 
@@ -473,7 +524,12 @@ Extend `MatchSet` with a visible mode-rule phase while preserving the current co
 ```text
 FixedUpdate
   MatchSet::Lifecycle
-    common roster -> waiting/countdown -> activation -> restart preparation
+    common roster -> waiting/countdown -> activation
+    -> restart prepare -> installed-mode in-place reset -> common restart commit/cleanup
+  MatchSet::DeadlineRules
+    installed mode checks existing threshold, otherwise timeout, only at/after ends_at_tick
+  MatchSet::PreGameOutcomes
+    common forfeit check/precedence -> take/validate deadline outcome -> one result commit/lock
   MatchSet::FighterLifecycle
     respawn/reset/protection
   Gameplay input -> abilities -> movement -> fire
@@ -484,33 +540,60 @@ FixedPostUpdate
   CombatSet::Damage
   AbilitySet::ObserveOutcomes
   MatchSet::ModeRules
-    clear/validate empty ModeRuleOutcome slot
-    Wipeout fact scoring OR Hot Zone occupancy/progress
+    prepare/sort current combat facts without draining; clear/validate empty ModeRuleOutcome slot
+    Wipeout reads current combat facts for scoring OR Hot Zone evaluates occupancy/progress
     write at most one current-match/current-tick PendingModeRuleOutcome
   MatchSet::Outcomes
-    common forfeit -> take/validate mode outcome -> one result commit
-    -> ApplyDeferred -> cleanup -> summary
+    take/validate eligible-tick mode outcome -> one result commit
+    -> ApplyDeferred -> common defeat/respawn handling
+    -> common and installed-mode telemetry read current combat facts
+    -> clear current combat facts exactly once -> ApplyDeferred -> cleanup -> summary
   CombatSet::Lifecycle -> TelemetryAndCues -> Finalize
 ```
 
 Hot Zone eligibility reads `CurrentHealth`, so it does not depend on seeing a deferred `Defeated`
-insert. An explicit `ApplyDeferred` remains before cleanup that queries newly marked lifecycle state.
-Add a schedule trace test that proves objective evaluation happens after movement/physics and damage,
-before completion cleanup and simulation-tick advancement. A second trace runs the outcome consumer
-twice and advances another tick to prove `take()` prevents duplicate or stale completion.
+insert. `CombatOutcomeFacts` is a combat-owned, current-tick observation buffer, not a common↔mode
+result handoff. Ability observers, Wipeout scoring, common combat telemetry, and Hot Zone near-zone
+telemetry read it without draining it. A common preparation system sorts the buffer once before mode
+readers; every scoring/telemetry reader independently rejects wrong-tick or wrong-match facts under
+the common diagnostic policy. The Wipeout plugin retains its bounded per-match scored-event ID set so
+duplicate facts cannot score twice. A single common finalizer records bounded common telemetry and
+then clears the buffer after every registered reader has run, including when no match is active or a
+root is missing.
+
+`DeadlineRules` and `PreGameOutcomes` are chained after lifecycle/restart and before fighter lifecycle
+and every authoritative gameplay set. They preserve M07 behavior: `ends_at_tick` is the first tick
+with no accepted match input, ability activation, movement, firing, damage, or objective evaluation.
+Only the installed mode reads its durable totals to distinguish recovered threshold from timeout;
+common code applies forfeit precedence and commits the opaque `MatchResult` through the same helper
+used by post-damage completion.
+
+Damage continues to insert `Defeated` through deferred commands. After result commitment, the first
+`ApplyDeferred` makes that marker visible. A common defeat-lifecycle system—not either mode plugin—then
+adds `RespawnState` only to newly defeated fighters belonging to the still-active current match. If
+forfeit or a mode outcome completed the match, it leaves those fighters locked with the rest of the
+match and schedules no respawn. Its commands are applied by the second explicit `ApplyDeferred` before
+later lifecycle cleanup. Sentry cleanup remains separate and does not enter fighter respawn handling.
+
+Add a schedule trace test that proves deadline completion precedes all gameplay on `ends_at_tick`;
+eligible objective evaluation happens after movement/physics and damage; fact readers run before the
+one clear; deferred defeat becomes visible before common respawn handling; and all cleanup precedes
+simulation-tick advancement. A second trace runs both pre-game and post-damage outcome consumers twice
+and advances another tick to prove `take()` prevents duplicate or stale completion.
 
 ### Protocol, replication, and recovery
 
-Register `WipeoutState` and `HotZoneState` with ordinary `.replicate()` and migrate `MatchState` in
-both roles. Bump the application protocol version/fingerprint and gameplay content fingerprint for
-the catalog changes. Do not register objective input or capture messages.
+Register `WipeoutState`, `HotZoneState`, and `MatchClock` with ordinary `.replicate()` and migrate
+`MatchState` in both roles. Bump the application protocol version/fingerprint and gameplay content
+fingerprint for the catalog changes. Do not register objective input or capture messages.
 
 The authoritative root is replicated to all accepted clients. A current/late client is ready to
-present Hot Zone only when it has a matching-generation `ResolvedMapSnapshot`, `MatchState`, and
-`HotZoneState` whose mode and match IDs agree, plus the root's `AuthoritativeTick` for deadline
-presentation. Mismatches remain in a bounded "syncing objective" presentation state and cannot leak
-stale totals or timers. In-place restart reset is tested; component removal/replacement on mode
-changes is not a production M09 behavior because the selected mode never hot-swaps.
+present Hot Zone only when it has a matching-generation `ResolvedMapSnapshot`, `MatchState`,
+`HotZoneState`, and `MatchClock` whose mode/map/match identities agree. Mismatches—including new
+`MatchState` plus an old-generation clock—remain in a bounded "syncing objective" presentation state
+and cannot leak stale totals or timers. In-place restart reset and both relative arrival orders are
+tested; component removal/replacement on mode changes is not a production M09 behavior because the
+selected mode never hot-swaps.
 
 Client mutation of replicated state is local only and never travels as authority. Network tests must
 mutate client `HotZoneState`, zone presentation entities, and HUD cache and prove the server and other
@@ -537,32 +620,50 @@ or text churn. Controller and keyboard require no new action mapping because cap
 
 ### Telemetry and evidence
 
-Add a tagged mode summary rather than nullable fields on every common summary:
+Keep identity, participants, active duration, general combat/build/ability aggregates, disconnects,
+bounded-record counts, and result in common `MatchSummary`. Add `mode_definition_id` and replace its
+Wipeout-only `final_scores`/`score_margin` fields with one tagged mode summary rather than nullable
+fields on every common summary:
 
 ```text
 ModeSummary
   Wipeout(WipeoutSummary)
   HotZone(HotZoneSummary)
 
+WipeoutSummary
+  final_scores: [u16; 2]
+  target_score: u16
+  score_margin: u16
+
 HotZoneSummary
   final_progress_ticks: [u16; 2]
-  target_progress_ticks
-  first_entry_tick_by_team
-  first_progress_tick_by_team
-  controlled_ticks_by_team
-  occupant_ticks_by_team
-  empty_ticks
-  contested_ticks
-  control_transitions_by_team
-  longest_control_run_by_team
-  near_zone_damage_by_team
-  near_zone_defeats_by_team
+  target_progress_ticks: u16
+  first_entry_tick_by_team: [Option<u64>; 2]
+  first_progress_tick_by_team: [Option<u64>; 2]
+  controlled_ticks_by_team: [u64; 2]
+  occupant_fighter_ticks_by_team: [u64; 2]
+  empty_ticks: u64
+  contested_ticks: u64
+  control_gained_transitions_by_team: [u32; 2]
+  longest_consecutive_control_ticks_by_team: [u64; 2]
+  near_zone_damage_suffered_by_team: [u64; 2]
+  near_zone_defeats_suffered_by_team: [u32; 2]
 ```
 
-Define near-zone combat as an applied hostile damage/defeat fact whose target's authoritative position
-at observation lies inside the objective shape expanded outward by 240 world units. Record the exact
-definition in reports; do not infer source proximity. Continue bounded raw evidence and dropped-record
-counters. Telemetry observes state/facts and never changes capture or victory.
+One `controlled_ticks_by_team` unit means one evaluated tick whose completed status is
+`Controlled(team)`, regardless of headcount. `occupant_fighter_ticks_by_team` adds the bounded occupant
+count each evaluated tick, so two teammates present for one tick contribute two. A control-gained
+transition occurs when the current evaluated status becomes `Controlled(team)` and the previous
+evaluated status was not `Controlled(team)`; empty and contested states break a consecutive run.
+Activation starts with no previous controller, and restart clears every accumulator and prior-status
+field.
+
+Define near-zone combat as an applied hostile damage/defeat fact whose fighter target's authoritative
+position at telemetry observation lies inside the objective shape expanded outward by 240 world units.
+Attribute the count and applied damage amount to the target/suffering team; ignore deployable targets,
+protected contacts, friendly/invalid facts, and source proximity. Record this exact definition in
+reports. Continue bounded raw evidence and dropped-record counters. Telemetry observes state/facts and
+never changes capture, respawn, or victory.
 
 Extend the existing process match report with mode ID, map identity, final mode summary, restart
 generation, and client convergence. The local/typical/adverse profiles must prove one unopposed team
@@ -580,21 +681,27 @@ regression subset after each slice.
 - [ ] Add `GameMode`/mode-neutral rules-profile configuration, CLI validation, Wipeout-compatible
   defaults, and focused configuration tests.
 - [ ] Extract `AuthoritativeMatchPlugin`, `MatchLifecycleRules`, `WipeoutModePlugin`, and
-  `WipeoutState` while keeping every accepted Wipeout behavior and test green.
+  `WipeoutState` while keeping every accepted Wipeout behavior and test green. Split the existing
+  combined fact/scoring/respawn system into non-draining mode scoring, common fact finalization, and
+  common deferred defeat/respawn handling; add the chained pre-game deadline/outcome sets so Wipeout
+  still completes before gameplay on its deadline tick, all before adding Hot Zone.
 
 ### Map and protocol foundation
 
 - [ ] Add Hot Zone stable definitions, area-only layout requirement, full-area/terrain-clearance
-  validation, preset 2, canonical fingerprints, and pure map resolver tests.
+  validation, preset 2, objective anchor-to-presentation-profile mapping, canonical fingerprints, and
+  pure map resolver/profile-mapping tests.
 - [ ] Make authoritative map startup and client reconstruction select/validate requirements from
   stable mode configuration/state rather than hardcoded Wipeout calls.
-- [ ] Add `HotZoneState`, migrate/register mode states, bump protocol/content versions, and prove
-  serialization/registration/current-client recovery before implementing progress.
+- [ ] Add `HotZoneState` and generation-tagged `MatchClock`, migrate/register mode states, bump
+  protocol/content versions, and prove serialization/registration plus mismatched-arrival syncing
+  before implementing progress.
 
 ### Authoritative Hot Zone vertical slice
 
-- [ ] Implement pure normalized containment, eligibility, complete occupancy snapshot, status, one
-  progress mutation per tick, threshold/timeout/tie/forfeit resolution, and diagnostics.
+- [ ] Implement pure normalized containment, connected-roster eligibility, complete occupancy
+  snapshot, status, exactly one progress mutation on each eligible half-open active tick,
+  threshold/timeout/tie/forfeit resolution, and correctly owned common/Hot Zone diagnostics.
 - [ ] Integrate explicit fixed-post ordering, restart/reset/cleanup, repeated-match behavior, and
   mode-tagged summaries without adding Hot Zone branches to movement/combat/build/ability code.
 - [ ] Add focused rule/App/schedule tests and deterministic multi-client authority/recovery cases.
@@ -603,8 +710,9 @@ regression subset after each slice.
 
 - [ ] Add exact-generation zone visuals, mode-dispatched HUD/results, syncing state, deduplicated
   threshold/control feedback, and bounded placeholder audio.
-- [ ] Extend match telemetry, process report, harness helpers, and `network-match.sh` mode selection;
-  add local/typical/adverse Hot Zone evidence and preserve Wipeout reports.
+- [ ] Migrate `MatchSummary` to the fully typed `ModeSummary`, extend process reports, harness helpers,
+  and `network-match.sh` mode selection; add local/typical/adverse Hot Zone evidence and preserve
+  Wipeout report meaning through `WipeoutSummary`.
 - [ ] Add performance/entity-growth checks plus 16:9, 16:10, 4:3, small-window, controller, and
   keyboard visual/usability checks.
 
@@ -623,42 +731,58 @@ regression subset after each slice.
 
 - [ ] Map catalog rejects unknown/duplicate mode or anchor IDs, wrong preset count/order, wrong mode,
   absent/duplicate/point objective anchors, non-finite/zero/oversized/out-of-bounds areas, permanent-
-  terrain overlap, unsupported anchors, unsafe spawns, and serialized-size/fingerprint violations.
+  terrain overlap, unsupported anchors, missing/wrong objective presentation-profile mapping, unsafe
+  spawns, and serialized-size/fingerprint violations.
 - [ ] Circle and axis-aligned-rectangle containment cover center, interior, exact boundary, just
   outside, negative coordinates, and non-finite points. Circle boundary cases use exactly representable
   axis-aligned radius-160 coordinates; no approximate-equality assertion defines gameplay semantics.
 - [ ] Occupancy covers empty, team 0 only, team 1 only, multiple same-team occupants, contested,
   simultaneous entry, boundary presence, defeated/zero-health/respawning/wrong-match/invalid-team/
-  non-finite exclusions, and spawn-protected inclusion.
+  non-finite/disconnected-roster exclusions, a lingering disconnected entity, and spawn-protected
+  inclusion.
 - [ ] Progress covers exactly one unit per controlled tick independent of headcount, zero when empty or
   contested, cap/checked arithmetic, duplicate same-tick evaluation, threshold, timeout leader, tie,
-  injected simultaneous threshold, and precedence rules.
+  injected simultaneous threshold, and precedence rules. With activation `A` and limit `L`, tests
+  prove exactly `L` eligible evaluations on `A..A+L`, no mutation at `A+L`, target `L` completion at
+  `A+L-1`, recovered/injected threshold precedence over timeout at `A+L`, and no accepted gameplay or
+  combat outcome on that boundary tick.
 - [ ] Rules validate all nonzero deadlines, target progress from 2 through the active-limit/`u16`
   ceiling, capacities, retention bounds, checked deadline combinations, production defaults, and the
   exact 30-tick verification target.
+- [ ] Mode-summary rules prove Wipeout score/target/margin preservation; occupant fighter-ticks versus
+  controlled ticks; first-entry/first-progress values; control-gained and consecutive-run semantics;
+  target-team attribution for near-zone hostile fighter damage/defeats; and reset at restart.
 
 ### Small-App/ECS and schedule tests
 
 - [ ] Plugin composition installs exactly one mode state and one compatible resolved map; mismatched
   mode/map configuration fails before gameplay starts.
-- [ ] Schedule trace proves final authoritative movement and same-tick zero health affect occupancy,
-  progress mutates before completion, `ModeRuleOutcome` is taken exactly once and cannot survive a
-  second consumer run or next tick, cleanup observes deferred changes, and tick advancement is last.
-- [ ] Waiting/countdown/completed ticks never advance progress; activation begins from zero; restart
-  creates a new match ID and resets the existing mode component in place; schedule observation proves
-  every restart tick has exactly one mode state (never both or neither); repeated restarts do not
-  accumulate entities/resources/data.
-- [ ] Disconnect/forfeit, respawn, protection, build selection/readiness, dash crossing, sentry presence,
-  and simultaneous defeat/capture follow the specified eligibility and common lifecycle rules. A
-  sentry positioned wholly inside the zone explicitly neither occupies nor contests it.
+- [ ] Schedule trace proves deadline outcome consumption/locking precedes all boundary-tick gameplay;
+  final authoritative movement and same-tick zero health affect eligible-tick occupancy; progress
+  mutates before post-damage completion; every combat-fact reader runs before the one common clear;
+  `ModeRuleOutcome` is taken exactly once by either consumer and cannot survive a second consumer run
+  or next tick; deferred `Defeated` is visible before common respawn handling; its commands are applied
+  before cleanup; and tick advancement is last.
+- [ ] Waiting/countdown/completed ticks never advance progress; activation begins from zero; the
+  chained restart prepare/mode-reset/common-commit transaction creates a new match ID and resets the
+  existing mode component in place. Trace observation at every allowed boundary and after the schedule
+  proves downstream systems see matching `MatchState`/`MatchClock`/mode IDs and exactly one mode state
+  (never both or neither); repeated restarts do not accumulate entities/resources/data.
+- [ ] Disconnect/forfeit, respawn, protection, build selection/readiness, dash crossing, sentry
+  presence, and simultaneous defeat/capture follow the specified eligibility and common lifecycle
+  rules. A disconnected fighter entity deliberately retained inside the zone loses occupancy through
+  connected-roster membership before despawn; a sentry positioned wholly inside explicitly neither
+  occupies nor contests it.
 - [ ] Existing Wipeout rule, lifecycle, telemetry, HUD, and schedule tests pass after extraction with
-  equivalent assertions against `WipeoutState`.
+  equivalent assertions against `WipeoutState` and `WipeoutSummary`; Hot Zone is not required for
+  common fact clearing or fighter respawn.
 
 ### Deterministic network tests
 
 - [ ] Two and four client Apps converge on mode/map/match/zone identity, occupants, status, progress,
-  root authoritative tick, derived timer/result, and restart generation; delayed/missing root tick
-  produces `syncing` rather than a client-local countdown.
+  generation-tagged match clock, derived timer/result, and restart generation. Delayed/missing clock,
+  new state plus old clock, and new clock plus old state all produce `syncing` rather than a stale or
+  client-local countdown.
 - [ ] Scripted positions cover unopposed control, contested hold, simultaneous entry/exit, threshold,
   timeout leader/tie, defeat in zone, respawn return, disconnect forfeit, and repeat match.
 - [ ] Duplicate/stale input and packet impairment cannot advance progress more than once per server
@@ -726,7 +850,9 @@ whether a recurring lesson justifies updating repository guidance or a reusable 
 |---|---|
 | M09 begins from a moving M08 review worktree | Specification may be reviewed now; implementation is explicitly gated on M08 closeout, exact commit, and green baseline. |
 | Common lifecycle extraction regresses Wipeout | Extract before adding Hot Zone behavior, migrate tests to `WipeoutState`, and require behavior-equivalent Wipeout process reports. |
-| `MatchState` protocol migration causes partial-state HUD bugs | Bump protocol, register concrete mode components, gate presentation on matching mode/match/map generations, and test delayed arrival/removal. |
+| `MatchState` protocol migration causes partial-state HUD bugs | Bump protocol, add the generation-tagged `MatchClock`, gate presentation on matching clock/mode/match/map generations, and test both relative arrival orders around restart. |
+| Common/mode extraction drops facts or changes respawn behavior | Make combat facts read-only until one ordered common clear, move fighter respawn after deferred defeat visibility into common lifecycle, and preserve equivalent Wipeout fact/respawn tests before adding Hot Zone. |
+| A disconnected fighter lingers in the objective | Use the same accepted connected-roster snapshot for occupancy and forfeit; test a retained stale fighter entity inside the zone. |
 | Area anchor overlaps terrain or differs between server/client | Strengthen resolver validation and derive both authority/presentation from the same canonical resolved anchor. |
 | Capture depends on ECS iteration or deferred defeat order | Collect the complete occupancy snapshot, sort/aggregate by stable team semantics, read positive health, and mutate once per tick. |
 | Objective favors spawn protection or one build excessively | Keep protection semantics consistent for M09, place the zone away from spawns, capture telemetry by build, and tune only through recorded feedback. |
@@ -743,13 +869,16 @@ whether a recurring lesson justifies updating repository guidance or a reusable 
   safely to Wipeout.
 - [ ] One validated area anchor drives both authoritative occupancy and exact client presentation.
 - [ ] Empty, single-team, contested, simultaneous-entry, threshold, timeout, tie, forfeit, and restart
-  semantics are deterministic and server-owned.
+  semantics are deterministic and server-owned, with exactly `active_limit_ticks` eligible objective
+  evaluations and no deadline-tick progress.
 - [ ] Durable objective state converges for all current/recovery scenarios without capture history or
-  client-authored results.
+  client-authored results; mismatched `MatchClock`/state generations display `syncing`.
 - [ ] Wipeout and Hot Zone reuse match lifecycle, fighters, movement, combat, builds, abilities,
   respawns, protection, and cleanup; no fighter/weapon/ability system contains Hot Zone victory logic.
 - [ ] Objective HUD/world/audio feedback is controller-readable and does not become gameplay truth.
-- [ ] Telemetry captures bounded occupancy, contest, progress, transition, and near-zone combat evidence.
+- [ ] Telemetry captures bounded, definition-tested occupancy fighter-ticks, control ticks/transitions,
+  progress, contest, and target-team-attributed near-zone combat evidence; Wipeout reports retain their
+  prior meaning through `WipeoutSummary`.
 - [ ] Format, both role graphs, feature isolation, complete tests, deterministic network/performance,
   both-mode process evidence, and required visual/controller/audio checks have explicit outcomes.
 - [ ] The user playtest is triaged, affected verification reruns, learning review completes, and deferred
