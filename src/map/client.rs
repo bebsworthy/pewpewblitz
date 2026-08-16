@@ -276,25 +276,27 @@ fn spawn_snapshot_visuals(
                 MapShape::Rectangle { half_extents } => half_extents * 2.0,
             };
             // A low-alpha floor fill plus a larger boundary disc behind it read as a ring
-            // without a mesh pipeline. Both stay behind fighters, projectiles, and effects.
+            // without a mesh pipeline. The 28-world-unit ring keeps the ownership boundary
+            // readable at the smallest supported window; both stay behind fighters and
+            // projectiles. Thickness/color are recorded presentation tuning, not gameplay.
             commands.spawn((
                 marker,
                 ZoneObjectiveBoundary {
                     anchor_id: anchor.anchor_id,
                 },
                 Sprite::from_color(
-                    Color::srgba(0.85, 0.75, 0.30, 0.55),
-                    diameter + Vec2::splat(10.0),
+                    Color::srgba(0.85, 0.75, 0.30, 0.65),
+                    diameter + Vec2::splat(28.0),
                 ),
-                Transform::from_translation(position.extend(-6.0)),
+                Transform::from_translation(position.extend(-4.9)),
             ));
             commands.spawn((
                 marker,
                 ZoneObjectiveFill {
                     anchor_id: anchor.anchor_id,
                 },
-                Sprite::from_color(Color::srgba(0.30, 0.55, 0.85, 0.14), diameter),
-                Transform::from_translation(position.extend(-5.5)),
+                Sprite::from_color(Color::srgba(0.30, 0.55, 0.85, 0.16), diameter),
+                Transform::from_translation(position.extend(-4.8)),
             ));
         }
     }
@@ -514,6 +516,48 @@ mod tests {
                 .0
         );
         assert!(!app.world().contains_resource::<PresentedMap>());
+    }
+
+    fn hot_zone_snapshot_test() -> ResolvedMapSnapshot {
+        MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(
+                MapPresetId(2),
+                MapInstanceId(11),
+                &MapLayoutRequirements::hot_zone(),
+            )
+            .unwrap()
+            .snapshot
+    }
+
+    #[test]
+    fn hot_zone_objective_visuals_spawn_with_the_exact_generation_marker() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, MapContentPlugin, MapPresentationPlugin));
+        let snapshot = hot_zone_snapshot_test();
+        let instance_id = snapshot.identity.instance_id;
+        let anchor_id = snapshot.mode_anchors[0].anchor_id;
+        app.world_mut()
+            .spawn((MapRoot, instance_id, snapshot.identity, snapshot));
+        app.update();
+        let world = app.world_mut();
+        let mut fills = world.query::<&ZoneObjectiveFill>();
+        let mut boundaries = world.query::<&ZoneObjectiveBoundary>();
+        assert_eq!(fills.iter(world).count(), 1);
+        assert_eq!(boundaries.iter(world).count(), 1);
+        let fill = fills.single(world).unwrap();
+        let boundary = boundaries.single(world).unwrap();
+        assert_eq!(fill.anchor_id, anchor_id);
+        assert_eq!(boundary.anchor_id, anchor_id);
+        let members = world
+            .query::<&MapPresentationMember>()
+            .iter(world)
+            .filter(|member| member.instance_id == instance_id)
+            .count();
+        assert!(
+            members > 0,
+            "zone visuals share the exact map generation marker"
+        );
     }
 
     #[test]

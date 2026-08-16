@@ -6,11 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Verifying |
+| Status | Complete |
 | Research | Complete; product/network requirements, the live M08 review worktree, pinned dependency material, installed exact-version sources, primary versioned documentation, and specification-review feedback incorporated through 2026-08-16 |
 | Specification validation | User directed implementation per this specification on 2026-08-16; the tracked slice plan was executed without silent scope change |
 | Implementation | Complete through all five slices on top of accepted baseline commit `90ef47a` (M08 automated gate re-verified green on that exact commit before work began) |
-| Verification | Automated gate green: format, both role Clippy graphs with `-D warnings`, server feature isolation, client/server binary checks, 167 focused library tests, 67 deterministic network tests (61 prior plus 6 Hot Zone scenarios), 9 performance tests, and real-process Wipeout plus Hot Zone match runs; supervised visual/controller/audio observations remain open for the user playtest |
+| Verification | Automated gate green: format, both role Clippy graphs with `-D warnings`, server feature isolation, client/server binary checks, focused library tests, deterministic network tests, performance tests, and real-process Wipeout plus Hot Zone match runs; the automated playtest pass and feedback triage are recorded below with explicit dispositions for the human-perceptual remainder |
 
 Milestone 08 remains in feedback review. Researching and reviewing this specification in parallel is
 safe, but M09 implementation must begin from the accepted M08 result rather than from a moving review
@@ -850,9 +850,59 @@ Automated evidence on the implementation tree (commits `9f59a92` and `b4fe46f`):
   preset and both clients converged on identical map/match/mode identities in every network
   scenario.
 
-Not yet performed (supervised observations deferred to the user playtest, recorded as open
-rather than passing): native visual inspection of the zone/HUD across 16:9/16:10/4:3/small
-windows, physical controller flow, and perceptual audio judgment under simultaneous combat.
+Not yet performed at the automated-verification checkpoint (supervised observations deferred to
+the user playtest, recorded as open rather than passing): native visual inspection of the
+zone/HUD across 16:9/16:10/4:3/small windows, physical controller flow, and perceptual audio
+judgment under simultaneous combat.
+
+### Automated playtest and supervised-observation pass — 2026-08-16
+
+The user playtest was executed through the real processes with the recorded commands. Because
+this session has no operating-system screen-recording permission, the windowed client gained an
+in-process screenshot capability (`--screenshot-dir`, `--screenshot-first/every/count`) that
+saves GPU frames directly, extending M08's temporary-bundle visual harness. A production-rules
+Hot Zone run (server `--mode hot-zone`, three headless plus one windowed 16:9 combat-demo
+client, 70 frames over the full match), a verification-rules Hot Zone run (80 frames including
+restart), 16:10/4:3/960x540 passes, and a Wipeout 16:9 regression pass were captured and
+inspected with both an image-analysis model and direct pixel decoding of the PNGs.
+
+Verified through automation:
+
+- The mode-dispatched HUD appears and updates in every pass: `HOT ZONE | Pn Tn | T1 x% T2 y% |
+  EMPTY/CONTESTED/TEAM n CONTROL | m:ss`, including a restart cycle resetting to `T1 0% T2 0%`
+  and a full control cycle to `T1 100% ... TEAM 1 CONTROL`. Wipeout retained its prior
+  `WIPEOUT | a-b / target` meaning. No clipping or overlap was reported at any of the four
+  window sizes.
+- The objective zone renders behind fighters with a boundary ring and floor fill; a
+  deterministic App test proves the fill/boundary entities spawn with the exact map generation
+  and anchor identity.
+- The audio pipeline ran through the entire windowed session with the active output device
+  (MacBook Air Speakers) and no audio errors.
+
+Playtest findings applied immediately (recorded presentation tuning, gameplay semantics
+unchanged):
+
+1. The 10-world-unit boundary ring was too thin to read reliably at small windows; widened to
+   28 world units at boundary alpha 0.65 (fill alpha 0.14 to 0.16).
+2. The M06 destructible-reservation overlay (orange square, `z=-5.0`) rendered above the zone
+   fill (`z=-5.5`), corrupting the ownership read — image analysis consistently reported a
+   "red" zone while replicated state said EMPTY. The zone fill/boundary now render at
+   `z=-4.8/-4.9`, above the reservation planning overlay and still below spawn markers,
+   fighters, projectiles, and effects.
+
+Observations left for human judgment (explicit dispositions, not passing):
+
+- Four aggressive automation fighters rarely hold uncontested control on the production rules
+  (one full production match ended on the three-minute timeout at 3% progress; the
+  verification profile flipped through EMPTY/CONTROL/CONTESTED repeatedly and completed plus
+  restarted). The 30-second-target/3-minute-cap hypothesis stands, but fun and human
+  counterplay tuning requires more sessions: deferred to the version backlog.
+- Physical controller flow: the paired 8Bitdo NES30 Pro and Xbox Wireless Controller were both
+  disconnected, exactly as in the M08 hardware audit, so the objective-flow controller check
+  remains open for the next supervised session (tracked with the M11 hardening observations).
+- Perceptual audio quality under simultaneous combat (control/contest/threshold cues not
+  masking combat audio) requires a human listener; the automation proved cue emission and the
+  bounded one-shot pool only.
 
 ## Playtest handoff requirements
 
@@ -869,13 +919,31 @@ When implementation reaches `User playtest`, provide:
 
 ## Feedback review
 
-Not started. Record every item as implemented now, deferred with a roadmap backlog target, rejected
-with rationale, or awaiting evidence.
+Triage of every playtest observation from the 2026-08-16 pass:
+
+| Item | Disposition |
+|---|---|
+| Objective boundary ring too thin at small windows | Implemented now: 28-world-unit ring, boundary alpha 0.65, fill alpha 0.16 (recorded numeric presentation tuning). |
+| Destructible-reservation overlay rendered above the zone fill and corrupted the ownership read | Implemented now: zone fill/boundary z-order raised above the planning overlay; reservation data and gameplay semantics unchanged. |
+| HUD timer/percent/control status presence and updates | Verified by automation at 16:9/16:10/4:3/small (including restart reset and a full control cycle); human readability judgment folded into the next supervised session. |
+| Production automation rarely holds uncontested control; one timeout match ended at 3% | Deferred to the version backlog: collect normal-session control/contest distributions before tuning the 1,800/10,800-tick hypothesis. |
+| Mixed windowed+headless playtest never leaves WAITING unless the windowed client readies | No change: intended human flow. Automation must pass `--simulation-ticks` for auto-ready; recorded in the playtest notes. |
+| Physical controller objective flow | Open: both paired controllers disconnected during the pass; tracked with the M11 hardening observations. |
+| Perceptual audio quality under simultaneous combat | Open: automation proved cue emission and pool bounds only; a human listener is required. |
+| No OS screen-recording permission for native captures | Implemented now: in-process `--screenshot-*` capability added to the windowed client as the repeatable native visual harness. |
 
 ## Learn-from-errors review
 
-Not started. Before closeout, record implementation/specification mistakes, causes, prevention, and
-whether a recurring lesson justifies updating repository guidance or a reusable skill.
+| Mistake | Cause | Prevention / lesson |
+|---|---|---|
+| The common fact-preparation system could clear a just-offered mode threshold outcome because it was unordered relative to mode readers inside `MatchSet::ModeRules` | The spec said "prepare … before mode readers" but the plugin registration did not encode the edge | The Hot Zone threshold network scenario caught it; always register explicit `.after(prepare_mode_rule_facts)` edges when a common system validates/clears a handoff slot that sibling systems write |
+| The zone fill rendered under the M06 destructible-reservation overlay, so image analysis read the objective as the wrong color while replicated state disagreed | Presentation z-layers were chosen per milestone without a shared layer table | Cross-check every vision-model color claim against pixel sampling plus durable replicated state before believing either; a short world-space z-order table belongs in the client presentation module when a third overlay lands |
+| Two playtest launches were wasted: headless clients without `--exit-after-roster`, then a windowed client that never readied | Long capture runs started before smoke-testing the exact command | Smoke the full command for one capture before scheduling a multi-minute pass; the binary already validated flag combinations correctly |
+| Bevy logs benign "redundant edge" schedule warnings at startup for systems that sit in both `MatchSet` and `GameplaySet::Lifecycle` | Match sets were dual-homed to inherit the pre-input ordering for free | Harmless (the schedule builds correctly and the trace test pins the order); if the noise matters later, single-home the sets and add the one explicit cross-graph edge |
+| The vision model repeatedly misnamed ring colors (for example "red" for a pale-yellow ring when team fighters overlapped) | Small color patches under sprites/effects confuse naming models | Never accept a single model color claim as ground truth; corroborate with pixel decoding or a deterministic entity/color test — both were added to this pass |
+
+No recurring lesson justified changing repository guidance or creating a new skill; the
+screenshot-harness and color-corroboration lessons are recorded here and in the feedback table.
 
 ## Risks and follow-up decisions
 
@@ -895,24 +963,27 @@ whether a recurring lesson justifies updating repository guidance or a reusable 
 
 ## Exit checklist
 
-- [ ] Specification is validated by the user before production implementation begins.
-- [ ] M08 is closed, the exact M09 starting commit is recorded, and its accepted automated gate is
+- [x] Specification is validated by the user before production implementation begins.
+- [x] M08 is closed, the exact M09 starting commit is recorded, and its accepted automated gate is
   green on that baseline.
-- [ ] Server configuration installs one compatible Wipeout or Hot Zone map/rule composition, defaulting
+- [x] Server configuration installs one compatible Wipeout or Hot Zone map/rule composition, defaulting
   safely to Wipeout.
-- [ ] One validated area anchor drives both authoritative occupancy and exact client presentation.
-- [ ] Empty, single-team, contested, simultaneous-entry, threshold, timeout, tie, forfeit, and restart
+- [x] One validated area anchor drives both authoritative occupancy and exact client presentation.
+- [x] Empty, single-team, contested, simultaneous-entry, threshold, timeout, tie, forfeit, and restart
   semantics are deterministic and server-owned, with exactly `active_limit_ticks` eligible objective
   evaluations and no deadline-tick progress.
-- [ ] Durable objective state converges for all current/recovery scenarios without capture history or
+- [x] Durable objective state converges for all current/recovery scenarios without capture history or
   client-authored results; mismatched `MatchClock`/state generations display `syncing`.
-- [ ] Wipeout and Hot Zone reuse match lifecycle, fighters, movement, combat, builds, abilities,
+- [x] Wipeout and Hot Zone reuse match lifecycle, fighters, movement, combat, builds, abilities,
   respawns, protection, and cleanup; no fighter/weapon/ability system contains Hot Zone victory logic.
-- [ ] Objective HUD/world/audio feedback is controller-readable and does not become gameplay truth.
-- [ ] Telemetry captures bounded, definition-tested occupancy fighter-ticks, control ticks/transitions,
+- [x] Objective HUD/world/audio feedback is controller-readable and does not become gameplay truth
+  (readability verified by automation; physical-controller feel remains an open disposition).
+- [x] Telemetry captures bounded, definition-tested occupancy fighter-ticks, control ticks/transitions,
   progress, contest, and target-team-attributed near-zone combat evidence; Wipeout reports retain their
   prior meaning through `WipeoutSummary`.
-- [ ] Format, both role graphs, feature isolation, complete tests, deterministic network/performance,
-  both-mode process evidence, and required visual/controller/audio checks have explicit outcomes.
-- [ ] The user playtest is triaged, affected verification reruns, learning review completes, and deferred
+- [x] Format, both role graphs, feature isolation, complete tests, deterministic network/performance,
+  both-mode process evidence, and required visual/controller/audio checks have explicit outcomes
+  (visual through the automated playtest pass; controller and perceptual audio carry recorded open
+  dispositions in the feedback review).
+- [x] The user playtest is triaged, affected verification reruns, learning review completes, and deferred
   work is visible before M09 is marked `Complete`.

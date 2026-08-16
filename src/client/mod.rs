@@ -367,6 +367,7 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     let client_id = config.client_id;
     let render_profile = config.render_profile;
     let window_size = config.window_size;
+    let screenshot_schedule = config.screenshot_schedule.clone();
     let mut app = App::new();
     app.insert_resource(config);
     if headless {
@@ -413,8 +414,50 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     ));
     if !headless {
         app.add_plugins(ClientPresentationPlugin);
+        if let Some(schedule) = screenshot_schedule {
+            std::fs::create_dir_all(&schedule.dir).expect("screenshot directory is creatable");
+            app.insert_resource(ScheduledScreenshots {
+                dir: schedule.dir,
+                first_update: schedule.first_update,
+                interval: schedule.interval,
+                remaining: schedule.count,
+                update_index: 0,
+                captured: 0,
+            })
+            .add_systems(Update, capture_scheduled_screenshot);
+        }
     }
     app
+}
+
+/// In-process frame capture state for windowed visual verification.
+#[derive(Resource, Debug)]
+struct ScheduledScreenshots {
+    dir: std::path::PathBuf,
+    first_update: u32,
+    interval: u32,
+    remaining: u32,
+    update_index: u32,
+    captured: u32,
+}
+
+fn capture_scheduled_screenshot(mut commands: Commands, mut plan: ResMut<ScheduledScreenshots>) {
+    if plan.remaining == 0 {
+        return;
+    }
+    let current = plan.update_index;
+    plan.update_index = current.saturating_add(1);
+    let due = plan.first_update + plan.interval * plan.captured;
+    if current < due {
+        return;
+    }
+    let path = plan.dir.join(format!("brawler-{current:06}.png"));
+    info!(path = %path.display(), "capturing scheduled screenshot");
+    commands
+        .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+        .observe(bevy::render::view::screenshot::save_to_disk(path));
+    plan.remaining -= 1;
+    plan.captured += 1;
 }
 
 const RENDER_30_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);

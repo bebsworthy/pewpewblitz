@@ -2,13 +2,15 @@
 
 use bevy::app::AppExit;
 use brawler::client::build_app_with_config;
-use brawler::config::{ClientNetworkConfig, WindowedCombatDemo, WindowedControllerDemo};
+use brawler::config::{
+    ClientNetworkConfig, ScreenshotSchedule, WindowedCombatDemo, WindowedControllerDemo,
+};
 use core::net::SocketAddr;
-use std::{env, process};
+use std::{env, path::PathBuf, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo]"
+        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
     );
 }
 
@@ -54,6 +56,10 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut windowed_combat_demo = false;
     let mut windowed_controller_demo = false;
     let mut window_size = None;
+    let mut screenshot_dir = None;
+    let mut screenshot_first: u32 = 30;
+    let mut screenshot_every: u32 = 60;
+    let mut screenshot_count: u32 = 1;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--client-id" => client_id = Some(parse_value(&flag, args.next())?),
@@ -76,6 +82,15 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--combat-demo" => windowed_combat_demo = true,
             "--controller-demo" => windowed_controller_demo = true,
             "--window-size" => window_size = Some(parse_window_size(&flag, args.next())?),
+            "--screenshot-dir" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                screenshot_dir = Some(PathBuf::from(value));
+            }
+            "--screenshot-first" => screenshot_first = parse_value(&flag, args.next())?,
+            "--screenshot-every" => screenshot_every = parse_value(&flag, args.next())?,
+            "--screenshot-count" => screenshot_count = parse_value(&flag, args.next())?,
             "--help" | "-h" => {
                 usage();
                 process::exit(0);
@@ -107,6 +122,14 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.windowed_combat_demo = windowed_combat_demo.then_some(WindowedCombatDemo);
     config.windowed_controller_demo = windowed_controller_demo.then_some(WindowedControllerDemo);
     config.window_size = window_size;
+    if let Some(dir) = screenshot_dir {
+        config.screenshot_schedule = Some(ScreenshotSchedule {
+            dir,
+            first_update: screenshot_first,
+            interval: screenshot_every,
+            count: screenshot_count,
+        });
+    }
     if windowed_combat_demo {
         config.headless_aim_at_dummy = true;
         config.headless_fire = true;

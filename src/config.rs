@@ -224,11 +224,22 @@ pub struct ClientNetworkConfig {
     pub windowed_controller_demo: Option<WindowedControllerDemo>,
     pub render_profile: RenderProfile,
     pub window_size: Option<(u16, u16)>,
+    pub screenshot_schedule: Option<ScreenshotSchedule>,
 }
 
 /// Enables the reproducible, windowed aim-at-dummy/fire smoke scenario.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowedCombatDemo;
+
+/// In-process screenshot capture plan for windowed visual verification. Frames are read
+/// from the render surface, so no operating-system screen-recording permission is needed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenshotSchedule {
+    pub dir: std::path::PathBuf,
+    pub first_update: u32,
+    pub interval: u32,
+    pub count: u32,
+}
 
 /// Enables a reproducible windowed smoke scenario through the native gamepad input path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,6 +275,7 @@ impl ClientNetworkConfig {
             windowed_controller_demo: None,
             render_profile: RenderProfile::from_env(),
             window_size: None,
+            screenshot_schedule: None,
         }
     }
 
@@ -320,6 +332,14 @@ impl ClientNetworkConfig {
         }
         if self.expected_build_version.is_empty() {
             return Err("expected build version must not be empty".to_string());
+        }
+        if let Some(schedule) = &self.screenshot_schedule {
+            if self.headless {
+                return Err("--screenshot-dir requires a windowed client".to_string());
+            }
+            if schedule.interval == 0 || schedule.count == 0 {
+                return Err("screenshot interval and count must be greater than zero".to_string());
+            }
         }
         Ok(())
     }
