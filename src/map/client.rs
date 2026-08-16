@@ -33,6 +33,19 @@ pub struct MapPresentationMember {
     pub instance_id: MapInstanceId,
 }
 
+/// Client-only objective zone fill derived from the replicated resolved area anchor. The
+/// authoritative anchor owns geometry and identity; presentation only tints this visual.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ZoneObjectiveFill {
+    pub anchor_id: ModeAnchorId,
+}
+
+/// Client-only objective zone boundary ring companion to [`ZoneObjectiveFill`].
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ZoneObjectiveBoundary {
+    pub anchor_id: ModeAnchorId,
+}
+
 pub struct MapPresentationPlugin;
 
 impl Plugin for MapPresentationPlugin {
@@ -48,6 +61,10 @@ impl Plugin for MapPresentationPlugin {
             .add_systems(
                 Update,
                 reconcile_map_snapshot.in_set(MapPresentationSet::Reconcile),
+            )
+            .add_systems(
+                Update,
+                tint_zone_objective.after(MapPresentationSet::Reconcile),
             );
     }
 }
@@ -180,6 +197,55 @@ fn validate_client_snapshot(
     Ok(())
 }
 
+/// Tint the world-space objective visual from durable replicated Hot Zone state. The
+/// presentation reads the same generation-tagged identities the HUD gates on; a mismatched
+/// or missing generation keeps a neutral tint instead of guessing ownership.
+fn tint_zone_objective(
+    roots: Query<
+        (
+            &crate::matchplay::MatchState,
+            &crate::matchplay::HotZoneState,
+            &crate::matchplay::MatchClock,
+        ),
+        With<crate::matchplay::MatchRoot>,
+    >,
+    mut fills: Query<&mut Sprite, With<ZoneObjectiveFill>>,
+    mut boundaries: Query<&mut Sprite, (With<ZoneObjectiveBoundary>, Without<ZoneObjectiveFill>)>,
+) {
+    let Ok((state, hot_zone, clock)) = roots.single() else {
+        return;
+    };
+    if state.match_id != hot_zone.match_id || clock.match_id != state.match_id {
+        return;
+    }
+    let (fill_color, boundary_color) = match hot_zone.status {
+        crate::matchplay::HotZoneStatus::Empty => (
+            Color::srgba(0.30, 0.55, 0.85, 0.14),
+            Color::srgba(0.85, 0.75, 0.30, 0.55),
+        ),
+        crate::matchplay::HotZoneStatus::Contested => (
+            Color::srgba(0.85, 0.30, 0.55, 0.18),
+            Color::srgba(0.95, 0.45, 0.70, 0.75),
+        ),
+        crate::matchplay::HotZoneStatus::Controlled { team } => (
+            with_alpha(team_color(team.0), 0.20),
+            with_alpha(team_color(team.0), 0.85),
+        ),
+    };
+    for mut sprite in &mut fills {
+        sprite.color = fill_color;
+    }
+    for mut sprite in &mut boundaries {
+        sprite.color = boundary_color;
+    }
+}
+
+fn with_alpha(color: Color, alpha: f32) -> Color {
+    let mut result = color;
+    result.set_alpha(alpha);
+    result
+}
+
 fn despawn_generation(
     commands: &mut Commands,
     members: &Query<(Entity, &MapPresentationMember)>,
@@ -192,6 +258,7 @@ fn despawn_generation(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn spawn_snapshot_visuals(
     commands: &mut Commands,
     snapshot: &ResolvedMapSnapshot,
@@ -200,6 +267,37 @@ fn spawn_snapshot_visuals(
     let marker = MapPresentationMember {
         instance_id: snapshot.identity.instance_id,
     };
+    for anchor in &snapshot.mode_anchors {
+        if let ModeAnchorShape::Area { position, shape } = anchor.shape
+            && let Some(_profile) = objective_presentation_profile(anchor.definition_id)
+        {
+            let diameter = match shape {
+                MapShape::Circle { radius } => Vec2::splat(radius * 2.0),
+                MapShape::Rectangle { half_extents } => half_extents * 2.0,
+            };
+            // A low-alpha floor fill plus a larger boundary disc behind it read as a ring
+            // without a mesh pipeline. Both stay behind fighters, projectiles, and effects.
+            commands.spawn((
+                marker,
+                ZoneObjectiveBoundary {
+                    anchor_id: anchor.anchor_id,
+                },
+                Sprite::from_color(
+                    Color::srgba(0.85, 0.75, 0.30, 0.55),
+                    diameter + Vec2::splat(10.0),
+                ),
+                Transform::from_translation(position.extend(-6.0)),
+            ));
+            commands.spawn((
+                marker,
+                ZoneObjectiveFill {
+                    anchor_id: anchor.anchor_id,
+                },
+                Sprite::from_color(Color::srgba(0.30, 0.55, 0.85, 0.14), diameter),
+                Transform::from_translation(position.extend(-5.5)),
+            ));
+        }
+    }
     for visual in &snapshot.visual_instances {
         let (color, size, z) = match visual.presentation_profile_id.0 {
             1 => (Color::srgb(0.055, 0.075, 0.10), Vec2::splat(64.0), -10.0),

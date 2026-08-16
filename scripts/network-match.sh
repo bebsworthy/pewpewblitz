@@ -9,15 +9,20 @@ if [[ "$target_dir" != /* ]]; then
 fi
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5200}"
 custom_build_client="${BRAWLER_NETWORK_CUSTOM_BUILD_CLIENT:-0}"
-wipeout_rules="${BRAWLER_NETWORK_WIPEOUT_RULES:-verification}"
+match_rules="${BRAWLER_NETWORK_MATCH_RULES:-verification}"
+game_mode="${BRAWLER_NETWORK_GAME_MODE:-wipeout}"
 simulation_ticks="${BRAWLER_NETWORK_SIMULATION_TICKS:-6000}"
 match_timeout_seconds="${BRAWLER_NETWORK_MATCH_TIMEOUT_SECONDS:-90}"
 if [[ ! "$custom_build_client" =~ ^[0-4]$ ]]; then
     printf 'brawler match: BRAWLER_NETWORK_CUSTOM_BUILD_CLIENT must be between 0 and 4\n' >&2
     exit 2
 fi
-if [[ "$wipeout_rules" != "verification" && "$wipeout_rules" != "production" ]]; then
-    printf 'brawler match: BRAWLER_NETWORK_WIPEOUT_RULES must be verification or production\n' >&2
+if [[ "$match_rules" != "verification" && "$match_rules" != "production" ]]; then
+    printf 'brawler match: BRAWLER_NETWORK_MATCH_RULES must be verification or production\n' >&2
+    exit 2
+fi
+if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" ]]; then
+    printf 'brawler match: BRAWLER_NETWORK_GAME_MODE must be wipeout or hot-zone\n' >&2
     exit 2
 fi
 if [[ ! "$simulation_ticks" =~ ^[1-9][0-9]*$ || ! "$match_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
@@ -62,7 +67,7 @@ cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$targ
     BRAWLER_SERVER_READY_FILE="$ready_file" \
     BRAWLER_NETWORK_ASSERT_MATCH=1 \
     BRAWLER_NETWORK_MATCH_REPORT_FILE="$report_file" \
-    "$target_dir/debug/brawler-server" --bind "$network_addr" --wipeout-rules "$wipeout_rules") &
+    "$target_dir/debug/brawler-server" --bind "$network_addr" --mode "$game_mode" --match-rules "$match_rules") &
 server_pid=$!
 
 deadline=$((SECONDS + 10))
@@ -99,7 +104,7 @@ done
 deadline=$((SECONDS + match_timeout_seconds))
 while job_is_running "$server_pid"; do
     if ((SECONDS >= deadline)); then
-        printf 'brawler match: %s 2v2 match timed out\n' "$wipeout_rules" >&2
+        printf 'brawler match: %s 2v2 match timed out\n' "$game_mode" >&2
         exit 124
     fi
     sleep 0.1
@@ -118,9 +123,9 @@ for pid in "${client_pids[@]}"; do
 done
 client_pids=()
 
-for required in initial_match_id restarted_match_id participant_count final_score_team_1 \
+for required in initial_match_id restarted_match_id participant_count mode_definition_id \
     summary_participant_count map_instance_id map_recipe_fingerprint content_fingerprint rules_revision \
-    final_score_team_2 result active_duration_ticks defeats respawns participant_active_ticks_team_1 \
+    final_score_team_1 final_score_team_2 result active_duration_ticks defeats respawns participant_active_ticks_team_1 \
     participant_active_ticks_team_2 records dropped_records summary_count \
     weapon_aggregate_count weapon_preset_ids build_preset_ids custom_builds build_fingerprints \
     build_total_points ultimate_ids passive_ids first_full_charge_ticks first_full_charge_active_ticks ability_uses_by_owner \

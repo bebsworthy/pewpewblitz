@@ -138,6 +138,7 @@ fn update_readiness_hud(
     playable: Res<ClientPlayableGate>,
     controlled: Query<(&PlayerId, &TeamId), (With<Fighter>, With<Controlled>)>,
     matches: Query<(&MatchState, Option<&crate::matchplay::WipeoutState>), With<MatchRoot>>,
+    hot_zones: Query<&crate::matchplay::HotZoneState, With<MatchRoot>>,
     clocks: Query<&crate::matchplay::MatchClock, With<MatchRoot>>,
     participants: Query<
         (
@@ -221,10 +222,11 @@ fn update_readiness_hud(
         participants.iter(),
         &mut roster_presentation,
     );
+    let final_line = final_objective_line(match_state, hot_zones.iter().next());
     for (mut text, mut visibility) in &mut phase_overlay {
         if let Some(label) = phase_overlay_label(
             match_state.map(|(state, _)| *state),
-            match_state.and_then(|(state, wipeout)| wipeout.map(|wipeout| (*state, *wipeout))),
+            final_line.as_deref(),
             now,
             phase_facts.participant_count,
             phase_facts.ready_count,
@@ -242,7 +244,7 @@ fn update_readiness_hud(
     }
     for mut text in &mut match_text {
         **text = match_state.map_or_else(
-            || "WIPEOUT | waiting for match state".to_string(),
+            || "waiting for match state".to_string(),
             |(state, wipeout)| {
                 let phase = match state.phase {
                     MatchPhase::Waiting => "WAITING".to_string(),
@@ -286,16 +288,53 @@ fn update_readiness_hud(
                 } else {
                     String::new()
                 };
-                let scores = wipeout.map_or_else(
-                    || "SYNCING".to_string(),
-                    |wipeout| {
-                        format!(
-                            "{}-{} / {}",
-                            wipeout.team_scores[0], wipeout.team_scores[1], wipeout.target_score
-                        )
-                    },
-                );
-                format!("WIPEOUT{local} | {scores} | {phase}{roster}")
+                match state.mode_definition_id {
+                    crate::map::WIPEOUT_MODE_DEFINITION => {
+                        let scores = wipeout.map_or_else(
+                            || "SYNCING".to_string(),
+                            |wipeout| {
+                                format!(
+                                    "{}-{} / {}",
+                                    wipeout.team_scores[0],
+                                    wipeout.team_scores[1],
+                                    wipeout.target_score
+                                )
+                            },
+                        );
+                        format!("WIPEOUT{local} | {scores} | {phase}{roster}")
+                    }
+                    crate::map::HOT_ZONE_MODE_DEFINITION => {
+                        let hot_zone = hot_zones.iter().next().filter(|hot_zone| {
+                            hot_zone.match_id == state.match_id
+                                && clock_generation_matches(match_state, clock)
+                        });
+                        let objective = hot_zone.map_or_else(
+                            || "SYNCING OBJECTIVE".to_string(),
+                            |hot_zone| {
+                                let percent = |progress: u16| {
+                                    u32::from(progress) * 100
+                                        / u32::from(hot_zone.target_progress_ticks)
+                                };
+                                let ownership = match hot_zone.status {
+                                    crate::matchplay::HotZoneStatus::Empty => "EMPTY".to_string(),
+                                    crate::matchplay::HotZoneStatus::Contested => {
+                                        "CONTESTED".to_string()
+                                    }
+                                    crate::matchplay::HotZoneStatus::Controlled { team } => {
+                                        format!("TEAM {} CONTROL", team.0 + 1)
+                                    }
+                                };
+                                format!(
+                                    "T1 {}% T2 {}% | {ownership}",
+                                    percent(hot_zone.progress_ticks[0]),
+                                    percent(hot_zone.progress_ticks[1]),
+                                )
+                            },
+                        );
+                        format!("HOT ZONE{local} | {objective} | {phase}{roster}")
+                    }
+                    _ => format!("UNKNOWN MODE{local} | {phase}{roster}"),
+                }
             },
         );
     }
@@ -310,6 +349,13 @@ fn match_deadline_tick(
     let state = state?;
     let clock = clock?;
     (clock.match_id == state.match_id).then_some(clock.completed_tick)
+}
+
+fn clock_generation_matches(
+    state: Option<(&MatchState, Option<&crate::matchplay::WipeoutState>)>,
+    clock: Option<&crate::matchplay::MatchClock>,
+) -> bool {
+    state.is_some_and(|(state, _)| clock.is_some_and(|clock| clock.match_id == state.match_id))
 }
 
 fn sync_roster_and_collect_phase_facts<'a>(
@@ -377,10 +423,47 @@ fn sync_roster_and_collect_phase_facts<'a>(
     facts
 }
 
+/// The mode-specific final objective line for the completed overlay, or a syncing label.
+fn final_objective_line(
+    state: Option<(&MatchState, Option<&crate::matchplay::WipeoutState>)>,
+    hot_zone: Option<&crate::matchplay::HotZoneState>,
+) -> Option<String> {
+    let (state, wipeout) = state?;
+    Some(match state.mode_definition_id {
+        crate::map::WIPEOUT_MODE_DEFINITION => wipeout.map_or_else(
+            || "FINAL  SYNCING".to_string(),
+            |wipeout| {
+                format!(
+                    "FINAL  {} - {}  |  MARGIN {}",
+                    wipeout.team_scores[0],
+                    wipeout.team_scores[1],
+                    wipeout.team_scores[0].abs_diff(wipeout.team_scores[1])
+                )
+            },
+        ),
+        crate::map::HOT_ZONE_MODE_DEFINITION => hot_zone
+            .filter(|hot_zone| hot_zone.match_id == state.match_id)
+            .map_or_else(
+                || "SYNCING OBJECTIVE".to_string(),
+                |hot_zone| {
+                    let percent = |progress: u16| {
+                        u32::from(progress) * 100 / u32::from(hot_zone.target_progress_ticks)
+                    };
+                    format!(
+                        "FINAL  T1 {}%  T2 {}%",
+                        percent(hot_zone.progress_ticks[0]),
+                        percent(hot_zone.progress_ticks[1]),
+                    )
+                },
+            ),
+        _ => "UNKNOWN MODE".to_string(),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn phase_overlay_label(
     state: Option<MatchState>,
-    wipeout: Option<(MatchState, crate::matchplay::WipeoutState)>,
+    final_line: Option<&str>,
     now: Option<u64>,
     participant_count: usize,
     ready_count: usize,
@@ -423,17 +506,7 @@ fn phase_overlay_label(
                     departed_team.0 + 1
                 ),
             };
-            let (scores, margin) = wipeout.map_or_else(
-                || ("SYNCING".to_string(), "SYNCING".to_string()),
-                |(_, wipeout)| {
-                    (
-                        format!("{} - {}", wipeout.team_scores[0], wipeout.team_scores[1]),
-                        wipeout.team_scores[0]
-                            .abs_diff(wipeout.team_scores[1])
-                            .to_string(),
-                    )
-                },
-            );
+            let final_line = final_line.unwrap_or("SYNCING");
             let restart = match now {
                 None => "SYNCING".to_string(),
                 Some(now) if now < restart_unlocked_at_tick => format!(
@@ -446,7 +519,7 @@ fn phase_overlay_label(
                 Some(_) => "Press SPACE / ENTER / A to ready for restart".to_string(),
             };
             Some(format!(
-                "{title}\n\nFINAL  {scores}  |  MARGIN {margin}\n\n{restart}\n{restart_ready_count}/{participant_count} restart ready"
+                "{title}\n\n{final_line}\n\n{restart}\n{restart_ready_count}/{participant_count} restart ready"
             ))
         }
         MatchPhase::Countdown { .. } | MatchPhase::Active { .. } => None,
@@ -620,7 +693,7 @@ mod tests {
         );
         let waiting = phase_overlay_label(
             Some(state),
-            Some((state, wipeout_state)),
+            final_objective_line(Some((&state, Some(&wipeout_state))), None).as_deref(),
             Some(0),
             4,
             2,
@@ -643,7 +716,7 @@ mod tests {
         };
         let locked = phase_overlay_label(
             Some(state),
-            Some((state, wipeout_state)),
+            final_objective_line(Some((&state, Some(&wipeout_state))), None).as_deref(),
             Some(100),
             4,
             4,
@@ -658,10 +731,73 @@ mod tests {
         assert!(locked.contains("Restart unlocks in 1"));
         assert!(locked.contains("2/4 restart ready"));
 
-        let syncing =
-            phase_overlay_label(Some(state), None, None, 4, 4, 2, true, true, false).unwrap();
+        let syncing = phase_overlay_label(
+            Some(state),
+            final_objective_line(Some((&state, None)), None).as_deref(),
+            None,
+            4,
+            4,
+            2,
+            true,
+            true,
+            false,
+        )
+        .unwrap();
         assert!(syncing.contains("FINAL  SYNCING"));
-        assert!(syncing.contains("MARGIN SYNCING"));
         assert!(syncing.contains("SYNCING"));
+    }
+    #[test]
+    fn hot_zone_completed_overlay_shows_final_percentages() {
+        let state = MatchState {
+            match_id: crate::matchplay::MatchId(1),
+            mode_definition_id: crate::map::HOT_ZONE_MODE_DEFINITION,
+            phase: MatchPhase::Completed {
+                completed_at_tick: 100,
+                restart_unlocked_at_tick: 160,
+                result: crate::matchplay::MatchResult::TeamVictory { team: TeamId(0) },
+            },
+            rules_revision: 1,
+        };
+        let hot_zone = crate::matchplay::HotZoneState {
+            match_id: crate::matchplay::MatchId(1),
+            zone_anchor_id: crate::map::ModeAnchorId(1),
+            occupants: [1, 0],
+            status: crate::matchplay::HotZoneStatus::Controlled { team: TeamId(0) },
+            progress_ticks: [15, 3],
+            target_progress_ticks: 30,
+            next_evaluation_tick: 100,
+        };
+        let label = phase_overlay_label(
+            Some(state),
+            final_objective_line(Some((&state, None)), Some(&hot_zone)).as_deref(),
+            Some(100),
+            2,
+            2,
+            0,
+            true,
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(label.contains("TEAM 1 WINS"));
+        assert!(label.contains("FINAL  T1 50%  T2 10%"));
+
+        let mismatched = crate::matchplay::HotZoneState {
+            match_id: crate::matchplay::MatchId(9),
+            ..hot_zone
+        };
+        let syncing = phase_overlay_label(
+            Some(state),
+            final_objective_line(Some((&state, None)), Some(&mismatched)).as_deref(),
+            Some(100),
+            2,
+            2,
+            0,
+            true,
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(syncing.contains("SYNCING OBJECTIVE"));
     }
 }
