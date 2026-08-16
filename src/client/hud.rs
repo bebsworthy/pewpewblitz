@@ -130,14 +130,15 @@ fn spawn_readiness_hud(mut commands: Commands) {
         .insert(BackgroundColor(Color::srgba(0.025, 0.035, 0.055, 0.92)));
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn update_readiness_hud(
     joins: Query<&ClientJoinStatus>,
     map: Res<crate::map::ClientMapReadiness>,
     assets: Res<assets::ClientAssetReadiness>,
     playable: Res<ClientPlayableGate>,
     controlled: Query<(&PlayerId, &TeamId), (With<Fighter>, With<Controlled>)>,
-    matches: Query<&MatchState, With<MatchRoot>>,
+    matches: Query<(&MatchState, Option<&crate::matchplay::WipeoutState>), With<MatchRoot>>,
+    clocks: Query<&crate::matchplay::MatchClock, With<MatchRoot>>,
     participants: Query<
         (
             &PlayerId,
@@ -150,7 +151,6 @@ fn update_readiness_hud(
         ),
         With<Fighter>,
     >,
-    ticks: Query<&AuthoritativeTick, (With<Fighter>, With<Controlled>)>,
     pending: Res<PendingLocalActions>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
     mut readiness_text: Query<
@@ -201,9 +201,12 @@ fn update_readiness_hud(
     }
     let fighter = controlled.iter().next();
     let match_state = matches.iter().next();
-    let now = ticks.iter().next().map_or(0, |tick| tick.0);
+    let clock = clocks.iter().next();
+    // Deadlines derive only from the phase minus the generation-tagged match clock; any other
+    // component arrival order displays a syncing label instead of a stale or local countdown.
+    let now = match_deadline_tick(match_state.map(|(state, _)| *state), clock);
     for (mut text, mut visibility) in &mut countdown_text {
-        if let Some(label) = countdown_label(match_state, now) {
+        if let Some(label) = countdown_label(match_state.map(|(state, _)| *state), now) {
             text.0 = label;
             *visibility = Visibility::Inherited;
         } else {
@@ -213,14 +216,15 @@ fn update_readiness_hud(
     }
     let local_player = fighter.map(|(player, _)| player.0);
     let phase_facts = sync_roster_and_collect_phase_facts(
-        match_state,
+        match_state.map(|(state, _)| *state),
         local_player,
         participants.iter(),
         &mut roster_presentation,
     );
     for (mut text, mut visibility) in &mut phase_overlay {
         if let Some(label) = phase_overlay_label(
-            match_state,
+            match_state.map(|(state, _)| *state),
+            match_state.and_then(|(state, wipeout)| wipeout.map(|wipeout| (*state, *wipeout))),
             now,
             phase_facts.participant_count,
             phase_facts.ready_count,
@@ -239,18 +243,24 @@ fn update_readiness_hud(
     for mut text in &mut match_text {
         **text = match_state.map_or_else(
             || "WIPEOUT | waiting for match state".to_string(),
-            |state| {
+            |(state, wipeout)| {
                 let phase = match state.phase {
                     MatchPhase::Waiting => "WAITING".to_string(),
-                    MatchPhase::Countdown { starts_at_tick } => format!(
-                        "STARTING IN {}",
-                        starts_at_tick.saturating_sub(now).div_ceil(60)
-                    ),
-                    MatchPhase::Active { ends_at_tick } => format!(
-                        "{}:{:02}",
-                        ends_at_tick.saturating_sub(now) / 3600,
-                        (ends_at_tick.saturating_sub(now) / 60) % 60
-                    ),
+                    MatchPhase::Countdown { starts_at_tick } => match now {
+                        Some(now) => format!(
+                            "STARTING IN {}",
+                            starts_at_tick.saturating_sub(now).div_ceil(60)
+                        ),
+                        None => "SYNCING".to_string(),
+                    },
+                    MatchPhase::Active { ends_at_tick } => match now {
+                        Some(now) => format!(
+                            "{}:{:02}",
+                            ends_at_tick.saturating_sub(now) / 3600,
+                            (ends_at_tick.saturating_sub(now) / 60) % 60
+                        ),
+                        None => "SYNCING".to_string(),
+                    },
                     MatchPhase::Completed { result, .. } => format!("{result:?}"),
                 };
                 let local = fighter.map_or_else(String::new, |(player, team)| {
@@ -260,7 +270,12 @@ fn update_readiness_hud(
                     .entries
                     .iter()
                     .map(|(player, entry)| {
-                        roster_entry_text(*player, entry, now, local_player == Some(*player))
+                        roster_entry_text(
+                            *player,
+                            entry,
+                            now.unwrap_or(0),
+                            local_player == Some(*player),
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
@@ -271,17 +286,34 @@ fn update_readiness_hud(
                 } else {
                     String::new()
                 };
-                format!(
-                    "WIPEOUT{local} | {}-{} / {} | {phase}{roster}",
-                    state.team_scores[0], state.team_scores[1], state.target_score
-                )
+                let scores = wipeout.map_or_else(
+                    || "SYNCING".to_string(),
+                    |wipeout| {
+                        format!(
+                            "{}-{} / {}",
+                            wipeout.team_scores[0], wipeout.team_scores[1], wipeout.target_score
+                        )
+                    },
+                );
+                format!("WIPEOUT{local} | {scores} | {phase}{roster}")
             },
         );
     }
 }
 
+/// The shared deadline clock, presentable only when the clock, match envelope, and concrete
+/// mode state carry the same match ID.
+fn match_deadline_tick(
+    state: Option<MatchState>,
+    clock: Option<&crate::matchplay::MatchClock>,
+) -> Option<u64> {
+    let state = state?;
+    let clock = clock?;
+    (clock.match_id == state.match_id).then_some(clock.completed_tick)
+}
+
 fn sync_roster_and_collect_phase_facts<'a>(
-    state: Option<&MatchState>,
+    state: Option<MatchState>,
     local_player: Option<u64>,
     participants: impl Iterator<
         Item = (
@@ -347,8 +379,9 @@ fn sync_roster_and_collect_phase_facts<'a>(
 
 #[allow(clippy::too_many_arguments)]
 fn phase_overlay_label(
-    state: Option<&MatchState>,
-    now: u64,
+    state: Option<MatchState>,
+    wipeout: Option<(MatchState, crate::matchplay::WipeoutState)>,
+    now: Option<u64>,
     participant_count: usize,
     ready_count: usize,
     restart_ready_count: usize,
@@ -390,33 +423,43 @@ fn phase_overlay_label(
                     departed_team.0 + 1
                 ),
             };
-            let margin = state.team_scores[0].abs_diff(state.team_scores[1]);
-            let restart = if now < restart_unlocked_at_tick {
-                format!(
+            let (scores, margin) = wipeout.map_or_else(
+                || ("SYNCING".to_string(), "SYNCING".to_string()),
+                |(_, wipeout)| {
+                    (
+                        format!("{} - {}", wipeout.team_scores[0], wipeout.team_scores[1]),
+                        wipeout.team_scores[0]
+                            .abs_diff(wipeout.team_scores[1])
+                            .to_string(),
+                    )
+                },
+            );
+            let restart = match now {
+                None => "SYNCING".to_string(),
+                Some(now) if now < restart_unlocked_at_tick => format!(
                     "Restart unlocks in {}",
                     restart_unlocked_at_tick.saturating_sub(now).div_ceil(60)
-                )
-            } else if local_restart_ready {
-                "Ready for restart - waiting for quorum".to_string()
-            } else {
-                "Press SPACE / ENTER / A to ready for restart".to_string()
+                ),
+                Some(_) if local_restart_ready => {
+                    "Ready for restart - waiting for quorum".to_string()
+                }
+                Some(_) => "Press SPACE / ENTER / A to ready for restart".to_string(),
             };
             Some(format!(
-                "{title}\n\nFINAL  {} - {}  |  MARGIN {margin}\n\n{restart}\n{restart_ready_count}/{participant_count} restart ready",
-                state.team_scores[0], state.team_scores[1]
+                "{title}\n\nFINAL  {scores}  |  MARGIN {margin}\n\n{restart}\n{restart_ready_count}/{participant_count} restart ready"
             ))
         }
         MatchPhase::Countdown { .. } | MatchPhase::Active { .. } => None,
     }
 }
 
-fn countdown_label(state: Option<&MatchState>, now: u64) -> Option<String> {
+fn countdown_label(state: Option<MatchState>, now: Option<u64>) -> Option<String> {
     let MatchPhase::Countdown { starts_at_tick } = state?.phase else {
         return None;
     };
     Some(
         starts_at_tick
-            .saturating_sub(now)
+            .saturating_sub(now?)
             .div_ceil(60)
             .max(1)
             .to_string(),
@@ -541,16 +584,22 @@ mod tests {
             phase: MatchPhase::Countdown {
                 starts_at_tick: 180,
             },
-            team_scores: [0, 0],
-            target_score: 10,
             rules_revision: 1,
         };
-        assert_eq!(countdown_label(Some(&state), 0).as_deref(), Some("3"));
-        assert_eq!(countdown_label(Some(&state), 120).as_deref(), Some("1"));
+        assert_eq!(countdown_label(Some(state), Some(0)).as_deref(), Some("3"));
+        assert_eq!(
+            countdown_label(Some(state), Some(120)).as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            countdown_label(Some(state), None),
+            None,
+            "a missing or mismatched generation hides the countdown instead of guessing"
+        );
         state.phase = MatchPhase::Active {
             ends_at_tick: 1_000,
         };
-        assert_eq!(countdown_label(Some(&state), 120), None);
+        assert_eq!(countdown_label(Some(state), Some(120)), None);
     }
 
     #[test]
@@ -559,15 +608,28 @@ mod tests {
             match_id: crate::matchplay::MatchId(1),
             mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
             phase: MatchPhase::Waiting,
-            team_scores: [3, 1],
-            target_score: 10,
             rules_revision: 1,
         };
+        let wipeout_state = crate::matchplay::WipeoutState {
+            team_scores: [3, 1],
+            target_score: 10,
+        };
         assert_eq!(
-            phase_overlay_label(Some(&state), 0, 4, 0, 0, false, false, false),
+            phase_overlay_label(Some(state), None, Some(0), 4, 0, 0, false, false, false),
             None
         );
-        let waiting = phase_overlay_label(Some(&state), 0, 4, 2, 0, true, false, false).unwrap();
+        let waiting = phase_overlay_label(
+            Some(state),
+            Some((state, wipeout_state)),
+            Some(0),
+            4,
+            2,
+            0,
+            true,
+            false,
+            false,
+        )
+        .unwrap();
         assert!(waiting.contains("PRESS SPACE / ENTER / A TO READY"));
         assert!(waiting.contains("2/4 fighters ready"));
 
@@ -579,10 +641,27 @@ mod tests {
                 departed_team: TeamId(1),
             },
         };
-        let locked = phase_overlay_label(Some(&state), 100, 4, 4, 2, true, true, false).unwrap();
+        let locked = phase_overlay_label(
+            Some(state),
+            Some((state, wipeout_state)),
+            Some(100),
+            4,
+            4,
+            2,
+            true,
+            true,
+            false,
+        )
+        .unwrap();
         assert!(locked.contains("TEAM 2 FORFEITED"));
         assert!(locked.contains("FINAL  3 - 1  |  MARGIN 2"));
         assert!(locked.contains("Restart unlocks in 1"));
         assert!(locked.contains("2/4 restart ready"));
+
+        let syncing =
+            phase_overlay_label(Some(state), None, None, 4, 4, 2, true, true, false).unwrap();
+        assert!(syncing.contains("FINAL  SYNCING"));
+        assert!(syncing.contains("MARGIN SYNCING"));
+        assert!(syncing.contains("SYNCING"));
     }
 }

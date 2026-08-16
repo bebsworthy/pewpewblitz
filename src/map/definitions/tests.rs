@@ -1,4 +1,5 @@
 use super::*;
+use crate::map::HOT_ZONE_MAP_PRESET;
 use bevy::prelude::Vec2;
 
 fn resolved_builtin() -> (MapContentCatalog, ResolvedMap) {
@@ -16,7 +17,7 @@ fn resolved_builtin() -> (MapContentCatalog, ResolvedMap) {
 #[test]
 fn embedded_catalog_resolves_exact_bounded_arena() {
     let (catalog, resolved) = resolved_builtin();
-    assert_eq!(catalog.presets.len(), 1);
+    assert_eq!(catalog.presets.len(), 2);
     assert_eq!(resolved.snapshot.geometry.len(), 6);
     assert_eq!(resolved.snapshot.visual_instances.len(), 28 * 18);
     assert_eq!(resolved.snapshot.spawn_areas.len(), 2);
@@ -32,6 +33,117 @@ fn embedded_catalog_resolves_exact_bounded_arena() {
         Vec2::new(896.0, 576.0)
     );
     assert!(postcard::to_allocvec(&resolved.snapshot).unwrap().len() < 64 * 1_024);
+}
+
+#[test]
+fn embedded_hot_zone_preset_resolves_one_central_area_anchor() {
+    let (catalog, _) = resolved_builtin();
+    let resolved = catalog
+        .resolve_preset(
+            HOT_ZONE_MAP_PRESET,
+            MapInstanceId(2),
+            &MapLayoutRequirements::hot_zone(),
+        )
+        .expect("built-in Hot Zone preset resolves");
+    assert_eq!(
+        resolved.snapshot.mode_definition_id,
+        HOT_ZONE_MODE_DEFINITION
+    );
+    assert_eq!(resolved.snapshot.mode_anchors.len(), 1);
+    let anchor = &resolved.snapshot.mode_anchors[0];
+    assert_eq!(anchor.definition_id, HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION);
+    assert_eq!(
+        objective_presentation_profile(anchor.definition_id),
+        Some(HOT_ZONE_OBJECTIVE_PRESENTATION_PROFILE)
+    );
+    match anchor.shape {
+        ModeAnchorShape::Area {
+            position,
+            shape: MapShape::Circle { radius },
+        } => {
+            assert_eq!(position, Vec2::ZERO);
+            assert_eq!(radius.to_bits(), 160.0_f32.to_bits());
+        }
+        _ => panic!("objective anchor must be an area"),
+    }
+    assert_eq!(resolved.snapshot.geometry.len(), 6);
+    assert_eq!(resolved.snapshot.spawn_points.len(), 8);
+}
+
+#[test]
+fn hot_zone_requirements_reject_point_anchors_and_wipeout_rejects_area_anchors() {
+    let (catalog, _) = resolved_builtin();
+    let mut recipe = catalog.presets[1].recipe.clone();
+    recipe.mode_anchors[0].shape = ModeAnchorShape::Point {
+        position: Vec2::ZERO,
+        facing: 0.0,
+    };
+    recipe.revision += 1;
+    assert!(
+        resolve_map_recipe(
+            &recipe,
+            Some(HOT_ZONE_MAP_PRESET),
+            MapInstanceId(3),
+            &catalog,
+            &MapLayoutRequirements::hot_zone(),
+            EngineMapLimits::default(),
+        )
+        .is_err()
+    );
+
+    let mut wipeout_recipe = catalog.presets[0].recipe.clone();
+    wipeout_recipe.mode_anchors.push(ModeAnchorPlacement {
+        placement_id: MapPlacementId(400),
+        anchor_id: ModeAnchorId(1),
+        definition_id: HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION,
+        shape: ModeAnchorShape::Area {
+            position: Vec2::ZERO,
+            shape: MapShape::Circle { radius: 160.0 },
+        },
+    });
+    wipeout_recipe.revision += 1;
+    assert!(
+        resolve_map_recipe(
+            &wipeout_recipe,
+            Some(MapPresetId(1)),
+            MapInstanceId(4),
+            &catalog,
+            &MapLayoutRequirements::wipeout(),
+            EngineMapLimits::default(),
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn objective_areas_must_stay_inside_bounds_and_clear_permanent_terrain() {
+    let (catalog, _) = resolved_builtin();
+    let base = catalog.presets[1].recipe.clone();
+    for (position, radius, description) in [
+        (Vec2::new(0.0, 216.0), 160.0, "overlaps central wall"),
+        (Vec2::new(780.0, 0.0), 160.0, "outside playable bounds"),
+        (Vec2::ZERO, 0.0, "zero radius"),
+        (Vec2::new(f32::NAN, 0.0), 160.0, "non-finite position"),
+    ] {
+        let mut recipe = base.clone();
+        recipe.mode_anchors[0].shape = ModeAnchorShape::Area {
+            position,
+            shape: MapShape::Circle { radius },
+        };
+        recipe.revision += 1;
+        assert!(
+            resolve_map_recipe(
+                &recipe,
+                Some(HOT_ZONE_MAP_PRESET),
+                MapInstanceId(5),
+                &catalog,
+                &MapLayoutRequirements::hot_zone(),
+                EngineMapLimits::default(),
+            )
+            .is_err(),
+            "expected rejection for an objective that {description}"
+        );
+    }
 }
 
 #[test]

@@ -378,19 +378,25 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
     };
 
     let mut server = App::new();
-    server.insert_resource(server_config).add_plugins((
-        MinimalPlugins,
-        StatesPlugin,
-        ServerPlugins {
-            tick_duration: SIMULATION_TICK,
-        },
-        GameplayPlugin,
-        ProtocolPlugin,
-        AvianNetworkPlugin,
-        AuthoritativeMapPlugin,
-        AuthoritativeMovementPlugin,
-        ServerNetworkPlugin,
-    ));
+    server
+        .insert_resource(server_config)
+        .insert_resource(brawler::matchplay::MatchLifecycleRules::default())
+        .insert_resource(brawler::matchplay::WipeoutRules::default())
+        .add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            ServerPlugins {
+                tick_duration: SIMULATION_TICK,
+            },
+            GameplayPlugin,
+            ProtocolPlugin,
+            AvianNetworkPlugin,
+            AuthoritativeMapPlugin,
+            AuthoritativeMovementPlugin,
+            ServerNetworkPlugin,
+            brawler::matchplay::AuthoritativeMatchPlugin,
+            brawler::matchplay::WipeoutModePlugin,
+        ));
     server.finish();
     server.cleanup();
     let mut now = Instant::now();

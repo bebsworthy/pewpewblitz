@@ -43,9 +43,18 @@ pub struct MatchState {
     pub match_id: MatchId,
     pub mode_definition_id: ModeDefinitionId,
     pub phase: MatchPhase,
-    pub team_scores: [u16; 2],
-    pub target_score: u16,
     pub rules_revision: u16,
+}
+
+/// Generation-tagged shared match clock published on the match root.
+///
+/// Clients derive countdown/remaining/restart deadlines only from the phase deadline minus
+/// `completed_tick`, and only while this generation tag agrees with `MatchState::match_id` and
+/// the installed mode state. It is updated in fixed finalize before `SimulationTick` advances.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchClock {
+    pub match_id: MatchId,
+    pub completed_tick: u64,
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

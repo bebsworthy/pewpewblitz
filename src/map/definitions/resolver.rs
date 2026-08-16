@@ -199,7 +199,7 @@ fn validate_recipe(
             return Err("invalid or unsupported map entity placement".to_string());
         }
     }
-    validate_layout(recipe, requirements)?;
+    validate_layout(recipe, requirements, limits)?;
     validate_spawns(recipe)?;
     validate_spawn_reachability(recipe)?;
     expand_visuals(&recipe.visuals, catalog.policy.max_visual_instances)?;
@@ -285,7 +285,11 @@ fn validate_placed_shape(
     Ok(())
 }
 
-fn validate_layout(recipe: &MapRecipe, requirements: &MapLayoutRequirements) -> Result<(), String> {
+fn validate_layout(
+    recipe: &MapRecipe,
+    requirements: &MapLayoutRequirements,
+    limits: EngineMapLimits,
+) -> Result<(), String> {
     if requirements.allowed_team_slots.is_empty()
         || requirements
             .allowed_team_slots
@@ -327,14 +331,19 @@ fn validate_layout(recipe: &MapRecipe, requirements: &MapLayoutRequirements) -> 
             .iter()
             .filter(|anchor| anchor.definition_id == requirement.definition_id)
             .collect();
-        if anchors.len() < requirement.minimum
-            || anchors.len() > requirement.maximum
-            || (requirement.point_only
-                && anchors
-                    .iter()
-                    .any(|anchor| !matches!(anchor.shape, ModeAnchorShape::Point { .. })))
-        {
-            return Err("map does not satisfy required mode-anchor shape/count".to_string());
+        if anchors.len() < requirement.minimum || anchors.len() > requirement.maximum {
+            return Err("map does not satisfy required mode-anchor count".to_string());
+        }
+        let shape_matches = |anchor: &&ModeAnchorPlacement| match requirement.shape {
+            RequiredAnchorShape::Point => {
+                matches!(anchor.shape, ModeAnchorShape::Point { .. })
+            }
+            RequiredAnchorShape::Area => {
+                matches!(anchor.shape, ModeAnchorShape::Area { .. })
+            }
+        };
+        if anchors.iter().any(|anchor| !shape_matches(anchor)) {
+            return Err("map does not satisfy required mode-anchor shape".to_string());
         }
     }
     let required: HashSet<_> = requirements
@@ -363,24 +372,52 @@ fn validate_layout(recipe: &MapRecipe, requirements: &MapLayoutRequirements) -> 
                 }
             }
             ModeAnchorShape::Area { position, shape } => {
-                let valid_shape = match shape {
-                    MapShape::Rectangle { half_extents } => {
-                        half_extents.is_finite() && half_extents.min_element() > 0.0
-                    }
-                    MapShape::Circle { radius } => radius.is_finite() && radius > 0.0,
-                };
-                if !position.is_finite()
-                    || !valid_shape
-                    || !recipe.playable_bounds.contains(position)
-                {
+                if !validate_objective_area(position, shape, recipe, limits) {
                     return Err(
-                        "mode anchor area is invalid or outside playable bounds".to_string()
+                        "mode anchor area is invalid, out of bounds, or blocked".to_string()
                     );
                 }
             }
         }
     }
     Ok(())
+}
+
+/// Objective areas must be finite, within code-owned extent bounds, completely inside the
+/// playable bounds, and clear of permanent terrain by the standard fighter radius.
+fn validate_objective_area(
+    position: Vec2,
+    shape: MapShape,
+    recipe: &MapRecipe,
+    limits: EngineMapLimits,
+) -> bool {
+    const FIGHTER_CLEARANCE: f32 = 24.0;
+    let valid_shape = match shape {
+        MapShape::Rectangle { half_extents } => {
+            half_extents.is_finite()
+                && half_extents.min_element() >= limits.min_shape_extent * 0.5
+                && half_extents.max_element() <= limits.max_shape_extent * 0.5
+        }
+        MapShape::Circle { radius } => {
+            radius.is_finite()
+                && radius >= limits.min_shape_extent * 0.5
+                && radius <= limits.max_shape_extent * 0.5
+        }
+    };
+    if !position.is_finite() || !valid_shape {
+        return false;
+    }
+    let half = shape.bounding_half_extents(0.0);
+    if !recipe.playable_bounds.contains(position - half)
+        || !recipe.playable_bounds.contains(position + half)
+    {
+        return false;
+    }
+    !overlaps_geometry(
+        position,
+        half.max_element() + FIGHTER_CLEARANCE,
+        &recipe.geometry,
+    )
 }
 
 fn validate_spawns(recipe: &MapRecipe) -> Result<(), String> {

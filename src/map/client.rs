@@ -128,10 +128,12 @@ fn validate_client_snapshot(
 ) -> Result<(), String> {
     let bytes = postcard::to_allocvec(snapshot)
         .map_err(|error| format!("map snapshot serialization failed: {error}"))?;
+    let requirements = MapLayoutRequirements::for_mode_definition(snapshot.mode_definition_id)
+        .ok_or_else(|| "replicated map snapshot carries an unknown mode".to_string())?;
     if snapshot.identity.instance_id.0 == 0
         || snapshot.catalog_schema_version != definitions::MAP_CATALOG_SCHEMA_VERSION
         || snapshot.recipe_schema_version != definitions::MAP_RECIPE_SCHEMA_VERSION
-        || snapshot.layout_schema_version != SANDBOX_LAYOUT_SCHEMA_VERSION
+        || snapshot.layout_schema_version != requirements.schema_version
         || bytes.len() > EngineMapLimits::default().max_snapshot_bytes
         || snapshot.geometry.len() > catalog.policy.max_geometry
         || snapshot.visual_instances.len() > catalog.policy.max_visual_instances

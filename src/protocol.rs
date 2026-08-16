@@ -39,7 +39,8 @@ use crate::map::{
     MapInstanceId, MapRoot, ResolvedMapIdentity, ResolvedMapSnapshot, SpawnAssignment,
 };
 use crate::matchplay::{
-    MatchParticipant, MatchRoot as MatchRootMarker, MatchState, RespawnState, SpawnProtection,
+    HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker, MatchState,
+    RespawnState, SpawnProtection, WipeoutState,
 };
 use crate::timing::SIMULATION_TICK;
 
@@ -47,7 +48,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 9;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 10;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -388,6 +389,9 @@ impl Plugin for ProtocolPlugin {
         app.component::<Fighter>().replicate_once();
         app.component::<MatchRootMarker>().replicate_once();
         app.component::<MatchState>().replicate();
+        app.component::<MatchClock>().replicate();
+        app.component::<WipeoutState>().replicate();
+        app.component::<HotZoneState>().replicate();
         app.component::<MatchParticipant>().replicate();
         app.component::<RespawnState>().replicate();
         app.component::<SpawnProtection>().replicate();
@@ -515,6 +519,9 @@ mod tests {
         assert!(components.is_registered::<Fighter>());
         assert!(components.is_registered::<MatchRootMarker>());
         assert!(components.is_registered::<MatchState>());
+        assert!(components.is_registered::<MatchClock>());
+        assert!(components.is_registered::<WipeoutState>());
+        assert!(components.is_registered::<HotZoneState>());
         assert!(components.is_registered::<MatchParticipant>());
         assert!(components.is_registered::<RespawnState>());
         assert!(components.is_registered::<SpawnProtection>());

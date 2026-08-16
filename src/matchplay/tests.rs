@@ -4,41 +4,53 @@ use bevy::prelude::Vec2;
 
 #[test]
 fn production_rules_match_the_approved_contract() {
-    let rules = WipeoutRules::default().validate().unwrap();
-    assert_eq!(rules.target_score, 10);
-    assert_eq!(rules.countdown_ticks, 180);
-    assert_eq!(rules.active_limit_ticks, 10_800);
-    assert_eq!(rules.respawn_delay_ticks, 180);
-    assert_eq!(rules.spawn_protection_ticks, 90);
-    assert_eq!(rules.completed_input_lock_ticks, 60);
+    let lifecycle = MatchLifecycleRules::default().validate().unwrap();
+    assert_eq!(lifecycle.minimum_participants_per_team, 1);
+    assert_eq!(lifecycle.maximum_participants_per_team, 2);
+    assert_eq!(lifecycle.countdown_ticks, 180);
+    assert_eq!(lifecycle.active_limit_ticks, 10_800);
+    assert_eq!(lifecycle.respawn_delay_ticks, 180);
+    assert_eq!(lifecycle.spawn_protection_ticks, 90);
+    assert_eq!(lifecycle.completed_input_lock_ticks, 60);
+    let wipeout = WipeoutRules::default().validate().unwrap();
+    assert_eq!(wipeout.target_score, 10);
+    let hot_zone = HotZoneRules::default().validate_with(&lifecycle).unwrap();
+    assert_eq!(hot_zone.target_progress_ticks, 1_800);
 }
 
 #[test]
 fn rules_reject_zero_invalid_capacity_and_overflow() {
+    assert!(WipeoutRules { target_score: 0 }.validate().is_err());
     assert!(
-        WipeoutRules {
-            target_score: 0,
-            ..WipeoutRules::default()
-        }
-        .validate()
-        .is_err()
-    );
-    assert!(
-        WipeoutRules {
+        MatchLifecycleRules {
             minimum_participants_per_team: 2,
             maximum_participants_per_team: 1,
-            ..WipeoutRules::default()
+            ..MatchLifecycleRules::default()
         }
         .validate()
         .is_err()
     );
     assert!(
-        WipeoutRules {
+        MatchLifecycleRules {
             countdown_ticks: u64::MAX,
             active_limit_ticks: 1,
-            ..WipeoutRules::default()
+            ..MatchLifecycleRules::default()
         }
         .validate()
+        .is_err()
+    );
+    assert!(
+        HotZoneRules {
+            target_progress_ticks: 1,
+        }
+        .validate_with(&MatchLifecycleRules::default())
+        .is_err()
+    );
+    assert!(
+        HotZoneRules {
+            target_progress_ticks: 20_000,
+        }
+        .validate_with(&MatchLifecycleRules::default())
         .is_err()
     );
 }
@@ -270,7 +282,7 @@ fn defeat_credit_rejects_self_allied_environmental_and_invalid_sources() {
         None
     );
     let mut saturated = u16::MAX;
-    increment_score(&mut saturated);
+    saturated = saturated.saturating_add(1);
     assert_eq!(saturated, u16::MAX);
 }
 
@@ -305,12 +317,18 @@ fn match_telemetry_is_bounded_and_derives_tick_metrics() {
             2,
         );
     }
-    telemetry.complete(
+    telemetry.complete_with_mode(
         160,
-        [1, 0],
+        crate::map::WIPEOUT_MODE_DEFINITION,
+        ModeSummary::Wipeout(WipeoutSummary {
+            final_scores: [1, 0],
+            target_score: 10,
+            score_margin: 1,
+        }),
         MatchResult::TeamVictory { team: TeamId(0) },
         1,
         &crate::combat::WeaponTelemetry::default(),
+        &crate::abilities::AbilityTelemetry::default(),
     );
     assert_eq!(telemetry.records.len(), 2);
     assert_eq!(telemetry.dropped_records, 1);
@@ -318,16 +336,29 @@ fn match_telemetry_is_bounded_and_derives_tick_metrics() {
     assert_eq!(summary.active_duration_ticks, 60);
     assert_eq!(summary.time_to_first_hostile_damage_ticks, Some(30));
     assert_eq!(summary.applied_damage_by_distance, [15, 0, 0]);
-    assert_eq!(summary.score_margin, 1);
+    assert_eq!(
+        summary.mode_summary,
+        ModeSummary::Wipeout(WipeoutSummary {
+            final_scores: [1, 0],
+            target_score: 10,
+            score_margin: 1,
+        })
+    );
     assert_eq!(summary.dropped_records, 1);
 
     telemetry.begin(MatchId(8), 200);
-    telemetry.complete(
+    telemetry.complete_with_mode(
         200,
-        [0, 0],
+        crate::map::WIPEOUT_MODE_DEFINITION,
+        ModeSummary::Wipeout(WipeoutSummary {
+            final_scores: [0, 0],
+            target_score: 10,
+            score_margin: 0,
+        }),
         MatchResult::Draw,
         2,
         &crate::combat::WeaponTelemetry::default(),
+        &crate::abilities::AbilityTelemetry::default(),
     );
     assert_eq!(telemetry.summaries.back().unwrap().dropped_records, 0);
 }
@@ -357,7 +388,19 @@ fn match_summary_archives_only_weapon_deltas_for_the_active_match() {
     let aggregate = weapons.source_aggregates.get_mut(&key).unwrap();
     aggregate.accepted_attacks += 4;
     aggregate.attacks_with_hostile_contact += 3;
-    telemetry.complete(20, [0, 0], MatchResult::Draw, 32, &weapons);
+    telemetry.complete_with_mode(
+        20,
+        crate::map::WIPEOUT_MODE_DEFINITION,
+        ModeSummary::Wipeout(WipeoutSummary {
+            final_scores: [0, 0],
+            target_score: 10,
+            score_margin: 0,
+        }),
+        MatchResult::Draw,
+        32,
+        &weapons,
+        &crate::abilities::AbilityTelemetry::default(),
+    );
 
     let summary = telemetry.summaries.back().unwrap();
     assert_eq!(summary.weapon_aggregates.len(), 1);
@@ -474,15 +517,21 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
     for _ in 0..4 {
         telemetry.record_participant_active_tick(TeamId(1), Some(crate::combat::WeaponPresetId(2)));
     }
-    telemetry.complete(
+    telemetry.complete_with_mode(
         180,
-        [2, 0],
+        crate::map::WIPEOUT_MODE_DEFINITION,
+        ModeSummary::Wipeout(WipeoutSummary {
+            final_scores: [2, 0],
+            target_score: 10,
+            score_margin: 2,
+        }),
         MatchResult::Forfeit {
             winner: TeamId(0),
             departed_team: TeamId(1),
         },
         1,
         &WeaponTelemetry::default(),
+        &crate::abilities::AbilityTelemetry::default(),
     );
     let summary = telemetry.summaries.back().unwrap();
     assert_eq!(summary.fight_duration_ticks, vec![10, 15]);
@@ -496,12 +545,18 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
     assert_two_preset_rates(summary);
 
     telemetry.begin(MatchId(12), 200);
-    telemetry.complete(
+    telemetry.complete_with_mode(
         200,
-        [0, 0],
+        crate::map::WIPEOUT_MODE_DEFINITION,
+        ModeSummary::Wipeout(WipeoutSummary {
+            final_scores: [0, 0],
+            target_score: 10,
+            score_margin: 0,
+        }),
         MatchResult::Draw,
         1,
         &WeaponTelemetry::default(),
+        &crate::abilities::AbilityTelemetry::default(),
     );
     let no_damage = telemetry.summaries.back().unwrap();
     assert_eq!(no_damage.time_to_first_hostile_damage_ticks, None);
@@ -519,4 +574,89 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
             .all(|rate| rate.abs() < f64::EPSILON)
     );
     assert_eq!(telemetry.dropped_summaries, 1);
+}
+
+#[cfg(feature = "server")]
+mod schedule_trace_tests {
+    use super::*;
+    use crate::gameplay::GameplayPlugin;
+    use bevy::prelude::*;
+    use bevy::time::TimeUpdateStrategy;
+
+    #[derive(Resource, Default)]
+    struct Trace(Vec<&'static str>);
+
+    fn probe(label: &'static str) -> impl FnMut(ResMut<Trace>) + 'static {
+        move |mut trace: ResMut<Trace>| trace.0.push(label)
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    fn finalize_probe(mut trace: ResMut<Trace>, tick: Res<crate::timing::SimulationTick>) {
+        assert_eq!(tick.0, 0, "tick advancement is last");
+        trace.0.push("finalize");
+    }
+
+    #[test]
+    fn match_sets_have_the_m09_fixed_tick_order() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, GameplayPlugin))
+            .insert_resource(TimeUpdateStrategy::FixedTimesteps(1))
+            .init_resource::<Trace>();
+        configure_match_schedule(&mut app);
+        app.add_systems(
+            FixedUpdate,
+            (
+                probe("lifecycle").in_set(MatchSet::Lifecycle),
+                probe("deadline").in_set(MatchSet::DeadlineRules),
+                probe("pregame").in_set(MatchSet::PreGameOutcomes),
+                probe("fighter-lifecycle").in_set(MatchSet::FighterLifecycle),
+                probe("input").in_set(crate::gameplay::GameplaySet::Input),
+                probe("fire").in_set(crate::gameplay::GameplaySet::Fire),
+            ),
+        )
+        .add_systems(
+            FixedPostUpdate,
+            (
+                probe("physics").after(avian2d::prelude::PhysicsSystems::StepSimulation),
+                probe("sweep").in_set(crate::combat::CombatSet::ProjectileSweep),
+                probe("damage").in_set(crate::combat::CombatSet::Damage),
+                probe("observe")
+                    .in_set(crate::abilities::AbilitySet::ObserveOutcomes)
+                    .after(crate::combat::CombatSet::Damage),
+                probe("mode-rules").in_set(MatchSet::ModeRules),
+                probe("outcomes").in_set(MatchSet::Outcomes),
+                probe("combat-lifecycle").in_set(crate::combat::CombatSet::Lifecycle),
+                finalize_probe
+                    .in_set(crate::combat::CombatSet::Finalize)
+                    .before(crate::gameplay::advance_simulation_tick),
+            ),
+        );
+
+        app.update();
+        app.update();
+
+        // Deadline completion precedes all boundary-tick gameplay; eligible objective
+        // evaluation happens after movement/physics and damage; fact consumers run before
+        // combat lifecycle; tick advancement is last.
+        assert_eq!(
+            app.world().resource::<Trace>().0,
+            vec![
+                "lifecycle",
+                "deadline",
+                "pregame",
+                "fighter-lifecycle",
+                "input",
+                "fire",
+                "physics",
+                "sweep",
+                "damage",
+                "observe",
+                "mode-rules",
+                "outcomes",
+                "combat-lifecycle",
+                "finalize",
+            ]
+        );
+        assert_eq!(app.world().resource::<crate::timing::SimulationTick>().0, 1);
+    }
 }

@@ -100,16 +100,44 @@ pub enum NetworkTransport {
     Crossbeam,
 }
 
-/// Explicit server-owned Wipeout rules profile. Production never changes rules from ambient
+/// Server-selected game mode. The dedicated server installs exactly one mode's rules and
+/// compatible map; clients learn the mode from replicated map and match state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum GameMode {
+    #[default]
+    Wipeout,
+    HotZone,
+}
+
+impl GameMode {
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "wipeout" | "default" => Some(Self::Wipeout),
+            "hot-zone" | "hot_zone" | "hotzone" => Some(Self::HotZone),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Wipeout => "wipeout",
+            Self::HotZone => "hot-zone",
+        }
+    }
+}
+
+/// Explicit server-owned match rules profile. Production never changes rules from ambient
 /// verification environment variables.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum WipeoutRulesProfile {
+pub enum MatchRulesProfile {
     #[default]
     Production,
     ProcessVerification,
 }
 
-impl WipeoutRulesProfile {
+impl MatchRulesProfile {
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -123,7 +151,7 @@ impl WipeoutRulesProfile {
 }
 
 /// Runtime configuration for the dedicated server.
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+#[derive(bevy::prelude::Resource, Clone, Debug, PartialEq, Eq)]
 pub struct ServerNetworkConfig {
     pub bind_addr: SocketAddr,
     pub transport: NetworkTransport,
@@ -132,7 +160,8 @@ pub struct ServerNetworkConfig {
     pub handshake_timeout: Duration,
     pub client_timeout: Duration,
     pub impairment_profile: NetworkImpairmentProfile,
-    pub wipeout_rules_profile: WipeoutRulesProfile,
+    pub game_mode: GameMode,
+    pub match_rules_profile: MatchRulesProfile,
 }
 
 impl Default for ServerNetworkConfig {
@@ -147,7 +176,8 @@ impl Default for ServerNetworkConfig {
             handshake_timeout: Duration::from_secs(3),
             client_timeout: Duration::from_secs(3),
             impairment_profile: NetworkImpairmentProfile::from_env(),
-            wipeout_rules_profile: WipeoutRulesProfile::Production,
+            game_mode: GameMode::Wipeout,
+            match_rules_profile: MatchRulesProfile::Production,
         }
     }
 }
@@ -320,16 +350,26 @@ mod tests {
     }
 
     #[test]
-    fn wipeout_rules_profile_is_explicit_and_defaults_to_production() {
+    fn game_modes_parse_explicit_names_and_default_to_wipeout() {
+        assert_eq!(ServerNetworkConfig::default().game_mode, GameMode::Wipeout);
+        assert_eq!(GameMode::parse("wipeout"), Some(GameMode::Wipeout));
+        assert_eq!(GameMode::parse("hot-zone"), Some(GameMode::HotZone));
+        assert_eq!(GameMode::parse("Hot_Zone"), Some(GameMode::HotZone));
+        assert_eq!(GameMode::parse("koth"), None);
+        assert_eq!(GameMode::HotZone.name(), "hot-zone");
+    }
+
+    #[test]
+    fn match_rules_profile_is_explicit_and_defaults_to_production() {
         assert_eq!(
-            ServerNetworkConfig::default().wipeout_rules_profile,
-            WipeoutRulesProfile::Production
+            ServerNetworkConfig::default().match_rules_profile,
+            MatchRulesProfile::Production
         );
         assert_eq!(
-            WipeoutRulesProfile::parse("verification"),
-            Some(WipeoutRulesProfile::ProcessVerification)
+            MatchRulesProfile::parse("verification"),
+            Some(MatchRulesProfile::ProcessVerification)
         );
-        assert_eq!(WipeoutRulesProfile::parse("unexpected"), None);
+        assert_eq!(MatchRulesProfile::parse("unexpected"), None);
     }
 
     #[test]

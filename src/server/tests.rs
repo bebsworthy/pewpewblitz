@@ -39,11 +39,16 @@ fn production_startup_instantiates_wipeout_map_and_match_without_practice_dummy(
 }
 
 #[test]
-fn shortened_wipeout_rules_require_the_explicit_verification_profile() {
-    let rules = wipeout_rules_for_profile(crate::config::WipeoutRulesProfile::ProcessVerification);
-    assert_eq!(rules.target_score, 10);
-    assert_eq!(rules.minimum_participants_per_team, 2);
-    assert_eq!(rules.active_limit_ticks, 3_600);
+fn shortened_rules_require_the_explicit_verification_profile() {
+    let lifecycle = match_lifecycle_rules_for_profile(MatchRulesProfile::ProcessVerification);
+    assert_eq!(lifecycle.minimum_participants_per_team, 2);
+    assert_eq!(lifecycle.active_limit_ticks, 3_600);
+    assert_eq!(lifecycle.countdown_ticks, 30);
+    let wipeout = wipeout_rules_for_profile(MatchRulesProfile::ProcessVerification);
+    assert_eq!(wipeout.target_score, 10);
+    let hot_zone =
+        crate::matchplay::hot_zone_rules_for_profile(MatchRulesProfile::ProcessVerification);
+    assert_eq!(hot_zone.target_progress_ticks, 30);
 }
 
 #[test]

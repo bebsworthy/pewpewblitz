@@ -42,7 +42,11 @@ fn performance_app() -> App {
         AuthoritativeMapPlugin,
         AuthoritativeMovementPlugin,
         ServerNetworkPlugin,
+        brawler::matchplay::AuthoritativeMatchPlugin,
+        brawler::matchplay::WipeoutModePlugin,
     ));
+    app.insert_resource(brawler::matchplay::MatchLifecycleRules::default());
+    app.insert_resource(brawler::matchplay::WipeoutRules::default());
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,
         ..default()

@@ -116,7 +116,16 @@ impl Harness {
     }
 
     pub(super) fn new_match(client_count: usize) -> Self {
-        let mut harness = Self::new(client_count);
+        let mut harness = Self::new_mode_with_options(client_count, None, false, false);
+        harness
+            .server
+            .world_mut()
+            .remove_resource::<LegacySandboxActivation>();
+        harness
+    }
+
+    pub(super) fn new_hot_zone_match(client_count: usize) -> Self {
+        let mut harness = Self::new_mode_with_options(client_count, None, false, true);
         harness
             .server
             .world_mut()
@@ -137,6 +146,15 @@ impl Harness {
         client_protocol_id: Option<u64>,
         extra_protocol: bool,
     ) -> Self {
+        Self::new_mode_with_options(client_count, client_protocol_id, extra_protocol, false)
+    }
+
+    fn new_mode_with_options(
+        client_count: usize,
+        client_protocol_id: Option<u64>,
+        extra_protocol: bool,
+        hot_zone: bool,
+    ) -> Self {
         let server_config = ServerNetworkConfig {
             transport: NetworkTransport::Crossbeam,
             handshake_timeout: std::time::Duration::from_millis(250),
@@ -149,26 +167,57 @@ impl Harness {
             facing: 0.0,
         });
         server.insert_resource(LegacySandboxActivation);
+        let lifecycle = if hot_zone {
+            // Shortened verification deadlines with a 1v1 capacity so deterministic
+            // two-client scenarios can activate without changing rule semantics.
+            brawler::matchplay::MatchLifecycleRules {
+                minimum_participants_per_team: 1,
+                ..brawler::server::match_lifecycle_rules_for_profile(
+                    brawler::config::MatchRulesProfile::ProcessVerification,
+                )
+            }
+        } else {
+            brawler::matchplay::MatchLifecycleRules::default()
+        };
         server
             .insert_resource(server_config.clone())
-            .add_plugins((
-                MinimalPlugins,
-                StatesPlugin,
-                ServerPlugins {
-                    tick_duration: SIMULATION_TICK,
-                },
-                GameplayPlugin,
-                ProtocolPlugin,
-                AvianNetworkPlugin,
-                AuthoritativeMapPlugin,
-                AuthoritativeMovementPlugin,
-                ServerNetworkPlugin,
-            ))
-            .add_systems(
-                bevy::prelude::Update,
-                activate_legacy_test_fighters
-                    .run_if(bevy::prelude::resource_exists::<LegacySandboxActivation>),
-            );
+            .insert_resource(lifecycle);
+        if hot_zone {
+            server
+                .insert_resource(brawler::matchplay::hot_zone_setup_for_composition())
+                .insert_resource(brawler::matchplay::hot_zone_rules_for_profile(
+                    brawler::config::MatchRulesProfile::ProcessVerification,
+                ))
+                .insert_resource(brawler::map::ServerMapSelection {
+                    preset_id: brawler::map::HOT_ZONE_MAP_PRESET,
+                });
+        } else {
+            server.insert_resource(brawler::matchplay::WipeoutRules::default());
+        }
+        server.add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            ServerPlugins {
+                tick_duration: SIMULATION_TICK,
+            },
+            GameplayPlugin,
+            ProtocolPlugin,
+            AvianNetworkPlugin,
+            AuthoritativeMapPlugin,
+            AuthoritativeMovementPlugin,
+            ServerNetworkPlugin,
+            brawler::matchplay::AuthoritativeMatchPlugin,
+        ));
+        if hot_zone {
+            server.add_plugins(brawler::matchplay::HotZoneModePlugin);
+        } else {
+            server.add_plugins(brawler::matchplay::WipeoutModePlugin);
+        }
+        server.add_systems(
+            bevy::prelude::Update,
+            activate_legacy_test_fighters
+                .run_if(bevy::prelude::resource_exists::<LegacySandboxActivation>),
+        );
         server.finish();
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);

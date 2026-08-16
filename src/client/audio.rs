@@ -34,7 +34,7 @@ struct ClientAudioState {
     was_playable: bool,
     was_error: bool,
     suppressed: u64,
-    last_match: Option<(crate::matchplay::MatchId, MatchPhase, [u16; 2])>,
+    last_match: Option<(crate::matchplay::MatchId, MatchPhase, Option<[u16; 2]>)>,
 }
 
 pub struct ClientAudioPlugin;
@@ -120,15 +120,19 @@ fn play_match_audio(
     mut commands: Commands,
     handles: Option<Res<ClientAssetHandles>>,
     asset_server: Res<AssetServer>,
-    matches: Query<&MatchState, (With<MatchRoot>, Changed<MatchState>)>,
+    matches: Query<
+        (&MatchState, Option<&crate::matchplay::WipeoutState>),
+        (With<MatchRoot>, Changed<MatchState>),
+    >,
     mut state: ResMut<ClientAudioState>,
     active: Query<(), With<ClientAudioOneShot>>,
 ) {
-    let Some(current) = matches.iter().next() else {
+    let Some((current, wipeout)) = matches.iter().next() else {
         return;
     };
+    let wipeout_scores = wipeout.map(|wipeout| wipeout.team_scores);
     let previous = state.last_match;
-    state.last_match = Some((current.match_id, current.phase, current.team_scores));
+    state.last_match = Some((current.match_id, current.phase, wipeout_scores));
     let Some(handles) = handles else {
         return;
     };
@@ -141,9 +145,9 @@ fn play_match_audio(
             id == current.match_id && matches!(phase, MatchPhase::Completed { .. })
         }) {
         Some(handles.defeat.clone())
-    } else if previous
-        .is_some_and(|(id, _, scores)| id == current.match_id && scores != current.team_scores)
-    {
+    } else if previous.is_some_and(|(id, _, scores)| {
+        id == current.match_id && scores.is_some_and(|scores| Some(scores) != wipeout_scores)
+    }) {
         Some(handles.impact.clone())
     } else if previous.is_none_or(|(id, phase, _)| id != current.match_id || phase != current.phase)
         && matches!(

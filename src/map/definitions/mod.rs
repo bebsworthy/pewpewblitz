@@ -11,9 +11,28 @@ pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const SANDBOX_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const WIPEOUT_LAYOUT_SCHEMA_VERSION: u16 = 1;
+pub const HOT_ZONE_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const PRACTICE_DUMMY_ANCHOR_DEFINITION: ModeAnchorDefinitionId = ModeAnchorDefinitionId(1);
+pub const HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION: ModeAnchorDefinitionId = ModeAnchorDefinitionId(2);
 pub const SANDBOX_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(1);
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
+pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
+
+/// Code-owned presentation profile for the Hot Zone objective visual.
+pub const HOT_ZONE_OBJECTIVE_PRESENTATION_PROFILE: MapPresentationProfileId =
+    MapPresentationProfileId(6);
+
+/// Resolve the code-owned presentation profile for one objective anchor definition. The
+/// anchor owns exact geometry and identity; the profile owns only color/material styling.
+#[must_use]
+pub fn objective_presentation_profile(
+    anchor: ModeAnchorDefinitionId,
+) -> Option<MapPresentationProfileId> {
+    match anchor {
+        HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION => Some(HOT_ZONE_OBJECTIVE_PRESENTATION_PROFILE),
+        _ => None,
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct EngineMapLimits {
@@ -105,12 +124,19 @@ pub struct MapContentCatalog {
     pub presets: Vec<MapPreset>,
 }
 
+/// The shape constraint one required mode anchor must satisfy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequiredAnchorShape {
+    Point,
+    Area,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequiredAnchor {
     pub definition_id: ModeAnchorDefinitionId,
     pub minimum: usize,
     pub maximum: usize,
-    pub point_only: bool,
+    pub shape: RequiredAnchorShape,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -141,6 +167,25 @@ impl MapLayoutRequirements {
     }
 
     #[must_use]
+    pub fn hot_zone() -> Self {
+        Self {
+            mode_definition_id: HOT_ZONE_MODE_DEFINITION,
+            schema_version: HOT_ZONE_LAYOUT_SCHEMA_VERSION,
+            allowed_team_slots: vec![0, 1],
+            spawn_areas_per_team: 1..=1,
+            spawn_points_per_team: 3..=8,
+            required_anchors: vec![RequiredAnchor {
+                definition_id: HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION,
+                minimum: 1,
+                maximum: 1,
+                shape: RequiredAnchorShape::Area,
+            }],
+            allowed_region_profiles: vec![RegionProfileId(1)],
+            allowed_entity_profiles: vec![EntityDefinitionId(1)],
+        }
+    }
+
+    #[must_use]
     pub fn sandbox() -> Self {
         Self {
             mode_definition_id: SANDBOX_MODE_DEFINITION,
@@ -152,10 +197,21 @@ impl MapLayoutRequirements {
                 definition_id: PRACTICE_DUMMY_ANCHOR_DEFINITION,
                 minimum: 1,
                 maximum: 1,
-                point_only: true,
+                shape: RequiredAnchorShape::Point,
             }],
             allowed_region_profiles: vec![RegionProfileId(1)],
             allowed_entity_profiles: vec![EntityDefinitionId(1)],
+        }
+    }
+
+    /// The layout requirements for one stable mode definition, if the mode is known.
+    #[must_use]
+    pub fn for_mode_definition(mode: ModeDefinitionId) -> Option<Self> {
+        match mode {
+            SANDBOX_MODE_DEFINITION => Some(Self::sandbox()),
+            WIPEOUT_MODE_DEFINITION => Some(Self::wipeout()),
+            HOT_ZONE_MODE_DEFINITION => Some(Self::hot_zone()),
+            _ => None,
         }
     }
 }
@@ -198,14 +254,30 @@ impl MapContentCatalog {
         validate_definitions(&self.entity_definitions, "entity definition")?;
         validate_definitions(&self.mode_definitions, "mode definition")?;
         validate_definitions(&self.anchor_definitions, "anchor definition")?;
-        if self.presets.len() != 1 || self.presets[0].id != MapPresetId(1) {
-            return Err("M06 requires exactly built-in map preset 1".to_string());
+        if self.presets.len() != 2
+            || self.presets[0].id != MapPresetId(1)
+            || self.presets[1].id != MapPresetId(2)
+        {
+            return Err(
+                "the gate accepts exactly built-in map presets 1 and 2 in ascending order"
+                    .to_string(),
+            );
         }
-        let preset = &self.presets[0];
-        if !valid_key(&preset.key) || !valid_display_name(&preset.display_name) {
-            return Err("invalid map preset metadata".to_string());
+        for preset in &self.presets {
+            if !valid_key(&preset.key) || !valid_display_name(&preset.display_name) {
+                return Err("invalid map preset metadata".to_string());
+            }
+            validate_recipe_references(&preset.recipe, self)?;
         }
-        validate_recipe_references(&preset.recipe, self)?;
+        // Every area objective anchor must have a code-owned presentation profile mapping.
+        if self.presets.iter().any(|preset| {
+            preset.recipe.mode_anchors.iter().any(|anchor| {
+                matches!(anchor.shape, ModeAnchorShape::Area { .. })
+                    && objective_presentation_profile(anchor.definition_id).is_none()
+            })
+        }) {
+            return Err("an area objective anchor has no presentation profile mapping".to_string());
+        }
         Ok(())
     }
 
@@ -224,7 +296,11 @@ impl MapContentCatalog {
         postcard::to_allocvec(&(
             MAP_FINGERPRINT_FORMAT_VERSION,
             EngineMapLimits::default(),
-            (SANDBOX_LAYOUT_SCHEMA_VERSION, WIPEOUT_LAYOUT_SCHEMA_VERSION),
+            (
+                SANDBOX_LAYOUT_SCHEMA_VERSION,
+                WIPEOUT_LAYOUT_SCHEMA_VERSION,
+                HOT_ZONE_LAYOUT_SCHEMA_VERSION,
+            ),
             canonical,
         ))
         .map_err(|error| format!("map catalog fingerprint serialization failed: {error}"))

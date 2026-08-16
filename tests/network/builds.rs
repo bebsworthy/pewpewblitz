@@ -669,7 +669,8 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
             .unwrap()
     };
     let scores_before = {
-        let mut roots = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
+        let mut roots =
+            world.query_filtered::<&brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
         roots.single(world).unwrap().team_scores
     };
     world
@@ -819,7 +820,8 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
             .iter(world)
             .any(|source| matches!(source.attack.kind, CombatSourceKind::Deployable { .. }))
     );
-    let mut roots = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
+    let mut roots =
+        world.query_filtered::<&brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
     assert_eq!(roots.single(world).unwrap().team_scores, scores_before);
     let owner_ability = world
         .get::<brawler::builds::AbilityState>(owner_entity)
@@ -924,7 +926,8 @@ fn sentry_expiry_destruction_disconnect_and_impaired_recovery_converge() {
     let (mut destruction, _, _) = active_sentry_fixture();
     let scores_before = {
         let world = destruction.server.world_mut();
-        let mut roots = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
+        let mut roots =
+            world.query_filtered::<&brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
         roots.single(world).unwrap().team_scores
     };
     {
@@ -951,7 +954,8 @@ fn sentry_expiry_destruction_disconnect_and_impaired_recovery_converge() {
     });
     let scores_after = {
         let world = destruction.server.world_mut();
-        let mut roots = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
+        let mut roots =
+            world.query_filtered::<&brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
         roots.single(world).unwrap().team_scores
     };
     assert_eq!(scores_after, scores_before);

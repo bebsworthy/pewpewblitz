@@ -8,11 +8,28 @@ use bevy::prelude::*;
 use lightyear::prelude::{NetworkTarget, Replicate};
 
 pub const BUILT_IN_MAP_PRESET: MapPresetId = MapPresetId(1);
+pub const HOT_ZONE_MAP_PRESET: MapPresetId = MapPresetId(2);
 pub const ARENA_WALL_THICKNESS: f32 = 48.0;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MapStartupSet {
     Instantiate,
+}
+
+/// Server-owned selection of which built-in map preset to install. Derived once from the
+/// validated game-mode configuration; the preset's mode definition picks the layout
+/// requirements, so a mode/map mismatch fails startup.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ServerMapSelection {
+    pub preset_id: MapPresetId,
+}
+
+impl Default for ServerMapSelection {
+    fn default() -> Self {
+        Self {
+            preset_id: BUILT_IN_MAP_PRESET,
+        }
+    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +54,7 @@ pub struct AuthoritativeMapPlugin;
 impl Plugin for AuthoritativeMapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MapCatalogResource>()
+            .init_resource::<ServerMapSelection>()
             .init_resource::<NextMapInstanceId>()
             .configure_sets(Startup, MapStartupSet::Instantiate)
             .add_systems(
@@ -56,12 +74,14 @@ fn initialize_authoritative_map(world: &mut World) {
         .allocate()
         .expect("map instance identifier space is available");
     let catalog = world.resource::<MapCatalogResource>().0.clone();
+    let selection = *world.resource::<ServerMapSelection>();
+    let preset = catalog
+        .preset(selection.preset_id)
+        .expect("selected built-in map preset exists");
+    let requirements = MapLayoutRequirements::for_mode_definition(preset.recipe.mode_definition_id)
+        .expect("selected built-in map preset has a known mode");
     let resolved = catalog
-        .resolve_preset(
-            BUILT_IN_MAP_PRESET,
-            instance_id,
-            &MapLayoutRequirements::wipeout(),
-        )
+        .resolve_preset(selection.preset_id, instance_id, &requirements)
         .expect("embedded built-in map must resolve");
     install_resolved_map(world, resolved).expect("resolved built-in map must instantiate");
 }

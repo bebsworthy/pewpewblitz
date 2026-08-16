@@ -161,8 +161,20 @@ pub(super) fn verify_process_match(
         .map(|(owner, damage)| format!("{}:{damage}", owner.0))
         .collect::<Vec<_>>()
         .join(",");
+    let (mode_definition_id, final_score_team_1, final_score_team_2) = match &summary.mode_summary {
+        crate::matchplay::ModeSummary::Wipeout(wipeout) => (
+            summary.mode_definition_id.0,
+            wipeout.final_scores[0],
+            wipeout.final_scores[1],
+        ),
+        crate::matchplay::ModeSummary::HotZone(hot_zone) => (
+            summary.mode_definition_id.0,
+            hot_zone.final_progress_ticks[0],
+            hot_zone.final_progress_ticks[1],
+        ),
+    };
     let report = format!(
-        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_preset_ids={}\ncustom_builds={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nbuild_selections={}\nbuild_dropped_records={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_terrain_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\n",
+        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nmode_definition_id={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_preset_ids={}\ncustom_builds={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nbuild_selections={}\nbuild_dropped_records={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_terrain_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\n",
         initial.0,
         state.match_id.0,
         participant_count,
@@ -171,8 +183,9 @@ pub(super) fn verify_process_match(
         map_identity.recipe_fingerprint.0,
         content_fingerprint.0,
         summary.rules_revision,
-        summary.final_scores[0],
-        summary.final_scores[1],
+        mode_definition_id,
+        final_score_team_1,
+        final_score_team_2,
         summary.result,
         summary.active_duration_ticks,
         summary.suffered_deaths_by_team.iter().sum::<u32>(),

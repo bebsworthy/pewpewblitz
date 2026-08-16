@@ -15,6 +15,25 @@ pub struct MatchOutcomeDiagnostics {
     pub duplicate_event: u64,
     pub unknown_or_wrong_match_target: u64,
     pub friendly_invalid_defeat: u64,
+    pub stale_mode_outcome: u64,
+    pub duplicate_mode_outcome: u64,
+    pub wrong_match_outcome: u64,
+    pub wrong_tick_outcome: u64,
+}
+
+/// Fully typed mode-specific terminal summary attached to one common match summary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeSummary {
+    Wipeout(WipeoutSummary),
+    HotZone(crate::matchplay::HotZoneSummary),
+}
+
+/// Wipeout's terminal scores, preserving the pre-M09 report meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WipeoutSummary {
+    pub final_scores: [u16; 2],
+    pub target_score: u16,
+    pub score_margin: u16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -23,12 +42,12 @@ pub struct MatchSummary {
     pub map_identity: Option<ResolvedMapIdentity>,
     pub content_fingerprint: Option<GameplayContentFingerprint>,
     pub rules_revision: u16,
+    pub mode_definition_id: crate::map::ModeDefinitionId,
+    pub mode_summary: ModeSummary,
     pub participants: Vec<MatchParticipantSummary>,
     pub active_started_at_tick: u64,
     pub active_duration_ticks: u64,
     pub time_to_first_hostile_damage_ticks: Option<u64>,
-    pub final_scores: [u16; 2],
-    pub score_margin: u16,
     pub result: MatchResult,
     pub applied_damage_by_distance: [u64; 3],
     pub credited_defeats_by_team: [u32; 2],
@@ -300,51 +319,21 @@ impl MatchTelemetry {
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
-    pub fn complete(
-        &mut self,
-        tick: u64,
-        scores: [u16; 2],
-        result: MatchResult,
-        maximum_summaries: usize,
-        weapons: &WeaponTelemetry,
-    ) {
-        self.complete_internal(tick, scores, result, maximum_summaries, weapons, None);
-    }
-
-    #[cfg(feature = "server")]
-    pub(crate) fn complete_with_abilities(
-        &mut self,
-        tick: u64,
-        scores: [u16; 2],
-        result: MatchResult,
-        maximum_summaries: usize,
-        weapons: &WeaponTelemetry,
-        abilities: &crate::abilities::AbilityTelemetry,
-    ) {
-        self.complete_internal(
-            tick,
-            scores,
-            result,
-            maximum_summaries,
-            weapons,
-            Some(abilities),
-        );
-    }
-
+    #[cfg_attr(not(feature = "server"), allow(dead_code))]
     #[allow(
         clippy::cast_precision_loss,
         clippy::too_many_arguments,
         clippy::too_many_lines
     )]
-    fn complete_internal(
+    pub(crate) fn complete_with_mode(
         &mut self,
         tick: u64,
-        scores: [u16; 2],
+        mode_definition_id: crate::map::ModeDefinitionId,
+        mode_summary: ModeSummary,
         result: MatchResult,
         maximum_summaries: usize,
         weapons: &WeaponTelemetry,
-        abilities: Option<&crate::abilities::AbilityTelemetry>,
+        abilities: &crate::abilities::AbilityTelemetry,
     ) {
         let Some(live) = self.live.take() else {
             return;
@@ -397,6 +386,8 @@ impl MatchTelemetry {
                 .context
                 .as_ref()
                 .map_or(0, |context| context.rules_revision),
+            mode_definition_id,
+            mode_summary,
             participants: live
                 .context
                 .as_ref()
@@ -406,8 +397,6 @@ impl MatchTelemetry {
             time_to_first_hostile_damage_ticks: live
                 .first_hostile_damage_tick
                 .map(|damage| damage.saturating_sub(live.active_start_tick)),
-            final_scores: scores,
-            score_margin: scores[0].abs_diff(scores[1]),
             result,
             applied_damage_by_distance: live.damage_by_distance,
             credited_defeats_by_team: live.defeats_by_team,
@@ -440,12 +429,12 @@ impl MatchTelemetry {
                 .collect(),
             weapon_aggregates,
             weapon_hostile_contact_rates,
-            ability_telemetry: abilities
-                .zip(live.ability_telemetry_start.as_ref())
-                .map_or_else(
-                    crate::abilities::AbilityTelemetry::default,
-                    |(end, start)| end.delta_since(start, live.active_start_tick),
-                ),
+            ability_telemetry: live
+                .ability_telemetry_start
+                .as_ref()
+                .map_or_else(crate::abilities::AbilityTelemetry::default, |start| {
+                    abilities.delta_since(start, live.active_start_tick)
+                }),
             disconnects: live.disconnects,
             dropped_records: self
                 .dropped_records
@@ -454,6 +443,7 @@ impl MatchTelemetry {
     }
 }
 
+#[cfg_attr(not(feature = "server"), allow(dead_code))]
 #[allow(clippy::cast_precision_loss)]
 fn per_preset_participant_minute(
     counts: &BTreeMap<WeaponPresetId, u32>,
@@ -473,6 +463,7 @@ fn per_preset_participant_minute(
         .collect()
 }
 
+#[cfg_attr(not(feature = "server"), allow(dead_code))]
 #[allow(clippy::cast_precision_loss)]
 fn per_participant_minute(counts: [u32; 2], active_ticks: [u64; 2]) -> [f64; 2] {
     std::array::from_fn(|index| {
@@ -484,6 +475,7 @@ fn per_participant_minute(counts: [u32; 2], active_ticks: [u64; 2]) -> [f64; 2] 
     })
 }
 
+#[cfg_attr(not(feature = "server"), allow(dead_code))]
 fn aggregate_delta(
     end: &WeaponTelemetryAggregate,
     start: &WeaponTelemetryAggregate,

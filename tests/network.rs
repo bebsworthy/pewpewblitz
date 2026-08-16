@@ -71,6 +71,9 @@ use serde::{Deserialize, Serialize};
 mod harness;
 use harness::*;
 
+#[path = "network/hot_zone.rs"]
+mod hot_zone;
+
 #[path = "network/builds.rs"]
 mod builds;
 #[path = "network/combat_composed.rs"]

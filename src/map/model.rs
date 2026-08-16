@@ -101,6 +101,30 @@ pub enum MapShape {
     Circle { radius: f32 },
 }
 
+/// A normalized, axis-aligned objective area derived from one resolved area anchor.
+///
+/// Containment is inclusive on the boundary: a fighter center exactly on the circle or
+/// rectangle edge counts as inside. Server occupancy uses this math authoritatively;
+/// clients may repeat it only for presentation.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct NormalizedArea {
+    pub center: Vec2,
+    pub shape: MapShape,
+}
+
+impl NormalizedArea {
+    #[must_use]
+    pub fn contains_point(&self, point: Vec2) -> bool {
+        let delta = point - self.center;
+        match self.shape {
+            MapShape::Rectangle { half_extents } => {
+                delta.x.abs() <= half_extents.x && delta.y.abs() <= half_extents.y
+            }
+            MapShape::Circle { radius } => delta.length_squared() <= radius * radius,
+        }
+    }
+}
+
 impl MapShape {
     #[must_use]
     pub fn bounding_half_extents(self, rotation: f32) -> Vec2 {

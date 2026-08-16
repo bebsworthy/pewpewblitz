@@ -9,12 +9,16 @@ use crate::{
         SpawnState, TeamId, TestDummy, WeaponCatalogResource, WeaponPresetId, WeaponTelemetry,
         WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
     },
-    config::{NetworkTransport, ServerNetworkConfig},
+    config::{GameMode, MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
-    map::{AuthoritativeMapPlugin, MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
+    map::{
+        AuthoritativeMapPlugin, BUILT_IN_MAP_PRESET, HOT_ZONE_MAP_PRESET, MapStartupSet,
+        ResolvedMap, ServerMapSelection, SpawnAssignment, SpawnPointCatalog,
+    },
     matchplay::{
-        MatchMember, MatchParticipant, MatchPhase, MatchRoot, MatchState, SpawnCandidate,
-        WipeoutPlugin, WipeoutRules, assigned_team, select_spawn,
+        AuthoritativeMatchPlugin, MatchLifecycleRules, MatchMember, MatchModeSetup,
+        MatchParticipant, MatchPhase, MatchRoot, MatchState, SpawnCandidate,
+        WIPEOUT_RULES_REVISION, WipeoutModePlugin, WipeoutRules, assigned_team, select_spawn,
     },
     movement::{
         AuthoritativeMovementPlugin, AvianNetworkPlugin, InputFreshness, InputValidationState,
@@ -277,11 +281,7 @@ impl Plugin for ServerNetworkPlugin {
                 Last,
                 (forward_app_exit_to_server_stop, finish_server_shutdown).chain(),
             )
-            .add_plugins((
-                ServerCombatPlugin,
-                WipeoutPlugin,
-                crate::abilities::ServerAbilityPlugin,
-            ));
+            .add_plugins((ServerCombatPlugin, crate::abilities::ServerAbilityPlugin));
     }
 }
 
@@ -395,7 +395,7 @@ fn process_client_hellos(
     spawn_points: Res<SpawnPointCatalog>,
     resolved_map: Res<ResolvedMap>,
     movement_tuning: Res<MovementTuning>,
-    wipeout_rules: Res<WipeoutRules>,
+    lifecycle_rules: Res<MatchLifecycleRules>,
     fighters: Res<crate::combat::FighterDefinitions>,
     weapons: Res<crate::combat::WeaponDefinitions>,
     mut ids: ResMut<NextSessionIds>,
@@ -476,7 +476,7 @@ fn process_client_hellos(
                         }
                     } else if assigned_team(
                         team_counts,
-                        wipeout_rules.maximum_participants_per_team,
+                        lifecycle_rules.maximum_participants_per_team,
                     )
                     .is_none()
                     {
@@ -492,7 +492,7 @@ fn process_client_hellos(
                                 };
                                 let assigned_team = assigned_team(
                                     team_counts,
-                                    wipeout_rules.maximum_participants_per_team,
+                                    lifecycle_rules.maximum_participants_per_team,
                                 )
                                 .expect("capacity was checked before identifier allocation");
                                 let candidates = spawn_points
@@ -1056,9 +1056,9 @@ fn finish_server_shutdown(
 /// Build the production headless dedicated server application.
 pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
     let mut app = App::new();
-    let wipeout_rules = wipeout_rules_for_profile(config.wipeout_rules_profile);
+    let lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
     app.insert_resource(config)
-        .insert_resource(wipeout_rules)
+        .insert_resource(lifecycle)
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
             crate::timing::SIMULATION_TICK,
         )))
@@ -1076,23 +1076,66 @@ pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
             AuthoritativeMovementPlugin,
             ServerNetworkPlugin,
             DedicatedServerPlugin,
+            AuthoritativeMatchPlugin,
         ));
+    install_server_game_mode(&mut app);
     app
 }
 
-fn wipeout_rules_for_profile(profile: crate::config::WipeoutRulesProfile) -> WipeoutRules {
+/// Install the configured mode's rules and mode plugin. The production composition reads the
+/// validated configuration exactly once during app construction; no runtime hot-swap occurs.
+fn install_server_game_mode(app: &mut App) {
+    let mode = app.world().resource::<ServerNetworkConfig>().game_mode;
+    let profile = app
+        .world()
+        .resource::<ServerNetworkConfig>()
+        .match_rules_profile;
+    match mode {
+        GameMode::Wipeout => {
+            app.insert_resource(MatchModeSetup {
+                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                rules_revision: WIPEOUT_RULES_REVISION,
+            })
+            .insert_resource(wipeout_rules_for_profile(profile))
+            .insert_resource(ServerMapSelection {
+                preset_id: BUILT_IN_MAP_PRESET,
+            })
+            .add_plugins(WipeoutModePlugin);
+        }
+        GameMode::HotZone => {
+            app.insert_resource(crate::matchplay::hot_zone_setup_for_composition())
+                .insert_resource(crate::matchplay::hot_zone_rules_for_profile(profile))
+                .insert_resource(ServerMapSelection {
+                    preset_id: HOT_ZONE_MAP_PRESET,
+                })
+                .add_plugins(crate::matchplay::HotZoneModePlugin);
+        }
+    }
+}
+
+/// Common lifecycle rules for one rules profile; deadlines shorten without changing semantics.
+#[must_use]
+pub fn match_lifecycle_rules_for_profile(profile: MatchRulesProfile) -> MatchLifecycleRules {
     match profile {
-        crate::config::WipeoutRulesProfile::Production => WipeoutRules::default(),
-        crate::config::WipeoutRulesProfile::ProcessVerification => WipeoutRules {
+        MatchRulesProfile::Production => MatchLifecycleRules::default(),
+        MatchRulesProfile::ProcessVerification => MatchLifecycleRules {
             minimum_participants_per_team: 2,
-            target_score: 10,
             countdown_ticks: 30,
             active_limit_ticks: 3_600,
             respawn_delay_ticks: 30,
             spawn_protection_ticks: 10,
             completed_input_lock_ticks: 10,
-            ..WipeoutRules::default()
+            ..MatchLifecycleRules::default()
         },
+    }
+    .validate()
+    .expect("configured match lifecycle rules profile must be valid")
+}
+
+fn wipeout_rules_for_profile(profile: MatchRulesProfile) -> WipeoutRules {
+    match profile {
+        MatchRulesProfile::Production => WipeoutRules::default(),
+        MatchRulesProfile::ProcessVerification => WipeoutRules { target_score: 10 },
     }
     .validate()
     .expect("configured Wipeout rules profile must be valid")
