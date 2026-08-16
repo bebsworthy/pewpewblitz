@@ -2,6 +2,7 @@
 set -euo pipefail
 
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5000}"
+game_mode="${BRAWLER_NETWORK_GAME_MODE:-wipeout}"
 headless="${BRAWLER_NETWORK_HEADLESS:-0}"
 combat_assert="${BRAWLER_NETWORK_ASSERT_COMBAT:-0}"
 windowed_combat_demo="${BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO:-0}"
@@ -37,6 +38,10 @@ if ! [[ "$network_timeout_seconds" =~ ^[0-9]+$ ]]; then
 fi
 if [[ "$headless" != "0" && "$headless" != "1" ]]; then
     printf 'brawler network: BRAWLER_NETWORK_HEADLESS must be 0 or 1\n' >&2
+    exit 2
+fi
+if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_GAME_MODE must be wipeout or hot-zone\n' >&2
     exit 2
 fi
 if [[ "$combat_assert" != "0" && "$combat_assert" != "1" ]]; then
@@ -161,7 +166,12 @@ if [[ "$headless" == "1" ]]; then
     fi
 fi
 
-(trap '' INT; exec "${server_env[@]}" "$server_binary" --bind "$network_addr") &
+server_args=(--bind "$network_addr" --mode "$game_mode")
+if [[ -n "${BRAWLER_NETWORK_MATCH_RULES:-}" ]]; then
+    server_args+=(--match-rules "$BRAWLER_NETWORK_MATCH_RULES")
+fi
+
+(trap '' INT; exec "${server_env[@]}" "$server_binary" "${server_args[@]}") &
 server_pid=$!
 
 start_epoch=$(date +%s)
@@ -188,7 +198,9 @@ if [[ "$headless" == "1" ]]; then
     if [[ "$combat_assert" == "1" ]]; then
         client_args+=(--headless --exit-after-roster 2 --simulation-ticks 1200 --fire)
     else
-        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 180)
+        # Outlast the production countdown (180 ticks) plus travel so the movement
+        # assertion observes real displacement instead of racing client shutdown.
+        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 600)
     fi
 fi
 

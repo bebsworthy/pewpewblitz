@@ -252,16 +252,16 @@ fn tint_zone_objective(
     }
     let (fill_color, boundary_color) = match hot_zone.status {
         crate::matchplay::HotZoneStatus::Empty => (
-            Color::srgba(0.30, 0.55, 0.85, 0.16),
-            Color::srgba(0.85, 0.75, 0.30, 0.65),
+            Color::srgba(0.2, 0.5, 0.95, 0.3),
+            Color::srgba(1.0, 0.82, 0.2, 0.9),
         ),
         crate::matchplay::HotZoneStatus::Contested => (
-            Color::srgba(0.85, 0.30, 0.55, 0.18),
-            Color::srgba(0.95, 0.45, 0.70, 0.75),
+            Color::srgba(0.95, 0.2, 0.45, 0.32),
+            Color::srgba(1.0, 0.35, 0.6, 0.95),
         ),
         crate::matchplay::HotZoneStatus::Controlled { team } => (
-            with_alpha(team_color(team.0), 0.20),
-            with_alpha(team_color(team.0), 0.85),
+            with_alpha(team_color(team.0), 0.32),
+            with_alpha(team_color(team.0), 0.95),
         ),
     };
     for material in &mesh_fills {
@@ -303,7 +303,7 @@ fn despawn_generation(
 #[allow(clippy::too_many_lines)]
 /// Objective boundary ring width in world units. Thickness/color are recorded
 /// presentation tuning, not gameplay semantics.
-pub const ZONE_RING_WIDTH: f32 = 14.0;
+pub const ZONE_RING_WIDTH: f32 = 28.0;
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn spawn_snapshot_visuals(
@@ -335,8 +335,7 @@ fn spawn_snapshot_visuals(
                         },
                         Mesh2d(ring),
                         MeshMaterial2d(
-                            materials
-                                .add(ColorMaterial::from(Color::srgba(0.85, 0.75, 0.30, 0.65))),
+                            materials.add(ColorMaterial::from(Color::srgba(1.0, 0.82, 0.2, 0.9))),
                         ),
                         Transform::from_translation(position.extend(-4.9)),
                     ));
@@ -347,8 +346,7 @@ fn spawn_snapshot_visuals(
                         },
                         Mesh2d(fill),
                         MeshMaterial2d(
-                            materials
-                                .add(ColorMaterial::from(Color::srgba(0.30, 0.55, 0.85, 0.16))),
+                            materials.add(ColorMaterial::from(Color::srgba(0.2, 0.5, 0.95, 0.3))),
                         ),
                         Transform::from_translation(position.extend(-4.8)),
                     ));
@@ -361,7 +359,7 @@ fn spawn_snapshot_visuals(
                             anchor_id: anchor.anchor_id,
                         },
                         Sprite::from_color(
-                            Color::srgba(0.85, 0.75, 0.30, 0.65),
+                            Color::srgba(1.0, 0.82, 0.2, 0.9),
                             size + Vec2::splat(ZONE_RING_WIDTH * 2.0),
                         ),
                         Transform::from_translation(position.extend(-4.9)),
@@ -371,7 +369,7 @@ fn spawn_snapshot_visuals(
                         ZoneObjectiveFill {
                             anchor_id: anchor.anchor_id,
                         },
-                        Sprite::from_color(Color::srgba(0.30, 0.55, 0.85, 0.16), size),
+                        Sprite::from_color(Color::srgba(0.2, 0.5, 0.95, 0.3), size),
                         Transform::from_translation(position.extend(-4.8)),
                     ));
                 }

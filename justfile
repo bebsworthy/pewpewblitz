@@ -82,6 +82,16 @@ docs:
 clean:
     cargo clean
 
+# Preview removal of development and test artifacts while preserving release builds.
+clean-debug-preview:
+    cargo clean --profile dev --dry-run
+    cargo clean --profile test --dry-run
+
+# Remove development and test artifacts while preserving release builds.
+clean-debug:
+    cargo clean --profile dev
+    cargo clean --profile test
+
 # Run automated verification, then start the end-of-cycle interactive user test.
 user-test: verify
     @printf '%s\n' 'Automated verification passed. Starting the two-client interactive user test.'
@@ -172,6 +182,10 @@ run:
 # Launch one server and two distinguishable windowed clients.
 network:
     BRAWLER_NETWORK_HEADLESS=0 ./scripts/network.sh
+
+# Launch one server and two windowed clients in Hot Zone mode (BRAWLER_NETWORK_MATCH_RULES=verification for a 30-tick capture target).
+network-hot-zone:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_NETWORK_GAME_MODE=hot-zone ./scripts/network.sh
 
 # Launch two windowed clients with client 1 firing at the neutral dummy.
 network-combat:

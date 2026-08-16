@@ -278,6 +278,11 @@ fn format_preset_rates(values: &[(WeaponPresetId, f64)]) -> String {
         .join(",")
 }
 
+/// The movement-smoke window must outlast a full production lifecycle: client join, build
+/// selection, the 180-tick countdown, and travel to displacement. Displacement is compared
+/// against the join-time baseline, so a wider window cannot pass a fighter that never moved.
+const MOVEMENT_SMOKE_WINDOW_TICKS: u64 = 420;
+
 pub(super) fn verify_process_movement(
     mut check: ResMut<ProcessMovementCheck>,
     tick: Res<crate::timing::SimulationTick>,
@@ -300,10 +305,9 @@ pub(super) fn verify_process_movement(
         check.initial_tick = Some(tick.0);
         return;
     }
-    if check
-        .initial_tick
-        .is_none_or(|initial_tick| tick.0 < initial_tick.saturating_add(120))
-    {
+    if check.initial_tick.is_none_or(|initial_tick| {
+        tick.0 < initial_tick.saturating_add(MOVEMENT_SMOKE_WINDOW_TICKS)
+    }) {
         return;
     }
     let moved = current.iter().any(|(player, position, _)| {

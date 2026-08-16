@@ -997,3 +997,28 @@ screenshot-harness and color-corroboration lessons are recorded here and in the 
   dispositions in the feedback review).
 - [x] The user playtest is triaged, affected verification reruns, learning review completes, and deferred
   work is visible before M09 is marked `Complete`.
+
+### Post-close follow-up — user playtest 2026-08-16
+
+Finding: "I can't see the zone that needs to be captured."
+
+Root cause (accepted, implemented now): the `c9a1eeb` remediation that replaced the objective
+quads with `Circle`/`Annulus` meshes silently regressed the playtest-validated boundary ring from
+28 back to 14 world units while keeping boundary alpha 0.65 and fill alpha 0.16 — roughly a 31 px
+muted-olive arc on a retina window against the near-black facility floor, about half the width the
+automated playtest had validated. Fixed by restoring `ZONE_RING_WIDTH = 28.0` and raising contrast
+across all three status tints (Empty fill alpha 0.16→0.30, boundary 0.65→0.90 with a brighter
+gold; Contested/Controlled similarly raised). Map shape-fidelity tests stay green (they assert the
+symbolic width), and the headless Hot Zone smoke passes (movement assertion at tick 583).
+
+Contributing observation (deferred, evidence recorded): from the team spawns (x = ±768) the zone's
+near edge is ~580 world units away while the 720-unit-vertical camera shows only ~576 units of
+half-width, so at match start the zone is entirely off-screen and nothing on the HUD points toward
+it. A zone direction/distance indicator is new presentation scope — recorded for version backlog
+triage rather than expanded into this fix.
+
+Same-session tooling follow-ups: `just network-hot-zone` launches the one-server/two-windowed-client
+Hot Zone session; `scripts/network.sh` gained `BRAWLER_NETWORK_GAME_MODE` and
+`BRAWLER_NETWORK_MATCH_RULES` passthrough. The movement-smoke window was widened 120→420 ticks
+(headless clients 180→600 ticks) because the 120-tick window predated the 180-tick production
+countdown and failed on the M08 baseline too — a pre-existing flake, not an M09 regression.
