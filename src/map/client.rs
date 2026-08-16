@@ -2,7 +2,10 @@
 #![allow(clippy::wildcard_imports)]
 
 use super::*;
+use bevy::math::primitives::{Annulus, Circle};
+use bevy::mesh::Mesh2d;
 use bevy::prelude::*;
+use bevy::sprite_render::{ColorMaterial, MeshMaterial2d};
 use std::collections::HashSet;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -69,9 +72,11 @@ impl Plugin for MapPresentationPlugin {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn reconcile_map_snapshot(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut color_materials: ResMut<Assets<ColorMaterial>>,
     catalog: Res<MapCatalogResource>,
     asset_server: Option<Res<AssetServer>>,
     assets: Option<Res<crate::client::ClientAssetHandles>>,
@@ -112,7 +117,13 @@ fn reconcile_map_snapshot(
             .is_some_and(|server| server.is_loaded(&assets.facility_tileset))
             .then_some(&assets.facility_tileset)
     });
-    spawn_snapshot_visuals(&mut commands, snapshot, facility_image);
+    spawn_snapshot_visuals(
+        &mut commands,
+        &mut meshes,
+        &mut color_materials,
+        snapshot,
+        facility_image,
+    );
     info!(
         instance_id = snapshot.identity.instance_id.0,
         snapshot_bytes = postcard::to_allocvec(snapshot).map_or(0, |bytes| bytes.len()),
@@ -200,6 +211,10 @@ fn validate_client_snapshot(
 /// Tint the world-space objective visual from durable replicated Hot Zone state. The
 /// presentation reads the same generation-tagged identities the HUD gates on; a mismatched
 /// or missing generation keeps a neutral tint instead of guessing ownership.
+type ZoneObjectiveMeshQuery<'w, 's, M> =
+    Query<'w, 's, &'static MeshMaterial2d<ColorMaterial>, (With<M>, With<Mesh2d>)>;
+
+#[allow(clippy::type_complexity)]
 fn tint_zone_objective(
     roots: Query<
         (
@@ -209,8 +224,25 @@ fn tint_zone_objective(
         ),
         With<crate::matchplay::MatchRoot>,
     >,
-    mut fills: Query<&mut Sprite, With<ZoneObjectiveFill>>,
-    mut boundaries: Query<&mut Sprite, (With<ZoneObjectiveBoundary>, Without<ZoneObjectiveFill>)>,
+    mut color_materials: ResMut<Assets<ColorMaterial>>,
+    mesh_fills: ZoneObjectiveMeshQuery<ZoneObjectiveFill>,
+    mesh_boundaries: ZoneObjectiveMeshQuery<ZoneObjectiveBoundary>,
+    mut quad_fills: Query<
+        &mut Sprite,
+        (
+            With<ZoneObjectiveFill>,
+            Without<Mesh2d>,
+            Without<ZoneObjectiveBoundary>,
+        ),
+    >,
+    mut quad_boundaries: Query<
+        &mut Sprite,
+        (
+            With<ZoneObjectiveBoundary>,
+            Without<Mesh2d>,
+            Without<ZoneObjectiveFill>,
+        ),
+    >,
 ) {
     let Ok((state, hot_zone, clock)) = roots.single() else {
         return;
@@ -220,8 +252,8 @@ fn tint_zone_objective(
     }
     let (fill_color, boundary_color) = match hot_zone.status {
         crate::matchplay::HotZoneStatus::Empty => (
-            Color::srgba(0.30, 0.55, 0.85, 0.14),
-            Color::srgba(0.85, 0.75, 0.30, 0.55),
+            Color::srgba(0.30, 0.55, 0.85, 0.16),
+            Color::srgba(0.85, 0.75, 0.30, 0.65),
         ),
         crate::matchplay::HotZoneStatus::Contested => (
             Color::srgba(0.85, 0.30, 0.55, 0.18),
@@ -232,10 +264,20 @@ fn tint_zone_objective(
             with_alpha(team_color(team.0), 0.85),
         ),
     };
-    for mut sprite in &mut fills {
+    for material in &mesh_fills {
+        if let Some(mut material) = color_materials.get_mut(material.id()) {
+            material.color = fill_color;
+        }
+    }
+    for material in &mesh_boundaries {
+        if let Some(mut material) = color_materials.get_mut(material.id()) {
+            material.color = boundary_color;
+        }
+    }
+    for mut sprite in &mut quad_fills {
         sprite.color = fill_color;
     }
-    for mut sprite in &mut boundaries {
+    for mut sprite in &mut quad_boundaries {
         sprite.color = boundary_color;
     }
 }
@@ -259,8 +301,15 @@ fn despawn_generation(
 }
 
 #[allow(clippy::too_many_lines)]
+/// Objective boundary ring width in world units. Thickness/color are recorded
+/// presentation tuning, not gameplay semantics.
+pub const ZONE_RING_WIDTH: f32 = 14.0;
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn spawn_snapshot_visuals(
     commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
     snapshot: &ResolvedMapSnapshot,
     facility_image: Option<&Handle<Image>>,
 ) {
@@ -271,33 +320,62 @@ fn spawn_snapshot_visuals(
         if let ModeAnchorShape::Area { position, shape } = anchor.shape
             && let Some(_profile) = objective_presentation_profile(anchor.definition_id)
         {
-            let diameter = match shape {
-                MapShape::Circle { radius } => Vec2::splat(radius * 2.0),
-                MapShape::Rectangle { half_extents } => half_extents * 2.0,
-            };
-            // A low-alpha floor fill plus a larger boundary disc behind it read as a ring
-            // without a mesh pipeline. The 28-world-unit ring keeps the ownership boundary
-            // readable at the smallest supported window; both stay behind fighters and
-            // projectiles. Thickness/color are recorded presentation tuning, not gameplay.
-            commands.spawn((
-                marker,
-                ZoneObjectiveBoundary {
-                    anchor_id: anchor.anchor_id,
-                },
-                Sprite::from_color(
-                    Color::srgba(0.85, 0.75, 0.30, 0.65),
-                    diameter + Vec2::splat(28.0),
-                ),
-                Transform::from_translation(position.extend(-4.9)),
-            ));
-            commands.spawn((
-                marker,
-                ZoneObjectiveFill {
-                    anchor_id: anchor.anchor_id,
-                },
-                Sprite::from_color(Color::srgba(0.30, 0.55, 0.85, 0.16), diameter),
-                Transform::from_translation(position.extend(-4.8)),
-            ));
+            // The objective shape must match authoritative containment exactly: circular
+            // anchors render a `Circle` fill with an `Annulus` boundary ring. Rectangle
+            // anchors keep axis-aligned quads. Both stay behind fighters and projectiles
+            // and above the destructible-reservation planning overlay.
+            match shape {
+                MapShape::Circle { radius } => {
+                    let ring = meshes.add(Annulus::new(radius, radius + ZONE_RING_WIDTH));
+                    let fill = meshes.add(Circle::new(radius));
+                    commands.spawn((
+                        marker,
+                        ZoneObjectiveBoundary {
+                            anchor_id: anchor.anchor_id,
+                        },
+                        Mesh2d(ring),
+                        MeshMaterial2d(
+                            materials
+                                .add(ColorMaterial::from(Color::srgba(0.85, 0.75, 0.30, 0.65))),
+                        ),
+                        Transform::from_translation(position.extend(-4.9)),
+                    ));
+                    commands.spawn((
+                        marker,
+                        ZoneObjectiveFill {
+                            anchor_id: anchor.anchor_id,
+                        },
+                        Mesh2d(fill),
+                        MeshMaterial2d(
+                            materials
+                                .add(ColorMaterial::from(Color::srgba(0.30, 0.55, 0.85, 0.16))),
+                        ),
+                        Transform::from_translation(position.extend(-4.8)),
+                    ));
+                }
+                MapShape::Rectangle { half_extents } => {
+                    let size = half_extents * 2.0;
+                    commands.spawn((
+                        marker,
+                        ZoneObjectiveBoundary {
+                            anchor_id: anchor.anchor_id,
+                        },
+                        Sprite::from_color(
+                            Color::srgba(0.85, 0.75, 0.30, 0.65),
+                            size + Vec2::splat(ZONE_RING_WIDTH * 2.0),
+                        ),
+                        Transform::from_translation(position.extend(-4.9)),
+                    ));
+                    commands.spawn((
+                        marker,
+                        ZoneObjectiveFill {
+                            anchor_id: anchor.anchor_id,
+                        },
+                        Sprite::from_color(Color::srgba(0.30, 0.55, 0.85, 0.16), size),
+                        Transform::from_translation(position.extend(-4.8)),
+                    ));
+                }
+            }
         }
     }
     for visual in &snapshot.visual_instances {
@@ -446,6 +524,8 @@ mod tests {
     fn app_with_snapshot(snapshot: ResolvedMapSnapshot) -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, MapContentPlugin, MapPresentationPlugin));
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<ColorMaterial>>();
         app.world_mut().spawn((
             MapRoot,
             snapshot.identity.instance_id,
@@ -534,9 +614,18 @@ mod tests {
     fn hot_zone_objective_visuals_spawn_with_the_exact_generation_marker() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, MapContentPlugin, MapPresentationPlugin));
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<ColorMaterial>>();
         let snapshot = hot_zone_snapshot_test();
         let instance_id = snapshot.identity.instance_id;
         let anchor_id = snapshot.mode_anchors[0].anchor_id;
+        let ModeAnchorShape::Area {
+            shape: MapShape::Circle { radius },
+            ..
+        } = snapshot.mode_anchors[0].shape
+        else {
+            panic!("built-in Hot Zone anchor is circular")
+        };
         app.world_mut()
             .spawn((MapRoot, instance_id, snapshot.identity, snapshot));
         app.update();
@@ -557,6 +646,52 @@ mod tests {
         assert!(
             members > 0,
             "zone visuals share the exact map generation marker"
+        );
+
+        // Shape fidelity: the presented objective must be a circle matching authoritative
+        // containment, with an annulus boundary of the recorded ring width — never a quad.
+        let mut fill_meshes = world.query_filtered::<&Mesh2d, With<ZoneObjectiveFill>>();
+        let mut boundary_meshes = world.query_filtered::<&Mesh2d, With<ZoneObjectiveBoundary>>();
+        let fill_handle = fill_meshes.single(world).unwrap().0.clone();
+        let boundary_handle = boundary_meshes.single(world).unwrap().0.clone();
+        let mesh_radii = |handle: Handle<Mesh>| -> (f32, f32, usize) {
+            let meshes = world.resource::<Assets<Mesh>>();
+            let mesh = meshes.get(&handle).expect("objective mesh exists");
+            let positions = mesh
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .expect("objective mesh has positions");
+            let bevy::mesh::VertexAttributeValues::Float32x3(values) = positions else {
+                panic!("objective mesh positions are Float32x3");
+            };
+            let radii: Vec<f32> = values.iter().map(|[x, y, _]| f32::hypot(*x, *y)).collect();
+            (
+                radii.iter().copied().fold(f32::INFINITY, f32::min),
+                radii.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+                radii.len(),
+            )
+        };
+        let (fill_inner, fill_outer, fill_vertices) = mesh_radii(fill_handle);
+        let (ring_inner, ring_outer, ring_vertices) = mesh_radii(boundary_handle);
+        // A disc mesh of rim vertices at the containment radius; a quad of the same size
+        // would reach radius * sqrt(2) at its corners and use only four vertices.
+        assert!(
+            (fill_inner - radius).abs() < 1.0
+                && (fill_outer - radius).abs() < 1.0
+                && fill_vertices > 8,
+            "fill is a circle of radius {radius}, got inner {fill_inner} outer {fill_outer} with {fill_vertices} vertices"
+        );
+        assert!(
+            (ring_inner - radius).abs() < 1.0
+                && (ring_outer - (radius + ZONE_RING_WIDTH)).abs() < 1.0
+                && ring_vertices > 16,
+            "boundary is an annulus {radius}..{} got {ring_inner}..{ring_outer} with {ring_vertices} vertices",
+            radius + ZONE_RING_WIDTH,
+        );
+        let mut sprites = world.query_filtered::<&Sprite, With<ZoneObjectiveFill>>();
+        assert_eq!(
+            sprites.iter(world).count(),
+            0,
+            "a circular objective never renders a rectangular sprite"
         );
     }
 

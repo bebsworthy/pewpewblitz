@@ -795,3 +795,136 @@ fn m05_combined_worst_case_fixed_tick_stays_within_budget() {
         60,
     );
 }
+
+/// Hot Zone composition used by the M09 objective benchmarks: the same server graph with
+/// the Hot Zone map/mode/rules installed instead of Wipeout.
+fn hot_zone_performance_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        ServerPlugins {
+            tick_duration: SIMULATION_TICK,
+        },
+        GameplayPlugin,
+        ProtocolPlugin,
+        AvianNetworkPlugin,
+        AuthoritativeMapPlugin,
+        AuthoritativeMovementPlugin,
+        ServerNetworkPlugin,
+        brawler::matchplay::AuthoritativeMatchPlugin,
+    ));
+    app.insert_resource(brawler::server::match_lifecycle_rules_for_profile(
+        brawler::config::MatchRulesProfile::ProcessVerification,
+    ));
+    app.insert_resource(brawler::matchplay::hot_zone_setup_for_composition());
+    // Production target progress keeps a 120-tick controlled window below threshold so
+    // the per-tick delta can be measured without completing the match mid-run.
+    app.insert_resource(brawler::matchplay::hot_zone_rules_for_profile(
+        brawler::config::MatchRulesProfile::Production,
+    ));
+    app.insert_resource(brawler::map::ServerMapSelection {
+        preset_id: brawler::map::HOT_ZONE_MAP_PRESET,
+    });
+    app.insert_resource(ServerNetworkConfig {
+        transport: NetworkTransport::Crossbeam,
+        ..default()
+    });
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(SIMULATION_TICK));
+    app.add_plugins(brawler::matchplay::HotZoneModePlugin);
+    app.update();
+    app
+}
+
+fn hot_zone_progress(app: &mut App) -> [u16; 2] {
+    let world = app.world_mut();
+    let mut roots = world.query_filtered::<&brawler::matchplay::HotZoneState, With<MatchRoot>>();
+    roots
+        .single(world)
+        .expect("one hot zone state")
+        .progress_ticks
+}
+
+/// Compare fixed-tick cost across the three objective occupancy states at supported
+/// participant capacity, proving evaluation correctness under load: exactly one progress
+/// unit per controlled tick, none when empty or contested.
+#[test]
+fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
+    let mut app = hot_zone_performance_app();
+    let match_id = {
+        let world = app.world_mut();
+        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
+        let mut state = roots.single_mut(world).expect("one match root");
+        state.phase = MatchPhase::Active {
+            ends_at_tick: u64::MAX,
+        };
+        state.match_id
+    };
+    let mut owners = Vec::new();
+    for (index, (preset, position, team)) in [
+        (1, Vec2::new(-600.0, 0.0), TeamId(0)),
+        (2, Vec2::new(-600.0, 200.0), TeamId(0)),
+        (3, Vec2::new(600.0, 0.0), TeamId(1)),
+        (4, Vec2::new(600.0, 200.0), TeamId(1)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let entity = spawn_m05_fighter(
+            &mut app,
+            40_000 + u64::try_from(index).expect("benchmark index fits"),
+            preset,
+            position,
+            team,
+            false,
+        );
+        app.world_mut().entity_mut(entity).insert((
+            MatchParticipant {
+                match_id,
+                ready: true,
+                restart_ready: false,
+            },
+            MatchMember(match_id),
+            ActiveCombatant,
+        ));
+        owners.push((entity, position));
+    }
+    app.update();
+    remove_benchmark_actions(
+        &mut app,
+        &owners.iter().map(|(entity, _)| *entity).collect::<Vec<_>>(),
+    );
+
+    // Empty zone: nobody advances.
+    fixed_tick_p95(&mut app, "m09-hot-zone-empty", 120);
+    assert_eq!(hot_zone_progress(&mut app), [0, 0]);
+
+    // Controlled zone: two team-1 fighters inside advance exactly one unit per tick.
+    for (index, (entity, _)) in owners[0..2].iter().enumerate() {
+        app.world_mut()
+            .entity_mut(*entity)
+            .insert(Position::from_xy(0.0, -100.0 - 20.0 * index as f32));
+    }
+    app.update();
+    let before = hot_zone_progress(&mut app);
+    fixed_tick_p95(&mut app, "m09-hot-zone-controlled", 120);
+    let after = hot_zone_progress(&mut app);
+    assert_eq!(
+        after[0] - before[0],
+        120,
+        "one progress unit per controlled tick"
+    );
+    assert_eq!(after[1], before[1]);
+
+    // Contested zone: both teams present, neither advances.
+    for (index, (entity, _)) in owners[2..4].iter().enumerate() {
+        app.world_mut()
+            .entity_mut(*entity)
+            .insert(Position::from_xy(0.0, 100.0 + 20.0 * index as f32));
+    }
+    app.update();
+    let before = hot_zone_progress(&mut app);
+    fixed_tick_p95(&mut app, "m09-hot-zone-contested", 120);
+    let after = hot_zone_progress(&mut app);
+    assert_eq!(after, before, "contested time advances neither team");
+}

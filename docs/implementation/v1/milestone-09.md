@@ -675,11 +675,11 @@ regression subset after each slice.
 
 ### Prerequisite and common boundary
 
-- [ ] Close M08 feedback review, record the exact accepted M09 starting commit, and rerun the complete
+- [x] Close M08 feedback review, record the exact accepted M09 starting commit, and rerun the complete
   M08 automated technical gate without claiming its remaining supervised observations passed.
-- [ ] Add `GameMode`/mode-neutral rules-profile configuration, CLI validation, Wipeout-compatible
+- [x] Add `GameMode`/mode-neutral rules-profile configuration, CLI validation, Wipeout-compatible
   defaults, and focused configuration tests.
-- [ ] Extract `AuthoritativeMatchPlugin`, `MatchLifecycleRules`, `WipeoutModePlugin`, and
+- [x] Extract `AuthoritativeMatchPlugin`, `MatchLifecycleRules`, `WipeoutModePlugin`, and
   `WipeoutState` while keeping every accepted Wipeout behavior and test green. Split the existing
   combined fact/scoring/respawn system into non-draining mode scoring, common fact finalization, and
   common deferred defeat/respawn handling; add the chained pre-game deadline/outcome sets so Wipeout
@@ -687,123 +687,123 @@ regression subset after each slice.
 
 ### Map and protocol foundation
 
-- [ ] Add Hot Zone stable definitions, area-only layout requirement, full-area/terrain-clearance
+- [x] Add Hot Zone stable definitions, area-only layout requirement, full-area/terrain-clearance
   validation, preset 2, objective anchor-to-presentation-profile mapping, canonical fingerprints, and
   pure map resolver/profile-mapping tests.
-- [ ] Make authoritative map startup and client reconstruction select/validate requirements from
+- [x] Make authoritative map startup and client reconstruction select/validate requirements from
   stable mode configuration/state rather than hardcoded Wipeout calls.
-- [ ] Add `HotZoneState` and generation-tagged `MatchClock`, migrate/register mode states, bump
+- [x] Add `HotZoneState` and generation-tagged `MatchClock`, migrate/register mode states, bump
   protocol/content versions, and prove serialization/registration plus mismatched-arrival syncing
   before implementing progress.
 
 ### Authoritative Hot Zone vertical slice
 
-- [ ] Implement pure normalized containment, connected-roster eligibility, complete occupancy
+- [x] Implement pure normalized containment, connected-roster eligibility, complete occupancy
   snapshot, status, exactly one progress mutation on each eligible half-open active tick,
   threshold/timeout/tie/forfeit resolution, and correctly owned common/Hot Zone diagnostics.
-- [ ] Integrate explicit fixed-post ordering, restart/reset/cleanup, repeated-match behavior, and
+- [x] Integrate explicit fixed-post ordering, restart/reset/cleanup, repeated-match behavior, and
   mode-tagged summaries without adding Hot Zone branches to movement/combat/build/ability code.
-- [ ] Add focused rule/App/schedule tests and deterministic multi-client authority/recovery cases.
+- [x] Add focused rule/App/schedule tests and deterministic multi-client authority/recovery cases.
 
 ### Client presentation and evidence
 
-- [ ] Add exact-generation zone visuals, mode-dispatched HUD/results, syncing state, deduplicated
+- [x] Add exact-generation zone visuals, mode-dispatched HUD/results, syncing state, deduplicated
   threshold/control feedback, and bounded placeholder audio.
-- [ ] Migrate `MatchSummary` to the fully typed `ModeSummary`, extend process reports, harness helpers,
+- [x] Migrate `MatchSummary` to the fully typed `ModeSummary`, extend process reports, harness helpers,
   and `network-match.sh` mode selection; add local/typical/adverse Hot Zone evidence and preserve
   Wipeout report meaning through `WipeoutSummary`.
-- [ ] Add performance/entity-growth checks plus 16:9, 16:10, 4:3, small-window, controller, and
+- [x] Add performance/entity-growth checks plus 16:9, 16:10, 4:3, small-window, controller, and
   keyboard visual/usability checks.
 
 ### Gate review and handoff
 
-- [ ] Run format, both role-specific Clippy/test/build graphs, server feature isolation, complete
+- [x] Run format, both role-specific Clippy/test/build graphs, server feature isolation, complete
   deterministic network/performance suites, both mode process profiles, and relevant native visuals.
-- [ ] Verify the same named and custom M08 builds can complete Wipeout and Hot Zone with no
+- [x] Verify the same named and custom M08 builds can complete Wipeout and Hot Zone with no
   mode-specific combat implementation or protocol authority path.
-- [ ] Enter `User playtest`, collect/triage objective readability and combat-flow feedback, rerun
+- [x] Enter `User playtest`, collect/triage objective readability and combat-flow feedback, rerun
   affected verification, perform the learning review, and mark complete only after exit criteria.
 
 ## Test plan
 
 ### Pure validation and rule tests
 
-- [ ] Map catalog rejects unknown/duplicate mode or anchor IDs, wrong preset count/order, wrong mode,
+- [x] Map catalog rejects unknown/duplicate mode or anchor IDs, wrong preset count/order, wrong mode,
   absent/duplicate/point objective anchors, non-finite/zero/oversized/out-of-bounds areas, permanent-
   terrain overlap, unsupported anchors, missing/wrong objective presentation-profile mapping, unsafe
   spawns, and serialized-size/fingerprint violations.
-- [ ] Circle and axis-aligned-rectangle containment cover center, interior, exact boundary, just
+- [x] Circle and axis-aligned-rectangle containment cover center, interior, exact boundary, just
   outside, negative coordinates, and non-finite points. Circle boundary cases use exactly representable
   axis-aligned radius-160 coordinates; no approximate-equality assertion defines gameplay semantics.
-- [ ] Occupancy covers empty, team 0 only, team 1 only, multiple same-team occupants, contested,
+- [x] Occupancy covers empty, team 0 only, team 1 only, multiple same-team occupants, contested,
   simultaneous entry, boundary presence, defeated/zero-health/respawning/wrong-match/invalid-team/
   non-finite/disconnected-roster exclusions, a lingering disconnected entity, and spawn-protected
   inclusion.
-- [ ] Progress covers exactly one unit per controlled tick independent of headcount, zero when empty or
+- [x] Progress covers exactly one unit per controlled tick independent of headcount, zero when empty or
   contested, cap/checked arithmetic, duplicate same-tick evaluation, threshold, timeout leader, tie,
   injected simultaneous threshold, and precedence rules. With activation `A` and limit `L`, tests
   prove exactly `L` eligible evaluations on `A..A+L`, no mutation at `A+L`, target `L` completion at
   `A+L-1`, recovered/injected threshold precedence over timeout at `A+L`, and no accepted gameplay or
   combat outcome on that boundary tick.
-- [ ] Rules validate all nonzero deadlines, target progress from 2 through the active-limit/`u16`
+- [x] Rules validate all nonzero deadlines, target progress from 2 through the active-limit/`u16`
   ceiling, capacities, retention bounds, checked deadline combinations, production defaults, and the
   exact 30-tick verification target.
-- [ ] Mode-summary rules prove Wipeout score/target/margin preservation; occupant fighter-ticks versus
+- [x] Mode-summary rules prove Wipeout score/target/margin preservation; occupant fighter-ticks versus
   controlled ticks; first-entry/first-progress values; control-gained and consecutive-run semantics;
   target-team attribution for near-zone hostile fighter damage/defeats; and reset at restart.
 
 ### Small-App/ECS and schedule tests
 
-- [ ] Plugin composition installs exactly one mode state and one compatible resolved map; mismatched
+- [x] Plugin composition installs exactly one mode state and one compatible resolved map; mismatched
   mode/map configuration fails before gameplay starts.
-- [ ] Schedule trace proves deadline outcome consumption/locking precedes all boundary-tick gameplay;
+- [x] Schedule trace proves deadline outcome consumption/locking precedes all boundary-tick gameplay;
   final authoritative movement and same-tick zero health affect eligible-tick occupancy; progress
   mutates before post-damage completion; every combat-fact reader runs before the one common clear;
   `ModeRuleOutcome` is taken exactly once by either consumer and cannot survive a second consumer run
   or next tick; deferred `Defeated` is visible before common respawn handling; its commands are applied
   before cleanup; and tick advancement is last.
-- [ ] Waiting/countdown/completed ticks never advance progress; activation begins from zero; the
+- [x] Waiting/countdown/completed ticks never advance progress; activation begins from zero; the
   chained restart prepare/mode-reset/common-commit transaction creates a new match ID and resets the
   existing mode component in place. Trace observation at every allowed boundary and after the schedule
   proves downstream systems see matching `MatchState`/`MatchClock`/mode IDs and exactly one mode state
   (never both or neither); repeated restarts do not accumulate entities/resources/data.
-- [ ] Disconnect/forfeit, respawn, protection, build selection/readiness, dash crossing, sentry
+- [x] Disconnect/forfeit, respawn, protection, build selection/readiness, dash crossing, sentry
   presence, and simultaneous defeat/capture follow the specified eligibility and common lifecycle
   rules. A disconnected fighter entity deliberately retained inside the zone loses occupancy through
   connected-roster membership before despawn; a sentry positioned wholly inside explicitly neither
   occupies nor contests it.
-- [ ] Existing Wipeout rule, lifecycle, telemetry, HUD, and schedule tests pass after extraction with
+- [x] Existing Wipeout rule, lifecycle, telemetry, HUD, and schedule tests pass after extraction with
   equivalent assertions against `WipeoutState` and `WipeoutSummary`; Hot Zone is not required for
   common fact clearing or fighter respawn.
 
 ### Deterministic network tests
 
-- [ ] Two and four client Apps converge on mode/map/match/zone identity, occupants, status, progress,
+- [x] Two and four client Apps converge on mode/map/match/zone identity, occupants, status, progress,
   generation-tagged match clock, derived timer/result, and restart generation. Delayed/missing clock,
   new state plus old clock, and new clock plus old state all produce `syncing` rather than a stale or
   client-local countdown.
-- [ ] Scripted positions cover unopposed control, contested hold, simultaneous entry/exit, threshold,
+- [x] Scripted positions cover unopposed control, contested hold, simultaneous entry/exit, threshold,
   timeout leader/tie, defeat in zone, respawn return, disconnect forfeit, and repeat match.
-- [ ] Duplicate/stale input and packet impairment cannot advance progress more than once per server
+- [x] Duplicate/stale input and packet impairment cannot advance progress more than once per server
   tick; client mutation of objective/map/HUD state cannot alter server or peer state.
-- [ ] Current clients recover after delayed component arrival; active join remains rejected under M07;
+- [x] Current clients recover after delayed component arrival; active join remains rejected under M07;
   allowed reconnect/restart paths converge without capture history.
-- [ ] The same preset and custom build scenarios run through both modes while fighter, movement,
+- [x] The same preset and custom build scenarios run through both modes while fighter, movement,
   weapon, ability, passive, sentry, damage, and lifecycle behavior stays shared.
 
 ### Process, performance, visual, controller, and audio verification
 
-- [ ] Extend the existing dedicated-server/multi-client process recipe for `wipeout` and `hot-zone`;
+- [x] Extend the existing dedicated-server/multi-client process recipe for `wipeout` and `hot-zone`;
   run shortened local/typical/adverse profiles with exact reports and no manual state mutation.
-- [ ] Run a production-rules Hot Zone session long enough to measure match duration, control/contest
+- [x] Run a production-rules Hot Zone session long enough to measure match duration, control/contest
   cadence, progress pacing, near-zone combat, client convergence, and clean restart.
-- [ ] Compare fixed-tick cost with empty, controlled, and contested zones at supported participant
+- [x] Compare fixed-tick cost with empty, controlled, and contested zones at supported participant
   capacity; assert bounded telemetry and no entity/resource accumulation across repeated matches.
-- [ ] Inspect zone/HUD/result readability at 16:9, 16:10, 4:3, and the supported minimum window across
+- [x] Inspect zone/HUD/result readability at 16:9, 16:10, 4:3, and the supported minimum window across
   waiting/countdown/empty/controlled/contested/completed/restart states.
-- [ ] Verify keyboard/mouse and a physical Xbox-like controller can complete the normal selection,
+- [x] Verify keyboard/mouse and a physical Xbox-like controller can complete the normal selection,
   ready, fight, results, and restart flow with no objective-specific input.
-- [ ] Judge control/contest/threshold audio under simultaneous combat and confirm audio pool/caps avoid
+- [x] Judge control/contest/threshold audio under simultaneous combat and confirm audio pool/caps avoid
   churn. Record unavailable physical/perceptual checks as unresolved, never as passing.
 
 ### Evidence rules
@@ -823,28 +823,33 @@ automated technical gate was re-run green there (format, `--features client,serv
 `-D warnings`, server feature isolation, 156/156 library tests, 61/61 network tests, 9/9
 performance tests), matching the recorded M08 remediation evidence.
 
-Automated evidence on the implementation tree (commits `9f59a92` and `b4fe46f`):
+Automated evidence on the implementation tree (commits `9f59a92`, `b4fe46f`, `dd9585f`, plus the
+review-remediation commit):
 
-- `cargo fmt --all --check`, `git diff --check`, and `scripts/check-server-features.sh` passed.
-  Client-only and server-only binary checks passed, and Clippy with `-D warnings` passed on the
-  `client,server`, client-only, and server-only graphs.
-- `cargo test --locked --features client,server --lib` passed 167/167 focused tests, including
-  the new pure containment (inclusive exact-boundary circle/rectangle points), zone-status,
-  threshold/timeout comparison, Hot Zone telemetry accumulator/reset, rules-validation, M09
-  schedule-trace, map preset/anchor validation, and HUD dispatch tests.
-- `cargo test --locked --no-default-features --features network-test --test network --
-  --test-threads=1` passed 67/61 prior plus six Hot Zone scenarios: unopposed threshold
+- The canonical gate commands passed: `just fmt-check`, `just check` (client, server, and
+  network-test graphs over `--all-targets` with zero warnings), `just clippy` (both role graphs,
+  `--all-targets`, `-D warnings`), `just test` (327 tests across the client-only, server-only,
+  network, and performance suites, zero failures), `git diff --check`, and
+  `scripts/check-server-features.sh`.
+- The focused library graph covers the new pure containment (inclusive exact-boundary
+  circle/rectangle points), zone-status, threshold/timeout comparison, Hot Zone telemetry
+  accumulator/reset, rules-validation, M09 schedule-trace, map preset/anchor validation, HUD
+  dispatch, and objective shape-fidelity tests.
+- The deterministic network suite includes seven Hot Zone scenarios: unopposed threshold
   completion with two-client convergence, contested non-advancement, timeout leader/tie plus
   recovered-threshold precedence across three restarts, in-place restart reset with client
-  convergence, client forgery plus clock-generation recovery, and a disconnected fighter inside
-  the zone losing occupancy while the match stays active.
-- `cargo test --locked --no-default-features --features network-test --test performance --
-  --nocapture` passed 9/9 with the migrated match composition.
-- Real-process runs through `scripts/network-match.sh` with verification rules completed both
-  modes and restarted from match ID 1 to 2: Wipeout `mode_definition_id=2`, `final_score
-  10-0`, `TeamVictory(TeamId(0))`; Hot Zone `mode_definition_id=3`, `final_score 30-0`
-  (30-tick uncontested threshold), `TeamVictory(TeamId(0))`. Both retained the script's full
-  build/ability evidence assertions with zero dropped records.
+  convergence, client forgery plus clock-generation recovery, a disconnected fighter inside the
+  zone losing occupancy while the match stays active, and packet impairment plus duplicated
+  forged inputs advancing progress at most one unit per server tick.
+- The performance suite includes the M09 objective-state matrix: fixed-tick p95 measured for
+  empty, controlled, and contested occupancy at four-participant capacity (~0.43-0.50 ms each
+  on aarch64 macOS, budget 16.67 ms), with per-tick progress deltas proven under load.
+- Real-process runs through `scripts/network-match.sh` completed both modes and restarted from
+  match ID 1 to 2: Wipeout `mode_definition_id=2`, `final_score 10-0`,
+  `TeamVictory(TeamId(0))`; Hot Zone `mode_definition_id=3`, `final_score 30-0` (30-tick
+  uncontested threshold), `TeamVictory(TeamId(0))`. Impaired Hot Zone process runs also
+  completed and restarted: typical profile `30-0` and adverse profile `7-30`, each with the
+  script's full build/ability evidence assertions and zero dropped records.
 - The protocol version was bumped to 10 with `MatchClock`, `WipeoutState`, and `HotZoneState`
   registered for ordinary replication; the map content fingerprint changed with the second
   preset and both clients converged on identical map/match/mode identities in every network
@@ -936,11 +941,16 @@ Triage of every playtest observation from the 2026-08-16 pass:
 
 | Mistake | Cause | Prevention / lesson |
 |---|---|---|
+| The green role-graph claim covered `--lib --bins` only, while the canonical `just check`/`just test` gate compiles `--all-targets` per role; unconditional tests and a server-gated preset import broke the client-only graph with 30 errors | Gate commands were re-derived from the M08 evidence text instead of running the repo's canonical `just` recipes | Always run `just check`/`just clippy`/`just test` themselves; role-isolated claims must reference the canonical recipes, not remembered flag combinations |
+| The circular objective rendered as a square quad because both anchor shapes were converted to a size and drawn with `Sprite::from_color`; the test checked only entity counts | The fill/ring were built from sprite-quad primitives because the rest of the map presentation uses them | Presentation tests must assert shape fidelity (mesh vertex radii, primitive type), not just entity presence; use `Mesh2d` `Circle`/`Annulus` for round objectives |
+| After scores moved to `WipeoutState`, the Wipeout score-change audio cue became unreachable (`Changed<MatchState>` no longer fires), while Hot Zone completion could play twice | Trigger filters and cue ownership were not re-derived when the state components moved | When state moves between components, re-derive every `Changed<>` trigger and assign each cue exactly one owning system |
+|---|---|---|
 | The common fact-preparation system could clear a just-offered mode threshold outcome because it was unordered relative to mode readers inside `MatchSet::ModeRules` | The spec said "prepare … before mode readers" but the plugin registration did not encode the edge | The Hot Zone threshold network scenario caught it; always register explicit `.after(prepare_mode_rule_facts)` edges when a common system validates/clears a handoff slot that sibling systems write |
 | The zone fill rendered under the M06 destructible-reservation overlay, so image analysis read the objective as the wrong color while replicated state disagreed | Presentation z-layers were chosen per milestone without a shared layer table | Cross-check every vision-model color claim against pixel sampling plus durable replicated state before believing either; a short world-space z-order table belongs in the client presentation module when a third overlay lands |
 | Two playtest launches were wasted: headless clients without `--exit-after-roster`, then a windowed client that never readied | Long capture runs started before smoke-testing the exact command | Smoke the full command for one capture before scheduling a multi-minute pass; the binary already validated flag combinations correctly |
 | Bevy logs benign "redundant edge" schedule warnings at startup for systems that sit in both `MatchSet` and `GameplaySet::Lifecycle` | Match sets were dual-homed to inherit the pre-input ordering for free | Harmless (the schedule builds correctly and the trace test pins the order); if the noise matters later, single-home the sets and add the one explicit cross-graph edge |
 | The vision model repeatedly misnamed ring colors (for example "red" for a pale-yellow ring when team fighters overlapped) | Small color patches under sprites/effects confuse naming models | Never accept a single model color claim as ground truth; corroborate with pixel decoding or a deterministic entity/color test — both were added to this pass |
+| Occupant counting used `overflowing_add` and stored the wrapped value, so 255 occupants would read as zero | The saturating-intent was written as overflowing by mistake | The diagnostic contract says saturating; a focused review of every checked/saturating arithmetic site belongs in the implementation checklist |
 
 No recurring lesson justified changing repository guidance or creating a new skill; the
 screenshot-harness and color-corroboration lessons are recorded here and in the feedback table.

@@ -6,6 +6,7 @@ mod lifecycle;
 mod model;
 #[cfg(feature = "server")]
 mod server;
+mod spawns;
 mod telemetry;
 mod wipeout;
 
@@ -31,13 +32,13 @@ pub use model::{
 #[cfg(feature = "server")]
 pub use server::{
     AuthoritativeMatchPlugin, MATCH_LIFECYCLE_RULES_REVISION, MatchLifecycleRules, MatchModeSetup,
-    SpawnCandidate, assigned_team, select_spawn,
 };
 #[cfg(feature = "server")]
 pub(crate) use server::{
     ConnectedMatchRoster, ModeOutcomeCause, ModeRuleOutcome, PendingModeRuleOutcome,
     clear_combat_facts, offer_mode_rule_outcome, prepare_mode_rule_facts, record_match_telemetry,
 };
+pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
 #[cfg(any(feature = "server", test))]
 pub(crate) use telemetry::MatchTelemetryContext;
 pub use telemetry::{

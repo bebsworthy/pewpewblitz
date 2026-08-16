@@ -134,7 +134,10 @@ fn play_match_audio(
     asset_server: Res<AssetServer>,
     matches: Query<
         (&MatchState, Option<&crate::matchplay::WipeoutState>),
-        (With<MatchRoot>, Changed<MatchState>),
+        (
+            With<MatchRoot>,
+            Or<(Changed<MatchState>, Changed<crate::matchplay::WipeoutState>)>,
+        ),
     >,
     mut state: ResMut<ClientAudioState>,
     active: Query<(), With<ClientAudioOneShot>>,
@@ -152,14 +155,17 @@ fn play_match_audio(
         state.suppressed = state.suppressed.saturating_add(1);
         return;
     }
+    let hot_zone_mode = current.mode_definition_id == crate::map::HOT_ZONE_MODE_DEFINITION;
     let sound = if matches!(current.phase, MatchPhase::Completed { .. })
         && !previous.is_some_and(|(id, phase, _)| {
             id == current.match_id && matches!(phase, MatchPhase::Completed { .. })
         }) {
         Some(handles.defeat.clone())
-    } else if previous.is_some_and(|(id, _, scores)| {
-        id == current.match_id && scores.is_some_and(|scores| Some(scores) != wipeout_scores)
-    }) {
+    } else if !hot_zone_mode
+        && previous.is_some_and(|(id, _, scores)| {
+            id == current.match_id && scores.is_some_and(|scores| Some(scores) != wipeout_scores)
+        })
+    {
         Some(handles.impact.clone())
     } else if previous.is_none_or(|(id, phase, _)| id != current.match_id || phase != current.phase)
         && matches!(
@@ -180,8 +186,9 @@ fn play_match_audio(
     }
 }
 
-/// Bounded objective feedback: control gained/lost, contested entry, 50%/90% thresholds,
-/// and completion. Cues are deduplicated per match/team from durable replicated state.
+/// Bounded objective feedback: control gained/lost, contested entry, and 50%/90% thresholds.
+/// Cues are deduplicated per match/team from durable replicated state. Match completion is
+/// owned by `play_match_audio` so exactly one completion cue can play per match.
 #[allow(clippy::needless_pass_by_value)]
 fn play_hot_zone_audio(
     mut commands: Commands,
@@ -225,20 +232,11 @@ fn play_hot_zone_audio(
     let percent = |progress: u16| {
         u32::from(progress) * 100 / u32::from(hot_zone.target_progress_ticks.max(1))
     };
-    let sound = if completed && !previous.completed {
-        Some(handles.defeat.clone())
-    } else if memory.status != previous.status {
-        Some(
-            if matches!(
-                memory.status,
-                crate::matchplay::HotZoneStatus::Controlled { .. }
-            ) {
-                handles.ready.clone()
-            } else {
-                handles.impact.clone()
-            },
-        )
-    } else {
+    let controlled_now = matches!(
+        memory.status,
+        crate::matchplay::HotZoneStatus::Controlled { .. }
+    );
+    let sound = if memory.status == previous.status {
         // Threshold crossings within one team's progress only.
         [0_usize, 1].into_iter().find_map(|team| {
             let crossed = |progress: u16| {
@@ -249,6 +247,12 @@ fn play_hot_zone_audio(
             (memory.progress_ticks[team] > previous.progress_ticks[team]
                 && crossed(memory.progress_ticks[team]))
             .then_some(handles.impact.clone())
+        })
+    } else {
+        Some(if controlled_now {
+            handles.ready.clone()
+        } else {
+            handles.impact.clone()
         })
     };
     if let Some(handle) = sound.filter(|handle| asset_server.is_loaded(handle)) {

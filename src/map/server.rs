@@ -8,7 +8,6 @@ use bevy::prelude::*;
 use lightyear::prelude::{NetworkTarget, Replicate};
 
 pub const BUILT_IN_MAP_PRESET: MapPresetId = MapPresetId(1);
-pub const HOT_ZONE_MAP_PRESET: MapPresetId = MapPresetId(2);
 pub const ARENA_WALL_THICKNESS: f32 = 48.0;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

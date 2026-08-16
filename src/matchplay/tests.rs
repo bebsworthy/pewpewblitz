@@ -4,55 +4,62 @@ use bevy::prelude::Vec2;
 
 #[test]
 fn production_rules_match_the_approved_contract() {
-    let lifecycle = MatchLifecycleRules::default().validate().unwrap();
-    assert_eq!(lifecycle.minimum_participants_per_team, 1);
-    assert_eq!(lifecycle.maximum_participants_per_team, 2);
-    assert_eq!(lifecycle.countdown_ticks, 180);
-    assert_eq!(lifecycle.active_limit_ticks, 10_800);
-    assert_eq!(lifecycle.respawn_delay_ticks, 180);
-    assert_eq!(lifecycle.spawn_protection_ticks, 90);
-    assert_eq!(lifecycle.completed_input_lock_ticks, 60);
     let wipeout = WipeoutRules::default().validate().unwrap();
     assert_eq!(wipeout.target_score, 10);
-    let hot_zone = HotZoneRules::default().validate_with(&lifecycle).unwrap();
-    assert_eq!(hot_zone.target_progress_ticks, 1_800);
+    #[cfg(feature = "server")]
+    {
+        let lifecycle = MatchLifecycleRules::default().validate().unwrap();
+        assert_eq!(lifecycle.minimum_participants_per_team, 1);
+        assert_eq!(lifecycle.maximum_participants_per_team, 2);
+        assert_eq!(lifecycle.countdown_ticks, 180);
+        assert_eq!(lifecycle.active_limit_ticks, 10_800);
+        assert_eq!(lifecycle.respawn_delay_ticks, 180);
+        assert_eq!(lifecycle.spawn_protection_ticks, 90);
+        assert_eq!(lifecycle.completed_input_lock_ticks, 60);
+        let hot_zone = HotZoneRules::default().validate_with(&lifecycle).unwrap();
+        assert_eq!(hot_zone.target_progress_ticks, 1_800);
+    }
 }
 
 #[test]
 fn rules_reject_zero_invalid_capacity_and_overflow() {
     assert!(WipeoutRules { target_score: 0 }.validate().is_err());
-    assert!(
-        MatchLifecycleRules {
-            minimum_participants_per_team: 2,
-            maximum_participants_per_team: 1,
-            ..MatchLifecycleRules::default()
-        }
-        .validate()
-        .is_err()
-    );
-    assert!(
-        MatchLifecycleRules {
-            countdown_ticks: u64::MAX,
-            active_limit_ticks: 1,
-            ..MatchLifecycleRules::default()
-        }
-        .validate()
-        .is_err()
-    );
-    assert!(
-        HotZoneRules {
-            target_progress_ticks: 1,
-        }
-        .validate_with(&MatchLifecycleRules::default())
-        .is_err()
-    );
-    assert!(
-        HotZoneRules {
-            target_progress_ticks: 20_000,
-        }
-        .validate_with(&MatchLifecycleRules::default())
-        .is_err()
-    );
+    #[cfg(feature = "server")]
+    {
+        assert!(
+            MatchLifecycleRules {
+                minimum_participants_per_team: 2,
+                maximum_participants_per_team: 1,
+                ..MatchLifecycleRules::default()
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            MatchLifecycleRules {
+                countdown_ticks: u64::MAX,
+                active_limit_ticks: 1,
+                ..MatchLifecycleRules::default()
+            }
+            .validate()
+            .is_err()
+        );
+        let lifecycle = MatchLifecycleRules::default();
+        assert!(
+            HotZoneRules {
+                target_progress_ticks: 1
+            }
+            .validate_with(&lifecycle)
+            .is_err()
+        );
+        assert!(
+            HotZoneRules {
+                target_progress_ticks: 20_000,
+            }
+            .validate_with(&lifecycle)
+            .is_err()
+        );
+    }
 }
 
 #[test]

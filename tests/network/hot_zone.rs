@@ -429,3 +429,46 @@ fn hot_zone_disconnected_fighter_inside_zone_loses_occupancy_while_active() {
     }
     assert_eq!(server_hot_zone(&mut harness).progress_ticks, frozen);
 }
+
+#[test]
+fn hot_zone_packet_impairment_and_duplicate_input_cannot_double_advance_progress() {
+    let mut harness = Harness::new_hot_zone_match(2);
+    select_ready_and_activate(&mut harness, 10);
+    let player = stage_outside_zone(&mut harness, 0);
+    release_into_zone(&mut harness, 0, player);
+
+    // Arm deterministic drop/duplicate/delay/reorder impairment on the controlling client
+    // and replay forged inputs for ticks the server has already consumed. Objective
+    // progress is server-owned: it may advance at most one unit per server tick.
+    harness.arm_packet_impairment(0);
+    let target = harness.controlled_entity(0);
+    let forged_tick = harness.server_tick().saturating_add(1);
+    let forged = FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE);
+    for _ in 0..4 {
+        harness.send_forged_input(
+            0,
+            lightyear::input::input_message::InputTarget::Entity(target),
+            forged_tick,
+            forged,
+        );
+    }
+    let before = server_hot_zone(&mut harness).progress_ticks;
+    let start_tick = harness.server_simulation_tick();
+    for _ in 0..60 {
+        harness.step();
+    }
+    let elapsed = harness.server_simulation_tick().saturating_sub(start_tick);
+    let after = server_hot_zone(&mut harness).progress_ticks;
+    // One unit per server tick until the verification threshold completes the match.
+    let remaining = u64::from(server_hot_zone(&mut harness).target_progress_ticks - before[0]);
+    assert_eq!(
+        u64::from(after[0] - before[0]),
+        elapsed.min(remaining),
+        "exactly one unit per server tick until threshold"
+    );
+    assert_eq!(after[1], before[1]);
+    assert!(
+        harness.packet_impairment(0).injected,
+        "the impaired batch actually exercised the link"
+    );
+}

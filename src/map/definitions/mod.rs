@@ -12,6 +12,7 @@ pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const SANDBOX_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const WIPEOUT_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const HOT_ZONE_LAYOUT_SCHEMA_VERSION: u16 = 1;
+pub const HOT_ZONE_MAP_PRESET: MapPresetId = MapPresetId(2);
 pub const PRACTICE_DUMMY_ANCHOR_DEFINITION: ModeAnchorDefinitionId = ModeAnchorDefinitionId(1);
 pub const HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION: ModeAnchorDefinitionId = ModeAnchorDefinitionId(2);
 pub const SANDBOX_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(1);
