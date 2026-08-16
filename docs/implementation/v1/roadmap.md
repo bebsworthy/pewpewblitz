@@ -31,8 +31,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in feedback review after an authorized technical-review remediation pass. Milestone 09 is in specification review, with implementation gated on M08 closeout. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
-- **Current milestone:** Milestone 08 — Feedback review; Milestone 09 — Specification review (implementation gated on M08 closeout)
+- **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in feedback review after an authorized technical-review remediation pass. Milestone 09 is in verification after implementing the common match lifecycle extraction and one-zone Hot Zone from baseline `90ef47a`; its automated gate, deterministic network/performance suites, and both-mode real-process runs are green, with the user playtest pending. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
+- **Current milestone:** Milestone 08 — Feedback review; Milestone 09 — Verifying (automated gate green, user playtest pending)
 - **Last completed milestone:** Milestone 07 — Wipeout match loop
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.

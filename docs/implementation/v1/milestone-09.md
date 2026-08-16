@@ -6,12 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Specification review |
+| Status | Verifying |
 | Research | Complete; product/network requirements, the live M08 review worktree, pinned dependency material, installed exact-version sources, primary versioned documentation, and specification-review feedback incorporated through 2026-08-16 |
-| Specification validation | Awaiting user approval; production implementation must not begin before approval |
-| Implementation | Not started; additionally gated on M08 feedback closeout and an exact green starting baseline |
-| Verification | Not started |
-| User validation/playtest | Not started |
+| Specification validation | User directed implementation per this specification on 2026-08-16; the tracked slice plan was executed without silent scope change |
+| Implementation | Complete through all five slices on top of accepted baseline commit `90ef47a` (M08 automated gate re-verified green on that exact commit before work began) |
+| Verification | Automated gate green: format, both role Clippy graphs with `-D warnings`, server feature isolation, client/server binary checks, 167 focused library tests, 67 deterministic network tests (61 prior plus 6 Hot Zone scenarios), 9 performance tests, and real-process Wipeout plus Hot Zone match runs; supervised visual/controller/audio observations remain open for the user playtest |
 
 Milestone 08 remains in feedback review. Researching and reviewing this specification in parallel is
 safe, but M09 implementation must begin from the accepted M08 result rather than from a moving review
@@ -819,7 +818,41 @@ regression subset after each slice.
 
 ## Implementation and verification evidence
 
-Not started. Populate this section only after the user validates the specification and M08 closes.
+Implementation began from the exact accepted baseline commit `90ef47a` after the complete M08
+automated technical gate was re-run green there (format, `--features client,server` Clippy with
+`-D warnings`, server feature isolation, 156/156 library tests, 61/61 network tests, 9/9
+performance tests), matching the recorded M08 remediation evidence.
+
+Automated evidence on the implementation tree (commits `9f59a92` and `b4fe46f`):
+
+- `cargo fmt --all --check`, `git diff --check`, and `scripts/check-server-features.sh` passed.
+  Client-only and server-only binary checks passed, and Clippy with `-D warnings` passed on the
+  `client,server`, client-only, and server-only graphs.
+- `cargo test --locked --features client,server --lib` passed 167/167 focused tests, including
+  the new pure containment (inclusive exact-boundary circle/rectangle points), zone-status,
+  threshold/timeout comparison, Hot Zone telemetry accumulator/reset, rules-validation, M09
+  schedule-trace, map preset/anchor validation, and HUD dispatch tests.
+- `cargo test --locked --no-default-features --features network-test --test network --
+  --test-threads=1` passed 67/61 prior plus six Hot Zone scenarios: unopposed threshold
+  completion with two-client convergence, contested non-advancement, timeout leader/tie plus
+  recovered-threshold precedence across three restarts, in-place restart reset with client
+  convergence, client forgery plus clock-generation recovery, and a disconnected fighter inside
+  the zone losing occupancy while the match stays active.
+- `cargo test --locked --no-default-features --features network-test --test performance --
+  --nocapture` passed 9/9 with the migrated match composition.
+- Real-process runs through `scripts/network-match.sh` with verification rules completed both
+  modes and restarted from match ID 1 to 2: Wipeout `mode_definition_id=2`, `final_score
+  10-0`, `TeamVictory(TeamId(0))`; Hot Zone `mode_definition_id=3`, `final_score 30-0`
+  (30-tick uncontested threshold), `TeamVictory(TeamId(0))`. Both retained the script's full
+  build/ability evidence assertions with zero dropped records.
+- The protocol version was bumped to 10 with `MatchClock`, `WipeoutState`, and `HotZoneState`
+  registered for ordinary replication; the map content fingerprint changed with the second
+  preset and both clients converged on identical map/match/mode identities in every network
+  scenario.
+
+Not yet performed (supervised observations deferred to the user playtest, recorded as open
+rather than passing): native visual inspection of the zone/HUD across 16:9/16:10/4:3/small
+windows, physical controller flow, and perceptual audio judgment under simultaneous combat.
 
 ## Playtest handoff requirements
 
