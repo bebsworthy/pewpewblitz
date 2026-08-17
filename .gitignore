@@ -1,4 +1,6 @@
 # Local upstream source checkouts used for research.
 /references/
 /target/
+# Isolated cargo cache for metrics-enabled measurement builds.
+/target-metrics/
 .DS_Store

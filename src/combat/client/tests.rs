@@ -361,3 +361,40 @@ fn replicated_delivery_visuals_wait_for_an_authoritative_pose() {
         Vec3::new(-90.0, 75.0, 12.0)
     );
 }
+
+#[test]
+fn named_client_combat_sets_preserve_the_locked_update_order() {
+    use bevy::prelude::*;
+
+    #[derive(Resource, Default)]
+    struct SetTrace(Vec<&'static str>);
+
+    fn probe(label: &'static str) -> impl Fn(ResMut<SetTrace>) {
+        move |mut trace: ResMut<SetTrace>| trace.0.push(label)
+    }
+
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, ClientCombatPlugin))
+        .insert_resource(crate::client::PendingLocalActions::default())
+        .insert_resource(crate::config::ClientNetworkConfig::new(1))
+        .init_resource::<crate::client::HeadlessAutomation>()
+        .init_resource::<SetTrace>()
+        .add_systems(
+            Update,
+            (
+                probe("ingest").in_set(CombatClientSet::Ingest),
+                probe("ensure").in_set(CombatClientSet::Ensure),
+                probe("sync").in_set(CombatClientSet::Sync),
+                probe("hud").in_set(CombatClientSet::HudAndStatus),
+                probe("effects").in_set(CombatClientSet::Effects),
+                probe("evidence").in_set(CombatClientSet::Evidence),
+            ),
+        );
+    app.update();
+    let trace = app.world().resource::<SetTrace>().0.clone();
+    assert_eq!(
+        trace,
+        vec!["ingest", "ensure", "sync", "hud", "effects", "evidence"],
+        "named sets must execute in the documented phase order"
+    );
+}

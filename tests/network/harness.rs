@@ -385,6 +385,7 @@ impl Harness {
         &self.client_cues[index]
     }
 
+    #[cfg(feature = "owner-prediction")]
     pub(super) fn set_replication_delay(&mut self, index: usize, delay: usize) {
         self.clients[index]
             .world_mut()

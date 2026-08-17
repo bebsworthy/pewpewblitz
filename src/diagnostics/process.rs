@@ -200,10 +200,19 @@ fn sample_lightyear_metrics(
             .get_counter_value(&Key::from_static_name(name))
             .map(|value| value as u64)
     }
+    // Lightyear records cumulative byte totals as gauges, not counters.
+    fn byte_gauge(
+        registry: &lightyear::metrics::prelude::MetricsRegistry,
+        name: &'static str,
+    ) -> Option<u64> {
+        registry
+            .get_gauge_value(&Key::from_static_name(name))
+            .map(|value| value.max(0.0) as u64)
+    }
     state.transport.bytes_sent =
-        counter(&registry, "transport/send_bytes").unwrap_or(state.transport.bytes_sent);
+        byte_gauge(&registry, "transport/send_bytes").unwrap_or(state.transport.bytes_sent);
     state.transport.bytes_received =
-        counter(&registry, "transport/recv_bytes").unwrap_or(state.transport.bytes_received);
+        byte_gauge(&registry, "transport/recv_bytes").unwrap_or(state.transport.bytes_received);
     state.transport.packets_sent =
         counter(&registry, "packets/send").unwrap_or(state.transport.packets_sent);
     state.transport.packets_received =

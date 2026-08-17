@@ -12,6 +12,8 @@ combat_report_file="${BRAWLER_NETWORK_COMBAT_REPORT_FILE:-}"
 combat_test_preset="${BRAWLER_NETWORK_COMBAT_TEST_PRESET:-}"
 network_run_id="${BRAWLER_NETWORK_RUN_ID:-network-script}"
 diagnostics_dir="${BRAWLER_DIAGNOSTICS_DIR:-}"
+client_count="${BRAWLER_NETWORK_CLIENT_COUNT:-2}"
+server_features="${BRAWLER_NETWORK_SERVER_FEATURES:-server}"
 diagnostics_scenario_id="${BRAWLER_DIAGNOSTICS_SCENARIO_ID:-}"
 network_timeout_seconds="${BRAWLER_NETWORK_TIMEOUT_SECONDS:-}"
 startup_timeout_seconds=10
@@ -36,6 +38,10 @@ if [[ -z "$network_timeout_seconds" ]]; then
     else
         network_timeout_seconds=0
     fi
+fi
+if ! [[ "$client_count" =~ ^[1-8]$ ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_CLIENT_COUNT must be 1-8\n' >&2
+    exit 2
 fi
 if ! [[ "$network_timeout_seconds" =~ ^[0-9]+$ ]]; then
     printf 'brawler network: BRAWLER_NETWORK_TIMEOUT_SECONDS must be a non-negative integer\n' >&2
@@ -117,6 +123,15 @@ job_is_running() {
     jobs -pr | grep -qx "$1"
 }
 
+all_clients_done() {
+    for pid in "${client_pids[@]}"; do
+        if [[ -n "$pid" ]] && job_is_running "$pid"; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 stop_child() {
     local pid="$1"
     local signal="$2"
@@ -181,7 +196,10 @@ required = [
     "fixed_ticks",
     "checkpoint_digest",
 ]
-for name in ("server.closeout", "client-1.closeout", "client-2.closeout"):
+names = ["server.closeout"] + sorted(
+    path.name for path in directory.glob("client-*.closeout")
+)
+for name in names:
     path = directory / name
     if not path.is_file():
         sys.exit(f"closeout report missing: {path}")
@@ -223,7 +241,7 @@ wait_for_server_closeout() {
     done
 }
 
-cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features server --bin brawler-server
+cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features "$server_features" --bin brawler-server
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features client --bin brawler-client
 
 server_env=(env "BRAWLER_SERVER_READY_FILE=$ready_file")
@@ -394,10 +412,39 @@ if [[ -n "$diagnostics_dir" ]]; then
     )
 fi
 
-(trap '' INT; exec "${client_one_env[@]}" "$client_binary" "${client_one_args[@]}") &
-client_one_pid=$!
-(trap '' INT; exec "${client_two_env[@]}" "$client_binary" "${client_two_args[@]}") &
-client_two_pid=$!
+client_pids=()
+for index in $(seq 1 "$client_count"); do
+    case "$index" in
+        1)
+            envs=("${client_one_env[@]}")
+            args=("${client_one_args[@]}")
+            ;;
+        2)
+            envs=("${client_two_env[@]}")
+            args=("${client_two_args[@]}")
+            ;;
+        *)
+            args=(--server "$network_addr" --client-id "$index")
+            if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
+                args+=(--build-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
+            fi
+            if [[ "$headless" == "1" && "$combat_assert" != "1" && "$terrain_assert" != "1" ]]; then
+                args+=(--headless --exit-after-roster "$client_count" --simulation-ticks 600)
+            fi
+            envs=(env)
+            if [[ -n "$diagnostics_dir" ]]; then
+                envs+=(
+                    "${identity_env[@]}"
+                    "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE=$diagnostics_dir/client-$index.closeout"
+                )
+            fi
+            ;;
+    esac
+    (trap '' INT; exec "${envs[@]}" "$client_binary" "${args[@]}") &
+    client_pids+=($!)
+done
+client_one_pid="${client_pids[0]}"
+client_two_pid="${client_pids[1]:-}"
 
 start_epoch=$(date +%s)
 if [[ "$network_timeout_seconds" -gt 0 ]]; then
@@ -452,7 +499,7 @@ while :; do
         fi
     fi
 
-    if [[ "$headless" == "1" && "$client_one_done" -eq 1 && "$client_two_done" -eq 1 ]]; then
+    if [[ "$headless" == "1" ]] && all_clients_done; then
         if [[ "$combat_assert" == "1" ]]; then
             if [[ -s "$combat_ready_file" \
                 && -s "$combat_client_ready_dir/client-1.ready" \

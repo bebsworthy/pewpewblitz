@@ -767,12 +767,24 @@ fn enforce_session_deadlines(
 /// completed, request a clean shutdown so terminal evidence (closeout reports, ordered stop)
 /// is produced instead of the launcher terminating the process.
 fn exit_after_verification(
+    tick: Res<crate::timing::SimulationTick>,
     movement: Res<ProcessMovementCheck>,
     combat: Res<ProcessCombatCheck>,
     match_check: Res<ProcessMatchCheck>,
     terrain: Res<ProcessTerrainCheck>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
+    // Idle-endpoint baseline control: exit cleanly after a bounded tick window even with
+    // no verification checks enabled, so the closeout report records cold-start and idle
+    // cost. A development verification control, not a v2 process contract.
+    if let Ok(idle_ticks) = env::var("BRAWLER_SERVER_EXIT_AFTER_TICKS")
+        && let Ok(idle_ticks) = idle_ticks.parse::<u64>()
+        && tick.0 >= idle_ticks
+    {
+        info!("brawler server exiting after the configured idle tick window");
+        app_exit.write(AppExit::Success);
+        return;
+    }
     if env::var("BRAWLER_SERVER_EXIT_AFTER_VERIFICATION").as_deref() != Ok("1") {
         return;
     }
