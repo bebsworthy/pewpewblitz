@@ -240,3 +240,29 @@ network-terrain-hot-zone:
 # Run repeated local, typical, and adverse combat convergence profiles.
 network-combat-profiles:
     ./scripts/network-combat-profiles.sh
+
+# Run the deterministic repeated-match and reconnect soak scenarios (25 matches per mode, 20 reconnect cycles).
+soak:
+    cargo test --locked --no-default-features --features network-test --test network soaks -- --test-threads=1 --nocapture
+
+# Run one closeout-instrumented Wipeout smoke; reports land under target/diagnostics/<scenario>.
+closeout-wipeout:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="target/diagnostics/wipeout-$(date +%Y%m%d-%H%M%S)"
+    BRAWLER_NETWORK_HEADLESS=1 BRAWLER_DIAGNOSTICS_DIR="$out" BRAWLER_DIAGNOSTICS_SCENARIO_ID=m11-wipeout-closeout ./scripts/network.sh
+    printf 'closeout reports: %s\n' "$out"
+
+# Run one closeout-instrumented Hot Zone smoke with the same validation.
+closeout-hot-zone:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="target/diagnostics/hot-zone-$(date +%Y%m%d-%H%M%S)"
+    BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_GAME_MODE=hot-zone \
+    BRAWLER_DIAGNOSTICS_DIR="$out" BRAWLER_DIAGNOSTICS_SCENARIO_ID=m11-hot-zone-closeout \
+    ./scripts/network.sh
+    printf 'closeout reports: %s\n' "$out"
+
+# Build the dedicated server with process-global Lightyear metrics for measurement runs.
+build-server-metrics:
+    cargo build --locked --no-default-features --features "server,process-metrics" --bin brawler-server
