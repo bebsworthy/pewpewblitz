@@ -10,6 +10,7 @@ pub mod map;
 pub mod matchplay;
 pub mod movement;
 pub mod protocol;
+pub mod terrain;
 pub mod timing;
 
 #[cfg(feature = "client")]

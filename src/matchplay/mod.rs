@@ -27,7 +27,7 @@ pub(crate) use lifecycle::{
 };
 pub use model::{
     ActiveCombatant, MatchClock, MatchId, MatchMember, MatchParticipant, MatchPhase, MatchResult,
-    MatchRoot, MatchState, RespawnState, SpawnProtection,
+    MatchRoot, MatchState, ResolvedMatchCapacity, RespawnState, SpawnProtection, TeamSlotCapacity,
 };
 #[cfg(feature = "server")]
 pub use server::{
@@ -35,8 +35,9 @@ pub use server::{
 };
 #[cfg(feature = "server")]
 pub(crate) use server::{
-    ConnectedMatchRoster, ModeOutcomeCause, ModeRuleOutcome, PendingModeRuleOutcome,
-    clear_combat_facts, offer_mode_rule_outcome, prepare_mode_rule_facts, record_match_telemetry,
+    ConnectedMatchRoster, ModeOutcomeCause, ModeRuleOutcome, PendingMatchRestart,
+    PendingModeRuleOutcome, clear_combat_facts, offer_mode_rule_outcome, prepare_mode_rule_facts,
+    record_match_telemetry,
 };
 pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
 #[cfg(any(feature = "server", test))]
@@ -78,6 +79,7 @@ pub(crate) enum MatchSet {
 pub(crate) enum MatchRestartSet {
     Prepare,
     ModeReset,
+    EnvironmentReset,
     Commit,
 }
 
@@ -101,6 +103,7 @@ pub(crate) fn configure_match_schedule(app: &mut bevy::prelude::App) {
         (
             MatchRestartSet::Prepare,
             MatchRestartSet::ModeReset,
+            MatchRestartSet::EnvironmentReset,
             MatchRestartSet::Commit,
         )
             .chain()
@@ -119,6 +122,24 @@ pub(crate) fn configure_match_schedule(app: &mut bevy::prelude::App) {
             .before(crate::combat::CombatSet::Lifecycle),
     );
 }
+
+/// Register one environment-reset system into the common restart transaction between
+/// mode reset and commit. Environment owners (terrain) reset synchronously here so no
+/// downstream system observes a new match with old environment state.
+#[cfg(feature = "server")]
+pub(crate) fn register_environment_reset_system<S, Marker>(app: &mut bevy::prelude::App, system: S)
+where
+    S: bevy::ecs::system::IntoSystem<(), (), Marker>,
+{
+    use bevy::ecs::schedule::IntoScheduleConfigs as _;
+    app.add_systems(
+        bevy::prelude::FixedUpdate,
+        system.in_set(MatchRestartSet::EnvironmentReset),
+    );
+}
+
+#[cfg(feature = "server")]
+pub(crate) use server::PendingMatchRestartSlot;
 
 #[cfg(test)]
 mod tests;

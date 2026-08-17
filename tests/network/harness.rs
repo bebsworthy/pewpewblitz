@@ -207,6 +207,7 @@ impl Harness {
             AuthoritativeMovementPlugin,
             ServerNetworkPlugin,
             brawler::matchplay::AuthoritativeMatchPlugin,
+            brawler::terrain::AuthoritativeTerrainPlugin,
         ));
         if hot_zone {
             server.add_plugins(brawler::matchplay::HotZoneModePlugin);
@@ -641,5 +642,114 @@ impl Harness {
             .iter(world)
             .filter(|(player, _)| player.0 != 0)
             .count()
+    }
+}
+
+impl Harness {
+    /// Inject one authoritative `DestroyTerrain` world-effect fact on the server.
+    pub(super) fn inject_terrain_brush(&mut self, attack: u64, position: (f32, f32), radius: f32) {
+        let world = self.server.world_mut();
+        world
+            .resource_mut::<brawler::combat::CombatWorldEffectFacts>()
+            .0
+            .push(terrain_brush_fact(attack, position, radius));
+    }
+
+    /// The authoritative root revision, or `None` before terrain installed.
+    pub(super) fn server_terrain_revision(&mut self) -> Option<u64> {
+        let world = self.server.world_mut();
+        world
+            .query::<&brawler::terrain::TerrainRoot>()
+            .iter(world)
+            .next()
+            .map(|root| root.revision)
+    }
+
+    /// Digest of the authoritative current occupancy across allocated chunks.
+    pub(super) fn server_terrain_digest(&mut self) -> u64 {
+        let world = self.server.world_mut();
+        let index = world.resource::<brawler::terrain::TerrainChunkIndex>();
+        let mut chunks = std::collections::BTreeMap::new();
+        for (chunk, entity) in &index.0 {
+            if let Some(state) = world.get::<brawler::terrain::TerrainChunkState>(*entity) {
+                chunks.insert(*chunk, state.current);
+            }
+        }
+        brawler::terrain::grid::occupancy_digest(&chunks)
+    }
+
+    /// Digest of one client's converged occupancy plus its readiness/revision.
+    pub(super) fn client_terrain(
+        &mut self,
+        index: usize,
+    ) -> (brawler::terrain::ClientTerrainReadiness, u64, u64) {
+        let world = self.clients[index].world();
+        let convergence = world.resource::<brawler::terrain::ClientTerrainConvergence>();
+        let readiness = world
+            .resource::<brawler::terrain::ClientTerrainReadiness>()
+            .clone();
+        (
+            readiness,
+            convergence.revision(),
+            brawler::terrain::grid::occupancy_digest(convergence.chunks()),
+        )
+    }
+
+    /// Send a forged recovery request that bypasses the client state machine.
+    pub(super) fn send_forged_terrain_request(
+        &mut self,
+        index: usize,
+        generation: brawler::terrain::TerrainGeneration,
+    ) {
+        let client_entity = self.client_entities[index];
+        let world = self.clients[index].world_mut();
+        let mut sender = world
+            .get_mut::<MessageSender<brawler::terrain::TerrainRecoveryRequest>>(client_entity)
+            .expect("client link should have a terrain recovery sender");
+        sender.send::<brawler::protocol::TerrainChannel>(
+            brawler::terrain::TerrainRecoveryRequest { generation },
+        );
+    }
+
+    /// Current authoritative terrain telemetry aggregates for forgery assertions.
+    pub(super) fn server_terrain_aggregates(
+        &mut self,
+    ) -> brawler::terrain::telemetry::TerrainTelemetryAggregates {
+        self.server
+            .world()
+            .resource::<brawler::terrain::telemetry::TerrainTelemetry>()
+            .aggregates
+            .clone()
+    }
+}
+
+/// One deterministic Arc-landing-like world fact for terrain injection.
+pub(super) fn terrain_brush_fact(
+    attack: u64,
+    position: (f32, f32),
+    radius: f32,
+) -> brawler::combat::CombatWorldEffectFact {
+    brawler::combat::CombatWorldEffectFact {
+        tick: 0,
+        source: AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(attack),
+            player_id: PlayerId(1),
+            owner_network_entity_id: NetworkEntityId(1),
+            team_id: TeamId(0),
+            recipe_fingerprint: WeaponRecipeFingerprint::default(),
+            presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+            legacy_compatibility: false,
+            source_preset_id: None,
+            origin: WorldPoint { x: 0.0, y: 0.0 },
+            facing: 0.0,
+        },
+        delivery_index: 0,
+        effect_index: 0,
+        position: WorldPoint {
+            x: position.0,
+            y: position.1,
+        },
+        effect: brawler::combat::WorldEffectDefinition::DestroyTerrain { radius },
     }
 }

@@ -127,6 +127,10 @@ pub(super) fn normalize_recipe(recipe: &mut WeaponRecipe) {
             n(angle_degrees);
         }
     }
+    for effect in &mut recipe.world_effects {
+        let WorldEffectDefinition::DestroyTerrain { radius } = effect;
+        n(radius);
+    }
     if let FiringPattern::Spread {
         total_angle_degrees,
         ..

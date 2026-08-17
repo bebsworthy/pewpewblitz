@@ -1101,12 +1101,12 @@ fn spawn_protection_blocks_hostile_payload_allows_movement_breaks_and_expires() 
         .server
         .world_mut()
         .entity_mut(source_entity)
-        .insert(Position::from_xy(-80.0, 0.0));
+        .insert(Position::from_xy(-140.0, 0.0));
     harness
         .server
         .world_mut()
         .entity_mut(target_entity)
-        .insert(Position::from_xy(80.0, 0.0));
+        .insert(Position::from_xy(140.0, 0.0));
     harness.set_controlled_input(
         0,
         FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),

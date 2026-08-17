@@ -7,6 +7,12 @@ server-validated weapon presets; the first product iteration adds a bounded cust
 build and two ultimates. Players move, aim, fire, take damage, die, respawn, and earn points for
 eliminations. The first team to the target score wins.
 
+This two-team MVP profile is not an engine-wide team or participant cap. Team count and participants
+per team are resolved from compatible game-mode and map definitions. The current M07 implementation
+stops at 2v2, while the MVP product target includes 3v3 and the broader architecture must remain
+compatible with large-group profiles; subsystem capacity may not silently use the temporary 2v2
+guard as its maximum.
+
 This is a Wipeout-style networked prototype because it exercises the important loop with minimal mode-specific machinery. The first test may run locally, but it uses a server-authoritative simulation.
 
 ## Content scope
@@ -125,7 +131,11 @@ player-authored build direction rather than only the underlying arena-shooter lo
 
 ### Gameplay MVP verification — Milestones 01–10
 
-Hot Zone then verifies that the same fighter, weapon, ability, and lifecycle code works under spatial-control rules. The destructible-terrain milestone verifies arbitrary holes, generated collision, authoritative terrain revisions, and late/reconnecting client recovery. Completion of Milestone 10 is the point at which every acceptance criterion below must have evidence; Milestone 11 hardens and closes v1.
+Hot Zone then verifies that the same fighter, weapon, ability, and lifecycle code works under
+spatial-control rules. The destructible-terrain milestone verifies quantized holes and passages,
+generated collision, authoritative terrain revisions, late/reconnecting client recovery, and bounded
+operation across the complete supported map-size range. Completion of Milestone 10 is the point at
+which every acceptance criterion below must have evidence; Milestone 11 hardens and closes v1.
 
 Projectile behaviors beyond straight and ballistic movement—such as bouncing, homing, curved steering, boomerang return, piercing, splitting, and delayed trajectories—are second-phase content.
 
@@ -151,7 +161,10 @@ The MVP is successful when:
 - the same actions are playable with keyboard/mouse without separate gameplay implementations;
 - two local clients can play one server-authoritative match;
 - clients cannot authoritatively alter positions, damage, status meters, scores, or terrain;
-- terrain destruction can create holes and tunnels without replacing visible map tiles;
+- terrain destruction can create readable quantized holes and passages without making visible map
+  tiles authoritative;
+- terrain allocation, destruction, collision rebuilds, and recovery remain bounded for every
+  supported playable-map size rather than only the built-in demonstration map;
 - terrain collision updates do not modify unrelated props, objectives, or fighter bodies.
 
 ## Deliberately postponed

@@ -3,7 +3,7 @@
 
 use super::*;
 use bevy::prelude::Vec2;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 pub fn resolve_map_recipe(
     recipe: &MapRecipe,
@@ -180,15 +180,6 @@ fn validate_recipe(
             return Err("region profile is not allowed by the layout".to_string());
         }
     }
-    if recipe
-        .regions
-        .iter()
-        .filter(|region| region.profile_id == RegionProfileId(1))
-        .count()
-        > limits.max_destructible_reservations
-    {
-        return Err("too many destructible terrain reservations".to_string());
-    }
     for entity in &recipe.entities {
         if !entity.position.is_finite()
             || !recipe.playable_bounds.contains(entity.position)
@@ -201,7 +192,14 @@ fn validate_recipe(
     }
     validate_layout(recipe, requirements, limits)?;
     validate_spawns(recipe)?;
-    validate_spawn_reachability(recipe)?;
+    resolve_initial_terrain(
+        recipe.playable_bounds,
+        &recipe.geometry,
+        &recipe.regions,
+        &recipe.spawn_points,
+        &recipe.mode_anchors,
+        limits,
+    )?;
     expand_visuals(&recipe.visuals, catalog.policy.max_visual_instances)?;
     Ok(())
 }
@@ -482,65 +480,6 @@ fn validate_spawns(recipe: &MapRecipe) -> Result<(), String> {
     clippy::cast_precision_loss,
     clippy::cast_sign_loss
 )]
-fn validate_spawn_reachability(recipe: &MapRecipe) -> Result<(), String> {
-    const CELL: f32 = 32.0;
-    const RADIUS: f32 = 24.0;
-    let size = recipe.playable_bounds.size();
-    let width = (size.x / CELL).floor() as usize;
-    let height = (size.y / CELL).floor() as usize;
-    if width == 0 || height == 0 || width.saturating_mul(height) > 32_768 {
-        return Err("invalid spawn clearance grid".to_string());
-    }
-    let to_cell = |point: Vec2| -> Option<(usize, usize)> {
-        let relative = point - recipe.playable_bounds.min;
-        let x = (relative.x / CELL).floor() as isize;
-        let y = (relative.y / CELL).floor() as isize;
-        (x >= 0 && y >= 0 && (x as usize) < width && (y as usize) < height)
-            .then_some((x as usize, y as usize))
-    };
-    let center = to_cell(recipe.playable_bounds.center())
-        .ok_or_else(|| "central combat probe is outside map".to_string())?;
-    let is_clear = |x: usize, y: usize| {
-        let point = recipe.playable_bounds.min
-            + Vec2::new((x as f32 + 0.5) * CELL, (y as f32 + 0.5) * CELL);
-        recipe.playable_bounds.contains_with_inset(point, RADIUS)
-            && !overlaps_geometry(point, RADIUS, &recipe.geometry)
-    };
-    if !is_clear(center.0, center.1) {
-        return Err("central combat probe is blocked".to_string());
-    }
-    let mut reachable = vec![false; width * height];
-    let mut queue = VecDeque::from([center]);
-    reachable[center.1 * width + center.0] = true;
-    while let Some((x, y)) = queue.pop_front() {
-        for (dx, dy) in [(1_isize, 0_isize), (-1, 0), (0, 1), (0, -1)] {
-            let nx = x as isize + dx;
-            let ny = y as isize + dy;
-            if nx < 0 || ny < 0 || nx as usize >= width || ny as usize >= height {
-                continue;
-            }
-            let next = (nx as usize, ny as usize);
-            let index = next.1 * width + next.0;
-            if !reachable[index] && is_clear(next.0, next.1) {
-                reachable[index] = true;
-                queue.push_back(next);
-            }
-        }
-    }
-    for point in &recipe.spawn_points {
-        let cell = to_cell(point.position).ok_or_else(|| "spawn is outside grid".to_string())?;
-        if !reachable[cell.1 * width + cell.0] {
-            return Err("spawn cannot reach the central combat probe".to_string());
-        }
-    }
-    Ok(())
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)]
 fn expand_visuals(
     visuals: &[VisualPlacement],
     maximum: usize,
@@ -605,7 +544,7 @@ fn expand_visuals(
     Ok(resolved)
 }
 
-fn overlaps_geometry(point: Vec2, radius: f32, geometry: &[GeometryPlacement]) -> bool {
+pub(super) fn overlaps_geometry(point: Vec2, radius: f32, geometry: &[GeometryPlacement]) -> bool {
     geometry.iter().any(|placement| match placement.shape {
         MapShape::Circle { radius: obstacle } => {
             point.distance_squared(placement.position) < (radius + obstacle).powi(2)

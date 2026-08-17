@@ -75,7 +75,7 @@ giving every floor or wall sprite a bespoke rule.
 
 - ordinary ground is a walkable surface without a modifier;
 - permanent walls and cover are blocking geometry;
-- destructible terrain uses mask-backed solidity and generated collision;
+- destructible terrain uses a chunked quantized occupancy grid and generated collision;
 - speedways, slow ground, hazards, objectives, and concealment are shaped gameplay regions;
 - smoke, temporary walls, and similar ability-created areas are server-owned runtime entities;
 - decorative grass, puddles, decals, and props have no gameplay effect unless map data explicitly
@@ -109,54 +109,93 @@ for the transport contract.
 
 ## Destructible terrain
 
-Destruction should not be implemented as replacing individual visible tiles. Brawler will use a flexible, mask-backed terrain system suitable for arbitrary craters, tunnels, and cutouts.
+Destruction should not be implemented as replacing individual visible tiles. Brawler will use a
+chunked, quantized occupancy grid that supports readable holes and passages at a deliberately chosen
+gameplay resolution. Grid cells are hidden simulation data; client visuals may present or soften the
+quantized edge without becoming collision truth.
 
 ```text
 Terrain appearance
         +
-Destruction mask
+Quantized occupancy grid
         +
-Generated collision polygons
+Generated collision
 ```
 
 ### Terrain representation
 
-- Store authoritative terrain solidity in a CPU-side image mask, bitset, or similarly compact resource/component representation owned by the server `World`.
-- Treat filled mask pixels as solid and erased pixels as empty.
-- Apply circular, capsule, rectangular, or authored brush shapes for explosions and digging.
-- Update dirty regions of the client-visible Bevy image/texture independently from authoritative collision generation.
-- Generate collision outlines from the modified mask using marching squares and polygon simplification.
+- Store authoritative terrain solidity as `[u64; 16]` occupied/empty bitsets owned by the server
+  `World`, using 8-world-unit cells and sparse 32×32-cell chunks.
+- Derive global chunk coordinates from world space with Euclidean floor division; the grid resolution
+  does not vary with map or destructible-region dimensions.
+- Convert circular, capsule, rectangular, or authored brushes to integer cell operations so the
+  authoritative result is deterministic.
+- Update dirty client presentation regions independently from authoritative collision generation.
+- Generate bounded collision with one Avian/Parry voxel shape per occupied chunk, reconciling
+  orthogonal-neighbor topology across chunk seams. Do not create one replicated entity per cell.
 
-The v1 Milestone 10 technical design must choose and validate the Bevy/Rust implementation for mask storage, dirty texture uploads, contour generation, simplification, and collider replacement. This may combine small maintained crates with project-owned code; do not adopt a large terrain framework merely to avoid a focused algorithm.
+The [v1 Milestone 10 technical specification](./implementation/v1/milestone-10.md) selects and
+budgets the cell size, chunk dimensions, bitset layout, half-cell brush quantization, client image
+updates, voxel collision generation, and collider replacement. Smooth mask carving and
+marching-squares contours remain deferred unless playtest evidence rejects the quantized result.
 
-The initial mask, allowed material/brush profiles, placement bounds, and stable terrain-chunk IDs
+The initial occupancy state, allowed material/brush profiles, placement bounds, and stable
+terrain-chunk IDs
 are authorable map-recipe data. Runtime destruction, collision regeneration, and terrain revision
 remain server-owned match state; a map author cannot directly publish a runtime revision or crater
 event.
 
-For a historical reference, [Spell-Splosion](https://github.com/MitchMakesThings/Spell-Splosion) demonstrates several Worms-style terrain-destruction techniques in an older Godot project. Its mask-to-visual-to-collision workflow is conceptually useful, but its engine APIs and scene structure are not Brawler implementation dependencies.
+For a historical reference, [Spell-Splosion](https://github.com/MitchMakesThings/Spell-Splosion)
+demonstrates several Worms-style terrain-destruction techniques in an older Godot project. It remains
+useful alternative evidence for smooth carving, but its mask workflow, engine APIs, and scene
+structure are not Brawler implementation requirements.
 
 ### Chunking
 
-The mask should be divided into implementation chunks, such as 128×128 or 256×256 mask pixels. Chunks are an internal optimization, not gameplay tiles. An explosion should rebuild only the chunks touched by its brush instead of regenerating the entire map collision.
+The occupancy grid is divided into fixed-cell-count implementation chunks. Chunk coordinates are
+derived from world space, so maps and destructible regions may vary in size without changing terrain
+resolution. Allocate only chunks intersecting authored destructible regions; do not allocate a
+whole-map grid when most of the map is permanent terrain. An explosion rebuilds only chunks touched
+by its quantized brush.
+
+The implementation must support the complete engine-owned playable-size range (currently
+1024–4096 units wide and 720–3072 units high), rather than deriving capacity from the current
+192×192-unit Crossroads reservation. Every otherwise-valid map size may host destructible regions.
+The current limits allow up to four reservations and authored shapes up to 2048 units across. The
+Milestone 10 specification supports those per-region limits while adding aggregate ceilings of 221
+intersected chunks and 196,608 occupied cells.
+
+Engine-owned budgets must bound total allocated destructible cells/chunks, dirty chunks rebuilt per
+fixed tick, generated collision complexity per chunk, recovery snapshot bytes, and destruction work
+accepted per tick. Validation must reject recipes that exceed any new aggregate terrain budget.
+Terrain concurrency derives from the resolved game-mode/map participant capacity, not from the
+current Wipeout implementation's temporary 2v2 limit. The v1 terrain format is verified for up to 24
+simultaneously active fighters and does not encode how they are divided among teams.
 
 Stable chunk identity links separate runtime representations:
 
-- **Authoritative server chunk:** solidity data, generated collision, terrain revision, and collision dirty/rebuild state.
-- **Client presentation chunk:** visual mask/material region and visual dirty/upload state derived from replicated terrain state or recovery data.
+- **Authoritative server chunk:** occupancy bits, generated collision, terrain revision, and collision
+  dirty/rebuild state.
+- **Client presentation chunk:** visual/material region and visual dirty/upload state derived from
+  replicated terrain state or recovery data.
 
 The dedicated server does not own or upload terrain textures. A client visual update cannot change authoritative solidity or collision.
 
 ### MVP destruction scope
 
-The first destruction prototype includes:
+The first destruction milestone includes:
 
-- one destructible terrain chunk;
+- one clearly marked destructible region in the built-in map plus fixtures covering multiple chunks,
+  separated regions, and the supported map-size extremes;
 - circular explosion brushes;
-- visual holes and crater edges;
+- quantized visual holes, passages, and readable crater edges;
 - projectile and fighter collision against the generated terrain;
 - collision regeneration between physics frames;
 - basic unstuck behavior when a fighter is embedded by a terrain change.
+
+The small built-in reservation is a playtest scenario, not a capacity target. Milestone completion
+requires bounded automated and process evidence across the full supported map-size range and at the
+legal destructible-region limits.
 
 Defer terrain deformation animation, falling debris, material layers, fluid behavior, structural collapse, persistent terrain saving, and internet-scale terrain bandwidth optimization. Terrain authority and basic event synchronization remain part of the network architecture.
 
@@ -183,6 +222,21 @@ The first test map should be symmetrical and intentionally plain:
 - no water, bushes, teleporters, or moving hazards.
 
 This makes weapon and build differences easier to observe while providing a contained test area for flexible terrain destruction.
+
+## Match topology and capacity ownership
+
+Team count and participants per team are properties of the selected game-mode and map composition,
+not global constants and not terrain rules. A game-mode definition supplies the legal topology and
+per-team participant ranges. A map supplies compatible team slots, spawn areas/points, playable
+space, and any mode-required anchors. Resolution accepts only their compatible intersection and
+produces the maximum active-fighter count used by admission and subsystem capacity checks.
+
+The current Wipeout/Hot Zone server code supports two teams with at most two participants per team;
+that is an implementation-stage profile, not the engine direction. Common IDs, map indexing,
+networking, terrain, and future mode-neutral systems must not bake in 2v2 or exactly two teams. The
+planned range includes ordinary 3v3 and larger arrangements such as `1v1 × 12`, `2v5 × 2`, and
+`3v3 × 3`. Each concrete game mode still owns whether those topologies make sense for its scoring,
+respawn, objective, HUD, and matchmaking rules.
 
 ## Mode inventory
 

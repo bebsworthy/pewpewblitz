@@ -98,3 +98,5 @@ mod movement;
 mod movement_input;
 #[path = "network/selection.rs"]
 mod selection;
+#[path = "network/terrain.rs"]
+mod terrain;

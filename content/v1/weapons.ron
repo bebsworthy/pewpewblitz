@@ -1,5 +1,5 @@
 (
-    schema_version: 2,
+    schema_version: 3,
     recipe_policy: (
         max_deliveries_per_attack: 16,
         max_payload_bundles: 4,
@@ -22,6 +22,8 @@
         max_knockback_speed: 900.0,
         max_angle_degrees: 180.0,
         max_targets_per_delivery: 16,
+        max_world_effects_per_delivery: 1,
+        max_terrain_brush_radius: 64.0,
     ),
     presets: [
         (
@@ -38,6 +40,7 @@
                     payload_bundles: [
                         (target: Direct, effects: [Damage(amount: 25, falloff: None, recipients: Hostiles)]),
                     ],
+                    world_effects: [],
                 ),
             ),
         ),
@@ -55,6 +58,7 @@
                     payload_bundles: [
                         (target: Direct, effects: [Damage(amount: 12, falloff: Linear(start_distance: 140.0, end_distance: 360.0, minimum_scale: 0.5), recipients: Hostiles)]),
                     ],
+                    world_effects: [],
                 ),
             ),
         ),
@@ -76,6 +80,7 @@
                             Slow(movement_multiplier: 0.70, duration_ticks: 45, stacking: StrongestRefreshes, recipients: Hostiles),
                         ]),
                     ],
+                    world_effects: [DestroyTerrain(radius: 48.0)],
                 ),
             ),
         ),
@@ -96,6 +101,7 @@
                             Knockback(speed: 650.0, duration_ticks: 6, recipients: Hostiles),
                         ]),
                     ],
+                    world_effects: [],
                 ),
             ),
         ),

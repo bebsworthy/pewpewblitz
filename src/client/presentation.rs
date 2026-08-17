@@ -440,7 +440,7 @@ mod tests {
         let nearest_visible_z = transform.translation.z - projection.far;
         let furthest_visible_z = transform.translation.z - projection.near;
 
-        assert_eq!(transform.translation.z, 0.0);
+        assert!(transform.translation.z.abs() <= f32::EPSILON);
         assert!(nearest_visible_z <= MIN_PRESENTATION_Z);
         assert!(furthest_visible_z >= MAX_PRESENTATION_Z);
     }

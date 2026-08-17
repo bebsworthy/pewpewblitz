@@ -70,7 +70,9 @@ Defold is lightweight and strong for 2D deployment, but its workflow and ecosyst
 - Express the first built-in arena through the same bounded map-recipe schema and server resolver
   intended for later user-authored maps. Keep server-owned mode implementations separate from
   user-editable layout data.
-- Keep destructible terrain as a mask-to-visual-to-collision subsystem rather than encoding it as visible tile replacement.
+- Keep destructible terrain as a quantized-solidity-to-visual-to-collision subsystem rather than
+  encoding it as visible tile replacement. The authoritative occupancy grid is an internal gameplay
+  representation and does not make presentation tiles authoritative.
 - Queue terrain collision rebuilds between physics frames and rebuild only dirty terrain chunks.
 - Treat the game as a dedicated-server-authoritative networked game from the first gameplay architecture.
 - Clients send input commands and receive authoritative state/events; clients do not authoritatively submit positions, damage, hits, status changes, scores, or terrain changes.

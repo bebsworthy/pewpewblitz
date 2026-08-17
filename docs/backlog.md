@@ -42,6 +42,7 @@ is either absent from all of those lists or present only as an unstated assumpti
 | GAP-NET-ROOMS | Coarse interest management (Rooms) | Match-instance/room-level filtering is discussed in doc 08 but only per-client entity visibility is in the future backlog. Matters once multiple matches share one server. | `08-network-architecture.md` interest management |
 | GAP-MAPS-BUILTIN | Additional built-in maps | Doc 04 describes four map-grammar archetypes (lane arena, cover maze, central-objective, chokepoint); v1 has one arena plus a Hot Zone variant, with no backlog item for more built-in maps. | `04-maps-and-game-modes.md` map grammar |
 | GAP-COMBAT-DEBRIS | Deferred destruction cosmetics | Terrain deformation animation and falling debris were deferred by doc 04 but omitted from M10's deferral list. | `04-maps-and-game-modes.md` MVP destruction scope |
+| GAP-TERRAIN-BEAM | Terrain-carving laser | Add a beam/laser world effect that erases destructible terrain along a server-resolved, quantized segment/capsule rather than one circular impact brush. Permanent geometry should stop the beam and remain indestructible. Scope deterministic rasterization, endpoint/radius wire data, maximum beam length/cells/chunks, simultaneous-beam budgets, collider batching, recovery compatibility, and matching client carve feedback. | Product idea, 2026-08-16; build on M10 terrain world effects |
 | GAP-FX-PRESENTATION | Richer combat presentation | Muzzle flash, explosion animation, debris/particles, screen shake, material-specific impact effects are specified in doc 03 but not in M06's feedback scope. | `03-weapons-and-abilities.md` presentation effects |
 
 ## P3 — Environment catalog items never dispositioned
@@ -79,6 +80,7 @@ concealment, spell-created concealment, speedway/slow surfaces, and one readable
 | GAP-TOOL-SPECTATE | Spectator/observer client | M11 replay/event logs are debug tools; an observer client would help 2v2 playtest verification and is cheap. | Review finding |
 | GAP-PLATFORM-BATTERY | Battery/thermal considerations | Power draw and background-work capping for laptop play sessions. | Review finding |
 | GAP-LEGAL-FONTS | Font licensing | Asset manifest covers game assets; fonts have no license check. | Review finding |
+| GAP-TOOL-COMBATPROFILES | `network-combat-profiles` gate broken | The repeated combat convergence profiles time out with no defeat/reset evidence and zero payload effects landing on the neutral dummy; reproduced identically at the pre-M10 baseline (rebuilt binaries), so it predates M10 terrain. M10's terrain profiles (`just network-terrain`) cover real-process terrain convergence; the defeat-evidence path needs its own fix. | M10 verification, 2026-08-16 |
 
 ## Triage status
 

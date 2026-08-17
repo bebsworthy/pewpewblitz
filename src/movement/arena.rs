@@ -35,6 +35,17 @@ pub fn terrain_collision_layers() -> CollisionLayers {
     )
 }
 
+/// Collision layers for authoritative destructible-terrain colliders. Queries that
+/// already combine both terrain membership masks see permanent and destructible geometry
+/// identically.
+#[must_use]
+pub fn destructible_terrain_collision_layers() -> CollisionLayers {
+    CollisionLayers::new(
+        DESTRUCTIBLE_TERRAIN_LAYER,
+        FIGHTER_LAYER | PROJECTILE_LAYER | DEPLOYABLE_LAYER,
+    )
+}
+
 #[must_use]
 pub fn pose_is_valid(
     position: Vec2,

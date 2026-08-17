@@ -10,7 +10,10 @@ The work is divided into three early gates:
 2. **First product iteration — Milestones 01–08.** The vertical slice also includes bounded builds,
    one constrained non-preset weapon configuration, two ultimates, and named presets. This is the
    first gate that tests Brawler's player-authored buildcraft differentiation.
-3. **Gameplay MVP verification — Milestones 01–10.** Hot Zone and flexible destructible terrain prove that combat code works across mode rules and mutable map geometry. This gate satisfies the full acceptance scope in [Gameplay MVP](../../05-gameplay-mvp.md).
+3. **Gameplay MVP verification — Milestones 01–10.** Hot Zone and quantized destructible terrain
+   prove that combat code works across mode rules, mutable map geometry, and the complete supported
+   playable-map size range. This gate satisfies the full acceptance scope in
+   [Gameplay MVP](../../05-gameplay-mvp.md).
 
 Milestone 11 hardens and closes the v1 MVP. Additional mode families and systemic status interactions are future-version candidates, not hidden v1 commitments.
 
@@ -34,8 +37,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 
 - **Version:** v1 — gameplay MVP
 - **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in feedback review after an authorized technical-review remediation pass. Milestone 09 is complete: implemented from baseline `90ef47a`, automated gate green, both-mode real-process runs recorded, and the 2026-08-16 automated playtest triaged with two presentation fixes applied and explicit open dispositions for the human-perceptual remainder. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
-- **Current milestone:** Milestone 08 — Feedback review; Milestone 09 — Complete (next: Milestone 10 once specified)
-- **Last completed milestone:** Milestone 07 — Wipeout match loop
+- **Current milestone:** Milestone 10 — User playtest (Milestone 08 remains in Feedback review)
+- **Last completed milestone:** Milestone 09 — Hot Zone
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
 
@@ -185,7 +188,7 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 07 | Complete | Wipeout match loop | [milestone-07.md](./milestone-07.md) |
 | 08 | Feedback review | Bounded brawler builds and abilities | [milestone-08.md](./milestone-08.md) |
 | 09 | Complete | Hot Zone | [milestone-09.md](./milestone-09.md) |
-| 10 | Not started | Flexible destructible terrain | Create when next |
+| 10 | Implementing | Quantized destructible terrain | [milestone-10.md](./milestone-10.md) |
 | 11 | Not started | MVP playtest hardening and closeout | Create when next |
 
 Create each milestone file just before its research phase so its specification reflects current evidence and prior milestone lessons. Use the zero-padded form `milestone-NN.md`.
@@ -571,45 +574,75 @@ Hot Zone intentionally precedes Heist and Gem Grab because it is the earliest di
 - simultaneous occupancy and timer expiry behave predictably;
 - the same build can enter either mode by selecting the appropriate rule plugin/configuration without substituting combat code.
 
-## Milestone 10 — Flexible destructible terrain
+## Milestone 10 — Quantized destructible terrain
 
 ### Deliverable
 
-Server-authoritative arbitrary terrain destruction supports visual reconstruction, generated collision, and client state recovery.
+Server-authoritative quantized terrain destruction supports visual reconstruction, generated
+collision, client state recovery, and bounded operation across every supported playable-map size.
 
 ### Scope
 
-- Bevy-specific technical decision for mask storage, texture updates, marching squares or equivalent contour generation, simplification, and collider replacement;
-- one destructible terrain region divided into dirty chunks;
-- initial terrain mask/shape, placement, and stable chunk identities sourced from the resolved map
+- fixed 8-world-unit cells on a global grid, 4-unit brush-center/radius quantization, sparse
+  32×32-cell (256×256-unit) chunks, and `[u64; 16]` initial/current occupancy per chunk;
+- sparse chunk allocation derived from destructible regions rather than whole-map allocation;
+- support for the complete engine-owned playable-size range, currently 1024–4096 units wide and
+  720–3072 units high, without treating the 192×192-unit built-in reservation as a capacity target;
+- support for arbitrary legal map offsets up to 221 intersected chunks and 196,608 occupied cells,
+  with recipe validation rejecting aggregate terrain outside those explicit ceilings;
+- one visible built-in destructible terrain region plus multi-chunk, multi-region, minimum-map, and
+  maximum-map verification fixtures;
+- initial terrain occupancy/shape, placement, and stable chunk identities sourced from the resolved map
   recipe while runtime destruction/revisions remain server-owned;
-- circular destruction brush emitted as a world-level payload;
-- authoritative terrain mask and monotonically increasing revision;
-- visual crater and edge update independent of collision generation;
-- collision rebuild scheduled in an explicit safe system set between physics steps;
+- one delivery-level Arc Launcher `DestroyTerrain { radius: 48 }` world effect, kept separate from
+  per-target damage/knockback/status payloads;
+- deterministic circular brush rasterization from integer half-cell coordinates;
+- authoritative occupancy bitsets and monotonically increasing revision;
+- one nearest-filtered 32×32 RGBA client image per allocated chunk, with quantized crater/edge updates
+  independent of collision generation;
+- Avian/Parry voxel collision per chunk, with fresh prospective shapes, conditional orthogonal-
+  neighbor reconciliation only for changed boundary topology, and atomic collider replacement after
+  damage and before mode rules;
 - projectile and fighter collision against changed terrain;
-- deterministic unstuck behavior for embedded fighters;
-- Lightyear terrain events with stable chunk ID, brush data, and revision;
-- revision-gap detection and recovery for late or reconnecting clients using an initial mask, chunk snapshot, or authoritative event history;
-- crater/debris presentation that does not affect gameplay truth;
-- dirty-chunk rebuild and event-size measurements.
+- defensive deterministic unstuck behavior for invalid injected/recovered states, with any use in a
+  valid scenario treated as a test failure because v1 destruction only removes solidity;
+- a dedicated bidirectional ordered-reliable Lightyear terrain channel carrying generation-tagged,
+  revisioned integer brush events of at most 96 serialized bytes;
+- revision-gap detection and recovery with a full current allocated-chunk bitset snapshot bounded to
+  48 KiB, a 64-event client buffer, and rate-limited requests;
+- client playability gated on matching immutable-map and terrain generations;
+- terrain restoration inside the existing restart transaction before the new match commits;
+- crater/debris presentation that does not affect gameplay truth, reusing the existing deduplicated
+  Arc landed-impact audio rather than adding another authoritative cue or asset;
+- a resolved map/mode capacity contract rather than a terrain assumption about team count or team
+  size, with terrain verified through 24 simultaneously active fighters;
+- engine-owned budgets including 24 admitted brushes and at most 221 distinct allocated collider
+  rebuilds per fixed tick, four affected occupancy chunks per brush, and 64 cosmetic debris entities;
+- dirty-chunk rebuild, collider-complexity, memory, recovery-size, and event-size measurements.
 
 ### Automated and network verification
 
 - brush application and revision ordering have repeatable focused or `App`/`World` schedule tests;
-- only affected chunks rebuild;
-- server collision changes match the authoritative mask;
-- two connected clients and one late/reconnecting client reach the same terrain revision and crater state;
+- only occupancy-changed chunks and the conditionally required boundary-neighbor union rebuild;
+- server collision changes match the authoritative occupancy grid;
+- two connected clients plus an impaired or newly accepted recovery fixture reach the same terrain
+  revision and crater state without changing the current active-match admission policy;
 - duplicate, missing, and out-of-order terrain events trigger safe deduplication or recovery;
-- terrain changes do not mutate unrelated objectives, props, or fighter state.
+- terrain changes do not mutate unrelated objectives, props, or fighter state;
+- minimum- and maximum-size maps, a near-maximum destructible region, multiple separated regions,
+  brushes crossing chunk boundaries, varied team topologies, and 24 simultaneous fighter brushes
+  remain within the declared memory, rebuild, collider, fixed-tick, and recovery budgets;
+- recipe validation rejects aggregate destructible terrain that exceeds declared budgets.
 
 ### Exit criteria
 
-- explosions create holes and tunnels without visible-tile replacement;
+- explosions create readable quantized holes and passages without making visible tiles authoritative;
 - server collision remains the gameplay authority;
 - clients can recover the current terrain state rather than requiring every historical event to have arrived live;
 - collision rebuilds are bounded to dirty chunks and do not visibly stall the test scenario;
-- unstuck behavior is predictable and cannot be client-authored.
+- unstuck behavior is predictable and cannot be client-authored;
+- every supported playable-map size can host and recover destructible regions without whole-map
+  allocation or demo-specific fixed capacity.
 
 Defer structural collapse, fluids, material simulation, persistent terrain saves, internet-scale bandwidth optimization, and production snapshot compression.
 

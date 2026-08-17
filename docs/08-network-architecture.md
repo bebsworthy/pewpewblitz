@@ -45,7 +45,7 @@ Client presentation and local feedback
 - perform projectile, hit, damage, and collision resolution;
 - own status meters and threshold effects;
 - own pickups, objectives, scores, respawns, and victory;
-- own destructible terrain masks and collision regeneration;
+- own destructible terrain occupancy grids and collision regeneration;
 - derive observer-specific concealment and reveal outcomes before replication when those mechanics
   are implemented;
 - replicate authoritative components and send discrete gameplay messages where required.
@@ -187,21 +187,35 @@ Do not introduce a custom aggregate `Snapshot` wrapper when Lightyear component 
 
 ## Terrain synchronization
 
-Terrain destruction is server-authoritative. The server should process the destruction brush, update the terrain revision, and broadcast a compact destruction command or affected-region update. Clients reconstruct the same visual crater locally. Do not send a full terrain texture after every explosion.
+Terrain destruction is server-authoritative. The server quantizes the destruction brush into terrain
+cells, updates the terrain revision, and broadcasts a compact deterministic destruction command or
+affected-chunk update. Clients reconstruct the same visual crater locally. Do not send a full terrain
+texture or whole-map grid after every explosion.
 
-For the first terrain network test, a terrain event can contain:
+Milestone 10 defines the live terrain event as:
 
 ```text
 TerrainDestructionEvent
-  terrain_chunk_id
-  brush_type
-  position
-  size
-  rotation
+  map_instance_id and match_id
+  terrain_fingerprint
   terrain_revision
+  attack_id and delivery_index
+  half-cell brush center and radius
+  affected terrain-chunk IDs
+  erased-cell count
 ```
 
-The server remains responsible for collision and gameplay truth. Clients use the event for presentation and prediction only. Each client tracks the latest applied terrain revision. A gap must trigger authoritative recovery from an initial mask, affected-chunk snapshot, or retained event history; reconnecting and late-joining clients cannot be required to have observed every live destruction event.
+Brush coordinates are bounded integers in half-cell units and have exactly one canonical cell
+rasterization. Peers never independently round unconstrained floating-point geometry. Live events
+use a dedicated ordered-reliable terrain channel; revision recovery sends bounded current chunk
+bitsets rather than replaying complete history.
+
+The server remains responsible for collision and gameplay truth. Clients use the event for
+presentation and prediction only. Each client tracks the latest applied terrain revision. A gap must
+trigger authoritative recovery from initial occupancy, affected-chunk bitsets, or retained event
+history; reconnecting and late-joining clients cannot be required to have observed every live
+destruction event. Recovery is sparse and region/chunk scoped so its memory and bandwidth do not
+scale with empty space on larger maps.
 
 ## Interest management and concealment
 

@@ -4,11 +4,18 @@
 use super::*;
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn verify_process_match(
     mut check: ResMut<ProcessMatchCheck>,
     roots: Query<&MatchState, With<MatchRoot>>,
     telemetry: Res<crate::matchplay::MatchTelemetry>,
     build_telemetry: Res<crate::builds::BuildTelemetry>,
+    terrain_roots: Query<&crate::terrain::TerrainRoot>,
+    terrain_chunks: Query<(
+        &crate::terrain::TerrainChunk,
+        &crate::terrain::TerrainChunkState,
+    )>,
+    terrain_telemetry: Option<Res<crate::terrain::telemetry::TerrainTelemetry>>,
     participants: Query<&MatchParticipant, With<Fighter>>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
@@ -173,8 +180,41 @@ pub(super) fn verify_process_match(
             hot_zone.final_progress_ticks[1],
         ),
     };
+    // Terrain process evidence: exact generation, occupancy scale, and bounded traffic.
+    let terrain = terrain_roots.single().ok().map(|root| {
+        let mut chunks = BTreeMap::new();
+        for (chunk, state) in &terrain_chunks {
+            chunks.insert(chunk.id, state.current);
+        }
+        let occupied: u32 = chunks
+            .values()
+            .map(crate::terrain::TerrainBits::count)
+            .sum();
+        let aggregates = terrain_telemetry
+            .as_deref()
+            .map(|telemetry| telemetry.aggregates.clone())
+            .unwrap_or_default();
+        (
+            root.terrain_fingerprint,
+            chunks.len(),
+            occupied,
+            root.revision,
+            crate::terrain::grid::occupancy_digest(&chunks),
+            aggregates.applied_brushes,
+            aggregates.cells_erased,
+            aggregates.collision_rebuilt_chunks.len(),
+            aggregates.recovery_requests,
+            aggregates.recovery_responses,
+            aggregates.recovery_rejections,
+            aggregates.recovery_snapshot_bytes,
+            aggregates.event_min_bytes,
+            aggregates.event_max_bytes,
+            aggregates.defensive_repairs,
+            aggregates.dropped_records,
+        )
+    });
     let report = format!(
-        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nmode_definition_id={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_preset_ids={}\ncustom_builds={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nbuild_selections={}\nbuild_dropped_records={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_terrain_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\n",
+        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nmode_definition_id={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_preset_ids={}\ncustom_builds={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nbuild_selections={}\nbuild_dropped_records={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_terrain_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\nterrain_format_version={}\nterrain_fingerprint={}\nterrain_chunk_count={}\nterrain_cell_count={}\nterrain_revision={}\nterrain_occupancy_digest={}\nterrain_brushes_applied={}\nterrain_cells_erased={}\nterrain_collider_rebuilds={}\nterrain_recovery_requests={}\nterrain_recovery_responses={}\nterrain_recovery_rejections={}\nterrain_recovery_snapshot_bytes={}\nterrain_event_min_bytes={:?}\nterrain_event_max_bytes={:?}\nterrain_defensive_repairs={}\nterrain_dropped_records={}\n",
         initial.0,
         state.match_id.0,
         participant_count,
@@ -240,6 +280,23 @@ pub(super) fn verify_process_match(
         ability_telemetry.passive_active_ticks,
         ability_telemetry.passive_modified_amounts,
         ability_telemetry.passive_unused_triggers,
+        crate::terrain::TERRAIN_FORMAT_VERSION,
+        terrain.map_or(0, |row| row.0),
+        terrain.map_or(0, |row| row.1),
+        terrain.map_or(0, |row| row.2),
+        terrain.map_or(0, |row| row.3),
+        terrain.map_or(0, |row| row.4),
+        terrain.map_or(0, |row| row.5),
+        terrain.map_or(0, |row| row.6),
+        terrain.map_or(0, |row| row.7),
+        terrain.map_or(0, |row| row.8),
+        terrain.map_or(0, |row| row.9),
+        terrain.map_or(0, |row| row.10),
+        terrain.map_or(0, |row| row.11),
+        terrain.and_then(|row| row.12),
+        terrain.and_then(|row| row.13),
+        terrain.map_or(0, |row| row.14),
+        terrain.map_or(0, |row| row.15),
     );
     if let Some(path) = &check.report_file
         && let Err(error) = fs::write(path, report.as_bytes())
@@ -825,4 +882,112 @@ pub(super) fn parse_client_cue_stream(contents: &str) -> Vec<CombatCue> {
         .lines()
         .filter_map(|line| decode_combat_cue(line.strip_prefix("cue_stream=")?))
         .collect()
+}
+
+/// Terrain-profile smoke: authoritative destruction must reach a target revision and strictly
+/// reduce occupancy within a bounded window. The ready file doubles as the launcher's wait
+/// target, and the optional report records the terrain traffic evidence for the profile run.
+pub(super) fn verify_process_terrain(
+    mut check: ResMut<ProcessTerrainCheck>,
+    tick: Res<crate::timing::SimulationTick>,
+    terrain_roots: Query<&crate::terrain::TerrainRoot>,
+    terrain_chunks: Query<(
+        &crate::terrain::TerrainChunk,
+        &crate::terrain::TerrainChunkState,
+    )>,
+    terrain_telemetry: Option<Res<crate::terrain::telemetry::TerrainTelemetry>>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    if !check.enabled || check.completed {
+        return;
+    }
+    let Ok(root) = terrain_roots.single() else {
+        return;
+    };
+    let mut chunks = BTreeMap::new();
+    for (chunk, state) in &terrain_chunks {
+        chunks.insert(chunk.id, state.current);
+    }
+    let occupied: u32 = chunks
+        .values()
+        .map(crate::terrain::TerrainBits::count)
+        .sum();
+    let initial = *check.initial_cells.get_or_insert(occupied);
+    if check.initial_observed_tick.is_none() {
+        check.initial_observed_tick = Some(tick.0);
+    }
+    // Track the peak rather than the live revision: after the profile clients disconnect the
+    // match restarts and resets terrain to revision zero, which must not erase evidence that
+    // the destruction target was already reached mid-run.
+    check.peak_revision = check.peak_revision.max(root.revision);
+    check.peak_destroyed = check.peak_destroyed || occupied < initial;
+    if check.peak_revision < check.target_revision || !check.peak_destroyed {
+        if check
+            .initial_observed_tick
+            .is_some_and(|start| tick.0 >= start.saturating_add(check.window_ticks))
+        {
+            let aggregates = terrain_telemetry
+                .as_deref()
+                .map(|telemetry| telemetry.aggregates.clone())
+                .unwrap_or_default();
+            error!(
+                tick = tick.0,
+                revision = check.peak_revision,
+                target_revision = check.target_revision,
+                occupied,
+                initial,
+                requested_brushes = aggregates.requested_brushes,
+                applied_brushes = aggregates.applied_brushes,
+                no_op_brushes = aggregates.no_op_brushes,
+                "network terrain assertion failed"
+            );
+            app_exit.write(AppExit::error());
+            check.completed = true;
+        }
+        return;
+    }
+    let aggregates = terrain_telemetry
+        .as_deref()
+        .map(|telemetry| telemetry.aggregates.clone())
+        .unwrap_or_default();
+    let report = format!(
+        "terrain_revision={}\nterrain_initial_cells={}\nterrain_cell_count={}\nterrain_occupancy_digest={}\nterrain_brushes_applied={}\nterrain_cells_erased={}\nterrain_collider_rebuilds={}\nterrain_recovery_requests={}\nterrain_recovery_responses={}\nterrain_recovery_rejections={}\nterrain_recovery_snapshot_bytes={}\nterrain_event_min_bytes={:?}\nterrain_event_max_bytes={:?}\nterrain_defensive_repairs={}\nterrain_dropped_records={}\n",
+        check.peak_revision,
+        initial,
+        occupied,
+        crate::terrain::grid::occupancy_digest(&chunks),
+        aggregates.applied_brushes,
+        aggregates.cells_erased,
+        aggregates.collision_rebuilt_chunks.len(),
+        aggregates.recovery_requests,
+        aggregates.recovery_responses,
+        aggregates.recovery_rejections,
+        aggregates.recovery_snapshot_bytes,
+        aggregates.event_min_bytes,
+        aggregates.event_max_bytes,
+        aggregates.defensive_repairs,
+        aggregates.dropped_records,
+    );
+    if let Some(path) = check.report_file.as_ref()
+        && let Err(error) = fs::write(path, report)
+    {
+        error!(?path, ?error, "network terrain report write failed");
+        app_exit.write(AppExit::error());
+        check.completed = true;
+        return;
+    }
+    info!(
+        tick = tick.0,
+        revision = check.peak_revision,
+        occupied,
+        initial,
+        "network terrain assertion passed"
+    );
+    if let Some(path) = check.ready_file.as_ref()
+        && let Err(error) = fs::write(path, b"passed\n")
+    {
+        error!(?path, ?error, "network terrain readiness signal failed");
+        app_exit.write(AppExit::error());
+    }
+    check.completed = true;
 }

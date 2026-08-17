@@ -48,7 +48,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 10;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 11;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -58,6 +58,10 @@ pub struct SessionChannel;
 
 /// Ordered reliable server-to-client stream for presentation-only combat facts.
 pub struct CombatChannel;
+
+/// Ordered reliable bidirectional channel for terrain events and bounded recovery. Kept
+/// distinct so a fragmented recovery snapshot never blocks joins or combat presentation.
+pub struct TerrainChannel;
 
 #[cfg(feature = "network-test")]
 pub type TestNativeInputMessage = InputMessage<NativeStateSequence<FighterInput>>;
@@ -344,6 +348,24 @@ fn interpolate_network_pose(
     )
 }
 
+/// Register the terrain wire: one ordered reliable bidirectional channel kept distinct
+/// from session and combat traffic so fragmented recovery never blocks either.
+fn register_terrain_protocol(app: &mut App) {
+    app.register_message::<crate::terrain::TerrainDestructionEvent>()
+        .add_direction(NetworkDirection::ServerToClient);
+    app.register_message::<crate::terrain::TerrainResetEvent>()
+        .add_direction(NetworkDirection::ServerToClient);
+    app.register_message::<crate::terrain::TerrainRecoveryRequest>()
+        .add_direction(NetworkDirection::ClientToServer);
+    app.register_message::<crate::terrain::TerrainRecoverySnapshot>()
+        .add_direction(NetworkDirection::ServerToClient);
+    app.add_channel::<TerrainChannel>(ChannelSettings {
+        mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+        ..default()
+    })
+    .add_direction(NetworkDirection::Bidirectional);
+}
+
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::combat::WeaponCatalogResource>()
@@ -385,6 +407,8 @@ impl Plugin for ProtocolPlugin {
             ..default()
         })
         .add_direction(NetworkDirection::ServerToClient);
+
+        register_terrain_protocol(app);
 
         app.component::<Fighter>().replicate_once();
         app.component::<MatchRootMarker>().replicate_once();
@@ -509,11 +533,18 @@ mod tests {
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());
         assert!(app.is_message_registered::<CombatCue>());
+        assert!(app.is_message_registered::<crate::terrain::TerrainDestructionEvent>());
+        assert!(app.is_message_registered::<crate::terrain::TerrainResetEvent>());
+        assert!(app.is_message_registered::<crate::terrain::TerrainRecoveryRequest>());
+        assert!(app.is_message_registered::<crate::terrain::TerrainRecoverySnapshot>());
         assert!(app.world().contains_resource::<MessageRegistry>());
         assert!(app.world().contains_resource::<ChannelRegistry>());
         let channels = app.world().resource::<ChannelRegistry>();
         assert!((0..32).any(|id| {
             channels.get_name_from_net_id(id) == core::any::type_name::<SessionChannel>()
+        }));
+        assert!((0..32).any(|id| {
+            channels.get_name_from_net_id(id) == core::any::type_name::<TerrainChannel>()
         }));
         let components = app.world().resource::<ComponentRegistry>();
         assert!(components.is_registered::<Fighter>());
@@ -590,6 +621,9 @@ mod tests {
         assert!((rotation.as_radians() - 0.5).abs() < 0.001);
     }
 
+    #[cfg(test)]
+    use lightyear::prelude::MessageSender;
+
     #[test]
     fn session_messages_round_trip_with_serde() {
         let message = JoinOutcome::Accepted {
@@ -599,6 +633,147 @@ mod tests {
         let bytes = postcard::to_allocvec(&message).expect("message serializes");
         let decoded: JoinOutcome = postcard::from_bytes(&bytes).expect("message deserializes");
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn terrain_messages_install_senders_only_in_their_exact_directions() {
+        let mut client = App::new();
+        client.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
+        #[cfg(feature = "client")]
+        client.add_plugins(lightyear::prelude::client::ClientPlugins {
+            tick_duration: SIMULATION_TICK,
+        });
+        #[cfg(all(not(feature = "client"), feature = "server"))]
+        client.add_plugins(lightyear::prelude::server::ServerPlugins {
+            tick_duration: SIMULATION_TICK,
+        });
+        client.add_plugins(ProtocolPlugin);
+        #[cfg(feature = "client")]
+        {
+            let client_link = client
+                .world_mut()
+                .spawn(lightyear::prelude::client::Client)
+                .id();
+            client.world_mut().flush();
+            let world = client.world();
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainRecoveryRequest>>(client_link)
+                    .is_some()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainDestructionEvent>>(client_link)
+                    .is_none()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainRecoverySnapshot>>(client_link)
+                    .is_none()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainResetEvent>>(client_link)
+                    .is_none()
+            );
+        }
+
+        let mut server = App::new();
+        server.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
+        #[cfg(feature = "client")]
+        server.add_plugins(lightyear::prelude::client::ClientPlugins {
+            tick_duration: SIMULATION_TICK,
+        });
+        #[cfg(all(not(feature = "client"), feature = "server"))]
+        server.add_plugins(lightyear::prelude::server::ServerPlugins {
+            tick_duration: SIMULATION_TICK,
+        });
+        server.add_plugins(ProtocolPlugin);
+        #[cfg(feature = "server")]
+        {
+            let server_link = server
+                .world_mut()
+                .spawn(lightyear::prelude::server::ClientOf)
+                .id();
+            server.world_mut().flush();
+            let world = server.world();
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainDestructionEvent>>(server_link)
+                    .is_some()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainRecoverySnapshot>>(server_link)
+                    .is_some()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainResetEvent>>(server_link)
+                    .is_some()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<crate::terrain::TerrainRecoveryRequest>>(server_link)
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn terrain_wire_shapes_round_trip_with_serde() {
+        use crate::terrain::{
+            TerrainBits, TerrainBrush, TerrainChunkId, TerrainChunkSnapshot,
+            TerrainDestructionEvent, TerrainGeneration, TerrainRecoverySnapshot, TerrainResetEvent,
+        };
+        let generation = TerrainGeneration {
+            map_instance_id: MapInstanceId(3),
+            match_id: crate::matchplay::MatchId(7),
+            terrain_fingerprint: 0x1234_5678_9abc_def0,
+        };
+        let event = TerrainDestructionEvent {
+            generation,
+            revision: 42,
+            source_attack_id: crate::combat::AttackId(11),
+            source_delivery_index: 0,
+            brush: TerrainBrush {
+                center_half_cells_x: -3,
+                center_half_cells_y: 5,
+                radius_half_cells: 12,
+            },
+            affected_chunks: vec![
+                TerrainChunkId { x: -1, y: 0 },
+                TerrainChunkId { x: 0, y: 0 },
+            ],
+            erased_cells: 77,
+        };
+        let bytes = postcard::to_allocvec(&event).expect("event serializes");
+        let decoded: TerrainDestructionEvent =
+            postcard::from_bytes(&bytes).expect("event deserializes");
+        assert_eq!(decoded, event);
+
+        let snapshot = TerrainRecoverySnapshot {
+            generation,
+            revision: 42,
+            chunks: vec![TerrainChunkSnapshot {
+                chunk_id: TerrainChunkId { x: 0, y: 0 },
+                occupancy: TerrainBits([u64::MAX; 16]),
+            }],
+        };
+        let bytes = postcard::to_allocvec(&snapshot).expect("snapshot serializes");
+        let decoded: TerrainRecoverySnapshot =
+            postcard::from_bytes(&bytes).expect("snapshot deserializes");
+        assert_eq!(decoded, snapshot);
+        let reset = TerrainResetEvent {
+            previous_generation: generation,
+            next_generation: TerrainGeneration {
+                match_id: crate::matchplay::MatchId(8),
+                ..generation
+            },
+        };
+        let bytes = postcard::to_allocvec(&reset).expect("reset serializes");
+        let decoded: TerrainResetEvent = postcard::from_bytes(&bytes).expect("reset deserializes");
+        assert_eq!(decoded, reset);
     }
 
     #[test]

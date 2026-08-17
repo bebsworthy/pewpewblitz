@@ -203,6 +203,7 @@ pub(super) fn sweep_composed_projectiles(
                 kind: PendingDeliveryKind::LobLanded {
                     position: WorldPoint::from(landing),
                 },
+                world_effects: runtime.recipe.world_effects.clone(),
             });
             continue;
         }
@@ -317,6 +318,7 @@ pub(super) fn sweep_composed_projectiles(
                 normal: WorldPoint::from(hit.normal1),
                 distance_band: distance_band(runtime.travelled),
             },
+            world_effects: runtime.recipe.world_effects.clone(),
         });
     }
 }
@@ -417,6 +419,7 @@ pub(super) fn resolve_melee_attacks(
                     target: *network_id,
                     position: WorldPoint::from(position.0),
                 },
+                world_effects: attack.recipe.world_effects.clone(),
             });
             for (bundle_index, bundle) in valid_bundles {
                 pending.write(PendingPayload {

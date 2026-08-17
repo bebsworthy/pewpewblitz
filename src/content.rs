@@ -28,7 +28,13 @@ pub fn gameplay_content_fingerprint(
 
 #[must_use]
 pub fn fnv1a64(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+    fnv1a64_seeded(0xcbf2_9ce4_8422_2325, bytes)
+}
+
+/// Continue one FNV-1a hash with more material instead of starting a new digest.
+#[must_use]
+pub fn fnv1a64_seeded(seed: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(seed, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
     })
 }

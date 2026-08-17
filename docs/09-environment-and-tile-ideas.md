@@ -25,8 +25,8 @@ an authoritative gameplay object.
   and vision.
 - **Runtime environment entity:** a server-owned temporary or stateful area such as smoke, fire,
   a healing field, a temporary wall, or a teleporter.
-- **Destructible terrain chunk:** mask-backed solidity and generated collision. Chunks are an
-  implementation optimization, not a visible-tile replacement system.
+- **Destructible terrain chunk:** quantized occupancy-grid solidity and generated collision. Chunks
+  are a sparse implementation unit, not a visible-tile replacement system.
 
 This separation lets art change without changing simulation and prevents a large `TileKind` enum
 from becoming the owner of unrelated movement, collision, status, and networking rules.
@@ -42,7 +42,7 @@ capabilities that have been exposed.
 |---|---|---|---|
 | Neutral surface | Floor, road, platform, packed earth | Walkable; no modifier | v1 foundation |
 | Permanent geometry | Boundary wall, pillar, permanent cover | Blocks movement; independently chooses projectile and vision blocking | v1 foundation |
-| Destructible geometry | Breakable cover, mask-backed wall or terrain | Solidity, health or destruction mask, collision revision, recovery state | One mask-backed region planned for v1 Milestone 10 |
+| Destructible geometry | Breakable cover, quantized wall or terrain | Occupancy bits, optional health, collision revision, recovery state | Chunked occupancy-grid terrain planned for v1 Milestone 10 |
 | Concealment | Tall grass, bushes, smoke, darkness, invisibility field | Observer-specific visibility, proximity/action reveal, network culling | Future-version candidate |
 | Mobility surface | Speedway, conveyor, wind current | Speed or acceleration multiplier, optional forced direction | Future-version candidate |
 | Hindering surface | Mud, snow, webs, shallow water | Slow, acceleration/turning modifier, optional status contribution | Future-version candidate |
@@ -243,7 +243,9 @@ The current v1 implementation remains intentionally smaller:
 - Milestone 06 resolves the first readable built-in map recipe, proves recipe/preset/resolved/runtime
   separation, and reserves a destructible region without implementing the player editor.
 - Milestone 09 adds an objective region through Hot Zone.
-- Milestone 10 proves one mask-backed destructible terrain region and recovery.
+- Milestone 10 proves chunked quantized destructible terrain and recovery across the complete
+  supported map-size range; its built-in map retains one visible playtest region, while scale and
+  multi-region coverage come from bounded fixtures and process scenarios.
 
 Concealment, speedways, slow/slippery surfaces, environment hazards, traversal devices, and
 interactive geometry remain future-version candidates until intentionally promoted into a version

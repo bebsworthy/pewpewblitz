@@ -62,8 +62,8 @@ pub use definitions::{
     PayloadEffectDefinition, RecipientPolicy, ResolvedWeapon, SlowStacking, TargetSelection,
     WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponEconomy,
     WeaponPresentationProfileId, WeaponPresetDefinition, WeaponPresetId, WeaponRecipe,
-    WeaponRecipeFingerprint, WeaponRecipePolicy, linear_falloff, resolve_configuration,
-    spread_angles,
+    WeaponRecipeFingerprint, WeaponRecipePolicy, WorldEffectDefinition, WorldEffectKind,
+    linear_falloff, resolve_configuration, spread_angles,
 };
 pub use evidence::{
     CombatCheckpoint, CombatEvidenceCheckpoint, CombatFighterSnapshot, CombatProjectileSnapshot,

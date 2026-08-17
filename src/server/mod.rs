@@ -66,7 +66,9 @@ mod verification;
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
 use verification::*;
-use verification::{verify_process_combat, verify_process_match, verify_process_movement};
+use verification::{
+    verify_process_combat, verify_process_match, verify_process_movement, verify_process_terrain,
+};
 
 /// Server-side session phase. Lightyear lifecycle components remain the connection truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -131,6 +133,43 @@ struct ProcessMatchCheck {
     report_file: Option<PathBuf>,
     initial_match_id: Option<crate::matchplay::MatchId>,
     completed: bool,
+}
+
+#[derive(Resource, Debug)]
+struct ProcessTerrainCheck {
+    enabled: bool,
+    ready_file: Option<PathBuf>,
+    report_file: Option<PathBuf>,
+    target_revision: u64,
+    window_ticks: u64,
+    initial_observed_tick: Option<u64>,
+    initial_cells: Option<u32>,
+    peak_revision: u64,
+    peak_destroyed: bool,
+    completed: bool,
+}
+
+impl FromWorld for ProcessTerrainCheck {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            enabled: env::var("BRAWLER_NETWORK_ASSERT_TERRAIN").as_deref() == Ok("1"),
+            ready_file: env::var_os("BRAWLER_NETWORK_TERRAIN_READY_FILE").map(PathBuf::from),
+            report_file: env::var_os("BRAWLER_NETWORK_TERRAIN_REPORT_FILE").map(PathBuf::from),
+            target_revision: env::var("BRAWLER_NETWORK_TERRAIN_TARGET_REVISION")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1),
+            window_ticks: env::var("BRAWLER_NETWORK_TERRAIN_WINDOW_TICKS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1800),
+            initial_observed_tick: None,
+            initial_cells: None,
+            peak_revision: 0,
+            peak_destroyed: false,
+            completed: false,
+        }
+    }
 }
 
 impl FromWorld for ProcessMatchCheck {
@@ -251,6 +290,7 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ProcessMovementCheck>()
             .init_resource::<ProcessCombatCheck>()
             .init_resource::<ProcessMatchCheck>()
+            .init_resource::<ProcessTerrainCheck>()
             .init_resource::<crate::builds::BuildTelemetry>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
@@ -274,6 +314,7 @@ impl Plugin for ServerNetworkPlugin {
                     verify_process_movement,
                     verify_process_combat,
                     verify_process_match,
+                    verify_process_terrain,
                 )
                     .chain(),
             )
@@ -1077,6 +1118,7 @@ pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
             ServerNetworkPlugin,
             DedicatedServerPlugin,
             AuthoritativeMatchPlugin,
+            crate::terrain::AuthoritativeTerrainPlugin,
         ));
     install_server_game_mode(&mut app);
     app

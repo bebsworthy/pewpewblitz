@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::model::*;
 
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 1;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 2;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const SANDBOX_LAYOUT_SCHEMA_VERSION: u16 = 1;
@@ -52,6 +52,9 @@ pub struct EngineMapLimits {
     pub max_spawn_points: usize,
     pub max_mode_anchors: usize,
     pub max_destructible_reservations: usize,
+    pub max_destructible_cells: usize,
+    pub max_destructible_chunks: usize,
+    pub max_terrain_recovery_bytes: usize,
     pub max_recipe_bytes: usize,
     pub max_snapshot_bytes: usize,
 }
@@ -74,6 +77,9 @@ impl Default for EngineMapLimits {
             max_spawn_points: 32,
             max_mode_anchors: 32,
             max_destructible_reservations: 4,
+            max_destructible_cells: crate::terrain::MAX_TERRAIN_CELLS,
+            max_destructible_chunks: crate::terrain::MAX_TERRAIN_CHUNKS,
+            max_terrain_recovery_bytes: crate::terrain::MAX_TERRAIN_RECOVERY_BYTES,
             max_recipe_bytes: 96 * 1_024,
             max_snapshot_bytes: 64 * 1_024,
         }
@@ -162,7 +168,7 @@ impl MapLayoutRequirements {
             spawn_areas_per_team: 1..=1,
             spawn_points_per_team: 3..=8,
             required_anchors: Vec::new(),
-            allowed_region_profiles: vec![RegionProfileId(1)],
+            allowed_region_profiles: vec![DESTRUCTIBLE_TERRAIN_REGION_PROFILE],
             allowed_entity_profiles: vec![EntityDefinitionId(1)],
         }
     }
@@ -181,7 +187,7 @@ impl MapLayoutRequirements {
                 maximum: 1,
                 shape: RequiredAnchorShape::Area,
             }],
-            allowed_region_profiles: vec![RegionProfileId(1)],
+            allowed_region_profiles: vec![DESTRUCTIBLE_TERRAIN_REGION_PROFILE],
             allowed_entity_profiles: vec![EntityDefinitionId(1)],
         }
     }
@@ -200,7 +206,7 @@ impl MapLayoutRequirements {
                 maximum: 1,
                 shape: RequiredAnchorShape::Point,
             }],
-            allowed_region_profiles: vec![RegionProfileId(1)],
+            allowed_region_profiles: vec![DESTRUCTIBLE_TERRAIN_REGION_PROFILE],
             allowed_entity_profiles: vec![EntityDefinitionId(1)],
         }
     }
@@ -451,8 +457,12 @@ fn valid_display_name(value: &str) -> bool {
 }
 
 mod resolver;
-pub(crate) use resolver::normalize_recipe;
+mod terrain;
+use resolver::normalize_recipe;
 pub use resolver::resolve_map_recipe;
+pub use terrain::{
+    DESTRUCTIBLE_TERRAIN_REGION_PROFILE, InitialTerrainLayout, resolve_initial_terrain,
+};
 
 #[cfg(test)]
 mod tests;

@@ -399,21 +399,8 @@ fn spawn_snapshot_visuals(
             Transform::from_translation(position.extend(2.0)),
         ));
     }
-    for region in &snapshot.regions {
-        let size = match region.shape {
-            MapShape::Rectangle { half_extents } => half_extents * 2.0,
-            MapShape::Circle { radius } => Vec2::splat(radius * 2.0),
-        };
-        commands.spawn((
-            marker,
-            Sprite::from_color(Color::srgba(0.95, 0.62, 0.12, 0.24), size),
-            Transform {
-                translation: region.position.extend(-5.0),
-                rotation: Quat::from_rotation_z(region.rotation),
-                ..default()
-            },
-        ));
-    }
+    // The authored destructible regions no longer render a planning overlay: live
+    // occupancy sprites from the terrain presentation own that space above the floor.
     for area in &snapshot.spawn_areas {
         let color = team_color(area.team_slot).with_alpha(0.10);
         commands.spawn((
@@ -514,7 +501,9 @@ mod tests {
             .query::<&MapPresentationMember>()
             .iter(app.world())
             .count();
-        assert_eq!(initial, 525);
+        // One fewer sprite than the M09 count: the destructible-reservation planning
+        // overlay is gone and live terrain occupancy presents its own chunk sprites.
+        assert_eq!(initial, 524);
         assert_eq!(
             *app.world().resource::<ClientMapReadiness>(),
             ClientMapReadiness::Ready

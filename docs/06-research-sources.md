@@ -33,7 +33,9 @@ Architecture research follows this priority: Brawler's gameplay and authority re
 
 ## Historical alternatives and terrain references
 
-The Godot material below informed the earlier engine comparison and the engine-neutral mask-to-visual-to-collision terrain concept. These APIs are not implementation dependencies for the selected Bevy stack.
+The Godot material below informed the earlier engine comparison and the smooth
+mask-to-visual-to-collision terrain alternative. These APIs are not implementation dependencies for
+the selected Bevy stack or requirements for v1's quantized occupancy-grid design.
 
 - [Godot license](https://godotengine.org/license/) — MIT licensing and treatment of engine versus game content.
 - [Godot GitHub repository](https://github.com/godotengine/godot) — cross-platform 2D/3D engine overview and supported export targets.
@@ -45,7 +47,15 @@ The Godot material below informed the earlier engine comparison and the engine-n
 - [Godot high-level multiplayer](https://docs.godotengine.org/en/4.0/tutorials/networking/high_level_multiplayer.html) — reference used during the engine comparison.
 - [Godot dedicated server exports](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_dedicated_servers.html) — reference used during the engine comparison.
 
-The v1 Milestone 10 terrain-design pass should add the exact Rust crates, algorithms, and Bevy/Avian integration references selected after a maintenance and performance review. Until then, marching squares, polygon simplification, dirty texture uploads, and collider replacement are requirements rather than dependency decisions.
+The [v1 Milestone 10 specification](./implementation/v1/milestone-10.md) records the exact local and
+primary-source research used to select 8-unit cells, sparse 32×32-cell chunks, deterministic
+half-cell brush quantization, Avian/Parry voxel collision, and per-chunk Bevy image updates across the
+complete supported map-size range. Its primary exact-version references include
+[Avian 0.7 collider documentation](https://docs.rs/avian2d/0.7.0/avian2d/collision/collider/struct.Collider.html),
+[Parry 0.27 voxel source](https://docs.rs/parry2d/0.27.0/src/parry2d/shape/voxels/voxels.rs.html),
+[Bevy 0.19 Image documentation](https://docs.rs/bevy/0.19.1/bevy/image/struct.Image.html), and
+[Lightyear 0.29 source](https://github.com/cBournhonesque/lightyear/tree/0.29.0). Marching squares and
+polygon simplification remain fallbacks only if measured voxel collision or gameplay evidence fails.
 
 ## Reference game and mode structure
 

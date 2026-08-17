@@ -134,6 +134,7 @@ fn spawn_readiness_hud(mut commands: Commands) {
 fn update_readiness_hud(
     joins: Query<&ClientJoinStatus>,
     map: Res<crate::map::ClientMapReadiness>,
+    terrain: Res<crate::terrain::ClientTerrainReadiness>,
     assets: Res<assets::ClientAssetReadiness>,
     playable: Res<ClientPlayableGate>,
     controlled: Query<(&PlayerId, &TeamId), (With<Fighter>, With<Controlled>)>,
@@ -192,7 +193,7 @@ fn update_readiness_hud(
     >,
 ) {
     let join = joins.iter().next().map(|status| &status.phase);
-    let status = readiness_status(join, &map, &assets, playable.0);
+    let status = readiness_status(join, &map, &terrain, &assets, playable.0);
     for mut text in &mut readiness_text {
         text.0 = if status == "READY" {
             String::new()
@@ -568,6 +569,7 @@ fn roster_entry_text(player: u64, entry: &CachedRosterEntry, now: u64, is_local:
 fn readiness_status(
     join: Option<&ClientJoinPhase>,
     map: &crate::map::ClientMapReadiness,
+    terrain: &crate::terrain::ClientTerrainReadiness,
     assets: &assets::ClientAssetReadiness,
     playable: bool,
 ) -> String {
@@ -588,15 +590,40 @@ fn readiness_status(
             _ => "READY".to_string(),
         };
     }
-    match (join, map, assets) {
-        (_, _, assets::ClientAssetReadiness::Loading) => "LOADING CLIENT CONTENT".to_string(),
-        (None | Some(ClientJoinPhase::Connecting), _, _) => "CONNECTING".to_string(),
-        (Some(ClientJoinPhase::AwaitingOutcome), _, _) => "HANDSHAKING".to_string(),
+    match (join, map, terrain, assets) {
+        (_, _, _, assets::ClientAssetReadiness::Loading) => "LOADING CLIENT CONTENT".to_string(),
+        (None | Some(ClientJoinPhase::Connecting), _, _, _) => "CONNECTING".to_string(),
+        (Some(ClientJoinPhase::AwaitingOutcome), _, _, _) => "HANDSHAKING".to_string(),
         (
             Some(ClientJoinPhase::Active { .. }),
             crate::map::ClientMapReadiness::WaitingForSnapshot,
             _,
+            _,
         ) => "WAITING FOR AUTHORITATIVE MAP".to_string(),
+        (
+            Some(ClientJoinPhase::Active { .. }),
+            _,
+            crate::terrain::ClientTerrainReadiness::WaitingForMap,
+            _,
+        ) => "SYNCING TERRAIN | WAITING FOR MAP".to_string(),
+        (
+            Some(ClientJoinPhase::Active { .. }),
+            _,
+            crate::terrain::ClientTerrainReadiness::SyncingTerrain,
+            _,
+        ) => "SYNCING TERRAIN".to_string(),
+        (
+            Some(ClientJoinPhase::Active { .. }),
+            _,
+            crate::terrain::ClientTerrainReadiness::RecoveringTerrain,
+            _,
+        ) => "RECOVERING TERRAIN".to_string(),
+        (
+            Some(ClientJoinPhase::Active { .. }),
+            _,
+            crate::terrain::ClientTerrainReadiness::Invalid(reason),
+            _,
+        ) => format!("TERRAIN REJECTED | {reason}"),
         _ => "PREPARING SANDBOX".to_string(),
     }
 }
@@ -611,6 +638,7 @@ mod tests {
             readiness_status(
                 None,
                 &crate::map::ClientMapReadiness::Invalid("bad schema".to_string()),
+                &crate::terrain::ClientTerrainReadiness::Ready,
                 &assets::ClientAssetReadiness::Loading,
                 false,
             ),
@@ -619,11 +647,53 @@ mod tests {
     }
 
     #[test]
+    fn terrain_sync_states_are_distinct_and_exact() {
+        let active_phase = ClientJoinPhase::Active {
+            player_id: PlayerId(1),
+            network_entity_id: NetworkEntityId(1),
+        };
+        let active = Some(&active_phase);
+        let cases = [
+            (
+                crate::terrain::ClientTerrainReadiness::WaitingForMap,
+                "SYNCING TERRAIN | WAITING FOR MAP",
+            ),
+            (
+                crate::terrain::ClientTerrainReadiness::SyncingTerrain,
+                "SYNCING TERRAIN",
+            ),
+            (
+                crate::terrain::ClientTerrainReadiness::RecoveringTerrain,
+                "RECOVERING TERRAIN",
+            ),
+            (
+                crate::terrain::ClientTerrainReadiness::Invalid(
+                    "recovery snapshot chunk set mismatch".to_string(),
+                ),
+                "TERRAIN REJECTED | recovery snapshot chunk set mismatch",
+            ),
+        ];
+        for (terrain, expected) in cases {
+            assert_eq!(
+                readiness_status(
+                    active,
+                    &crate::map::ClientMapReadiness::Ready,
+                    &terrain,
+                    &assets::ClientAssetReadiness::Ready,
+                    false,
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn degraded_assets_are_visible_but_do_not_block_play() {
         assert_eq!(
             readiness_status(
                 None,
                 &crate::map::ClientMapReadiness::Ready,
+                &crate::terrain::ClientTerrainReadiness::Ready,
                 &assets::ClientAssetReadiness::Degraded(vec!["audio.fire"]),
                 true,
             ),

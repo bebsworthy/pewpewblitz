@@ -15,12 +15,13 @@ pub use client::{
     PresentedMap, ZoneObjectiveBoundary, ZoneObjectiveFill, perimeter_visual_shapes,
 };
 pub use definitions::{
-    EngineMapLimits, HOT_ZONE_LAYOUT_SCHEMA_VERSION, HOT_ZONE_MAP_PRESET, HOT_ZONE_MODE_DEFINITION,
-    HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION, HOT_ZONE_OBJECTIVE_PRESENTATION_PROFILE,
-    MapCatalogResource, MapContentCatalog, MapContentPlugin, MapLayoutRequirements, MapPreset,
-    MapRecipePolicy, PRACTICE_DUMMY_ANCHOR_DEFINITION, RequiredAnchorShape,
-    SANDBOX_LAYOUT_SCHEMA_VERSION, WIPEOUT_LAYOUT_SCHEMA_VERSION, WIPEOUT_MODE_DEFINITION,
-    objective_presentation_profile, resolve_map_recipe,
+    DESTRUCTIBLE_TERRAIN_REGION_PROFILE, EngineMapLimits, HOT_ZONE_LAYOUT_SCHEMA_VERSION,
+    HOT_ZONE_MAP_PRESET, HOT_ZONE_MODE_DEFINITION, HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION,
+    HOT_ZONE_OBJECTIVE_PRESENTATION_PROFILE, InitialTerrainLayout, MapCatalogResource,
+    MapContentCatalog, MapContentPlugin, MapLayoutRequirements, MapPreset, MapRecipePolicy,
+    PRACTICE_DUMMY_ANCHOR_DEFINITION, RequiredAnchorShape, SANDBOX_LAYOUT_SCHEMA_VERSION,
+    WIPEOUT_LAYOUT_SCHEMA_VERSION, WIPEOUT_MODE_DEFINITION, objective_presentation_profile,
+    resolve_initial_terrain, resolve_map_recipe,
 };
 pub use model::*;
 #[cfg(feature = "server")]

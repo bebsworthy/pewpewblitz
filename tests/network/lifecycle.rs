@@ -396,6 +396,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
             ServerNetworkPlugin,
             brawler::matchplay::AuthoritativeMatchPlugin,
             brawler::matchplay::WipeoutModePlugin,
+            brawler::terrain::AuthoritativeTerrainPlugin,
         ));
     server.finish();
     server.cleanup();

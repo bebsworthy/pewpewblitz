@@ -25,7 +25,7 @@ fn projectile_filters_allied_fighters_and_consumes_on_terrain() {
                 continue;
             }
             let right_side = player.0 % 2 == 0;
-            position.0 = Vec2::new(if right_side { 100.0 } else { -100.0 }, 0.0);
+            position.0 = Vec2::new(if right_side { 140.0 } else { -140.0 }, 0.0);
             *rotation = Rotation::radians(if right_side {
                 std::f32::consts::PI
             } else {
@@ -253,7 +253,7 @@ fn posthumous_projectile_retains_original_source_attribution() {
                 continue;
             }
             let right_side = player.0 % 2 == 0;
-            position.0 = Vec2::new(if right_side { 100.0 } else { -100.0 }, 0.0);
+            position.0 = Vec2::new(if right_side { 140.0 } else { -140.0 }, 0.0);
             *rotation = Rotation::radians(if right_side {
                 std::f32::consts::PI
             } else {

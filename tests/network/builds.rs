@@ -102,7 +102,7 @@ fn active_sentry_fixture() -> (Harness, Entity, brawler::abilities::SentryIdenti
                     phase: brawler::builds::AbilityPhase::Ready,
                 };
             } else {
-                position.0 = Vec2::new(100.0, 0.0);
+                position.0 = Vec2::new(140.0, 0.0);
                 *rotation = Rotation::radians(std::f32::consts::PI);
             }
         }
@@ -152,8 +152,10 @@ fn sentry_projectile_travels_and_damages_a_hostile_fighter() {
             With<brawler::abilities::Sentry>,
         >();
         let sentry_position = sentries.single(world).unwrap().0.0;
-        let mut fighters =
-            world.query_filtered::<(Entity, &TeamId, &CurrentHealth), With<Fighter>>();
+        let mut fighters = world.query_filtered::<
+            (Entity, &TeamId, &CurrentHealth),
+            (With<Fighter>, Without<TestDummy>),
+        >();
         let (target, _, health) = fighters
             .iter(world)
             .find(|(_, team, _)| **team != identity.team_id)
@@ -164,7 +166,9 @@ fn sentry_projectile_travels_and_damages_a_hostile_fighter() {
         .server
         .world_mut()
         .entity_mut(target)
-        .insert(Position(sentry_position + Vec2::X * 200.0))
+        // North of the sentry keeps a clear line of sight past the central destructible
+        // block that now occupies the old origin-to-east corridor.
+        .insert(Position(sentry_position + Vec2::new(0.0, 200.0)))
         .remove::<brawler::matchplay::SpawnProtection>();
 
     for _ in 0..120 {
@@ -581,7 +585,7 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
                 *rotation = Rotation::radians(0.0);
             }
             if *player == player_ids[1] {
-                position.0 = Vec2::ZERO;
+                position.0 = Vec2::new(-140.0, 0.0);
                 *rotation = Rotation::radians(std::f32::consts::PI);
             }
             *ability = brawler::builds::AbilityState {

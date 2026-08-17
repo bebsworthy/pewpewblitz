@@ -67,6 +67,7 @@ fn non_preset_configuration_uses_the_same_resolver_and_recipe_fingerprint() {
                     recipients: RecipientPolicy::Hostiles,
                 }],
             }],
+            world_effects: Vec::new(),
         },
     };
     let first = resolve_configuration(None, configuration.clone(), &fighter).unwrap();
@@ -140,4 +141,114 @@ fn policy_change_changes_content_fingerprint() {
     let mut second = first.clone();
     second.recipe_policy.max_damage -= 1;
     assert_ne!(first.fingerprint(), second.fingerprint());
+}
+
+// --- Delivery-level world effects (Milestone 10) ---
+
+#[test]
+fn only_the_arc_launcher_carries_a_terrain_world_effect() {
+    let catalog = WeaponCatalog::embedded().unwrap();
+    for preset in &catalog.presets {
+        match preset.id.0 {
+            3 => {
+                assert_eq!(
+                    preset.configuration.recipe.world_effects,
+                    vec![WorldEffectDefinition::DestroyTerrain { radius: 48.0 }],
+                    "Arc Launcher carries exactly one radius-48 terrain brush"
+                );
+            }
+            _ => assert!(
+                preset.configuration.recipe.world_effects.is_empty(),
+                "preset {} must be explicit about having no world effects",
+                preset.id.0
+            ),
+        }
+    }
+}
+
+fn arc_configuration() -> WeaponConfiguration {
+    WeaponCatalog::embedded()
+        .unwrap()
+        .preset(WeaponPresetId(3))
+        .unwrap()
+        .configuration
+        .clone()
+}
+
+#[test]
+fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
+    let fighter = super::super::FighterDefinitions::default().entries[0];
+    let policy = WeaponRecipePolicy::default();
+    let limits = EngineWeaponLimits::default();
+
+    // More than one world effect per delivery.
+    let mut two = arc_configuration();
+    two.recipe
+        .world_effects
+        .push(WorldEffectDefinition::DestroyTerrain { radius: 16.0 });
+    assert!(
+        two.validate(&policy, limits, Some(fighter.body_radius))
+            .unwrap_err()
+            .contains("too many world effects")
+    );
+
+    for radius in [f32::NAN, 4.0, 7.5, 50.0, 68.0] {
+        let mut bad = arc_configuration();
+        bad.recipe.world_effects = vec![WorldEffectDefinition::DestroyTerrain { radius }];
+        assert!(
+            bad.validate(&policy, limits, Some(fighter.body_radius))
+                .unwrap_err()
+                .contains("brush radius"),
+            "radius {radius} must reject"
+        );
+    }
+
+    // Destruction on straight (non-lobbed) delivery.
+    let mut straight = arc_configuration();
+    straight.recipe.delivery = DeliveryMethod::Straight {
+        speed: 900.0,
+        radius: 6.0,
+        range: 900.0,
+        lifetime_ticks: 60,
+        muzzle_offset: 34.0,
+    };
+    straight.recipe.payload_bundles = vec![PayloadBundleDefinition {
+        target: TargetSelection::Direct,
+        effects: vec![PayloadEffectDefinition::Damage {
+            amount: 25,
+            falloff: DamageFalloff::None,
+            recipients: RecipientPolicy::Hostiles,
+        }],
+    }];
+    assert!(
+        straight
+            .validate(&policy, limits, Some(fighter.body_radius))
+            .unwrap_err()
+            .contains("single-fire lobbed")
+    );
+
+    // A policy ceiling wider than the engine ceiling rejects during catalog validation.
+    let mut catalog = WeaponCatalog::embedded().unwrap();
+    catalog.recipe_policy.max_terrain_brush_radius = 128.0;
+    assert!(
+        catalog
+            .validate()
+            .unwrap_err()
+            .contains("policy exceeds engine limits")
+    );
+    let mut catalog = WeaponCatalog::embedded().unwrap();
+    catalog.recipe_policy.max_world_effects_per_delivery = 2;
+    assert!(
+        catalog
+            .validate()
+            .unwrap_err()
+            .contains("policy exceeds engine limits")
+    );
+
+    // The untouched Arc configuration still resolves with its terrain effect.
+    assert!(
+        arc_configuration()
+            .validate(&policy, limits, Some(fighter.body_radius))
+            .is_ok()
+    );
 }

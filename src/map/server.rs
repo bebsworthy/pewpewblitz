@@ -132,6 +132,9 @@ pub fn install_resolved_map(world: &mut World, resolved: ResolvedMap) -> Result<
 }
 
 pub fn teardown_authoritative_map(world: &mut World) {
+    // Narrow terrain cleanup handoff: stale destructible colliders may not survive map
+    // replacement into an unrelated frame.
+    crate::terrain::teardown_authoritative_terrain(world);
     let roots: Vec<_> = {
         let mut query = world.query_filtered::<Entity, With<MapRoot>>();
         query.iter(world).collect()

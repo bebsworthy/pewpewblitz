@@ -39,7 +39,22 @@ src/
   gameplay.rs              shared fixed-tick schedule/set composition
   protocol.rs              wire registration and network protocol boundary
   config.rs                validated client/server/process configuration
+  content.rs               build-embedded catalog loading and content fingerprints
   timing.rs                shared simulation time definitions
+  abilities/
+    mod.rs                 ability composition root, schedule sets, public re-exports
+    charge.rs              ultimate charge ownership and outcome observation
+    dash.rs                authoritative dash activation/movement/interruption
+    sentry.rs              deployable activation, targeting, firing, and cleanup
+    passives.rs            passive trigger/application rules
+    telemetry.rs           bounded ability records and aggregates
+    tests.rs               focused ability composition and behavior tests
+  builds/
+    mod.rs                 build composition root and public API
+    model.rs               authored selections and resolved immutable loadouts
+    definitions.rs         catalogs, validation, resolution, fingerprints
+    telemetry.rs           bounded selection/build records and aggregates
+    tests.rs               focused build rule and composition tests
   combat/
     mod.rs                 combat composition root, public re-exports, shared sets/plugins
     model.rs               stable identities and shared/runtime combat state shapes
@@ -49,11 +64,29 @@ src/
     attack.rs              economy, attack acceptance, firing expansion, attack telemetry
     delivery.rs            straight, lobbed, and melee delivery geometry/execution
     effects.rs             targeting, payloads, damage, effects, defeat, ordered outcomes
+    outcomes.rs            bounded authoritative outcome-fact ownership
     telemetry.rs           bounded records, trackers, aggregates, summaries
     evidence.rs            bounded process/checkpoint evidence and convergence schemas
     server.rs              server combat plugin and schedule registration
     client.rs              combat-specific previews, cues, effects, projectiles, and HUD
     tests.rs               shared combat model/composition tests
+  map/
+    mod.rs                 map composition root, stable IDs/profiles, public re-exports
+    model.rs               recipe/resolved snapshot/runtime map shapes and indexes
+    definitions/           catalog parsing, validation, resolution, fingerprints, tests
+    server.rs              authoritative map generation install/teardown and colliders
+    client.rs              replicated map reconstruction and client presentation
+    tests.rs               shared map composition and lifecycle tests
+  matchplay/
+    mod.rs                 common match schedule/restart composition and mode plugins
+    model.rs               stable match state, results, participants, and summaries
+    lifecycle.rs           fighter defeat/respawn/reset lifecycle helpers
+    server.rs              common authoritative roster, phase, restart, and outcomes
+    spawns.rs              mode-neutral team assignment and deterministic spawn selection
+    wipeout.rs             Wipeout scoring and mode-owned reset
+    hot_zone.rs            Hot Zone occupancy/progress and mode-owned reset
+    telemetry.rs           bounded match/mode records and aggregates
+    tests.rs               focused common/mode lifecycle tests
   movement/
     mod.rs                 movement plugins and authoritative schedule composition
     arena.rs               arena definitions, geometry, colliders, and spawn helpers
@@ -61,8 +94,11 @@ src/
     tests.rs               focused movement tests
   client/
     mod.rs                 client application composition and shared client state
+    assets.rs              retained visual/audio handles and readiness
+    audio.rs               bounded cue-to-audio presentation
+    hud.rs                 session, combat, build, match, and mode HUD
     input.rs               keyboard, mouse, gamepad, and native-input sampling
-    presentation.rs        camera, arena, HUD, and replicated-pose presentation
+    presentation.rs        camera, arena, effects, and replicated-pose presentation
     session.rs             connection, selection, shutdown, and headless automation lifecycle
     tests.rs               client composition and behavior tests
   server/
@@ -73,7 +109,8 @@ tests/
   network.rs               integration-test composition entry point
   network/
     harness.rs             reusable separate-App/Crossbeam/UDP test harness
-    *.rs                   scenarios grouped by lifecycle, movement, selection, combat, recovery
+    *.rs                   scenarios grouped by lifecycle, movement, map, selection, builds, combat, recovery, and modes
+  performance.rs           fixed-tick and subsystem performance/capacity gates
 ```
 
 `content/v1/` owns build-embedded authored gameplay data. `references/` contains read-only upstream

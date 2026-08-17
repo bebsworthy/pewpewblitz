@@ -224,6 +224,19 @@ network-combat-blade:
 network-smoke:
     BRAWLER_NETWORK_HEADLESS=1 ./scripts/network.sh
 
+# Run one headless terrain-destruction profile (Wipeout) with Arc Launcher clients.
+network-terrain:
+    BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_TERRAIN=1 \
+    BRAWLER_NETWORK_WEAPON_PRESET=3 BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO=3 \
+    ./scripts/network.sh
+
+# Run the same terrain profile under Hot Zone rules around the central objective.
+network-terrain-hot-zone:
+    BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_TERRAIN=1 \
+    BRAWLER_NETWORK_GAME_MODE=hot-zone \
+    BRAWLER_NETWORK_WEAPON_PRESET=3 BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO=3 \
+    ./scripts/network.sh
+
 # Run repeated local, typical, and adverse combat convergence profiles.
 network-combat-profiles:
     ./scripts/network-combat-profiles.sh

@@ -201,7 +201,10 @@ cold >= 100 → frozen for 1.5 seconds
 
 The threshold effect should define what happens to the meter after triggering: reset, partial reduction, lockout, or temporary immunity. These rules must be explicit so players can understand why a target did or did not freeze.
 
-Terrain destruction is a world-level payload. A weapon emits a destruction brush—such as a circle, capsule, rectangle, or authored shape—with a position, size, and optional material effect. The terrain subsystem applies that brush to its mask and regenerates affected collision chunks. Weapons must not know about tiles or directly edit collision polygons.
+Terrain destruction is a world-level payload. A weapon emits a destruction brush—such as a circle,
+capsule, rectangle, or authored shape—with a position, size, and optional material effect. The terrain
+subsystem deterministically quantizes that brush into its authoritative occupancy grid and regenerates
+affected collision chunks. Weapons must not know about grid cells, visible tiles, or collision shapes.
 
 Ability-created smoke, darkness, grass-like cover, speed fields, and other environment areas should
 reuse the authored/runtime region and concealment contracts in

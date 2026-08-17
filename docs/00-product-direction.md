@@ -43,6 +43,12 @@ publishing, asset upload, discovery, moderation, or procedural generation. A use
 therefore compatible with the non-goal of procedural map generation: one is deliberate bounded
 authoring, while the other is automatic generation.
 
+Team count and participants per team are resolved from the chosen game mode and a compatible map,
+not fixed globally. The mode defines legal team topology and participant ranges; the map proves it
+has the matching team slots, spawn capacity, playable space, and required anchors. Ordinary matches
+are expected to center on 3v3, while the architecture must also accommodate larger-group layouts
+such as `1v1 × 12`, `2v5 × 2`, and `3v3 × 3` when a mode and map explicitly support them.
+
 ## Balance principle
 
 Customization must not mean that every stat can be maximized independently. Each build should spend from a power budget, use slot restrictions, or accept explicit opportunity costs.

@@ -351,6 +351,7 @@ fn resolve_pending_deliveries(
     telemetry: &mut WeaponTelemetry,
     legacy_telemetry: &mut CombatTelemetry,
     outbox: &mut CombatOutbox,
+    world_effect_facts: &mut CombatWorldEffectFacts,
 ) -> HashSet<(AttackId, u8)> {
     let mut resolved_delivery_keys = HashSet::new();
     for delivery in delivery_records {
@@ -487,6 +488,24 @@ fn resolve_pending_deliveries(
                     WeaponTelemetryOutcome::MeleeContact,
                 );
             }
+        }
+        // World effects are delivery-level facts: exactly one per authored effect for this
+        // committed delivery, independent of target count.
+        for (effect_index, effect) in delivery.world_effects.iter().enumerate() {
+            let effect_index = u8::try_from(effect_index).unwrap_or(u8::MAX);
+            let position = match &delivery.kind {
+                PendingDeliveryKind::StraightImpact { position, .. }
+                | PendingDeliveryKind::LobLanded { position }
+                | PendingDeliveryKind::MeleeContact { position, .. } => *position,
+            };
+            world_effect_facts.0.push(CombatWorldEffectFact {
+                tick: delivery.tick,
+                source: delivery.source,
+                delivery_index: delivery.delivery_index,
+                effect_index,
+                position,
+                effect: *effect,
+            });
         }
         if let Some(entity) = delivery.entity {
             commands.entity(entity).try_despawn();
@@ -664,6 +683,17 @@ fn apply_runtime_effects(
     (effects_state, motion_state)
 }
 
+/// The bounded authoritative transaction outputs produced by payload resolution, grouped
+/// to keep the scheduling system within the engine's system-parameter budget.
+#[cfg(feature = "server")]
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct CombatTransactionState<'w> {
+    legacy_telemetry: ResMut<'w, CombatTelemetry>,
+    outbox: ResMut<'w, CombatOutbox>,
+    world_effect_facts: ResMut<'w, CombatWorldEffectFacts>,
+    outcome_facts: ResMut<'w, CombatOutcomeFacts>,
+}
+
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
@@ -675,9 +705,7 @@ pub(super) fn resolve_composed_payloads(
     mut payloads: MessageReader<PendingPayload>,
     mut deliveries: MessageReader<PendingDelivery>,
     mut gameplay_telemetry: AbilityWeaponTelemetry,
-    mut legacy_telemetry: ResMut<CombatTelemetry>,
-    mut outbox: ResMut<CombatOutbox>,
-    mut outcome_facts: ResMut<CombatOutcomeFacts>,
+    mut transaction: CombatTransactionState,
     mut target_queries: ParamSet<(
         Query<
             (
@@ -822,8 +850,9 @@ pub(super) fn resolve_composed_payloads(
         &mut reserved_events,
         &mut trackers,
         &mut gameplay_telemetry.weapon,
-        &mut legacy_telemetry,
-        &mut outbox,
+        &mut transaction.legacy_telemetry,
+        &mut transaction.outbox,
+        &mut transaction.world_effect_facts,
     );
     for record in records {
         resolved_delivery_keys.insert((record.source.attack_id, record.delivery_index));
@@ -864,7 +893,7 @@ pub(super) fn resolve_composed_payloads(
             && teams_are_hostile(record.source.team_id, *target_team)
         {
             if let Some(event_id) = reserved_events.next() {
-                outcome_facts.0.push(CombatOutcomeFact {
+                transaction.outcome_facts.0.push(CombatOutcomeFact {
                     event_id,
                     tick: tick.0,
                     attack_id: record.source.attack_id,
@@ -1052,14 +1081,18 @@ pub(super) fn resolve_composed_payloads(
                         band,
                         applied,
                     );
-                    legacy_telemetry.applied_damage = legacy_telemetry
+                    transaction.legacy_telemetry.applied_damage = transaction
+                        .legacy_telemetry
                         .applied_damage
                         .saturating_add(u64::from(applied));
                     if owner_damage {
-                        legacy_telemetry.close_hits = legacy_telemetry.close_hits.saturating_add(1);
+                        transaction.legacy_telemetry.close_hits =
+                            transaction.legacy_telemetry.close_hits.saturating_add(1);
                     } else {
-                        legacy_telemetry.hostile_fighter_hits =
-                            legacy_telemetry.hostile_fighter_hits.saturating_add(1);
+                        transaction.legacy_telemetry.hostile_fighter_hits = transaction
+                            .legacy_telemetry
+                            .hostile_fighter_hits
+                            .saturating_add(1);
                     }
                     let damage_cue = CombatCue::DamageApplied {
                         event_id: damage_event,
@@ -1073,8 +1106,8 @@ pub(super) fn resolve_composed_payloads(
                         distance_band: distance_band(record.engagement_distance),
                         presentation_profile_id: record.source.presentation_profile_id,
                     };
-                    legacy_telemetry.record_cue(damage_cue.clone());
-                    outbox.0.push(damage_cue);
+                    transaction.legacy_telemetry.record_cue(damage_cue.clone());
+                    transaction.outbox.0.push(damage_cue);
                     if let Some(legacy_damage_event) = legacy_damage_event {
                         let legacy_cue = CombatCue::Damage {
                             event_id: legacy_damage_event,
@@ -1085,17 +1118,19 @@ pub(super) fn resolve_composed_payloads(
                             health_after: health.0,
                             distance_band: distance_band(record.engagement_distance),
                         };
-                        legacy_telemetry.record_cue(legacy_cue.clone());
-                        legacy_telemetry.record(CombatLogRecord::Damage {
-                            tick: tick.0,
-                            event_id: legacy_damage_event,
-                            source,
-                            target: *target_network_id,
-                            requested,
-                            applied,
-                            health_after: health.0,
-                        });
-                        outbox.0.push(legacy_cue);
+                        transaction.legacy_telemetry.record_cue(legacy_cue.clone());
+                        transaction
+                            .legacy_telemetry
+                            .record(CombatLogRecord::Damage {
+                                tick: tick.0,
+                                event_id: legacy_damage_event,
+                                source,
+                                target: *target_network_id,
+                                requested,
+                                applied,
+                                health_after: health.0,
+                            });
+                        transaction.outbox.0.push(legacy_cue);
                     }
                     gameplay_telemetry.weapon.record(WeaponTelemetryRecord {
                         tick: tick.0,
@@ -1122,7 +1157,7 @@ pub(super) fn resolve_composed_payloads(
                         resulting_motion: motion_state,
                         outcome: WeaponTelemetryOutcome::DamageApplied,
                     });
-                    outcome_facts.0.push(CombatOutcomeFact {
+                    transaction.outcome_facts.0.push(CombatOutcomeFact {
                         event_id: damage_event,
                         tick: tick.0,
                         attack_id: record.source.attack_id,
@@ -1196,7 +1231,8 @@ pub(super) fn resolve_composed_payloads(
                         resulting_motion: None,
                         outcome: WeaponTelemetryOutcome::Defeat,
                     });
-                    legacy_telemetry.defeats = legacy_telemetry.defeats.saturating_add(1);
+                    transaction.legacy_telemetry.defeats =
+                        transaction.legacy_telemetry.defeats.saturating_add(1);
                     let defeated_cue = CombatCue::FighterDefeated {
                         event_id: defeat_event,
                         tick: tick.0,
@@ -1206,9 +1242,11 @@ pub(super) fn resolve_composed_payloads(
                         position: WorldPoint::from(record.position),
                         presentation_profile_id: Some(record.source.presentation_profile_id),
                     };
-                    legacy_telemetry.record_cue(defeated_cue.clone());
-                    outbox.0.push(defeated_cue);
-                    outcome_facts.0.push(CombatOutcomeFact {
+                    transaction
+                        .legacy_telemetry
+                        .record_cue(defeated_cue.clone());
+                    transaction.outbox.0.push(defeated_cue);
+                    transaction.outcome_facts.0.push(CombatOutcomeFact {
                         event_id: defeat_event,
                         tick: tick.0,
                         attack_id: record.source.attack_id,
@@ -1240,14 +1278,16 @@ pub(super) fn resolve_composed_payloads(
                             source: Some(source),
                             target: *target_network_id,
                         };
-                        legacy_telemetry.record_cue(legacy_cue.clone());
-                        legacy_telemetry.record(CombatLogRecord::Defeat {
-                            tick: tick.0,
-                            event_id: legacy_defeat_event,
-                            source: Some(source),
-                            target: *target_network_id,
-                        });
-                        outbox.0.push(legacy_cue);
+                        transaction.legacy_telemetry.record_cue(legacy_cue.clone());
+                        transaction
+                            .legacy_telemetry
+                            .record(CombatLogRecord::Defeat {
+                                tick: tick.0,
+                                event_id: legacy_defeat_event,
+                                source: Some(source),
+                                target: *target_network_id,
+                            });
+                        transaction.outbox.0.push(legacy_cue);
                     }
                 }
             }
@@ -1307,8 +1347,8 @@ pub(super) fn resolve_composed_payloads(
     }
     for (entity, cue) in deferred_effect_cues {
         if !defeated_this_tick.contains(&entity) {
-            legacy_telemetry.record_cue(cue.clone());
-            outbox.0.push(cue);
+            transaction.legacy_telemetry.record_cue(cue.clone());
+            transaction.outbox.0.push(cue);
         }
     }
     for (attack_id, _) in resolved_delivery_keys {

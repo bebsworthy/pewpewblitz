@@ -748,6 +748,7 @@ pub(crate) fn tick_sentries(
                     recipients: crate::combat::RecipientPolicy::Hostiles,
                 }],
             }],
+            world_effects: Vec::new(),
         };
         commands.spawn((
             crate::combat::Projectile,

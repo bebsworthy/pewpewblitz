@@ -1,7 +1,7 @@
 //! Shared combat identities, replicated state, and server-internal delivery messages.
 
 #[cfg(feature = "server")]
-use super::{PayloadBundleDefinition, WeaponRecipe};
+use super::{PayloadBundleDefinition, WeaponRecipe, WorldEffectDefinition};
 use super::{
     WeaponDefinitionId, WeaponPresentationProfileId, WeaponPresetId, WeaponRecipeFingerprint,
 };
@@ -282,7 +282,28 @@ pub struct PendingDelivery {
     pub engagement_distance: f32,
     pub delivery_travel: f32,
     pub kind: PendingDeliveryKind,
+    /// Authored delivery-level world effects, copied from the firing recipe. Bounded by
+    /// validation to one entry in v1.
+    pub world_effects: Vec<WorldEffectDefinition>,
 }
+
+/// One committed delivery-level world effect. Combat emits these after the delivery
+/// transaction commits; the terrain authority owns whether any cell actually changes.
+#[cfg(feature = "server")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CombatWorldEffectFact {
+    pub tick: u64,
+    pub source: AttackSource,
+    pub delivery_index: u8,
+    pub effect_index: u8,
+    pub position: WorldPoint,
+    pub effect: WorldEffectDefinition,
+}
+
+/// Bounded ordered world-effect facts for one fixed post-update tick.
+#[cfg(feature = "server")]
+#[derive(Resource, Default, Debug)]
+pub struct CombatWorldEffectFacts(pub Vec<CombatWorldEffectFact>);
 
 #[cfg(feature = "server")]
 #[derive(Clone, Debug, PartialEq)]

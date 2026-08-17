@@ -9,9 +9,10 @@ use super::{
     ActiveCombatant, AuthoritativeFighterLifecyclePlugin, FighterLifecycleConfig, FighterReset,
     MatchClock, MatchId, MatchMember, MatchOutcomeDiagnostics, MatchParticipant,
     MatchParticipantSummary, MatchPhase, MatchRestartSet, MatchResult, MatchRoot, MatchSet,
-    MatchState, MatchTelemetry, MatchTelemetryContext, ModeSummary, RespawnState, SpawnCandidate,
-    SpawnProtection, WipeoutState, WipeoutSummary, complete_fighter_lifecycle,
-    configure_match_schedule, fighter_runtime_values, reset_fighter_runtime, select_spawn,
+    MatchState, MatchTelemetry, MatchTelemetryContext, ModeSummary, ResolvedMatchCapacity,
+    RespawnState, SpawnCandidate, SpawnProtection, WipeoutState, WipeoutSummary,
+    complete_fighter_lifecycle, configure_match_schedule, fighter_runtime_values,
+    reset_fighter_runtime, select_spawn,
 };
 use crate::{
     combat::{
@@ -188,6 +189,12 @@ impl PendingMatchRestart {
     pub(crate) fn slot(&self) -> Option<PendingMatchRestartSlot> {
         self.0
     }
+
+    /// In-crate test staging for the environment-reset transaction.
+    #[cfg(test)]
+    pub(crate) fn stage_for_test(&mut self, slot: PendingMatchRestartSlot) {
+        self.0 = Some(slot);
+    }
 }
 
 #[derive(Resource, Debug)]
@@ -239,6 +246,42 @@ impl NextMatchId {
     }
 }
 
+/// Operational connection limits may not under-provision the selected gameplay profile.
+fn reject_under_provisioned_connection_capacity(app: &App, capacity: &ResolvedMatchCapacity) {
+    if let Some(config) = app
+        .world()
+        .get_resource::<crate::config::ServerNetworkConfig>()
+        && config.max_clients < usize::from(capacity.maximum_active_fighters)
+    {
+        panic!(
+            "server connection capacity {} under-provisions the selected profile's {} active fighters",
+            config.max_clients, capacity.maximum_active_fighters
+        );
+    }
+}
+
+/// Ordered post-update pipeline shared by every mode: consume the mode outcome, resolve
+/// respawns, record telemetry, and capture the match summary with deferred boundaries.
+fn register_match_outcome_pipeline(app: &mut App) {
+    app.add_systems(
+        FixedPostUpdate,
+        (
+            consume_mode_rule_outcome,
+            ApplyDeferred,
+            handle_defeated_respawns,
+            record_match_telemetry,
+            clear_combat_facts,
+            ApplyDeferred,
+            crate::abilities::request_sentry_lifecycle_cleanup,
+            crate::abilities::cleanup_requested_sentries,
+            ApplyDeferred,
+            capture_match_summary,
+        )
+            .chain()
+            .in_set(MatchSet::Outcomes),
+    );
+}
+
 /// The common authoritative match lifecycle plugin. Compose with exactly one installed mode
 /// plugin (`WipeoutModePlugin` or `HotZoneModePlugin`).
 pub struct AuthoritativeMatchPlugin;
@@ -253,9 +296,13 @@ impl Plugin for AuthoritativeMatchPlugin {
         let rules = configured
             .validate()
             .expect("match lifecycle rules must be valid");
+        let capacity = ResolvedMatchCapacity::from_rules(&rules)
+            .expect("validated match rules resolve a checked capacity");
+        reject_under_provisioned_connection_capacity(app, &capacity);
         if app.world().get_resource::<MatchModeSetup>().is_none() {
             app.insert_resource(MatchModeSetup::default());
         }
+        app.insert_resource(capacity);
         configure_match_schedule(app);
         app.add_plugins(AuthoritativeFighterLifecyclePlugin)
             .insert_resource(rules)
@@ -313,36 +360,20 @@ impl Plugin for AuthoritativeMatchPlugin {
             .add_systems(
                 FixedPostUpdate,
                 prepare_mode_rule_facts.in_set(MatchSet::ModeRules),
-            )
-            .add_systems(
-                FixedPostUpdate,
-                (
-                    consume_mode_rule_outcome,
-                    ApplyDeferred,
-                    handle_defeated_respawns,
-                    record_match_telemetry,
-                    clear_combat_facts,
-                    ApplyDeferred,
-                    crate::abilities::request_sentry_lifecycle_cleanup,
-                    crate::abilities::cleanup_requested_sentries,
-                    ApplyDeferred,
-                    capture_match_summary,
-                )
-                    .chain()
-                    .in_set(MatchSet::Outcomes),
-            )
-            .add_systems(
-                FixedPostUpdate,
-                publish_match_clock
-                    .in_set(crate::combat::CombatSet::Finalize)
-                    .before(crate::gameplay::advance_simulation_tick),
-            )
-            .add_systems(
-                FixedPostUpdate,
-                record_match_movement
-                    .after(avian2d::prelude::PhysicsSystems::StepSimulation)
-                    .before(crate::combat::CombatSet::ProjectileSweep),
             );
+        register_match_outcome_pipeline(app);
+        app.add_systems(
+            FixedPostUpdate,
+            publish_match_clock
+                .in_set(crate::combat::CombatSet::Finalize)
+                .before(crate::gameplay::advance_simulation_tick),
+        )
+        .add_systems(
+            FixedPostUpdate,
+            record_match_movement
+                .after(avian2d::prelude::PhysicsSystems::StepSimulation)
+                .before(crate::combat::CombatSet::ProjectileSweep),
+        );
     }
 }
 
@@ -1071,8 +1102,14 @@ pub(crate) fn record_match_telemetry(
 
 /// The one ordered clear of the current-tick combat fact buffer, after every registered
 /// reader has run, including when no match is active or the root is missing.
-pub(crate) fn clear_combat_facts(mut facts: ResMut<CombatOutcomeFacts>) {
+pub(crate) fn clear_combat_facts(
+    mut facts: ResMut<CombatOutcomeFacts>,
+    mut world_effect_facts: ResMut<crate::combat::CombatWorldEffectFacts>,
+) {
     facts.0.clear();
+    // Terrain drains world-effect facts earlier in the fixed-post chain; this clear is the
+    // safety net for compositions without an authoritative terrain plugin.
+    world_effect_facts.0.clear();
 }
 
 /// Publish the generation-tagged match clock in fixed finalize before the simulation tick

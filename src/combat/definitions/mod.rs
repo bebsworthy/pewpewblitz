@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 2;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 3;
 pub const FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
@@ -41,6 +41,8 @@ pub struct EngineWeaponLimits {
     pub max_effect_duration_ticks: u64,
     pub max_speed: f32,
     pub max_distance: f32,
+    pub max_world_effects_per_delivery: u8,
+    pub max_terrain_brush_radius: f32,
 }
 
 impl Default for EngineWeaponLimits {
@@ -63,6 +65,8 @@ impl Default for EngineWeaponLimits {
             max_effect_duration_ticks: 3_600,
             max_speed: 4_096.0,
             max_distance: 4_096.0,
+            max_world_effects_per_delivery: 1,
+            max_terrain_brush_radius: crate::terrain::MAX_TERRAIN_BRUSH_RADIUS_WORLD,
         }
     }
 }
@@ -105,6 +109,27 @@ pub enum RecipientPolicyKind {
     HostilesAndOwner,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum WorldEffectKind {
+    DestroyTerrain,
+}
+
+/// A delivery-level world effect. World effects fire once per committed delivery at the
+/// delivery position; they are not applied per fighter target.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum WorldEffectDefinition {
+    DestroyTerrain { radius: f32 },
+}
+
+impl WorldEffectDefinition {
+    #[must_use]
+    pub fn kind(&self) -> WorldEffectKind {
+        match self {
+            Self::DestroyTerrain { .. } => WorldEffectKind::DestroyTerrain,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct WeaponRecipePolicy {
     pub max_deliveries_per_attack: u8,
@@ -128,6 +153,8 @@ pub struct WeaponRecipePolicy {
     pub max_knockback_speed: f32,
     pub max_angle_degrees: f32,
     pub max_targets_per_delivery: u8,
+    pub max_world_effects_per_delivery: u8,
+    pub max_terrain_brush_radius: f32,
 }
 
 impl Default for WeaponRecipePolicy {
@@ -168,6 +195,8 @@ impl Default for WeaponRecipePolicy {
             max_knockback_speed: 900.0,
             max_angle_degrees: 180.0,
             max_targets_per_delivery: 16,
+            max_world_effects_per_delivery: 1,
+            max_terrain_brush_radius: 64.0,
         }
     }
 }
@@ -289,6 +318,7 @@ pub struct WeaponRecipe {
     pub firing: FiringPattern,
     pub delivery: DeliveryMethod,
     pub payload_bundles: Vec<PayloadBundleDefinition>,
+    pub world_effects: Vec<WorldEffectDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -621,6 +651,31 @@ impl WeaponConfiguration {
                 validate_effect(*effect, policy, limits)?;
             }
         }
+        let world_effect_limit = policy
+            .max_world_effects_per_delivery
+            .min(limits.max_world_effects_per_delivery);
+        if recipe.world_effects.len() > usize::from(world_effect_limit) {
+            return Err("too many world effects per delivery".to_string());
+        }
+        for effect in &recipe.world_effects {
+            let WorldEffectDefinition::DestroyTerrain { radius } = *effect;
+            let max_radius = policy
+                .max_terrain_brush_radius
+                .min(limits.max_terrain_brush_radius);
+            let half_cell = crate::terrain::TERRAIN_SUBCELL_SIZE_WORLD;
+            if !finite_range(radius, crate::terrain::TERRAIN_CELL_SIZE_WORLD, max_radius)
+                || ((radius / half_cell).round() * half_cell - radius).abs() > 1.0e-4
+            {
+                return Err("invalid terrain brush radius".to_string());
+            }
+            let single_lobbed = matches!(recipe.delivery, DeliveryMethod::Lobbed { .. })
+                && matches!(recipe.firing, FiringPattern::Single);
+            if !single_lobbed {
+                return Err(
+                    "world destruction requires single-fire lobbed delivery in v1".to_string(),
+                );
+            }
+        }
         if deliveries == 0 {
             return Err("zero deliveries".to_string());
         }
@@ -740,6 +795,13 @@ fn validate_policy(policy: &WeaponRecipePolicy, limits: EngineWeaponLimits) -> R
         || !finite_range(policy.max_angle_degrees, 0.0, limits.max_angle_degrees)
         || policy.max_targets_per_delivery == 0
         || policy.max_targets_per_delivery > limits.max_targets_per_delivery
+        || policy.max_world_effects_per_delivery == 0
+        || policy.max_world_effects_per_delivery > limits.max_world_effects_per_delivery
+        || !finite_range(
+            policy.max_terrain_brush_radius,
+            0.0,
+            limits.max_terrain_brush_radius,
+        )
     {
         return Err("weapon recipe policy exceeds engine limits".to_string());
     }
@@ -839,6 +901,9 @@ fn limits_within_engine_ceiling(limits: EngineWeaponLimits) -> bool {
         && limits.max_speed <= ceiling.max_speed
         && limits.max_distance.is_finite()
         && limits.max_distance <= ceiling.max_distance
+        && limits.max_world_effects_per_delivery <= ceiling.max_world_effects_per_delivery
+        && limits.max_terrain_brush_radius.is_finite()
+        && limits.max_terrain_brush_radius <= ceiling.max_terrain_brush_radius
 }
 fn valid_display_name(value: &str) -> bool {
     !value.is_empty() && value.len() <= 48 && value.chars().all(|character| !character.is_control())

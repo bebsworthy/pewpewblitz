@@ -498,7 +498,7 @@ fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
                 continue;
             }
             let right_side = player.0 % 2 == 0;
-            position.0 = Vec2::new(if right_side { 100.0 } else { -100.0 }, 0.0);
+            position.0 = Vec2::new(if right_side { 140.0 } else { -140.0 }, 0.0);
             *rotation = Rotation::radians(if right_side {
                 std::f32::consts::PI
             } else {

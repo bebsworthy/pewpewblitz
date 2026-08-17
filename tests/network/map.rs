@@ -36,12 +36,14 @@ fn maximum_policy_resolved_map(
     }
     while recipe.regions.len() < 4 {
         let index = recipe.regions.len();
+        let column = index % 2;
+        let row = index / 2;
         recipe.regions.push(MapRegionPlacement {
             placement_id: MapPlacementId(3_000 + u32::try_from(index).unwrap()),
             region_id: RegionId(u16::try_from(index + 1).unwrap()),
             profile_id: RegionProfileId(1),
             presentation_profile_id: MapPresentationProfileId(3),
-            position: Vec2::new(240.0, 400.0),
+            position: Vec2::new(240.0 + 80.0 * column as f32, 400.0 + 80.0 * row as f32),
             rotation: 0.0,
             shape: MapShape::Circle { radius: 8.0 },
         });
@@ -157,7 +159,7 @@ fn map_content_mismatch_rejects_before_fighter_spawn() {
         .0
         .presets[0]
         .recipe
-        .revision = 3;
+        .revision = 99;
     harness.step_until(|harness| {
         let world = harness.clients[0].world_mut();
         let mut query = world.query_filtered::<&ClientJoinStatus, With<Client>>();
