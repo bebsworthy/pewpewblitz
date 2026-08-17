@@ -6,13 +6,13 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Implementing |
+| Status | User playtest |
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the accepted v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
-| Implementation | Slices 0–6 implemented through commit `7924769` (see the implementation evidence section and "Remaining M11 work"); Slice 7 awaits user playtest |
-| Verification | Green after every slice through `c4f4600`: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (212), `just test-server` (197), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs with validated reports |
-| User playtest | Pending final supervised closeout matrix |
+| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user |
+| Verification | Green after every slice through `9131095`: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (213), `just test-server` (197), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs with validated reports |
+| User playtest | Handoff delivered 2026-08-17 (see "Slice 7 — supervised playtest handoff"); awaiting physical controller/keyboard, audio, HUD/layout, and pacing observations |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
 contained user-owned terrain changes, and additional user-owned documentation, matchplay, terrain,
@@ -642,10 +642,11 @@ Implementation must not begin until the user validates this specification.
 - [x] Consolidate existing telemetry summaries without creating a second gameplay mutation path.
   (Consolidation reads replicated state at exit; gameplay telemetry paths are unchanged.)
 - [x] Add process timing/entity/link observations and the explicit `process-metrics` feature.
-- [ ] Measure diagnostics-off versus metrics-on overhead and record which instrumentation
-  profile v2 M01 must reproduce for like-for-like comparison. (Runs pending; the
-  `process-metrics` build lane compiles and the sampler is ordered before
-  `ClearBucketsSystem`.)
+- [x] Measure diagnostics-off versus metrics-on overhead and record which instrumentation
+  profile v2 M01 must reproduce for like-for-like comparison. (Clean-tree paired runs at
+  `9131095`: wipeout-local off 514/977/12624 µs vs metrics-on 503/915/8816 µs p50/p95/max, and
+  idle off 570/994 vs on 556/933 — the recorder is below run-to-run host variance, so v2 M01
+  reproduces the metrics-on profile; see `evidence/v2-baseline/README.md`.)
 - [x] Add bounded structured failure/exit reporting.
 - [x] Add the optional client authority/network overlay and exact UI/layout tests.
 - [x] Extend named scripts with scenario ID/revision, seed, fingerprints, output paths, and
@@ -693,11 +694,17 @@ Implementation must not begin until the user validates this specification.
 - [x] Extract payload planning/reservation/application/commit helpers under one scheduled system.
 - [x] Lock deterministic target/event/outcome/cue/telemetry ordering and exhaustion atomicity.
   (The preserved-chain suites and combat scenarios pass unchanged against the split modules.)
-- [ ] Introduce named client combat sets and explicit deferred boundaries only after the preserved
-  chain is green; relax only demonstrated-independent edges. (The exact fifteen-system chain is
-  preserved in `combat/client/mod.rs`; introducing the named sets and relaxing edges remains
-  open so the milestone closes on the preserved behavior.)
-- [ ] Compare client frame/update evidence and server fixed-tick performance against Slice 0.
+- [x] Introduce named client combat sets and explicit deferred boundaries only after the preserved
+  chain is green; relax only demonstrated-independent edges. (`CombatClientSet` names the exact
+  fifteen-system chain at `9131095` with the implicit `.chain()` boundaries retained — no edge was
+  demonstrated independent, so none was relaxed — and a runtime set-order characterization test
+  locks the Ingest→Ensure→Sync→HudAndStatus→Effects→Evidence order; client tests grew to 213.)
+- [x] Compare client frame/update evidence and server fixed-tick performance against Slice 0.
+  (Clean-tree matrix at `9131095`: worst server p95 1 233 µs (hot-zone 2v2) and worst max
+  16 161 µs versus the 16.67 ms budget, against Slice 0's synthetic worst p95 5 702 µs — real
+  2v2 traffic sits far under the synthetic envelope and shows no post-refactor regression.
+  Headless client fixed-tick is p50 52–65 µs / p95 115–168 µs; windowed frame pacing is
+  deliberately left to the supervised playtest, not claimed from automation.)
 - [x] Review `matchplay/server.rs`; record keep/split disposition from ownership evidence.
   (Disposition: keep. Its roster, phase, outcome, restart, respawn, and telemetry ownership
   remains cohesive with explicit common match sets and visible `ApplyDeferred` boundaries;
@@ -714,21 +721,31 @@ Implementation must not begin until the user validates this specification.
   the pre-existing build-replacement, terrain 100-cycle reset, rejection, recovery, and shutdown
   suites remain green.)
 - [x] Run real UDP local/typical/adverse scenarios, 2-client and 2v2 sessions, and current broader
-  synthetic-capacity fixtures with consolidated reports. (Local-profile closeout-instrumented runs
-  are green through `just closeout-wipeout` / `just closeout-hot-zone`; the full local/typical/
-  adverse matrix rerun for the closeout report is pending.)
-- [ ] Record server tick, bandwidth, entity, report-size, and match/build/mode measurements.
-  (The closeout envelope records fixed-tick percentiles, entity/link high-water, RTT/jitter, and
-  report validation for the smoke scenarios; the consolidated multi-profile matrix is pending.)
-- [ ] Publish the reproducible direct-UDP single-match baseline and terminal cleanup evidence needed
-  by v2 M01; do not run a routed or multi-worker substitute in M11. (The machinery and recipes
-  exist; the recorded baseline artifact for the v2 handoff is pending.)
+  synthetic-capacity fixtures with consolidated reports. (Full matrix executed from the clean
+  `9131095` tree: local/typical/adverse × Wipeout/Hot Zone two-client runs plus both 2v2 sessions
+  and both idle endpoints, eleven runs, every report validated with `clean-exit`, zero errors and
+  zero dropped messages; numbers in the slice 6 evidence.)
+- [x] Record server tick, bandwidth, entity, report-size, and match/build/mode measurements.
+  (The metrics-on matrix records transport bytes/packets per profile and mode — 2-client
+  ≈107–113 KB sent per ~10 s window, 2v2 ≈296–310 KB, with RTT/jitter scaling local
+  20–28 ms → typical ~100–104 ms → adverse ~146–154 ms p50 — plus entity high-water 512,
+  report sizes 1 070–1 117 bytes, idle ≈38.7 MB and match ≈42–43 MB resident memory, and
+  21–23 ms stop-to-exit; the byte counters required reading Lightyear's `transport/*_bytes`
+  gauges rather than counters, fixed at `9131095`.)
+- [x] Publish the reproducible direct-UDP single-match baseline and terminal cleanup evidence needed
+  by v2 M01; do not run a routed or multi-worker substitute in M11. (Committed at
+  `docs/implementation/v1/evidence/v2-baseline/`: idle endpoints (both instrumentation lanes),
+  production-content 2v2 Wipeout and Hot Zone single-match runs, the overhead control pair,
+  RSS samples, provenance, exact command shapes, and the metrics-on reproduction decision for
+  v2 M01.)
 
 ### Slice 7 — Final playtest, source-milestone closeout, and v2 handoff
 
-- [ ] Deliver one canonical supervised playtest matrix covering controller and keyboard/mouse,
+- [x] Deliver one canonical supervised playtest matrix covering controller and keyboard/mouse,
   Wipeout and Hot Zone, named/custom builds, terrain, complete HUD states, audio, restart, and
-  normal-duration pacing.
+  normal-duration pacing. (Delivered 2026-08-17 with the run path, controls, scenario matrix,
+  known limitations, and requested observations — recorded under "Slice 7 — supervised playtest
+  handoff" below; the physical observations themselves remain user-gated.)
 - [ ] Record aspect ratios, devices, profiles, reports, observations, and unavailable checks without
   claiming human/perceptual evidence from automation.
 - [ ] Triage every feedback item and rerun affected verification.
@@ -883,22 +900,100 @@ protocol migration: three validated reports, clean-exit, fixed-tick p95 944 µs,
 512. **The M03 owner-prediction experiment was not executed in this pass** — it remains the open
 `M03-PRED` item and must not be inferred from these results; prediction stays disabled.
 
+**Slice 5/6 remainder — named sets and the clean-tree measurement matrix (2026-08-17, commit
+`9131095`).** `CombatClientSet` (Ingest/Ensure/Sync/HudAndStatus/Effects/Evidence) now names the
+client combat update chain with every implicit `.chain()` deferred boundary retained; the runtime
+set-order test `named_client_combat_sets_preserve_the_locked_update_order` locks the order, and no
+edge was demonstrated independent enough to relax. `network.sh` gained `BRAWLER_NETWORK_CLIENT_COUNT`
+(1–8) and `BRAWLER_NETWORK_SERVER_FEATURES`, so the 2v2 and metrics lanes reuse the one validated
+launch/report path; `BRAWLER_SERVER_EXIT_AFTER_TICKS` bounds the idle-endpoint case; the
+`process-metrics` byte counters were corrected to read Lightyear's `transport/send_bytes`/
+`recv_bytes` gauges (they are gauges, not counters — packet counters were already right).
+
+The full matrix was then executed from the clean `9131095` tree (eleven runs, one declared
+~10 s window each, every report digest-validated; `source_dirty=false` recorded in each):
+
+| Run | tick p50/p95/max (µs) | RTT p50/p95 (µs) | bytes sent/recv | packets sent/recv |
+|---|---|---|---|---|
+| idle off / metrics | 570/994/6 280 · 556/933/7 546 | — | 0/0 | 0/0 |
+| wipeout local off / metrics | 514/977/12 624 · 503/915/8 816 | 22 564/32 807 · 20 433/24 307 | 0/0 · 107 845/52 851 | 0/0 · 738/707 |
+| wipeout typical metrics | 533/904/8 558 | 103 324/108 735 | 107 227/49 921 | 746/700 |
+| wipeout adverse metrics | 537/979/8 202 | 146 331/153 705 | 106 569/48 404 | 751/681 |
+| hot-zone local metrics | 541/1 007/9 100 | 25 864/34 512 | 113 266/53 506 | 746/712 |
+| hot-zone typical metrics | 561/1 114/7 769 | 100 704/104 218 | 112 983/50 629 | 754/710 |
+| hot-zone adverse metrics | 617/1 109/9 186 | 146 539/150 192 | 111 905/48 659 | 749/687 |
+| wipeout 2v2 metrics | 592/1 119/9 115 | 23 796/28 544 | 295 568/102 214 | 1 480/1 411 |
+| hot-zone 2v2 metrics | 604/1 233/16 161 | 27 028/31 011 | 310 023/104 526 | 1 491/1 422 |
+
+All eleven: `clean-exit`, entity high-water 512, link high-water 0/2/4 by case,
+`dropped_messages=0`, `error_count=0`, `first_divergence=none`; reports 1 070–1 117 bytes;
+server RSS ≈38.7 MB idle and ≈42–43 MB at 2v2 high-water; AppExit-to-report 21–23 ms.
+Conclusions recorded for v2: the metrics recorder's tick overhead is below host run-to-run
+variance (both pairings), the metrics-on lane is the profile v2 M01 must reproduce, and real 2v2
+server p95 (≤1 233 µs) sits far under both the 16.67 ms budget and Slice 0's synthetic worst
+(5 702 µs), with no post-refactor regression. The committed baseline artifact and reproduction
+commands live in `evidence/v2-baseline/`.
+
 ### Remaining M11 work
 
 Implemented slices 0–6 leave these items open, in milestone order:
 
 1. ~~the M03 owner-prediction candidate, comparison matrix, and keep/defer decision~~ (executed and
    decided 2026-08-17, commit `c4f4600`; see the slice 6 evidence);
-2. named client combat sets and any measured chain relaxation (Slice 5 remainder);
-3. the full local/typical/adverse UDP matrix and 2v2 runs with consolidated closeout reports, the
+2. ~~named client combat sets and any measured chain relaxation (Slice 5 remainder)~~ (introduced at
+   `9131095` with the chain preserved and a set-order test; no edge qualified for relaxation);
+3. ~~the full local/typical/adverse UDP matrix and 2v2 runs with consolidated closeout reports, the
    diagnostics-off versus metrics-on overhead comparison, and the recorded direct-UDP single-match
-   baseline artifact for the v2 M01 handoff (Slice 6 remainder);
-4. Slice 7 in full: the supervised playtest matrix, feedback triage, source-milestone status
-   updates from actual evidence, learn-from-errors review, and the final v2 handoff record — all
-   of which require the user's physical controllers, display, and perceptual judgment.
+   baseline artifact for the v2 M01 handoff (Slice 6 remainder)~~ (executed from the clean `9131095`
+   tree; see the slice 6 measurement evidence and `evidence/v2-baseline/`);
+4. Slice 7 user-gated remainder: the supervised playtest observations, feedback triage,
+   source-milestone status updates from actual evidence, learn-from-errors review, and the final
+   v2 handoff record — all of which require the user's physical controllers, display, and
+   perceptual judgment.
 
 The closeout ledger rows below therefore remain **pending user evidence**; no earlier milestone's
 status was changed by this pass.
+
+### Slice 7 — supervised playtest handoff (delivered 2026-08-17)
+
+Delivered with the milestone status move to `User playtest`; the physical observations, feedback
+triage, source-milestone updates, learn-from-errors review, and explicit v1 acceptance remain
+user-gated. Run path (binaries build through the recipes; Ctrl-C terminates the real processes):
+
+- Two windowed clients vs one dedicated server: `just network` (Wipeout) / `just network-hot-zone`.
+- Single-client convenience run: `just run`. Reproducible scripted combat: `just network-combat`
+  (and `-30`/`-60`/`-high` render profiles, `-pulse`/`-scatter`/`-arc`/`-blade` weapon presets).
+- Controller-path smoke: `just network-controller` (synthetic gamepad — not a substitute for the
+  physical controller observation).
+
+Controls: build selection Left/Right or A/D (D-pad/left stick + South on controller), Custom via
+Up/Down + Left/Right with Escape/East back; Space/Enter/South readies and requests the next match
+after the completed-phase lock. Play: WASD move, mouse aim, mouse-left fire, E ultimate, hold Tab
+(or Select) for the roster scoreboard; controller: left stick move, right stick aim, right trigger
+fire, right bumper ultimate, Start pause. The client settings UI (Slice 2) provides bounded
+remapping/calibration and pause settings to exercise alongside the defaults.
+
+Scenario matrix for the pass (record aspect ratio, device, profile, and any closeout reports):
+
+1. Both modes to natural completion at normal rules — Wipeout and Hot Zone, keyboard/mouse and
+   controller, full match-length pacing (target 2–4 min) and Hot Zone pacing specifically
+   (`M09-BALANCE`).
+2. Named presets and a Custom build on each device; build replacement between matches.
+3. Terrain interaction: Arc Launcher craters (`just network-combat-arc`), destroyed cover blocking
+   lobbed vs straight delivery, perimeter/cover collision feel.
+4. HUD states end to end: countdown, active, respawn/protection, completed/restart lock; health,
+   ammo, ultimate meter/phase, passive, sentry health/lifetime, cooldown/reload, scoreboard.
+5. Audio cues (fire/hit/defeat/ultimate/round) at default calibration.
+6. Restart loop: completed → next match → re-ready, plus one mid-match client close/reopen.
+7. Feel under impairment if desired: `BRAWLER_NETWORK_PROFILE=typical|adverse just network`.
+
+Known limitations to carry into observations: prediction is disabled (v1 defers `M03-PRED`), so
+remote fighters interpolate with inherent latency; Q is reserved (no active item); join-in-progress
+and session resumption are intentionally absent; windowed frame pacing on physical displays was
+not measurable headless. Requested observations: controller parity and deadzone comfort (M07
+backlog), perceptual audio balance and cue distinguishability (M09 backlog), HUD legibility/layout
+on the real display (M09 backlog), counterplay readability under fire, match-length pacing, and
+terrain readability after destruction.
 
 ## Verification plan
 

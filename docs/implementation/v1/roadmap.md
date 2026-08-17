@@ -37,7 +37,7 @@ The milestone sections below are outcome briefs and research prompts, not preval
 
 - **Version:** v1 — gameplay MVP
 - **Overall status:** Milestone 11 entered specification review on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 completed 2026-08-17 after three implementation-review rounds and the user-playtest round were remediated (destructible terrain blocks straight shots; the lob-landing and crater-readability redesign is reserved as `GAP-DESIGN-TERRAIN-RESERVATION`); Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing. The accepted v2 topology adds only a worker-readiness audit and direct-UDP comparison baseline to M11; v2 infrastructure remains out of scope.
-- **Current milestone:** Milestone 11 — Implementing (slices 0–6 complete including the measured prediction deferral; the full measurement matrix and the Slice 7 supervised playtest remain; see [milestone-11.md](./milestone-11.md))
+- **Current milestone:** Milestone 11 — User playtest (slices 0–6 complete through `9131095`: the measured prediction deferral, the full clean-tree UDP measurement matrix, the metrics-on overhead comparison, and the committed `evidence/v2-baseline/` artifact; the supervised playtest handoff is delivered, and the user observations, feedback triage, learn-from-errors review, and explicit v1 acceptance remain; see [milestone-11.md](./milestone-11.md))
 - **Last completed milestone:** Milestone 10 — Quantized destructible terrain
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -193,7 +193,7 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 08 | Feedback review | Bounded brawler builds and abilities | [milestone-08.md](./milestone-08.md) |
 | 09 | Complete | Hot Zone | [milestone-09.md](./milestone-09.md) |
 | 10 | Feedback review | Quantized destructible terrain | [milestone-10.md](./milestone-10.md) |
-| 11 | Implementing | MVP playtest hardening and closeout | [milestone-11.md](./milestone-11.md) |
+| 11 | User playtest | MVP playtest hardening and closeout | [milestone-11.md](./milestone-11.md) |
 
 Create each milestone file just before its research phase so its specification reflects current evidence and prior milestone lessons. Use the zero-padded form `milestone-NN.md`.
 
