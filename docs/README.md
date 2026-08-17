@@ -19,6 +19,7 @@ The project is intentionally starting with the gameplay loop. Production matchma
 - [Network architecture](./08-network-architecture.md) — authority model, Lightyear replication, Bevy server/client world composition, and local network testing.
 - [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) — future-facing environment catalog, composable region properties, concealment, and network interest management.
 - [Bots](./10-bots.md) — decision record for player-filling bots as external headless clients, first-version scope, and open questions.
+- [Art and presentation direction](./11-art-and-presentation-direction.md) — validated visual style, owned blob-template terrain contract, skeleton character rig and skins, VFX architecture, and rendering decisions.
 - [Version 1 implementation roadmap](./implementation/v1/roadmap.md) — tracked MVP milestones from the Rust and Bevy application foundation through playtest hardening and closeout.
 
 ## Working vocabulary
