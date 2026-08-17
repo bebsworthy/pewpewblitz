@@ -227,7 +227,7 @@ fn keyboard_movement_is_sampled_from_the_window_input_resource() {
         .init_resource::<ClientInputContext>()
         .insert_resource(ClientPlayableGate(true))
         .init_resource::<InputDeviceActivity>()
-        .init_resource::<InputTuning>()
+        .init_resource::<ClientInputSettings>()
         .add_systems(Update, sample_local_input);
     app.world_mut().spawn((Window::default(), PrimaryWindow));
 
@@ -250,7 +250,7 @@ fn logical_keyboard_movement_supports_non_us_layouts() {
         .init_resource::<PendingLocalActions>()
         .init_resource::<ClientInputContext>()
         .init_resource::<InputDeviceActivity>()
-        .init_resource::<InputTuning>()
+        .init_resource::<ClientInputSettings>()
         .add_systems(Update, sample_local_input);
     app.world_mut().spawn((Window::default(), PrimaryWindow));
 
@@ -277,7 +277,7 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
         .insert_resource(ClientPlayableGate(true))
         .init_resource::<ClientInputContext>()
         .init_resource::<InputDeviceActivity>()
-        .init_resource::<InputTuning>()
+        .init_resource::<ClientInputSettings>()
         .add_systems(Update, sample_local_input);
     let gamepad_entity = app.world_mut().spawn(gamepad).id();
     let catalog = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
@@ -296,7 +296,9 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
         ActiveInputDevice::Gamepad(gamepad_entity)
     );
     assert_eq!(pending.move_axis, Vec2::new(0.75, 0.0));
-    assert_eq!(pending.aim_axis, Some(Vec2::new(0.0, -0.8)));
+    // Default calibration commits the normalized aim direction; facing is identical to the
+    // raw-axis contract because the authoritative decoder normalizes positive multiples.
+    assert_eq!(pending.aim_axis, Some(Vec2::new(0.0, -1.0)));
     assert!(
         pending
             .aim_distance
@@ -324,7 +326,7 @@ fn controller_sample_reaches_native_fighter_action_buffer() {
         .insert_resource(ClientPlayableGate(true))
         .init_resource::<ClientInputContext>()
         .init_resource::<InputDeviceActivity>()
-        .init_resource::<InputTuning>()
+        .init_resource::<ClientInputSettings>()
         .add_systems(Update, (sample_local_input, write_client_input).chain());
     app.world_mut().spawn((
         ActionState::<FighterInput>::default(),
@@ -342,10 +344,16 @@ fn controller_sample_reaches_native_fighter_action_buffer() {
         action.0,
         FighterInput::from_axes(
             Vec2::new(0.75, 0.0),
-            Some(Vec2::new(0.0, -0.8)),
+            Some(Vec2::new(0.0, -1.0)),
             FighterInput::PRIMARY_FIRE,
         )
     );
+    // The calibrated aim axis and the previous raw axis are positive scalar multiples, so
+    // the authoritative facing decode produces the identical rotation.
+    let tuning = crate::movement::InputTuning::default();
+    let calibrated_facing = crate::movement::committed_aim(Vec2::new(0.0, -1.0), tuning);
+    let raw_facing = crate::movement::committed_aim(Vec2::new(0.0, -0.8), tuning);
+    assert_eq!(calibrated_facing, raw_facing);
     assert_eq!(
         app.world().resource::<PendingLocalActions>().active_device,
         ActiveInputDevice::Gamepad(gamepad_entity)
@@ -548,5 +556,124 @@ fn hud_reports_connection_device_actions_and_scoreboard_state() {
     assert_eq!(
         app.world().get::<Visibility>(scoreboard),
         Some(&Visibility::Inherited)
+    );
+}
+
+#[test]
+#[allow(clippy::float_cmp)]
+fn pause_keys_adjust_calibration_only_while_paused() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ClientInputContext>()
+        .init_resource::<ClientInputSettings>()
+        .init_resource::<InputSettingsSelection>()
+        .add_systems(Update, adjust_input_settings_from_pause_keys);
+
+    // Gameplay context ignores the adjustment keys entirely.
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.press(KeyCode::BracketRight);
+    keyboard.press(KeyCode::KeyI);
+    app.update();
+    let settings = *app.world().resource::<ClientInputSettings>();
+    // Exact zero is representable; the default never applied a radial remap.
+    assert_eq!(settings.move_deadzone, 0.0);
+    assert!(!settings.invert_move_y);
+
+    *app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Paused;
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::BracketRight);
+    keyboard.press(KeyCode::KeyI);
+    app.update();
+    let settings = *app.world_mut().resource::<ClientInputSettings>();
+    assert!((settings.move_deadzone - 0.05).abs() < 1e-6);
+    assert!(settings.invert_move_y);
+
+    // Tab cycles the selected field, then reset restores validated defaults.
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::Tab);
+    keyboard.press(KeyCode::BracketRight);
+    app.update();
+    let settings = app.world_mut().resource::<ClientInputSettings>();
+    assert!((settings.aim_deadzone - 0.30).abs() < 1e-6);
+    assert!(app.world().resource::<InputSettingsSelection>().0 == CalibrationField::AimDeadzone);
+
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::KeyR);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientInputSettings>(),
+        ClientInputSettings {
+            revision: 1,
+            ..ClientInputSettings::default()
+        }
+    );
+}
+
+#[test]
+fn settings_revision_change_clears_held_and_latched_actions() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ClientInputContext>()
+        .init_resource::<InputDeviceActivity>()
+        .init_resource::<PendingLocalActions>()
+        .init_resource::<ClientInputSettings>()
+        .add_systems(Update, sample_local_input);
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+    {
+        let mut pending = app.world_mut().resource_mut::<PendingLocalActions>();
+        pending.held_buttons = FighterInput::PRIMARY_FIRE;
+        pending.latched_buttons = FighterInput::INTERACT;
+        pending.input_settings_revision = 0;
+    }
+    app.update();
+    // Held buttons are recomputed from device state each sample, but a latched action must
+    // survive while the settings revision is unchanged.
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert_eq!(pending.latched_buttons, FighterInput::INTERACT);
+    assert_eq!(pending.input_settings_revision, 0);
+
+    app.world_mut()
+        .resource_mut::<ClientInputSettings>()
+        .toggle_inversion(true);
+    app.update();
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert_eq!(pending.held_buttons, 0);
+    assert_eq!(pending.latched_buttons, 0);
+    assert_eq!(pending.input_settings_revision, 1);
+}
+
+#[test]
+fn settings_overlay_reports_calibration_and_conflicts() {
+    let mut settings = ClientInputSettings::default();
+    let lines = compose_input_settings_lines(&settings);
+    assert!(lines.len() <= 6);
+    assert!(
+        lines[0]
+            .replace("Move deadzone 0.00", "")
+            .contains("Aim deadzone 0.25")
+    );
+    assert!(lines.iter().any(|line| line.contains("Bindings OK")));
+
+    settings
+        .rebind(KeyboardAction::MoveDown, KeyCode::KeyS)
+        .expect("rebind applies");
+    settings
+        .rebind(KeyboardAction::MoveUp, KeyCode::KeyW)
+        .expect("rebind applies");
+    // Both rebinds above are defaults; force a real conflict instead.
+    settings
+        .rebind(KeyboardAction::Ultimate, KeyCode::KeyQ)
+        .expect("rebind applies");
+    let lines = compose_input_settings_lines(&settings);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Conflict: Active item, Ultimate"))
     );
 }

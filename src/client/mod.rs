@@ -12,10 +12,7 @@ use crate::{
     matchplay::{
         MatchParticipant, MatchPhase, MatchRoot, MatchState, RespawnState, SpawnProtection,
     },
-    movement::{
-        AvianNetworkPlugin, CAMERA_VERTICAL_SPAN, InputTuning, committed_aim, radial_deadzone,
-        trigger_pressed,
-    },
+    movement::{AvianNetworkPlugin, CAMERA_VERTICAL_SPAN},
     protocol::{
         BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
         ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, MatchCommand,
@@ -57,6 +54,7 @@ mod hud;
 mod input;
 mod presentation;
 mod session;
+mod settings;
 pub(crate) use assets::ClientAssetHandles;
 #[allow(clippy::wildcard_imports)]
 use input::*;
@@ -69,6 +67,10 @@ pub use session::ClientNetworkPlugin;
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
 use session::*;
+pub use settings::{
+    CalibrationField, ClientInputSettings, GamepadAction, GamepadBindings, KeyboardAction,
+    KeyboardBindings,
+};
 
 /// User-visible client connection state. Lightyear lifecycle components remain the truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -222,6 +224,7 @@ pub struct PendingLocalActions {
     pub cancel_pressed: bool,
     pub scoreboard_held: bool,
     pub action_indicator: u16,
+    pub input_settings_revision: u32,
 }
 
 #[derive(Resource, Debug)]
@@ -261,6 +264,7 @@ impl Default for PendingLocalActions {
             cancel_pressed: false,
             scoreboard_held: false,
             action_indicator: 0,
+            input_settings_revision: 0,
         }
     }
 }
@@ -348,6 +352,9 @@ struct ControllerDemoGamepad;
 
 #[derive(Component)]
 struct PauseOverlay;
+
+#[derive(Component)]
+struct InputSettingsText;
 
 #[derive(Component)]
 struct ControlsText;

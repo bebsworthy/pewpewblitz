@@ -1,6 +1,7 @@
 //! Local device sampling, render-to-fixed input bridging, and input diagnostics.
 #![allow(clippy::wildcard_imports)]
 
+use super::settings::key_code_letter;
 use super::*;
 
 pub(super) fn logical_key_pressed(keyboard: Option<&ButtonInput<Key>>, expected: &str) -> bool {
@@ -14,6 +15,10 @@ pub(super) fn logical_key_pressed(keyboard: Option<&ButtonInput<Key>>, expected:
 }
 
 /// Converts controller, keyboard, and mouse state to the shared action representation.
+///
+/// All device shaping (deadzones, aim commit, trigger hysteresis, inversion, bindings) is
+/// client-owned and applied before quantization; the server keeps validating the quantized
+/// intent without seeing physical devices.
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sample_local_input(
@@ -21,7 +26,7 @@ pub(super) fn sample_local_input(
     trace: Option<ResMut<LiveInputTrace>>,
     mut context: ResMut<ClientInputContext>,
     mut activity: ResMut<InputDeviceActivity>,
-    tuning: Res<InputTuning>,
+    settings: Res<ClientInputSettings>,
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     logical_keyboard: Option<Res<ButtonInput<Key>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
@@ -39,48 +44,57 @@ pub(super) fn sample_local_input(
         // replace that scripted state with a synthetic zero-device sample.
         return;
     }
+    // A binding or calibration change is a hard boundary for held state: a rebind must not
+    // synthesize a stuck action from the previous physical layout.
+    if pending.input_settings_revision != settings.revision {
+        pending.held_buttons = 0;
+        pending.latched_buttons = 0;
+        pending.input_settings_revision = settings.revision;
+    }
     let mouse_buttons = mouse_buttons.as_deref();
     let logical_keyboard = logical_keyboard.as_deref();
+    let binding_pressed = |code: KeyCode| -> bool {
+        keyboard.pressed(code)
+            || key_code_letter(code)
+                .is_some_and(|letter| logical_key_pressed(logical_keyboard, &letter.to_string()))
+    };
+    let bindings = settings.keyboard;
     let mut keyboard_move = Vec2::ZERO;
-    if keyboard.pressed(KeyCode::KeyA) || logical_key_pressed(logical_keyboard, "a") {
+    if binding_pressed(bindings.move_left) {
         keyboard_move.x -= 1.0;
     }
-    if keyboard.pressed(KeyCode::KeyD) || logical_key_pressed(logical_keyboard, "d") {
+    if binding_pressed(bindings.move_right) {
         keyboard_move.x += 1.0;
     }
-    if keyboard.pressed(KeyCode::KeyS) || logical_key_pressed(logical_keyboard, "s") {
+    if binding_pressed(bindings.move_down) {
         keyboard_move.y -= 1.0;
     }
-    if keyboard.pressed(KeyCode::KeyW) || logical_key_pressed(logical_keyboard, "w") {
+    if binding_pressed(bindings.move_up) {
         keyboard_move.y += 1.0;
     }
-    let keyboard_active = keyboard_move != Vec2::ZERO
-        || keyboard.any_just_pressed([
-            KeyCode::KeyQ,
-            KeyCode::KeyE,
-            KeyCode::Space,
-            KeyCode::Enter,
-            KeyCode::Escape,
-        ]);
-    let keyboard_scoreboard = keyboard.pressed(KeyCode::Tab);
+    let action_keys = [
+        bindings.active_item,
+        bindings.ultimate,
+        bindings.interact,
+        bindings.pause,
+    ];
+    let keyboard_active = keyboard_move != Vec2::ZERO || keyboard.any_just_pressed(action_keys);
+    let keyboard_scoreboard = binding_pressed(bindings.scoreboard);
     let mouse_active = mouse_motion.is_some_and(|motion| motion.delta.length_squared() > 0.0);
 
     let mut meaningful_gamepads = Vec::new();
     for (entity, gamepad) in &gamepads {
         let left = gamepad.left_stick();
         let right = gamepad.right_stick();
-        let trigger = gamepad.get(GamepadButton::RightTrigger2).unwrap_or(0.0);
-        let meaningful = left.length() >= tuning.move_deadzone
-            || right.length() >= tuning.aim_deadzone
-            || trigger >= tuning.trigger_release
-            || gamepad.any_pressed([
-                GamepadButton::LeftTrigger,
-                GamepadButton::RightTrigger,
-                GamepadButton::South,
-                GamepadButton::East,
-                GamepadButton::Select,
-                GamepadButton::Start,
-            ]);
+        let trigger = gamepad.get(settings.gamepad.primary).unwrap_or(0.0);
+        let meaningful = left.length() >= settings.move_deadzone
+            || right.length() >= settings.aim_deadzone
+            || trigger >= settings.trigger_release
+            || settings
+                .gamepad
+                .rows()
+                .iter()
+                .any(|(_, button)| gamepad.pressed(*button));
         let changed = activity
             .last_samples
             .iter()
@@ -88,19 +102,16 @@ pub(super) fn sample_local_input(
             .is_none_or(|(_, previous_left, previous_right, previous_trigger)| {
                 previous_left.distance_squared(left) > 0.0001
                     || previous_right.distance_squared(right) > 0.0001
-                    || (trigger >= tuning.trigger_release
-                        && *previous_trigger < tuning.trigger_release)
+                    || (trigger >= settings.trigger_release
+                        && *previous_trigger < settings.trigger_release)
             });
         if meaningful
             && (changed
-                || gamepad.any_just_pressed([
-                    GamepadButton::LeftTrigger,
-                    GamepadButton::RightTrigger,
-                    GamepadButton::South,
-                    GamepadButton::East,
-                    GamepadButton::Select,
-                    GamepadButton::Start,
-                ]))
+                || settings
+                    .gamepad
+                    .rows()
+                    .iter()
+                    .any(|(_, button)| gamepad.just_pressed(*button)))
         {
             activity.recent_gamepads.retain(|id| *id != entity);
             activity.recent_gamepads.push(entity);
@@ -132,8 +143,9 @@ pub(super) fn sample_local_input(
     let keyboard_mouse_active = keyboard_active
         || mouse_active
         || keyboard_scoreboard
-        || mouse_buttons
-            .is_some_and(|buttons| buttons.any_pressed([MouseButton::Left, MouseButton::Right]));
+        || mouse_buttons.is_some_and(|buttons| {
+            buttons.any_pressed([settings.mouse_primary, MouseButton::Right])
+        });
     let meaningful_gamepad = if meaningful_gamepads.is_empty() {
         None
     } else {
@@ -152,42 +164,44 @@ pub(super) fn sample_local_input(
                 if active == entity =>
             {
                 let mut buttons = 0;
-                let trigger = gamepad.get(GamepadButton::RightTrigger2).unwrap_or(0.0);
-                if trigger_pressed(
+                let trigger = gamepad.get(settings.gamepad.primary).unwrap_or(0.0);
+                if settings.trigger_is_pressed(
                     pending.held_buttons & FighterInput::PRIMARY_FIRE != 0,
                     trigger,
-                    *tuning,
                 ) {
                     buttons |= FighterInput::PRIMARY_FIRE;
                 }
-                if gamepad.pressed(GamepadButton::LeftTrigger) {
+                if gamepad.pressed(settings.gamepad.active_item) {
                     buttons |= FighterInput::ACTIVE_ITEM;
                 }
-                if gamepad.pressed(GamepadButton::RightTrigger) {
+                if gamepad.pressed(settings.gamepad.ultimate) {
                     buttons |= FighterInput::ULTIMATE;
                 }
+                let shaped_aim = right.is_finite().then(|| settings.shape_aim(right));
                 (
-                    left,
-                    right.is_finite().then_some(right),
-                    committed_aim(right, *tuning).and_then(|_| {
-                        controlled_lob_range(&fighters).map(|range| {
-                            radial_deadzone(right, tuning.aim_deadzone).length() * range
+                    settings.shape_move(left),
+                    shaped_aim.flatten(),
+                    shaped_aim
+                        .is_some()
+                        .then(|| {
+                            controlled_lob_range(&fighters)
+                                .and_then(|range| settings.shape_aim_distance(right, range))
                         })
-                    }),
+                        .flatten(),
                     buttons,
-                    gamepad.just_pressed(GamepadButton::Start),
-                    gamepad.just_pressed(GamepadButton::South),
+                    gamepad.just_pressed(settings.gamepad.pause),
+                    gamepad.just_pressed(settings.gamepad.interact),
                 )
             }
             _ => {
                 let mut buttons = 0;
-                if mouse_buttons.is_some_and(|buttons| buttons.pressed(MouseButton::Left)) {
+                if mouse_buttons.is_some_and(|buttons| buttons.pressed(settings.mouse_primary)) {
                     buttons |= FighterInput::PRIMARY_FIRE;
                 }
-                if keyboard.pressed(KeyCode::KeyQ) {
+                if binding_pressed(bindings.active_item) {
                     buttons |= FighterInput::ACTIVE_ITEM;
                 }
-                if keyboard.pressed(KeyCode::KeyE) {
+                if binding_pressed(bindings.ultimate) {
                     buttons |= FighterInput::ULTIMATE;
                 }
                 let mouse_aim = mouse_aim(&windows, &cameras, &fighters);
@@ -196,23 +210,20 @@ pub(super) fn sample_local_input(
                     mouse_aim.map(|(direction, _)| direction),
                     mouse_aim.map(|(_, distance)| distance),
                     buttons,
-                    keyboard.just_pressed(KeyCode::Escape),
-                    keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::Enter),
+                    keyboard.just_pressed(bindings.pause),
+                    keyboard.just_pressed(bindings.interact),
                 )
             }
         };
 
     pending.cancel_pressed = gamepad_sample
-        .is_some_and(|(_, _, _, gamepad)| gamepad.just_pressed(GamepadButton::East))
-        || keyboard.just_pressed(KeyCode::Escape);
+        .is_some_and(|(_, _, _, gamepad)| gamepad.just_pressed(settings.gamepad.cancel))
+        || keyboard.just_pressed(bindings.pause);
     pending.scoreboard_held = gamepad_sample
-        .is_some_and(|(_, _, _, gamepad)| gamepad.pressed(GamepadButton::Select))
-        || keyboard.pressed(KeyCode::Tab);
+        .is_some_and(|(_, _, _, gamepad)| gamepad.pressed(settings.gamepad.scoreboard))
+        || binding_pressed(bindings.scoreboard);
     pending.action_indicator = u16::from(gamepad_buttons);
-    if gamepad_interact
-        || keyboard.just_pressed(KeyCode::Space)
-        || keyboard.just_pressed(KeyCode::Enter)
-    {
+    if gamepad_interact || keyboard.just_pressed(bindings.interact) {
         pending.action_indicator |= ACTION_INTERACT;
     }
     if pending.cancel_pressed {
@@ -225,10 +236,7 @@ pub(super) fn sample_local_input(
         pending.action_indicator |= ACTION_SCOREBOARD;
     }
     apply_pause_request(&mut context, &mut pending, gamepad_pause);
-    if gamepad_interact
-        || keyboard.just_pressed(KeyCode::Space)
-        || keyboard.just_pressed(KeyCode::Enter)
-    {
+    if gamepad_interact || keyboard.just_pressed(bindings.interact) {
         pending.latched_buttons |= FighterInput::INTERACT;
     }
     pending.move_axis = move_axis;
@@ -239,10 +247,10 @@ pub(super) fn sample_local_input(
     if let Some(mut trace) = trace.filter(|trace| trace.enabled) {
         let focused = windows.iter().next().is_some_and(|window| window.focused);
         let wasd = [
-            keyboard.pressed(KeyCode::KeyW),
-            keyboard.pressed(KeyCode::KeyA),
-            keyboard.pressed(KeyCode::KeyS),
-            keyboard.pressed(KeyCode::KeyD),
+            keyboard.pressed(bindings.move_up),
+            keyboard.pressed(bindings.move_left),
+            keyboard.pressed(bindings.move_down),
+            keyboard.pressed(bindings.move_right),
         ];
         let sample = (focused, wasd, pending.move_axis, pending.active_device);
         if trace.last_sample != Some(sample) {
@@ -666,5 +674,105 @@ pub(super) fn add_controlled_input_marker(
             ActionState::<FighterInput>::default(),
             InputMarker::<FighterInput>::default(),
         ));
+    }
+}
+
+/// Selected calibration field for the pause settings overlay.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputSettingsSelection(pub CalibrationField);
+
+impl Default for InputSettingsSelection {
+    fn default() -> Self {
+        Self(CalibrationField::MoveDeadzone)
+    }
+}
+
+/// Compose the pause-overlay settings text from validated session-local state.
+#[must_use]
+pub fn compose_input_settings_lines(settings: &ClientInputSettings) -> Vec<String> {
+    let mut lines = vec![
+        format!(
+            "Move deadzone {:.2}  Aim deadzone {:.2}  Aim commit {:.2}",
+            settings.move_deadzone, settings.aim_deadzone, settings.aim_commit_threshold
+        ),
+        format!(
+            "Invert move-Y: {}   Invert aim-Y: {}",
+            if settings.invert_move_y { "on" } else { "off" },
+            if settings.invert_aim_y { "on" } else { "off" }
+        ),
+        "Tab: next field  [ ]: adjust  I/O: invert move/aim  R: reset".to_string(),
+    ];
+    let conflicts = settings.keyboard_conflicts();
+    if conflicts.is_empty() {
+        lines.push("Bindings OK".to_string());
+    } else {
+        lines.push(format!(
+            "Conflict: {}",
+            conflicts
+                .iter()
+                .map(|action| KeyboardAction::name(*action))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    lines
+}
+
+/// Adjust session-local input calibration from the pause context only. These keys never
+/// enter `FighterInput`: the authoritative match is unaffected by local settings.
+pub(super) fn adjust_input_settings_from_pause_keys(
+    context: Res<ClientInputContext>,
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    mut selection: ResMut<InputSettingsSelection>,
+    mut settings: ResMut<ClientInputSettings>,
+) {
+    if !matches!(*context, ClientInputContext::Paused) {
+        return;
+    }
+    let Some(keyboard) = keyboard else {
+        return;
+    };
+    let fields = [
+        CalibrationField::MoveDeadzone,
+        CalibrationField::AimDeadzone,
+        CalibrationField::AimCommitThreshold,
+    ];
+    if keyboard.just_pressed(KeyCode::Tab) {
+        let next = (fields
+            .iter()
+            .position(|field| *field == selection.0)
+            .map_or(0, usize::from)
+            + 1)
+            % fields.len();
+        selection.0 = fields[next];
+    }
+    if keyboard.just_pressed(KeyCode::BracketLeft) {
+        settings.adjust_calibration(selection.0, -0.05);
+    }
+    if keyboard.just_pressed(KeyCode::BracketRight) {
+        settings.adjust_calibration(selection.0, 0.05);
+    }
+    if keyboard.just_pressed(KeyCode::KeyI) {
+        settings.toggle_inversion(false);
+    }
+    if keyboard.just_pressed(KeyCode::KeyO) {
+        settings.toggle_inversion(true);
+    }
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        settings.reset_to_default();
+    }
+}
+
+pub(super) fn update_input_settings_overlay(
+    context: Res<ClientInputContext>,
+    settings: Res<ClientInputSettings>,
+    mut texts: Query<&mut Text, With<InputSettingsText>>,
+) {
+    if !matches!(*context, ClientInputContext::Paused) {
+        return;
+    }
+    let lines = compose_input_settings_lines(&settings);
+    if let Ok(mut text) = texts.single_mut() {
+        text.0 = lines.join("\n");
     }
 }

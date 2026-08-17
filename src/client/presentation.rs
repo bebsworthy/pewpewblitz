@@ -86,6 +86,17 @@ fn spawn_pause_overlay(mut commands: Commands) {
                 TextFont::from_font_size(28.0),
                 TextColor(Color::WHITE),
             ));
+            parent.spawn((
+                InputSettingsText,
+                Text::new(""),
+                TextFont::from_font_size(14.0),
+                TextColor(Color::srgb(0.75, 0.9, 1.0)),
+                TextLayout::linebreak(LineBreak::WordBoundary),
+                Node {
+                    margin: UiRect::all(px(4.0)),
+                    ..default()
+                },
+            ));
         });
 }
 

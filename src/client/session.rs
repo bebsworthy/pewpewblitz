@@ -21,7 +21,8 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<ClientPlayableGate>()
             .init_resource::<BuildSelectionState>()
             .init_resource::<MatchCommandState>()
-            .init_resource::<InputTuning>()
+            .init_resource::<ClientInputSettings>()
+            .init_resource::<InputSettingsSelection>()
             .add_systems(
                 Startup,
                 (spawn_client_connection, spawn_controller_demo_gamepad).chain(),
@@ -54,6 +55,8 @@ impl Plugin for ClientNetworkPlugin {
                     process_match_command_outcomes,
                     send_match_command,
                     update_build_selection_overlay,
+                    adjust_input_settings_from_pause_keys,
+                    update_input_settings_overlay,
                     disconnect_rejected_client,
                     observe_client_lifecycle,
                     log_replicated_roster,
