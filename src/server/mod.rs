@@ -447,6 +447,7 @@ fn process_client_hellos(
     fighters: Res<crate::combat::FighterDefinitions>,
     weapons: Res<crate::combat::WeaponDefinitions>,
     mut ids: ResMut<NextSessionIds>,
+    mut diagnostics: Option<ResMut<crate::diagnostics::ProcessDiagnosticsState>>,
     mut receivers: Query<(
         Entity,
         &RemoteId,
@@ -640,6 +641,9 @@ fn process_client_hellos(
                     session.last_outcome = Some(outcome);
                     if rejected {
                         session.phase = ServerSessionPhase::Rejected;
+                        if let Some(state) = diagnostics.as_deref_mut() {
+                            state.record_rejected_connection();
+                        }
                     }
                 }
             }
@@ -746,6 +750,7 @@ fn process_match_commands(
 
 fn enforce_session_deadlines(
     time: Res<Time<Real>>,
+    mut diagnostics: Option<ResMut<crate::diagnostics::ProcessDiagnosticsState>>,
     mut query: Query<(Entity, &mut ServerSession, Has<Disconnected>), With<LinkOf>>,
 ) {
     let now = time.elapsed();
@@ -758,6 +763,9 @@ fn enforce_session_deadlines(
             session.last_outcome = Some(JoinOutcome::Rejected {
                 reason: JoinRejection::HandshakeTimeout,
             });
+            if let Some(state) = diagnostics.as_deref_mut() {
+                state.record_rejected_connection();
+            }
             warn!(?entity, "brawler server handshake timed out");
         }
     }

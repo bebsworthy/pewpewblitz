@@ -88,3 +88,14 @@ These are un-routed, loopback, single-worker numbers from one machine and one de
 case. They set the control envelope — tick percentiles, entity/link high-water, RTT/jitter under
 each impairment profile, transport volume, report size, idle/match memory — not v2 budgets. M01
 derives routed thresholds during its own specification review, per the accepted architecture.
+
+## Post-baseline report-semantics note
+
+These reports predate the 2026-08-18 M11 review-round hardening (recorded in
+[milestone-11.md](../../milestone-11.md)). After that pass, `checkpoint_digest` /
+`first_divergence` / `dropped_messages` / `rejected_connections` / `error_count` are populated
+from each process's own evidence, and the terminal validator requires zero drops/errors/rejections
+plus cross-endpoint digest agreement. For these exact scenarios the field values are unchanged
+(`checkpoint_digest=0`, all zero counters, no participants at these exit phases), so a v2 M01
+reproduction on the hardened build remains directly comparable; only the validation strictness
+increased.

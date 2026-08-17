@@ -71,7 +71,7 @@ pub use session::ClientNetworkPlugin;
 use session::*;
 pub use settings::{
     CalibrationField, ClientInputSettings, GamepadAction, GamepadBindings, KeyboardAction,
-    KeyboardBindings,
+    KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
 
 /// User-visible client connection state. Lightyear lifecycle components remain the truth.

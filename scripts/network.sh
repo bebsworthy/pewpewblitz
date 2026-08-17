@@ -99,8 +99,10 @@ if [[ "$windowed_combat_demo" == "1" && "$windowed_controller_demo" == "1" ]]; t
 fi
 
 server_pid=""
-client_one_pid=""
-client_two_pid=""
+# Every spawned client is tracked uniformly: exit status, cleanup, and report validation
+# cover the whole 1-8 roster, not just the first two clients.
+client_pids=()
+client_done=()
 ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-server-ready.XXXXXX")"
 movement_ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-movement-ready.XXXXXX")"
 rm -f "$movement_ready_file"
@@ -116,14 +118,17 @@ if [[ -z "$combat_client_ready_dir" ]]; then
     combat_client_ready_dir_owned=1
 fi
 server_done=0
-client_one_done=0
-client_two_done=0
 
 job_is_running() {
     jobs -pr | grep -qx "$1"
 }
 
 all_clients_done() {
+    # Bash 3.2 treats expanding a declared-but-empty array as unbound under `set -u`, so
+    # every expansion of the client roster is guarded by an explicit length check.
+    if [[ "${#client_pids[@]}" -eq 0 ]]; then
+        return 0
+    fi
     for pid in "${client_pids[@]}"; do
         if [[ -n "$pid" ]] && job_is_running "$pid"; then
             return 1
@@ -162,9 +167,12 @@ cleanup() {
     # Background Brawler processes ignore terminal SIGINT so the launcher owns Ctrl-C and can
     # terminate every child deterministically. Use SIGTERM for both normal and interrupted exits.
     local signal=TERM
-    for pid in "$client_one_pid" "$client_two_pid" "$server_pid"; do
-        stop_child "$pid" "$signal"
-    done
+    if [[ "${#client_pids[@]}" -gt 0 ]]; then
+        for pid in "${client_pids[@]}"; do
+            stop_child "$pid" "$signal"
+        done
+    fi
+    stop_child "$server_pid" "$signal"
     rm -f "$ready_file"
     rm -f "$movement_ready_file"
     rm -f "$terrain_ready_file"
@@ -182,11 +190,12 @@ validate_closeout_reports() {
     if [[ -z "$diagnostics_dir" ]]; then
         return 0
     fi
-    python3 - "$diagnostics_dir" <<'PYVALIDATE'
+    python3 - "$diagnostics_dir" "$client_count" <<'PYVALIDATE'
 import sys
 from pathlib import Path
 
 directory = Path(sys.argv[1])
+client_count = int(sys.argv[2])
 required = [
     "schema_version",
     "scenario_id",
@@ -195,11 +204,24 @@ required = [
     "exit_category",
     "fixed_ticks",
     "checkpoint_digest",
+    "first_divergence",
+    "dropped_messages",
+    "rejected_connections",
+    "error_count",
 ]
-names = ["server.closeout"] + sorted(
-    path.name for path in directory.glob("client-*.closeout")
-)
-for name in names:
+expected = ["server.closeout"] + [
+    f"client-{index}.closeout" for index in range(1, client_count + 1)
+]
+present = sorted(path.name for path in directory.glob("*.closeout"))
+if present != sorted(expected):
+    sys.exit(
+        "expected exactly one closeout report per configured endpoint ("
+        + ", ".join(sorted(expected))
+        + "); found: "
+        + (", ".join(present) or "none")
+    )
+digests = set()
+for name in expected:
     path = directory / name
     if not path.is_file():
         sys.exit(f"closeout report missing: {path}")
@@ -220,6 +242,20 @@ for name in names:
         sys.exit(f"closeout report {path} missing required fields: {missing}")
     if fields.get("exit_category") != "clean-exit":
         sys.exit(f"unexpected exit category in {path}: {fields.get('exit_category')}")
+    for zero_field in ("dropped_messages", "rejected_connections", "error_count"):
+        if fields.get(zero_field) != "0":
+            sys.exit(
+                f"closeout report {path} reported {zero_field}={fields.get(zero_field)}"
+            )
+    if fields.get("first_divergence") != "none":
+        sys.exit(
+            f"closeout report {path} reported divergence: {fields.get('first_divergence')}"
+        )
+    digests.add(fields.get("checkpoint_digest", ""))
+if len(digests) > 1:
+    sys.exit(
+        "checkpoint digests diverged across endpoints: " + ", ".join(sorted(digests))
+    )
 PYVALIDATE
     printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
     if command -v shasum >/dev/null 2>&1; then
@@ -441,10 +477,9 @@ for index in $(seq 1 "$client_count"); do
             ;;
     esac
     (trap '' INT; exec "${envs[@]}" "$client_binary" "${args[@]}") &
-    client_pids+=($!)
+    client_pids+=("$!")
+    client_done+=(0)
 done
-client_one_pid="${client_pids[0]}"
-client_two_pid="${client_pids[1]:-}"
 
 start_epoch=$(date +%s)
 if [[ "$network_timeout_seconds" -gt 0 ]]; then
@@ -473,30 +508,22 @@ while :; do
         exit "$server_exit_code"
     fi
 
-    if [[ "$client_one_done" -eq 0 ]] && ! job_is_running "$client_one_pid"; then
-        if wait "$client_one_pid"; then
-            client_one_exit_code=0
-        else
-            client_one_exit_code=$?
-        fi
-        client_one_done=1
-        printf 'brawler network: client 1 exited with status %s\n' "$client_one_exit_code" >&2
-        if [[ "$client_one_exit_code" -ne 0 ]]; then
-            exit "$client_one_exit_code"
-        fi
-    fi
-
-    if [[ "$client_two_done" -eq 0 ]] && ! job_is_running "$client_two_pid"; then
-        if wait "$client_two_pid"; then
-            client_two_exit_code=0
-        else
-            client_two_exit_code=$?
-        fi
-        client_two_done=1
-        printf 'brawler network: client 2 exited with status %s\n' "$client_two_exit_code" >&2
-        if [[ "$client_two_exit_code" -ne 0 ]]; then
-            exit "$client_two_exit_code"
-        fi
+    if [[ "${#client_pids[@]}" -gt 0 ]]; then
+        for index in "${!client_pids[@]}"; do
+            if [[ "${client_done[$index]}" -eq 0 ]] && ! job_is_running "${client_pids[$index]}"; then
+                if wait "${client_pids[$index]}"; then
+                    client_exit_code=0
+                else
+                    client_exit_code=$?
+                fi
+                client_done[$index]=1
+                printf 'brawler network: client %s exited with status %s\n' \
+                    "$((index + 1))" "$client_exit_code" >&2
+                if [[ "$client_exit_code" -ne 0 ]]; then
+                    exit "$client_exit_code"
+                fi
+            fi
+        done
     fi
 
     if [[ "$headless" == "1" ]] && all_clients_done; then
@@ -535,8 +562,14 @@ while :; do
         if [[ "$terrain_assert" == "1" && -n "$terrain_report_file" && -f "$terrain_report_file" ]]; then
             cat "$terrain_report_file" >&2
         fi
-        printf 'brawler network: timed out after %s seconds; server=%s client1=%s client2=%s\n' \
-            "$network_timeout_seconds" "$server_done" "$client_one_done" "$client_two_done" >&2
+        client_status="server=$server_done"
+        if [[ "${#client_pids[@]}" -gt 0 ]]; then
+            for index in "${!client_pids[@]}"; do
+                client_status="$client_status client$((index + 1))=${client_done[$index]}"
+            done
+        fi
+        printf 'brawler network: timed out after %s seconds; %s\n' \
+            "$network_timeout_seconds" "$client_status" >&2
         exit 124
     fi
     sleep 0.1

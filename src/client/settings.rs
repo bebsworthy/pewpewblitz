@@ -12,6 +12,10 @@ use bevy::prelude::{GamepadButton, MouseButton, Resource, Vec2};
 /// Upper bound for adjustable analog calibration values.
 pub const MAX_CALIBRATION: f32 = 0.5;
 
+/// Minimum enforced gap between trigger press and release thresholds; adjustments can never
+/// collapse the hysteresis band below this.
+pub const MIN_TRIGGER_HYSTERESIS: f32 = 0.05;
+
 /// One rebindable keyboard action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KeyboardAction {
@@ -54,6 +58,25 @@ impl KeyboardAction {
         KeyboardAction::Pause,
         KeyboardAction::Scoreboard,
     ];
+}
+
+/// Modifier keys that cannot form a gameplay binding on their own.
+#[must_use]
+pub fn is_modifier_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::ControlLeft
+            | KeyCode::ControlRight
+            | KeyCode::AltLeft
+            | KeyCode::AltRight
+            | KeyCode::SuperLeft
+            | KeyCode::SuperRight
+            | KeyCode::ShiftLeft
+            | KeyCode::ShiftRight
+            | KeyCode::Fn
+            | KeyCode::FnLock
+            | KeyCode::Meta
+    )
 }
 
 /// Keyboard bindings for the implemented gameplay actions.
@@ -105,20 +128,7 @@ impl KeyboardBindings {
     /// Rebind exactly one action, rejecting modifier and unknown keys that cannot form a
     /// gameplay binding.
     pub fn rebind(&mut self, action: KeyboardAction, key: KeyCode) -> Result<(), String> {
-        if matches!(
-            key,
-            KeyCode::ControlLeft
-                | KeyCode::ControlRight
-                | KeyCode::AltLeft
-                | KeyCode::AltRight
-                | KeyCode::SuperLeft
-                | KeyCode::SuperRight
-                | KeyCode::ShiftLeft
-                | KeyCode::ShiftRight
-                | KeyCode::Fn
-                | KeyCode::FnLock
-                | KeyCode::Meta
-        ) {
+        if is_modifier_key(key) {
             return Err(format!("{key:?} cannot be bound to an action"));
         }
         match action {
@@ -137,47 +147,42 @@ impl KeyboardBindings {
 }
 
 /// The letter produced by a default binding, for logical keyboard-layout fallback.
-/// Non-letter bindings (arrows, space, tab) have no character fallback.
+///
+/// Only letter keys have a character fallback: `Key::Character` events never carry names like
+/// "tab" or "space", so mapping those bindings to their first letter would make the unrelated
+/// physical letter key trigger the action. Arrows, Space, Tab, Escape, Enter, and every other
+/// non-letter key match by physical code only.
 #[must_use]
 pub fn key_code_letter(code: KeyCode) -> Option<char> {
-    let name = match code {
-        KeyCode::KeyA => "a",
-        KeyCode::KeyB => "b",
-        KeyCode::KeyC => "c",
-        KeyCode::KeyD => "d",
-        KeyCode::KeyE => "e",
-        KeyCode::KeyF => "f",
-        KeyCode::KeyG => "g",
-        KeyCode::KeyH => "h",
-        KeyCode::KeyI => "i",
-        KeyCode::KeyJ => "j",
-        KeyCode::KeyK => "k",
-        KeyCode::KeyL => "l",
-        KeyCode::KeyM => "m",
-        KeyCode::KeyN => "n",
-        KeyCode::KeyO => "o",
-        KeyCode::KeyP => "p",
-        KeyCode::KeyQ => "q",
-        KeyCode::KeyR => "r",
-        KeyCode::KeyS => "s",
-        KeyCode::KeyT => "t",
-        KeyCode::KeyU => "u",
-        KeyCode::KeyV => "v",
-        KeyCode::KeyW => "w",
-        KeyCode::KeyX => "x",
-        KeyCode::KeyY => "y",
-        KeyCode::KeyZ => "z",
-        KeyCode::ArrowUp => "up",
-        KeyCode::ArrowDown => "down",
-        KeyCode::ArrowLeft => "left",
-        KeyCode::ArrowRight => "right",
-        KeyCode::Space => "space",
-        KeyCode::Tab => "tab",
-        KeyCode::Escape => "escape",
-        KeyCode::Enter => "enter",
-        _ => return None,
-    };
-    name.chars().next()
+    match code {
+        KeyCode::KeyA => Some('a'),
+        KeyCode::KeyB => Some('b'),
+        KeyCode::KeyC => Some('c'),
+        KeyCode::KeyD => Some('d'),
+        KeyCode::KeyE => Some('e'),
+        KeyCode::KeyF => Some('f'),
+        KeyCode::KeyG => Some('g'),
+        KeyCode::KeyH => Some('h'),
+        KeyCode::KeyI => Some('i'),
+        KeyCode::KeyJ => Some('j'),
+        KeyCode::KeyK => Some('k'),
+        KeyCode::KeyL => Some('l'),
+        KeyCode::KeyM => Some('m'),
+        KeyCode::KeyN => Some('n'),
+        KeyCode::KeyO => Some('o'),
+        KeyCode::KeyP => Some('p'),
+        KeyCode::KeyQ => Some('q'),
+        KeyCode::KeyR => Some('r'),
+        KeyCode::KeyS => Some('s'),
+        KeyCode::KeyT => Some('t'),
+        KeyCode::KeyU => Some('u'),
+        KeyCode::KeyV => Some('v'),
+        KeyCode::KeyW => Some('w'),
+        KeyCode::KeyX => Some('x'),
+        KeyCode::KeyY => Some('y'),
+        KeyCode::KeyZ => Some('z'),
+        _ => None,
+    }
 }
 
 /// Controller button bindings for the implemented gameplay actions. The primary action is
@@ -307,6 +312,8 @@ pub enum CalibrationField {
     MoveDeadzone,
     AimDeadzone,
     AimCommitThreshold,
+    TriggerPress,
+    TriggerRelease,
 }
 
 impl CalibrationField {
@@ -316,6 +323,8 @@ impl CalibrationField {
             Self::MoveDeadzone => "Move deadzone",
             Self::AimDeadzone => "Aim deadzone",
             Self::AimCommitThreshold => "Aim commit threshold",
+            Self::TriggerPress => "Trigger press",
+            Self::TriggerRelease => "Trigger release",
         }
     }
 }
@@ -395,10 +404,13 @@ impl ClientInputSettings {
         conflicts
     }
 
-    /// Reset to validated defaults and bump the revision.
+    /// Reset to validated defaults, bumping the revision from its previous value so consumers
+    /// that compare revisions still observe the change even when only one mutation ever
+    /// happened.
     pub fn reset_to_default(&mut self) {
+        let revision = self.revision.saturating_add(1);
         *self = Self::default();
-        self.revision = 1;
+        self.revision = revision;
     }
 
     /// Adjust one calibration field by a clamped step and bump the revision.
@@ -407,17 +419,28 @@ impl ClientInputSettings {
             CalibrationField::MoveDeadzone | CalibrationField::AimDeadzone => {
                 (0.0, MAX_CALIBRATION)
             }
-            CalibrationField::AimCommitThreshold => (0.0, 1.0),
+            CalibrationField::AimCommitThreshold
+            | CalibrationField::TriggerPress
+            | CalibrationField::TriggerRelease => (0.0, 1.0),
         };
         let target = match field {
             CalibrationField::MoveDeadzone => &mut self.move_deadzone,
             CalibrationField::AimDeadzone => &mut self.aim_deadzone,
             CalibrationField::AimCommitThreshold => &mut self.aim_commit_threshold,
+            CalibrationField::TriggerPress => &mut self.trigger_press,
+            CalibrationField::TriggerRelease => &mut self.trigger_release,
         };
         *target = (*target + step).clamp(limit_min, limit_max);
-        if field == CalibrationField::AimCommitThreshold {
-            self.aim_commit_threshold = self.aim_commit_threshold.max(self.aim_deadzone);
-        }
+        // Adjusting one half of a paired invariant can break the other half; restore both
+        // orderings so every reachable adjustment leaves the settings valid. Release is
+        // clamped first so the press floor can never push it above 1.0.
+        self.aim_commit_threshold = self.aim_commit_threshold.max(self.aim_deadzone);
+        self.trigger_release = self
+            .trigger_release
+            .clamp(0.0, 1.0 - MIN_TRIGGER_HYSTERESIS);
+        self.trigger_press = self
+            .trigger_press
+            .clamp(self.trigger_release + MIN_TRIGGER_HYSTERESIS, 1.0);
         self.revision = self.revision.saturating_add(1);
     }
 
@@ -436,6 +459,28 @@ impl ClientInputSettings {
         self.keyboard.rebind(action, key)?;
         self.revision = self.revision.saturating_add(1);
         Ok(())
+    }
+
+    /// Rebind the primary mouse action and bump the revision. Every physical mouse button is
+    /// a valid binding; the overlay reports any resulting conflict.
+    pub fn rebind_mouse(&mut self, button: MouseButton) {
+        self.mouse_primary = button;
+        self.revision = self.revision.saturating_add(1);
+    }
+
+    /// Rebind one controller action and bump the revision. Every digital button is valid;
+    /// analog shaping is unaffected because actions read button state, not position.
+    pub fn rebind_gamepad(&mut self, action: GamepadAction, button: GamepadButton) {
+        match action {
+            GamepadAction::Primary => self.gamepad.primary = button,
+            GamepadAction::ActiveItem => self.gamepad.active_item = button,
+            GamepadAction::Ultimate => self.gamepad.ultimate = button,
+            GamepadAction::Interact => self.gamepad.interact = button,
+            GamepadAction::Pause => self.gamepad.pause = button,
+            GamepadAction::Cancel => self.gamepad.cancel = button,
+            GamepadAction::Scoreboard => self.gamepad.scoreboard = button,
+        }
+        self.revision = self.revision.saturating_add(1);
     }
 
     /// Shape a physical movement axis into abstract intent before quantization.
@@ -645,8 +690,96 @@ mod tests {
         assert_eq!(settings.keyboard, KeyboardBindings::default());
         assert_eq!(settings.gamepad, GamepadBindings::default());
         assert!(!settings.invert_move_y && !settings.invert_aim_y);
-        assert!(settings.revision > 0);
+        // The reset itself bumps the revision from its previous value, so a consumer that
+        // already observed revision 1 still sees this change.
+        assert_eq!(settings.revision, 2);
         assert!(settings.keyboard_conflicts().is_empty());
+    }
+
+    #[test]
+    fn reset_from_a_fresh_resource_still_notifies_consumers() {
+        let mut settings = ClientInputSettings::default();
+        assert_eq!(settings.revision, 0);
+        settings.reset_to_default();
+        assert_eq!(settings.revision, 1);
+    }
+
+    #[test]
+    fn key_code_letter_has_no_fallback_for_non_letter_keys() {
+        assert_eq!(key_code_letter(KeyCode::KeyW), Some('w'));
+        for code in [
+            KeyCode::ArrowUp,
+            KeyCode::ArrowDown,
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowRight,
+            KeyCode::Space,
+            KeyCode::Tab,
+            KeyCode::Escape,
+            KeyCode::Enter,
+            KeyCode::F1,
+        ] {
+            assert_eq!(key_code_letter(code), None, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn trigger_calibration_preserves_the_hysteresis_band() {
+        let mut settings = ClientInputSettings::default();
+        // Pressing down cannot collapse into the release threshold.
+        for _ in 0..12 {
+            settings.adjust_calibration(CalibrationField::TriggerPress, -0.05);
+            assert!(settings.validate().is_ok());
+        }
+        assert!(
+            (settings.trigger_press - (settings.trigger_release + MIN_TRIGGER_HYSTERESIS)).abs()
+                < 1e-6
+        );
+
+        // Releasing up cannot cross the press threshold; pressing up saturates at 1.0.
+        // Releasing up cannot cross the press threshold, and the pair saturates at [0.95, 1.0]
+        // without ever drifting out of bounds.
+        for _ in 0..12 {
+            settings.adjust_calibration(CalibrationField::TriggerRelease, 0.05);
+            assert!(settings.validate().is_ok());
+        }
+        assert!(
+            (settings.trigger_release - (settings.trigger_press - MIN_TRIGGER_HYSTERESIS)).abs()
+                < 1e-6
+        );
+        for _ in 0..10 {
+            settings.adjust_calibration(CalibrationField::TriggerPress, 0.05);
+        }
+        assert!((settings.trigger_press - 1.0).abs() < 1e-6);
+        assert!((settings.trigger_release - (1.0 - MIN_TRIGGER_HYSTERESIS)).abs() < 1e-6);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn raising_the_aim_deadzone_keeps_the_commit_threshold_valid() {
+        let mut settings = ClientInputSettings::default();
+        settings.adjust_calibration(CalibrationField::AimDeadzone, 0.2);
+        assert!((settings.aim_deadzone - 0.45).abs() < 1e-6);
+        assert!((settings.aim_commit_threshold - 0.45).abs() < 1e-6);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn mouse_and_gamepad_rebinds_apply_and_bump_the_revision() {
+        let mut settings = ClientInputSettings::default();
+        settings.rebind_mouse(MouseButton::Right);
+        assert_eq!(settings.mouse_primary, MouseButton::Right);
+        assert_eq!(settings.revision, 1);
+
+        settings.rebind_gamepad(GamepadAction::Ultimate, GamepadButton::RightTrigger2);
+        assert_eq!(
+            settings.gamepad_conflicts(),
+            vec![GamepadAction::Primary, GamepadAction::Ultimate]
+        );
+        assert_eq!(settings.revision, 2);
+
+        settings.rebind_gamepad(GamepadAction::Ultimate, GamepadButton::North);
+        assert!(settings.gamepad_conflicts().is_empty());
+        assert_eq!(settings.revision, 3);
     }
 
     #[test]

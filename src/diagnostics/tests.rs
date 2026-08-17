@@ -233,7 +233,122 @@ fn failure_records_are_bounded_and_render_deterministically() {
         .iter()
         .find(|line| line.starts_with("message="))
         .expect("message line exists");
-    assert!(truncated_line.len() <= "message=".len() + failure::MAX_FAILURE_MESSAGE_BYTES + 3);
+    assert!(
+        truncated_line.len() <= "message=".len() + failure::MAX_FAILURE_MESSAGE_BYTES,
+        "the ellipsis must fit inside the declared byte bound"
+    );
+}
+
+#[test]
+fn participant_identity_passes_manifest_validation() {
+    use crate::builds::{BuildPresetId, BuildRecipeFingerprint, BuildRevision, SelectedBuild};
+
+    let builds = [
+        SelectedBuild {
+            source_build_preset_id: Some(BuildPresetId(3)),
+            recipe_fingerprint: BuildRecipeFingerprint(u64::MAX),
+            revision: BuildRevision(u16::MAX),
+        },
+        SelectedBuild {
+            source_build_preset_id: None,
+            recipe_fingerprint: BuildRecipeFingerprint(0),
+            revision: BuildRevision(0),
+        },
+    ];
+    for build in &builds {
+        let mut manifest = valid_manifest();
+        manifest.participants = vec![ManifestParticipant {
+            player_id: 1,
+            build_identity: process::participant_build_identity(build),
+        }];
+        assert!(
+            manifest.validate().is_ok(),
+            "identity {} must satisfy the manifest contract",
+            manifest.participants[0].build_identity
+        );
+    }
+}
+
+#[test]
+fn failure_messages_truncate_on_utf8_boundaries_and_never_exceed_the_byte_bound() {
+    // Each character is three bytes long, so a character-indexed truncation would keep up
+    // to three times the declared byte limit.
+    let multibyte = ProcessFailureRecordV1::new(
+        FailureCategory::VerificationFailed,
+        "é".repeat(failure::MAX_FAILURE_MESSAGE_BYTES),
+    );
+    assert!(multibyte.message.len() <= failure::MAX_FAILURE_MESSAGE_BYTES);
+    for line in multibyte.to_report_lines() {
+        assert!(!line.contains('\n'));
+    }
+
+    let exact = ProcessFailureRecordV1::new(
+        FailureCategory::Timeout,
+        "x".repeat(failure::MAX_FAILURE_MESSAGE_BYTES),
+    );
+    assert_eq!(exact.message.len(), failure::MAX_FAILURE_MESSAGE_BYTES);
+    assert!(!exact.message.ends_with("..."));
+}
+
+#[test]
+fn failure_messages_encode_report_separators() {
+    let hostile = ProcessFailureRecordV1::new(
+        FailureCategory::ShutdownIncomplete,
+        "stage=world\nsecond=line\rpercent=100%",
+    );
+    let lines = hostile.to_report_lines();
+    // The record renders as exactly one line per field; separators are percent-encoded so
+    // no embedded newline or '=' can corrupt key=value parsing.
+    assert_eq!(lines.len(), 8);
+    assert_eq!(
+        lines
+            .iter()
+            .find(|line| line.starts_with("message="))
+            .expect("message line exists"),
+        "message=stage%3Dworld%0Asecond%3Dline%0Dpercent%3D100%25"
+    );
+    let control = ProcessFailureRecordV1::new(FailureCategory::Panic, "a\tb");
+    assert_eq!(control.message, "a b");
+}
+
+#[test]
+fn checkpoint_digest_requires_identical_names_and_snapshots() {
+    use crate::combat::CombatStateSnapshot;
+    use std::collections::BTreeMap;
+
+    let snapshot = |tick: u64| CombatStateSnapshot {
+        authoritative_tick: tick,
+        fighters: Vec::new(),
+        projectiles: Vec::new(),
+    };
+    let mut left: BTreeMap<String, CombatStateSnapshot> = BTreeMap::new();
+    left.insert("defeat".to_string(), snapshot(42));
+    left.insert("reset".to_string(), snapshot(90));
+    let mut right = left.clone();
+    let (left_digest, count) = process::checkpoint_evidence_digest(&left);
+    assert_eq!(count, 2);
+    assert_eq!(
+        process::checkpoint_evidence_digest(&right),
+        (left_digest, 2)
+    );
+
+    right.insert("active_slow".to_string(), snapshot(7));
+    assert_ne!(
+        process::checkpoint_evidence_digest(&right).0,
+        left_digest,
+        "an extra unmatched checkpoint must change the digest"
+    );
+
+    right.remove("active_slow");
+    right.insert("reset".to_string(), snapshot(91));
+    assert_ne!(
+        process::checkpoint_evidence_digest(&right).0,
+        left_digest,
+        "a divergent snapshot payload must change the digest"
+    );
+
+    let empty: BTreeMap<String, CombatStateSnapshot> = BTreeMap::new();
+    assert_eq!(process::checkpoint_evidence_digest(&empty), (0, 0));
 }
 
 #[test]

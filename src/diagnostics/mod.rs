@@ -14,6 +14,8 @@ pub use failure::{
 };
 #[cfg(feature = "client")]
 pub use overlay::ClientDiagnosticsOverlayPlugin;
+#[cfg(feature = "server")]
+pub(crate) use process::ProcessDiagnosticsState;
 pub use process::{
     DiagnosticsSet, ProcessDiagnosticsPlugin, ProcessDiagnosticsSettings, TransportCounters,
     percentile_micros,

@@ -10,8 +10,8 @@
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the accepted v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
-| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user |
-| Verification | Green after every slice through `9131095`: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (213), `just test-server` (197), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs with validated reports |
+| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2) was remediated in full — see the review-round evidence below |
+| Verification | Green after every slice through `9131095`, and again after the review-round remediation: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (226), `just test-server` (201), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry real checkpoint digests, zero drop/error/rejection counters, and cross-endpoint digest agreement |
 | User playtest | Handoff delivered 2026-08-17 (see "Slice 7 — supervised playtest handoff"); awaiting physical controller/keyboard, audio, HUD/layout, and pacing observations |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -970,8 +970,10 @@ Controls: build selection Left/Right or A/D (D-pad/left stick + South on control
 Up/Down + Left/Right with Escape/East back; Space/Enter/South readies and requests the next match
 after the completed-phase lock. Play: WASD move, mouse aim, mouse-left fire, E ultimate, hold Tab
 (or Select) for the roster scoreboard; controller: left stick move, right stick aim, right trigger
-fire, right bumper ultimate, Start pause. The client settings UI (Slice 2) provides bounded
-remapping/calibration and pause settings to exercise alongside the defaults.
+fire, right bumper ultimate, Start pause. The client settings UI (Slice 2, completed by the
+review-round remediation) provides bounded remapping/calibration in the pause overlay: Tab or
+D-pad cycles the 22 rows, brackets or D-pad adjust calibration (including trigger thresholds),
+B or South rebinds the selected row from the next key/mouse/pad press, I/O invert, R resets.
 
 Scenario matrix for the pass (record aspect ratio, device, profile, and any closeout reports):
 
@@ -994,6 +996,62 @@ not measurable headless. Requested observations: controller parity and deadzone 
 backlog), perceptual audio balance and cue distinguishability (M09 backlog), HUD legibility/layout
 on the real display (M09 backlog), counterplay readability under fire, match-length pacing, and
 terrain readability after destruction.
+
+### Code-review round remediation (2026-08-18)
+
+A post-handoff review round filed seven findings (three P1, four P2); all were remediated in one
+pass on top of the delivered tree, with the full canonical gate set and fresh closeout-instrumented
+runs re-verified afterward.
+
+- **P1 — network.sh client supervision (uniform roster handling).** Exit-status checking,
+  termination, and the timeout summary now cover every spawned client 1–8 through `client_pids` /
+  `client_done` arrays (clients 1 and 2 previously had dedicated handling; 3–8 could fail
+  unobserved and outlive a timeout or interrupt). Every array expansion is length-guarded because
+  macOS bash 3.2 treats empty-array expansion as unbound under `set -u`; the early-exit cleanup
+  path was exercised with a deliberately invalid `--bind`. Closeout validation now expects exactly
+  one report per configured endpoint (`server.closeout` + `client-1..N`) and fails on missing or
+  extra `*.closeout` files instead of globbing whatever exists.
+- **P1 — closeout reports proved field presence, not convergence.** `checkpoint_digest` is now the
+  FNV digest of the process's own recorded checkpoints (`name:encoded-snapshot`, ordered; empty
+  evidence stays 0), `manifest.checkpoint_count` reflects the observed count, the client reports
+  the first expected checkpoint it never reproduced as `first_divergence`, `dropped_messages`
+  sums the existing drop telemetry (client cue-stream drops; server `CombatTelemetry` drops),
+  `error_count` counts observed error exits, and `rejected_connections` is incremented at both
+  server rejection sites (join refusals and handshake deadlines). The terminal validator requires
+  zero drops/errors/rejections, `first_divergence=none`, and identical `checkpoint_digest` across
+  every endpoint. A combat-assert closeout run then surfaced a latent producer bug — the server's
+  participant identity embedded `=` separators its own manifest validation rejects, so server
+  reports were silently never written whenever fighters with selected builds were alive at exit
+  (all prior matrix runs exited in phases where participants were empty, masking it); identities
+  now use `:` separators with a regression test. Verified live: a combat run shows five checkpoints
+  and one identical digest on the server and both clients, and the four-client Hot Zone run
+  validates five exact reports.
+- **P1 — pause settings UI had no rebinding path.** The overlay now exposes all 22 rows (five
+  calibration values including trigger press/release, nine keyboard actions, mouse primary, seven
+  controller actions). `B` (or pad South on pad rows) arms rebind listening; the next non-modifier
+  key, mouse button, or pad button commits, with B/East cancelling and modifier presses refused.
+  Trigger thresholds adjust with the release-press hysteresis enforced (`MIN_TRIGGER_HYSTERESIS`
+  0.05, saturating at [0.95, 1.0]). Controller parity: D-pad navigates and adjusts, South arms pad
+  rebinds. While listening, pause/cancel/interact/scoreboard edges are suppressed in sampling so
+  capturing a binding cannot unpause or latch actions mid-rebind (notably when binding Escape).
+- **P2 — `reset_to_default` revision.** Reset now bumps from the previous revision instead of
+  hard-coding 1, so a consumer that already observed revision 1 still sees the change.
+- **P2 — `key_code_letter` cross-talk.** Non-letter keys (arrows, Space, Tab, Escape, Enter, F-keys)
+  no longer fall back to their names' first letter, which made the physical T key trigger Tab-bound
+  actions; letters keep the logical-layout fallback and everything else matches by physical code.
+- **P2 — builds/server.rs module-wide lint allows.** The `needless_pass_by_value`/`type_complexity`
+  allowances moved from the module to `process_build_selection` itself with an ownership rationale.
+- **P2 — failure-record bounds.** Messages are percent-encoded for `%`, `=`, and newlines (other
+  control characters collapse to spaces) and truncated on a UTF-8 boundary with the ellipsis inside
+  the declared 512-byte bound; multibyte messages can no longer exceed it by 3×.
+
+Verification after remediation: `just fmt-check`, `just clippy-client`, `just clippy-server`,
+`just server-features`, `just check` (zero warnings across lanes), `just test-client` (226),
+`just test-server` (201), `just test-network` (77), `just test-performance` (14),
+`just network-smoke`, `just prediction-comparison` (6), `git diff --check`; live
+closeout-instrumented movement, combat-assert (nonzero cross-endpoint digests + participant rows),
+and four-client Hot Zone runs with validated reports; validator negative paths (extra report,
+divergent digest) and the early-exit cleanup checked directly.
 
 ## Verification plan
 

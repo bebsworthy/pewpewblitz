@@ -23,7 +23,6 @@ pub struct ProcessDiagnosticsSettings {
     pub started_at: SystemTime,
     pub started_instant: Instant,
     pub end_reason: String,
-    pub rejected_connections: u64,
 }
 
 impl Default for ProcessDiagnosticsSettings {
@@ -34,7 +33,6 @@ impl Default for ProcessDiagnosticsSettings {
             started_at: SystemTime::now(),
             started_instant: Instant::now(),
             end_reason: "app-exit".to_string(),
-            rejected_connections: 0,
         }
     }
 }
@@ -79,7 +77,7 @@ pub(crate) struct ProcessDiagnosticsState {
     terminal_entities: Option<u32>,
     terminal_links: Option<u32>,
     pub(crate) transport: TransportCounters,
-    dropped_messages: u64,
+    rejected_connections: u64,
     error_count: u64,
     report_written: bool,
 }
@@ -98,10 +96,19 @@ impl Default for ProcessDiagnosticsState {
             terminal_entities: None,
             terminal_links: None,
             transport: TransportCounters::default(),
-            dropped_messages: 0,
+            rejected_connections: 0,
             error_count: 0,
             report_written: false,
         }
+    }
+}
+
+impl ProcessDiagnosticsState {
+    /// Count one refused session so the closeout report can prove zero rejections instead
+    /// of merely carrying the field. Called from the server's rejection paths only.
+    #[cfg(feature = "server")]
+    pub(crate) fn record_rejected_connection(&mut self) {
+        self.rejected_connections = self.rejected_connections.saturating_add(1);
     }
 }
 
@@ -161,10 +168,18 @@ fn finish_fixed_tick_observation(mut state: ResMut<ProcessDiagnosticsState>) {
 }
 
 fn observe_process_counts(
+    mut exits: MessageReader<AppExit>,
     entities: &bevy::ecs::entity::Entities,
     links: Query<(), With<Link>>,
     mut state: ResMut<ProcessDiagnosticsState>,
 ) {
+    // Every observed error exit is one failed check or lifecycle path; the closeout report
+    // uses this count to prove zero errors rather than merely carrying the field.
+    for exit in exits.read() {
+        if exit.is_error() {
+            state.error_count = state.error_count.saturating_add(1);
+        }
+    }
     let entity_count = entities.len();
     let link_count = u32::try_from(links.iter().count()).unwrap_or(u32::MAX);
     state.entity_high_water = state.entity_high_water.max(entity_count);
@@ -244,9 +259,94 @@ fn duration_to_micros(duration: Duration) -> u32 {
     u32::try_from(duration.as_micros()).unwrap_or(u32::MAX)
 }
 
+/// Convergence evidence derived from the process's own checkpoint and drop telemetry. The
+/// defaults are what a run with no recorded scenario checkpoints reports.
+#[derive(Default)]
+struct CloseoutEvidence {
+    checkpoint_digest: u64,
+    observed_checkpoints: usize,
+    first_divergence: Option<String>,
+    dropped_messages: u64,
+}
+
+/// The server is authoritative: it digests the checkpoints it recorded and sums its own
+/// bounded-evidence drop counters. It reports no divergence of its own.
+#[cfg(feature = "server")]
+fn server_closeout_evidence(
+    evidence: &crate::combat::CombatEvidenceSnapshots,
+    telemetry: Option<&crate::combat::CombatTelemetry>,
+) -> CloseoutEvidence {
+    let (checkpoint_digest, observed_checkpoints) =
+        checkpoint_evidence_digest(&evidence.checkpoints);
+    let dropped_messages = telemetry.map_or(0, |telemetry| {
+        telemetry
+            .dropped_cues
+            .saturating_add(telemetry.dropped_records)
+            .saturating_add(telemetry.dropped_accepted_shot_timestamps)
+    });
+    CloseoutEvidence {
+        checkpoint_digest,
+        observed_checkpoints,
+        first_divergence: None,
+        dropped_messages,
+    }
+}
+
+/// The client is the converging endpoint: it digests the checkpoints it reproduced, sums
+/// its dropped cue counters, and labels the first expected checkpoint it never matched.
+#[cfg(feature = "client")]
+fn client_closeout_evidence(
+    observation: &crate::combat::client::ClientCombatObservation,
+) -> CloseoutEvidence {
+    let (checkpoint_digest, observed_checkpoints) =
+        checkpoint_evidence_digest(&observation.checkpoints);
+    let dropped_messages = observation
+        .dropped_cue_stream
+        .saturating_add(observation.dropped_cue_timestamps);
+    let first_divergence = observation.expected_checkpoints.first().map(|unmatched| {
+        format!(
+            "checkpoint {} unmatched at tick {}",
+            unmatched.checkpoint.as_str(),
+            unmatched.snapshot.authoritative_tick
+        )
+    });
+    CloseoutEvidence {
+        checkpoint_digest,
+        observed_checkpoints,
+        first_divergence,
+        dropped_messages,
+    }
+}
+
+/// Digest over a process's recorded checkpoint evidence: ordered `name:encoded-snapshot`
+/// pairs, so equal digests across endpoints prove both checkpoint sets and payloads agree.
+pub(super) fn checkpoint_evidence_digest(
+    checkpoints: &std::collections::BTreeMap<String, crate::combat::CombatStateSnapshot>,
+) -> (u64, usize) {
+    if checkpoints.is_empty() {
+        // Zero is reserved for "no checkpoint evidence observed", so idle runs never carry
+        // the digest of an empty set.
+        return (0, 0);
+    }
+    let mut values = Vec::with_capacity(checkpoints.len());
+    for (name, snapshot) in checkpoints {
+        let encoded = crate::combat::encode_state_snapshot(snapshot).unwrap_or_default();
+        values.push(format!("{name}:{encoded}"));
+    }
+    let count = values.len();
+    let refs: Vec<&str> = values.iter().map(String::as_str).collect();
+    (super::stable_digest(&refs), count)
+}
+
 // Bevy system parameters are owned by the scheduling runtime; `Res` cannot be borrowed here.
-// The fighter read observes only stable wire identities for the manifest participant rows.
-#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+// The fighter read observes only stable wire identities for the manifest participant rows,
+// and the role-gated evidence parameters are how one finalizer serves both role lanes.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    reason = "every parameter is a Bevy system parameter owned by the schedule runtime; the role-gated evidence reads keep one finalization phase instead of duplicated per-role systems"
+)]
 fn finalize_closeout_report(
     mut exits: MessageReader<AppExit>,
     settings: Res<ProcessDiagnosticsSettings>,
@@ -258,6 +358,11 @@ fn finalize_closeout_report(
             (&crate::protocol::PlayerId, &crate::builds::SelectedBuild),
             With<crate::protocol::Fighter>,
         >,
+    >,
+    #[cfg(feature = "server")] server_evidence: Option<Res<crate::combat::CombatEvidenceSnapshots>>,
+    #[cfg(feature = "server")] combat_telemetry: Option<Res<crate::combat::CombatTelemetry>>,
+    #[cfg(feature = "client")] client_observation: Option<
+        Res<crate::combat::client::ClientCombatObservation>,
     >,
 ) {
     if !state.enabled || state.report_written {
@@ -278,6 +383,24 @@ fn finalize_closeout_report(
     if let Some(content) = content {
         manifest.content_fingerprint = content.0;
     }
+    // Checkpoint convergence evidence comes from the process's own recorded scenario
+    // checkpoints, so the digest and divergence fields reflect observed gameplay rather
+    // than schema presence. Each App registers only its own role's evidence resources, so
+    // sequential role resolution stays correct even in both-features test builds.
+    #[cfg_attr(not(any(feature = "server", feature = "client")), allow(unused_mut))]
+    let mut evidence = CloseoutEvidence::default();
+    #[cfg(feature = "server")]
+    if let Some(server) = server_evidence.as_deref() {
+        evidence = server_closeout_evidence(server, combat_telemetry.as_deref());
+    }
+    #[cfg(feature = "client")]
+    if let Some(observation) = client_observation.as_deref() {
+        evidence = client_closeout_evidence(observation);
+    }
+    if evidence.observed_checkpoints > 0 {
+        manifest.checkpoint_count =
+            u32::try_from(evidence.observed_checkpoints).unwrap_or(u32::MAX);
+    }
     if let Some(fighters) = fighters
         && manifest.participants.is_empty()
     {
@@ -285,12 +408,7 @@ fn finalize_closeout_report(
             .iter()
             .map(|(player, build)| super::ManifestParticipant {
                 player_id: player.0,
-                build_identity: format!(
-                    "preset={:?} fingerprint={} revision={}",
-                    build.source_build_preset_id.map_or(0, |id| id.0),
-                    build.recipe_fingerprint.0,
-                    build.revision.0
-                ),
+                build_identity: participant_build_identity(build),
             })
             .collect();
         participants.sort_unstable_by_key(|participant| participant.player_id);
@@ -325,10 +443,10 @@ fn finalize_closeout_report(
         packets_received: state.transport.packets_received,
         channel_messages_sent: state.transport.channel_messages_sent,
         channel_messages_received: state.transport.channel_messages_received,
-        checkpoint_digest: 0,
-        first_divergence: None,
-        dropped_messages: state.dropped_messages,
-        rejected_connections: settings.rejected_connections,
+        checkpoint_digest: evidence.checkpoint_digest,
+        first_divergence: evidence.first_divergence,
+        dropped_messages: evidence.dropped_messages,
+        rejected_connections: state.rejected_connections,
         error_count: state.error_count,
     };
     if let Err(error) = report.validate() {
@@ -343,6 +461,18 @@ fn finalize_closeout_report(
             bevy::log::info!(path = %path.display(), "closeout report written");
         }
     }
+}
+
+/// Bounded, separator-free identity for one manifest participant row. `:` separates the
+/// fields because the manifest validator rejects `=` and newlines inside identity values;
+/// the worst case (`u64` fingerprint, `u16` ids) stays far under the identity bound.
+pub(super) fn participant_build_identity(build: &crate::builds::SelectedBuild) -> String {
+    format!(
+        "preset:{} fingerprint:{} revision:{}",
+        build.source_build_preset_id.map_or(0, |id| u64::from(id.0)),
+        build.recipe_fingerprint.0,
+        u64::from(build.revision.0)
+    )
 }
 
 fn system_time_micros(when: SystemTime) -> u64 {

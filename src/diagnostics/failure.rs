@@ -67,17 +67,40 @@ pub struct ProcessFailureRecordV1 {
     pub unix_micros: u64,
 }
 
+/// Percent-encode the characters that would corrupt single-line `key=value` report fields.
+/// The encoding is deterministic and reversible, and never introduces a raw separator.
+fn sanitize_message_value(message: &str) -> String {
+    let mut sanitized = String::with_capacity(message.len());
+    for character in message.chars() {
+        match character {
+            '%' => sanitized.push_str("%25"),
+            '=' => sanitized.push_str("%3D"),
+            '\n' => sanitized.push_str("%0A"),
+            '\r' => sanitized.push_str("%0D"),
+            control if u32::from(control) < 0x20 || control == '\u{7f}' => sanitized.push(' '),
+            other => sanitized.push(other),
+        }
+    }
+    sanitized
+}
+
+/// Truncate to the byte bound on a valid UTF-8 boundary, reserving room for the ellipsis so
+/// the final message never exceeds `MAX_FAILURE_MESSAGE_BYTES`.
+fn truncate_message_bytes(message: String) -> String {
+    if message.len() <= MAX_FAILURE_MESSAGE_BYTES {
+        return message;
+    }
+    let mut end = MAX_FAILURE_MESSAGE_BYTES - 3;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &message[..end])
+}
+
 impl ProcessFailureRecordV1 {
     #[must_use]
     pub fn new(category: FailureCategory, message: impl Into<String>) -> Self {
-        let mut message = message.into();
-        if message.len() > MAX_FAILURE_MESSAGE_BYTES {
-            let truncated = &message[..message
-                .char_indices()
-                .nth(MAX_FAILURE_MESSAGE_BYTES)
-                .map_or(message.len(), |(index, _)| index)];
-            message = format!("{truncated}...");
-        }
+        let message = truncate_message_bytes(sanitize_message_value(&message.into()));
         Self {
             schema_version: FAILURE_SCHEMA_VERSION,
             category,

@@ -3,11 +3,6 @@
 //! This is build/session authority, not endpoint composition: the system resets input
 //! epochs, resolves a server-owned candidate, cleans deployables and transients, installs
 //! the loadout and runtime state, records telemetry, and responds idempotently.
-#![allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "the multi-receiver session query and multi-field fighter install query mirror the server composition the transaction moved from"
-)]
 
 use crate::combat::{ActiveEffects, WeaponCatalogResource, WeaponPhase, WeaponState};
 use crate::matchplay::{MatchParticipant, MatchPhase, MatchRoot, MatchState};
@@ -27,7 +22,13 @@ use super::{BuildCatalogResource, BuildResolutionError, BuildTelemetry, resolve_
 
 /// Resolve a bounded build request against server-owned catalogs and the current waiting
 /// match. One system by design: the transaction is atomic within the fixed Update step.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the multi-receiver session query and multi-field fighter install query are Bevy system parameters owned by the schedule runtime, and the transaction is deliberately atomic in one fixed Update step"
+)]
 pub fn process_build_selection(
     mut commands: Commands,
     builds: Res<BuildCatalogResource>,

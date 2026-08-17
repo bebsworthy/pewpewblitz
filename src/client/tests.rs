@@ -586,7 +586,7 @@ fn pause_keys_adjust_calibration_only_while_paused() {
     keyboard.press(KeyCode::BracketRight);
     keyboard.press(KeyCode::KeyI);
     app.update();
-    let settings = *app.world_mut().resource::<ClientInputSettings>();
+    let settings = *app.world().resource::<ClientInputSettings>();
     assert!((settings.move_deadzone - 0.05).abs() < 1e-6);
     assert!(settings.invert_move_y);
 
@@ -596,21 +596,205 @@ fn pause_keys_adjust_calibration_only_while_paused() {
     keyboard.press(KeyCode::Tab);
     keyboard.press(KeyCode::BracketRight);
     app.update();
-    let settings = app.world_mut().resource::<ClientInputSettings>();
+    let settings = *app.world().resource::<ClientInputSettings>();
     assert!((settings.aim_deadzone - 0.30).abs() < 1e-6);
-    assert!(app.world().resource::<InputSettingsSelection>().0 == CalibrationField::AimDeadzone);
+    assert_eq!(
+        app.world().resource::<InputSettingsSelection>().field,
+        InputSettingsField::Calibration(CalibrationField::AimDeadzone)
+    );
 
     let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
     keyboard.reset_all();
     keyboard.press(KeyCode::KeyR);
     app.update();
+    // Two calibration adjustments and one inversion preceded the reset; the reset bumps the
+    // revision from that previous value so consumers never miss the change.
     assert_eq!(
         *app.world().resource::<ClientInputSettings>(),
         ClientInputSettings {
-            revision: 1,
+            revision: 4,
             ..ClientInputSettings::default()
         }
     );
+}
+
+#[test]
+fn pause_trigger_calibration_keeps_the_hysteresis_band() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .insert_resource(ClientInputContext::Paused)
+        .init_resource::<ClientInputSettings>()
+        .init_resource::<InputSettingsSelection>()
+        .add_systems(Update, adjust_input_settings_from_pause_keys);
+
+    // Cycle to Trigger press (three fields after Move deadzone) and lower it repeatedly.
+    for _ in 0..3 {
+        let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keyboard.reset_all();
+        keyboard.press(KeyCode::Tab);
+        app.update();
+    }
+    assert_eq!(
+        app.world().resource::<InputSettingsSelection>().field,
+        InputSettingsField::Calibration(CalibrationField::TriggerPress)
+    );
+    for _ in 0..8 {
+        let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keyboard.reset_all();
+        keyboard.press(KeyCode::BracketLeft);
+        app.update();
+    }
+    let settings = *app.world().resource::<ClientInputSettings>();
+    assert!(
+        (settings.trigger_press - (settings.trigger_release + MIN_TRIGGER_HYSTERESIS)).abs() < 1e-6
+    );
+    assert!(settings.validate().is_ok());
+}
+
+#[test]
+fn pause_rebind_flow_captures_the_next_physical_key_press() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .insert_resource(ClientInputContext::Paused)
+        .init_resource::<ClientInputSettings>()
+        .init_resource::<InputSettingsSelection>()
+        .add_systems(Update, adjust_input_settings_from_pause_keys);
+    app.world_mut()
+        .resource_mut::<InputSettingsSelection>()
+        .field = InputSettingsField::Keyboard(KeyboardAction::Ultimate);
+
+    // B arms rebind listening for the selected binding row.
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.press(KeyCode::KeyB);
+    app.update();
+    assert!(app.world().resource::<InputSettingsSelection>().listening);
+
+    // The next non-modifier key commits the rebind and ends listening.
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::KeyP);
+    app.update();
+    let settings = *app.world().resource::<ClientInputSettings>();
+    assert_eq!(settings.keyboard.ultimate, KeyCode::KeyP);
+    assert!(!app.world().resource::<InputSettingsSelection>().listening);
+    assert_eq!(settings.revision, 1);
+
+    // While listening, B cancels instead of binding, and modifiers are refused.
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::KeyB);
+    app.update();
+    assert!(app.world().resource::<InputSettingsSelection>().listening);
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::ShiftLeft);
+    app.update();
+    assert!(
+        app.world().resource::<InputSettingsSelection>().listening,
+        "a modifier press must not commit a binding"
+    );
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::KeyB);
+    app.update();
+    assert!(!app.world().resource::<InputSettingsSelection>().listening);
+    assert_eq!(
+        app.world()
+            .resource::<ClientInputSettings>()
+            .keyboard
+            .ultimate,
+        KeyCode::KeyP
+    );
+}
+
+#[test]
+fn pause_rebind_captures_mouse_and_gamepad_buttons() {
+    let mut gamepad = Gamepad::default();
+    gamepad.digital_mut().press(GamepadButton::North);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .insert_resource(ClientInputContext::Paused)
+        .init_resource::<ClientInputSettings>()
+        .init_resource::<InputSettingsSelection>()
+        .add_systems(Update, adjust_input_settings_from_pause_keys);
+
+    // Mouse primary rebinds from the next mouse button press.
+    app.world_mut()
+        .resource_mut::<InputSettingsSelection>()
+        .field = InputSettingsField::MousePrimary;
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.press(KeyCode::KeyB);
+    app.update();
+    // Clear the arming key's just-pressed edge so only the mouse press can commit or cancel.
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .reset_all();
+    let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+    mouse.press(MouseButton::Right);
+    app.update();
+    assert_eq!(
+        app.world().resource::<ClientInputSettings>().mouse_primary,
+        MouseButton::Right
+    );
+
+    // A gamepad row armed from the keyboard captures the next controller button press.
+    app.world_mut()
+        .resource_mut::<InputSettingsSelection>()
+        .field = InputSettingsField::Gamepad(GamepadAction::Ultimate);
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.reset_all();
+    keyboard.press(KeyCode::KeyB);
+    app.update();
+    app.world_mut().spawn(gamepad);
+    // Clear the arming key's just-pressed edge so only the pad press can commit or cancel.
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .reset_all();
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<ClientInputSettings>()
+            .gamepad
+            .ultimate,
+        GamepadButton::North
+    );
+    assert!(!app.world().resource::<InputSettingsSelection>().listening);
+}
+
+#[test]
+fn capturing_a_rebind_suppresses_pause_cancel_and_latched_actions() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .insert_resource(ClientInputContext::Paused)
+        .init_resource::<PendingLocalActions>()
+        .init_resource::<InputDeviceActivity>()
+        .init_resource::<ClientInputSettings>()
+        .insert_resource(InputSettingsSelection {
+            field: InputSettingsField::Keyboard(KeyboardAction::Ultimate),
+            listening: true,
+        })
+        .add_systems(Update, sample_local_input);
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+    // Escape is the default pause binding; while listening it must neither unpause nor
+    // register as cancel, so the capture can bind it if the user chooses.
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.press(KeyCode::Escape);
+    keyboard.press(KeyCode::Space);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientInputContext>(),
+        ClientInputContext::Paused
+    );
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert!(!pending.cancel_pressed);
+    assert_eq!(pending.action_indicator & ACTION_PAUSE, 0);
+    assert_eq!(pending.latched_buttons, 0);
 }
 
 #[test]
@@ -649,31 +833,59 @@ fn settings_revision_change_clears_held_and_latched_actions() {
 }
 
 #[test]
-fn settings_overlay_reports_calibration_and_conflicts() {
+fn settings_overlay_reports_calibration_bindings_and_conflicts() {
     let mut settings = ClientInputSettings::default();
-    let lines = compose_input_settings_lines(&settings);
-    assert!(lines.len() <= 6);
+    let selection = InputSettingsSelection::default();
+    let lines = compose_input_settings_lines(&settings, selection);
+    assert!(lines.len() <= 8);
     assert!(
-        lines[0]
-            .replace("Move deadzone 0.00", "")
-            .contains("Aim deadzone 0.25")
+        lines[0].replace("move=[0.00]", "").contains("aim=0.25")
+            && lines[0].contains("trigger=0.55/0.45")
     );
     assert!(lines.iter().any(|line| line.contains("Bindings OK")));
+    let mouse_selected = InputSettingsSelection {
+        field: InputSettingsField::MousePrimary,
+        listening: false,
+    };
+    assert!(
+        compose_input_settings_lines(&settings, mouse_selected)
+            .iter()
+            .any(|line| line.contains("Mouse [Left]"))
+    );
 
-    settings
-        .rebind(KeyboardAction::MoveDown, KeyCode::KeyS)
-        .expect("rebind applies");
-    settings
-        .rebind(KeyboardAction::MoveUp, KeyCode::KeyW)
-        .expect("rebind applies");
-    // Both rebinds above are defaults; force a real conflict instead.
     settings
         .rebind(KeyboardAction::Ultimate, KeyCode::KeyQ)
         .expect("rebind applies");
-    let lines = compose_input_settings_lines(&settings);
+    let lines = compose_input_settings_lines(&settings, selection);
     assert!(
         lines
             .iter()
             .any(|line| line.contains("Conflict: Active item, Ultimate"))
+    );
+
+    // A listening selection replaces the hint row with the rebind capture prompt and marks
+    // the target field.
+    let listening = InputSettingsSelection {
+        field: InputSettingsField::Keyboard(KeyboardAction::Ultimate),
+        listening: true,
+    };
+    let lines = compose_input_settings_lines(&settings, listening);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Rebind Ultimate: press a key"))
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("ult=[E]") || line.contains("ult=[Q]"))
+    );
+
+    settings.rebind_gamepad(GamepadAction::Cancel, GamepadButton::South);
+    let lines = compose_input_settings_lines(&settings, selection);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Conflict: Active item, Ultimate, Interact, Cancel"))
     );
 }

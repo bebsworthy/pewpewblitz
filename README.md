@@ -101,7 +101,12 @@ requests the next match after the completed-phase lock. During play, use WASD to
 to aim, mouse-left to fire, and E to use the charged ultimate; Q remains reserved for the future
 active-item slot. A connected controller uses the left stick for movement, right stick for aim,
 right trigger to fire, right bumper for the ultimate, and Start for pause. Hold Tab or controller
-Select for the full roster scoreboard. The HUD shows match phase, score/time/result,
+Select for the full roster scoreboard. Pausing (Escape or Start) also opens the local settings
+overlay: Tab or the D-pad cycles calibration and binding rows, brackets or the D-pad adjust values
+(move/aim deadzones, aim commit, trigger thresholds), B or South rebinds the selected row from the
+next key, mouse-button, or controller-button press, I/O toggle Y-axis inversion, and R restores
+the validated defaults; session-local settings shape device input before quantization and never
+reach the server. The HUD shows match phase, score/time/result,
 roster/loadout/readiness, respawn and protection state, health, ammo, ultimate meter/phase, passive
 state, sentry health/lifetime, and cooldown/reload; fighters also show debug health bars.
 The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
