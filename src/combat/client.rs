@@ -18,6 +18,7 @@ pub(super) fn preview_segments(
     aim_distance: Option<f32>,
     resolved: &ResolvedWeapon,
     map: &crate::map::ResolvedMapSnapshot,
+    terrain_chunks: &BTreeMap<crate::terrain::TerrainChunkId, crate::terrain::TerrainBits>,
 ) -> Vec<(Vec2, f32, Vec2, Color)> {
     let mut segments = Vec::with_capacity(MAX_PREVIEW_SEGMENTS);
     match resolved.recipe.delivery {
@@ -101,7 +102,11 @@ pub(super) fn preview_segments(
                             geometry.rotation,
                             geometry.shape,
                         )
-                    })
+                    }) && !crate::terrain::grid::circle_overlaps_occupied(
+                        candidate,
+                        landing_clearance_radius,
+                        terrain_chunks,
+                    )
                 },
             );
             let landing = repaired_landing.unwrap_or(bounded);
@@ -816,6 +821,7 @@ fn update_weapon_preview(
     mut commands: Commands,
     maps: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
     pending: Res<crate::client::PendingLocalActions>,
+    convergence: Option<Res<crate::terrain::ClientTerrainConvergence>>,
     fighters: Query<
         (&Position, &Rotation, Option<&ResolvedWeapon>),
         (With<Fighter>, With<lightyear::prelude::Controlled>),
@@ -847,7 +853,21 @@ fn update_weapon_preview(
     };
     let origin = position.0;
     let facing = rotation.as_radians();
-    let segments = preview_segments(origin, facing, pending.aim_distance, resolved, map);
+    // The preview repairs against the committed destructible occupancy exactly like the
+    // server's collider clearance, so the marker never promises a landing the
+    // authoritative resolution will pull back to a face.
+    let no_terrain = BTreeMap::new();
+    let terrain_chunks = convergence
+        .as_deref()
+        .map_or(&no_terrain, |convergence| convergence.chunks());
+    let segments = preview_segments(
+        origin,
+        facing,
+        pending.aim_distance,
+        resolved,
+        map,
+        terrain_chunks,
+    );
     for (visual, mut transform, mut sprite, mut visibility) in &mut visuals {
         let Some((center, angle, size, color)) = segments.get(usize::from(visual.slot)) else {
             *visibility = Visibility::Hidden;
@@ -1228,7 +1248,14 @@ mod tests {
                 &MapLayoutRequirements::wipeout(),
             )
             .unwrap();
-        preview_segments(Vec2::ZERO, 0.0, None, &resolved, &map.snapshot)
+        preview_segments(
+            Vec2::ZERO,
+            0.0,
+            None,
+            &resolved,
+            &map.snapshot,
+            &BTreeMap::new(),
+        )
     }
 
     #[test]
@@ -1263,9 +1290,71 @@ mod tests {
                 &MapLayoutRequirements::wipeout(),
             )
             .unwrap();
-        let segments = preview_segments(Vec2::ZERO, 0.0, Some(180.0), &resolved, &map.snapshot);
+        let segments = preview_segments(
+            Vec2::ZERO,
+            0.0,
+            Some(180.0),
+            &resolved,
+            &map.snapshot,
+            &BTreeMap::new(),
+        );
 
         assert!((segments[0].2.x - 180.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn launcher_preview_repairs_landings_against_committed_terrain() {
+        let catalog = WeaponCatalog::embedded().unwrap();
+        let fighter = FighterDefinitions::default().entries[0];
+        let resolved = catalog.resolve_preset(WeaponPresetId(3), &fighter).unwrap();
+        let map_catalog = MapContentCatalog::embedded().unwrap();
+        let map = map_catalog
+            .resolve_preset(
+                ArenaPresetId(1),
+                MapInstanceId(1),
+                &MapLayoutRequirements::wipeout(),
+            )
+            .unwrap();
+        // Occupied destructible cells covering world x [288, 328) around the aim axis:
+        // the marker must repair exactly like the server's collider clearance instead of
+        // promising a landing inside terrain.
+        let mut chunks: BTreeMap<crate::terrain::TerrainChunkId, crate::terrain::TerrainBits> =
+            BTreeMap::new();
+        for cell_y in -3..3 {
+            for cell_x in 36..41 {
+                let Some((chunk, (local_x, local_y))) =
+                    crate::terrain::grid::cell_to_chunk_and_local((cell_x, cell_y))
+                else {
+                    continue;
+                };
+                chunks.entry(chunk).or_default().set(local_x, local_y);
+            }
+        }
+        let empty = preview_segments(
+            Vec2::ZERO,
+            0.0,
+            Some(300.0),
+            &resolved,
+            &map.snapshot,
+            &BTreeMap::new(),
+        );
+        assert!((empty[1].0.x - 300.0).abs() <= 0.5);
+        assert_eq!(empty[1].3, Color::srgba(0.35, 0.85, 1.0, 0.34));
+
+        let repaired = preview_segments(
+            Vec2::ZERO,
+            0.0,
+            Some(300.0),
+            &resolved,
+            &map.snapshot,
+            &chunks,
+        );
+        assert!(
+            repaired[1].0.x < 286.0 && repaired[1].0.x > 260.0,
+            "the marker pulls back out of the occupied cells: {}",
+            repaired[1].0.x
+        );
+        assert_eq!(repaired[1].3, Color::srgba(0.95, 0.35, 1.0, 0.45));
     }
 
     #[test]

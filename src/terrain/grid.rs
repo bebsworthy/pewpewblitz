@@ -95,6 +95,43 @@ pub fn cell_center_world(cell: (i32, i32)) -> Vec2 {
     cell_min_world(cell) + Vec2::splat(TERRAIN_CELL_SIZE_WORLD * 0.5)
 }
 
+/// True when the circle overlaps any occupied cell of the committed chunk occupancy.
+/// Presentation-resolution twin of the server's collider-based landing clearance: the
+/// lob preview repairs its landing marker exactly where authoritative resolution will.
+#[must_use]
+pub fn circle_overlaps_occupied(
+    center: Vec2,
+    radius: f32,
+    chunks: &BTreeMap<TerrainChunkId, TerrainBits>,
+) -> bool {
+    let (Some(min_cell), Some(max_cell)) = (
+        world_to_cell(center - Vec2::splat(radius)),
+        world_to_cell(center + Vec2::splat(radius)),
+    ) else {
+        return false;
+    };
+    for cell_y in min_cell.1..=max_cell.1 {
+        for cell_x in min_cell.0..=max_cell.0 {
+            let cell = (cell_x, cell_y);
+            let Some((chunk, (local_x, local_y))) = cell_to_chunk_and_local(cell) else {
+                continue;
+            };
+            if !chunks
+                .get(&chunk)
+                .is_some_and(|bits| bits.get(local_x, local_y))
+            {
+                continue;
+            }
+            let min = cell_min_world(cell);
+            let closest = center.clamp(min, min + Vec2::splat(TERRAIN_CELL_SIZE_WORLD));
+            if center.distance_squared(closest) <= radius * radius {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// The cell center expressed in half-cell units: `(2x + 1, 2y + 1)`.
 #[must_use]
 pub fn cell_center_half_cells(cell: (i32, i32)) -> (i32, i32) {

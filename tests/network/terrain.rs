@@ -450,3 +450,90 @@ fn one_arc_landing_erases_multiple_chunks_but_plays_one_landed_cue() {
         brawler::terrain::ClientTerrainReadiness::Ready
     ));
 }
+
+#[test]
+fn straight_shots_stop_at_destructible_cover_until_it_is_carved() {
+    let mut harness = Harness::new(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.server_ids().len() == 2
+            && harness.selection_is_complete(0)
+    });
+    harness.step_until(both_clients_terrain_ready);
+    // Pin the shooter west of the central destructible block and the practice dummy east
+    // of it, on the block's axis: destructible terrain is the only thing between a
+    // 900-range straight shot and a hostile target.
+    {
+        let world = harness.server.world_mut();
+        let mut fighters =
+            world.query_filtered::<(Entity, &PlayerId), (With<Fighter>, Without<TestDummy>)>();
+        let shooter = fighters
+            .iter(world)
+            .min_by_key(|(_, player)| player.0)
+            .map(|(entity, _)| entity)
+            .expect("player fighter");
+        let mut dummies = world.query_filtered::<Entity, With<TestDummy>>();
+        let dummy = dummies.iter(world).next().expect("practice dummy");
+        world
+            .entity_mut(shooter)
+            .insert(Position::from_xy(-220.0, 0.0));
+        world
+            .entity_mut(dummy)
+            .insert(Position::from_xy(220.0, 0.0));
+    }
+    let initial_health = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
+        query.single(world).expect("dummy health").0
+    };
+    // Cross the strictly-newer-input activation barrier before the first fire intent.
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.step();
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .accepted_shots
+            >= 1
+            && harness.server_projectile_count() > 0
+    });
+    // Stop firing immediately so the rest of the scenario owns the magazine.
+    harness.set_controlled_input(0, FighterInput::default());
+    // The projectile dies on the block's west face: it despawns, no payload crosses, and
+    // the target behind the cover keeps its full health.
+    harness.step_until(|harness| harness.server_projectile_count() == 0);
+    let (health_after_cover, applied_damage) = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
+        (
+            query.single(world).expect("dummy health").0,
+            world.resource::<CombatTelemetry>().applied_damage,
+        )
+    };
+    assert_eq!(health_after_cover, initial_health);
+    assert_eq!(applied_damage, 0, "cover absorbs the direct shot");
+
+    // Carve a lane through the block on the firing axis, exactly as delivered
+    // DestroyTerrain brushes would, then fire again: the same shot now crosses.
+    for (attack, x) in [(1u64, -80.0), (2, 0.0), (3, 80.0)] {
+        harness.inject_terrain_brush(attack, (x, 0.0), 64.0);
+    }
+    harness.step_until(|harness| harness.server_terrain_revision().unwrap_or(0) >= 3);
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
+        query
+            .single(world)
+            .is_ok_and(|health| health.0 < initial_health)
+    });
+}

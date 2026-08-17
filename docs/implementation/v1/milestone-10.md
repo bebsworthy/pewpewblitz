@@ -1511,6 +1511,30 @@ Cell size, chunk size, collider family, or recovery-contract changes return the 
 `Specification review`. Radius/color/debris/layer tuning that preserves validated bounds may remain
 in feedback review with affected verification rerun.
 
+## User playtest feedback (2026-08-17)
+
+The first windowed M10 playtest (two Arc Launcher clients on the built-in Crossroads practice map)
+returned three observations. Two are fixed in the playtest remediation commit; the third and half of
+the second are intentionally deferred under a product decision the playtest settled: terrain
+destruction is not a normal-weapon property going forward — it is reserved for ultimate moves and
+special items (for example a thrown bomb), with the Arc Launcher's `DestroyTerrain` acting as the
+M10 test vehicle until that redesign. The reserved follow-ups are recorded as
+`GAP-DESIGN-TERRAIN-RESERVATION` in the v1 backlog.
+
+| Feedback | Evidence | Decision | Follow-up verification |
+|---|---|---|---|
+| Pulse shots passed through the destructible block and hit a player behind it | The projectile sweep's spatial-filter mask already included both terrain layers, but its acceptance predicate only passed hostile fighters and `ArenaWall` entities, so `cast_shape_predicate` ignored terrain chunk colliders entirely — every composed straight shot (pulse, scatter) crossed cover while area payloads simultaneously honored `terrain_occlusion` | Implement now | The predicate accepts destructible chunk colliders alongside arena walls; a terrain impact is an ordinary targetless `StraightImpact` (projectile despawns at the face, world effects fire at the impact point). Three network duels that unknowingly fired through the central block (reciprocal lethal hits, posthumous attribution, spawn protection) moved to the clear corridor at y=160 between the block and the north wall; `straight_shots_stop_at_destructible_cover_until_it_is_carved` pins the full loop — the shot dies on the face with the target at full health and zero applied damage, then crosses only after three delivered brushes carve the lane |
+| The lob aimed at the block center detonated on the block's face, and the aim marker promised the center | The server's landing repair treats destructible occupancy as unclear for landing (`DESTRUCTIBLE_TERRAIN_LAYER` is in the clearance filter), so center-aimed lobs snap to the last clear point on the near face, while the client preview checked only permanent map geometry and showed the unrepaired point | Preview parity now; landing behavior deferred | The preview repairs against the committed destructible occupancy exactly like the server's collider clearance (`circle_overlaps_occupied` twin in `terrain/grid.rs`), so the marker tells the truth; `launcher_preview_repairs_landings_against_committed_terrain` pins both the pull-back distance and the repaired color. Changing where lobs may land — destructible cells as legal landings for `DestroyTerrain`-carrying recipes — is deferred to the ultimate/item redesign because the current carrier weapon is provisional |
+| The radius-150 damage area and the radius-48 crater read as inconsistent | Authored Arc Launcher values: payload `Area(radius: 150)` versus `DestroyTerrain(radius: 48)`; the damage disc is ~10x the crater area, and the explosion feedback does not distinguish the high-energy core from the outer ring | Deferred with the product decision | Crater-size tuning (the 64-unit brush ceiling is the representable maximum) and distinct crater-edge feedback fold into `GAP-DESIGN-TERRAIN-RESERVATION`, decided together with the ultimate/item carrier rather than balanced on a provisional weapon. Melee arcs still ignore terrain — unreachable with the 192-unit block because melee reach is 120 — and joins the same backlog item |
+
+Playtest remediation verification (2026-08-17): `fmt-check`, `clippy-client`, `clippy-server`
+(`-D warnings`), `check`, `server-features`, `test-client` (185), `test-server` (181),
+`test-network` (74, including the new cover scenario), `test-performance` (14; m10 worst case
+5.14 ms p95 on the 24-seam-brush one-tick burst), `git diff --check`, `network-terrain`
+(assertion passed at tick 635, revision 1, 540/576 cells, both clients converged, exit 0), and
+`network-terrain-hot-zone` (assertion passed at tick 633, revision 1, 541/576 cells, exit 0) all
+green.
+
 ## Risks and mitigations
 
 | Risk | Mitigation |
