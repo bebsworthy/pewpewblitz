@@ -90,7 +90,9 @@ fn classify_generation(
     }
 }
 
-/// Validate one live event's shape against the engine bounds before any application.
+/// Validate one live event's shape against the engine bounds before any application. A
+/// real erasure always reports at least one erased cell and one affected chunk; a
+/// zero-effect event is corrupt input that must never consume a revision.
 fn event_shape_is_valid(
     event: &TerrainDestructionEvent,
     expected: &BTreeSet<TerrainChunkId>,
@@ -101,12 +103,22 @@ fn event_shape_is_valid(
     sorted.dedup();
     radius.is_finite()
         && (TERRAIN_CELL_SIZE_WORLD..=MAX_TERRAIN_BRUSH_RADIUS_WORLD).contains(&radius)
+        && event.erased_cells > 0
+        && !event.affected_chunks.is_empty()
         && event.affected_chunks.len() <= MAX_TERRAIN_BRUSH_CHUNKS
         && sorted == event.affected_chunks
         && event
             .affected_chunks
             .iter()
             .all(|chunk| expected.contains(chunk))
+}
+
+/// True when `bits` occupies at least one cell that `initial` does not author.
+fn bits_construct_outside(bits: &TerrainBits, initial: &TerrainBits) -> bool {
+    bits.0
+        .iter()
+        .zip(initial.0.iter())
+        .any(|(current, authored)| current & !authored != 0)
 }
 
 impl ClientTerrainConvergence {
@@ -169,6 +181,8 @@ impl ClientTerrainConvergence {
             state.chunks.clear();
             state.revision = 0;
             state.pending_reset = None;
+            state.dirty.clear();
+            state.applied_brushes.clear();
             state.phase = TerrainConvergencePhase::AwaitingRecovery {
                 generation: expected,
                 request_pending: false,
@@ -324,10 +338,13 @@ impl ClientTerrainConvergence {
     }
 
     /// Apply one authoritative recovery snapshot. Validation failures for the expected
-    /// generation are irrecoverable; buffered-event problems re-request instead.
+    /// generation are irrecoverable; buffered-event problems re-request instead. Erase-only
+    /// monotonicity is part of validation: recovered occupancy must be a subset of the
+    /// authored initial occupancy, and a revision-zero snapshot is exactly the initial state.
     pub fn apply_snapshot(
         &mut self,
         snapshot: &TerrainRecoverySnapshot,
+        initial_chunks: &BTreeMap<TerrainChunkId, TerrainBits>,
     ) -> TerrainConvergenceAction {
         let Some(expected) = self.phase_generation() else {
             return TerrainConvergenceAction::Ignored;
@@ -361,6 +378,22 @@ impl ClientTerrainConvergence {
                 format!("recovery snapshot exceeded {MAX_TERRAIN_RECOVERY_BYTES} serialized bytes")
             } else {
                 "recovery snapshot chunk set mismatch".to_string()
+            };
+            self.invalidate(reason.clone());
+            return TerrainConvergenceAction::Invalidated(reason);
+        }
+        let constructed_outside = snapshot_chunks.iter().any(|(chunk, bits)| {
+            initial_chunks
+                .get(chunk)
+                .is_some_and(|initial| bits_construct_outside(bits, initial))
+        });
+        let initial_mismatch = snapshot.revision == 0 && snapshot_chunks != *initial_chunks;
+        if constructed_outside || initial_mismatch {
+            let reason = if constructed_outside {
+                "recovery snapshot constructed occupied cells outside the authored terrain"
+                    .to_string()
+            } else {
+                "revision-zero recovery snapshot does not equal initial occupancy".to_string()
             };
             self.invalidate(reason.clone());
             return TerrainConvergenceAction::Invalidated(reason);

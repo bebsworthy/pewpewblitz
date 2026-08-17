@@ -270,11 +270,13 @@ pub(crate) fn reset_terrain_on_match_restart(world: &mut World) {
             changed_masks.insert(*chunk, mask);
         }
     }
+    let rebuilt_colliders = super::authority::compute_dirty_union(&index, &changed_masks).len();
     let transaction = TerrainTransaction {
         changed,
         changed_masks,
         facts: Vec::new(),
         staged_events: Vec::new(),
+        pending_records: Vec::new(),
         revision: 0,
         active: true,
     };
@@ -311,7 +313,7 @@ pub(crate) fn reset_terrain_on_match_restart(world: &mut World) {
         brush: None,
         affected_chunks: Vec::new(),
         erased_cells: 0,
-        rebuilt_colliders: 0,
+        rebuilt_colliders,
         serialized_event_bytes: None,
         outcome: TerrainTelemetryOutcome::Reset,
     });

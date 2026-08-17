@@ -5,10 +5,11 @@ use avian2d::prelude::{
 use bevy::{prelude::*, time::TimeUpdateStrategy};
 use brawler::{
     combat::{
-        ActiveEffects, AttackId, AttackSource, ComposedProjectileRuntime, CurrentHealth,
-        ExternalMotion, FighterDefinitionId, FighterDefinitions, LobbedFlight, Projectile,
-        SelectedBuild, SlowEffect, TeamId, WeaponDefinitionId, WeaponDefinitions, WeaponPhase,
-        WeaponPresetId, WeaponState, default_fighter_runtime,
+        ActiveEffects, AttackId, AttackSource, CombatSourceKind, CombatWorldEffectFact,
+        ComposedProjectileRuntime, CurrentHealth, ExternalMotion, FighterDefinitionId,
+        FighterDefinitions, LobbedFlight, Projectile, SelectedBuild, SlowEffect, TeamId,
+        WeaponDefinitionId, WeaponDefinitions, WeaponPhase, WeaponPresentationProfileId,
+        WeaponPresetId, WeaponState, WorldEffectDefinition, WorldPoint, default_fighter_runtime,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -432,7 +433,7 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
                 owner_entity: owners[index % owners.len()],
                 source_entity: owners[index % owners.len()],
                 source: AttackSource {
-                    kind: brawler::combat::CombatSourceKind::PrimaryWeapon,
+                    kind: CombatSourceKind::PrimaryWeapon,
                     attack_id: AttackId(index as u64 + 1),
                     player_id: PlayerId(1),
                     owner_network_entity_id: NetworkEntityId(1),
@@ -441,7 +442,7 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
                     presentation_profile_id: recipe.presentation_profile_id,
                     legacy_compatibility: false,
                     source_preset_id: Some(WeaponPresetId(1)),
-                    origin: brawler::combat::WorldPoint::from(position),
+                    origin: WorldPoint::from(position),
                     facing: 0.0,
                 },
                 delivery_index: 0,
@@ -966,18 +967,20 @@ fn maximum_terrain_resolved_map(off_grid: bool) -> brawler::map::ResolvedMap {
     // Near-complete destructible coverage built from four engine-legal rectangles
     // (extent <= 2048 each): a left column reaching the bottom edge keeps chunk row -1
     // populated on the off-grid map, a right column starting one chunk-row up leaves the
-    // bottom-right corner clear for the capacity profile's spawn points and fighters.
-    // Every tile edge falls between cell centers, so no cell is selected twice.
+    // bottom-right notch clear for the capacity profile's spawn points and fighters.
+    // Every tile edge falls between cell centers, so no cell is selected twice, and the
+    // left column's right edge stops 80 units short of the stock extent so the notch
+    // strip fits twelve 64-spaced spawn points per team with the 600-unit opposing gap.
     let tiles: [(f32, f32, f32, f32); 4] = if off_grid {
         [
-            (924.0, 928.0, 1020.0, 1024.0),
+            (884.0, 928.0, 980.0, 1024.0),
             (2968.0, 968.0, 1024.0, 984.0),
             (924.0, 2460.0, 1020.0, 508.0),
             (2968.0, 2460.0, 1024.0, 508.0),
         ]
     } else {
         [
-            (1024.0, 1024.0, 1024.0, 1024.0),
+            (984.0, 1024.0, 984.0, 1024.0),
             (3072.0, 1064.0, 1024.0, 984.0),
             (1024.0, 2560.0, 1024.0, 512.0),
             (3072.0, 2560.0, 1024.0, 512.0),
@@ -1002,35 +1005,30 @@ fn maximum_terrain_resolved_map(off_grid: bool) -> brawler::map::ResolvedMap {
             },
         )
         .collect();
-    let bounds = recipe.playable_bounds;
-    recipe.spawn_areas = vec![
-        brawler::map::TeamSpawnArea {
-            placement_id: brawler::map::MapPlacementId(910),
-            team_slot: 0,
-            bounds: brawler::map::AxisAlignedMapRect {
-                min: Vec2::new(bounds.max.x - 1848.0, spawn_y - 36.0),
-                max: Vec2::new(bounds.max.x - 1440.0, spawn_y + 36.0),
-            },
+    // Twelve spawn points per team at 64-unit spacing inside the notch strip, with the
+    // full 600-unit opposing gap between the team runs and 32-unit insets everywhere.
+    // Both runs start right of the map center so facing PI points into the interior, and
+    // the last point of each run must land in a probe cell whose center clears the
+    // 24-unit playable inset: the strip from center to that cell fits both runs exactly.
+    let (team0_start, team1_start) = if off_grid {
+        (1952.0, 3256.0)
+    } else {
+        (2052.0, 3356.0)
+    };
+    let spawn_area = |team_slot: u8, start: f32| brawler::map::TeamSpawnArea {
+        placement_id: brawler::map::MapPlacementId(910 + u32::from(team_slot)),
+        team_slot,
+        bounds: brawler::map::AxisAlignedMapRect {
+            min: Vec2::new(start - 32.0, spawn_y - 36.0),
+            max: Vec2::new(start + 736.0, spawn_y + 36.0),
         },
-        brawler::map::TeamSpawnArea {
-            placement_id: brawler::map::MapPlacementId(911),
-            team_slot: 1,
-            bounds: brawler::map::AxisAlignedMapRect {
-                min: Vec2::new(bounds.max.x - 596.0, spawn_y - 36.0),
-                max: Vec2::new(bounds.max.x - 188.0, spawn_y + 36.0),
-            },
-        },
-    ];
+    };
+    recipe.spawn_areas = vec![spawn_area(0, team0_start), spawn_area(1, team1_start)];
     recipe.spawn_points.clear();
-    for team_slot in 0..=1_u8 {
-        let base_x = if team_slot == 0 {
-            bounds.max.x - 1796.0
-        } else {
-            bounds.max.x - 544.0
-        };
-        for offset in [0.0_f32, 128.0, 256.0] {
+    for (team_slot, base_x) in [(0_u8, team0_start), (1_u8, team1_start)] {
+        for step in 0..12_u16 {
             let index = recipe.spawn_points.len();
-            let x = base_x + offset;
+            let x = base_x + f32::from(step) * 64.0;
             recipe.spawn_points.push(brawler::map::TeamSpawnPoint {
                 placement_id: brawler::map::MapPlacementId(920 + u32::try_from(index).unwrap()),
                 spawn_point_id: brawler::map::SpawnPointId(200 + u16::try_from(index).unwrap()),
@@ -1043,12 +1041,18 @@ fn maximum_terrain_resolved_map(off_grid: bool) -> brawler::map::ResolvedMap {
         }
     }
     recipe.mode_anchors.clear();
+    // The 24-fighter capacity profile keeps the wipeout layout contract but widens the
+    // per-team spawn-point range to the twelve simultaneous participants it admits.
+    let requirements = brawler::map::MapLayoutRequirements {
+        spawn_points_per_team: 3..=12,
+        ..brawler::map::MapLayoutRequirements::wipeout()
+    };
     brawler::map::resolve_map_recipe(
         &recipe,
         None,
         brawler::map::MapInstanceId(41),
         &catalog,
-        &brawler::map::MapLayoutRequirements::wipeout(),
+        &requirements,
         brawler::map::EngineMapLimits {
             max_destructible_reservations: 6,
             ..brawler::map::EngineMapLimits::default()
@@ -1110,27 +1114,31 @@ fn m10_aligned_and_off_grid_maximum_terrain_stay_within_fixed_tick_budget() {
 #[test]
 fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budget() {
     let mut app = performance_app();
-    // Admit the full 24-brush ceiling in one tick for the worst-placement burst.
-    app.world_mut()
-        .remove_resource::<brawler::matchplay::ResolvedMatchCapacity>();
-    app.world_mut()
-        .insert_resource(brawler::terrain::authority::TerrainAdmissionCapacity(24));
+    // The 24-fighter profile resolves through the composition contract, not a synthetic
+    // admission insert: rules derive the capacity, the capacity validates against the
+    // selected map's team slots and spawn capacity, and terrain derives its admission
+    // ceiling from the published capacity.
+    let capacity_rules = brawler::matchplay::MatchLifecycleRules {
+        minimum_participants_per_team: 2,
+        maximum_participants_per_team: 12,
+        ..brawler::matchplay::MatchLifecycleRules::default()
+    };
+    let capacity = brawler::matchplay::ResolvedMatchCapacity::from_rules(&capacity_rules)
+        .expect("24-fighter profile derives a checked capacity");
     let resolved = maximum_terrain_resolved_map(true);
+    capacity
+        .validate_against_map(&resolved.snapshot)
+        .expect("maximum map satisfies the 24-fighter capacity profile");
+    app.world_mut().insert_resource(capacity);
     brawler::map::install_resolved_map(app.world_mut(), resolved).expect("maximum map installs");
     // The maximum map's clear corner notch is the only initially clear ground: place
     // the 24-fighter capacity profile there, clear of every destructible cell.
-    let fighters = &brawler::combat::FighterDefinitions::default().clone();
-    let weapons = app
-        .world()
-        .resource::<brawler::combat::WeaponDefinitions>()
-        .clone();
+    let fighters = &FighterDefinitions::default().clone();
+    let weapons = app.world().resource::<WeaponDefinitions>().clone();
     let mut active = Vec::with_capacity(24);
     for index in 0..24_u16 {
-        let (fighter_id, build, team, health, weapon) = brawler::combat::default_fighter_runtime(
-            TeamId(u8::try_from(index % 2).unwrap()),
-            fighters,
-            &weapons,
-        );
+        let (fighter_id, build, team, health, weapon) =
+            default_fighter_runtime(TeamId(u8::try_from(index % 2).unwrap()), fighters, &weapons);
         let position = Vec2::new(2000.0 + f32::from(index) * 80.0, -56.0);
         let entity = app
             .world_mut()
@@ -1184,28 +1192,28 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
             app.world_mut()
                 .resource_mut::<brawler::combat::CombatWorldEffectFacts>()
                 .0
-                .push(brawler::combat::CombatWorldEffectFact {
+                .push(CombatWorldEffectFact {
                     tick: 0,
                     source: AttackSource {
-                        kind: brawler::combat::CombatSourceKind::PrimaryWeapon,
+                        kind: CombatSourceKind::PrimaryWeapon,
                         attack_id: AttackId(attack),
                         player_id: PlayerId(1),
                         owner_network_entity_id: NetworkEntityId(1),
                         team_id: TeamId(0),
                         recipe_fingerprint: Default::default(),
-                        presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+                        presentation_profile_id: WeaponPresentationProfileId(3),
                         legacy_compatibility: false,
                         source_preset_id: None,
-                        origin: brawler::combat::WorldPoint { x: 0.0, y: 0.0 },
+                        origin: WorldPoint { x: 0.0, y: 0.0 },
                         facing: 0.0,
                     },
                     delivery_index: 0,
                     effect_index: 0,
-                    position: brawler::combat::WorldPoint {
+                    position: WorldPoint {
                         x: position.x,
                         y: position.y,
                     },
-                    effect: brawler::combat::WorldEffectDefinition::DestroyTerrain { radius: 48.0 },
+                    effect: WorldEffectDefinition::DestroyTerrain { radius: 48.0 },
                 });
             attack += 1;
         }
@@ -1222,29 +1230,29 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
     );
 }
 
-fn worst_placement_fact(attack: u64, position: Vec2) -> brawler::combat::CombatWorldEffectFact {
-    brawler::combat::CombatWorldEffectFact {
+fn worst_placement_fact(attack: u64, position: Vec2) -> CombatWorldEffectFact {
+    CombatWorldEffectFact {
         tick: 1,
-        source: brawler::combat::AttackSource {
-            kind: brawler::combat::CombatSourceKind::PrimaryWeapon,
-            attack_id: brawler::combat::AttackId(attack),
-            player_id: brawler::protocol::PlayerId(1),
-            owner_network_entity_id: brawler::protocol::NetworkEntityId(1),
-            team_id: brawler::combat::TeamId(0),
+        source: AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(attack),
+            player_id: PlayerId(1),
+            owner_network_entity_id: NetworkEntityId(1),
+            team_id: TeamId(0),
             recipe_fingerprint: Default::default(),
-            presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+            presentation_profile_id: WeaponPresentationProfileId(3),
             legacy_compatibility: false,
             source_preset_id: None,
-            origin: brawler::combat::WorldPoint { x: 0.0, y: 0.0 },
+            origin: WorldPoint { x: 0.0, y: 0.0 },
             facing: 0.0,
         },
         delivery_index: 0,
         effect_index: 0,
-        position: brawler::combat::WorldPoint {
+        position: WorldPoint {
             x: position.x,
             y: position.y,
         },
-        effect: brawler::combat::WorldEffectDefinition::DestroyTerrain { radius: 48.0 },
+        effect: WorldEffectDefinition::DestroyTerrain { radius: 48.0 },
     }
 }
 

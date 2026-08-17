@@ -148,6 +148,10 @@ pub struct TerrainTransaction {
     /// deferral when collider construction refuses.
     pub facts: Vec<CombatWorldEffectFact>,
     pub staged_events: Vec<TerrainDestructionEvent>,
+    /// Applied records staged by the brush loop and recorded by the collision commit,
+    /// which is the first point that knows the real rebuilt-collider attribution. A
+    /// refused batch drops them: nothing applied, nothing recorded as applied.
+    pub pending_records: Vec<TerrainTelemetryRecord>,
     pub revision: u64,
     pub active: bool,
 }
@@ -299,7 +303,7 @@ fn apply_terrain_brushes(
     let mut previous: BTreeMap<TerrainChunkId, TerrainBits> = BTreeMap::new();
     let mut revision = root.revision;
     let mut staged_events = Vec::new();
-    let mut applied = 0_u64;
+    let mut pending_records = Vec::new();
     for fact in &admitted {
         mutation.telemetry.record_request();
         let WorldEffectDefinition::DestroyTerrain { radius } = fact.effect;
@@ -308,6 +312,17 @@ fn apply_terrain_brushes(
                 root,
                 fact,
                 TerrainTelemetryOutcome::NoOccupiedCell,
+            ));
+            continue;
+        };
+        // Exhausting the revision space is an invariant failure, not a mutation
+        // opportunity: refuse before touching scratch occupancy so no brush can change
+        // cells without revision progress.
+        let Some(next_revision) = revision.checked_add(1) else {
+            mutation.telemetry.record(no_op_record(
+                root,
+                fact,
+                TerrainTelemetryOutcome::RejectedRevisionExhausted,
             ));
             continue;
         };
@@ -321,8 +336,7 @@ fn apply_terrain_brushes(
             ));
             continue;
         }
-        revision = revision.saturating_add(1);
-        applied = applied.saturating_add(1);
+        revision = next_revision;
         let event = TerrainDestructionEvent {
             generation: root.generation(),
             revision,
@@ -332,7 +346,7 @@ fn apply_terrain_brushes(
             affected_chunks: outcome.affected_chunks,
             erased_cells: outcome.erased_cells,
         };
-        mutation.telemetry.record(TerrainTelemetryRecord {
+        pending_records.push(TerrainTelemetryRecord {
             tick: fact.tick,
             map_instance_id: root.map_instance_id,
             revision,
@@ -368,10 +382,10 @@ fn apply_terrain_brushes(
         changed_masks,
         facts: admitted,
         staged_events,
+        pending_records,
         revision,
         active: true,
     };
-    mutation.telemetry.record_tick_maxima(applied, 0);
 }
 
 /// Defer each complete excess fact before evaluating it; never split a brush. Queue
@@ -472,9 +486,37 @@ fn mask_touches_boundary(mask: &TerrainBits, boundary: Boundary) -> bool {
     }
 }
 
+/// The four orthogonal chunk neighbors: east, west, north, south.
+fn orthogonal_neighbors(chunk: TerrainChunkId) -> [TerrainChunkId; 4] {
+    [
+        TerrainChunkId {
+            x: chunk.x.saturating_add(1),
+            y: chunk.y,
+        },
+        TerrainChunkId {
+            x: chunk.x.saturating_sub(1),
+            y: chunk.y,
+        },
+        TerrainChunkId {
+            x: chunk.x,
+            y: chunk.y.saturating_add(1),
+        },
+        TerrainChunkId {
+            x: chunk.x,
+            y: chunk.y.saturating_sub(1),
+        },
+    ]
+}
+
+/// True when the two chunks differ by exactly one step on a single axis.
+fn is_orthogonal_neighbor(chunk: TerrainChunkId, candidate: TerrainChunkId) -> bool {
+    (chunk.x.abs_diff(candidate.x) == 1 && chunk.y == candidate.y)
+        || (chunk.x == candidate.x && chunk.y.abs_diff(candidate.y) == 1)
+}
+
 /// The collision-dirty union: every occupancy-changed chunk plus an allocated orthogonal
 /// neighbor only where a changed boundary cell alters cross-chunk topology.
-fn compute_dirty_union(
+pub(super) fn compute_dirty_union(
     index: &TerrainChunkIndex,
     changed_masks: &BTreeMap<TerrainChunkId, TerrainBits>,
 ) -> BTreeSet<TerrainChunkId> {
@@ -682,8 +724,38 @@ pub(super) fn commit_terrain_collision(world: &mut World) {
             .aggregates
             .collision_rebuilt_chunks
             .extend(union.iter().copied());
-        telemetry.record_tick_maxima(0, union.len() as u64);
+        // Presentation repaints every changed chunk plus its allocated orthogonal
+        // neighbors, regardless of the boundary masks that govern collider rebuilds.
+        let mut visual_union: BTreeSet<TerrainChunkId> =
+            transaction.changed.keys().copied().collect();
+        for chunk in transaction.changed.keys() {
+            for neighbor in orthogonal_neighbors(*chunk) {
+                if index.0.contains_key(&neighbor) {
+                    visual_union.insert(neighbor);
+                }
+            }
+        }
+        telemetry
+            .aggregates
+            .visual_dirty_chunks
+            .extend(visual_union);
+        telemetry.record_tick_maxima(transaction.staged_events.len() as u64, union.len() as u64);
         telemetry.record_collider_state(voxels_before, voxels_after, empty_chunks);
+        // Applied records finalize here with the collider rebuilds each brush can have
+        // caused: its own affected chunks plus their rebuilt orthogonal neighbors.
+        for mut record in transaction.pending_records {
+            record.rebuilt_colliders = union
+                .iter()
+                .filter(|rebuilt| {
+                    record.affected_chunks.contains(*rebuilt)
+                        || record
+                            .affected_chunks
+                            .iter()
+                            .any(|dirty| is_orthogonal_neighbor(*dirty, **rebuilt))
+                })
+                .count();
+            telemetry.record(record);
+        }
     }
     let mut outbox = world.resource_mut::<TerrainOutbox>();
     for event in transaction.staged_events {

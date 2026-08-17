@@ -120,4 +120,39 @@ impl ResolvedMatchCapacity {
             maximum_active_fighters: u8::try_from(total).ok()?,
         })
     }
+
+    /// Validate the resolved capacity against the selected map snapshot: the map must
+    /// serve exactly the team slots the rules declare, with enough spawn points per team
+    /// for every simultaneous participant. Returns the exact mismatch otherwise.
+    pub fn validate_against_map(
+        &self,
+        snapshot: &crate::map::ResolvedMapSnapshot,
+    ) -> Result<(), String> {
+        let mut per_team_points: std::collections::BTreeMap<u8, usize> =
+            std::collections::BTreeMap::new();
+        for point in &snapshot.spawn_points {
+            *per_team_points.entry(point.team_slot).or_default() += 1;
+        }
+        let capacity_slots: std::collections::BTreeSet<u8> =
+            self.team_slots.iter().map(|slot| slot.team_slot).collect();
+        let map_slots: std::collections::BTreeSet<u8> = per_team_points.keys().copied().collect();
+        if capacity_slots != map_slots {
+            return Err(format!(
+                "selected map serves team slots {map_slots:?} but the profile resolved {capacity_slots:?}"
+            ));
+        }
+        for slot in &self.team_slots {
+            let points = per_team_points
+                .get(&slot.team_slot)
+                .copied()
+                .unwrap_or_default();
+            if points < usize::from(slot.maximum_participants) {
+                return Err(format!(
+                    "selected map provides {points} spawn points for team slot {} but the profile admits up to {} simultaneous participants",
+                    slot.team_slot, slot.maximum_participants
+                ));
+            }
+        }
+        Ok(())
+    }
 }

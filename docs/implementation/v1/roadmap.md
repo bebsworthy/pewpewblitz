@@ -36,8 +36,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in feedback review after an authorized technical-review remediation pass. Milestone 09 is complete: implemented from baseline `90ef47a`, automated gate green, both-mode real-process runs recorded, and the 2026-08-16 automated playtest triaged with two presentation fixes applied and explicit open dispositions for the human-perceptual remainder. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
-- **Current milestone:** Milestone 10 — Feedback review, implementation-review findings remediated 2026-08-16 (Milestone 08 remains in Feedback review)
+- **Overall status:** Milestone 11 research began on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 remains in feedback review with both implementation-review rounds (2026-08-16, 2026-08-17) remediated; Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing.
+- **Current milestone:** Milestone 11 — Researching; first specification and implementation-plan draft in [milestone-11.md](./milestone-11.md)
 - **Last completed milestone:** Milestone 09 — Hot Zone
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -54,6 +54,10 @@ Record deferred implementation and playtest feedback here. Every item needs its 
 | M09-BALANCE | Milestone 09 feedback review, 2026-08-16 | Collect normal-session Hot Zone control/contest distributions before tuning the 1,800-tick target or 10,800-tick cap; automation rarely holds uncontested control (one production match timed out at 3%). | The target/cap values are explicit initial hypotheses; human counterplay data is required before any tuning decision. | Milestone 11 hardening review or the next Hot Zone playtest |
 | M08-ENV-SOURCE | Milestone 08 technical review, 2026-08-15 | Add `Environment` to stable combat source identity with an explicit attribution/exclusion policy when the first authoritative environmental damage source is introduced. | M08 has no environmental outcome author; adding a dormant registered variant now would create wire churn without exercised behavior. | First environmental-damage milestone, no later than M11 hardening review |
 | M08-BUILD-BOUNDARY | Milestone 08 technical review, 2026-08-15 | Extract the waiting-phase build transaction from `server/mod.rs` into `builds/server.rs` and retire the legacy replicated combat `SelectedBuild` in favor of one loadout identity/runtime authority model. | This is valid organization/API debt, but combining a large authority extraction with removal of a registered compatibility component during feedback remediation adds avoidable schedule and protocol risk. | Milestone 11 hardening review |
+| M10-ORG-TERRAIN-SPLITS | Milestone 10 implementation review, 2026-08-16 | Separate terrain client presentation from recovery/convergence and separate network convergence rules from server request handling while preserving the public terrain API, wire schema, and reset schedule. | M10 extracted terrain lifecycle ownership but deferred the remaining mixed `terrain/client.rs` and `terrain/network.rs` concerns to avoid invalidating recorded implementation evidence. The M10 feedback record previously named this item `GAP-ORG-TERRAIN-SPLITS` without adding it to this backlog. | Milestone 11 hardening |
+| M11-ORG-COMBAT-CLIENT | External architecture review validated 2026-08-17 | Decompose `combat/client.rs` into preview, cue ingestion, world visuals, HUD/status, transient effects, and evidence ownership; preserve the existing chain first, then relax only measured dependencies behind schedule tests. | The file currently mixes independent presentation lifecycles and serializes fifteen update systems in one global chain. | Milestone 11 hardening |
+| M11-ORG-MOVEMENT-EFFECTS | External architecture review validated 2026-08-17 | Move authoritative movement out of `movement/mod.rs`, extract testable movement-decision helpers, and stage the composed payload transaction into planning, application, outcome, and commit helpers without changing its atomic schedule boundary. | Both schedule-facing systems coordinate too many recognizable phases and carry broad complexity suppressions; blindly splitting them into separately scheduled systems would risk authority and deferred-command behavior. | Milestone 11 hardening |
+| M11-LINT-SCOPE | External architecture review validated 2026-08-17 | Remove production module-wide `type_complexity` and `needless_pass_by_value` suppressions where decomposition makes them unnecessary; keep any unavoidable Bevy signature exception item-scoped and justified. | Green Clippy with module-wide allowances does not prove the repository's own narrow-suppression policy. Wildcard and numeric-cast allowances are reviewed separately rather than mechanically conflated with orchestration debt. | Milestone 11 hardening |
 | FUT-ARSENAL | Product direction clarification, 2026-08-14 | Persistent account-owned arsenal of brawlers, saved build identity/revisions, production weapon editor, and acquisition/entitlement flow. | M05 establishes recipe/resolution/runtime boundaries and M08 proves bounded in-memory customization; accounts, storage, currency, loot, and unlock policy are outside v1. | Post-v1 product planning |
 | FUT-MAP-BUILDER | Product direction clarification, 2026-08-14 | Player-facing builder for bounded map recipes plus persistence, publishing, discovery, moderation, asset policy, and version migration. Players arrange approved presentation, terrain, geometry, entities, regions, spawns, and objective anchors but cannot author mode rules. | M06 must establish the recipe/preset/resolved/runtime boundary and server validation without expanding v1 into editor or platform services. | Future-version planning after M06 evidence |
 
@@ -188,8 +192,8 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 07 | Complete | Wipeout match loop | [milestone-07.md](./milestone-07.md) |
 | 08 | Feedback review | Bounded brawler builds and abilities | [milestone-08.md](./milestone-08.md) |
 | 09 | Complete | Hot Zone | [milestone-09.md](./milestone-09.md) |
-| 10 | Implementing | Quantized destructible terrain | [milestone-10.md](./milestone-10.md) |
-| 11 | Not started | MVP playtest hardening and closeout | Create when next |
+| 10 | Feedback review | Quantized destructible terrain | [milestone-10.md](./milestone-10.md) |
+| 11 | Researching | MVP playtest hardening and closeout | [milestone-11.md](./milestone-11.md) |
 
 Create each milestone file just before its research phase so its specification reflects current evidence and prior milestone lessons. Use the zero-padded form `milestone-NN.md`.
 
@@ -668,6 +672,16 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 - debug overlays for tick, latency, connection, authority, and entity ownership;
 - input remapping, deadzone, aim-threshold, and controller settings;
 - repeated-match, late-join, and reconnect soak scenarios;
+- close the still-open Milestone 01–03, 05, 08, and 10 verification, playtest, feedback, and
+  learning gates from one explicit ledger without rewriting their historical evidence;
+- extract the server-owned build-selection transaction into `builds/server.rs`, remove the legacy
+  replicated combat build component, and leave one selected-build/resolved-loadout/runtime-state
+  authority model with an intentional protocol migration;
+- decompose mixed combat-client, authoritative-movement, combat-effect, and terrain
+  presentation/recovery concerns while preserving public paths, role gates, fixed-tick ordering,
+  message ordering, and deferred-command visibility;
+- replace broad production complexity/pass-by-value Clippy suppressions with narrow justified
+  exceptions after the owning systems have been inspected and decomposed;
 - final user playtest and feedback triage;
 - technical-debt review and evidence-based next-version recommendation;
 - learn-from-errors review and justified skill creation or improvement.
@@ -675,6 +689,8 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 ### Automated and playtest verification
 
 - run the full unit, integration, network-impairment, and repeated-match suite;
+- lock current authority, schedule, protocol, recovery, and telemetry behavior before each
+  organization slice, then prove equivalence or explicitly validate an intended migration;
 - visually verify the supported controller and keyboard/mouse paths;
 - deliver a documented playtest build and scenario to the user;
 - record each feedback item as implement now, backlog, rejected with rationale, or needs more evidence.
@@ -685,6 +701,12 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 - balance decisions use captured data and playtests;
 - repeatable two-client, 2v2, and broader multi-client sessions are documented;
 - server tick and bandwidth limits are measured for the current content set;
+- build selection, movement, combat payload resolution, and client presentation have cohesive
+  ownership boundaries with schedule and protocol invariants covered by focused tests;
+- production module-wide complexity suppressions touched by M11 are removed or have an explicit
+  reviewed disposition; green Clippy is not achieved by widening suppression scope;
+- every earlier non-complete v1 milestone is either completed from recorded evidence or remains
+  visibly blocked/open with a user-approved disposition, so M11 cannot conceal an earlier gate;
 - user feedback is incorporated or triaged with rationale;
 - milestone learnings and recurring errors are recorded;
 - useful skills are created or improved when the learning is reusable;

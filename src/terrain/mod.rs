@@ -18,7 +18,6 @@ pub mod grid;
 pub mod lifecycle;
 pub mod model;
 pub mod network;
-#[cfg(feature = "server")]
 pub mod telemetry;
 #[cfg(test)]
 mod tests;

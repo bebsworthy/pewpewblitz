@@ -387,15 +387,12 @@ fn one_arc_landing_erases_multiple_chunks_but_plays_one_landed_cue() {
     let player = harness.controlled_player_id(0);
     {
         let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<(
-            &PlayerId,
-            &mut avian2d::prelude::Position,
-            &mut avian2d::prelude::Rotation,
-        ), With<Fighter>>();
+        let mut query =
+            world.query_filtered::<(&PlayerId, &mut Position, &mut Rotation), With<Fighter>>();
         for (candidate, mut position, mut rotation) in query.iter_mut(world) {
             if *candidate == player {
                 position.0 = Vec2::new(-300.0, 0.0);
-                *rotation = avian2d::prelude::Rotation::radians(0.0);
+                *rotation = Rotation::radians(0.0);
             }
         }
     }

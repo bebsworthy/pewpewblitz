@@ -667,3 +667,101 @@ mod schedule_trace_tests {
         assert_eq!(app.world().resource::<crate::timing::SimulationTick>().0, 1);
     }
 }
+
+#[cfg(feature = "server")]
+mod capacity_composition_tests {
+    use super::super::server::validate_capacity_against_selected_map;
+    use super::*;
+    use crate::map::{MapInstanceId, MapLayoutRequirements, MapPresetId, ResolvedMap};
+    use bevy::prelude::{App, Startup};
+
+    fn embedded_snapshot() -> crate::map::ResolvedMapSnapshot {
+        let catalog = crate::map::MapContentCatalog::embedded().expect("embedded map catalog");
+        catalog
+            .resolve_preset(
+                MapPresetId(1),
+                MapInstanceId(1),
+                &MapLayoutRequirements::wipeout(),
+            )
+            .expect("built-in wipeout preset resolves")
+            .snapshot
+    }
+
+    fn production_capacity() -> ResolvedMatchCapacity {
+        ResolvedMatchCapacity::from_rules(&MatchLifecycleRules::default())
+            .expect("production rules resolve a checked capacity")
+    }
+
+    #[test]
+    fn production_capacity_satisfies_the_builtin_map() {
+        production_capacity()
+            .validate_against_map(&embedded_snapshot())
+            .expect("the built-in wipeout map serves the production profile");
+    }
+
+    #[test]
+    fn capacity_rejects_maps_serving_other_team_slots() {
+        let mut lopsided = embedded_snapshot();
+        lopsided.spawn_points.retain(|point| point.team_slot == 0);
+        let error = production_capacity()
+            .validate_against_map(&lopsided)
+            .expect_err("a one-team map cannot serve a two-team profile");
+        assert!(error.contains("team slots"), "{error}");
+    }
+
+    #[test]
+    fn capacity_rejects_maps_without_spawn_capacity_for_simultaneous_participants() {
+        let mut sparse = embedded_snapshot();
+        let mut kept_per_team = [0_usize; 2];
+        sparse.spawn_points.retain(|point| {
+            let slot = usize::from(point.team_slot);
+            kept_per_team[slot] += 1;
+            kept_per_team[slot] <= 1
+        });
+        let error = production_capacity()
+            .validate_against_map(&sparse)
+            .expect_err("one spawn point per team cannot admit two simultaneous fighters");
+        assert!(error.contains("spawn points"), "{error}");
+    }
+
+    #[test]
+    #[should_panic(expected = "does not satisfy the selected map")]
+    fn startup_panics_when_the_selected_map_under_serves_the_profile() {
+        let mut app = App::new();
+        app.add_systems(Startup, validate_capacity_against_selected_map);
+        let mut under_served = embedded_snapshot();
+        let mut kept_per_team = [0_usize; 2];
+        under_served.spawn_points.retain(|point| {
+            let slot = usize::from(point.team_slot);
+            kept_per_team[slot] += 1;
+            kept_per_team[slot] <= 1
+        });
+        app.insert_resource(ResolvedMap::from_snapshot(under_served));
+        app.insert_resource(production_capacity());
+        app.update();
+    }
+
+    #[test]
+    fn synthetic_wide_profiles_validate_against_maps_that_serve_them() {
+        // A large-group profile (outside today's production rules) still resolves and
+        // validates against a map that serves its slots and spawn capacity.
+        let wide = ResolvedMatchCapacity {
+            team_slots: vec![
+                TeamSlotCapacity {
+                    team_slot: 0,
+                    minimum_participants: 1,
+                    maximum_participants: 12,
+                },
+                TeamSlotCapacity {
+                    team_slot: 1,
+                    minimum_participants: 1,
+                    maximum_participants: 12,
+                },
+            ],
+            maximum_active_fighters: 24,
+        };
+        assert_eq!(wide.maximum_active_fighters, 24);
+        // The built-in map does not serve twelve simultaneous participants per team.
+        assert!(wide.validate_against_map(&embedded_snapshot()).is_err());
+    }
+}

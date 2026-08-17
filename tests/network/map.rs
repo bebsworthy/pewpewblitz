@@ -285,7 +285,14 @@ fn maximum_policy_snapshot_converges_over_impaired_real_udp() {
         client.cleanup();
 
         let mut converged = false;
-        for _ in 0..3_600 {
+        // The impaired transport retransmits at its own cadence; the Adverse profile
+        // needs roughly double the Typical bound before a full fragmented snapshot is
+        // reliably delivered, so the margin keeps the test sensitive but not flaky.
+        let tick_bound = match impairment_profile {
+            NetworkImpairmentProfile::Local | NetworkImpairmentProfile::Typical => 3_600,
+            NetworkImpairmentProfile::Adverse => 7_200,
+        };
+        for _ in 0..tick_bound {
             now += SIMULATION_TICK;
             client.insert_resource(TimeUpdateStrategy::ManualInstant(now));
             client.update();

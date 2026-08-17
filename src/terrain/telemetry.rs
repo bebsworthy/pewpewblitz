@@ -1,4 +1,7 @@
-//! Bounded server-side terrain telemetry records and aggregates.
+//! Bounded terrain telemetry records and aggregates. The server records brush,
+//! transaction, and recovery behavior; the client terrain plugin records its local
+//! convergence facts (`ClientGapObserved`, `ClientDuplicateIgnored`,
+//! `ClientSnapshotApplied`) against the same bounded shape.
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -44,9 +47,18 @@ pub enum TerrainTelemetryOutcome {
     NoOccupiedCell,
     DeferredRebuildBudget,
     RejectedQueueFull,
+    /// The generation's revision space is exhausted: the brush is refused before any
+    /// mutation rather than applied without revision progress.
+    RejectedRevisionExhausted,
     Reset,
-    RecoverySent { bytes: usize, chunks: usize },
-    RecoveryRejected { reason: TerrainRecoveryRejection },
+    RecoverySent {
+        bytes: usize,
+        chunks: usize,
+    },
+    RecoveryRejected {
+        reason: TerrainRecoveryRejection,
+    },
+    /// Client-local convergence facts recorded by the client terrain plugin.
     ClientGapObserved,
     ClientDuplicateIgnored,
     ClientSnapshotApplied,
@@ -111,9 +123,6 @@ impl TerrainTelemetry {
                 aggregates
                     .occupancy_dirty_chunks
                     .extend(record.affected_chunks.iter().copied());
-                aggregates
-                    .visual_dirty_chunks
-                    .extend(record.affected_chunks.iter().copied());
             }
             TerrainTelemetryOutcome::NoOccupiedCell => {
                 aggregates.no_op_brushes = aggregates.no_op_brushes.saturating_add(1);
@@ -121,7 +130,8 @@ impl TerrainTelemetry {
             TerrainTelemetryOutcome::DeferredRebuildBudget => {
                 aggregates.deferred_brushes = aggregates.deferred_brushes.saturating_add(1);
             }
-            TerrainTelemetryOutcome::RejectedQueueFull => {
+            TerrainTelemetryOutcome::RejectedQueueFull
+            | TerrainTelemetryOutcome::RejectedRevisionExhausted => {
                 aggregates.rejected_brushes = aggregates.rejected_brushes.saturating_add(1);
             }
             TerrainTelemetryOutcome::Reset => {}

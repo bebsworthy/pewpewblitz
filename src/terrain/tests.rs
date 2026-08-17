@@ -606,6 +606,81 @@ mod authority_tests {
     }
 
     #[test]
+    fn revision_exhaustion_rejects_brushes_without_mutation() {
+        let mut app = terrain_app();
+        // Fabricate an exhausted root: unreachable in play, but the invariant must hold.
+        let world = app.world_mut();
+        let root_entity = world
+            .query_filtered::<Entity, With<TerrainRoot>>()
+            .iter(world)
+            .next()
+            .expect("terrain root exists");
+        let exhausted = root(world);
+        world.entity_mut(root_entity).insert(TerrainRoot {
+            revision: u64::MAX,
+            ..exhausted
+        });
+        let before = current_occupancy(world);
+        world
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fact(1, (0.0, 0.0), 48.0));
+        app.update();
+        let world = app.world_mut();
+        assert_eq!(
+            current_occupancy(world),
+            before,
+            "no cell changes once the revision space is exhausted"
+        );
+        assert_eq!(root(world).revision, u64::MAX);
+        assert!(
+            world.resource::<TerrainOutbox>().events.is_empty(),
+            "no duplicate maximum-revision event is staged"
+        );
+        let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+        assert_eq!(telemetry.aggregates.rejected_brushes, 1);
+        assert_eq!(telemetry.aggregates.applied_brushes, 0);
+        assert!(telemetry.records.iter().any(|record| record.outcome
+            == super::super::telemetry::TerrainTelemetryOutcome::RejectedRevisionExhausted));
+    }
+
+    #[test]
+    fn applied_records_and_aggregates_carry_real_rebuild_and_visual_counts() {
+        let mut app = terrain_app();
+        // An interior brush of chunk (0,0): exactly one collider rebuilds, while
+        // presentation also repaints the two allocated orthogonal neighbors of the
+        // changed chunk regardless of boundary masks.
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fact(1, (48.0, 48.0), 16.0));
+        app.update();
+        let world = app.world_mut();
+        let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+        assert_eq!(
+            telemetry.aggregates.collision_rebuilt_chunks.len(),
+            1,
+            "an interior brush rebuilds only its own chunk collider"
+        );
+        assert_eq!(
+            telemetry.aggregates.visual_dirty_chunks.len(),
+            3,
+            "the changed chunk plus its two allocated orthogonal neighbors repaint"
+        );
+        let record = telemetry
+            .records
+            .iter()
+            .rev()
+            .find(|record| {
+                record.outcome == super::super::telemetry::TerrainTelemetryOutcome::Applied
+            })
+            .expect("the interior brush applies");
+        assert_eq!(record.rebuilt_colliders, 1);
+        assert_eq!(telemetry.aggregates.max_collider_rebuilds_in_one_tick, 1);
+        assert_eq!(telemetry.aggregates.max_brushes_in_one_tick, 1);
+    }
+
+    #[test]
     fn brush_at_chunk_seam_rebuilds_the_boundary_neighbor() {
         let mut app = terrain_app();
         // Erase along the x=0 global seam at y far from the block edge: cells at local
@@ -1016,7 +1091,10 @@ mod convergence_tests {
         );
         state.mark_request_sent();
         assert_eq!(
-            state.apply_snapshot(&recovery_snapshot(&initial_chunks(), terrain_gen, 0)),
+            state.apply_snapshot(
+                &recovery_snapshot(&initial_chunks(), terrain_gen, 0),
+                &initial_chunks()
+            ),
             TerrainConvergenceAction::Applied
         );
         assert_eq!(
@@ -1074,7 +1152,10 @@ mod convergence_tests {
         ));
         // A duplicate snapshot for the recovered generation re-syncs fully.
         assert_eq!(
-            state.apply_snapshot(&recovery_snapshot(&initial_chunks(), terrain_gen, 0)),
+            state.apply_snapshot(
+                &recovery_snapshot(&initial_chunks(), terrain_gen, 0),
+                &initial_chunks()
+            ),
             TerrainConvergenceAction::Applied
         );
         assert!(matches!(state.phase, TerrainConvergencePhase::Ready { .. }));
@@ -1087,15 +1168,20 @@ mod convergence_tests {
         state.observe_generation(terrain_gen, &initial_chunks());
         state.mark_request_sent();
         let (first, after_first) = stage_event(&initial_chunks(), terrain_gen, 1, center_brush(2));
+        // A second brush elsewhere in the same occupied chunk erases fresh cells.
         let (second, after_second) = stage_event(
             &after_first,
             terrain_gen,
             2,
             TerrainBrush {
-                center_half_cells_x: -5,
-                center_half_cells_y: 3,
+                center_half_cells_x: 17,
+                center_half_cells_y: 17,
                 radius_half_cells: 2,
             },
+        );
+        assert!(
+            second.erased_cells > 0,
+            "the second event erases fresh cells"
         );
         // Out-of-order arrival while recovery is outstanding.
         assert_eq!(
@@ -1104,7 +1190,10 @@ mod convergence_tests {
         );
         assert_eq!(state.apply_event(first), TerrainConvergenceAction::Buffered);
         assert_eq!(
-            state.apply_snapshot(&recovery_snapshot(&initial_chunks(), terrain_gen, 0)),
+            state.apply_snapshot(
+                &recovery_snapshot(&initial_chunks(), terrain_gen, 0),
+                &initial_chunks()
+            ),
             TerrainConvergenceAction::Applied
         );
         assert_eq!(state.revision(), 2);
@@ -1182,7 +1271,7 @@ mod convergence_tests {
         let mut snapshot = recovery_snapshot(&initial_chunks(), terrain_gen, 0);
         snapshot.chunks.push(snapshot.chunks[0]);
         assert!(matches!(
-            state.apply_snapshot(&snapshot),
+            state.apply_snapshot(&snapshot, &initial_chunks()),
             TerrainConvergenceAction::Invalidated(_)
         ));
         // A snapshot missing its expected chunk also invalidates.
@@ -1191,7 +1280,7 @@ mod convergence_tests {
         let mut missing = recovery_snapshot(&initial_chunks(), terrain_gen, 0);
         missing.chunks.clear();
         assert!(matches!(
-            state.apply_snapshot(&missing),
+            state.apply_snapshot(&missing, &initial_chunks()),
             TerrainConvergenceAction::Invalidated(_)
         ));
     }
@@ -1217,9 +1306,96 @@ mod convergence_tests {
             "400-chunk fixture must exceed the serialized ceiling"
         );
         assert!(matches!(
-            state.apply_snapshot(&snapshot),
+            state.apply_snapshot(&snapshot, &wide),
             TerrainConvergenceAction::Invalidated(_)
         ));
+    }
+
+    #[test]
+    fn zero_effect_events_recover_instead_of_consuming_a_revision() {
+        let terrain_gen = generation(1);
+        // Commit one real erase, then repeat the same brush inside its own crater: a
+        // self-consistent zero-erasure event whose local rasterization also erases
+        // nothing. It must never consume the next revision.
+        let mut state = ready_state();
+        let brush = center_brush(2);
+        let (first, after_first) = stage_event(&initial_chunks(), terrain_gen, 1, brush);
+        assert_eq!(state.apply_event(first), TerrainConvergenceAction::Applied);
+        let (repeat, _) = stage_event(&after_first, terrain_gen, 2, brush);
+        assert_eq!(
+            repeat.erased_cells, 0,
+            "a repeat brush on its own crater erases nothing"
+        );
+        assert!(repeat.affected_chunks.is_empty());
+        assert_eq!(
+            state.apply_event(repeat),
+            TerrainConvergenceAction::RequestRecovery(terrain_gen)
+        );
+        assert_eq!(
+            state.revision(),
+            1,
+            "the zero-effect event consumed no revision"
+        );
+        // A misreported zero on an otherwise real chunk report is equally corrupt.
+        let mut state = ready_state();
+        let (mut event, _) = stage_event(&initial_chunks(), terrain_gen, 1, center_brush(2));
+        event.erased_cells = 0;
+        assert_eq!(
+            state.apply_event(event),
+            TerrainConvergenceAction::RequestRecovery(terrain_gen)
+        );
+    }
+
+    #[test]
+    fn snapshots_may_not_construct_cells_or_rewrite_a_revision_zero_state() {
+        let terrain_gen = generation(1);
+        let sparse_initial = {
+            let mut bits = TerrainBits::default();
+            bits.set(5, 5);
+            bits.set(9, 9);
+            BTreeMap::from([(TerrainChunkId { x: 0, y: 0 }, bits)])
+        };
+        // One constructed cell outside the authored occupancy invalidates irrecoverably.
+        let mut state = ClientTerrainConvergence::default();
+        state.observe_generation(terrain_gen, &sparse_initial);
+        state.mark_request_sent();
+        let mut constructed = recovery_snapshot(&sparse_initial, terrain_gen, 4);
+        constructed.chunks[0].occupancy.set(20, 20);
+        let TerrainConvergenceAction::Invalidated(reason) =
+            state.apply_snapshot(&constructed, &sparse_initial)
+        else {
+            panic!("a snapshot that constructs cells must invalidate");
+        };
+        assert!(reason.contains("outside the authored terrain"));
+
+        // Revision zero means no brush ever applied: the snapshot must equal initial.
+        let mut state = ClientTerrainConvergence::default();
+        state.observe_generation(terrain_gen, &sparse_initial);
+        state.mark_request_sent();
+        let mut preseeded = recovery_snapshot(&sparse_initial, terrain_gen, 0);
+        preseeded.chunks[0].occupancy = {
+            let mut bits = TerrainBits::default();
+            bits.set(9, 9);
+            bits
+        };
+        let TerrainConvergenceAction::Invalidated(reason) =
+            state.apply_snapshot(&preseeded, &sparse_initial)
+        else {
+            panic!("a revision-zero snapshot below initial must invalidate");
+        };
+        assert!(reason.contains("revision-zero"));
+
+        // An erase-only subset at a real revision still commits.
+        let mut state = ClientTerrainConvergence::default();
+        state.observe_generation(terrain_gen, &sparse_initial);
+        state.mark_request_sent();
+        let mut subset = recovery_snapshot(&sparse_initial, terrain_gen, 7);
+        subset.chunks[0].occupancy = preseeded.chunks[0].occupancy;
+        assert_eq!(
+            state.apply_snapshot(&subset, &sparse_initial),
+            TerrainConvergenceAction::Applied
+        );
+        assert_eq!(state.revision(), 7);
     }
 
     #[test]
@@ -1260,7 +1436,10 @@ mod convergence_tests {
         let mut state = ClientTerrainConvergence::default();
         state.observe_generation(terrain_gen, &initial_chunks());
         assert_eq!(
-            state.apply_snapshot(&recovery_snapshot(&initial_chunks(), terrain_gen, u64::MAX)),
+            state.apply_snapshot(
+                &recovery_snapshot(&initial_chunks(), terrain_gen, u64::MAX),
+                &initial_chunks()
+            ),
             TerrainConvergenceAction::Applied
         );
         assert_eq!(state.revision(), u64::MAX);
@@ -1369,7 +1548,10 @@ mod convergence_tests {
         ));
         // The served post-restart snapshot converges the held generation.
         assert_eq!(
-            state.apply_snapshot(&recovery_snapshot(&initial_chunks(), next_gen, 0)),
+            state.apply_snapshot(
+                &recovery_snapshot(&initial_chunks(), next_gen, 0),
+                &initial_chunks()
+            ),
             TerrainConvergenceAction::Applied
         );
         assert_eq!(state.revision(), 0);
@@ -1519,12 +1701,17 @@ mod reset_cycle_tests {
 
 #[cfg(feature = "client")]
 mod client_presentation_tests {
-    use super::convergence_tests::{generation, initial_chunks, stage_event};
+    use super::convergence_tests::{center_brush, generation, initial_chunks, stage_event};
     use super::*;
     use crate::terrain::ClientTerrainConvergence;
     use crate::terrain::TerrainConvergenceAction;
     use crate::terrain::TerrainConvergencePhase;
-    use crate::terrain::client::{TerrainDebris, spawn_terrain_debris};
+    use crate::terrain::client::{
+        TerrainDebris, classify_client_event, expire_terrain_debris, record_snapshot_application,
+        spawn_terrain_debris,
+    };
+    use crate::terrain::grid::recovery_snapshot;
+    use crate::terrain::telemetry::{TerrainTelemetry, TerrainTelemetryOutcome};
     use bevy::prelude::*;
 
     fn debris_app() -> App {
@@ -1532,13 +1719,40 @@ mod client_presentation_tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Image>>()
             .init_resource::<ClientTerrainConvergence>()
-            .add_systems(Update, spawn_terrain_debris);
+            .add_systems(
+                Update,
+                (spawn_terrain_debris, expire_terrain_debris).chain(),
+            );
         app
     }
 
+    /// A convergence machine that already committed the initial snapshot at revision 0.
+    fn converged(terrain_gen: TerrainGeneration) -> ClientTerrainConvergence {
+        let mut state = ClientTerrainConvergence::default();
+        assert_eq!(
+            state.observe_generation(terrain_gen, &initial_chunks()),
+            TerrainConvergenceAction::RequestRecovery(terrain_gen)
+        );
+        state.mark_request_sent();
+        assert_eq!(
+            state.apply_snapshot(
+                &recovery_snapshot(&initial_chunks(), terrain_gen, 0),
+                &initial_chunks(),
+            ),
+            TerrainConvergenceAction::Applied
+        );
+        state
+    }
+
     /// Commit `count` distinct fresh-terrain brushes through the public convergence path
-    /// so the debris spawner observes one authoritative burst.
-    pub(super) fn commit_burst(convergence: &mut ClientTerrainConvergence, count: usize) {
+    /// so the debris spawner observes one authoritative burst. Centers sit on an
+    /// eight-half-cell grid so every disc erases fresh cells: a zero-effect event is
+    /// corrupt input the machine rejects with recovery instead of committing.
+    pub(super) fn commit_burst(
+        convergence: &mut ClientTerrainConvergence,
+        start: usize,
+        count: usize,
+    ) {
         let TerrainConvergencePhase::Ready {
             generation: terrain_gen,
         } = convergence.phase
@@ -1546,14 +1760,22 @@ mod client_presentation_tests {
             panic!("commit_burst expects a ready convergence");
         };
         let mut current = convergence.chunks().clone();
-        for index in 0..count {
+        for offset in 0..count {
+            let index = start + offset;
+            let (lattice, within) = (index / 64, index % 64);
             let brush = TerrainBrush {
-                center_half_cells_x: 1 + i16::try_from((index % 8) * 4).unwrap(),
-                center_half_cells_y: 1 + i16::try_from((index / 8) * 8).unwrap(),
+                center_half_cells_x: 1 + i16::try_from((within % 8) * 8 + (lattice % 2) * 4)
+                    .unwrap(),
+                center_half_cells_y: 1 + i16::try_from((within / 8) * 8 + (lattice % 2) * 4)
+                    .unwrap(),
                 radius_half_cells: 2,
             };
             let (event, next) =
                 stage_event(&current, terrain_gen, convergence.revision() + 1, brush);
+            assert!(
+                event.erased_cells > 0,
+                "burst brush {index} must erase fresh cells"
+            );
             assert_eq!(
                 convergence.apply_event(event),
                 TerrainConvergenceAction::Applied
@@ -1582,10 +1804,10 @@ mod client_presentation_tests {
             convergence.mark_request_sent();
             let snapshot = recovery_snapshot(&initial_chunks(), terrain_gen, 0);
             assert_eq!(
-                convergence.apply_snapshot(&snapshot),
+                convergence.apply_snapshot(&snapshot, &initial_chunks()),
                 TerrainConvergenceAction::Applied
             );
-            commit_burst(&mut convergence, 63);
+            commit_burst(&mut convergence, 0, 63);
         }
         app.update();
         assert_eq!(
@@ -1597,7 +1819,7 @@ mod client_presentation_tests {
         // of exceeding it.
         {
             let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
-            commit_burst(&mut convergence, 24);
+            commit_burst(&mut convergence, 64, 24);
         }
         app.update();
         assert_eq!(
@@ -1608,10 +1830,95 @@ mod client_presentation_tests {
         // Repeated bursts keep it there.
         {
             let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
-            commit_burst(&mut convergence, 24);
+            commit_burst(&mut convergence, 88, 24);
         }
         app.update();
         assert_eq!(debris_count(&mut app), MAX_TERRAIN_DEBRIS_EFFECTS);
+    }
+
+    #[test]
+    fn stale_generation_debris_is_retired_immediately() {
+        let mut app = debris_app();
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            *convergence = converged(generation(1));
+            commit_burst(&mut convergence, 0, 4);
+        }
+        app.update();
+        assert_eq!(debris_count(&mut app), 4, "fresh debris presents");
+        // A generation change (restart or map replacement) moves convergence out of the
+        // old generation's Ready state: the sweep retires old debris without waiting on
+        // the 500 ms presentation timer.
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            assert_eq!(
+                convergence.observe_generation(generation(2), &initial_chunks()),
+                TerrainConvergenceAction::RequestRecovery(generation(2))
+            );
+        }
+        app.update();
+        assert_eq!(
+            debris_count(&mut app),
+            0,
+            "a generation change retires old-generation debris immediately"
+        );
+        // New-generation debris presents again once convergence re-commits.
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            *convergence = converged(generation(2));
+            commit_burst(&mut convergence, 0, 2);
+        }
+        app.update();
+        assert_eq!(debris_count(&mut app), 2);
+        // Disconnect clears convergence entirely: no debris survives the session.
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            convergence.clear();
+        }
+        app.update();
+        assert_eq!(
+            debris_count(&mut app),
+            0,
+            "disconnect retires every debris effect"
+        );
+    }
+
+    #[test]
+    fn client_convergence_telemetry_records_duplicates_gaps_and_snapshots() {
+        let terrain_gen = generation(1);
+        let mut state = converged(terrain_gen);
+        let mut telemetry = TerrainTelemetry::default();
+        // A duplicate revision from a committed Ready state counts once.
+        let (event, _) = stage_event(&initial_chunks(), terrain_gen, 1, center_brush(2));
+        assert_eq!(
+            state.apply_event(event.clone()),
+            TerrainConvergenceAction::Applied
+        );
+        classify_client_event(&state, &event, 7, &mut telemetry);
+        assert_eq!(telemetry.aggregates.client_duplicates, 1);
+        assert_eq!(telemetry.aggregates.client_gaps, 0);
+        // A revision beyond committed + 1 reports the observed gap.
+        let (gap, _) = stage_event(&initial_chunks(), terrain_gen, 9, center_brush(2));
+        classify_client_event(&state, &gap, 8, &mut telemetry);
+        assert_eq!(telemetry.aggregates.client_duplicates, 1);
+        assert_eq!(telemetry.aggregates.client_gaps, 1);
+        // An event from a foreign generation is neither a duplicate nor a gap.
+        let (foreign, _) = stage_event(&initial_chunks(), generation(2), 1, center_brush(2));
+        classify_client_event(&state, &foreign, 9, &mut telemetry);
+        assert_eq!(telemetry.aggregates.client_duplicates, 1);
+        assert_eq!(telemetry.aggregates.client_gaps, 1);
+        // One applied recovery snapshot records against the committed generation.
+        record_snapshot_application(&state, 0, 9, &mut telemetry);
+        assert_eq!(telemetry.aggregates.client_snapshots_applied, 1);
+        assert_eq!(telemetry.aggregates.client_duplicates, 1);
+        let record = telemetry
+            .records
+            .iter()
+            .rev()
+            .find(|record| record.outcome == TerrainTelemetryOutcome::ClientSnapshotApplied)
+            .expect("the snapshot application leaves a record");
+        assert_eq!(record.map_instance_id, terrain_gen.map_instance_id);
+        assert_eq!(record.revision, 0);
     }
 }
 
@@ -1683,7 +1990,7 @@ mod client_soak_tests {
             );
             convergence.mark_request_sent();
             assert_eq!(
-                convergence.apply_snapshot(&recovery_snapshot(&chunks, first, 0)),
+                convergence.apply_snapshot(&recovery_snapshot(&chunks, first, 0), &chunks),
                 TerrainConvergenceAction::Applied
             );
         }
@@ -1695,7 +2002,7 @@ mod client_soak_tests {
         for cycle in 0..100_u64 {
             {
                 let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
-                commit_burst(&mut convergence, 1);
+                commit_burst(&mut convergence, 0, 1);
             }
             app.update();
             // The server resets for the next match; the client observes the new match

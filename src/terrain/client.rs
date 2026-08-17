@@ -14,6 +14,7 @@ use super::model::{
     TerrainGeneration, TerrainRecoveryRequest, TerrainRecoverySnapshot, TerrainResetEvent,
 };
 use super::network::{ClientTerrainConvergence, TerrainConvergenceAction, TerrainConvergencePhase};
+use super::telemetry::{TerrainTelemetry, TerrainTelemetryOutcome, TerrainTelemetryRecord};
 use crate::map::{InitialTerrainLayout, MapInstanceId, MapRoot, ResolvedMapSnapshot};
 use crate::matchplay::{MatchId, MatchRoot as MatchRootMarker, MatchState};
 use crate::protocol::TerrainChannel;
@@ -58,6 +59,7 @@ impl Plugin for ClientTerrainPlugin {
         app.add_plugins(TerrainCorePlugin)
             .init_resource::<ClientTerrainReadiness>()
             .init_resource::<ExpectedClientTerrainSlot>()
+            .init_resource::<TerrainTelemetry>()
             .add_systems(
                 Update,
                 (
@@ -137,6 +139,77 @@ fn derive_expected_client_terrain(
 /// server's per-link cooldown so a served exchange is never double-counted.
 const RECOVERY_REQUEST_RETRY_TICKS: u64 = 60;
 
+/// One client-local convergence telemetry record: only the tick, generation identity,
+/// and revision it observed are meaningful.
+fn client_convergence_record(
+    tick: u64,
+    generation: TerrainGeneration,
+    revision: u64,
+    outcome: TerrainTelemetryOutcome,
+) -> TerrainTelemetryRecord {
+    TerrainTelemetryRecord {
+        tick,
+        map_instance_id: generation.map_instance_id,
+        revision,
+        source_attack_id: None,
+        delivery_index: None,
+        brush: None,
+        affected_chunks: Vec::new(),
+        erased_cells: 0,
+        rebuilt_colliders: 0,
+        serialized_event_bytes: None,
+        outcome,
+    }
+}
+
+/// Record the convergence facts the pure machine signals only through its action: a
+/// duplicate revision and a revision gap observed from an already-committed state.
+pub(super) fn classify_client_event(
+    convergence: &ClientTerrainConvergence,
+    event: &TerrainDestructionEvent,
+    tick: u64,
+    telemetry: &mut TerrainTelemetry,
+) {
+    let TerrainConvergencePhase::Ready { generation } = convergence.phase else {
+        return;
+    };
+    if event.generation != generation {
+        return;
+    }
+    let committed = convergence.revision();
+    let outcome = if event.revision <= committed {
+        TerrainTelemetryOutcome::ClientDuplicateIgnored
+    } else if event.revision > committed.saturating_add(1) {
+        TerrainTelemetryOutcome::ClientGapObserved
+    } else {
+        return;
+    };
+    telemetry.record(client_convergence_record(
+        tick,
+        generation,
+        event.revision,
+        outcome,
+    ));
+}
+
+/// Record one applied recovery snapshot against the convergence machine's committed
+/// generation. Called only after `apply_snapshot` committed new authoritative state.
+pub(super) fn record_snapshot_application(
+    convergence: &ClientTerrainConvergence,
+    snapshot_revision: u64,
+    tick: u64,
+    telemetry: &mut TerrainTelemetry,
+) {
+    if let TerrainConvergencePhase::Ready { generation } = convergence.phase {
+        telemetry.record(client_convergence_record(
+            tick,
+            generation,
+            snapshot_revision,
+            TerrainTelemetryOutcome::ClientSnapshotApplied,
+        ));
+    }
+}
+
 /// Receive terrain traffic, drive the pure convergence machine, and send at most one
 /// outstanding recovery request for the awaited generation.
 #[allow(clippy::too_many_arguments)]
@@ -145,6 +218,7 @@ fn drive_terrain_wire_convergence(
     mut last_request_tick: Local<Option<u64>>,
     expected: Res<ExpectedClientTerrainSlot>,
     mut convergence: ResMut<ClientTerrainConvergence>,
+    mut telemetry: ResMut<TerrainTelemetry>,
     mut readiness: ResMut<ClientTerrainReadiness>,
     mut requests: Query<&mut MessageSender<TerrainRecoveryRequest>, With<Client>>,
     mut snapshots: Query<Option<&mut MessageReceiver<TerrainRecoverySnapshot>>, With<Client>>,
@@ -160,12 +234,17 @@ fn drive_terrain_wire_convergence(
         ExpectedClientTerrainSlot::Derived(current) => &current.layout.chunks,
         _ => &empty,
     };
+    let tick = tick.map_or(0, |tick| tick.0);
     for receiver in &mut snapshots {
         let Some(mut receiver) = receiver else {
             continue;
         };
         for snapshot in receiver.receive() {
-            report_invalid(convergence.apply_snapshot(&snapshot));
+            let action = convergence.apply_snapshot(&snapshot, initial_chunks);
+            if action == TerrainConvergenceAction::Applied {
+                record_snapshot_application(&convergence, snapshot.revision, tick, &mut telemetry);
+            }
+            report_invalid(action);
         }
     }
     for receiver in &mut resets {
@@ -181,12 +260,12 @@ fn drive_terrain_wire_convergence(
             continue;
         };
         for event in receiver.receive() {
+            classify_client_event(&convergence, &event, tick, &mut telemetry);
             report_invalid(convergence.apply_event(event));
         }
     }
     // One outstanding request, re-armed after a bounded silent window so a lost request
     // or response on an unreliable transport cannot wedge convergence forever.
-    let tick = tick.map_or(0, |tick| tick.0);
     let tick = SimulationTick(tick);
     let mut resend = false;
     match convergence.phase {
@@ -218,9 +297,20 @@ fn drive_terrain_wire_convergence(
         }
         *last_request_tick = Some(tick.0);
     }
+    refresh_terrain_readiness(&mut readiness, &convergence, &expected);
+}
+
+/// Derive the user-facing readiness observation from the committed convergence phase.
+/// Runs after the Update-stage readiness writers so the clamp is authoritative for the
+/// next sampled frame.
+fn refresh_terrain_readiness(
+    readiness: &mut ClientTerrainReadiness,
+    convergence: &ClientTerrainConvergence,
+    expected: &ExpectedClientTerrainSlot,
+) {
     let was_ready = matches!(*readiness, ClientTerrainReadiness::Ready);
     *readiness = match &convergence.phase {
-        TerrainConvergencePhase::WaitingForMap => match &*expected {
+        TerrainConvergencePhase::WaitingForMap => match expected {
             ExpectedClientTerrainSlot::Failed(reason) => {
                 ClientTerrainReadiness::Invalid(reason.clone())
             }
@@ -304,8 +394,11 @@ pub struct TerrainChunkVisual {
 }
 
 /// One bounded cosmetic destruction burst. Never collides, replicates, or plays audio.
+/// Carries its terrain generation so a reset, map replacement, or disconnect despawns it
+/// immediately instead of outliving its generation by the presentation timer.
 #[derive(Component)]
 pub(super) struct TerrainDebris {
+    generation: TerrainGeneration,
     expires_at: std::time::Duration,
 }
 
@@ -514,6 +607,9 @@ pub(super) fn spawn_terrain_debris(
         return;
     }
     let brushes = convergence.take_applied_brushes();
+    let TerrainConvergencePhase::Ready { generation } = convergence.phase else {
+        return;
+    };
     // Budget the ceiling across live debris plus this tick's applied brushes, keeping
     // the newest feedback: retire the oldest existing effects first and, when a single
     // burst exceeds the ceiling on its own, present only its newest brushes.
@@ -532,7 +628,10 @@ pub(super) fn spawn_terrain_debris(
     for brush in &brushes[brushes.len() - newest..] {
         let center = crate::terrain::grid::brush_center_world(*brush);
         commands.spawn((
-            TerrainDebris { expires_at },
+            TerrainDebris {
+                generation,
+                expires_at,
+            },
             Sprite::from_color(
                 Color::srgba(0.85, 0.66, 0.34, 0.85),
                 Vec2::splat(
@@ -546,15 +645,22 @@ pub(super) fn spawn_terrain_debris(
     }
 }
 
-/// Expire debris by client presentation time; the durable crater stays.
+/// Expire debris by client presentation time and immediately retire any debris whose
+/// terrain generation left the convergence machine (reset, map replacement, or
+/// disconnect); the durable crater stays.
 pub(super) fn expire_terrain_debris(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
+    convergence: Res<ClientTerrainConvergence>,
     debris: Query<(Entity, &TerrainDebris)>,
 ) {
     let now = time.elapsed();
+    let current = match convergence.phase {
+        TerrainConvergencePhase::Ready { generation } => Some(generation),
+        _ => None,
+    };
     for (entity, debris) in &debris {
-        if now >= debris.expires_at {
+        if now >= debris.expires_at || Some(debris.generation) != current {
             commands.entity(entity).try_despawn();
         }
     }
@@ -770,11 +876,10 @@ mod tests {
             ));
             convergence.mark_request_sent();
             assert_eq!(
-                convergence.apply_snapshot(&terrain_grid::recovery_snapshot(
-                    &layout.chunks,
-                    generation,
-                    0
-                )),
+                convergence.apply_snapshot(
+                    &terrain_grid::recovery_snapshot(&layout.chunks, generation, 0),
+                    &layout.chunks
+                ),
                 TerrainConvergenceAction::Applied
             );
             convergence.take_dirty();

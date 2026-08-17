@@ -260,6 +260,23 @@ fn reject_under_provisioned_connection_capacity(app: &App, capacity: &ResolvedMa
     }
 }
 
+/// Map validation proves the map satisfies its mode definition; this composition step
+/// proves it satisfies the *resolved rules profile*: identical team slots and enough
+/// spawn points for every simultaneous participant. Runs once the selected map is
+/// installed, before the match root exists.
+#[allow(clippy::needless_pass_by_value)]
+pub(super) fn validate_capacity_against_selected_map(
+    capacity: Res<ResolvedMatchCapacity>,
+    resolved: Option<Res<ResolvedMap>>,
+) {
+    let Some(resolved) = resolved else {
+        return;
+    };
+    if let Err(reason) = capacity.validate_against_map(&resolved.snapshot) {
+        panic!("resolved match capacity does not satisfy the selected map: {reason}");
+    }
+}
+
 /// Ordered post-update pipeline shared by every mode: consume the mode outcome, resolve
 /// respawns, record telemetry, and capture the match summary with deferred boundaries.
 fn register_match_outcome_pipeline(app: &mut App) {
@@ -322,7 +339,12 @@ impl Plugin for AuthoritativeMatchPlugin {
             .init_resource::<PendingMatchActivation>()
             .add_systems(
                 Startup,
-                initialize_match_root.after(MapStartupSet::Instantiate),
+                (
+                    validate_capacity_against_selected_map,
+                    initialize_match_root,
+                )
+                    .chain()
+                    .after(MapStartupSet::Instantiate),
             )
             .add_systems(
                 FixedUpdate,
