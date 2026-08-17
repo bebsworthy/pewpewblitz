@@ -1855,9 +1855,11 @@ mod client_presentation_tests {
     use crate::terrain::ClientTerrainConvergence;
     use crate::terrain::TerrainConvergenceAction;
     use crate::terrain::TerrainConvergencePhase;
-    use crate::terrain::client::{
-        TerrainDebris, classify_client_event, clear_telemetry_on_generation_change,
-        expire_terrain_debris, record_snapshot_application, spawn_terrain_debris,
+    use crate::terrain::client::presentation::{
+        TerrainDebris, expire_terrain_debris, spawn_terrain_debris,
+    };
+    use crate::terrain::client::recovery::{
+        classify_client_event, clear_telemetry_on_generation_change, record_snapshot_application,
     };
     use crate::terrain::grid::recovery_snapshot;
     use crate::terrain::telemetry::{TerrainTelemetry, TerrainTelemetryOutcome};
@@ -2114,10 +2116,10 @@ mod client_soak_tests {
     use super::convergence_tests::{generation, initial_chunks};
     use crate::terrain::ClientTerrainConvergence;
     use crate::terrain::TerrainConvergenceAction;
-    use crate::terrain::client::{
-        ExpectedClientTerrain, ExpectedClientTerrainSlot, TerrainChunkVisual,
-        expire_terrain_debris, spawn_terrain_debris, update_terrain_visuals,
+    use crate::terrain::client::presentation::{
+        TerrainChunkVisual, expire_terrain_debris, spawn_terrain_debris, update_terrain_visuals,
     };
+    use crate::terrain::client::{ExpectedClientTerrain, ExpectedClientTerrainSlot};
     use crate::terrain::grid::recovery_snapshot;
     use crate::terrain::model::MAX_TERRAIN_DEBRIS_EFFECTS;
     use bevy::prelude::*;
