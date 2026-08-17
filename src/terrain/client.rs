@@ -36,15 +36,15 @@ pub enum ClientTerrainReadiness {
 
 /// One locally derived expectation from the replicated map and match state.
 #[derive(Clone, Debug, PartialEq)]
-struct ExpectedClientTerrain {
-    generation: TerrainGeneration,
-    layout: InitialTerrainLayout,
-    derived_from: (MapInstanceId, MatchId),
+pub(super) struct ExpectedClientTerrain {
+    pub(super) generation: TerrainGeneration,
+    pub(super) layout: InitialTerrainLayout,
+    pub(super) derived_from: (MapInstanceId, MatchId),
 }
 
 /// Derivation cache so layout resolution runs only when the replicated pair changes.
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
-enum ExpectedClientTerrainSlot {
+pub(super) enum ExpectedClientTerrainSlot {
     #[default]
     Waiting,
     Failed(String),
@@ -305,7 +305,7 @@ pub struct TerrainChunkVisual {
 
 /// One bounded cosmetic destruction burst. Never collides, replicates, or plays audio.
 #[derive(Component)]
-struct TerrainDebris {
+pub(super) struct TerrainDebris {
     expires_at: std::time::Duration,
 }
 
@@ -407,7 +407,7 @@ fn neighbor_bits(
 
 /// Ensure one sprite per expected chunk, repaint dirty chunks and their orthogonal
 /// visual neighbors, and retire sprites that left the expected generation.
-fn update_terrain_visuals(
+pub(super) fn update_terrain_visuals(
     mut commands: Commands,
     mut images: Option<ResMut<Assets<Image>>>,
     expected: Res<ExpectedClientTerrainSlot>,
@@ -503,7 +503,7 @@ fn update_terrain_visuals(
         }
     }
 }
-fn spawn_terrain_debris(
+pub(super) fn spawn_terrain_debris(
     mut commands: Commands,
     images: Option<ResMut<Assets<Image>>>,
     time: Res<Time<Virtual>>,
@@ -513,15 +513,24 @@ fn spawn_terrain_debris(
     if images.as_deref().is_none() {
         return;
     }
+    let brushes = convergence.take_applied_brushes();
+    // Budget the ceiling across live debris plus this tick's applied brushes, keeping
+    // the newest feedback: retire the oldest existing effects first and, when a single
+    // burst exceeds the ceiling on its own, present only its newest brushes.
     let mut live: Vec<_> = debris.iter().collect();
     live.sort_by_key(|(entity, _)| *entity);
-    while live.len() >= super::model::MAX_TERRAIN_DEBRIS_EFFECTS {
+    let overflow = live
+        .len()
+        .saturating_add(brushes.len())
+        .saturating_sub(super::model::MAX_TERRAIN_DEBRIS_EFFECTS);
+    for _ in 0..overflow.min(live.len()) {
         let (expire, _) = live.remove(0);
         commands.entity(expire).try_despawn();
     }
+    let newest = brushes.len().min(super::model::MAX_TERRAIN_DEBRIS_EFFECTS);
     let expires_at = time.elapsed() + TERRAIN_DEBRIS_LIFETIME;
-    for brush in convergence.take_applied_brushes() {
-        let center = crate::terrain::grid::brush_center_world(brush);
+    for brush in &brushes[brushes.len() - newest..] {
+        let center = crate::terrain::grid::brush_center_world(*brush);
         commands.spawn((
             TerrainDebris { expires_at },
             Sprite::from_color(
@@ -538,7 +547,7 @@ fn spawn_terrain_debris(
 }
 
 /// Expire debris by client presentation time; the durable crater stays.
-fn expire_terrain_debris(
+pub(super) fn expire_terrain_debris(
     mut commands: Commands,
     time: Res<Time<Virtual>>,
     debris: Query<(Entity, &TerrainDebris)>,

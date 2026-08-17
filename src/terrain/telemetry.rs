@@ -83,6 +83,7 @@ pub struct TerrainTelemetryAggregates {
     pub client_duplicates: u64,
     pub client_snapshots_applied: u64,
     pub defensive_repairs: u64,
+    pub stale_generation_brushes: u64,
     pub dropped_records: u64,
 }
 

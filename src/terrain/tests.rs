@@ -740,6 +740,115 @@ mod authority_tests {
         assert_eq!(colliders.iter(world).count(), 4);
     }
 
+    #[test]
+    fn restart_clears_queued_brushes_and_rejects_restart_tick_facts() {
+        let mut app = terrain_app();
+        app.world_mut()
+            .insert_resource(crate::terrain::authority::TerrainAdmissionCapacity(1));
+        let initial = current_occupancy(app.world_mut());
+        let positions = [(0.0, 0.0), (40.0, 40.0), (-40.0, -40.0)];
+        for (index, attack) in (1..=3).enumerate() {
+            app.world_mut()
+                .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+                .0
+                .push(fact(attack, positions[index], 48.0));
+        }
+        app.update();
+        {
+            let world = app.world_mut();
+            assert_eq!(root(world).revision, 1, "one brush admitted");
+            assert_eq!(
+                world.resource::<PendingTerrainBrushes>().queue.len(),
+                2,
+                "excess facts defer whole"
+            );
+        }
+        app.init_resource::<crate::matchplay::PendingMatchRestart>();
+        app.world_mut()
+            .resource_mut::<crate::matchplay::PendingMatchRestart>()
+            .stage_for_test(crate::matchplay::PendingMatchRestartSlot {
+                previous_id: crate::matchplay::MatchId(1),
+                next_id: crate::matchplay::MatchId(3),
+                restart_tick: 1,
+            });
+        crate::terrain::reset_terrain_on_match_restart(app.world_mut());
+        // A detonation resolved at the restart tick itself is staged after the reset
+        // inside the same fixed-post chain; it must not carve the restored generation.
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fact(9, (0.0, 0.0), 48.0));
+        app.update();
+        {
+            let world = app.world_mut();
+            assert_eq!(root(world).revision, 0, "no stale brush may apply");
+            assert_eq!(current_occupancy(world), initial);
+            assert!(world.resource::<PendingTerrainBrushes>().queue.is_empty());
+            assert!(
+                world
+                    .resource::<crate::terrain::TerrainBrushBatch>()
+                    .brushes
+                    .is_empty()
+            );
+            let telemetry = world.resource::<crate::terrain::telemetry::TerrainTelemetry>();
+            assert_eq!(
+                telemetry.aggregates.stale_generation_brushes, 1,
+                "the restart-tick fact is counted and dropped"
+            );
+        }
+        // A detonation resolved after the restart tick brushes the new match normally.
+        let mut fresh = fact(11, (0.0, 0.0), 48.0);
+        fresh.tick = 2;
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fresh);
+        app.update();
+        assert_eq!(root(app.world_mut()).revision, 1);
+    }
+
+    #[test]
+    fn exact_teardown_without_reinstall_keeps_fixed_post_systems_schedulable() {
+        let mut app = terrain_app();
+        app.update();
+        let resolved = app
+            .world_mut()
+            .resource::<crate::map::ResolvedMap>()
+            .clone();
+        let initial_chunks = {
+            let world = app.world_mut();
+            let mut chunks = world.query::<&TerrainChunk>();
+            chunks.iter(world).count()
+        };
+        assert!(initial_chunks > 0, "fixture installs terrain chunks");
+        // The exact teardown authoritative map teardown performs with no replacement.
+        crate::map::teardown_authoritative_map(app.world_mut());
+        for _ in 0..3 {
+            app.update();
+        }
+        {
+            let world = app.world_mut();
+            let mut roots = world.query_filtered::<Entity, With<TerrainRoot>>();
+            assert_eq!(roots.iter(world).count(), 0);
+            let mut chunks = world.query::<&TerrainChunk>();
+            assert_eq!(chunks.iter(world).count(), 0);
+            assert!(
+                world
+                    .resource::<crate::terrain::TerrainChunkIndex>()
+                    .0
+                    .is_empty()
+            );
+            assert!(world.resource::<PendingTerrainBrushes>().queue.is_empty());
+        }
+        // Reinstalling a map rebuilds a fresh generation from the retained empty state.
+        crate::map::install_resolved_map(app.world_mut(), resolved).expect("map reinstalls");
+        app.update();
+        let world = app.world_mut();
+        let mut chunks = world.query::<&TerrainChunk>();
+        assert_eq!(chunks.iter(world).count(), initial_chunks);
+        assert_eq!(root(world).revision, 0);
+    }
+
     /// Probe the Avian collider world for destructible terrain at one point from inside a
     /// system, because `SpatialQuery` is a system parameter rather than a resource.
     fn terrain_point_hits(app: &mut App, point: (f32, f32)) -> bool {
@@ -835,7 +944,7 @@ mod convergence_tests {
         ClientTerrainConvergence, TerrainConvergenceAction, TerrainConvergencePhase,
     };
 
-    fn generation(match_id: u64) -> TerrainGeneration {
+    pub(super) fn generation(match_id: u64) -> TerrainGeneration {
         TerrainGeneration {
             map_instance_id: crate::map::MapInstanceId(1),
             match_id: MatchId(match_id),
@@ -844,12 +953,12 @@ mod convergence_tests {
     }
 
     /// One fully occupied chunk at the origin, like the built-in block's corner.
-    fn initial_chunks() -> BTreeMap<TerrainChunkId, TerrainBits> {
+    pub(super) fn initial_chunks() -> BTreeMap<TerrainChunkId, TerrainBits> {
         BTreeMap::from([chunk_with_all_cells_set(TerrainChunkId { x: 0, y: 0 })])
     }
 
     /// Compute the exact event a server would send by rasterizing `brush` on `current`.
-    fn stage_event(
+    pub(super) fn stage_event(
         current: &BTreeMap<TerrainChunkId, TerrainBits>,
         terrain_gen: TerrainGeneration,
         revision: u64,
@@ -889,7 +998,7 @@ mod convergence_tests {
         )
     }
 
-    fn center_brush(radius_half_cells: u16) -> TerrainBrush {
+    pub(super) fn center_brush(radius_half_cells: u16) -> TerrainBrush {
         TerrainBrush {
             center_half_cells_x: 1,
             center_half_cells_y: 1,
@@ -1225,6 +1334,75 @@ mod convergence_tests {
     }
 
     #[test]
+    fn reset_outrunning_match_observation_syncs_through_recovery() {
+        let terrain_gen = generation(1);
+        let next_gen = generation(2);
+        // The reset arrives while the client still observes the pre-restart match id:
+        // nothing is committed and convergence leaves the ready state immediately.
+        let mut state = ready_state();
+        assert_eq!(
+            state.apply_reset(
+                TerrainResetEvent {
+                    previous_generation: terrain_gen,
+                    next_generation: next_gen,
+                },
+                Some(terrain_gen),
+                &initial_chunks()
+            ),
+            TerrainConvergenceAction::RequestRecovery(next_gen)
+        );
+        assert!(matches!(
+            &state.phase,
+            TerrainConvergencePhase::AwaitingRecovery { generation, .. } if *generation == next_gen
+        ));
+        assert!(state.chunks().is_empty());
+        assert_eq!(state.revision(), 0);
+        // Repeated pre-restart observations hold the syncing state instead of churning
+        // back to a request the server would reject as stale.
+        assert_eq!(
+            state.observe_generation(terrain_gen, &initial_chunks()),
+            TerrainConvergenceAction::Ignored
+        );
+        assert!(matches!(
+            &state.phase,
+            TerrainConvergencePhase::AwaitingRecovery { generation, .. } if *generation == next_gen
+        ));
+        // The served post-restart snapshot converges the held generation.
+        assert_eq!(
+            state.apply_snapshot(&recovery_snapshot(&initial_chunks(), next_gen, 0)),
+            TerrainConvergenceAction::Applied
+        );
+        assert_eq!(state.revision(), 0);
+        assert_eq!(state.chunks(), &initial_chunks());
+        assert_eq!(
+            state.observe_generation(next_gen, &initial_chunks()),
+            TerrainConvergenceAction::Ignored
+        );
+        // An unrelated generation change discards the held reset and recovers instead.
+        let mut state = ready_state();
+        assert_eq!(
+            state.apply_reset(
+                TerrainResetEvent {
+                    previous_generation: terrain_gen,
+                    next_generation: next_gen,
+                },
+                Some(terrain_gen),
+                &initial_chunks()
+            ),
+            TerrainConvergenceAction::RequestRecovery(next_gen)
+        );
+        let foreign = generation(7);
+        assert_eq!(
+            state.observe_generation(foreign, &initial_chunks()),
+            TerrainConvergenceAction::RequestRecovery(foreign)
+        );
+        assert!(matches!(
+            &state.phase,
+            TerrainConvergencePhase::AwaitingRecovery { generation, .. } if *generation == foreign
+        ));
+    }
+
+    #[test]
     fn generation_change_discards_state_and_requests_recovery() {
         let mut state = ready_state();
         let (event, next_chunks) =
@@ -1260,18 +1438,28 @@ mod reset_cycle_tests {
     use std::time::Instant;
 
     /// The 100-cycle reset budget from the M10 scale slice: destroy, reset, repeat, and
-    /// confirm the per-cycle cost stays small and the state exactly returns.
+    /// confirm the per-cycle cost stays small, the state exactly returns, and repeated
+    /// cycles leak no entities, queues, or telemetry records.
     #[test]
     fn one_hundred_destroy_reset_cycles_stay_fast_and_exact() {
         let mut app = terrain_app();
         let initial = current_occupancy(app.world_mut());
+        let initial_chunks = {
+            let world = app.world_mut();
+            let mut chunks = world.query::<&crate::terrain::TerrainChunk>();
+            chunks.iter(world).count()
+        };
         app.init_resource::<crate::matchplay::PendingMatchRestart>();
         let start = Instant::now();
         for cycle in 0..100_u64 {
+            // Each cycle's detonation carries a tick after the previous restart's brush
+            // epoch, exactly like a real post-restart impact.
+            let mut detonation = fact(1, (0.0, 0.0), 48.0);
+            detonation.tick = cycle + 1;
             app.world_mut()
                 .resource_mut::<crate::combat::CombatWorldEffectFacts>()
                 .0
-                .push(fact(1, (0.0, 0.0), 48.0));
+                .push(detonation);
             app.update();
             assert_eq!(root(app.world_mut()).revision, 1, "cycle {cycle}");
             app.world_mut()
@@ -1282,13 +1470,280 @@ mod reset_cycle_tests {
                     restart_tick: cycle,
                 });
             crate::terrain::reset_terrain_on_match_restart(app.world_mut());
-            assert_eq!(root(app.world_mut()).revision, 0, "cycle {cycle}");
+            let world = app.world_mut();
+            assert_eq!(root(world).revision, 0, "cycle {cycle}");
+            assert!(
+                world
+                    .resource::<crate::terrain::PendingTerrainBrushes>()
+                    .queue
+                    .is_empty(),
+                "cycle {cycle}"
+            );
+            assert!(
+                world
+                    .resource::<crate::terrain::TerrainBrushBatch>()
+                    .brushes
+                    .is_empty(),
+                "cycle {cycle}"
+            );
         }
         let elapsed = start.elapsed();
-        assert_eq!(current_occupancy(app.world_mut()), initial);
+        let world = app.world_mut();
+        assert_eq!(current_occupancy(world), initial);
+        let mut chunks = world.query::<&crate::terrain::TerrainChunk>();
+        assert_eq!(
+            chunks.iter(world).count(),
+            initial_chunks,
+            "repeated cycles leak no chunk entities"
+        );
+        assert_eq!(
+            world
+                .resource::<crate::terrain::TerrainChunkIndex>()
+                .0
+                .len(),
+            initial_chunks
+        );
+        assert!(
+            world
+                .resource::<crate::terrain::telemetry::TerrainTelemetry>()
+                .records
+                .len()
+                <= crate::terrain::model::MAX_TERRAIN_TELEMETRY_RECORDS
+        );
         assert!(
             elapsed.as_millis() < 4_000,
             "100 destroy/reset cycles took {elapsed:?}"
         );
+    }
+}
+
+#[cfg(feature = "client")]
+mod client_presentation_tests {
+    use super::convergence_tests::{generation, initial_chunks, stage_event};
+    use super::*;
+    use crate::terrain::ClientTerrainConvergence;
+    use crate::terrain::TerrainConvergenceAction;
+    use crate::terrain::TerrainConvergencePhase;
+    use crate::terrain::client::{TerrainDebris, spawn_terrain_debris};
+    use bevy::prelude::*;
+
+    fn debris_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Image>>()
+            .init_resource::<ClientTerrainConvergence>()
+            .add_systems(Update, spawn_terrain_debris);
+        app
+    }
+
+    /// Commit `count` distinct fresh-terrain brushes through the public convergence path
+    /// so the debris spawner observes one authoritative burst.
+    pub(super) fn commit_burst(convergence: &mut ClientTerrainConvergence, count: usize) {
+        let TerrainConvergencePhase::Ready {
+            generation: terrain_gen,
+        } = convergence.phase
+        else {
+            panic!("commit_burst expects a ready convergence");
+        };
+        let mut current = convergence.chunks().clone();
+        for index in 0..count {
+            let brush = TerrainBrush {
+                center_half_cells_x: 1 + i16::try_from((index % 8) * 4).unwrap(),
+                center_half_cells_y: 1 + i16::try_from((index / 8) * 8).unwrap(),
+                radius_half_cells: 2,
+            };
+            let (event, next) =
+                stage_event(&current, terrain_gen, convergence.revision() + 1, brush);
+            assert_eq!(
+                convergence.apply_event(event),
+                TerrainConvergenceAction::Applied
+            );
+            current = next;
+        }
+    }
+
+    pub(super) fn debris_count(app: &mut App) -> usize {
+        let mut debris = app
+            .world_mut()
+            .query_filtered::<&Transform, With<TerrainDebris>>();
+        debris.iter(app.world()).count()
+    }
+
+    #[test]
+    fn debris_bursts_respect_the_ceiling_across_existing_and_new_effects() {
+        let mut app = debris_app();
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            let terrain_gen = generation(1);
+            assert_eq!(
+                convergence.observe_generation(terrain_gen, &initial_chunks()),
+                TerrainConvergenceAction::RequestRecovery(terrain_gen)
+            );
+            convergence.mark_request_sent();
+            let snapshot = recovery_snapshot(&initial_chunks(), terrain_gen, 0);
+            assert_eq!(
+                convergence.apply_snapshot(&snapshot),
+                TerrainConvergenceAction::Applied
+            );
+            commit_burst(&mut convergence, 63);
+        }
+        app.update();
+        assert_eq!(
+            debris_count(&mut app),
+            63,
+            "a sub-ceiling burst lands whole"
+        );
+        // A full 24-brush burst on top of 63 live effects must hold the ceiling instead
+        // of exceeding it.
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            commit_burst(&mut convergence, 24);
+        }
+        app.update();
+        assert_eq!(
+            debris_count(&mut app),
+            MAX_TERRAIN_DEBRIS_EFFECTS,
+            "existing plus pending stays exactly at the ceiling"
+        );
+        // Repeated bursts keep it there.
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            commit_burst(&mut convergence, 24);
+        }
+        app.update();
+        assert_eq!(debris_count(&mut app), MAX_TERRAIN_DEBRIS_EFFECTS);
+    }
+}
+
+#[cfg(feature = "client")]
+mod client_soak_tests {
+    use super::client_presentation_tests::{commit_burst, debris_count};
+    use super::convergence_tests::{generation, initial_chunks};
+    use crate::terrain::ClientTerrainConvergence;
+    use crate::terrain::TerrainConvergenceAction;
+    use crate::terrain::client::{
+        ExpectedClientTerrain, ExpectedClientTerrainSlot, TerrainChunkVisual,
+        expire_terrain_debris, spawn_terrain_debris, update_terrain_visuals,
+    };
+    use crate::terrain::grid::recovery_snapshot;
+    use crate::terrain::model::MAX_TERRAIN_DEBRIS_EFFECTS;
+    use bevy::prelude::*;
+
+    fn visual_count(app: &mut App) -> usize {
+        let mut visuals = app
+            .world_mut()
+            .query_filtered::<&Transform, With<TerrainChunkVisual>>();
+        visuals.iter(app.world()).count()
+    }
+
+    fn image_count(app: &mut App) -> usize {
+        app.world().resource::<Assets<Image>>().len()
+    }
+
+    /// The M10 client growth soak: one hundred destroy/reset cycles through the public
+    /// convergence path hold visual-entity, image-handle, and debris bounds with no
+    /// per-cycle growth, and debris reaches exact cleanup by presentation time.
+    #[test]
+    fn one_hundred_client_destroy_reset_cycles_hold_visual_and_debris_bounds() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(50),
+            ))
+            .init_resource::<Assets<Image>>()
+            .init_resource::<ClientTerrainConvergence>()
+            .init_resource::<ExpectedClientTerrainSlot>()
+            .add_systems(
+                Update,
+                (
+                    update_terrain_visuals,
+                    spawn_terrain_debris,
+                    expire_terrain_debris,
+                ),
+            );
+        let chunks = initial_chunks();
+        let layout = crate::map::InitialTerrainLayout {
+            terrain_fingerprint: 0xabcd_ef01,
+            chunks: chunks.clone(),
+            total_cells: 1024,
+        };
+        let set_slot = |app: &mut App, current: crate::terrain::TerrainGeneration| {
+            app.insert_resource(ExpectedClientTerrainSlot::Derived(ExpectedClientTerrain {
+                generation: current,
+                layout: layout.clone(),
+                derived_from: (crate::map::MapInstanceId(1), current.match_id),
+            }));
+        };
+        let first = generation(1);
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            assert_eq!(
+                convergence.observe_generation(first, &chunks),
+                TerrainConvergenceAction::RequestRecovery(first)
+            );
+            convergence.mark_request_sent();
+            assert_eq!(
+                convergence.apply_snapshot(&recovery_snapshot(&chunks, first, 0)),
+                TerrainConvergenceAction::Applied
+            );
+        }
+        set_slot(&mut app, first);
+        app.update();
+        let baseline_visuals = visual_count(&mut app);
+        let baseline_images = image_count(&mut app);
+        assert_eq!(baseline_visuals, chunks.len());
+        for cycle in 0..100_u64 {
+            {
+                let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+                commit_burst(&mut convergence, 1);
+            }
+            app.update();
+            // The server resets for the next match; the client observes the new match
+            // id and accepts the chained reset.
+            let previous = generation(cycle + 1);
+            let next = generation(cycle + 2);
+            set_slot(&mut app, next);
+            {
+                let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+                assert_eq!(
+                    convergence.apply_reset(
+                        crate::terrain::TerrainResetEvent {
+                            previous_generation: previous,
+                            next_generation: next,
+                        },
+                        Some(next),
+                        &chunks,
+                    ),
+                    TerrainConvergenceAction::Applied
+                );
+            }
+            app.update();
+            if cycle % 10 == 0 {
+                assert_eq!(
+                    visual_count(&mut app),
+                    baseline_visuals,
+                    "cycle {cycle} leaks no chunk visuals"
+                );
+                assert_eq!(
+                    image_count(&mut app),
+                    baseline_images,
+                    "cycle {cycle} leaks no image handles"
+                );
+            }
+        }
+        assert_eq!(visual_count(&mut app), baseline_visuals);
+        assert_eq!(image_count(&mut app), baseline_images);
+        assert_eq!(
+            app.world()
+                .resource::<ClientTerrainConvergence>()
+                .revision(),
+            0
+        );
+        assert!(debris_count(&mut app) <= MAX_TERRAIN_DEBRIS_EFFECTS);
+        // One debris lifetime later, the last cycle's feedback is gone exactly.
+        for _ in 0..10 {
+            app.update();
+        }
+        assert_eq!(debris_count(&mut app), 0, "debris expires to exact cleanup");
     }
 }

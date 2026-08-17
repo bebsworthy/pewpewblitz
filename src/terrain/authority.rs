@@ -1,5 +1,6 @@
-//! Server-authoritative terrain ownership: chunk state, brush transactions, Avian
-//! collider lifecycle, match restart reset, and defensive fighter repair.
+//! Server-authoritative terrain ownership: chunk state, brush admission transactions,
+//! Avian collider commits, and defensive fighter repair. Generation install/teardown
+//! and the match-restart reset live in `lifecycle.rs`.
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -16,9 +17,7 @@ use super::grid as terrain_grid;
 use super::model::*;
 use super::telemetry::{TerrainTelemetry, TerrainTelemetryOutcome, TerrainTelemetryRecord};
 use crate::combat::{CombatWorldEffectFact, SpawnState, WorldEffectDefinition};
-use crate::map::{
-    EngineMapLimits, InitialTerrainLayout, MapInstanceId, ResolvedMap, resolve_initial_terrain,
-};
+use crate::map::{MapInstanceId, ResolvedMap};
 use crate::matchplay::MatchId;
 use avian2d::prelude::{Collider, CollisionLayers, Position, RigidBody, Rotation};
 use bevy::prelude::*;
@@ -153,6 +152,12 @@ pub struct TerrainTransaction {
     pub active: bool,
 }
 
+/// The minimum simulation tick a world-effect fact must carry to brush the current match
+/// generation. The restart reset advances it past the restart tick so facts resolved
+/// during the previous match's final fixed-post chain cannot carve restored terrain.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerrainBrushEpoch(pub u64);
+
 /// The authoritative terrain plugin: exact-generation chunk state, the fixed-post terrain
 /// chain, restart reset, and defensive repair.
 pub struct AuthoritativeTerrainPlugin;
@@ -167,10 +172,12 @@ impl Plugin for AuthoritativeTerrainPlugin {
             .init_resource::<TerrainTelemetry>()
             .init_resource::<TerrainAdmissionCapacity>()
             .init_resource::<TerrainBrushBatch>()
+            .init_resource::<TerrainBrushEpoch>()
             .init_resource::<TerrainTransaction>()
             .add_systems(
                 FixedUpdate,
-                reconcile_authoritative_terrain.before(crate::gameplay::GameplaySet::Input),
+                super::lifecycle::reconcile_authoritative_terrain
+                    .before(crate::gameplay::GameplaySet::Input),
             )
             .add_systems(
                 FixedPostUpdate,
@@ -183,7 +190,10 @@ impl Plugin for AuthoritativeTerrainPlugin {
             );
         register_terrain_schedule(app);
         crate::terrain::network::register_terrain_network(app);
-        crate::matchplay::register_environment_reset_system(app, reset_terrain_on_match_restart);
+        crate::matchplay::register_environment_reset_system(
+            app,
+            super::lifecycle::reset_terrain_on_match_restart,
+        );
     }
 }
 
@@ -213,209 +223,24 @@ pub(crate) fn register_terrain_schedule(app: &mut App) {
     );
 }
 
-/// Exact-generation terrain teardown invoked by authoritative map teardown. No stale
-/// collider, root, resource, or queue survives into an unrelated frame.
-pub fn teardown_authoritative_terrain(world: &mut World) {
-    let mut terrain_entities: Vec<Entity> = world
-        .query_filtered::<Entity, With<TerrainRoot>>()
-        .iter(world)
-        .collect();
-    terrain_entities.extend(
-        world
-            .query_filtered::<Entity, With<TerrainChunk>>()
-            .iter(world),
-    );
-    for entity in terrain_entities {
-        if let Ok(entity_mut) = world.get_entity_mut(entity) {
-            entity_mut.despawn();
-        }
-    }
-    world.remove_resource::<TerrainChunkIndex>();
-    world.remove_resource::<PendingTerrainBrushes>();
-    world.remove_resource::<TerrainOutbox>();
-    world.remove_resource::<TerrainRecoveryCache>();
-    world.remove_resource::<TerrainBrushBatch>();
-    world.remove_resource::<TerrainTransaction>();
-}
-
-/// Derive the initial layout from one validated resolved map snapshot.
-fn derive_layout(resolved: &ResolvedMap) -> Result<InitialTerrainLayout, String> {
-    resolve_initial_terrain(
-        resolved.snapshot.playable_bounds,
-        &resolved.snapshot.geometry,
-        &resolved.snapshot.regions,
-        &resolved.snapshot.spawn_points,
-        &resolved.snapshot.mode_anchors,
-        EngineMapLimits::default(),
-    )
-}
-
-fn reconcile_authoritative_terrain(world: &mut World) {
-    let Some(resolved) = world.get_resource::<ResolvedMap>().cloned() else {
-        if world.query::<&TerrainRoot>().iter(world).next().is_some() {
-            teardown_authoritative_terrain(world);
-        }
-        return;
-    };
-    let instance_id = resolved.snapshot.identity.instance_id;
-    let existing = world.query::<&TerrainRoot>().iter(world).next().copied();
-    if let Some(root) = existing
-        && root.map_instance_id == instance_id
-    {
-        adopt_match_generation(world, root);
-        refresh_admission_capacity(world);
-        return;
-    }
-    teardown_authoritative_terrain(world);
-
-    let layout = derive_layout(&resolved).expect("validated map snapshot re-derives its terrain");
-    if !layout.is_empty()
-        && let Some(capacity) = world.get_resource::<crate::matchplay::ResolvedMatchCapacity>()
-        && usize::from(capacity.maximum_active_fighters) > MAX_TERRAIN_ACTIVE_FIGHTERS
-    {
-        panic!("terrain-enabled match capacity exceeds the engine fighter ceiling");
-    }
-    install_terrain(
-        world,
-        instance_id,
-        layout.terrain_fingerprint,
-        &layout.chunks,
-    );
-    let root = world
-        .query::<&TerrainRoot>()
-        .iter(world)
-        .next()
-        .copied()
-        .expect("terrain root exists after installation");
-    adopt_match_generation(world, root);
-    refresh_admission_capacity(world);
-    info!(
-        instance_id = instance_id.0,
-        chunks = layout.chunks.len(),
-        cells = layout.total_cells,
-        fingerprint = layout.terrain_fingerprint,
-        "authoritative terrain installed"
-    );
-}
-
-/// Adopt the current match generation onto the terrain root. Live terrain events carry
-/// the exact map-plus-match generation.
-fn adopt_match_generation(world: &mut World, root: TerrainRoot) {
-    if root.match_id.is_some() {
-        return;
-    }
-    let match_id = world
-        .query_filtered::<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>()
-        .iter(world)
-        .next()
-        .map(|state| state.match_id);
-    if let Some(match_id) = match_id
-        && let Some(entity) = world
-            .query_filtered::<Entity, With<TerrainRoot>>()
-            .iter(world)
-            .next()
-    {
-        world.entity_mut(entity).insert(TerrainRoot {
-            match_id: Some(match_id),
-            ..root
-        });
-    }
-}
-
-fn refresh_admission_capacity(world: &mut World) {
-    if let Some(capacity) = world.get_resource::<crate::matchplay::ResolvedMatchCapacity>() {
-        let admitted =
-            usize::from(capacity.maximum_active_fighters).clamp(1, MAX_TERRAIN_BRUSHES_PER_TICK);
-        world.insert_resource(TerrainAdmissionCapacity(admitted));
-    }
-}
-
-/// Spawn the deterministic ascending chunk entities with seam-reconciled colliders, the
-/// root, the index, and the recovery cache.
-fn install_terrain(
-    world: &mut World,
-    instance_id: MapInstanceId,
-    fingerprint: u64,
-    chunks: &BTreeMap<TerrainChunkId, TerrainBits>,
-) {
-    let mut prospective: Vec<(TerrainChunkId, avian2d::parry::shape::Voxels)> = chunks
-        .iter()
-        .filter_map(|(chunk, bits)| Some((*chunk, collider::build_voxels(bits)?)))
-        .collect();
-    collider::reconcile_neighbors(&mut prospective);
-    let colliders: BTreeMap<_, _> = prospective
-        .into_iter()
-        .map(|(chunk, voxels)| (chunk, collider::voxels_collider(voxels)))
-        .collect();
-
-    world.spawn(TerrainRoot {
-        map_instance_id: instance_id,
-        terrain_fingerprint: fingerprint,
-        match_id: None,
-        revision: 0,
-    });
-    let mut index = TerrainChunkIndex::default();
-    for (chunk_id, bits) in chunks {
-        let min = terrain_grid::chunk_min_world(*chunk_id);
-        let entity = world
-            .spawn((
-                TerrainChunk {
-                    id: *chunk_id,
-                    map_instance_id: instance_id,
-                },
-                TerrainChunkState {
-                    initial: *bits,
-                    current: *bits,
-                    last_modified_revision: 0,
-                },
-                TerrainChunkCollision {
-                    occupied_cells: bits.count() as u16,
-                    collider_revision: 0,
-                },
-            ))
-            .id();
-        if let Some(collider_value) = colliders.get(chunk_id) {
-            world.entity_mut(entity).insert((
-                RigidBody::Static,
-                collider_value.clone(),
-                crate::movement::destructible_terrain_collision_layers(),
-                Position::from_xy(min.x, min.y),
-                Rotation::default(),
-                Transform::from_translation(min.extend(0.0)),
-            ));
-        }
-        index.0.insert(*chunk_id, entity);
-    }
-    world.insert_resource(index);
-    world.insert_resource(TerrainRecoveryCache {
-        revision: 0,
-        chunks: chunks.clone(),
-    });
-    // Teardown removed the previous generation's queues and transaction state; a fresh
-    // generation starts from empty bounded state, not from stale leftovers.
-    if world.get_resource::<PendingTerrainBrushes>().is_none() {
-        world.init_resource::<PendingTerrainBrushes>();
-    }
-    if world.get_resource::<TerrainOutbox>().is_none() {
-        world.init_resource::<TerrainOutbox>();
-    }
-    if world.get_resource::<TerrainBrushBatch>().is_none() {
-        world.init_resource::<TerrainBrushBatch>();
-    }
-    if world.get_resource::<TerrainTransaction>().is_none() {
-        world.init_resource::<TerrainTransaction>();
-    }
-}
-
-/// Merge deferred and new world-effect facts into one deterministic sorted batch.
+/// Merge deferred and new world-effect facts into one deterministic sorted batch, dropping
+/// any fact that predates the current match generation's brush epoch.
 fn collect_terrain_brushes(
     mut facts: ResMut<crate::combat::CombatWorldEffectFacts>,
     mut deferred: ResMut<PendingTerrainBrushes>,
     mut batch: ResMut<TerrainBrushBatch>,
+    epoch: Res<TerrainBrushEpoch>,
+    mut telemetry: ResMut<TerrainTelemetry>,
 ) {
     let mut brushes = std::mem::take(&mut batch.brushes);
     brushes.append(&mut facts.0);
     brushes.extend(deferred.queue.drain(..).map(|pending| pending.fact));
+    let before = brushes.len();
+    brushes.retain(|fact| fact.tick >= epoch.0);
+    telemetry.aggregates.stale_generation_brushes = telemetry
+        .aggregates
+        .stale_generation_brushes
+        .saturating_add((before - brushes.len()) as u64);
     brushes.sort_by(brush_order);
     brushes.dedup_by(|left, right| brush_key(left) == brush_key(right));
     batch.brushes = brushes;
@@ -436,7 +261,6 @@ fn brush_order(left: &CombatWorldEffectFact, right: &CombatWorldEffectFact) -> s
 
 /// Apply the admitted brushes to scratch occupancy, staging events against the state
 /// produced by all earlier sorted facts. No ECS bits change here.
-#[allow(clippy::too_many_lines)]
 #[derive(bevy::ecs::system::SystemParam)]
 struct TerrainMutationState<'w> {
     telemetry: ResMut<'w, TerrainTelemetry>,
@@ -699,7 +523,7 @@ fn compute_dirty_union(
 /// install occupancy, colliders, recovery cache, revision, and staged events. A refusal
 /// defers the complete batch without committing partial state.
 #[allow(clippy::too_many_lines)]
-fn commit_terrain_collision(world: &mut World) {
+pub(super) fn commit_terrain_collision(world: &mut World) {
     let Some(transaction) = world.get_resource::<TerrainTransaction>() else {
         return;
     };
@@ -866,105 +690,6 @@ fn commit_terrain_collision(world: &mut World) {
         outbox.push_event(event);
     }
     *world.resource_mut::<TerrainTransaction>() = TerrainTransaction::default();
-}
-
-fn pending_restart_slot(
-    restart: &crate::matchplay::PendingMatchRestart,
-) -> Option<crate::matchplay::PendingMatchRestartSlot> {
-    restart.slot()
-}
-
-/// Match-restart environment reset: restore every initial bitset and collider, reset the
-/// revision for the new match generation, and stage one reset event. Runs inside the
-/// chained restart transaction before common commit.
-pub(crate) fn reset_terrain_on_match_restart(world: &mut World) {
-    let Some(slot) = world
-        .get_resource::<crate::matchplay::PendingMatchRestart>()
-        .and_then(pending_restart_slot)
-    else {
-        return;
-    };
-    let Some(root) = world.query::<&TerrainRoot>().iter(world).next().copied() else {
-        return;
-    };
-    if root
-        .match_id
-        .is_some_and(|match_id| match_id != slot.previous_id)
-    {
-        return;
-    }
-    let index = world.resource::<TerrainChunkIndex>().clone();
-    let mut changed: BTreeMap<TerrainChunkId, TerrainBits> = BTreeMap::new();
-    let mut changed_masks: BTreeMap<TerrainChunkId, TerrainBits> = BTreeMap::new();
-    for (chunk, entity) in &index.0 {
-        let Some(state) = world.get::<TerrainChunkState>(*entity) else {
-            continue;
-        };
-        if state.current != state.initial {
-            let mut mask = TerrainBits::default();
-            for word_index in 0..TERRAIN_WORDS_PER_CHUNK {
-                mask.0[word_index] = state.current.0[word_index] ^ state.initial.0[word_index];
-            }
-            changed.insert(*chunk, state.initial);
-            changed_masks.insert(*chunk, mask);
-        }
-    }
-    let transaction = TerrainTransaction {
-        changed,
-        changed_masks,
-        facts: Vec::new(),
-        staged_events: Vec::new(),
-        revision: 0,
-        active: true,
-    };
-    // Commit the restored occupancy and colliders exactly like a brush transaction, then
-    // finish the generation switch on the root. Re-occupied chunks regain colliders.
-    *world.resource_mut::<TerrainTransaction>() = transaction;
-    commit_terrain_collision(world);
-    if let Some(root_entity) = world
-        .query_filtered::<Entity, With<TerrainRoot>>()
-        .iter(world)
-        .next()
-    {
-        let previous_generation = root.generation();
-        world.entity_mut(root_entity).insert(TerrainRoot {
-            match_id: Some(slot.next_id),
-            revision: 0,
-            ..root
-        });
-        *world.resource_mut::<TerrainOutbox>() = TerrainOutbox {
-            reset: Some(TerrainResetEvent {
-                previous_generation,
-                next_generation: root.generation().map_match(slot.next_id),
-            }),
-            ..Default::default()
-        };
-    }
-    let mut telemetry = world.resource_mut::<TerrainTelemetry>();
-    telemetry.record(TerrainTelemetryRecord {
-        tick: slot.restart_tick,
-        map_instance_id: root.map_instance_id,
-        revision: 0,
-        source_attack_id: None,
-        delivery_index: None,
-        brush: None,
-        affected_chunks: Vec::new(),
-        erased_cells: 0,
-        rebuilt_colliders: 0,
-        serialized_event_bytes: None,
-        outcome: TerrainTelemetryOutcome::Reset,
-    });
-}
-
-impl TerrainGeneration {
-    #[must_use]
-    fn map_match(self, match_id: MatchId) -> Self {
-        Self {
-            map_instance_id: self.map_instance_id,
-            match_id,
-            terrain_fingerprint: self.terrain_fingerprint,
-        }
-    }
 }
 
 /// Defensive server-only fighter repair for malformed, recovered, or injected states. A

@@ -37,7 +37,7 @@ The milestone sections below are outcome briefs and research prompts, not preval
 
 - **Version:** v1 — gameplay MVP
 - **Overall status:** Milestone 07 is complete; its automated and technical gate is green, with explicitly deferred supervised observations tracked for M11. Milestone 08 is in feedback review after an authorized technical-review remediation pass. Milestone 09 is complete: implemented from baseline `90ef47a`, automated gate green, both-mode real-process runs recorded, and the 2026-08-16 automated playtest triaged with two presentation fixes applied and explicit open dispositions for the human-perceptual remainder. Milestone 05 closeout bookkeeping, Milestone 03 verification, and earlier user playtests remain open
-- **Current milestone:** Milestone 10 — User playtest (Milestone 08 remains in Feedback review)
+- **Current milestone:** Milestone 10 — Feedback review, implementation-review findings remediated 2026-08-16 (Milestone 08 remains in Feedback review)
 - **Last completed milestone:** Milestone 09 — Hot Zone
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.

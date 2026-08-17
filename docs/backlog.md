@@ -80,6 +80,7 @@ concealment, spell-created concealment, speedway/slow surfaces, and one readable
 | GAP-TOOL-SPECTATE | Spectator/observer client | M11 replay/event logs are debug tools; an observer client would help 2v2 playtest verification and is cheap. | Review finding |
 | GAP-PLATFORM-BATTERY | Battery/thermal considerations | Power draw and background-work capping for laptop play sessions. | Review finding |
 | GAP-LEGAL-FONTS | Font licensing | Asset manifest covers game assets; fonts have no license check. | Review finding |
+| GAP-ORG-TERRAIN-SPLITS | Terrain module decomposition continues past M10 remediation | The 2026-08-16 M10 implementation review noted that `terrain/network.rs` (recovery serving plus wire records) and `terrain/client.rs` (wire driving, presentation, debris, readiness) each mix independently changing lifecycles. M10 remediation extracted `terrain/lifecycle.rs` and fixed the lifecycle defects in place; the remaining splits were deferred to avoid invalidating recorded evidence mid-remediation. | M10 feedback review, 2026-08-16 |
 | GAP-TOOL-COMBATPROFILES | `network-combat-profiles` gate broken | The repeated combat convergence profiles time out with no defeat/reset evidence and zero payload effects landing on the neutral dummy; reproduced identically at the pre-M10 baseline (rebuilt binaries), so it predates M10 terrain. M10's terrain profiles (`just network-terrain`) cover real-process terrain convergence; the defeat-evidence path needs its own fix. | M10 verification, 2026-08-16 |
 
 ## Triage status

@@ -45,6 +45,7 @@ pub struct ClientTerrainConvergence {
     revision: u64,
     dirty: Vec<TerrainChunkId>,
     applied_brushes: Vec<TerrainBrush>,
+    pending_reset: Option<TerrainResetEvent>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -153,6 +154,7 @@ impl ClientTerrainConvergence {
         self.revision = 0;
         self.dirty.clear();
         self.applied_brushes.clear();
+        self.pending_reset = None;
     }
 
     /// Observe the locally derived expected generation (map snapshot plus match state).
@@ -166,6 +168,7 @@ impl ClientTerrainConvergence {
         let restart_recovery = |state: &mut Self| {
             state.chunks.clear();
             state.revision = 0;
+            state.pending_reset = None;
             state.phase = TerrainConvergencePhase::AwaitingRecovery {
                 generation: expected,
                 request_pending: false,
@@ -174,11 +177,18 @@ impl ClientTerrainConvergence {
             TerrainConvergenceAction::RequestRecovery(expected)
         };
         match &self.phase {
-            TerrainConvergencePhase::WaitingForMap
-            | TerrainConvergencePhase::AwaitingRecovery { .. } => {
-                if let TerrainConvergencePhase::AwaitingRecovery { generation, .. } = &self.phase
-                    && *generation == expected
+            TerrainConvergencePhase::WaitingForMap => restart_recovery(self),
+            TerrainConvergencePhase::AwaitingRecovery { generation, .. } => {
+                if *generation == expected {
+                    return TerrainConvergenceAction::Ignored;
+                }
+                if let Some(pending) = &self.pending_reset
+                    && pending.previous_generation == expected
                 {
+                    // A reset chaining from exactly this observed generation is already
+                    // outstanding: the match view has not replicated the post-restart id
+                    // yet. Keep awaiting the reset's generation instead of churning back
+                    // to a request the server must reject as stale.
                     return TerrainConvergenceAction::Ignored;
                 }
                 restart_recovery(self)
@@ -256,7 +266,11 @@ impl ClientTerrainConvergence {
     }
 
     /// Apply one authoritative reset event for a match restart. Accepted only when the
-    /// reset chains from the currently committed generation onto the same map.
+    /// reset chains from the currently committed generation onto the same map and the
+    /// client already observes the new `MatchState.match_id`. A reset that outruns match
+    /// replication holds convergence in the syncing state and recovers the post-restart
+    /// generation with one bounded snapshot instead of committing terrain the match view
+    /// cannot vouch for.
     pub fn apply_reset(
         &mut self,
         reset: TerrainResetEvent,
@@ -279,13 +293,27 @@ impl ClientTerrainConvergence {
         let Some(observed) = observed else {
             return TerrainConvergenceAction::Ignored;
         };
-        // The reset may arrive before or after the new match id replicates; both orders
-        // are acceptable only against the same immutable map generation.
-        if observed.match_id != reset.next_generation.match_id
-            && observed.match_id != committed.match_id
-        {
-            return TerrainConvergenceAction::Ignored;
+        if observed.match_id != reset.next_generation.match_id {
+            if observed != committed {
+                // Neither the pre-restart nor the post-restart match: not this reset's
+                // generation to apply.
+                return TerrainConvergenceAction::Ignored;
+            }
+            // The reset outran match replication. Hold it against the committed
+            // generation, leave the syncing state, and let one recovery exchange land
+            // the post-restart occupancy; a later observation of the new match id keeps
+            // the held request armed instead of churning to a stale one.
+            self.chunks.clear();
+            self.revision = 0;
+            self.pending_reset = Some(reset);
+            self.phase = TerrainConvergencePhase::AwaitingRecovery {
+                generation: reset.next_generation,
+                request_pending: false,
+                buffered: Vec::new(),
+            };
+            return TerrainConvergenceAction::RequestRecovery(reset.next_generation);
         }
+        self.pending_reset = None;
         self.chunks = initial_chunks.clone();
         self.revision = 0;
         self.dirty.extend(self.expected_chunks.iter().copied());

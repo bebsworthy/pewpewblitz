@@ -14,6 +14,8 @@ pub mod client;
 #[cfg(feature = "server")]
 pub mod collider;
 pub mod grid;
+#[cfg(feature = "server")]
+pub mod lifecycle;
 pub mod model;
 pub mod network;
 #[cfg(feature = "server")]
@@ -21,16 +23,18 @@ pub mod telemetry;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "server"))]
-pub(crate) use authority::reset_terrain_on_match_restart;
 #[cfg(feature = "server")]
 pub use authority::{
     AuthoritativeTerrainPlugin, PendingTerrainBrush, PendingTerrainBrushes, TerrainBrushBatch,
-    TerrainChunk, TerrainChunkCollision, TerrainChunkIndex, TerrainChunkState, TerrainOutbox,
-    TerrainRecoveryCache, TerrainRoot, TerrainTransaction, teardown_authoritative_terrain,
+    TerrainBrushEpoch, TerrainChunk, TerrainChunkCollision, TerrainChunkIndex, TerrainChunkState,
+    TerrainOutbox, TerrainRecoveryCache, TerrainRoot, TerrainTransaction,
 };
 #[cfg(feature = "client")]
 pub use client::{ClientTerrainPlugin, ClientTerrainReadiness, paint_chunk_pixels};
+#[cfg(all(test, feature = "server"))]
+pub(crate) use lifecycle::reset_terrain_on_match_restart;
+#[cfg(feature = "server")]
+pub use lifecycle::teardown_authoritative_terrain;
 pub use model::*;
 pub use network::{ClientTerrainConvergence, TerrainConvergenceAction, TerrainConvergencePhase};
 

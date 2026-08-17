@@ -6,12 +6,12 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | User playtest |
+| Status | Feedback review |
 | Research | Complete for specification review; product and network contracts, the live M09 codebase, pinned Bevy 0.19.1/Lightyear 0.29/Avian 0.7 sources and examples, installed exact-version crate sources, and current primary exact-version documentation inspected through 2026-08-16 |
 | Review findings | Checked against the live source and pinned dependencies on 2026-08-16; dispositions recorded below |
 | Specification validation | User validated by requesting implementation of this specification on 2026-08-16 |
-| Implementation | Complete from starting commit `7a7a2baa0dc6aaa8bcacf61155e4d75727f397db`; all six slices delivered with per-slice evidence below |
-| Verification | Complete 2026-08-16: canonical gate, both-mode terrain process profiles under local/typical/adverse conditions, and windowed visual capture green (see Slice 6 evidence); pre-existing `network-combat-profiles` failure recorded in the backlog |
+| Implementation | Complete from starting commit `7a7a2baa0dc6aaa8bcacf61155e4d75727f397db`, delivered as `5cb219f` and remediated from the 2026-08-16 implementation review as the follow-up fix commit; all six slices delivered with per-slice evidence below |
+| Verification | Complete 2026-08-16 and re-run after review remediation: canonical gate, both-mode terrain process profiles under local/typical/adverse conditions, and windowed visual capture green (see Slice 6 evidence); pre-existing `network-combat-profiles` failure recorded in the backlog |
 
 Milestone 09 is complete, but Milestones 01–03, 05, and 08 retain their recorded user or hardware
 gates. M10 implementation may build on the accepted M09 codebase without rewriting those historical
@@ -1221,29 +1221,44 @@ Every criterion from [Gameplay MVP](../../05-gameplay-mvp.md) with its repeatabl
 | Two local clients play one server-authoritative match | `tests/network/` multi-client harness; `just run` two-window script. |
 | Clients cannot authoritatively alter positions, damage, status, scores, or terrain | Forged-input/forged-request suites: `movement_input.rs`, `terrain::forged_recovery_requests…`; server-only mutation ownership in `combat/movement/terrain` authority modules. |
 | Terrain destruction creates readable quantized holes/passages; visible tiles never authoritative | Quantized grid + crater visuals (`terrain::client` tests: fill/rim/holes/cross-seam); occupancy truth only in server authority + recovery snapshots; client image edits cannot touch bits/collision/revision (pure presentation derivation). |
-| Terrain allocation, destruction, rebuilds, recovery bounded for every map size | Engine ceilings + map validation (`maximum_grid_fixtures…`), M10 performance fixtures (aligned/off-grid 176-chunk near-max maps, 24 brushes, 27,413-byte snapshots, 100 reset cycles). |
+| Terrain allocation, destruction, rebuilds, recovery bounded for every map size | Engine ceilings + map validation (`maximum_grid_fixtures…`), M10 performance fixtures (aligned 192-chunk / off-grid 221-chunk ceiling maps, 24 brushes, 32,539-byte snapshots, 100 reset cycles; remediated 2026-08-16 to the exact ceilings). |
 | Terrain collision updates leave props/objectives/fighters unchanged | Hot Zone anchor identity/progress independent of terrain (validation treats anchors as rule areas); collider writes target only terrain chunk entities; M10 network tests assert objectives and fighters unaffected. |
 
 No criterion was removed or weakened; the terrain bullet added by this milestone is covered above.
 
 ### Slice 6 evidence
 
-- Performance fixtures (`just test-performance`, 13 passed) added three M10 cases on top of the
-  existing 100-fighter/200-projectile, combat, build, match, and Hot Zone cases re-run with active
-  terrain:
+- Performance fixtures (`just test-performance`, 14 passed after remediation) added four M10 cases
+  on top of the existing 100-fighter/200-projectile, combat, build, match, and Hot Zone cases
+  re-run with active terrain:
   - `m10_aligned_and_off_grid_maximum_terrain_stay_within_fixed_tick_budget` — maximum playable
-    maps (4,088×3,064) aligned and at an arbitrary off-grid offset allocate 176 chunks /
-    150,000+ occupied cells with p95 brush-and-rebuild ≈ 572 µs (aligned) and ≈ 462 µs (off-grid),
-    zero defensive repairs, inside the fixed-tick budget.
+    maps (4,096×3,072) aligned and at an arbitrary off-grid offset allocate exactly 192 and 221
+    chunks with 194,048 and 193,153 occupied cells (both under the 196,608 ceiling), p95
+    brush-and-rebuild ≈ 0.9 ms (aligned) and ≈ 0.5 ms (off-grid), zero defensive repairs, inside
+    the fixed-tick budget. Remediation note: the pre-review fixture allocated only 176 chunks; the
+    post-review fixture reaches the true ceilings with four engine-legal reservations and a clear
+    corner notch for spawn/fighter clearances, and the runtime re-derivation path uses default
+    engine limits throughout.
   - `m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budget` — 24 active
-    fighters with the admission ceiling raised to the capacity profile's maximum and 24
-    simultaneous radius-48 brushes at worst-placement chunk seams: all 24 applied, max burst
-    ≈ 3.45 ms, zero repairs.
+    fighters placed on the ceiling map's clear notch with the admission ceiling raised to the
+    capacity profile's maximum and 24 simultaneous radius-48 brushes at worst-placement chunk
+    seams: all 24 applied, p95 burst ≈ 3.8 ms, zero repairs.
   - `m10_recovery_serialization_and_client_image_painting_stay_within_budget` — 20 recovery
-    snapshot serializations over the off-grid layout average ≈ 16.8 µs / 27,413 bytes (≤ 48 KiB)
-    across 176 chunks; chunk image painting averages ≈ 5.3 µs per 32×32 repaint.
+    snapshot serializations over the 221-chunk off-grid layout average ≈ 22 µs / 32,539 bytes
+    (≤ 48 KiB); chunk image painting averages ≈ 6.2 µs per 32×32 repaint.
+  - `m10_varied_team_capacities_derive_admission_and_admit_without_deferral` — resolved capacities
+    for 2×2, 3×2, 4×3, 2×12, 8×3, and 24×1 team topologies derive the expected
+    `TerrainAdmissionCapacity` (clamped at the 24-brush ceiling) and admit exactly that many
+    worst-placement brushes in one fixed tick with no deferral, rejection, or repair.
 - `one_hundred_destroy_reset_cycles_stay_fast_and_exact` covers repeated reset growth: 100
-  destroy/reset cycles return to revision zero and initial occupancy each cycle in under 4 s.
+  destroy/reset cycles with per-cycle tick-advancing detonations return to revision zero and
+  initial occupancy each cycle in under 4 s with empty pending/batch/fact queues after every reset,
+  stable chunk-entity and index counts, and telemetry records within their 2,048 bound.
+- `one_hundred_client_destroy_reset_cycles_hold_visual_and_debris_bounds` (client feature) drives
+  the same 100 cycles through the public convergence path with the visual/debris presentation
+  systems installed: chunk-visual entities and `Assets<Image>` handles stay at their baseline
+  counts across all cycles, debris holds the 64 ceiling, and the last feedback expires to exact
+  zero one lifetime after the final reset.
 - Process verification: `verify_process_match` reports 17 terrain rows (format/fingerprint, chunk
   and cell counts, revision, occupancy digest, applied brushes, erased cells, collider rebuilds,
   recovery requests/responses/rejections, snapshot bytes, event min/max bytes, defensive repairs,
@@ -1421,11 +1436,28 @@ Known v1 limitations in the handoff: grid-quantized edges, erase-only terrain, o
 effect, no structural collapse/materials/persistence, no active-match session resumption, and local-
 scale recovery rather than production compression.
 
-## Feedback review template
+## Feedback review (2026-08-16)
+
+An implementation review of the delivered M10 change set found two lifecycle defects, two
+boundedness/readiness defects, and overstated capacity/exit evidence. All five findings were
+verified against the live source and the pinned Bevy 0.19.1 executor semantics, accepted, and
+implemented now as the remediation commit; none changed the validated cell/chunk/collider/recovery
+contracts, so the milestone stays in feedback review rather than returning to specification review.
 
 | Feedback | Evidence | Decision | Follow-up verification |
 |---|---|---|---|
-| _Awaiting playtest_ |  | Implement now / defer / reject / research |  |
+| [P1] Deferred brushes survive match restart | `reset_terrain_on_match_restart` replaced the transaction/outbox but never cleared `PendingTerrainBrushes`, `TerrainBrushBatch`, or `CombatWorldEffectFacts`; `collect_terrain_brushes` drains all three in the restart tick's fixed-post chain (payload resolution runs in `CombatSet::Damage` after the FixedUpdate reset), so an old-match detonation could carve freshly restored terrain and publish it under the new generation | Implement now | Reset clears the deferred queue, the collected batch, and combat's fact buffer, and advances a new `TerrainBrushEpoch` past the restart tick so same-tick deliveries are dropped and counted; `restart_clears_queued_brushes_and_rejects_restart_tick_facts` reproduces the ordering, the 100-cycle soak now pushes undrained facts and asserts empty queues per cycle |
+| [P1] Standalone map teardown leaves fixed-post systems without required resources | `teardown_authoritative_terrain` removed six resources while `collect_terrain_brushes`, `apply_terrain_brushes`, and `repair_embedded_fighters` hold them as unconditional params; Bevy 0.19.1 treats a missing `Res` as an error validation and its own `missing_resource_panics_*` executor tests confirm the schedule panics | Implement now | Teardown resets the shared resources to a valid empty generation instead of removing them; `exact_teardown_without_reinstall_keeps_fixed_post_systems_schedulable` runs fixed ticks after an exact teardown with no reinstall and then reinstalls |
+| [P2] Reset accepted before the client observes the new match generation | `apply_reset` accepted the reset when the observed match id equaled the old committed id, violating the "only with the matching new `MatchState.match_id`" contract | Implement now | `apply_reset` accepts only the matching new match id; an early reset holds as `pending_reset`, leaves the syncing state, and converges via one recovery exchange while repeated pre-restart observations no longer churn to stale requests; `reset_outrunning_match_observation_syncs_through_recovery` covers hold/converge/supersede |
+| [P2] Cosmetic debris could exceed its 64-entity ceiling | `spawn_terrain_debris` trimmed the existing set to 63 and then spawned every applied brush, so a 24-brush tick reached 87 live entities | Implement now | Capacity is budgeted across existing plus pending spawns, keeping the newest burst and retiring the oldest first; `debris_bursts_respect_the_ceiling_across_existing_and_new_effects` pins 63+24 and repeated bursts to exactly 64 |
+| [P2] Capacity/exit claims lacked their specified evidence | The performance fixture allocated 176 chunks while the checklist marked the 221-chunk workload complete (221 existed only in resolver tests), the varied-team capacity fixture was missing, and the reset soak checked only occupancy/revision/elapsed | Implement now | The maximum-map fixture now builds the true ceilings (aligned 192 chunks, off-grid 221 chunks with a clear spawn notch from four engine-legal reservations), all three m10 fixtures assert the exact ceilings, `m10_varied_team_capacities_derive_admission_and_admit_without_deferral` covers 2x2 through 24x1 topologies, and both soaks assert entity/index/queue/telemetry/server and visual/image/debris/client stability across 100 cycles |
+| Maintainability: `authority.rs`/`client.rs`/`network.rs` mix lifecycles; module-wide Clippy suppressions | `authority.rs` mixed generation lifecycle with the per-tick pipeline; item-attached `too_many_lines` allows on `commit_terrain_collision` and an inert allow above `TerrainMutationState`; the documented module-level cast/wildcard allow in `authority.rs` predates the review | Partially now, remainder deferred | Restart/teardown/reconcile/install moved to a focused `terrain/lifecycle.rs` submodule with an explicit import list, the inert allow was dropped, and the queue-clearing invariants live with the reset; further `network.rs`/`client.rs` decomposition deferred to the v1 backlog as `GAP-ORG-TERRAIN-SPLITS` to avoid invalidating recorded evidence mid-remediation |
+
+Remediation verification (re-run 2026-08-17): `just fmt-check`, `clippy-client`, `clippy-server`,
+`check`, `server-features`, `test-client` (179), `test-server` (169), `test-network` (73),
+`test-performance` (14), `git diff --check`, `network-smoke` (movement assertion at tick 595),
+`network-terrain` (assertion passed at revision 1, 537/576 cells, both clients converged, exit 0),
+and `network-terrain-hot-zone` (assertion passed at revision 1, 574/576 cells, exit 0) all green.
 
 Cell size, chunk size, collider family, or recovery-contract changes return the milestone to
 `Specification review`. Radius/color/debris/layer tuning that preserves validated bounds may remain

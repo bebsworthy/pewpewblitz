@@ -948,73 +948,97 @@ fn maximum_terrain_resolved_map(off_grid: bool) -> brawler::map::ResolvedMap {
     let mut recipe = catalog.presets[0].recipe.clone();
     recipe.recipe_id = brawler::map::MapRecipeId(70);
     recipe.revision = 1;
+    // The engine-maximum playable size. Aligned, the span intersects 16x12 global chunks;
+    // the same size at an arbitrary offset intersects 17x13 = 221, the chunk ceiling.
     let origin = if off_grid {
-        Vec2::new(4.0, 4.0)
+        Vec2::new(-100.0, -100.0)
     } else {
         Vec2::ZERO
     };
     recipe.playable_bounds = brawler::map::AxisAlignedMapRect {
         min: origin,
-        max: origin + Vec2::new(4088.0, 3064.0),
+        max: origin + Vec2::new(4096.0, 3072.0),
     };
     recipe.camera_bounds = recipe.playable_bounds;
     recipe.geometry.clear();
     recipe.visuals.clear();
     recipe.entities.clear();
-    let region_centers = [
-        Vec2::new(1024.0, 986.0),
-        Vec2::new(3068.0, 986.0),
-        Vec2::new(1024.0, 2382.0),
-        Vec2::new(3068.0, 2382.0),
-    ];
-    recipe.regions = region_centers
+    // Near-complete destructible coverage built from four engine-legal rectangles
+    // (extent <= 2048 each): a left column reaching the bottom edge keeps chunk row -1
+    // populated on the off-grid map, a right column starting one chunk-row up leaves the
+    // bottom-right corner clear for the capacity profile's spawn points and fighters.
+    // Every tile edge falls between cell centers, so no cell is selected twice.
+    let tiles: [(f32, f32, f32, f32); 4] = if off_grid {
+        [
+            (924.0, 928.0, 1020.0, 1024.0),
+            (2968.0, 968.0, 1024.0, 984.0),
+            (924.0, 2460.0, 1020.0, 508.0),
+            (2968.0, 2460.0, 1024.0, 508.0),
+        ]
+    } else {
+        [
+            (1024.0, 1024.0, 1024.0, 1024.0),
+            (3072.0, 1064.0, 1024.0, 984.0),
+            (1024.0, 2560.0, 1024.0, 512.0),
+            (3072.0, 2560.0, 1024.0, 512.0),
+        ]
+    };
+    // The clear corner notch: y in [-96, -16) off-grid, [0, 80) aligned.
+    let spawn_y = if off_grid { -56.0 } else { 40.0 };
+    recipe.regions = tiles
         .iter()
         .enumerate()
-        .map(|(index, center)| brawler::map::MapRegionPlacement {
-            placement_id: brawler::map::MapPlacementId(900 + u32::try_from(index).unwrap()),
-            region_id: brawler::map::RegionId(1),
-            profile_id: brawler::map::RegionProfileId(1),
-            presentation_profile_id: brawler::map::MapPresentationProfileId(3),
-            position: origin + *center,
-            rotation: 0.0,
-            shape: brawler::map::MapShape::Rectangle {
-                half_extents: Vec2::new(1016.0, 674.0),
+        .map(
+            |(index, (center_x, center_y, half_x, half_y))| brawler::map::MapRegionPlacement {
+                placement_id: brawler::map::MapPlacementId(900 + u32::try_from(index).unwrap()),
+                region_id: brawler::map::RegionId(1),
+                profile_id: brawler::map::RegionProfileId(1),
+                presentation_profile_id: brawler::map::MapPresentationProfileId(3),
+                position: Vec2::new(*center_x, *center_y),
+                rotation: 0.0,
+                shape: brawler::map::MapShape::Rectangle {
+                    half_extents: Vec2::new(*half_x, *half_y),
+                },
             },
-        })
+        )
         .collect();
+    let bounds = recipe.playable_bounds;
     recipe.spawn_areas = vec![
         brawler::map::TeamSpawnArea {
             placement_id: brawler::map::MapPlacementId(910),
             team_slot: 0,
             bounds: brawler::map::AxisAlignedMapRect {
-                min: origin + Vec2::new(16.0, 8.0),
-                max: origin + Vec2::new(1000.0, 292.0),
+                min: Vec2::new(bounds.max.x - 1848.0, spawn_y - 36.0),
+                max: Vec2::new(bounds.max.x - 1440.0, spawn_y + 36.0),
             },
         },
         brawler::map::TeamSpawnArea {
             placement_id: brawler::map::MapPlacementId(911),
             team_slot: 1,
             bounds: brawler::map::AxisAlignedMapRect {
-                min: origin + Vec2::new(3088.0, 8.0),
-                max: origin + Vec2::new(4072.0, 292.0),
+                min: Vec2::new(bounds.max.x - 596.0, spawn_y - 36.0),
+                max: Vec2::new(bounds.max.x - 188.0, spawn_y + 36.0),
             },
         },
     ];
     recipe.spawn_points.clear();
     for team_slot in 0..=1_u8 {
-        let x = if team_slot == 0 { 128.0 } else { 3960.0 };
-        for y in [64.0, 144.0, 224.0] {
+        let base_x = if team_slot == 0 {
+            bounds.max.x - 1796.0
+        } else {
+            bounds.max.x - 544.0
+        };
+        for offset in [0.0_f32, 128.0, 256.0] {
             let index = recipe.spawn_points.len();
+            let x = base_x + offset;
             recipe.spawn_points.push(brawler::map::TeamSpawnPoint {
                 placement_id: brawler::map::MapPlacementId(920 + u32::try_from(index).unwrap()),
                 spawn_point_id: brawler::map::SpawnPointId(200 + u16::try_from(index).unwrap()),
                 team_slot,
-                position: origin + Vec2::new(x, y),
-                facing: if team_slot == 0 {
-                    0.0
-                } else {
-                    std::f32::consts::PI
-                },
+                position: Vec2::new(x, spawn_y),
+                // Both teams spawn from the right-hand notch and face the map
+                // interior; the validator requires a positive facing-to-center dot.
+                facing: std::f32::consts::PI,
             });
         }
     }
@@ -1025,7 +1049,10 @@ fn maximum_terrain_resolved_map(off_grid: bool) -> brawler::map::ResolvedMap {
         brawler::map::MapInstanceId(41),
         &catalog,
         &brawler::map::MapLayoutRequirements::wipeout(),
-        brawler::map::EngineMapLimits::default(),
+        brawler::map::EngineMapLimits {
+            max_destructible_reservations: 6,
+            ..brawler::map::EngineMapLimits::default()
+        },
     )
     .expect("maximum terrain recipe resolves")
 }
@@ -1047,10 +1074,22 @@ fn m10_aligned_and_off_grid_maximum_terrain_stay_within_fixed_tick_budget() {
             .expect("maximum map installs");
         app.update();
         let (chunks, cells) = terrain_scale(&mut app);
-        assert!(chunks >= 176, "near-ceiling chunk allocation: {chunks}");
+        let expected_chunks = if off_grid {
+            brawler::terrain::MAX_TERRAIN_CHUNKS
+        } else {
+            192
+        };
+        assert_eq!(
+            chunks, expected_chunks,
+            "maximum map allocates every ceiling chunk (off_grid={off_grid})"
+        );
         assert!(
             cells >= 150_000,
             "near-ceiling occupied cells: {cells} (off_grid={off_grid})"
+        );
+        assert!(
+            cells as usize <= brawler::terrain::MAX_TERRAIN_CELLS,
+            "occupied cells stay under the engine ceiling: {cells} (off_grid={off_grid})"
         );
         let telemetry = app
             .world()
@@ -1078,8 +1117,8 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
         .insert_resource(brawler::terrain::authority::TerrainAdmissionCapacity(24));
     let resolved = maximum_terrain_resolved_map(true);
     brawler::map::install_resolved_map(app.world_mut(), resolved).expect("maximum map installs");
-    // The maximum map's spawn strip is the only initially clear ground: place the
-    // 24-fighter capacity profile there, clear of every destructible cell.
+    // The maximum map's clear corner notch is the only initially clear ground: place
+    // the 24-fighter capacity profile there, clear of every destructible cell.
     let fighters = &brawler::combat::FighterDefinitions::default().clone();
     let weapons = app
         .world()
@@ -1092,7 +1131,7 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
             fighters,
             &weapons,
         );
-        let position = Vec2::new(32.0 + f32::from(index) * 168.0, 150.0);
+        let position = Vec2::new(2000.0 + f32::from(index) * 80.0, -56.0);
         let entity = app
             .world_mut()
             .spawn((
@@ -1124,7 +1163,11 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
     let _ = &active;
     app.update();
     let (chunks, _) = terrain_scale(&mut app);
-    assert!(chunks > 0);
+    assert_eq!(
+        chunks,
+        brawler::terrain::MAX_TERRAIN_CHUNKS,
+        "the seam-brush workload runs on the full 221-chunk ceiling map"
+    );
     // Worst placements: 24 brushes centered across chunk seams of the maximum map,
     // spread far enough apart that every one erases fresh cells in the same tick.
     let mut attack = 1_u64;
@@ -1179,6 +1222,101 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
     );
 }
 
+fn worst_placement_fact(attack: u64, position: Vec2) -> brawler::combat::CombatWorldEffectFact {
+    brawler::combat::CombatWorldEffectFact {
+        tick: 1,
+        source: brawler::combat::AttackSource {
+            kind: brawler::combat::CombatSourceKind::PrimaryWeapon,
+            attack_id: brawler::combat::AttackId(attack),
+            player_id: brawler::protocol::PlayerId(1),
+            owner_network_entity_id: brawler::protocol::NetworkEntityId(1),
+            team_id: brawler::combat::TeamId(0),
+            recipe_fingerprint: Default::default(),
+            presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+            legacy_compatibility: false,
+            source_preset_id: None,
+            origin: brawler::combat::WorldPoint { x: 0.0, y: 0.0 },
+            facing: 0.0,
+        },
+        delivery_index: 0,
+        effect_index: 0,
+        position: brawler::combat::WorldPoint {
+            x: position.x,
+            y: position.y,
+        },
+        effect: brawler::combat::WorldEffectDefinition::DestroyTerrain { radius: 48.0 },
+    }
+}
+
+#[test]
+fn m10_varied_team_capacities_derive_admission_and_admit_without_deferral() {
+    for (team_count, per_team, expected_admission) in [
+        (2_u8, 2_u8, 4_usize),
+        (3, 2, 6),
+        (4, 3, 12),
+        (2, 12, 24),
+        (8, 3, 24),
+        (24, 1, 24),
+    ] {
+        let mut app = performance_app();
+        let resolved = maximum_terrain_resolved_map(true);
+        brawler::map::install_resolved_map(app.world_mut(), resolved)
+            .expect("maximum map installs");
+        let rules = brawler::matchplay::MatchLifecycleRules {
+            team_count,
+            minimum_participants_per_team: 1,
+            maximum_participants_per_team: per_team,
+            ..brawler::matchplay::MatchLifecycleRules::default()
+        };
+        let capacity = brawler::matchplay::ResolvedMatchCapacity::from_rules(&rules)
+            .expect("varied-team capacity resolves");
+        assert_eq!(
+            u32::from(capacity.maximum_active_fighters),
+            u32::from(team_count) * u32::from(per_team),
+            "{team_count} teams x {per_team}"
+        );
+        app.world_mut().insert_resource(capacity);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<brawler::terrain::authority::TerrainAdmissionCapacity>()
+                .0,
+            expected_admission,
+            "{team_count} teams x {per_team} derives its admission ceiling"
+        );
+        // Exactly the admitted ceiling of spread worst-placement brushes applies whole
+        // in one fixed tick: no deferral, no rejection, no defensive repair.
+        for attack in 0..expected_admission {
+            let position = Vec2::new(
+                300.0 + (attack % 8) as f32 * 220.0,
+                600.0 + (attack / 8) as f32 * 220.0,
+            );
+            app.world_mut()
+                .resource_mut::<brawler::combat::CombatWorldEffectFacts>()
+                .0
+                .push(worst_placement_fact(
+                    u64::try_from(attack).unwrap() + 1,
+                    position,
+                ));
+        }
+        app.update();
+        let world = app.world();
+        let telemetry = world.resource::<brawler::terrain::telemetry::TerrainTelemetry>();
+        assert_eq!(
+            telemetry.aggregates.applied_brushes as usize, expected_admission,
+            "{team_count} teams x {per_team} admits its whole ceiling"
+        );
+        assert!(
+            world
+                .resource::<brawler::terrain::PendingTerrainBrushes>()
+                .queue
+                .is_empty(),
+            "{team_count} teams x {per_team} defers nothing"
+        );
+        assert_eq!(telemetry.aggregates.defensive_repairs, 0);
+    }
+}
+
 #[test]
 fn m10_recovery_serialization_and_client_image_painting_stay_within_budget() {
     let resolved = maximum_terrain_resolved_map(true);
@@ -1196,7 +1334,7 @@ fn m10_recovery_serialization_and_client_image_painting_stay_within_budget() {
         match_id: brawler::matchplay::MatchId(1),
         terrain_fingerprint: layout.terrain_fingerprint,
     };
-    assert!(layout.chunks.len() >= 176);
+    assert_eq!(layout.chunks.len(), brawler::terrain::MAX_TERRAIN_CHUNKS);
 
     let start = Instant::now();
     let mut sizes = Vec::new();
