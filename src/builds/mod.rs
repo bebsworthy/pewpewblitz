@@ -3,6 +3,8 @@
 mod definitions;
 mod model;
 #[cfg(feature = "server")]
+pub(crate) mod server;
+#[cfg(feature = "server")]
 mod telemetry;
 
 pub use definitions::{
