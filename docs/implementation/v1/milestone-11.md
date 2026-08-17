@@ -11,7 +11,7 @@
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
 | Implementation | Slices 0–6 implemented through commit `7924769` (see the implementation evidence section and "Remaining M11 work"); Slice 7 awaits user playtest |
-| Verification | Green after every slice through `7924769`: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (212), `just test-server` (197), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, and closeout-instrumented UDP runs with validated reports |
+| Verification | Green after every slice through `c4f4600`: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (212), `just test-server` (197), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs with validated reports |
 | User playtest | Pending final supervised closeout matrix |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -706,10 +706,8 @@ Implementation must not begin until the user validates this specification.
 
 ### Slice 6 — Prediction decision and lifecycle soaks
 
-- [ ] Implement the isolated M03 owner-prediction candidate and run the accepted comparison matrix.
-  (Not executed in this implementation pass; see the slice evidence below.)
-- [ ] Keep or remove it strictly from recorded thresholds; update M03 and `M03-PRED`. (Pending the
-  experiment above; prediction remains disabled and `M03-PRED` stays open.)
+- [x] Implement the isolated M03 owner-prediction candidate and run the accepted comparison matrix.
+- [x] Keep or remove it strictly from recorded thresholds; update M03 and `M03-PRED`.
 - [x] Run deterministic repeated Wipeout/Hot Zone, build replacement, terrain reset/recovery,
   connection rejection/reconnect, and shutdown loops with exact growth/drop assertions. (New
   `tests/network/soaks.rs`: 25 Wipeout and 25 Hot Zone restart rounds plus 20 reconnect cycles;
@@ -845,6 +843,33 @@ visible and the exhaustion-abort semantics are unchanged. `matchplay/server.rs` 
 keep (see the slice checklist). Introducing the named client combat sets and relaxing chain edges
 is deliberately not done in this pass — the preserved chain is the reviewable baseline.
 
+**Slice 6 — prediction experiment and decision (commit `c4f4600`).** The experimental
+non-default `owner-prediction` feature carries a client-side owner-only candidate: the movement
+multiplier math extracted into shared `movement::input` helpers, predicted-pose integration with
+bounded static-arena resolution computed from the replicated map snapshot, reconciliation keyed
+to `last_reconciled_tick` so replication pipelining cannot clobber the fresh prediction, and
+bounded correction statistics. The network harness gained a deterministic receive-delay line
+(profiles: local 0, typical 1, adverse 3 ticks ≈ 100 ms RTT at 60 Hz), and
+`tests/network/prediction.rs` runs the accepted M03 matrix via `just prediction-comparison`:
+
+| Gate (M03 contract) | Measured result | Verdict |
+|---|---|---|
+| ≥2-tick p95 input-to-visible latency reduction at 100 ms RTT | baseline 4/4/5 ticks vs candidate 1 at local/typical/adverse | pass |
+| p95 render-space correction ≤ 24-unit fighter radius | 12.0 / 18.0 / 18.0 units across profiles | pass |
+| corrected pose within 1 world unit within 12 ticks after impairment | 1 tick | pass |
+| never crosses or persistently penetrates terrain — static arena | worst penetration streak 0 ticks | pass |
+| never crosses or persistently penetrates terrain — destructible cells | predicted pose inside still-solid cells for 142 ticks; authoritative 0; terrain-drive p95 correction 12 units | **fail** |
+
+**Decision: defer owner prediction from v1.** Four of five gates pass, but the terrain gate fails
+decisively and exactly as the M11 specification anticipated: an owner-only candidate faithful to
+the M03 static-arena contract cannot satisfy v1's destructible-terrain world, because the client
+does not model server-authoritative terrain occupancy, so the owner's predicted view crosses
+still-solid crater cells until the next correction. The feature stays experimental and outside
+every supported build (it is not nested in `client`, `server`, or `network-test`), prediction
+remains disabled in supported v1, and `M03-PRED` resolves as measured-and-deferred. A future
+prediction proposal must add client-side destructible-terrain collision sourced from the
+convergence state and rerun this matrix.
+
 **Slice 6 — lifecycle soaks and recipes (commit `7924769`).** `tests/network/soaks.rs` adds three
 deterministic scenarios: 25 authoritative Wipeout restarts and 25 Hot Zone restarts (forced
 authoritative completion each round, asserting retained fighters/projectiles/participants stay at
@@ -862,7 +887,8 @@ protocol migration: three validated reports, clean-exit, fixed-tick p95 944 µs,
 
 Implemented slices 0–6 leave these items open, in milestone order:
 
-1. the M03 owner-prediction candidate, comparison matrix, and keep/defer decision (`M03-PRED`);
+1. ~~the M03 owner-prediction candidate, comparison matrix, and keep/defer decision~~ (executed and
+   decided 2026-08-17, commit `c4f4600`; see the slice 6 evidence);
 2. named client combat sets and any measured chain relaxation (Slice 5 remainder);
 3. the full local/typical/adverse UDP matrix and 2v2 runs with consolidated closeout reports, the
    diagnostics-off versus metrics-on overhead comparison, and the recorded direct-UDP single-match

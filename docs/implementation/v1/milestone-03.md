@@ -8,7 +8,7 @@
 | Roadmap | [roadmap.md](./roadmap.md) |
 | Status | Verifying |
 | Specification validation | Accepted by explicit implementation request on 2026-08-13 |
-| Implementation | Implemented; owner prediction remains disabled pending the comparison gate |
+| Implementation | Implemented; owner prediction measured and deferred from v1 (see the prediction decision in the verification record) |
 | Verification | Automated authority, collision, UDP/process, HUD, pause, performance, and lost-input checks pass; visual, hardware, and prediction evidence remain open |
 | User validation/playtest | Pending interactive controller/windowed playtest |
 
@@ -177,16 +177,21 @@ baseline-versus-predicted comparison can be run under the specified profiles.
   canonical pose on the delayed server timeline. Do not add a second frame-interpolation pass to
   those views. If owner prediction passes, its fixed-simulated view alone gets between-fixed-tick
   frame interpolation using `Time<Fixed>::overstep_fraction()`.
-- [ ] Begin implementation with the fully authoritative owner path and record input-to-visible
+- [x] Begin implementation with the fully authoritative owner path and record input-to-visible
   latency at local, 50 ms, and 100 ms round-trip conditions. Then run the identical input/collision
   system on an owner-only `Predicted` entity with zero configured input delay. Static arena
   colliders are built from the same definition in both worlds; remote fighters remain nonblocking
-  and interpolated.
-- [ ] Adopt owner prediction only if it reduces p95 input-to-visible latency by at least two fixed
+  and interpolated. (Executed 2026-08-17 as the experimental `owner-prediction` feature with the
+  comparison matrix in `tests/network/prediction.rs`; see the milestone-11 slice 6 evidence.)
+- [x] Adopt owner prediction only if it reduces p95 input-to-visible latency by at least two fixed
   ticks at 100 ms RTT, returns its corrected canonical pose to within one world unit of the
   authoritative pose for the same simulation tick within 12 ticks after an impairment/correction,
   never crosses or persistently penetrates terrain, and has p95 render-space correction no larger
-  than the 24-unit fighter radius. Record all results even if prediction is deferred.
+  than the 24-unit fighter radius. Record all results even if prediction is deferred. (Decision:
+  defer. Latency 4/4/5→1 ticks, p95 correction 12–18 units, convergence 1 tick, and static
+  penetration 0 all pass, but the destructible-terrain clause fails — the predicted view crossed
+  still-solid cells for 142 ticks where the authoritative pose never does — so prediction is
+  deferred from v1 and the candidate stays behind the non-default experimental feature.)
 - [x] Prediction does not weaken authority: the server still validates inputs and owns the pose;
   the client only simulates the same deterministic movement for immediate presentation and rolls
   back/replays on authoritative disagreement.
