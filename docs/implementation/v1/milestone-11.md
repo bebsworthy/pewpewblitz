@@ -6,10 +6,10 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Researching |
-| Research | First pass complete 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, and current primary documentation; focused API and baseline measurements remain before specification review |
-| Review findings | External maintainability review validated against the live source on 2026-08-17; scope and provisional dispositions are recorded below |
-| Specification validation | Pending; this is the first research/specification draft and does not authorize production implementation |
+| Status | Specification review |
+| Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the accepted v2 multi-process architecture |
+| Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
+| Specification validation | Pending user validation; production implementation remains unauthorized |
 | Implementation | Not started |
 | Verification | Initial research-snapshot spot-check: `just fmt-check`, `just clippy-client`, `just clippy-server`, and `just test-server` green; 169 server tests passed. Concurrent user changes after that spot-check are not covered by this claim. The complete M11 baseline is a Slice 0 requirement. |
 | User playtest | Pending final supervised closeout matrix |
@@ -19,7 +19,9 @@ contained user-owned terrain changes, and additional user-owned documentation, m
 and performance edits appeared while this draft was being written. M11 research changes only this
 file and `roadmap.md`; it does not claim or overwrite the other dirty paths. Before implementation,
 Slice 0 must record the then-current commit, dirty paths, complete canonical baseline, and any
-accepted M08/M10 feedback that overlaps this scope.
+accepted M08/M10 feedback that overlaps this scope. Baseline values are implementation evidence,
+not permission to bypass specification review; a result that materially changes scope or an
+accepted decision returns M11 to `Specification review`.
 
 ## Outcome
 
@@ -39,13 +41,13 @@ architectural target, create service/domain layers around Bevy's `World`, or spl
 transaction into implicitly ordered systems merely to satisfy Clippy.
 
 The final gate is a supervised controller and keyboard/mouse playtest, explicit triage of every open
-v1 item, a learn-from-errors review, and an evidence-based v2 recommendation. M11 cannot mark earlier
-milestones complete by proxy: it supplies evidence, then updates each owning milestone's actual
-status and record.
+v1 item, a learn-from-errors review, and a bounded handoff to the accepted v2 architecture. M11
+cannot mark earlier milestones complete by proxy: it supplies evidence, then updates each owning
+milestone's actual status and record.
 
-## Decisions requiring specification validation
+## Decisions presented for specification validation
 
-The following are provisional until the user approves the M11 specification:
+The following remain provisional until the user approves the M11 specification:
 
 1. **No new gameplay family.** M11 hardens the implemented Wipeout, Hot Zone, build, ability, and
    terrain scope. It adds no new weapon primitive, ultimate, mode, environmental damage source,
@@ -104,6 +106,11 @@ The following are provisional until the user approves the M11 specification:
     contract for compatibility, add an explicit schema version and manifest identity, and fail on
     missing/duplicate/oversized required fields. Do not add a database, telemetry service, or remote
     crash-upload dependency.
+16. **Prepare evidence and seams for v2, not v2 infrastructure.** Preserve the dedicated server as
+    one independently runnable authoritative match `App`/`World`, inventory its startup inputs,
+    process-global state, endpoint ownership, background work, and shutdown outputs, and publish the
+    single-match baseline consumed by v2 M01. Do not add the supervisor, routed transport, IPC,
+    worker manifest, capability envelope, lobby authority, or subprocess lifecycle to v1.
 
 ## Product and scope boundaries
 
@@ -120,6 +127,8 @@ The following are provisional until the user approves the M11 specification:
   stable controlled network identity/team, authority role, and bounded entity counts;
 - process-only Lightyear transport/message metrics, fixed-tick duration samples, server entity
   high-water, connection high-water, and report byte sizes;
+- one v2 handoff record covering the dedicated server composition/launch boundary, process-global
+  assumptions, clean/error shutdown contract, and a reproducible single-match worker baseline;
 - session-local remapping/calibration for the implemented controller and keyboard/mouse actions;
 - complete schedule/API-preserving decomposition of the accepted organization hotspots;
 - the intentional selected-build protocol migration with exact registration/fingerprint evidence;
@@ -128,7 +137,8 @@ The following are provisional until the user approves the M11 specification:
 - the accepted M03 prediction comparison and final keep/defer decision;
 - final supervised controller, keyboard/mouse, HUD/layout, audio, counterplay, match-length, and Hot
   Zone pacing observations, including the existing M07/M09 supervised backlog;
-- feedback triage, source-milestone status updates, learn-from-errors review, and v2 recommendation.
+- feedback triage, source-milestone status updates, learn-from-errors review, and v2 architecture
+  handoff.
 
 ### Out of scope
 
@@ -144,6 +154,8 @@ The following are provisional until the user approves the M11 specification:
   Steam Input, or multiple players sharing one client process unless separately approved;
 - changes to the 60 Hz simulation rate, authority model, Lightyear/Bevy/Avian versions, transport,
   terrain representation, map recipe, or content format;
+- the v2 supervisor/router, lobby and queue authority, route capabilities, UDP envelope, IPC packet
+  or control channels, subprocess spawning, worker manifests, and multi-worker execution;
 - broad `#![allow]` cleanup unrelated to the touched ownership boundaries; wildcard/numeric-cast
   policy is reviewed independently from complexity/pass-by-value orchestration debt;
 - splitting cohesive files, adding a crate, or introducing ports/services/repositories to satisfy a
@@ -165,6 +177,11 @@ The following are provisional until the user approves the M11 specification:
 - The existing match report already joins match, weapon, build, and ability summaries. Terrain and
   process/network measurements need a versioned common envelope and exact run identity rather than a
   second gameplay telemetry path.
+- The accepted v2 topology treats the existing one-match server as the future worker payload. M11
+  therefore affects v2 chiefly through measurement and composition discipline: it should leave one
+  headless match authority runnable without client dependencies and reveal process-global or
+  shutdown assumptions before M01 wraps it. Changing its transport or teaching it about routing in
+  M11 would couple two milestone specifications and invalidate the v1 closeout baseline.
 
 ### Organization hotspots
 
@@ -334,6 +351,7 @@ implementation machine and CI configuration.
 | 2026-08-17 | Installed exact Lightyear `0.29.0` sources: `lightyear_{metrics,link,sync,transport,messages,udp}` and [`0.29.0` crate docs](https://docs.rs/lightyear/0.29.0/lightyear/) | `LinkStats` exposes RTT/jitter; optional metrics expose packet/channel/message/transport bytes; the registry is process-global and transient histogram buckets clear in `Last`. | Use a process-only feature and sample before the clear set; do not use global metrics as a multi-App correctness oracle. |
 | 2026-08-17 | Current official Bevy examples index and version-selection guidance, [Bevy repository](https://github.com/bevyengine/bevy/tree/v0.19.0/examples) | Upstream explicitly warns that main-branch examples may differ from released APIs. | Continue exact-version verification before implementation; local 0.20-dev source is architectural evidence only. |
 | 2026-08-17 | Current Lightyear primary tag, [Lightyear 0.29.0 examples](https://github.com/cBournhonesque/lightyear/tree/0.29.0/examples) | Search indexes may surface other Lightyear releases under `latest`; the installed 0.29 source and pinned tag are the exact API authority. | Record exact tag/source paths and avoid transferring `latest` APIs into the implementation. |
+| 2026-08-17 | `docs/14-multiplayer-server-architecture.md` and `docs/implementation/v2/{roadmap,milestone-01}.md` | V2 reuses one v1 authoritative server world per worker and needs numeric overhead comparisons against the un-routed single-process path. | Add a bounded worker-readiness audit and baseline artifact to M11; explicitly defer routing, IPC, manifests, supervision, and multi-worker behavior to v2 M01. |
 
 ## Technical specification draft
 
@@ -400,6 +418,43 @@ boundary; no client presentation type enters the server graph.
 `matchplay/server.rs` remains intact unless M11 implementation demonstrates a separate owner and adds
 schedule tests first. No package, public service layer, repository abstraction, or alternate runtime
 model is introduced.
+
+### V2 worker-readiness handoff
+
+M11 produces evidence for v2 M01 without implementing its architecture. The handoff records:
+
+- the exact server executable, role feature, plugin/app composition entry point, supported startup
+  inputs, endpoint bind point, readiness observation, terminal result/report outputs, exit codes,
+  and graceful/error shutdown sequence;
+- every known process-global facility, static/singleton recorder, Bevy task/background task,
+  signal/panic hook, open endpoint, temporary/output path, and cleanup assumption relevant to
+  running the same server composition in an isolated child process;
+- cold start-to-endpoint-ready and start-to-match-ready duration; idle and representative-match
+  resident memory; fixed-tick p50/p95/max; transport bytes; entity/link high-water; report size;
+  graceful stop-to-exit duration; and terminal resource counts;
+- the exact scenario manifest, mode, map/terrain profile, participants/builds, network profile,
+  build profile, source revision, hardware/OS, sample count, and command used for every baseline.
+
+The current reusable seam is concrete: `src/bin/server.rs` parses process configuration and calls
+`server::build_app_with_config(ServerNetworkConfig)`. The resulting headless app owns the
+`ServerUdpIo` endpoint, installs `TerminalCtrlCHandlerPlugin`, reports endpoint readiness, and
+orders Lightyear `Stop` before app exit. Existing environment variables and ready/report files are
+development verification controls, not a future worker manifest or IPC control protocol. M11 may
+consolidate their evidence output, but must not elevate them into the v2 process contract.
+
+The baseline is one dedicated server process using Lightyear UDP directly, with no route envelope
+or IPC. It includes an idle endpoint case and fixed, declared measurement windows for production-
+content 2v2 Wipeout and Hot Zone cases, so v2 does not optimize only one mode or a shortened demo
+world. Diagnostics-off control runs quantify measurement overhead; metrics-on runs provide the
+transport and timing evidence. V2 M01 owns routed measurements and compares them with the same
+scenario manifests and instrumentation mode.
+
+M11 does not set v2 overhead budgets, because router/IPC behavior has not yet been measured; M01
+derives and presents those thresholds during its specification review.
+
+M11 may expose or preserve a small server application-construction function if its own tests or
+composition cleanup demonstrate the need. It must not invent a generic worker API, cross-process
+DTO, manifest loader, transport abstraction, or new crate in anticipation of M01.
 
 ### Closeout ledger
 
@@ -566,17 +621,19 @@ fails; a negative result is a successful evidence outcome.
 
 ## Implementation plan
 
-Implementation must not begin until this specification reaches `Specification review` and the user
-validates it.
+Implementation must not begin until the user validates this specification.
 
-### Slice 0 — Baseline, closeout ledger, and specification lock
+### Slice 0 — Baseline, closeout ledger, and measured-value lock
 
 - [ ] Record exact commit, dirty paths, toolchain/dependencies, and accepted overlapping feedback.
 - [ ] Run the complete canonical baseline and named process profiles; record exact counts/timings.
 - [ ] Measure current process report sizes, fixed-tick performance, entity high-water, and the
   client-combat update chain before changing structure.
-- [ ] Finalize every provisional decision, exact soak count/budget, report schema, and input-setting
-  bounds through specification review.
+- [ ] Lock the v2 comparison scenario and record the current dedicated-server composition, launch,
+  readiness, process-global-state, and shutdown audit before refactoring it.
+- [ ] Apply the approved decisions; finalize exact soak counts/budgets and measured bounds from the
+  baseline. Return to `Specification review` before any result-driven material scope or architecture
+  change.
 - [ ] Add schedule/behavior characterization tests required by later organization slices.
 
 ### Slice 1 — Reproduction, consolidated reports, and diagnostics
@@ -584,6 +641,8 @@ validates it.
 - [ ] Add versioned run manifest/closeout report values and deterministic field validation.
 - [ ] Consolidate existing telemetry summaries without creating a second gameplay mutation path.
 - [ ] Add process timing/entity/link observations and the explicit `process-metrics` feature.
+- [ ] Measure diagnostics-off versus metrics-on overhead and record which instrumentation profile
+  v2 M01 must reproduce for like-for-like comparison.
 - [ ] Add bounded structured failure/exit reporting.
 - [ ] Add the optional client authority/network overlay and exact UI/layout tests.
 - [ ] Extend named scripts with scenario ID/revision, seed, fingerprints, output paths, and terminal
@@ -638,8 +697,10 @@ validates it.
 - [ ] Run real UDP local/typical/adverse scenarios, 2-client and 2v2 sessions, and current broader
   synthetic-capacity fixtures with consolidated reports.
 - [ ] Record server tick, bandwidth, entity, report-size, and match/build/mode measurements.
+- [ ] Publish the reproducible direct-UDP single-match baseline and terminal cleanup evidence needed
+  by v2 M01; do not run a routed or multi-worker substitute in M11.
 
-### Slice 7 — Final playtest, source-milestone closeout, and v2 recommendation
+### Slice 7 — Final playtest, source-milestone closeout, and v2 handoff
 
 - [ ] Deliver one canonical supervised playtest matrix covering controller and keyboard/mouse,
   Wipeout and Hot Zone, named/custom builds, terrain, complete HUD states, audio, restart, and
@@ -649,8 +710,9 @@ validates it.
 - [ ] Triage every feedback item and rerun affected verification.
 - [ ] Update M01–M03, M05, M08, M10, the M07/M09 backlog rows, and the M11 ledger from actual evidence.
 - [ ] Complete learn-from-errors and decide whether any recurring workflow merits a project skill.
-- [ ] Write an evidence-based v2 recommendation and obtain explicit user acceptance before marking
-  M11 and v1 complete.
+- [ ] Reconcile the accepted v2 architecture with the worker-readiness audit, make the baseline
+  linkable from v2 M01, and record any discovered blocker without implementing the v2 transport or
+  supervisor.
 
 ## Verification plan
 
@@ -690,6 +752,8 @@ ECS/network tests.
 - compare baseline and owner-prediction candidate with identical manifests;
 - cover minimum/built-in/maximum terrain fixtures and current two-client, 2v2, and synthetic broader
   participant capacities without turning temporary process capacity into an engine cap.
+- record the v2 comparison scenario's cold readiness, idle/loaded resident memory, fixed-tick,
+  transport, entity/link, report-size, stop-to-exit, and terminal-cleanup baseline from direct UDP.
 
 ### Visual, controller, audio, and human evidence
 
@@ -738,6 +802,7 @@ modes under local/typical/adverse profiles where applicable and finish with `git
 | Soaks use shortened rules as balance evidence | Automation proves lifecycle/growth; normal production-rules human sessions judge pacing/balance. |
 | Earlier milestone gaps disappear in M11 bookkeeping | Source-owned ledger and explicit user disposition before status changes. |
 | Dirty user terrain work is overwritten | Record dirty paths, avoid unrelated edits, and reconcile only user-approved overlapping changes. |
+| V2 preparation expands M11 into infrastructure work | Produce only the audited launch/composition contract and direct-UDP baseline; leave every routed packet, IPC, manifest, lobby, and child-process artifact to v2 M01. |
 
 ## Exit criteria
 
@@ -761,13 +826,16 @@ modes under local/typical/adverse profiles where applicable and finish with `git
   within exact entity/resource/queue/record/time/byte bounds under named profiles.
 - [ ] Current two-client, 2v2, and broader synthetic-capacity paths are documented and measured; no
   demonstration profile becomes an accidental engine limit.
+- [ ] The v2 worker-readiness handoff records the reusable server composition and launch/shutdown
+  contract, process-global assumptions, and reproducible direct-UDP single-match baseline, with no
+  supervisor/router or IPC implementation added to v1.
 - [ ] Complete role-specific format/Clippy/check/build/test, server isolation, network, performance,
   process, soak, and `git diff --check` gates are green with exact evidence.
 - [ ] Final supervised controller/keyboard, HUD/layout, audio, counterplay, match-length, terrain,
   and Hot Zone pacing feedback is recorded and triaged with rationale.
 - [ ] Every earlier non-complete v1 milestone/backlog item due at M11 has a source-owned completed or
   explicit user-approved open/deferred disposition.
-- [ ] The learn-from-errors review and evidence-based v2 recommendation are complete.
+- [ ] The learn-from-errors review and accepted-v2-architecture handoff are complete.
 - [ ] The user explicitly accepts v1 before M11 and the version are marked `Complete`.
 
 ## Feedback review

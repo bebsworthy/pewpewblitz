@@ -8,6 +8,14 @@ The planned implementation is Bevy 0.19 with Lightyear 0.29. Bevy core is intent
 
 This dependency choice is a deliberate risk, not an invisible assumption. v1 Milestones 01–03 validate the actual version combination through application composition, two-client connection/replication, and server-authoritative movement before the project commits to substantial combat content; there is no separate throwaway engine spike.
 
+V2 concurrency extends this authority model through isolated match-worker processes rather than
+placing multiple mutable matches in one Bevy world. The accepted supervisor, single-public-port,
+and UDP/IPC routing decision is recorded in
+[Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md).
+This document remains the gameplay authority and replication contract inside each match worker.
+The lobby worker follows the same server-authority and stable-identity principles but owns session,
+catalog, queue, and reservation state rather than combat simulation.
+
 ## Authority model
 
 ```text
@@ -226,8 +234,8 @@ observer connection and potentially hidden spatial entity.
 
 Lightyear 0.29 provides two complementary mechanisms:
 
-- `RoomPlugin` and `Rooms` provide coarse, semi-static filtering for match instances, arena
-  regions, or broad spatial partitions;
+- `RoomPlugin` and `Rooms` provide coarse, semi-static filtering for arena regions or broad spatial
+  partitions inside one authority world;
 - `VisibilityExt::gain_visibility` and `VisibilityExt::lose_visibility` provide dynamic
   per-entity, per-connection visibility for observer-specific concealment and reveal.
 

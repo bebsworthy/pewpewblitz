@@ -1,384 +1,463 @@
-# Player UX and presentation design
+# Player UX and server-local matchmaking design
 
 ## Purpose and scope
 
-This document analyzes the current prototype presentation, the experience the design docs imagine,
-and the screens, states, and transitions that bridge the gap. It is a design and gap analysis, not
-a milestone specification: it identifies what must be built and what is underspecified, and it
-respects the v1 non-goals (no production matchmaking services, accounts, parties, or backend
-services). Basic server-local pool matchmaking (queue a game type, start when enough players are
-queued) is part of the target UX; ELO/skill matching, cross-server queues, and party services are
-not.
+This document defines the agreed product direction for the v2 player experience. It connects the
+current prototype to a product-quality client shell, direct-connect multiplayer, server-local game
+queues, automatic match formation, concurrent authoritative match workers, and a dependable
+bot-practice path. It is a feature and architecture boundary, not a milestone specification: every
+v2 milestone still begins with its own research and user-validated technical specification.
+
+In this document, **matchmaking** means direct-connect, server-local, skill-free queueing: the
+player first joins a known server, selects one of its game types, and the server forms matches from
+that game type's pool. V2 does not include global or cross-server matchmaking, ELO/rank, parties,
+accounts, authentication, or production backend services.
 
 Status triage used below:
 
-- **Have** — exists in the prototype, usable or reusable.
-- **Debug-only** — exists but is text/debug presentation that must be replaced by product UI.
-- **Missing** — required for the described experience; not built.
-- **Design gap** — the docs never settled the design; the milestone must decide before building.
+- **Have** — exists in the prototype and is usable or reusable.
+- **Debug-only** — exists as development presentation that must become product UI.
+- **Missing** — required for the agreed experience and not built.
+- **Research required** — the product behavior is agreed, but the responsible milestone must
+  research and validate the technical architecture before implementation.
+- **Deferred** — explicitly outside v2.
 
-## Hosting topology and matchmaking (decision)
+## Agreed v2 feature boundary
 
-The client never creates a server. Servers are hosted independently (dedicated `brawler-server`
-processes, local for development, remote later) and clients join them:
+V2 includes:
 
-- **Join by address is always available:** `IP:port` or `hostname:port` (with an optional default
-  port when omitted), validated before any network attempt.
-- **Favorites are a basic TOML list** (`server_name`, `addr`), auto-saved when the player joins or
-  edits, and hand-editable since the file is plain text.
-- **Discovery is a later service, not matchmaking.** A future registration endpoint receives
-  heartbeats from dedicated servers (name, addr, available game types, players, version,
-  protocol/content fingerprints) and serves a list the client can browse. A registry lists
-  servers; it does not solve client-to-server reachability (NAT, relays — see `GAP-NET-INTERNET`).
-  Until it exists, the address entry and favorites list are the complete join experience.
-- **The server operator defines the games available on that server.** Server configuration lists
-  one or more game types, each binding a mode to the allowed maps and settings for that mode:
+1. A product-quality client shell with controller-first and keyboard/mouse navigation, settings,
+   credits, recoverable errors, and local persistence.
+2. Direct connection by address, explicit favorites, recent servers, session-scoped display names,
+   and server-advertised game types.
+3. A product build editor backed by the existing bounded recipe and server validation, plus a
+   schema-versioned local last-used build.
+4. Exact-topology, server-local queues with immutable queue tickets, deterministic team assignment,
+   overflow handling, match reservation, loading/check-in, and one authoritative countdown.
+5. Concurrent authoritative matches as isolated worker processes behind one logical server and one
+   public UDP endpoint, with supervisor-owned admission, routing, cleanup, recovery, and measured
+   host admission ceilings.
+6. Exact 2v2 and 3v3 Wipeout and Hot Zone game types, subject to mode/map validation and each
+   milestone's R&D.
+7. A redesigned combat HUD, scoreboard, in-match menu, results flow, and non-fatal session
+   lifecycle.
+8. An authoritative bot-practice path so a first-time player can test controls and builds without a
+   populated server queue.
+9. An accessibility and usability baseline: input calibration/remapping, non-color-only team
+   identification, UI scaling, reduced shake/flashes, and audio/display settings.
+10. Automated lifecycle, race, cross-match isolation, recovery, performance, visual-layout, and
+    controller-usability verification.
 
-  ```toml
-  [[game_types]]
-  name = "Wipeout 2v2"
-  mode = "wipeout"
-  maps = ["arena"]
-  rules = { target_score = 10, max_players_per_team = 2 }
+V2 explicitly defers:
 
-  [[game_types]]
-  name = "Hot Zone 2v2"
-  mode = "hot-zone"
-  maps = ["hot_zone_arena"]
-  ```
+- global or cross-server matchmaking, skill rating, rank, and leaderboards;
+- public server registry/discovery and internet reachability work such as NAT traversal and relays;
+- parties, invitations, private groups, and team-affinity guarantees;
+- accounts, authentication, cloud saves, persistent arsenals, inventories, and entitlements;
+- join-in-progress, match-session resumption, host migration, and spectator mode;
+- production moderation, fleet orchestration, and public-server administration;
+- a sideband REST control service;
+- the complete production-art pipeline from docs 11–12. V2 includes the UI/HUD visual system and
+  combat-readability polish, not the full terrain-theme, character-rig, skin, and VFX replacement.
 
-  Clients never author rules, maps, or settings; they choose among the server's offered game
-  types. The "HostSetup / create a game" screen is removed from the player UX.
-- **Pool matchmaking, server-local and skill-free.** A player joins a game type (optionally
-  filtered by game mode) and enters that type's pool of waiting players, with their selected
-  build. When the pool has enough players for one game of that type, the server forms a match and
-  starts it after a short formation countdown. There is no ELO, rank, or skill matching — that is
-  explicitly pointless until the player base exists. Overflow players stay queued for the next
-  game.
-- **Concurrent matches per process are the intended design.** A server hosts many game types and
-  many pools, and formed matches run in parallel on the same process. This re-instances the
-  existing single-match machinery rather than writing a parallel model: per-match rules and
-  capacity (today `MatchLifecycleRules`/`ResolvedMatchCapacity` are process resources), per-match
-  map and terrain instances (the M10 chunk grid is global), per-match fixed-tick budgets (engine
-  ceilings currently assume one match), admission by match id, and coarse interest management so
-  clients only receive their own match. This design depends on `GAP-NET-ROOMS` (Lightyear room
-  interest management); ordering and gap analysis are separate, later work.
+## Hosting topology and matchmaking decisions
 
-## Current state (what the prototype does today)
+### Dedicated-server authority
 
-The windowed client connects immediately on launch and never shows a menu:
+Authoritative simulation always runs in a `brawler-server` worker configuration. One logical server
+is a thin supervisor/router plus a long-lived lobby worker and isolated match worker processes. A
+product practice launcher may start the same supervisor and worker topology locally, but the
+windowed client never owns gameplay authority or bypasses the routed network, validation, and
+server-owned simulation path. The accepted topology and its remaining R&D gates are recorded in
+[Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md).
 
-- **Auto-connect on boot.** `ClientNetworkConfig::new(1)` connects to `127.0.0.1:5000`; the server
-  address, client id, build preset, and mode come from command-line flags (`--server`,
-  `--client-id`, `--build-preset`, server `--mode wipeout|hot-zone`). No launch screen, no
-  server selection, no game creation.
-- **Join lifecycle is a sequence, not a flow.** Connecting → handshake (`ClientHello`) →
-  `ClientJoinPhase::Active` or `Rejected`/`Disconnected`. Rejection and disconnect write
-  `AppExit::error()`: the client quits instead of returning to a menu.
-- **Build selection is a debug overlay.** During the waiting phase, arrow keys cycle four presets
-  plus one custom recipe (pulse power/reach/magazine, ultimate, two passives) over a fighter. All
-  text, driven by `update_build_selection_overlay`. The server already validates preset and custom
-  `BuildSelectionRequest`s against a 12-point budget, so the authority side is product-ready.
-- **The waiting phase is the lobby.** When every participant is ready, the server counts down and
-  starts; on completion, restart unlocks and a restart quorum repeats the match. There is no
-  "leave", no host control, and no mode/map choice after server launch. This machinery is the
-  foundation the pool model replaces or reuses (see underspecified items 2–4).
-- **The in-match HUD is a text console.** Readiness text ("CONNECTING", "SYNCING TERRAIN", "READY"),
-  a match line ("WIPEOUT | P1 T1 | 3-1 / 10 | 2:31"), a roster dump ("P1 T2 W3 alive"), a countdown
-  number, and a phase overlay ("GET READY", "TEAM 2 WINS", restart prompts). Correct and complete,
-  designed for debugging, not playing.
-- **No player identity.** Players are "Brawler client {id}". No display names anywhere.
-- **No settings or credits.** Input remapping is M11 scope but has no UI yet; CC0 attribution has
-  no credits screen.
-- **Headless automation exists and must survive.** `--headless`, demos, and network tests drive the
-  same authoritative path without UI.
+### Joining and discovery
 
-## What the docs imagine
+- Joining by `IP:port` or `hostname(:port)` is always available. A missing port uses a documented
+  default, and the address is validated before a network attempt.
+- Favorites are an explicit player action, stored in a schema-versioned local file as stable
+  `name`/`addr` entries. Successfully joined addresses may enter a separate bounded recent-server
+  list; joining does not silently create a favorite.
+- Public server registry/discovery is deferred with internet reachability. A future registry may
+  receive server heartbeats and populate a browse tab, but it is not part of v2 matchmaking and
+  does not by itself solve NAT or relay requirements.
 
-- **Controller-first menus and combat, KBM fully supported.** "Make primary fire, active item, and
-  ultimate states readable without requiring a mouse cursor"; "Do not make precise cursor placement
-  mandatory for objectives or menu navigation" ([Gameplay MVP](../05-gameplay-mvp.md#controller-usability-requirements)).
-  Menus must be navigable by focus ring with A confirm / B cancel.
-- **Buildcraft is the differentiation.** The arsenal of player-authored brawlers (weapon recipe +
-  body + ultimate + items) is the long-lived player-facing content ([Product direction](../00-product-direction.md#differentiation),
-  `FUT-ARSENAL`). The MVP exposes four presets plus one bounded custom recipe; a full editor,
-  persistence, and acquisition are post-v1.
-- **Short matches, short sessions.** "A match should expose a build's strengths and weaknesses
-  quickly" — getting from launch to fighting should be a handful of inputs.
-- **Readable competition.** Players must understand why they were damaged, slowed, defeated, or
-  denied an objective — including team/mode state in the queue and match.
-- **Mode and map are server-owned.** Players may pick modes and maps for a match they host; they
-  never author rules ([Product direction](../00-product-direction.md#creator-direction)).
-- **MVP networking is a local dedicated server plus clients.** Two local clients complete an
-  authoritative match; in-process loopback is a dev convenience ([roadmap network policy](../implementation/v1/roadmap.md#network-and-protocol-policy)).
-  Production matchmaking services are a non-goal, which the pool model respects: queues are
-  server-local and skill-free, and address-based joining always works.
-- **M11 delivers input remap/calibration data and a debug overlay** but no full menu shell
-  (`GAP-UI-SETTINGS`, `GAP-AUDIO-SETTINGS`, `GAP-UI-WINDOW`, `GAP-LEGAL-CREDITS` in the
-  [backlog](../backlog.md)). A bot practice mode is explicitly permitted by the network architecture
-  doc (`GAP-MODE-TRAINING`).
+### Server-owned game types
 
-## Design principles for the ideal experience
+The server operator defines a bounded immutable list of game types at process startup. Each game
+type has a stable `GameTypeId` and configuration revision distinct from its display name, and binds
+one mode to compatible maps, exact team topology, and validated settings:
 
-1. **Boot to a menu, fight within a minute.** The launch screen is the hub; every path to a match
-   is short.
-2. **Controller-first navigation, KBM as first-class.** A focus ring moves with D-pad/left stick
-   and Tab/arrows; mouse click and hover work everywhere; confirm/cancel always map to A/B and
-   Space/Enter/Escape.
-3. **One place for every choice.** Game type, build, and mode filter are decided before queuing;
-   the match itself only plays.
-4. **The queue is honest about state.** Game types, pool sizes, expected formation (players
-   queued vs. needed), and build are visible while waiting; the match preview is visible during
-   the formation countdown.
-5. **Fail soft.** Rejection, timeout, mismatch, and disconnect return to a menu with a clear
-   message. A prototype may quit; a game never does.
-6. **Nothing authoritative moves to the client.** Every screen is presentation over replicated or
-   local state; menus send intent (`SetReady`, build selection, leave) through the existing
-   validated channels.
-7. **Automation survives.** Headless clients, demos, and network tests bypass the UI through the
-   same join path, never through a fake UI.
+```toml
+[[game_types]]
+id = "wipeout-2v2"
+name = "Wipeout 2v2"
+mode = "wipeout"
+maps = ["arena"]
+teams = 2
+players_per_team = 2
+rules = { target_score = 10 }
 
-## Ideal experience: screens, states, and transitions
+[[game_types]]
+id = "hot-zone-3v3"
+name = "Hot Zone 3v3"
+mode = "hot-zone"
+maps = ["hot_zone_arena"]
+teams = 2
+players_per_team = 3
+```
 
-Client screens are a Bevy state machine (`States`) named `ClientScreen`. One screen is active at a
-time; the match overlays (menu, settings, scoreboard) are sub-states of `Match`.
+Startup validation proves mode/rules compatibility, map anchors and spawn capacity, formation size,
+content identities/revisions, and process ceilings before the server advertises a game type. The
+server selects among multiple allowed maps by a deterministic rotation policy specified during the
+owning milestone; clients do not vote or author rules in v2. Runtime hot-editing is deferred.
+
+### Server-local pool formation
+
+- Each advertised game type owns a FIFO pool of validated queue tickets.
+- A queue ticket records the stable player/session identity, game type and revision, server-accepted
+  immutable build snapshot, admission order, and a unique ticket/request identity.
+- Formation requires the game type's exact topology. Lifecycle minimums handle later departures or
+  forfeits; they are not permission to start an undersized match.
+- The server reserves the oldest exact set of valid tickets, assigns teams through a deterministic
+  server-owned rule, allocates a match instance, and moves those clients into match loading.
+- Overflow tickets remain queued for the next formation.
+- A disconnected or explicitly cancelled ticket is removed. Queue commands are idempotent and
+  formation resolves cancellation races deterministically.
+- Parties and group affinity are absent. Two friends may join the same queue, but v2 does not
+  promise the same match or team.
+- PvP game types never insert bots silently. Practice and any bot-filled game types are separately
+  named and visibly identified.
+
+### Concurrent matches as isolated workers
+
+Concurrent matches are a committed v2 capability and a mandatory R&D gate, not an assumed
+extension of the current single-match server. Each active match runs the existing authoritative
+gameplay composition in its own OS process and Bevy `App`/`World`. The supervisor owns the single
+public UDP socket, bounded routing and admission state, worker process lifecycle, and control/packet
+IPC. It does not own combat ECS state or decode and reproduce Lightyear replication.
+
+The client uses a fresh Lightyear connection when moving between lobby and match authority even
+though both connections use the same public address. A short-lived opaque routing capability directs
+the new handshake to the assigned worker. V2 does not attempt to migrate a live Lightyear/Netcode
+session between processes.
+
+The worker architecture reuses the existing authoritative server machinery rather than creating a
+parallel gameplay implementation. Process isolation scopes fighters, projectiles, abilities, bots,
+objectives, cues, rules, mode state, maps, terrain, physics, recovery, telemetry, and cleanup.
+Shared immutable catalogs remain build inputs in every worker; mutable match state stays inside the
+owning worker world. Host-wide capacity belongs to the supervisor; queue and reservation state
+belong to the lobby worker.
+
+## Current prototype state
+
+The windowed client connects immediately on launch and never shows a product menu:
+
+- **Auto-connect on boot.** Address, client id, build preset, and server mode are command-line
+  configuration. There is no title, server selection, or game selection screen.
+- **Join lifecycle is terminal.** Connecting leads to Active, Rejected, or Disconnected; rejection
+  and disconnect exit the application instead of returning to a usable screen.
+- **Build selection is a debug overlay.** Four presets and one bounded custom recipe already use
+  server validation and the 12-point budget, but selection is attached to the waiting-match fighter
+  rather than a pre-match session or queue ticket.
+- **The waiting phase acts as a lobby.** All participants ready up, one process-global match starts,
+  and restart quorum repeats the same roster.
+- **HUD and results are debugging surfaces.** They expose correct match, roster, readiness, and
+  outcome facts as text rather than product presentation.
+- **Identity is numeric.** No display name exists.
+- **Settings and credits lack product UI and persistence.** M11 supplies input-setting data and a
+  debug overlay, not the complete v2 shell.
+- **Headless automation exists and must survive.** Tests and demos drive the same authoritative
+  join and gameplay path without pretending to operate UI.
+
+## Experience principles
+
+1. **Boot to a useful choice; fight within a minute when a path is available.** Practice is always
+   available; a reachable populated favorite is a short path to PvP. The UI never invents a short
+   queue estimate when the population cannot support one.
+2. **Controller-first navigation, keyboard/mouse first-class.** Focus navigation, confirm, cancel,
+   and back are consistent. Direct address and optional name editing may use keyboard/paste;
+   controller users can accept a generated name and navigate saved servers without text entry.
+3. **One place for every choice.** Game type and build are selected before queue admission. The
+   build is locked while queued; changing it means cancelling or completing an acknowledged ticket
+   update before formation.
+4. **Queue state is honest and private.** Show game type, `queued/needed`, the player's accepted
+   build, and formation/loading progress. Do not publish every waiting player's name or build.
+5. **Fail soft.** Rejection, timeout, mismatch, unavailable content, cancellation races, and
+   disconnect lead to a clear recoverable state. Headless automation retains deterministic exit
+   codes.
+6. **Nothing authoritative moves to the client.** UI sends bounded intent; the server validates
+   membership, builds, formation, teams, maps, lifecycle, and outcomes.
+7. **Automation follows the product path.** Headless clients bypass presentation but use the same
+   session, queue, formation, loading, and match protocols.
+8. **Readable competition is accessible.** Team identity is never color-only, important state has
+   shape/text/icon support, and settings can reduce presentation that impairs play.
+
+## Client flow and overlays
+
+One flat state enum cannot model a top-level flow plus Settings, scoreboard, confirmation, and
+error overlays. The client owns two presentation layers:
+
+- `ClientFlow`: `Title`, `ServerSelect`, `Connecting`, `GameSelect`, `Queue`, `MatchLoading`,
+  `Match`, and `Results`.
+- `ClientOverlay`: `None`, `BuildEditor`, `Settings`, `Credits`, `InMatchMenu`, `Scoreboard`,
+  `Confirmation`, and `Error`.
+
+The milestone R&D may select exact Bevy state/resource types, but it must preserve this separation,
+an explicit return destination for overlays, deterministic focus restoration, and complete cleanup
+on flow changes.
 
 ### There is no pause in multiplayer
 
-A multiplayer match cannot pause: the authoritative server and every other player keep running.
-The menu button opens an in-match **Menu overlay** while the match continues unchanged (the
-current prototype already behaves this way — the pause toggle is local and the server keeps
-ticking). The overlay exists for settings, scoreboard, and leaving; it never stops the match, and
-no player is given a free clock-stall. "Pause" is legacy naming; the concept is *menu overlay*.
+The in-match menu never pauses the authoritative match. Opening it suppresses local gameplay
+actions and sends neutral intent while the server continues; the player remains vulnerable. Leaving
+an active match requires confirmation and applies the existing server-owned forfeit policy.
+Scoreboard behavior may remain a non-blocking hold overlay if playtesting shows that it should not
+suppress gameplay input.
 
 ```text
-Title ───────────────► ServerSelect ◄──────────────┐
-  │                       │                        │
-  │                       │ Join                   │ error/leave
-  │                       ▼                        │
-  │                  Connecting ───────────────────┤
-  │                       │                        │
-  │                       ▼                        │
-  │                  GameSelect ─────► BuildEditor ─┤
-  │                       │                        │
-  │            Join game type (mode filter)        │
-  │                       ▼                        │
-  │                    Queue ──────────────────────┤
-  │                       │                        │
-  │          pool fills (server-owned)             │
-  │                       ▼                        │
-  │               FormationCountdown ─────────────►┤
-  │                       │                        │
-  │                       ▼                        │
-  │                    Match ◄──► Menu              │
-  │                       │                        │
-  │                       ▼                        │
-  │                   Results ◄─ (completed)       │
-  │                       │                        │
-  │            Queue again / leave ───────────────►┤
-  │                       │                        │
-  │                       ▼                        │
-  │                    Queue ◄─────────────────────┘
-  │
-  ▼
-Settings ◄───────────────────── any screen (sub-state)
-Credits
-```
+Title ── Play ──► ServerSelect ── Join ──► Connecting
+  │                    ▲                       │
+  │                    │ disconnect            │ handshake/catalog ready
+  │                    │                       ▼
+  ├── Practice         └────────────────── GameSelect ◄─────────────┐
+  │                                            │                    │
+  │                                      queue exact game type      │
+  │                                            ▼                    │
+  │                                          Queue ── cancel ───────┘
+  │                                            │
+  │                                      tickets reserved
+  │                                            ▼
+  │                                      MatchLoading
+  │                                  sync + formation check-in
+  │                                            │
+  │                                  authoritative countdown
+  │                                            ▼
+  │                                           Match
+  │                                            │
+  │                                         completed
+  │                                            ▼
+  │                                          Results
+  │                                   queue again / change game
+  └─────────────────────────────────────────────────────────────────
 
-Note: `FormationCountdown` is followed by the existing `MatchState` waiting/countdown sequence
-where eligible — or by a short server-side formation check-in — and after `Results` the player
-re-queues rather than using restart quorum. Pools form matches concurrently; each formed match
-runs as its own match instance on the same server process (see the concurrent-matches design
-below).
+Overlays: BuildEditor, Settings, Credits, InMatchMenu, Scoreboard,
+          Confirmation, Error
+```
 
 ### Screen inventory
 
-| # | Screen | Purpose | Primary content | Backing state today |
-|---|---|---|---|---|
-| 1 | **Title** | Hub: Play (join), Settings, Credits, Quit | Logo, version, focus menu | none — client boots straight to connect |
-| 2 | **ServerSelect** | Join a server by address or from favorites | Direct address entry (`IP:port`, `hostname(:port)`), favorites list, (future: registry list), Back | none; `--server` flag only |
-| 3 | **Connecting** | Transient: connect, handshake, game-type sync, map/terrain sync, assets | Progress line from the existing readiness ladder, Cancel | `ClientJoinPhase`, `ClientMapReadiness`, `ClientTerrainReadiness`, `ClientAssetReadiness` |
-| 4 | **GameSelect** | Choose a game type on this server | Game-type list (mode + maps + settings + pool size), optional mode filter, join; Build edit entry | none — server advertises game types (new message) |
-| 5 | **BuildEditor** | Choose preset or edit the bounded custom build before queuing | Preset cards, custom fields, budget bar (12 pts), stat/profile preview, Confirm | `BuildCatalogResource`, `resolve_build_recipe`, `BuildSelectionState` |
-| 6 | **Queue** | Waiting in a pool | Game type, players queued vs. needed, current build, Cancel; player names appear as they queue | none — new pool replication/messages |
-| 7 | **Match** | Countdown + active play | Minimal HUD: health/ammo, weapon, ultimate charge, score/objective, crosshair + range, landing indicator | combat HUD + match state |
-| 8 | **Menu** | In-match overlay; the match never pauses | Resume, Settings, Scoreboard, Leave Match, Debug overlay toggle | `ClientInputContext::Paused` (legacy name) |
-| 9 | **Results** | Match completed | Winner, final score/objective, team summary, Queue again (same game type), Leave | `MatchPhase::Completed` |
-| 10 | **Settings** | Global settings | Input remap/calibration (M11), audio, display/window, credits | M11 `ClientInputSettings` |
-| 11 | **Error** | Modal: rejection, mismatch, timeout, disconnect | Reason in plain words, Back to ServerSelect, Retry | `JoinRejection`, `ClientJoinPhase::Rejected/Disconnected` |
+| Flow/overlay | Purpose | Primary content | Backing state today |
+|---|---|---|---|
+| **Title** | Product hub | Play, Practice, Settings, Credits, Quit; logo/version | Missing |
+| **ServerSelect** | Choose a known server | Direct address, explicit favorites, recent servers, Back | `--server` only |
+| **Connecting** | Establish a lobby session | DNS/transport, handshake, compatibility, game-type catalog; Cancel | Partial `ClientJoinPhase`; currently also assumes match readiness |
+| **GameSelect** | Choose an advertised game type | Mode, map pool, topology, rules summary, pool count; edit build | Missing advertisement/UI |
+| **BuildEditor** | Create the next queue build | Presets, bounded fields, budget, stats, confirm/cancel | Debug-only overlay; validation exists |
+| **Queue** | Wait for exact formation | Game type, `queued/needed`, accepted build, Cancel | Missing |
+| **MatchLoading** | Prepare one reserved match | Selected map/mode, map/assets/terrain sync, participant check-in, timeout | Existing readiness pieces, wrong lifecycle location |
+| **Match** | Countdown and active play | Product HUD, crosshair/range, objective, cues | Debug-heavy presentation |
+| **InMatchMenu** | Non-pausing overlay | Resume, Settings, Scoreboard, Leave Match, debug toggle | Debug pause overlay |
+| **Scoreboard** | Match roster and score detail | Teams, names, builds where policy permits, score/objective | Text overlay |
+| **Results** | Completed-match decision | Winner, final result, team summary, Queue Again, Change Game, Disconnect | Debug phase overlay/restart quorum |
+| **Settings** | Local configuration | Input, accessibility, audio, display/window | M11 data, UI missing |
+| **Credits** | Attribution and licenses | Required asset attribution and project credits | Missing |
+| **Error** | Recoverable failure overlay | Plain-language reason and context-valid Retry/Back action | Structured categories partly planned in M11 |
 
-### Key transitions and their rules
+### Transition and membership rules
 
-- **Title → ServerSelect** via Play. **ServerSelect → Connecting** on Join: the address is
-  validated (`SocketAddr`, or hostname resolved with a default port) before any network attempt.
-  Favorites are a plain TOML list (`name`, `addr`) auto-saved on join/edit and hand-editable.
-- **Connecting → GameSelect** on `ClientJoinPhase::Active` + game-type advertisement + asset
-  readiness. **Connecting → Error** on rejection, timeout, or mismatch.
-- **GameSelect ↔ BuildEditor** happens before queuing. The build is still sent and validated
-  exactly like today (`BuildSelectionRequest`); the editor is its presentation. A change of build
-  while queued re-sends the selection; server re-validates.
-- **GameSelect → Queue** on "Join": the client requests membership in that game type's pool
-  (server-validated against capacity and legality). **Queue → GameSelect** on Cancel (leave pool).
-- **Queue → Match** is server-owned: when the pool reaches the game type's formation size, the
-  server forms the match, runs a short formation countdown (straggler grace), assigns teams, and
-  starts. The current all-ready start and restart-quorum machinery is superseded by pool formation;
-  whether restart quorum survives as an in-group rematch is a design decision below.
-- **Match → Menu** toggles locally; the authoritative match never pauses and continues (unchanged).
-  **Match → Results** on `Completed`.
-- **Results → Queue** re-queues the same game type (same build). **Results → ServerSelect** leaves.
-- **Leave Match / Leave Queue** sends an intentional departure and returns to ServerSelect. The
-  server keeps its existing departure/forfeit semantics; the client simply disconnects cleanly
-  instead of quitting.
-- **Error → ServerSelect** always. No prototype-quit behavior remains in the windowed client;
-  headless automation keeps its exit codes for CI.
-- **Future registry browse** (a later service): the server list tab populates from the registration
-  endpoint's heartbeat data (including the offered game types); joining still uses the same
-  address-based join path.
+- `Connecting` completes after transport, handshake/fingerprint validation, session identity, and a
+  bounded game-type advertisement. It does not wait for a map or terrain instance.
+- GameSelect and BuildEditor are lobby presentation. The editor changes a local draft; successful
+  queue admission validates and freezes its server-owned snapshot on the ticket.
+- Cancel Queue removes the ticket and returns to GameSelect without disconnecting.
+- Exact formation reserves tickets and allocates a match worker; it does not begin gameplay
+  immediately.
+- MatchLoading closes the lobby Lightyear session, establishes a fresh worker session through the
+  same public endpoint, synchronizes the selected map/assets/terrain, and performs a bounded
+  check-in. Once every retained participant is ready, the worker starts the only gameplay
+  countdown.
+- If formation loading fails or a participant times out, the server disposes the incomplete match
+  instance and returns valid remaining tickets to the front of their pool under a specified bounded
+  retry policy.
+- Leave Match confirms and forfeits, closes the match-worker connection, and establishes a fresh
+  lobby connection through the same logical server endpoint before returning to GameSelect.
+- Results has independent Queue Again, Change Game, and Disconnect actions. There is no player-facing
+  restart quorum or fixed-roster rematch.
+- Disconnect from Server is the only ordinary transition back to ServerSelect from an active lobby.
+- Retry after connection loss starts a fresh lobby session. V2 does not imply match resumption or
+  join-in-progress.
+- All membership commands carry request/ticket identity and are idempotent under duplicates,
+  cancellation/formation races, and late responses.
 
-## What must be built to get there
+## Build selection contract
 
-### A. Client UI shell (all missing)
+The current recipe catalog, resolver, preset profiles, and 12-point validation remain the gameplay
+authority. The lifecycle changes:
 
-| Item | Notes |
+1. The BuildEditor owns a local editable draft and previews locally resolvable values.
+2. Queue Join carries the complete bounded recipe or stable preset identity plus required catalog
+   revision.
+3. The server resolves and validates the build atomically with ticket admission.
+4. The accepted immutable public build snapshot belongs to the ticket and transfers into the formed
+   match's selected-build/loadout lifecycle.
+5. The player cannot counter-pick while queued. Editing requires Cancel Queue and re-admission, or a
+   future explicitly specified atomic ticket update; the initial v2 implementation should prefer
+   cancel and requeue.
+6. Queue UI shows the player's own accepted build. Opponent builds are not exposed before formation;
+   the match scoreboard exposes only the bounded public configuration needed for readable play.
+7. A schema-versioned local last-used build improves repeat sessions. Named account-owned arsenals,
+   acquisition, entitlements, and cloud persistence remain deferred under `FUT-ARSENAL`.
+
+## Session identity and local persistence
+
+- Stable `PlayerId`/network identity remains authoritative; display name is presentation metadata,
+  never identity or authorization.
+- V2 display names are session-scoped and untrusted. The server enforces UTF-8 byte and grapheme
+  bounds, normalization, control-character rejection, and deterministic duplicate suffixes, then
+  replicates the accepted display form.
+- A generated usable default means controller play never blocks on text entry.
+- Local files for settings, favorites, recents, display name, and last-used build have explicit
+  schema versions, platform-appropriate locations, bounded input, atomic replacement, and safe
+  fallback after missing or malformed data.
+- Favorites are player-authored; recents are bounded and automatic. Neither belongs in the server
+  feature graph.
+
+## Session and protocol work
+
+| Item | Status | Agreed direction |
+|---|---|---|
+| Non-fatal windowed lifecycle | Debug-only → change | Transition to flow/error UI; retain headless exit contracts |
+| Lobby session identity/name | Missing | Server-sanitized session display name over stable numeric identity |
+| Game-type advertisement | Missing | Bounded stable IDs/revisions, modes, map pool, exact topology, rules summary, and queue count |
+| Queue commands and snapshots | Missing | Reliable in-band requests/acks with ticket identity, revisioned aggregate pool state, and explicit rejection reasons |
+| Match reservation/loading | Missing | Match allocation, targeted sync, check-in deadline, dissolution/requeue policy |
+| Leave/cancel/disconnect | Missing | Separate idempotent intents with distinct membership effects |
+| Address and local server lists | Missing | Validated hostname/address, explicit favorites, bounded recents |
+| Match recovery | Partial | Terrain/map recovery applies after reservation; no v2 session resumption |
+| Public registry | Deferred | Coordinate later with internet reachability and public-server policy |
+
+Lobby, build, and queue actions stay on dedicated reliable in-band Lightyear messages/channels on
+the lobby connection. Match loading and gameplay actions use the separately authenticated match
+worker connection. The routing envelope and IPC framing live below Lightyear and never become a
+second gameplay protocol. REST/HTTP becomes a new architecture decision only when a concrete
+external service—such as accounts, inventory, registry, or cross-server matchmaking—requires it.
+
+## Multi-process architecture research contract
+
+The topology is decided, but its reusable implementation begins with the v2 transport-foundation
+milestone. That milestone must answer and prove:
+
+| Concern | Required result |
 |---|---|
-| Client screen state machine | Bevy `States` `ClientScreen` + screen plugin composition; the current `StatesPlugin` import already exists |
-| Menu navigation model | Focus-ring widgets (controller) + mouse; shared confirm/cancel/back handling via the existing abstract actions; no gameplay-input coupling |
-| UI component set | Buttons, list rows, panels, cards, budget bar, pips, focus ring; consistent with the doc-11 look; icons from the doc-12 HUD atlas |
-| Screen scaffolds | Title, ServerSelect, Connecting, GameSelect, BuildEditor, Queue, Match HUD shell, Menu, Results, Settings, Error |
-| Local persistence | Favorites, last-used name, settings file; follows the manifest/licensing discipline; keep out of the server graph |
+| Process ownership | The supervisor owns ingress, routing capabilities/tables, host capacity, worker handles, and shutdown; a long-lived lobby worker owns sessions/queues/reservations and delivers supervisor-minted capabilities; each match worker owns exactly one authoritative match world |
+| Routed transport | One public UDP socket routes opaque Lightyear datagrams through bounded framed IPC while preserving packet and peer identity |
+| Connection handoff | Lobby and match use distinct Lightyear sessions at the same public endpoint; expired, replayed, malformed, and misrouted capabilities fail safely |
+| IPC portability | One validated frame codec supports message-oriented backends directly and explicit length-prefixed byte streams, including the selected macOS/Linux backend and a documented Windows named-pipe or portable fallback path |
+| Backpressure | Per-route and per-worker queues, packet-size limits, drop behavior, and telemetry are bounded and tested under a stalled worker |
+| Worker lifecycle | Spawn, manifest validation, readiness, heartbeat, result, graceful stop, forced termination policy, crash detection, and route cleanup are explicit |
+| Gameplay reuse | The production match worker composes the existing server-authoritative plugins; the foundation is not a mock gameplay server or disposable example |
+| Security | Routing capabilities authorize routing, not player identity or a replacement for inner Netcode authentication; they are unguessable, scoped, expiring, revocable, and rate-limited before allocating worker or route state |
+| Admission budgets | Host-wide ceilings bound workers, fighters, memory, CPU/fixed-tick work, IPC queues, and bandwidth based on measurement |
+| Verification | Two simultaneous worker matches, cross-route isolation, reconnect/handoff, crash cleanup, impaired networking, and repeated lifecycle soaks pass |
 
-### B. Session and protocol (partly have, partly missing)
+The first UX vertical slice may use one active worker while this gate is researched, but the v2
+queue/concurrency feature is not complete until these invariants pass. The foundation milestone
+must leave production modules, tests, and observability that later lobby and formation milestones
+extend; it must not leave a throwaway prototype beside the real server path.
 
-| Item | Status | Notes |
+## In-match presentation scope
+
+| Item | Status | V2 result |
 |---|---|---|
-| Non-fatal join lifecycle | Debug-only → change | `Rejected`/`Disconnected`/timeout currently write `AppExit::error()` (`session.rs`); must transition to Error screen instead; headless paths keep exiting |
-| Display name | Missing, **design gap** | No name exists anywhere; needs a protocol decision (client name in `ClientHello` or a session message) and roster/pool replication/display — protocol fingerprint change |
-| Game-type advertisement | Missing | New server→client message (or handshake payload) listing game types: name, mode, maps, settings, formation size; also carried pre-join by the registry heartbeat |
-| Queue join/leave + pool state | Missing | Client requests pool membership (with game type + build); server replicates pool composition (players, names, builds, formation progress); formation/start is server-owned |
-| Leave-match intent | Missing, **design gap** | Clean intentional departure message vs. plain disconnect; server already handles departure/forfeit |
-| Address entry (`IP:port`, `hostname(:port)`) | Missing | Validate before connecting; hostname resolution with an optional default port; reuse the existing `Authentication::Manual` join path |
-| Favorites (TOML) | Missing | Plain `name`/`addr` list, auto-saved on join/edit, hand-editable; same manifest discipline as assets; keep out of the server graph |
-| Server metadata for browsing | Missing, **design gap** | Name, game types, mode, maps, settings, players, version, fingerprints; post-join from the advertisement, pre-join from a future registry heartbeat — schema/service scope is a later design decision, not matchmaking |
-| Registry discovery service | Future | Heartbeats from dedicated servers to a registration endpoint; client browse tab; see `GAP-NET-INTERNET` for reachability caveats |
-| Pool → match formation | Missing | Server-side pool accounting per game type, formation trigger (size vs. timer), team assignment, overflow stay-queued, disconnect handling; formed matches run concurrently (see the concurrent-matches design below) |
-| Formation/start semantics | Design gap | Replace or reuse the existing all-ready countdown; ready-check vs. immediate formation; see underspecified list |
-| Team size / player expectations | Design gap | Mode defines topology (2v2 MVP, 3v3 target); game types advertise formation size; server capacity vs. mode requirement must not conflict |
+| Combat HUD | Debug-only → replace | Health, ammo/cooldown, weapon/build identity, ultimate charge, score/objective, and bounded alerts using icons/bars/pips |
+| Crosshair/range/landing | Have | Restyle and validate for controller readability |
+| Objective presentation | Have | Preserve authoritative facts; restyle Wipeout and Hot Zone presentation |
+| Scoreboard | Text → replace | Readable team panel on View/in-menu; no queue-wide identity disclosure |
+| In-match menu | Debug-only → replace | Non-pausing overlay with neutral local intent and confirmed leave |
+| Results | Debug-only → replace | Final result plus Queue Again, Change Game, and Disconnect |
+| Debug overlay | M11 | Remains separately toggleable and never becomes the product HUD |
+| Combat feedback | Have/partial | Preserve hit/defeat feedback; add only v2 readability polish, not the full production VFX pipeline |
 
-### C. Game selection, queue, and build editor (data partly exists; presentation missing)
+## Settings, accessibility, and text input
 
-| Item | Status | Notes |
-|---|---|---|
-| GameSelect screen | Missing | Game-type cards from the server advertisement (mode + maps + settings + pool size); mode filter tab |
-| Queue screen | Missing | Pool composition from new replication: players, names, builds, `queued/needed` formation progress; Cancel leaves the pool |
-| Build editor screen | Debug-only → replace | Replace `update_build_selection_overlay`; catalog, `resolve_build_recipe`, budget math, and preset profiles all exist and stay server-validated |
-| Custom-recipe fields | Have | Power/reach/magazine/ultimate/passives with `PulsePower/Reach/Magazine` enums; present as labeled choices, not `{:?}` debug text |
-| Build preview | Have | Resolved loadout + total points; present as stats/budget bar |
-| Ready / restart-ready actions | Have, may retire | `MatchCommand::SetReady/ReadyForRestart` keep their wire; pool formation may make ready redundant and restart quorum a design decision |
-| Build persistence | Design gap | Session-scoped today; local saved builds are `FUT-ARSENAL` (post-v1) but a session-local "my current build" card is implied |
+V2 settings cover:
 
-### D. In-match presentation (mostly have, must be redesigned)
+- M11 action remapping, deadzones, aim threshold, sensitivity, Y inversion, conflict detection,
+  reset-to-default, controller disconnect, and active-device glyph changes;
+- master/SFX/music-ready volume categories, mute-on-focus-loss policy, and safe defaults even if v2
+  has no full music catalog;
+- window mode, resolution, vsync/frame limit, cursor capture, UI scale, and safe layout margins;
+- non-color-only team identification and a colorblind-friendly palette option;
+- reduced screen shake, reduced flashes, and bounded presentation intensity;
+- focus repeat/debounce, focus restoration after modal/list changes, mouse hover/click, and clear
+  focus indication;
+- keyboard entry and paste for addresses and optional names. Controller users can complete every
+  ordinary flow by using generated names and saved servers without an on-screen keyboard.
 
-| Item | Status | Notes |
-|---|---|---|
-| Clean combat HUD | Debug-only → replace | Health/ammo/weapon/ultimate as icons+bars (doc 12 icons); team score as pips/objective bar; no roster text dump (scoreboard moves to the Menu overlay/View) |
-| Crosshair + range feedback | Have | Preview geometry exists (`combat/client.rs`); align with doc-05 controller readability |
-| Landing indicator | Have | Lobbed-weapon landing indicator exists |
-| Objective presentation | Have | Hot Zone ring/fill (SDF), Wipeout scores; present per doc 11 area-effect rules |
-| Scoreboard | Have (text) | View-button overlay; restyle as panel |
-| Menu overlay | Debug-only → replace | Exists as pause overlay + controls text; becomes the Menu screen with Settings entry; the match continues underneath |
-| Results screen | Debug-only → replace | Phase overlay text → proper screen with restart/leave |
-| Debug overlay | M11 scope | Keep behind a toggle, never mixed into the play HUD |
-| Damage/status readability | Have | Hit flash, hit confirmation, defeat feedback exist |
+Credits are a top-level Title destination and may also be linked from Settings/About, but remain one
+owned screen. Required attribution derives from the existing asset manifest.
 
-### E. Settings, credits, and error surfaces (missing; backlog-acknowledged)
+## Error and retry policy
 
-- Input remap/calibration UI for the M11 settings resource (`GAP-UI-SETTINGS`).
-- Audio and display settings (`GAP-AUDIO-SETTINGS`, `GAP-UI-WINDOW`).
-- Credits screen for CC0/CC-BY attribution (`GAP-LEGAL-CREDITS`).
-- Error presentation bound to M11 structured failure categories, in plain language.
+The error presentation maps structured categories to honest actions:
 
-### F. Verification
+- invalid address/name/local file → correct locally or restore defaults;
+- DNS/transport timeout → retry the same server or return to ServerSelect;
+- protocol/content mismatch → explain incompatibility; do not loop Retry automatically;
+- server full/game type unavailable/config revision changed → refresh GameSelect where the lobby
+  session remains valid;
+- queue rejection/build rejection → remain in GameSelect/BuildEditor with the precise correctable
+  reason;
+- formation failure/check-in timeout → return valid tickets according to the documented retry
+  policy and explain the outcome;
+- match disconnect → acknowledge that the match cannot resume, then retry a fresh lobby session or
+  return to ServerSelect;
+- server shutdown → return to ServerSelect with a non-crash message.
 
-- Pure/UI tests: screen transitions, focus navigation, budget bar, error mapping;
-- schedule tests: screen systems do not touch authoritative simulation; pool join/leave/formation;
-- network tests: connect → game select → queue → formation → match → results → re-queue and
-  join → reject → error → rejoin loops; pool formation with overflow, disconnect in queue, and
-  disconnect in match; headless automation and existing exit-code contracts unchanged;
-- visual/controller checks per M11 matrix at the supported layouts.
+Errors may be overlays, but a lost connection changes the underlying flow and clears stale queue,
+match, map, terrain, focus, and presentation state exactly once.
 
-### G. Concurrent matches per process (design)
+## Verification requirements
 
-This section describes the intended design; it is not a commitment to build it. Ordering and gap
-analysis happen later. The model re-instances the existing single-match machinery rather than
-writing a parallel one. The replication part of this design depends on `GAP-NET-ROOMS` (Lightyear
-room interest management):
+- **Pure/UI tests:** flow/overlay transitions, return destinations, focus graph and restoration,
+  controller/KBM parity, build budget display, local-file migration/fallback, and error mapping.
+- **Schedule/ECS tests:** presentation cannot mutate authoritative simulation; match-scoped queries,
+  mode routing, deferred boundaries, and exact cleanup remain explicit.
+- **Protocol tests:** bounded advertisements, names, recipes, ticket IDs/revisions, duplicates, stale
+  commands, malformed input, rate limits, and direction/target registration.
+- **Network tests:** connect → catalog → queue → reserve → load/check-in → countdown → match →
+  results → requeue/change-game; rejection → correction → rejoin; queue overflow; cancellation at
+  formation; disconnect in every phase; fresh-session retry; and headless exit equivalence.
+- **Concurrency tests:** simultaneous Wipeout/Hot Zone worker processes, route/message/recovery
+  isolation, host admission refusal, worker teardown/crash, and repeated formation/completion soak.
+- **Performance tests:** measured server fixed-tick, entity, terrain, memory, and bandwidth ceilings;
+  client FPS/frame-time and UI rebuild targets at supported resolutions.
+- **Visual/accessibility checks:** minimum resolution, window resizing, ultrawide behavior, UI scale,
+  safe margins, non-color team reading, reduced-effects mode, controller disconnect, and input-glyph
+  switching.
+- **Usability checks:** first-run Practice reaches controllable play within one minute; a populated
+  favorite requires only a handful of inputs; queue state never promises an unsupported wait time.
 
-| Item | Notes |
-|---|---|
-| Per-match rules and capacity | `MatchLifecycleRules`/`ResolvedMatchCapacity` become per-match state keyed by match id; every consumer (lifecycle, spawns, terrain admission, telemetry) reads the owning match's instance |
-| Per-match mode | One process hosts heterogeneous matches; mode selection moves from app-install time (`install_server_game_mode`) to match-formation time |
-| Per-match map and terrain | Per-match resolved map + terrain instance; M10 chunk/collider/brush budgets become per-match ceilings with a process admission ceiling so N matches cannot stack past the engine's verified capacity |
-| Replication rooms | Lightyear `RoomPlugin`; a client receives only its own match's replication set; cross-match isolation is a correctness requirement, not an optimization |
-| Admission by match id | Join targets a formed match (pool → match); per-match capacity admission; rejection remains explicit and documented |
-| Fixed-tick budgets | All matches share one fixed tick; systems iterate per match instance; performance fixtures cover N concurrent matches at the 24-fighter ceiling |
-| Telemetry and evidence | Per-match retention/summaries (already `MatchId`-scoped in places); global bounded histories stay bounded under concurrency |
-| Server configuration | Game types become a config list (drafted TOML above); operator validation covers mode ↔ map ↔ capacity per type |
-| Test strategy | Multi-pool formation, concurrent matches, cross-match isolation, overflow, disconnect-in-queue, and soak loops become first-class fixtures |
+## Remaining milestone R&D questions
 
-### H. Control-plane protocol (research item, no decision)
+These are technical research tasks rather than unsettled product behavior:
 
-Open question worth investigating before the queue/build-session protocol is locked: should
-session-level actions — player setup, build selection and, later, arsenal/inventory management —
-travel over the gameplay protocol or a sideband classical REST channel?
+1. Which framed IPC primitive and wake-up strategy best satisfies packet boundaries, bounded
+   backpressure, clean shutdown, and the supported desktop platforms?
+2. What minimal Lightyear transport plugin maps routed IPC peers to `Link` entities without
+   modifying Lightyear connection, replication, or gameplay layers?
+3. What role-specific manifest, restart, reconciliation, and shutdown policy does the long-lived
+   lobby worker require beyond the process/IPC machinery shared with match workers?
+4. What measured host ceilings allow concurrent 2v2/3v3 worker processes with independent terrain
+   while preserving fixed-tick, memory, IPC, and bandwidth budgets?
+5. What exact deterministic team-assignment and map-rotation algorithms are simplest and testable?
+6. What bounded check-in timeout and ticket-return policy behaves best under local and impaired
+   network profiles?
+7. Which platform path and atomic persistence mechanism should store the versioned client settings,
+   favorites, recents, name, and last-used build?
+8. How should the product launcher invoke the same supervisor/worker topology for local practice
+   across startup, readiness, failure, and shutdown without adding a second gameplay path?
 
-| Dimension | Gameplay protocol (Lightyear session channel) | Sideband REST/HTTP |
-|---|---|---|
-| Transport | Reuses the game connection, auth, and reliability | Second transport: separate port/endpoint, TLS story, client HTTP stack in Bevy |
-| Lifecycle | Actions die with the game connection; menu actions require a live game session | Survives/independent of game sessions; natural fit for pre-join setup |
-| Semantics | Lightyear message request/response and validation patterns | Standard HTTP idempotency, caching, retries, JSON schema tooling |
-| Coordination | Single source of truth for session state | Two channels must be reconciled (e.g., build chosen over REST must bind to a game session) |
-| Boundary | One protocol to maintain, one fingerprint | Cleaner separation of control vs. gameplay authority; fits future services (accounts, inventory) |
-
-Investigation should decide one coherent model, record the choice in this document, and then lock
-the queue/build protocol. The current prototype is entirely in-band (build selection, match
-commands), so in-band remains the default unless the investigation finds a concrete boundary
-problem.
-
-## Underspecified or missing in the design docs
-
-1. **Player display name.** No design anywhere; identity is a numeric client id. Needs a protocol
-   and roster/pool decision before any queue can show names.
-2. **Pool formation rules.** Does a match form at the game type's maximum size, its minimum plus a
-   grace timer, or a ready-check (accept/decline) after formation? Overflow behavior (stay queued)
-   is decided; timing is not. Team assignment from a mixed pool (vs. pre-formed groups) needs a
-   rule; groups/parties are out of scope but two friends queuing together is plausible.
-3. **Restart and rematch semantics.** Pool formation supersedes all-ready start. Does the existing
-   restart quorum survive as an in-group rematch, or does every completed match return everyone to
-   their pools? Both are defensible; pick one before implementation.
-4. **Build selection timing.** The current flow selects builds inside the waiting phase over a
-   fighter. The pool flow selects before queuing; the server must accept a build selection from a
-   queued (not yet matched) player and carry it into the formed match.
-5. **Registry service scope.** The heartbeat schema (name, addr, game types, mode, maps, settings,
-   players, version, protocol/content fingerprints), registration endpoint, refresh cadence,
-   stale-server expiry, and client browse UI are undesigned. It is a later service and must stay
-   clearly distinct from matchmaking; it also does not solve reachability (NAT/relay).
-6. **Favorites file location and format.** TOML list is decided; file path, auto-save timing, and
-   hand-edit behavior need a small spec (no settings persistence exists yet).
-7. **Server game-type configuration.** TOML shape is drafted above; validation (map ↔ mode
-   compatibility, capacity vs. map spawns, formation size bounds) and whether game types are
-   immutable per process need a spec.
-8. **Leaving and returning.** There is no design for intentional departure from a pool or match,
-   return-to-menu, or what the server does with a leaving queued player (drop from pool) beyond the
-   existing forfeit rules for matches.
-9. **Local build persistence.** Session-scoped by default; `FUT-ARSENAL` covers accounts, but a
-   simple local "last used build" is unstated and cheap.
-10. **Bot practice.** Doc 08 explicitly permits an authoritative bot-practice mode (`GAP-MODE-TRAINING`),
-    but no menu path ("Play vs Bots") is designed and v1 bots are match-fillers only. A bot-practice
-    game type is a server-side concern (hosted or local), not a client-hosted game.
-11. **Error taxonomy UX.** Structured failure categories exist as M11 work, but the mapping from
-    each category to a screen/retry path is not designed.
-12. **Credits and settings placement.** Screens are named in the backlog; where they live in the
-    navigation graph is not.
-13. **Control-plane protocol.** See section H: in-band gameplay protocol vs. sideband REST for
-    player setup, build selection, and future inventory/arsenal actions is an open investigation;
-    in-band remains the default until it concludes.
+These questions belong in the relevant v2 milestone research sections. They do not reopen the
+agreed authority, membership, formation, rematch, or global-matchmaking boundaries above.

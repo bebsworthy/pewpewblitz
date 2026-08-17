@@ -36,8 +36,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 11 research began on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 remains in feedback review with all three implementation-review rounds remediated and the 2026-08-17 user-playtest findings triaged (destructible terrain now blocks straight shots; lob landing behavior and crater readability deferred to the ultimate/item redesign as `GAP-DESIGN-TERRAIN-RESERVATION`); Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing.
-- **Current milestone:** Milestone 11 — Researching; first specification and implementation-plan draft in [milestone-11.md](./milestone-11.md)
+- **Overall status:** Milestone 11 entered specification review on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 remains in feedback review with all three implementation-review rounds remediated and the 2026-08-17 user-playtest findings triaged (destructible terrain now blocks straight shots; lob landing behavior and crater readability deferred to the ultimate/item redesign as `GAP-DESIGN-TERRAIN-RESERVATION`); Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing. The accepted v2 topology adds only a worker-readiness audit and direct-UDP comparison baseline to M11; v2 infrastructure remains out of scope.
+- **Current milestone:** Milestone 11 — Specification review; implementation remains gated on user validation of [milestone-11.md](./milestone-11.md)
 - **Last completed milestone:** Milestone 09 — Hot Zone
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -193,7 +193,7 @@ Telemetry begins with combat in Milestones 04–05 and match metrics in Mileston
 | 08 | Feedback review | Bounded brawler builds and abilities | [milestone-08.md](./milestone-08.md) |
 | 09 | Complete | Hot Zone | [milestone-09.md](./milestone-09.md) |
 | 10 | Feedback review | Quantized destructible terrain | [milestone-10.md](./milestone-10.md) |
-| 11 | Researching | MVP playtest hardening and closeout | [milestone-11.md](./milestone-11.md) |
+| 11 | Specification review | MVP playtest hardening and closeout | [milestone-11.md](./milestone-11.md) |
 
 Create each milestone file just before its research phase so its specification reflects current evidence and prior milestone lessons. Use the zero-padded form `milestone-NN.md`.
 
@@ -666,6 +666,8 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 - fixed-tick replay or deterministic event logs where practical;
 - named packet-loss, latency, duplication, jitter, and reconnect profiles;
 - server load, tick-time, bandwidth, and entity-count measurements;
+- a reproducible direct-UDP single-match baseline plus an audit of the dedicated server's
+  composition, launch/readiness, process-global assumptions, and shutdown contract for v2 M01;
 - build matchup and map/mode reports;
 - automated fixed-schedule ECS tests for all implemented mode rules;
 - crash and structured error reporting for local development;
@@ -683,7 +685,9 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 - replace broad production complexity/pass-by-value Clippy suppressions with narrow justified
   exceptions after the owning systems have been inspected and decomposed;
 - final user playtest and feedback triage;
-- technical-debt review and evidence-based next-version recommendation;
+- technical-debt review and evidence-based handoff to the accepted next-version architecture;
+- explicitly no v2 supervisor, router, IPC, worker manifest, lobby, queue, or multi-worker
+  implementation during v1 closeout;
 - learn-from-errors review and justified skill creation or improvement.
 
 ### Automated and playtest verification
@@ -701,6 +705,8 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 - balance decisions use captured data and playtests;
 - repeatable two-client, 2v2, and broader multi-client sessions are documented;
 - server tick and bandwidth limits are measured for the current content set;
+- the accepted v2 architecture has a bounded handoff record and direct-UDP worker comparison
+  baseline without expanding M11 into v2 infrastructure;
 - build selection, movement, combat payload resolution, and client presentation have cohesive
   ownership boundaries with schedule and protocol invariants covered by focused tests;
 - production module-wide complexity suppressions touched by M11 are removed or have an explicit
