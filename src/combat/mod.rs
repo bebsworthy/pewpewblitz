@@ -41,7 +41,7 @@ use effects::{
     resolve_composed_payloads,
 };
 #[cfg(feature = "client")]
-use evidence::{
+pub(crate) use evidence::{
     capture_client_combat_checkpoints, receive_combat_evidence_checkpoints,
     record_headless_combat_observation,
 };

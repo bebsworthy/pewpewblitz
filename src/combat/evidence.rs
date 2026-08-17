@@ -533,7 +533,7 @@ pub(super) fn send_combat_evidence_checkpoints(
 }
 
 #[cfg(feature = "client")]
-pub(super) fn receive_combat_evidence_checkpoints(
+pub fn receive_combat_evidence_checkpoints(
     mut observation: ResMut<ClientCombatObservation>,
     mut receivers: Query<
         Option<&mut lightyear::prelude::MessageReceiver<CombatEvidenceCheckpoint>>,
@@ -552,7 +552,7 @@ pub(super) fn receive_combat_evidence_checkpoints(
 
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]
-pub(super) fn capture_client_combat_checkpoints(
+pub fn capture_client_combat_checkpoints(
     mut observation: ResMut<ClientCombatObservation>,
     fighters: Query<
         (
@@ -771,7 +771,7 @@ pub(super) fn capture_client_combat_checkpoints(
 
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]
-pub(super) fn record_headless_combat_observation(
+pub fn record_headless_combat_observation(
     mut observation: ResMut<ClientCombatObservation>,
     mut status: ResMut<ClientCombatEvidenceStatus>,
     config: Res<crate::config::ClientNetworkConfig>,

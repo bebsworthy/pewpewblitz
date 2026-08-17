@@ -101,7 +101,7 @@ struct ClientShutdown {
 struct RosterLogState(Vec<(PlayerId, NetworkEntityId)>);
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
-pub(crate) struct HeadlessAutomation {
+pub struct HeadlessAutomation {
     move_axis: Vec2,
     aim_axis: Option<Vec2>,
     aim_at_dummy: bool,
