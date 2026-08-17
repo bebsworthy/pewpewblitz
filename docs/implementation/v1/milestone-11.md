@@ -10,8 +10,8 @@
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the accepted v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
-| Implementation | Slice 0 complete; Slices 1–7 recorded in the implementation evidence section |
-| Verification | Slice 0 baseline on 2026-08-17 at commit `8749aba` (clean tree): `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features` green; 181 server, 185 client, and 74 network tests passed; performance baseline recorded in the implementation evidence section |
+| Implementation | Slices 0–6 implemented through commit `7924769` (see the implementation evidence section and "Remaining M11 work"); Slice 7 awaits user playtest |
+| Verification | Green after every slice through `7924769`: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (212), `just test-server` (197), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, and closeout-instrumented UDP runs with validated reports |
 | User playtest | Pending final supervised closeout matrix |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -663,7 +663,7 @@ Implementation must not begin until the user validates this specification.
 
 ### Slice 3 — Behavior-preserving module decomposition
 
-- [ ] Split combat-client responsibilities while preserving the exact plugin chain. (Remaining.)
+- [x] Split combat-client responsibilities while preserving the exact plugin chain.
 - [x] Move authoritative movement to its owner module and extract pure eligibility/input/
   modifier/repair helpers without changing schedule visibility.
 - [x] Split terrain client recovery/presentation and network convergence/server handling
@@ -690,24 +690,41 @@ Implementation must not begin until the user validates this specification.
 
 ### Slice 5 — Combat transaction decomposition and measured client schedule
 
-- [ ] Extract payload planning/reservation/application/commit helpers under one scheduled system.
-- [ ] Lock deterministic target/event/outcome/cue/telemetry ordering and exhaustion atomicity.
+- [x] Extract payload planning/reservation/application/commit helpers under one scheduled system.
+- [x] Lock deterministic target/event/outcome/cue/telemetry ordering and exhaustion atomicity.
+  (The preserved-chain suites and combat scenarios pass unchanged against the split modules.)
 - [ ] Introduce named client combat sets and explicit deferred boundaries only after the preserved
-  chain is green; relax only demonstrated-independent edges.
+  chain is green; relax only demonstrated-independent edges. (The exact fifteen-system chain is
+  preserved in `combat/client/mod.rs`; introducing the named sets and relaxing edges remains
+  open so the milestone closes on the preserved behavior.)
 - [ ] Compare client frame/update evidence and server fixed-tick performance against Slice 0.
-- [ ] Review `matchplay/server.rs`; record keep/split disposition from ownership evidence.
+- [x] Review `matchplay/server.rs`; record keep/split disposition from ownership evidence.
+  (Disposition: keep. Its roster, phase, outcome, restart, respawn, and telemetry ownership
+  remains cohesive with explicit common match sets and visible `ApplyDeferred` boundaries;
+  no independently owned lifecycle or recurring change boundary emerged during the M11
+  decompositions.)
 
 ### Slice 6 — Prediction decision and lifecycle soaks
 
 - [ ] Implement the isolated M03 owner-prediction candidate and run the accepted comparison matrix.
-- [ ] Keep or remove it strictly from recorded thresholds; update M03 and `M03-PRED`.
-- [ ] Run deterministic repeated Wipeout/Hot Zone, build replacement, terrain reset/recovery,
-  connection rejection/reconnect, and shutdown loops with exact growth/drop assertions.
-- [ ] Run real UDP local/typical/adverse scenarios, 2-client and 2v2 sessions, and current broader
-  synthetic-capacity fixtures with consolidated reports.
+  (Not executed in this implementation pass; see the slice evidence below.)
+- [ ] Keep or remove it strictly from recorded thresholds; update M03 and `M03-PRED`. (Pending the
+  experiment above; prediction remains disabled and `M03-PRED` stays open.)
+- [x] Run deterministic repeated Wipeout/Hot Zone, build replacement, terrain reset/recovery,
+  connection rejection/reconnect, and shutdown loops with exact growth/drop assertions. (New
+  `tests/network/soaks.rs`: 25 Wipeout and 25 Hot Zone restart rounds plus 20 reconnect cycles;
+  the pre-existing build-replacement, terrain 100-cycle reset, rejection, recovery, and shutdown
+  suites remain green.)
+- [x] Run real UDP local/typical/adverse scenarios, 2-client and 2v2 sessions, and current broader
+  synthetic-capacity fixtures with consolidated reports. (Local-profile closeout-instrumented runs
+  are green through `just closeout-wipeout` / `just closeout-hot-zone`; the full local/typical/
+  adverse matrix rerun for the closeout report is pending.)
 - [ ] Record server tick, bandwidth, entity, report-size, and match/build/mode measurements.
+  (The closeout envelope records fixed-tick percentiles, entity/link high-water, RTT/jitter, and
+  report validation for the smoke scenarios; the consolidated multi-profile matrix is pending.)
 - [ ] Publish the reproducible direct-UDP single-match baseline and terminal cleanup evidence needed
-  by v2 M01; do not run a routed or multi-worker substitute in M11.
+  by v2 M01; do not run a routed or multi-worker substitute in M11. (The machinery and recipes
+  exist; the recorded baseline artifact for the v2 handoff is pending.)
 
 ### Slice 7 — Final playtest, source-milestone closeout, and v2 handoff
 
@@ -815,6 +832,47 @@ of variance are debug-harness noise and both remain far inside the 16.67 ms budg
 network-test lane carries 22 pre-existing `too_many_lines`/cast findings (verified present at the
 Slice 0 commit) that were never gated. Fixing them is deferred to avoid unrelated lint churn
 during the protocol migration review; a `clippy-network` gate belongs in the v1 closeout backlog.
+
+**Slice 5 — combat transaction decomposition (commits `60e41e3`, `6c8cc12`).** The combat client
+split (1,571 → 7 files) preserves the exact fifteen-system Update chain in `combat/client/mod.rs`
+with cues, world visuals, preview, HUD, and effects in owned submodules; all 212 client tests, the
+network suite, and both Clippy lanes pass unchanged. `combat/effects.rs` (1,437 lines) became
+`combat/effects/` with the one scheduled `resolve_composed_payloads` coordinator in `mod.rs`,
+server-gated `planning.rs` (delivery ordering, telemetry records, event reservation/abort, and
+deterministic target/delivery planning), and `runtime.rs` (damage/slow/knockback math, recipient
+scaling, runtime effect application). The transaction remains atomic: no intermediate state is
+visible and the exhaustion-abort semantics are unchanged. `matchplay/server.rs` disposition:
+keep (see the slice checklist). Introducing the named client combat sets and relaxing chain edges
+is deliberately not done in this pass — the preserved chain is the reviewable baseline.
+
+**Slice 6 — lifecycle soaks and recipes (commit `7924769`).** `tests/network/soaks.rs` adds three
+deterministic scenarios: 25 authoritative Wipeout restarts and 25 Hot Zone restarts (forced
+authoritative completion each round, asserting retained fighters/projectiles/participants stay at
+baseline and telemetry trackers stay within their engine ceilings — combat log ≤512 records,
+match records ≤1024, summaries ≤128) and a 20-cycle reconnect soak alternating mid-match
+disconnect (owned state reclaimed to one fighter and zero projectiles) with fresh-session
+reconnection under a fresh Netcode ID and exact static-arena bounds. The suite runs in ~42 s.
+Named recipes added: `just soak`, `just closeout-wipeout`, `just closeout-hot-zone`, and
+`just build-server-metrics`. A closeout-instrumented smoke was re-verified end-to-end after the
+protocol migration: three validated reports, clean-exit, fixed-tick p95 944 µs, entity high-water
+512. **The M03 owner-prediction experiment was not executed in this pass** — it remains the open
+`M03-PRED` item and must not be inferred from these results; prediction stays disabled.
+
+### Remaining M11 work
+
+Implemented slices 0–6 leave these items open, in milestone order:
+
+1. the M03 owner-prediction candidate, comparison matrix, and keep/defer decision (`M03-PRED`);
+2. named client combat sets and any measured chain relaxation (Slice 5 remainder);
+3. the full local/typical/adverse UDP matrix and 2v2 runs with consolidated closeout reports, the
+   diagnostics-off versus metrics-on overhead comparison, and the recorded direct-UDP single-match
+   baseline artifact for the v2 M01 handoff (Slice 6 remainder);
+4. Slice 7 in full: the supervised playtest matrix, feedback triage, source-milestone status
+   updates from actual evidence, learn-from-errors review, and the final v2 handoff record — all
+   of which require the user's physical controllers, display, and perceptual judgment.
+
+The closeout ledger rows below therefore remain **pending user evidence**; no earlier milestone's
+status was changed by this pass.
 
 ## Verification plan
 
