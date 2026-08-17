@@ -1,0 +1,791 @@
+# Milestone 11 — MVP playtest hardening and closeout
+
+## Tracking
+
+| Field | Value |
+|---|---|
+| Version | v1 — gameplay MVP |
+| Roadmap | [roadmap.md](./roadmap.md) |
+| Status | Researching |
+| Research | First pass complete 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, and current primary documentation; focused API and baseline measurements remain before specification review |
+| Review findings | External maintainability review validated against the live source on 2026-08-17; scope and provisional dispositions are recorded below |
+| Specification validation | Pending; this is the first research/specification draft and does not authorize production implementation |
+| Implementation | Not started |
+| Verification | Initial research-snapshot spot-check: `just fmt-check`, `just clippy-client`, `just clippy-server`, and `just test-server` green; 169 server tests passed. Concurrent user changes after that spot-check are not covered by this claim. The complete M11 baseline is a Slice 0 requirement. |
+| User playtest | Pending final supervised closeout matrix |
+
+Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
+contained user-owned terrain changes, and additional user-owned documentation, matchplay, terrain,
+and performance edits appeared while this draft was being written. M11 research changes only this
+file and `roadmap.md`; it does not claim or overwrite the other dirty paths. Before implementation,
+Slice 0 must record the then-current commit, dirty paths, complete canonical baseline, and any
+accepted M08/M10 feedback that overlaps this scope.
+
+## Outcome
+
+Brawler v1 closes as a reproducible, measurable, server-authoritative gameplay MVP rather than as a
+collection of individually green feature milestones. One versioned closeout report ties together
+build, combat, ability, match, mode, terrain, process, and network evidence. Named deterministic
+scenarios reproduce major failures without introducing a general replay engine. The client exposes
+bounded input calibration/remapping and an optional authority/network diagnostics overlay. Repeated
+match, rejection, reconnect, recovery, and shutdown scenarios prove that current lifecycle policy is
+stable rather than silently adding session resumption or join-in-progress.
+
+M11 also pays down the validated organization debt at the seams most likely to obstruct post-v1
+work: client combat presentation, authoritative movement, composed payload resolution, terrain
+presentation/recovery, and the server build transaction. Refactoring must preserve behavior before
+any intentional schedule or protocol migration. The milestone does not use file size as an
+architectural target, create service/domain layers around Bevy's `World`, or split one atomic
+transaction into implicitly ordered systems merely to satisfy Clippy.
+
+The final gate is a supervised controller and keyboard/mouse playtest, explicit triage of every open
+v1 item, a learn-from-errors review, and an evidence-based v2 recommendation. M11 cannot mark earlier
+milestones complete by proxy: it supplies evidence, then updates each owning milestone's actual
+status and record.
+
+## Decisions requiring specification validation
+
+The following are provisional until the user approves the M11 specification:
+
+1. **No new gameplay family.** M11 hardens the implemented Wipeout, Hot Zone, build, ability, and
+   terrain scope. It adds no new weapon primitive, ultimate, mode, environmental damage source,
+   status interaction, persistence, matchmaking, art pipeline, or player-facing editor.
+2. **Use an explicit closeout ledger.** Milestones 01–03, 05, 08, and 10 retain their historical
+   records and statuses. M11 links each open gate to one owner, one required observation, and one
+   final disposition; it does not duplicate or rewrite earlier claims.
+3. **Choose deterministic scenario logs, not a general replay engine.** Record the run ID, version,
+   protocol/content fingerprints, mode/rules/profile, seed, participants/builds, fixed-tick scripted
+   inputs, checkpoints, and terminal digest needed to rerun named automated scenarios. Do not record
+   arbitrary live `World` state or promise playback of every human session.
+4. **Keep diagnostics observational.** Process metrics and overlays may read ECS/network state and
+   write local reports/UI only. They never mutate gameplay, validation, authority, replication
+   targets, match results, or terrain.
+5. **Isolate Lightyear metrics from multi-App tests.** Add a non-default `process-metrics` feature
+   that enables `lightyear/metrics` only for dedicated process measurement builds. It is not nested
+   in `client`, `server`, or `network-test`, because Lightyear 0.29 installs a process-global metrics
+   recorder and separate-App tests need per-World isolation.
+6. **Separate local device calibration from server input validation.** Client-owned deadzones,
+   aim-commit threshold, trigger hysteresis, axis inversion, and bindings shape device input before
+   quantization. Server-owned tick/history/rate/ownership/magnitude rules remain validation. The
+   default calibrated path must match the current authoritative movement within declared quantized
+   tolerance before adjustable values are exposed.
+7. **Bound v1 remapping.** Support session-local keyboard/mouse and controller button bindings for
+   the existing actions plus reset-to-default, move/aim deadzones, aim threshold, trigger thresholds,
+   and Y-axis inversion. Do not add account/cloud settings, arbitrary macros, chords, multiple local
+   players, touch controls, or a new input dependency. Persistence is proposed out of scope for v1
+   unless specification review explicitly requires it.
+8. **Separate structural extraction from behavior changes.** First move code with identical system
+   registration, set membership, explicit chains, and deferred boundaries. Only a later measured
+   slice may relax the combat-client global chain or change an authority path.
+9. **Keep payload resolution one scheduled transaction.** Decompose planning, event reservation,
+   damage/effect application, defeat/outcome creation, and telemetry/cue commit into named helpers
+   under one schedule-facing coordinator unless schedule tests prove a multi-system transaction is
+   both necessary and equivalent.
+10. **Split the build migration.** First move waiting-phase build request handling from
+    `server/mod.rs` to `builds/server.rs` without a wire change. Then intentionally remove the legacy
+    replicated `combat::SelectedBuild` and standalone fighter `ResolvedWeapon` component in favor of
+    `builds::SelectedBuild`, immutable `ResolvedMatchLoadout`, and mutable runtime components. The
+    second change bumps protocol compatibility and reruns recovery/reconnect evidence.
+11. **Do not add dormant `Environment` identity.** M11 confirms that no implemented system authors
+    environmental damage. `M08-ENV-SOURCE` is dispositioned to the first real environmental-damage
+    milestone, where attribution and exclusion can be tested, rather than changing the v1 wire for
+    an unused variant.
+12. **Do not split `matchplay/server.rs` for line count.** Its common roster, phase, outcome, restart,
+    respawn, and telemetry ownership remains cohesive and its schedule boundaries are visible. Split
+    only if implementation finds an independently owned lifecycle or recurring change boundary.
+13. **Execute, do not assume, the M03 prediction gate.** Build the owner-prediction candidate behind
+    an isolated experimental feature/configuration, run the accepted baseline comparison, and keep
+    it only if the existing latency/convergence/correction thresholds pass. Otherwise record the
+    evidence and defer prediction from v1.
+14. **Preserve current admission policy.** Active-match join remains explicitly rejected and there
+    is no session resumption. M11 soaks rejection, clean disconnect, allowed new-session/restart
+    paths, and terrain/map recovery; it does not silently implement join-in-progress.
+15. **Use versioned, bounded local reports.** Keep the existing shell-readable `key=value` process
+    contract for compatibility, add an explicit schema version and manifest identity, and fail on
+    missing/duplicate/oversized required fields. Do not add a database, telemetry service, or remote
+    crash-upload dependency.
+
+## Product and scope boundaries
+
+### In scope
+
+- one M11 closeout ledger covering every non-complete v1 milestone and backlog item due at M11;
+- one versioned run manifest and consolidated closeout report assembled from existing bounded
+  telemetry summaries plus process/network measurements;
+- deterministic named Wipeout and Hot Zone scenarios with explicit seed, profile, participants,
+  builds, fixed-tick inputs/checkpoints, and terminal digests;
+- local structured failure reporting for configuration errors, endpoint failures, verification
+  failures, panics, and clean/failed shutdown, with build/run/protocol context where available;
+- client debug overlay for simulation tick, match/mode identity, connection phase, RTT, jitter,
+  stable controlled network identity/team, authority role, and bounded entity counts;
+- process-only Lightyear transport/message metrics, fixed-tick duration samples, server entity
+  high-water, connection high-water, and report byte sizes;
+- session-local remapping/calibration for the implemented controller and keyboard/mouse actions;
+- complete schedule/API-preserving decomposition of the accepted organization hotspots;
+- the intentional selected-build protocol migration with exact registration/fingerprint evidence;
+- deterministic separate-App, real UDP, impairment, repeated-match, rejection, recovery, reconnect,
+  shutdown, performance, and growth tests;
+- the accepted M03 prediction comparison and final keep/defer decision;
+- final supervised controller, keyboard/mouse, HUD/layout, audio, counterplay, match-length, and Hot
+  Zone pacing observations, including the existing M07/M09 supervised backlog;
+- feedback triage, source-milestone status updates, learn-from-errors review, and v2 recommendation.
+
+### Out of scope
+
+- a general replay/spectator system, rollback debugger, arbitrary live-session input recorder, or
+  serialized ECS `World` snapshots;
+- production analytics ingestion, accounts, consent policy, remote crash upload, dashboards,
+  databases, cloud storage, or internet fleet monitoring;
+- matchmaking, authentication, session resumption, active join-in-progress, host migration, or
+  production reconnect handoff;
+- gameplay additions, new balance values without recorded playtest evidence, new content, final art,
+  or high-fidelity audio production;
+- persistent settings, cloud settings, macros, action chords, accessibility automation, touch input,
+  Steam Input, or multiple players sharing one client process unless separately approved;
+- changes to the 60 Hz simulation rate, authority model, Lightyear/Bevy/Avian versions, transport,
+  terrain representation, map recipe, or content format;
+- broad `#![allow]` cleanup unrelated to the touched ownership boundaries; wildcard/numeric-cast
+  policy is reviewed independently from complexity/pass-by-value orchestration debt;
+- splitting cohesive files, adding a crate, or introducing ports/services/repositories to satisfy a
+  size metric.
+
+## Current architecture findings
+
+### Baseline and open-closeout state
+
+- The initial research snapshot passed format and both role-specific Clippy lanes with warnings
+  denied; `just test-server` passed 169 tests. This validates the review's strong baseline while
+  showing its earlier 166-test count is stale. Later concurrent user edits require the full Slice 0
+  rerun and are not covered by this spot-check.
+- The roadmap still has open gates in M01–M03, M05, M08, and M10. M07/M09 also carry explicitly
+  deferred supervised observations. V1 cannot close by marking only M11 complete.
+- Local/typical/adverse network profiles, deterministic Crossbeam tests, real UDP scripts, process
+  evidence, content/protocol fingerprints, bounded telemetry, and fixed-tick performance fixtures
+  already exist. M11 should consolidate and soak them, not replace them.
+- The existing match report already joins match, weapon, build, and ability summaries. Terrain and
+  process/network measurements need a versioned common envelope and exact run identity rather than a
+  second gameplay telemetry path.
+
+### Organization hotspots
+
+- `combat/client.rs` is 1,482 lines, with production code through line 1,207 and client tests after
+  that. It owns preview geometry, cue ingestion/deduplication, evidence, projectile/sentry/dash
+  visuals, HUD/status, and transient effects. `ClientCombatPlugin` globally chains fifteen update
+  systems, including independent HUD/effect work.
+- `combat/effects.rs` is 1,437 lines with only a small test tail. Its domain ownership is correct,
+  but `resolve_composed_payloads` coordinates collection, deterministic target planning, atomic event
+  reservation, delivery facts, damage, passives, defeat, status/motion, telemetry, outcome facts,
+  cues, and cleanup.
+- `movement/mod.rs` is a composition surface containing the approximately 200-line
+  `authoritative_movement` system. That system combines activity gating, input freshness, aim,
+  loadout/passive/effect modifiers, Avian move-and-slide, defensive pose repair, tracing, and
+  deferred component commit.
+- `server/mod.rs` still owns the large waiting-phase build transaction. The transaction resets input
+  epochs, resolves a server-owned candidate, cleans deployables/transients, installs the loadout and
+  runtime state, updates telemetry, and responds idempotently. That is build/session authority, not
+  endpoint composition.
+- `terrain/client.rs` still mixes recovery/convergence state with images, sprites, debris, and client
+  readiness. `terrain/network.rs` mixes pure convergence rules with server request/snapshot handling.
+  M10 extracted lifecycle ownership but its feedback record named a backlog item that was absent from
+  the roadmap until M11 research.
+- `matchplay/server.rs` is large but comparatively cohesive, has explicit common match schedule sets,
+  and keeps `ApplyDeferred` boundaries visible. It is not an automatic extraction target.
+
+### Lint and role-boundary findings
+
+- Production module-wide `type_complexity`/`needless_pass_by_value` allowances exist in movement,
+  client, server, combat, and terrain areas. Some Bevy system parameters are legitimately passed by
+  value and complex queries may be clearest inline; the policy problem is suppression scope, not the
+  mere existence of any exception.
+- The dedicated-server feature graph currently excludes rendering, windowing, audio, client assets,
+  and device backends. M11 diagnostics and settings must not weaken `check-server-features.sh`.
+- Both legacy `combat::SelectedBuild` and `builds::SelectedBuild` are replicated, and the fighter also
+  replicates a standalone `ResolvedWeapon` beside `ResolvedMatchLoadout.primary_weapon`. This is the
+  exact registered compatibility debt behind `M08-BUILD-BOUNDARY`.
+
+### Input and diagnostics findings
+
+- `InputTuning` currently combines local device thresholds with server tick/history/rate validation.
+  Windowed clients sample raw movement axes into `PendingLocalActions`; authoritative movement then
+  applies the movement deadzone. Exposing a per-client deadzone requires an explicit calibration
+  boundary rather than mutating a shared server resource or applying two response curves.
+- The client already reads `PingManager` for trace output and has a pause overlay, input-device
+  tracking, and stable `NetworkEntityId`. A bounded debug overlay can reuse those facts without a new
+  network message.
+- Installed Lightyear 0.29 exposes `LinkStats { rtt, jitter }` and an optional metrics feature with
+  per-message, per-channel, packet, transport-byte, and UDP-byte metrics. `MetricsPlugin` uses a
+  process-global recorder and clears histogram buckets in `Last`, so consumers must sample before
+  `ClearBucketsSystem`; this is unsuitable as a per-App network-test oracle.
+
+## Research questions and conclusions
+
+### How should M11 improve reproduction without building replay infrastructure?
+
+Use named scenario manifests plus existing deterministic inputs and state digests. Each manifest has
+a schema version, scenario ID/revision, build/protocol/content identity, mode/rules/profile, seed,
+participant/build assignments, fixed-tick automation parameters, expected checkpoints, and terminal
+digest. The runner produces a closeout report referencing that manifest. A failure can be rerun with
+the same script/configuration and compared at the first divergent checkpoint.
+
+This is sufficient for current deterministic Crossbeam and bounded UDP process automation. Human
+playtests record configuration and observations but are not falsely described as deterministic
+replays. Full live input capture and arbitrary state restoration remain future tooling.
+
+### Should M11 enable Lightyear's metrics feature everywhere?
+
+No. Enable it only through `process-metrics` for dedicated OS-process measurements. Standard client
+and server feature graphs remain unchanged, and `network-test` continues to own separate Worlds
+without a process-global metrics oracle. The process plugin samples required counters/gauges and
+histograms before Lightyear clears transient buckets, then writes only bounded aggregate results.
+
+RTT/jitter for the ordinary overlay comes from the link's existing `PingManager`/`LinkStats`, so the
+overlay does not require the metrics feature.
+
+### How can user deadzones remain local without weakening server authority?
+
+Split device calibration from network validation. The client maps physical axes/buttons through a
+validated `ClientInputSettings`, producing a normalized abstract intent. The wire remains the same
+bounded `FighterInput`; the server validates ownership, target, history, tick window, rate, bit mask,
+and normalized magnitude. It does not trust positions or results.
+
+Before changing the authoritative decoder, a golden matrix must compare current defaults against the
+new calibration-before-quantization path at zero, thresholds, cardinals, diagonals, and representative
+analog magnitudes. Default position/facing results must remain exact where quantization permits and
+within one encoded-axis unit otherwise. Headless automation bypasses physical calibration and writes
+explicit abstract intent, preserving deterministic scenarios.
+
+### Should the combat-client chain be relaxed during file extraction?
+
+No. First reproduce the exact existing registration and chain after splitting files. Add schedule and
+same-frame visibility tests for cue ingestion, command application before visual sync, evidence
+capture, and HUD/effect readers. A later change may introduce named client combat sets such as
+`Ingest`, `Ensure`, `Sync`, `HudAndStatus`, `Effects`, and `Evidence`, with an explicit
+`ApplyDeferred` after entity creation. Only dependencies demonstrated by data/message flow remain
+ordered; independent work may run in parallel if query access permits. Measure rather than assume a
+frame-time gain.
+
+### How should the composed payload transaction be decomposed?
+
+Keep one system in the existing combat schedule and extract named data transformations:
+
+1. collect and validate pending deliveries/payloads;
+2. compute required event reservations and fail the whole composed batch on exhaustion;
+3. build stable target plans and deterministic order;
+4. resolve delivery/world-effect facts;
+5. apply damage and create outcome/defeat facts;
+6. apply non-damage runtime effects and motion;
+7. commit components, trackers, telemetry, and cues.
+
+Pure planning/value math receives focused tests. Helpers that need commands/resources receive narrow
+transaction contexts, not generic service traits. The coordinator retains the same message-read,
+`Commands`, `ParamSet`, and schedule boundary so no intermediate state becomes visible.
+
+### What exactly replaces the legacy build model?
+
+On a fighter:
+
+```text
+builds::SelectedBuild       stable accepted identity/revision
+builds::ResolvedMatchLoadout immutable server-resolved public configuration
+combat::WeaponState          mutable ammo/cooldown/reload state
+builds::AbilityState         mutable ultimate state
+builds::PassiveRuntimeState  mutable passive state
+combat::CurrentHealth/...    mutable fighter/combat state
+```
+
+`ResolvedWeapon` remains a value type nested in the loadout but is no longer installed or registered
+as a second fighter component. Combat, HUD, evidence, verification, and match telemetry read the
+loadout/identity appropriate to their concern. Removing two registered components changes the
+protocol fingerprint and increments `SUPPORTED_PROTOCOL_VERSION`; older clients receive the existing
+clean mismatch outcome rather than deserializing a changed registry.
+
+### Is an `Environment` combat-source variant required for v1 closeout?
+
+No. Terrain destruction is a world effect, not environmental fighter damage, and permanent terrain
+does not author damage outcomes. Adding an unexercised variant would create wire churn without an
+attribution policy. M11 records the audit and moves the requirement to the first environmental
+damage implementation.
+
+### What repeated scenarios are sufficient for v1?
+
+- deterministic separate-App Wipeout and Hot Zone restart loops that complete at least 25 matches
+  without entity/resource/record growth outside declared bounded histories;
+- 100-cycle focused terrain destroy/reset coverage retained from M10;
+- repeated connection rejection, disconnect, reconnect-as-new-session, map/terrain recovery, and
+  shutdown loops with exact cleanup assertions;
+- real UDP local/typical/adverse named scenarios for both modes, including one four-client 2v2 run
+  and documented broader synthetic-capacity evidence;
+- a production-rules human session for match length/counterplay, rather than replacing human pacing
+  judgment with shortened automation.
+
+The exact loop counts and time budgets remain provisional until Slice 0 measures the baseline on the
+implementation machine and CI configuration.
+
+## Research log
+
+| Date | Source | Finding | M11 consequence |
+|---|---|---|---|
+| 2026-08-17 | `docs/{00-product-direction,05-gameplay-mvp,08-network-architecture}.md` and this roadmap | V1 remains combat-first, controller-first, server-authoritative, short-session, and evidence-driven; clients send intent only. | Diagnostics/settings remain client-local or observational; no authority or content expansion. |
+| 2026-08-17 | `docs/implementation/v1/milestone-{01,02,03,05,07,08,09,10}.md` | Earlier user/hardware/prediction/verification/feedback gates remain explicitly open. | Add a source-owned closeout ledger; do not let M11 overwrite historical status. |
+| 2026-08-17 | Live `src/{combat,movement,server,builds,terrain,matchplay,client,protocol}.rs`, tests, scripts, and `Cargo.toml` | Review hotspots and duplicate build registrations are real; matchplay is more cohesive than raw line count suggests; current process evidence already provides a strong base. | Target the demonstrated seams and preserve the existing package/role topology. |
+| 2026-08-17 | `references/bevy/examples/{README.md,app/plugin.rs,app/plugin_group.rs,app/headless.rs}` | Plugins should own focused functionality; headless composition omits presentation features. The checked-in Bevy tree is 0.20-dev and cannot establish exact 0.19 APIs. | Use examples for composition only and confirm exact APIs against installed Bevy 0.19.1/current primary docs. |
+| 2026-08-17 | Bevy 0.19 [`SystemSet`](https://docs.rs/bevy/0.19.0/bevy/prelude/trait.SystemSet.html), [`SystemParam`](https://docs.rs/bevy/0.19.0/bevy/ecs/system/derive.SystemParam.html), and [`ApplyDeferred`](https://docs.rs/bevy/0.19.0/bevy/ecs/schedule/struct.ApplyDeferred.html) documentation | Sets expose stable conceptual ordering; derived parameters group legitimate World access; deferred application is a behavior boundary, not formatting. | Keep public sets/composition visible, use transaction parameters only for cohesive ownership, and test every moved flush boundary. |
+| 2026-08-17 | `references/lightyear/book/src/{SUMMARY.md,tutorial/setup.md,concepts/replication/protocol.md,concepts/advanced_replication/{inputs,client_replication,visual_interpolation}.md}` and `simple_{setup,box}` | Protocol registration is shared and order-sensitive; input and render/fixed timelines are distinct; temporary visual values must not become canonical or replicated. | Build migration bumps compatibility; input calibration stays before abstract intent; presentation refactors remain client-only. |
+| 2026-08-17 | Installed exact Lightyear `0.29.0` sources: `lightyear_{metrics,link,sync,transport,messages,udp}` and [`0.29.0` crate docs](https://docs.rs/lightyear/0.29.0/lightyear/) | `LinkStats` exposes RTT/jitter; optional metrics expose packet/channel/message/transport bytes; the registry is process-global and transient histogram buckets clear in `Last`. | Use a process-only feature and sample before the clear set; do not use global metrics as a multi-App correctness oracle. |
+| 2026-08-17 | Current official Bevy examples index and version-selection guidance, [Bevy repository](https://github.com/bevyengine/bevy/tree/v0.19.0/examples) | Upstream explicitly warns that main-branch examples may differ from released APIs. | Continue exact-version verification before implementation; local 0.20-dev source is architectural evidence only. |
+| 2026-08-17 | Current Lightyear primary tag, [Lightyear 0.29.0 examples](https://github.com/cBournhonesque/lightyear/tree/0.29.0/examples) | Search indexes may surface other Lightyear releases under `latest`; the installed 0.29 source and pinned tag are the exact API authority. | Record exact tag/source paths and avoid transferring `latest` APIs into the implementation. |
+
+## Technical specification draft
+
+### Application and module composition
+
+Keep one package and the existing `client`, `server`, and `network-test` role features. Add only:
+
+```text
+process-metrics = ["lightyear/metrics"]
+```
+
+This feature is invoked explicitly by M11 measurement scripts and is not included by any supported
+role feature. Standard production role isolation and all current canonical builds remain unchanged.
+
+Proposed ownership after M11:
+
+```text
+src/
+  diagnostics/
+    mod.rs                 shared bounded report/manifest values and plugin composition
+    process.rs             fixed-tick/entity/process observations and report finalization
+    client.rs              optional client overlay observations/presentation
+    failure.rs             local structured process-failure records
+  client/
+    settings.rs            local bindings/calibration model, validation, and settings UI
+  movement/
+    mod.rs                 public movement API and plugin/schedule composition
+    authority.rs           server movement query/coordinator and focused decision helpers
+    input.rs               abstract intent shaping/validation helpers with role boundaries
+  combat/
+    client/
+      mod.rs               ClientCombatPlugin and visible update-set composition
+      preview.rs           weapon preview geometry
+      cues.rs              cue deduplication and ingestion
+      world.rs             projectile/sentry/dash/world-space visuals
+      hud.rs               combat HUD and durable status markers
+      effects.rs           bounded transient visual effects
+      evidence.rs          combat presentation/process evidence coordination
+      tests.rs
+    effects/
+      mod.rs               public effect helpers and scheduled transaction coordinator
+      planning.rs          event reservation and deterministic target/delivery plans
+      runtime.rs           damage, defeat, slow, knockback, passive math
+      commit.rs            ECS/telemetry/outcome/cue commit helpers
+      tests.rs
+  builds/
+    server.rs              waiting-phase request/resolve/install/response transaction
+  terrain/
+    client/
+      mod.rs               client terrain plugin/readiness composition
+      recovery.rs          snapshot/event convergence and recovery requests
+      presentation.rs      images, sprites, edges, debris, reset presentation
+    network/
+      mod.rs               shared network API and registration-facing re-exports
+      convergence.rs       pure revision/generation/snapshot/event rules
+      server.rs            recovery request validation and snapshot publication
+```
+
+Exact filenames may change during specification review if inspection finds a better ownership seam,
+but the responsibilities may not be merged back into unrelated composition roots. Public crate paths
+used by integration tests remain stable through explicit re-exports. Role gates stay at the owner
+boundary; no client presentation type enters the server graph.
+
+`matchplay/server.rs` remains intact unless M11 implementation demonstrates a separate owner and adds
+schedule tests first. No package, public service layer, repository abstraction, or alternate runtime
+model is introduced.
+
+### Closeout ledger
+
+`milestone-11.md` owns a live ledger with these initial rows:
+
+| Source | Open gate entering M11 | Evidence owner | Required disposition |
+|---|---|---|---|
+| M01 | user smoke test/application foundation | final supervised build/run pass | complete or explicit user-approved open disposition |
+| M02 | connection lifecycle user playtest | repeated connect/reject/disconnect/shutdown scenario | complete or explicit disposition |
+| M03 / `M03-PRED` | impairment comparison, prediction decision, render/controller observation | prediction experiment plus supervised movement pass | keep/defer decision and source milestone update |
+| M05 | twelve impairment reruns and window/controller verification bookkeeping | consolidated network/visual matrix | source milestone verification update |
+| M08 | feedback review and `M08-BUILD-BOUNDARY` | build migration plus playtest feedback triage | source milestone feedback/learning update |
+| M10 | user playtest, feedback, learning, terrain split | terrain hardening plus final terrain scenario | source milestone feedback/learning update |
+| M07/M09 backlog | physical controller, perceptual audio, full HUD/layout, Hot Zone pacing | final supervised playtest | observation or explicit unavailability/disposition |
+
+An item cannot be checked merely because a later scenario touched adjacent code. Evidence must satisfy
+the source milestone's stated observation or receive an explicit user decision.
+
+### Manifest and report contract
+
+Add bounded shared values conceptually equivalent to:
+
+```text
+RunManifestV1
+  schema_version
+  scenario_id + revision
+  run_id
+  build version + source revision + dirty flag
+  protocol version + registry fingerprint
+  gameplay content fingerprint
+  mode + rules + network + render profiles
+  seed
+  participant count and stable build identities
+  scripted fixed-tick action/checkpoint list
+
+CloseoutReportV1
+  manifest identity
+  start/end reason and process exit category
+  fixed ticks and duration
+  fixed-tick p50/p95/max
+  entity/link high-water and terminal counts
+  RTT/jitter p50/p95/max where sampled
+  transport/channel/message sent/received bytes
+  combat/build/ability/match/mode/terrain aggregates
+  checkpoint digests and first divergence
+  bounded drop/rejection/error counters
+```
+
+The report is local, bounded, deterministic in field order, and rejects unknown schema revisions in
+verification scripts. Existing required `key=value` fields remain available during migration. A
+report may point to a detailed existing evidence file but does not embed unbounded event history.
+
+### Diagnostics ownership and schedule
+
+- `ProcessDiagnosticsPlugin` is installed in both role Apps but remains inert unless a report path or
+  explicit diagnostics configuration is present.
+- Fixed-tick timing starts in `FixedFirst` and commits in `FixedLast` after Brawler's final fixed
+  state. Observation never inserts/removes gameplay components.
+- Entity/link counts and bounded high-water marks sample after the fixed transaction and during
+  shutdown finalization.
+- With `process-metrics`, Lightyear `MetricsPlugin` is installed once per OS process. Brawler samples
+  required metrics in `Last` before `lightyear::metrics::prelude::ClearBucketsSystem` and writes
+  aggregates at clean/error exit.
+- The client overlay updates in ordinary `Update` from replicated/local observation state. It shows
+  stable network/match identities, not process-local `Entity` as a wire identity.
+- Headless server builds add no rendering, window, UI, audio, assets, or device input.
+
+### Structured failure reporting
+
+Process argument/configuration errors remain exit code 2. Runtime failures use stable local
+categories such as `endpoint_start`, `protocol_mismatch`, `content_mismatch`, `verification_failed`,
+`timeout`, `panic`, and `shutdown_incomplete`. Every report includes the run/build/protocol context
+available at failure time and a bounded message; it does not include secrets, network keys, full
+paths unless explicitly selected as an output path, or arbitrary component dumps.
+
+A minimal panic hook may append a bounded local failure record before delegating to the normal hook.
+It is a development diagnostic, not a claim of panic recovery. A panic still terminates the process.
+
+### Input settings and remapping
+
+Introduce a client-only validated resource with:
+
+- keyboard directions and action keys;
+- primary mouse button;
+- controller action buttons;
+- move deadzone, aim deadzone, aim commit threshold;
+- trigger press/release hysteresis with `release < press`;
+- independent move-Y and aim-Y inversion;
+- reset-to-default and conflict reporting.
+
+The existing abstract actions remain unchanged. Pause/cancel/scoreboard remain local and never enter
+`FighterInput`; primary/active/ultimate/interact continue to map into the same allowed server intent
+bits. Axis/binding changes clear held/latched state at the transition so a rebind cannot synthesize a
+stuck action. Disconnect/hotplug falls back to the remaining active device without changing settings.
+
+The settings overlay is client presentation, usable from the local pause context, and cannot pause
+the authoritative match. Automated tests drive the resource/UI state directly; physical-controller
+verification remains a human observation.
+
+### Organization and lint invariants
+
+- `mod.rs` files expose plugins, public sets, and intentional re-exports; focused algorithms and
+  lifecycle code live in owned submodules.
+- A system split must name its state owner and schedule phase. Moving one unchanged giant function to
+  a new file is insufficient unless the move restores the composition boundary and a second slice
+  then extracts testable phases.
+- Client combat file extraction preserves the original global chain before any ordering relaxation.
+- Authoritative movement remains one fixed simulation coordinator unless an explicit intermediate
+  ECS state and deferred boundary are specified and tested.
+- Payload resolution remains atomic in the existing combat schedule.
+- Every touched production module-wide `type_complexity` or `needless_pass_by_value` allowance is
+  removed. If Clippy still mischaracterizes an unavoidable Bevy system signature, attach the allow to
+  that item with a concise ownership/engine rationale.
+- Do not mechanically remove wildcard/numeric-cast allowances in the same changes unless inspection
+  proves they hide a concrete problem; unrelated lint churn makes schedule/protocol review harder.
+
+### Build authority and protocol migration
+
+Slice A moves request handling without changing registered types. `ServerNetworkPlugin` still places
+the system at the same point between session initialization/hello handling and match commands, with
+the same sentry cleanup and `ApplyDeferred` visibility.
+
+Slice B changes fighter state and the protocol registry:
+
+- remove replicated `combat::SelectedBuild`;
+- stop installing/replicating standalone fighter `ResolvedWeapon`;
+- use `builds::SelectedBuild` for stable identity and `ResolvedMatchLoadout.primary_weapon` for
+  immutable resolved configuration;
+- keep `WeaponState`, health, effects, ability, passive, and other mutable runtime components
+  separate;
+- update combat, movement, HUD, evidence, match telemetry, server verification, and fixtures to read
+  the owning representation;
+- bump `SUPPORTED_PROTOCOL_VERSION` and record the new registry fingerprint;
+- preserve clean mismatch rejection and prove accepted peers agree on identity/loadout/runtime state;
+- do not reuse the migration to add `Environment`, prediction, or another wire shape.
+
+### Network lifecycle and recovery
+
+M11 retains the current policy:
+
+- initial waiting-phase joins are accepted within capacity;
+- active-match joins are rejected with the documented outcome;
+- a disconnected session cleans its owned authoritative state;
+- reconnect is a new connection/session attempt, not resumption;
+- durable map/match/loadout and terrain recovery state allows an accepted client to converge without
+  replaying historical cues/events;
+- shutdown flushes terminal outcomes/reports through the existing ordered stop path.
+
+Repeated tests cover duplicate/stale build requests, protocol mismatch during the build migration,
+disconnect during each match phase, rejected active reconnect, accepted waiting/restart connection,
+terrain revision gaps, and clean process shutdown.
+
+### Prediction experiment
+
+Use the M03 accepted comparison contract. The candidate is owner-only, behind an experimental
+feature/configuration, and shares only deterministic movement rules genuinely executed on both
+roles. Server authority, remote interpolation, combat, abilities, terrain mutation, match rules, and
+session lifecycle remain unpredicted.
+
+Run identical scripted movement/aim under local, typical, and adverse profiles for baseline and
+candidate. Record input-to-visible latency, correction count/magnitude, convergence, terrain contact,
+render-rate behavior, and fixed cost. Remove the feature/configuration from supported v1 if the gate
+fails; a negative result is a successful evidence outcome.
+
+## Implementation plan
+
+Implementation must not begin until this specification reaches `Specification review` and the user
+validates it.
+
+### Slice 0 — Baseline, closeout ledger, and specification lock
+
+- [ ] Record exact commit, dirty paths, toolchain/dependencies, and accepted overlapping feedback.
+- [ ] Run the complete canonical baseline and named process profiles; record exact counts/timings.
+- [ ] Measure current process report sizes, fixed-tick performance, entity high-water, and the
+  client-combat update chain before changing structure.
+- [ ] Finalize every provisional decision, exact soak count/budget, report schema, and input-setting
+  bounds through specification review.
+- [ ] Add schedule/behavior characterization tests required by later organization slices.
+
+### Slice 1 — Reproduction, consolidated reports, and diagnostics
+
+- [ ] Add versioned run manifest/closeout report values and deterministic field validation.
+- [ ] Consolidate existing telemetry summaries without creating a second gameplay mutation path.
+- [ ] Add process timing/entity/link observations and the explicit `process-metrics` feature.
+- [ ] Add bounded structured failure/exit reporting.
+- [ ] Add the optional client authority/network overlay and exact UI/layout tests.
+- [ ] Extend named scripts with scenario ID/revision, seed, fingerprints, output paths, and terminal
+  digest checks.
+
+### Slice 2 — Input settings and authority-boundary cleanup
+
+- [ ] Split client device calibration from server validation tuning.
+- [ ] Lock default-equivalence matrices before changing the authoritative decoder.
+- [ ] Add validated session-local bindings/calibration, pause settings UI, conflict/reset behavior,
+  and state clearing on changes.
+- [ ] Cover keyboard/mouse, synthetic controller, hotplug, pause, headless bypass, malformed intent,
+  and server authority.
+- [ ] Re-run movement/network/performance evidence before organization work.
+
+### Slice 3 — Behavior-preserving module decomposition
+
+- [ ] Split combat-client responsibilities while preserving the exact plugin chain.
+- [ ] Move authoritative movement to its owner module and extract pure eligibility/input/modifier/
+  repair helpers without changing schedule visibility.
+- [ ] Split terrain client recovery/presentation and network convergence/server handling while
+  preserving wire/reset behavior and public paths.
+- [ ] Remove or narrow touched module-wide complexity/pass-by-value allowances.
+- [ ] Re-run role-specific, schedule, visual, terrain recovery, and performance gates after each
+  extraction rather than after one large refactor.
+
+### Slice 4 — Server build boundary and protocol migration
+
+- [ ] Move the build request transaction into `builds/server.rs` with identical ordering and wire.
+- [ ] Verify idempotency, stale/wrong-match/wrong-phase/ready-lock/capacity/error outcomes before the
+  component migration.
+- [ ] Remove legacy fighter build/weapon components and migrate all consumers to identity/loadout/
+  runtime owners.
+- [ ] Update protocol version/fingerprint tests and clean mismatch/recovery/network scenarios.
+- [ ] Confirm the server feature graph and report schema contain no client presentation dependency.
+
+### Slice 5 — Combat transaction decomposition and measured client schedule
+
+- [ ] Extract payload planning/reservation/application/commit helpers under one scheduled system.
+- [ ] Lock deterministic target/event/outcome/cue/telemetry ordering and exhaustion atomicity.
+- [ ] Introduce named client combat sets and explicit deferred boundaries only after the preserved
+  chain is green; relax only demonstrated-independent edges.
+- [ ] Compare client frame/update evidence and server fixed-tick performance against Slice 0.
+- [ ] Review `matchplay/server.rs`; record keep/split disposition from ownership evidence.
+
+### Slice 6 — Prediction decision and lifecycle soaks
+
+- [ ] Implement the isolated M03 owner-prediction candidate and run the accepted comparison matrix.
+- [ ] Keep or remove it strictly from recorded thresholds; update M03 and `M03-PRED`.
+- [ ] Run deterministic repeated Wipeout/Hot Zone, build replacement, terrain reset/recovery,
+  connection rejection/reconnect, and shutdown loops with exact growth/drop assertions.
+- [ ] Run real UDP local/typical/adverse scenarios, 2-client and 2v2 sessions, and current broader
+  synthetic-capacity fixtures with consolidated reports.
+- [ ] Record server tick, bandwidth, entity, report-size, and match/build/mode measurements.
+
+### Slice 7 — Final playtest, source-milestone closeout, and v2 recommendation
+
+- [ ] Deliver one canonical supervised playtest matrix covering controller and keyboard/mouse,
+  Wipeout and Hot Zone, named/custom builds, terrain, complete HUD states, audio, restart, and
+  normal-duration pacing.
+- [ ] Record aspect ratios, devices, profiles, reports, observations, and unavailable checks without
+  claiming human/perceptual evidence from automation.
+- [ ] Triage every feedback item and rerun affected verification.
+- [ ] Update M01–M03, M05, M08, M10, the M07/M09 backlog rows, and the M11 ledger from actual evidence.
+- [ ] Complete learn-from-errors and decide whether any recurring workflow merits a project skill.
+- [ ] Write an evidence-based v2 recommendation and obtain explicit user acceptance before marking
+  M11 and v1 complete.
+
+## Verification plan
+
+### Pure and focused ECS tests
+
+- manifest/report validation, bounded ordering, duplicate/missing/oversized fields, and digests;
+- input settings bounds/conflicts/defaults, calibration curves, quantization equivalence, trigger
+  hysteresis, inversion, hotplug, and held/latched clearing;
+- movement eligibility, stale/fresh input, modifiers, external motion, defensive repair, and commit;
+- payload reservation exhaustion, stable plans, damage/effect/defeat ordering, deployable policy,
+  telemetry/cue exactness, and cleanup;
+- client cue deduplication, command visibility, visuals, HUD/effects, evidence, and update-set trace;
+- terrain convergence/recovery/presentation/reset after module extraction;
+- build request outcome matrix and one loadout authority model after migration.
+
+Tests advance Bevy fixed time or run the named schedule explicitly. No wall-clock sleeps are added to
+ECS/network tests.
+
+### Protocol and separate-App network tests
+
+- registry contains the new exact component set and fingerprint changes when registration changes;
+- old protocol version rejects cleanly; current peers converge on selected identity, resolved
+  loadout, runtime weapon/ability/passive state, HUD, evidence, and match summary;
+- duplicate/stale/reordered build/input/terrain messages cannot create extra authority mutations;
+- Wipeout and Hot Zone complete/restart with identical common combat/build behavior;
+- disconnect/reconnect policy, active-join rejection, allowed new session, late durable-state
+  recovery, terrain gaps, and shutdown are explicit;
+- repeated loops retain exact entity/resource/queue/record bounds.
+
+### Process, performance, and capacity evidence
+
+- run process-metrics builds separately from multi-App tests;
+- report fixed-tick p50/p95/max, transport/channel/message bytes, RTT/jitter, entity/link high-water,
+  terminal counts, report sizes, and bounded drops/errors;
+- preserve every existing performance ceiling; investigate any p95 regression greater than 10%
+  even when the absolute budget still passes;
+- compare baseline and owner-prediction candidate with identical manifests;
+- cover minimum/built-in/maximum terrain fixtures and current two-client, 2v2, and synthetic broader
+  participant capacities without turning temporary process capacity into an engine cap.
+
+### Visual, controller, audio, and human evidence
+
+- inspect 16:9, 16:10, 4:3, and minimum supported window layouts across loading, selection, waiting,
+  countdown, active, paused/settings, scoreboard, completed, and restart states;
+- verify overlay off/on does not alter authoritative state or obscure required combat information;
+- complete the flow with physical controller and keyboard/mouse, including remap/calibration reset;
+- judge movement/aim feel, weapon/ability/terrain readability, simultaneous combat/mode audio,
+  build counterplay, Wipeout match length, and Hot Zone control/contest pacing;
+- record unavailable hardware/listener checks as open or explicitly dispositioned, never passing.
+
+### Canonical commands
+
+During `Verifying`, run and record at minimum:
+
+```text
+just fmt-check
+just clippy-client
+just clippy-server
+just server-features
+just check
+just test-client
+just test-server
+just test-network
+just test-performance
+just network-smoke
+```
+
+M11 must add named recipes for the consolidated closeout, repeated-match/reconnect soak, process
+metrics, and prediction comparison rather than relying on undocumented one-off commands. Run both
+modes under local/typical/adverse profiles where applicable and finish with `git diff --check`.
+
+## Risks and mitigations
+
+| Risk | Mitigation |
+|---|---|
+| M11 becomes an unbounded cleanup milestone | Scope only roadmap closeout gates and validated debt; require a source backlog/exit criterion for every change. |
+| Structural refactor changes authority or order | Characterization tests first; preserve registration/sets/flushes; one ownership slice at a time. |
+| Removing duplicate build components breaks recovery/HUD/evidence | Separate no-wire extraction from protocol migration; bump version; run full consumer and reconnect matrix. |
+| Payload decomposition exposes partial state | Keep one scheduled coordinator and atomic event reservation/commit boundary. |
+| Client-chain relaxation causes one-frame missing visuals | Preserve chain first; explicit sets/`ApplyDeferred`; same-frame schedule tests and captures. |
+| User deadzone becomes client-authoritative movement | Client shapes bounded abstract intent only; server validates normalized intent and remains sole pose author. |
+| Lightyear metrics leak across separate Apps | Non-default process-only feature; no metrics correctness assertions in multi-App harness. |
+| Diagnostics perturb fixed cost or leak server features | Bounded sampling, explicit feature, measured overhead, and unchanged feature-isolation gate. |
+| Replay scope expands into state serialization | Versioned named manifests/checkpoints only; no arbitrary `World` snapshots or human replay promise. |
+| Soaks use shortened rules as balance evidence | Automation proves lifecycle/growth; normal production-rules human sessions judge pacing/balance. |
+| Earlier milestone gaps disappear in M11 bookkeeping | Source-owned ledger and explicit user disposition before status changes. |
+| Dirty user terrain work is overwritten | Record dirty paths, avoid unrelated edits, and reconcile only user-approved overlapping changes. |
+
+## Exit criteria
+
+- [ ] User has validated the M11 technical specification and every accepted scope change is recorded.
+- [ ] One versioned manifest/report path reproduces named Wipeout and Hot Zone scenarios and
+  consolidates existing gameplay telemetry with bounded process/network measurements.
+- [ ] Structured local failure records distinguish configuration, compatibility, endpoint,
+  verification, timeout, panic, and shutdown outcomes without remote services or sensitive dumps.
+- [ ] Client settings provide bounded remapping/calibration with default-equivalent authoritative
+  behavior, keyboard/controller parity, and no new client authority.
+- [ ] Combat client, authoritative movement, terrain client/network, build transaction, and payload
+  transaction follow the accepted ownership boundaries with public paths and schedule invariants
+  covered by tests.
+- [ ] Legacy fighter build/weapon replication is removed, protocol compatibility is intentionally
+  migrated, and current peers converge on one selected identity/resolved loadout/runtime model.
+- [ ] Every touched module-wide complexity/pass-by-value suppression is removed or receives an
+  explicit narrow reviewed disposition; no suppression is widened to make the gate green.
+- [ ] The M03 prediction comparison is executed and the keep/defer decision follows recorded latency,
+  correction, convergence, render, and performance evidence.
+- [ ] Repeated match/restart, rejection/reconnect, terrain recovery, and shutdown scenarios stay
+  within exact entity/resource/queue/record/time/byte bounds under named profiles.
+- [ ] Current two-client, 2v2, and broader synthetic-capacity paths are documented and measured; no
+  demonstration profile becomes an accidental engine limit.
+- [ ] Complete role-specific format/Clippy/check/build/test, server isolation, network, performance,
+  process, soak, and `git diff --check` gates are green with exact evidence.
+- [ ] Final supervised controller/keyboard, HUD/layout, audio, counterplay, match-length, terrain,
+  and Hot Zone pacing feedback is recorded and triaged with rationale.
+- [ ] Every earlier non-complete v1 milestone/backlog item due at M11 has a source-owned completed or
+  explicit user-approved open/deferred disposition.
+- [ ] The learn-from-errors review and evidence-based v2 recommendation are complete.
+- [ ] The user explicitly accepts v1 before M11 and the version are marked `Complete`.
+
+## Feedback review
+
+Not started. During feedback review, record each item as implemented now, deferred to the version or
+future backlog, rejected with rationale, or awaiting evidence. Re-run every affected verification
+gate after accepted changes.
+
+## Learn-from-errors review
+
+Complete after implementation, verification, playtest, and feedback triage:
+
+| Mistake or surprise | Cause | Prevention/change | Reusable project lesson |
+|---|---|---|---|
+| _Pending implementation and playtest_ |  |  |  |
+
+At minimum review scope control in a closeout milestone, whether characterization tests caught every
+schedule/protocol dependency, whether process metrics changed timing, whether settings preserved
+authority, whether soak counts found growth missed by focused tests, and whether the final evidence
+ledger made open human observations clearer. Create or improve a skill only for a recurring lesson
+that is reusable beyond this repository.
