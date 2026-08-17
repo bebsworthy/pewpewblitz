@@ -1,8 +1,21 @@
 //! Focused movement, arena, and input validation tests.
 
+#[cfg(feature = "server")]
+use super::authority::{
+    MovementDecision, movement_decision, repaired_pose, resolved_movement_velocity,
+};
+#[cfg(feature = "server")]
+use super::input::{
+    decoded_input_is_valid, input_end_tick_is_acceptable, input_history_len_is_valid,
+    input_sequence_ends_with_present_state, input_target_is_entity,
+};
 use super::*;
+use crate::protocol::FighterInput;
 use crate::protocol::QuantizedAxis2;
 use core::time::Duration;
+#[cfg(feature = "server")]
+use lightyear::input::input_buffer::Compressed;
+use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 
 #[test]
 fn radial_deadzone_remaps_and_clamps_diagonal_input() {
@@ -196,4 +209,123 @@ fn absent_end_state_cannot_refresh_input_validation() {
     assert!(!input_sequence_ends_with_present_state(
         [Compressed::Absent, Compressed::SameAsPrecedent].into_iter(),
     ));
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn movement_decision_combines_freshness_staleness_and_activation_barrier() {
+    let tuning = InputTuning::default();
+    let input = FighterInput::from_axes(Vec2::new(0.6, 0.0), Some(Vec2::X), 0);
+    let mut buffer = NativeBuffer::<FighterInput>::default();
+    buffer.set(lightyear::prelude::Tick(10), ActionState(input));
+    buffer.last_remote_tick = Some(lightyear::prelude::Tick(10));
+
+    // A present buffer state refreshes the freshness watermark even from a stale component.
+    let decision = movement_decision(
+        20,
+        &InputFreshness::default(),
+        Some(&ActionState(input)),
+        Some(&buffer),
+        None,
+        &tuning,
+        12,
+    );
+    assert!(!decision.stale);
+    assert!(decision.activation_ready);
+    assert_eq!(decision.freshness.last_fresh_tick, Some(10));
+    assert!((decision.movement.x - 0.5).abs() < 1e-5);
+    assert!(decision.aim.is_some());
+
+    // Without any present input the stream goes stale and the axis neutralizes.
+    let decision = movement_decision(
+        100,
+        &InputFreshness {
+            last_fresh_tick: Some(10),
+        },
+        None,
+        None,
+        None,
+        &tuning,
+        12,
+    );
+    assert!(decision.stale);
+    assert_eq!(decision.movement, Vec2::ZERO);
+
+    // The post-selection barrier holds movement until a later fresh tick arrives.
+    let barrier = crate::combat::AwaitingPostSelectionInput {
+        accepted_at_tick: 30,
+    };
+    let decision = movement_decision(
+        31,
+        &InputFreshness {
+            last_fresh_tick: Some(10),
+        },
+        Some(&ActionState(input)),
+        None,
+        Some(&barrier),
+        &tuning,
+        12,
+    );
+    assert!(!decision.activation_ready);
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn resolved_velocity_applies_modifiers_and_external_motion_only_when_active() {
+    let held = MovementDecision {
+        activation_ready: false,
+        movement: Vec2::X,
+        ..MovementDecision::default()
+    };
+    assert_eq!(
+        resolved_movement_velocity(0, &held, None, 300.0, None, None, None),
+        Vec2::ZERO
+    );
+
+    let decision = MovementDecision {
+        activation_ready: true,
+        movement: Vec2::X,
+        ..MovementDecision::default()
+    };
+    let velocity = resolved_movement_velocity(0, &decision, Some(320.0), 300.0, None, None, None);
+    assert!((velocity.x - 320.0).abs() < 1e-5);
+
+    let slow = crate::combat::ActiveEffects {
+        slow: Some(crate::combat::SlowEffect {
+            source_attack_id: crate::combat::AttackId(1),
+            source_network_entity_id: crate::protocol::NetworkEntityId(1),
+            movement_multiplier_milli: 500,
+            expires_at_tick: 10,
+        }),
+    };
+    let velocity = resolved_movement_velocity(5, &decision, None, 300.0, Some(&slow), None, None);
+    assert!((velocity.x - 150.0).abs() < 1e-5);
+
+    // An expired slow no longer applies.
+    let velocity = resolved_movement_velocity(20, &decision, None, 300.0, Some(&slow), None, None);
+    assert!((velocity.x - 300.0).abs() < 1e-5);
+
+    let external = crate::combat::ExternalMotion {
+        velocity: Vec2::new(0.0, 40.0),
+        expires_at_tick: 30,
+    };
+    let velocity =
+        resolved_movement_velocity(5, &decision, None, 300.0, None, None, Some(&external));
+    assert!((velocity.y - 40.0).abs() < 1e-5 && (velocity.x - 300.0).abs() < 1e-5);
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn repaired_pose_clamps_finite_positions_and_resets_non_finite_facing() {
+    let bounds = crate::map::PlayableBounds(crate::map::AxisAlignedMapRect {
+        min: Vec2::new(-500.0, -300.0),
+        max: Vec2::new(500.0, 300.0),
+    });
+    let (position, facing) = repaired_pose(Vec2::new(600.0, 0.0), 1.0, &bounds, 24.0, 0.5);
+    assert_eq!(position, Vec2::new(476.0, 0.0));
+    assert!((facing - 1.0).abs() < f32::EPSILON);
+
+    let (position, facing) = repaired_pose(Vec2::INFINITY, f32::NAN, &bounds, 24.0, 0.5);
+    assert_eq!(position, Vec2::ZERO);
+    assert!((facing - 0.5).abs() < f32::EPSILON);
 }

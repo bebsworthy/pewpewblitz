@@ -139,7 +139,8 @@ pub(super) fn input_sequence_ends_with_present_state(
 /// signal: Lightyear advances it even when a received state resolves to
 /// `Compressed::Absent`. Only a present value (including a resolved
 /// `SameAsPrecedent`) is evidence that the client supplied input for the tick.
-pub(super) fn latest_present_remote_tick(buffer: &NativeBuffer<FighterInput>) -> Option<u64> {
+#[must_use]
+pub fn latest_present_remote_tick(buffer: &NativeBuffer<FighterInput>) -> Option<u64> {
     let tick = buffer.last_remote_tick?;
     buffer.get(tick).map(|_| u64::from(tick.0))
 }
