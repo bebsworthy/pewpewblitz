@@ -681,6 +681,51 @@ mod authority_tests {
     }
 
     #[test]
+    fn multi_brush_batches_credit_each_brush_only_its_own_collider_dirt() {
+        let mut app = terrain_app();
+        // One batch: an interior brush of chunk (0,0) plus the corner seam brush, whose
+        // boundary erases dirty every allocated chunk. The committed union holds three
+        // chunks in or adjacent to the interior brush's chunk, but the interior brush
+        // changed no boundary cell: those neighbor rebuilds belong to the seam brush.
+        for brush in [(1, (48.0, 48.0), 16.0), (2, (4.0, 4.0), 48.0)] {
+            app.world_mut()
+                .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+                .0
+                .push(fact(brush.0, brush.1, brush.2));
+        }
+        app.update();
+        let world = app.world_mut();
+        let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+        assert_eq!(telemetry.aggregates.applied_brushes, 2);
+        let union_len = telemetry.aggregates.collision_rebuilt_chunks.len();
+        assert!(
+            union_len >= 4,
+            "the seam brush dirties every allocated chunk"
+        );
+        let applied = |attack: u64| {
+            telemetry
+                .records
+                .iter()
+                .rev()
+                .find(|record| {
+                    record.outcome == super::super::telemetry::TerrainTelemetryOutcome::Applied
+                        && record.source_attack_id == Some(AttackId(attack))
+                })
+                .unwrap_or_else(|| panic!("the brush of attack {attack} applies"))
+        };
+        assert_eq!(
+            applied(1).rebuilt_colliders,
+            1,
+            "an interior-only brush never credits neighbor rebuilds another brush caused"
+        );
+        assert_eq!(
+            applied(2).rebuilt_colliders,
+            union_len,
+            "the boundary brush forces every collider the batch rebuilt"
+        );
+    }
+
+    #[test]
     fn brush_at_chunk_seam_rebuilds_the_boundary_neighbor() {
         let mut app = terrain_app();
         // Erase along the x=0 global seam at y far from the block edge: cells at local
@@ -774,6 +819,43 @@ mod authority_tests {
     }
 
     #[test]
+    fn map_replacement_clears_the_previous_generation_telemetry() {
+        let mut app = terrain_app();
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fact(1, (0.0, 0.0), 48.0));
+        app.update();
+        {
+            let world = app.world_mut();
+            let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+            assert_eq!(telemetry.aggregates.applied_brushes, 1);
+            assert!(telemetry.records.iter().any(|record| record.outcome
+                == super::super::telemetry::TerrainTelemetryOutcome::Applied));
+        }
+        let catalog = app
+            .world()
+            .resource::<crate::map::MapCatalogResource>()
+            .0
+            .clone();
+        let replacement = catalog
+            .resolve_preset(
+                MapPresetId(1),
+                crate::map::MapInstanceId(2),
+                &MapLayoutRequirements::wipeout(),
+            )
+            .unwrap();
+        crate::map::install_resolved_map(app.world_mut(), replacement).unwrap();
+        app.update();
+        let world = app.world_mut();
+        assert_eq!(
+            *world.resource::<super::super::telemetry::TerrainTelemetry>(),
+            super::super::telemetry::TerrainTelemetry::default(),
+            "the replacement generation inherits no records or aggregates"
+        );
+    }
+
+    #[test]
     fn restart_reset_restores_initial_occupancy_and_zero_revision() {
         let mut app = terrain_app();
         let initial = current_occupancy(app.world_mut());
@@ -813,6 +895,73 @@ mod authority_tests {
         let mut colliders =
             world.query_filtered::<&avian2d::prelude::Collider, With<TerrainChunk>>();
         assert_eq!(colliders.iter(world).count(), 4);
+    }
+
+    #[test]
+    fn restart_starts_a_fresh_telemetry_epoch_for_the_next_generation() {
+        let mut app = terrain_app();
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fact(1, (0.0, 0.0), 48.0));
+        app.update();
+        {
+            let world = app.world_mut();
+            let instance_id = root(world).map_instance_id;
+            let mut telemetry = world.resource_mut::<super::super::telemetry::TerrainTelemetry>();
+            assert_eq!(telemetry.aggregates.applied_brushes, 1);
+            // The previous match also served one recovery exchange.
+            telemetry.record(super::super::telemetry::TerrainTelemetryRecord {
+                tick: 5,
+                map_instance_id: instance_id,
+                revision: 1,
+                source_attack_id: None,
+                delivery_index: None,
+                brush: None,
+                affected_chunks: Vec::new(),
+                erased_cells: 0,
+                rebuilt_colliders: 0,
+                serialized_event_bytes: None,
+                outcome: super::super::telemetry::TerrainTelemetryOutcome::RecoverySent {
+                    bytes: 512,
+                    chunks: 4,
+                },
+            });
+            telemetry.record_recovery_request();
+            assert_eq!(telemetry.aggregates.recovery_requests, 1);
+            assert_eq!(telemetry.aggregates.recovery_responses, 1);
+        }
+        app.init_resource::<crate::matchplay::PendingMatchRestart>();
+        app.world_mut()
+            .resource_mut::<crate::matchplay::PendingMatchRestart>()
+            .stage_for_test(crate::matchplay::PendingMatchRestartSlot {
+                previous_id: crate::matchplay::MatchId(1),
+                next_id: crate::matchplay::MatchId(3),
+                restart_tick: 10,
+            });
+        crate::terrain::reset_terrain_on_match_restart(app.world_mut());
+        let world = app.world_mut();
+        let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+        // The new generation's telemetry opens with its own reset facts only.
+        assert_eq!(telemetry.records.len(), 1, "only the reset record remains");
+        assert_eq!(
+            telemetry.records[0].outcome,
+            super::super::telemetry::TerrainTelemetryOutcome::Reset
+        );
+        assert_eq!(telemetry.aggregates.applied_brushes, 0);
+        assert_eq!(telemetry.aggregates.requested_brushes, 0);
+        assert_eq!(telemetry.aggregates.cells_erased, 0);
+        assert_eq!(telemetry.aggregates.events_sent, 0);
+        assert_eq!(telemetry.aggregates.recovery_requests, 0);
+        assert_eq!(telemetry.aggregates.recovery_responses, 0);
+        assert!(telemetry.aggregates.occupancy_dirty_chunks.is_empty());
+        assert_eq!(telemetry.aggregates.max_brushes_in_one_tick, 0);
+        // The reset's own restoration rebuilds are the new epoch's first metrics.
+        assert!(telemetry.records[0].rebuilt_colliders > 0);
+        assert_eq!(
+            telemetry.records[0].rebuilt_colliders,
+            telemetry.aggregates.collision_rebuilt_chunks.len()
+        );
     }
 
     #[test]
@@ -1707,8 +1856,8 @@ mod client_presentation_tests {
     use crate::terrain::TerrainConvergenceAction;
     use crate::terrain::TerrainConvergencePhase;
     use crate::terrain::client::{
-        TerrainDebris, classify_client_event, expire_terrain_debris, record_snapshot_application,
-        spawn_terrain_debris,
+        TerrainDebris, classify_client_event, clear_telemetry_on_generation_change,
+        expire_terrain_debris, record_snapshot_application, spawn_terrain_debris,
     };
     use crate::terrain::grid::recovery_snapshot;
     use crate::terrain::telemetry::{TerrainTelemetry, TerrainTelemetryOutcome};
@@ -1919,6 +2068,43 @@ mod client_presentation_tests {
             .expect("the snapshot application leaves a record");
         assert_eq!(record.map_instance_id, terrain_gen.map_instance_id);
         assert_eq!(record.revision, 0);
+    }
+
+    #[test]
+    fn client_telemetry_clears_exactly_once_per_generation_change() {
+        let terrain_gen = generation(1);
+        let mut state = converged(terrain_gen);
+        let mut telemetry = TerrainTelemetry::default();
+        let mut telemetry_generation = None;
+        // Adopting the first generation clears nothing; convergence facts accumulate.
+        clear_telemetry_on_generation_change(&state, &mut telemetry, &mut telemetry_generation);
+        let (event, _) = stage_event(&initial_chunks(), terrain_gen, 1, center_brush(2));
+        assert_eq!(
+            state.apply_event(event.clone()),
+            TerrainConvergenceAction::Applied
+        );
+        classify_client_event(&state, &event, 7, &mut telemetry);
+        record_snapshot_application(&state, 0, 7, &mut telemetry);
+        assert_eq!(telemetry.records.len(), 2);
+        // A restart or map replacement moves the machine to a new generation: the
+        // previous generation's convergence facts must not survive the boundary.
+        assert_eq!(
+            state.observe_generation(generation(2), &initial_chunks()),
+            TerrainConvergenceAction::RequestRecovery(generation(2))
+        );
+        clear_telemetry_on_generation_change(&state, &mut telemetry, &mut telemetry_generation);
+        assert_eq!(telemetry, TerrainTelemetry::default());
+        // The new generation records its own facts; the clear happened exactly once.
+        state.mark_request_sent();
+        assert_eq!(
+            state.apply_snapshot(
+                &recovery_snapshot(&initial_chunks(), generation(2), 0),
+                &initial_chunks(),
+            ),
+            TerrainConvergenceAction::Applied
+        );
+        record_snapshot_application(&state, 0, 8, &mut telemetry);
+        assert_eq!(telemetry.aggregates.client_snapshots_applied, 1);
     }
 }
 

@@ -36,7 +36,7 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 11 research began on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 remains in feedback review with both implementation-review rounds (2026-08-16, 2026-08-17) remediated; Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing.
+- **Overall status:** Milestone 11 research began on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 remains in feedback review with all three implementation-review rounds (two on 2026-08-16/17 and the telemetry/attribution round on 2026-08-17) remediated; Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing.
 - **Current milestone:** Milestone 11 — Researching; first specification and implementation-plan draft in [milestone-11.md](./milestone-11.md)
 - **Last completed milestone:** Milestone 09 — Hot Zone
 

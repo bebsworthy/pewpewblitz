@@ -151,9 +151,20 @@ pub struct TerrainTransaction {
     /// Applied records staged by the brush loop and recorded by the collision commit,
     /// which is the first point that knows the real rebuilt-collider attribution. A
     /// refused batch drops them: nothing applied, nothing recorded as applied.
-    pub pending_records: Vec<TerrainTelemetryRecord>,
+    pub pending_records: Vec<PendingTerrainRecord>,
     pub revision: u64,
     pub active: bool,
+}
+
+/// One Applied telemetry record staged by the brush loop, plus the collider-dirty
+/// chunks that brush's own changed cells force. The collision commit intersects the
+/// per-brush set with the batch union it actually rebuilt to finalize
+/// `rebuilt_colliders`, so a brush is never credited with a neighbor rebuild only
+/// another brush's boundary change caused.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingTerrainRecord {
+    pub record: TerrainTelemetryRecord,
+    pub brush_dirty: BTreeSet<TerrainChunkId>,
 }
 
 /// The minimum simulation tick a world-effect fact must carry to brush the current match
@@ -327,6 +338,7 @@ fn apply_terrain_brushes(
             continue;
         };
         seed_scratch(&index, &chunks, brush, &mut scratch, &mut previous);
+        let brush_before = brush_scratch_before(brush, &scratch);
         let outcome = terrain_grid::apply_brush(&mut scratch, brush);
         if outcome.erased_cells == 0 {
             mutation.telemetry.record(no_op_record(
@@ -336,6 +348,8 @@ fn apply_terrain_brushes(
             ));
             continue;
         }
+        // This brush's own collider dirt, distinct from what its batch siblings force.
+        let brush_dirty = brush_dirty_union(&index, brush_before, &scratch);
         revision = next_revision;
         let event = TerrainDestructionEvent {
             generation: root.generation(),
@@ -346,18 +360,21 @@ fn apply_terrain_brushes(
             affected_chunks: outcome.affected_chunks,
             erased_cells: outcome.erased_cells,
         };
-        pending_records.push(TerrainTelemetryRecord {
-            tick: fact.tick,
-            map_instance_id: root.map_instance_id,
-            revision,
-            source_attack_id: Some(fact.source.attack_id),
-            delivery_index: Some(fact.delivery_index),
-            brush: Some(brush),
-            affected_chunks: event.affected_chunks.clone(),
-            erased_cells: event.erased_cells,
-            rebuilt_colliders: 0,
-            serialized_event_bytes: terrain_grid::destruction_event_bytes(&event),
-            outcome: TerrainTelemetryOutcome::Applied,
+        pending_records.push(PendingTerrainRecord {
+            record: TerrainTelemetryRecord {
+                tick: fact.tick,
+                map_instance_id: root.map_instance_id,
+                revision,
+                source_attack_id: Some(fact.source.attack_id),
+                delivery_index: Some(fact.delivery_index),
+                brush: Some(brush),
+                affected_chunks: event.affected_chunks.clone(),
+                erased_cells: event.erased_cells,
+                rebuilt_colliders: 0,
+                serialized_event_bytes: terrain_grid::destruction_event_bytes(&event),
+                outcome: TerrainTelemetryOutcome::Applied,
+            },
+            brush_dirty,
         });
         staged_events.push(event);
     }
@@ -369,12 +386,8 @@ fn apply_terrain_brushes(
         if let Some(final_bits) = scratch.get(chunk)
             && final_bits != previous_bits
         {
-            let mut mask = TerrainBits::default();
-            for word_index in 0..TERRAIN_WORDS_PER_CHUNK {
-                mask.0[word_index] = previous_bits.0[word_index] ^ final_bits.0[word_index];
-            }
             changed.insert(*chunk, *final_bits);
-            changed_masks.insert(*chunk, mask);
+            changed_masks.insert(*chunk, changed_mask(previous_bits, final_bits));
         }
     }
     *mutation.transaction = TerrainTransaction {
@@ -447,6 +460,59 @@ fn seed_scratch(
     }
 }
 
+/// XOR mask of the cells that differ between two occupancy bitsets.
+fn changed_mask(before: &TerrainBits, after: &TerrainBits) -> TerrainBits {
+    let mut mask = TerrainBits::default();
+    for word_index in 0..TERRAIN_WORDS_PER_CHUNK {
+        mask.0[word_index] = before.0[word_index] ^ after.0[word_index];
+    }
+    mask
+}
+
+/// The seeded scratch occupancy for every allocated chunk the brush can touch, captured
+/// immediately before the brush applies so its own delta stays distinguishable from the
+/// earlier brushes of the same batch.
+fn brush_scratch_before(
+    brush: TerrainBrush,
+    scratch: &BTreeMap<TerrainChunkId, TerrainBits>,
+) -> Vec<(TerrainChunkId, TerrainBits)> {
+    let ((x_min, x_max), (y_min, y_max)) = terrain_grid::brush_cell_range(brush);
+    let mut seen = BTreeSet::new();
+    let mut before = Vec::new();
+    for cell_y in y_min..=y_max {
+        for cell_x in x_min..=x_max {
+            let Some((chunk, _)) = terrain_grid::cell_to_chunk_and_local((cell_x, cell_y)) else {
+                continue;
+            };
+            if seen.insert(chunk)
+                && let Some(bits) = scratch.get(&chunk)
+            {
+                before.push((chunk, *bits));
+            }
+        }
+    }
+    before
+}
+
+/// The collider-dirty chunks this one brush forces: its own changed masks — the XOR of
+/// the scratch state it produced against the `brush_scratch_before` snapshot, which
+/// monotone erasure within a tick never cancels — expanded through the same
+/// boundary-neighbor rule as the batch union.
+fn brush_dirty_union(
+    index: &TerrainChunkIndex,
+    brush_before: Vec<(TerrainChunkId, TerrainBits)>,
+    scratch: &BTreeMap<TerrainChunkId, TerrainBits>,
+) -> BTreeSet<TerrainChunkId> {
+    let brush_masks: BTreeMap<_, _> = brush_before
+        .into_iter()
+        .filter_map(|(chunk, before)| {
+            let after = scratch.get(&chunk)?;
+            (after != &before).then(|| (chunk, changed_mask(&before, after)))
+        })
+        .collect();
+    compute_dirty_union(index, &brush_masks)
+}
+
 fn no_op_record(
     root: TerrainRoot,
     fact: &CombatWorldEffectFact,
@@ -506,12 +572,6 @@ fn orthogonal_neighbors(chunk: TerrainChunkId) -> [TerrainChunkId; 4] {
             y: chunk.y.saturating_sub(1),
         },
     ]
-}
-
-/// True when the two chunks differ by exactly one step on a single axis.
-fn is_orthogonal_neighbor(chunk: TerrainChunkId, candidate: TerrainChunkId) -> bool {
-    (chunk.x.abs_diff(candidate.x) == 1 && chunk.y == candidate.y)
-        || (chunk.x == candidate.x && chunk.y.abs_diff(candidate.y) == 1)
 }
 
 /// The collision-dirty union: every occupancy-changed chunk plus an allocated orthogonal
@@ -741,20 +801,12 @@ pub(super) fn commit_terrain_collision(world: &mut World) {
             .extend(visual_union);
         telemetry.record_tick_maxima(transaction.staged_events.len() as u64, union.len() as u64);
         telemetry.record_collider_state(voxels_before, voxels_after, empty_chunks);
-        // Applied records finalize here with the collider rebuilds each brush can have
-        // caused: its own affected chunks plus their rebuilt orthogonal neighbors.
-        for mut record in transaction.pending_records {
-            record.rebuilt_colliders = union
-                .iter()
-                .filter(|rebuilt| {
-                    record.affected_chunks.contains(*rebuilt)
-                        || record
-                            .affected_chunks
-                            .iter()
-                            .any(|dirty| is_orthogonal_neighbor(*dirty, **rebuilt))
-                })
-                .count();
-            telemetry.record(record);
+        // Applied records finalize here with the collider rebuilds each brush's own
+        // changed cells force: the per-brush dirty union intersected with the union the
+        // commit actually rebuilt.
+        for mut pending in transaction.pending_records {
+            pending.record.rebuilt_colliders = pending.brush_dirty.intersection(&union).count();
+            telemetry.record(pending.record);
         }
     }
     let mut outbox = world.resource_mut::<TerrainOutbox>();

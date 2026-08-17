@@ -2,6 +2,11 @@
 //! transaction, and recovery behavior; the client terrain plugin records its local
 //! convergence facts (`ClientGapObserved`, `ClientDuplicateIgnored`,
 //! `ClientSnapshotApplied`) against the same bounded shape.
+//!
+//! Telemetry is scoped to one terrain generation: the server clears it at every
+//! generation boundary (match restart before the reset commit, map teardown, and map
+//! install), and the client clears it whenever the convergence machine discards a
+//! generation. Records and aggregates never cross from one match or map into the next.
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -65,7 +70,8 @@ pub enum TerrainTelemetryOutcome {
     DefensiveRepair,
 }
 
-/// Match-scoped aggregate counters over terrain behavior.
+/// Match-scoped aggregate counters over terrain behavior; cleared with the records at
+/// every terrain generation boundary.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TerrainTelemetryAggregates {
     pub requested_brushes: u64,

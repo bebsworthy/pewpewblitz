@@ -51,6 +51,9 @@ pub fn teardown_authoritative_terrain(world: &mut World) {
     world.insert_resource(TerrainBrushBatch::default());
     world.insert_resource(TerrainTransaction::default());
     world.insert_resource(TerrainBrushEpoch::default());
+    // Telemetry is match-scoped: a removed or replaced generation leaves no records or
+    // aggregates behind for the next one to inherit.
+    world.insert_resource(TerrainTelemetry::default());
 }
 
 /// Derive the initial layout from one validated resolved map snapshot.
@@ -214,6 +217,7 @@ fn install_terrain(
     world.insert_resource(TerrainBrushBatch::default());
     world.insert_resource(TerrainTransaction::default());
     world.insert_resource(TerrainBrushEpoch::default());
+    world.insert_resource(TerrainTelemetry::default());
 }
 
 fn pending_restart_slot(
@@ -223,9 +227,9 @@ fn pending_restart_slot(
 }
 
 /// Match-restart environment reset: restore every initial bitset and collider, reset the
-/// revision for the new match generation, clear every brush queued by the previous match,
-/// and stage one reset event. Runs inside the chained restart transaction before common
-/// commit.
+/// revision for the new match generation, clear every brush queued by the previous match
+/// and its telemetry epoch, and stage one reset event. Runs inside the chained restart
+/// transaction before common commit.
 pub(crate) fn reset_terrain_on_match_restart(world: &mut World) {
     let Some(slot) = world
         .get_resource::<crate::matchplay::PendingMatchRestart>()
@@ -280,6 +284,10 @@ pub(crate) fn reset_terrain_on_match_restart(world: &mut World) {
         revision: 0,
         active: true,
     };
+    // The new match's telemetry epoch starts empty: the reset's own collider rebuilds
+    // and its Reset record must be the first facts of the new generation, not appended
+    // to the previous match's counters, records, and dirty sets.
+    *world.resource_mut::<TerrainTelemetry>() = TerrainTelemetry::default();
     // Commit the restored occupancy and colliders exactly like a brush transaction, then
     // finish the generation switch on the root. Re-occupied chunks regain colliders.
     *world.resource_mut::<TerrainTransaction>() = transaction;

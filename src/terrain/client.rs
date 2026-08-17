@@ -210,12 +210,30 @@ pub(super) fn record_snapshot_application(
     }
 }
 
+/// Clear the convergence telemetry whenever the machine's generation changes. The
+/// generation switches only when the derived map/match observation changes (caught at
+/// this system's start) or when an applied reset commits the next match generation
+/// (checked immediately after `apply_reset`); gaps and duplicates of a discarded
+/// generation are not facts of the new one.
+pub(super) fn clear_telemetry_on_generation_change(
+    convergence: &ClientTerrainConvergence,
+    telemetry: &mut TerrainTelemetry,
+    telemetry_generation: &mut Option<TerrainGeneration>,
+) {
+    let current = convergence.phase_generation();
+    if *telemetry_generation != current {
+        *telemetry = TerrainTelemetry::default();
+        *telemetry_generation = current;
+    }
+}
+
 /// Receive terrain traffic, drive the pure convergence machine, and send at most one
 /// outstanding recovery request for the awaited generation.
 #[allow(clippy::too_many_arguments)]
 fn drive_terrain_wire_convergence(
     tick: Option<Res<SimulationTick>>,
     mut last_request_tick: Local<Option<u64>>,
+    mut telemetry_generation: Local<Option<TerrainGeneration>>,
     expected: Res<ExpectedClientTerrainSlot>,
     mut convergence: ResMut<ClientTerrainConvergence>,
     mut telemetry: ResMut<TerrainTelemetry>,
@@ -235,6 +253,7 @@ fn drive_terrain_wire_convergence(
         _ => &empty,
     };
     let tick = tick.map_or(0, |tick| tick.0);
+    clear_telemetry_on_generation_change(&convergence, &mut telemetry, &mut telemetry_generation);
     for receiver in &mut snapshots {
         let Some(mut receiver) = receiver else {
             continue;
@@ -253,6 +272,11 @@ fn drive_terrain_wire_convergence(
         };
         for reset in receiver.receive() {
             report_invalid(convergence.apply_reset(reset, observed, initial_chunks));
+            clear_telemetry_on_generation_change(
+                &convergence,
+                &mut telemetry,
+                &mut telemetry_generation,
+            );
         }
     }
     for receiver in &mut events {

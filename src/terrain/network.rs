@@ -420,7 +420,7 @@ impl ClientTerrainConvergence {
         TerrainConvergenceAction::Applied
     }
 
-    fn phase_generation(&self) -> Option<TerrainGeneration> {
+    pub(super) fn phase_generation(&self) -> Option<TerrainGeneration> {
         match &self.phase {
             TerrainConvergencePhase::WaitingForMap => None,
             TerrainConvergencePhase::AwaitingRecovery { generation, .. }

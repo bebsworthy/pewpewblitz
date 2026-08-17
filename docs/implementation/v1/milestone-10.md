@@ -8,10 +8,10 @@
 | Roadmap | [roadmap.md](./roadmap.md) |
 | Status | Feedback review |
 | Research | Complete for specification review; product and network contracts, the live M09 codebase, pinned Bevy 0.19.1/Lightyear 0.29/Avian 0.7 sources and examples, installed exact-version crate sources, and current primary exact-version documentation inspected through 2026-08-16 |
-| Review findings | Checked against the live source and pinned dependencies on 2026-08-16 (round 1) and 2026-08-17 (round 2); dispositions recorded below |
+| Review findings | Checked against the live source and pinned dependencies on 2026-08-16 (round 1), 2026-08-17 (round 2), and 2026-08-17 (round 3); dispositions recorded below |
 | Specification validation | User validated by requesting implementation of this specification on 2026-08-16 |
 | Implementation | Complete from starting commit `7a7a2baa0dc6aaa8bcacf61155e4d75727f397db`, delivered as `5cb219f` and remediated from the 2026-08-16 and 2026-08-17 implementation reviews as follow-up fix commits; all six slices delivered with per-slice evidence below |
-| Verification | Complete 2026-08-16 and re-run after both review remediations: canonical gate, both-mode terrain process profiles under local/typical/adverse conditions, and windowed visual capture green (see Slice 6 evidence); pre-existing `network-combat-profiles` failure recorded in the backlog |
+| Verification | Complete 2026-08-16 and re-run after all three review remediations: canonical gate, both-mode terrain process profiles under local/typical/adverse conditions, and windowed visual capture green (see Slice 6 evidence); pre-existing `network-combat-profiles` failure recorded in the backlog |
 
 Milestone 09 is complete, but Milestones 01–03, 05, and 08 retain their recorded user or hardware
 gates. M10 implementation may build on the accepted M09 codebase without rewriting those historical
@@ -1482,6 +1482,30 @@ warnings`), `check`, `server-features`, `test-client` (183), `test-server` (178)
 `git diff --check`, `network-terrain` (assertion passed at tick 580, revision 1, 546/576 cells,
 both clients converged, exit 0), and `network-terrain-hot-zone` (assertion passed at tick 576,
 revision 1, 539/576 cells, exit 0) all green.
+
+Cell size, chunk size, collider family, or recovery-contract changes return the milestone to
+`Specification review`. Radius/color/debris/layer tuning that preserves validated bounds may remain
+in feedback review with affected verification rerun.
+
+## Feedback review, round 3 (2026-08-17)
+
+A third review round examined the round-2 remediation itself and found both findings in code that
+remediation introduced or left unwired. Both were verified against the live source, accepted, and
+implemented now as one follow-up fix commit; neither changes the validated
+cell/chunk/collider/recovery contracts or the wire protocol, so the milestone stays in feedback
+review.
+
+| Feedback | Evidence | Decision | Follow-up verification |
+|---|---|---|---|
+| [P2] Terrain telemetry was not actually match-scoped | Telemetry is documented as match-scoped and the specification requires restart to clear the telemetry epoch state and teardown to remove every prior telemetry state by exact old map, but the restart reset appended its `Reset` record to the surviving records/aggregates/dirty sets/maxima, map teardown and install reset the seven shared generation resources while leaving `TerrainTelemetry` intact, and the client's convergence telemetry survived every generation switch and disconnect | Implement now | The server clears telemetry at every generation boundary: the restart reset clears it immediately before its collision commit so the restoration rebuilds and the `Reset` record become the new epoch's first facts, and teardown/install reset it beside the other fresh-generation resources. The client clears it exactly when the convergence machine discards a generation — a derived map/match change at the wire system's start, an applied reset immediately after its commit, disconnect via the cleared phase. `restart_starts_a_fresh_telemetry_epoch_for_the_next_generation` pins one surviving `Reset` record with zeroed applied/requested/event/recovery counters whose rebuild count equals the fresh aggregate, `map_replacement_clears_the_previous_generation_telemetry` pins an exactly default resource after replacement, and `client_telemetry_clears_exactly_once_per_generation_change` covers adopt, clear, and re-record |
+| [P2] Per-event collider attribution overcounted in multi-brush batches | The round-2 attribution credited every Applied record with each committed-union chunk equal or orthogonal-adjacent to the brush's affected chunks, ignoring the boundary-mask rule that actually forces neighbor rebuilds; an interior-only brush therefore inherited collider rebuilds that only another brush's boundary change caused | Implement now | The brush loop snapshots the seeded scratch bits before each brush applies, derives that brush's own changed masks (monotone erasure within a tick never cancels), and carries the per-brush dirty union — computed with the same `compute_dirty_union` boundary rule as the batch — on the staged record; the collision commit intersects it with the union it actually rebuilt. `multi_brush_batches_credit_each_brush_only_its_own_collider_dirt` batches an interior brush with the corner seam brush and pins one credited rebuild for the interior brush while the boundary brush owns the full union; the single-brush attribution test passes unchanged |
+
+Round-3 remediation verification (2026-08-17): `fmt-check`, `clippy-client`, `clippy-server`
+(`-D warnings`), `check`, `server-features`, `test-client` (184), `test-server` (181),
+`test-network` (73), `test-performance` (14; m10 worst case 4.34 ms p95 on the 24-seam-brush
+one-tick burst), `git diff --check`, `network-terrain` (assertion passed at tick 600, revision 1,
+537/576 cells, both clients converged, exit 0), and `network-terrain-hot-zone` (assertion passed
+at tick 560, revision 1, 540/576 cells, exit 0) all green.
 
 Cell size, chunk size, collider family, or recovery-contract changes return the milestone to
 `Specification review`. Radius/color/debris/layer tuning that preserves validated bounds may remain
