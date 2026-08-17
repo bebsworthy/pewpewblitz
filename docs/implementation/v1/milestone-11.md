@@ -638,46 +638,55 @@ Implementation must not begin until the user validates this specification.
 
 ### Slice 1 — Reproduction, consolidated reports, and diagnostics
 
-- [ ] Add versioned run manifest/closeout report values and deterministic field validation.
-- [ ] Consolidate existing telemetry summaries without creating a second gameplay mutation path.
-- [ ] Add process timing/entity/link observations and the explicit `process-metrics` feature.
-- [ ] Measure diagnostics-off versus metrics-on overhead and record which instrumentation profile
-  v2 M01 must reproduce for like-for-like comparison.
-- [ ] Add bounded structured failure/exit reporting.
-- [ ] Add the optional client authority/network overlay and exact UI/layout tests.
-- [ ] Extend named scripts with scenario ID/revision, seed, fingerprints, output paths, and terminal
-  digest checks.
+- [x] Add versioned run manifest/closeout report values and deterministic field validation.
+- [x] Consolidate existing telemetry summaries without creating a second gameplay mutation path.
+  (Consolidation reads replicated state at exit; gameplay telemetry paths are unchanged.)
+- [x] Add process timing/entity/link observations and the explicit `process-metrics` feature.
+- [ ] Measure diagnostics-off versus metrics-on overhead and record which instrumentation
+  profile v2 M01 must reproduce for like-for-like comparison. (Runs pending; the
+  `process-metrics` build lane compiles and the sampler is ordered before
+  `ClearBucketsSystem`.)
+- [x] Add bounded structured failure/exit reporting.
+- [x] Add the optional client authority/network overlay and exact UI/layout tests.
+- [x] Extend named scripts with scenario ID/revision, seed, fingerprints, output paths, and
+  terminal digest checks.
 
 ### Slice 2 — Input settings and authority-boundary cleanup
 
-- [ ] Split client device calibration from server validation tuning.
-- [ ] Lock default-equivalence matrices before changing the authoritative decoder.
-- [ ] Add validated session-local bindings/calibration, pause settings UI, conflict/reset behavior,
-  and state clearing on changes.
-- [ ] Cover keyboard/mouse, synthetic controller, hotplug, pause, headless bypass, malformed intent,
-  and server authority.
-- [ ] Re-run movement/network/performance evidence before organization work.
+- [x] Split client device calibration from server validation tuning.
+- [x] Lock default-equivalence matrices before changing the authoritative decoder.
+- [x] Add validated session-local bindings/calibration, pause settings UI, conflict/reset
+  behavior, and state clearing on changes.
+- [x] Cover keyboard/mouse, synthetic controller, hotplug, pause, headless bypass, malformed
+  intent, and server authority.
+- [x] Re-run movement/network/performance evidence before organization work.
 
 ### Slice 3 — Behavior-preserving module decomposition
 
-- [ ] Split combat-client responsibilities while preserving the exact plugin chain.
-- [ ] Move authoritative movement to its owner module and extract pure eligibility/input/modifier/
-  repair helpers without changing schedule visibility.
-- [ ] Split terrain client recovery/presentation and network convergence/server handling while
-  preserving wire/reset behavior and public paths.
-- [ ] Remove or narrow touched module-wide complexity/pass-by-value allowances.
-- [ ] Re-run role-specific, schedule, visual, terrain recovery, and performance gates after each
-  extraction rather than after one large refactor.
+- [ ] Split combat-client responsibilities while preserving the exact plugin chain. (Remaining.)
+- [x] Move authoritative movement to its owner module and extract pure eligibility/input/
+  modifier/repair helpers without changing schedule visibility.
+- [x] Split terrain client recovery/presentation and network convergence/server handling
+  while preserving wire/reset behavior and public paths.
+- [x] Remove or narrow touched module-wide complexity/pass-by-value allowances. (New/edited
+  modules carry item-scoped allows with engine rationale; broad pre-existing allowances in
+  untouched files are unchanged per the no-unrelated-churn rule.)
+- [x] Re-run role-specific, schedule, visual, terrain recovery, and performance gates after
+  each extraction rather than after one large refactor.
 
 ### Slice 4 — Server build boundary and protocol migration
 
-- [ ] Move the build request transaction into `builds/server.rs` with identical ordering and wire.
-- [ ] Verify idempotency, stale/wrong-match/wrong-phase/ready-lock/capacity/error outcomes before the
-  component migration.
-- [ ] Remove legacy fighter build/weapon components and migrate all consumers to identity/loadout/
-  runtime owners.
-- [ ] Update protocol version/fingerprint tests and clean mismatch/recovery/network scenarios.
-- [ ] Confirm the server feature graph and report schema contain no client presentation dependency.
+- [x] Move the build request transaction into `builds/server.rs` with identical ordering and
+  wire.
+- [x] Verify idempotency, stale/wrong-match/wrong-phase/ready-lock/capacity/error outcomes
+  before the component migration. (All 74 network scenarios, including the build-selection
+  ordering/idempotency suite, passed on the moved transaction before the registry change.)
+- [x] Remove legacy fighter build/weapon components and migrate all consumers to identity/
+  loadout/runtime owners.
+- [x] Update protocol version/fingerprint tests and clean mismatch/recovery/network
+  scenarios. (`SUPPORTED_PROTOCOL_VERSION` is now 12; the real-UDP smoke passes.)
+- [x] Confirm the server feature graph and report schema contain no client presentation
+  dependency.
 
 ### Slice 5 — Combat transaction decomposition and measured client schedule
 
@@ -742,6 +751,70 @@ Implementation must not begin until the user validates this specification.
   `AppExit` to Lightyear `Stop` and completes only after `Stopped`. Process-global facilities: the
   Lightyear metrics registry (only under `process-metrics`), Bevy task pools, the terminal Ctrl-C
   hook, and environment-variable verification controls (`BRAWLER_NETWORK_*`, `BRAWLER_SERVER_*`).
+
+### Slices 1–4 implementation evidence (2026-08-17, commits through `a1431f9`)
+
+**Slice 1 — diagnostics (commit `716d39a`).** New `src/diagnostics/` module: `RunManifestV1` and
+`CloseoutReportV1` values with bounded validation, deterministic `key=value` rendering, and an
+FNV-1a checkpoint digest; `ProcessDiagnosticsPlugin` observes fixed-tick duration between
+`FixedFirst`/`FixedLast`, entity/link counts and high-water marks, samples `LinkStats` RTT/jitter,
+and finalizes one report at the terminal `AppExit` ordered after each role's shutdown chain via
+`DiagnosticsSet`. The non-default `process-metrics` Cargo feature installs Lightyear
+`MetricsPlugin` once per measurement process and samples transport/channel/packet counters before
+`ClearBucketsSystem`; it is not nested in any role feature. `ProcessFailureRecordV1` carries
+stable categories for config rejection (exit 2 in both binaries), endpoint failure, and panics
+via a delegating hook. The client overlay (F3 or `BRAWLER_DIAGNOSTICS_OVERLAY`) renders only
+stable identities, tick, RTT/jitter, and entity counts. `network.sh` gained
+`BRAWLER_DIAGNOSTICS_DIR` scenario identity (scenario ID, run ID, source revision/dirty flag),
+per-process closeout outputs, terminal report validation (schema, required fields, duplicates,
+clean exit), a printed terminal digest, and a `BRAWLER_SERVER_EXIT_AFTER_VERIFICATION` graceful
+server exit so the server's report is produced. Verified end-to-end: a real two-client UDP smoke
+wrote three validated closeout reports with fixed-tick p50/p95 (506 µs/973 µs), entity high-water
+512, RTT p50 25.8 ms. 13 server + 14 client diagnostics tests cover validation, digests, ring
+buffers, percentiles, failure records, and overlay bounds.
+
+**Slice 2 — input calibration split (commit `f9d560b`).** `src/client/settings.rs` owns
+session-local keyboard/mouse/gamepad bindings, move/aim deadzones, aim-commit threshold, trigger
+hysteresis with `release < press`, independent Y-axis inversions, conflict reporting, and
+reset-to-default with a revision counter. Default calibration is the exact movement identity
+(zero deadzone short-circuit before the radial remap) and mirrors the authoritative aim
+thresholds; golden-matrix, aim-commit-decision, and trigger-hysteresis equivalence tests lock
+default behavior, and wire tests assert facing equivalence for positive-scalar-multiple axes.
+`sample_local_input` shapes all device input through the settings before quantization, and a
+revision change clears held/latched state. The client session no longer initializes the shared
+server `InputTuning`; headless automation still writes abstract intent directly. The pause
+context gained the settings overlay with field cycling, bracket adjustment, inversion toggles,
+reset, and conflict lines. 212 client tests pass.
+
+**Slice 3 — movement and terrain decomposition (commits `f8443ad`, `f7477df`).**
+`movement/authority.rs` (server-gated) owns the unchanged fixed-tick coordinator and both native
+input validators, with `movement_decision`, `resolved_movement_velocity`, and `repaired_pose`
+extracted as pure helpers plus characterization tests; `movement/mod.rs` is composition only.
+`terrain/client/` splits into `mod.rs` (plugin chain, readiness gate), `recovery.rs` (generation
+derivation, wire convergence, telemetry classification), and `presentation.rs` (images, sprites,
+debris) with the exact six-system Update chain preserved. `terrain/network/` splits the pure
+convergence machine from server request validation/publication. Public terrain paths are
+unchanged and all 49 terrain tests plus the network suite pass.
+
+**Slice 4 — build boundary and protocol migration (commits `021342a`, `a1431f9`).** Slice A moved
+`process_build_selection` verbatim into `builds/server.rs` at the identical Update chain position
+with no wire change; the full network suite passed on the moved transaction before the registry
+change. Slice B removed the replicated `combat::SelectedBuild` and the standalone fighter
+`ResolvedWeapon` registration: `builds::SelectedBuild` is the single identity,
+`ResolvedMatchLoadout.primary_weapon` the immutable resolved weapon, and the neutral dummy now
+carries the same authority model. Consumers migrated across combat firing, evidence snapshots,
+matchplay lifecycle/roster/telemetry, client HUD/roster/lob range, and process verification;
+`MatchParticipantSummary` collapsed its duplicated identity and now carries the loadout weapon
+preset for deaths-by-preset. `SUPPORTED_PROTOCOL_VERSION` is 12. All canonical gates green:
+fmt, both Clippy lanes, server features, 197 server + 212 client + 74 network + 14 performance
+tests, and the real-UDP smoke. The 24-seam-brush performance p95 measured 8.5 ms this run versus
+5.4 ms at baseline while the 100-fighter p95 measured 1.09 ms versus 1.77 ms — both directions
+of variance are debug-harness noise and both remain far inside the 16.67 ms budget.
+
+**Discovered gap.** The canonical Clippy recipes cover only the client and server lanes; the
+network-test lane carries 22 pre-existing `too_many_lines`/cast findings (verified present at the
+Slice 0 commit) that were never gated. Fixing them is deferred to avoid unrelated lint churn
+during the protocol migration review; a `clippy-network` gate belongs in the v1 closeout backlog.
 
 ## Verification plan
 
