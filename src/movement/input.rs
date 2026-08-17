@@ -44,6 +44,27 @@ impl Default for InputTuning {
     }
 }
 
+/// Slow multiplier from active effects for one tick, shared by the authoritative and
+/// owner-predicted movement paths so both apply identical rules.
+#[must_use]
+pub fn active_slow_multiplier(effects: Option<&crate::combat::ActiveEffects>, tick: u64) -> f32 {
+    effects
+        .and_then(|effects| effects.slow)
+        .filter(|slow| tick < slow.expires_at_tick)
+        .map_or(1.0, |slow| {
+            f32::from(slow.movement_multiplier_milli) / 1000.0
+        })
+}
+
+/// Adrenaline multiplier from the passive runtime state, shared by both movement paths.
+#[must_use]
+pub fn adrenaline_multiplier(state: Option<&crate::builds::PassiveRuntimeState>, tick: u64) -> f32 {
+    state
+        .and_then(|state| state.adrenaline_until_tick)
+        .filter(|deadline| tick < *deadline)
+        .map_or(1.0, |_| 1.15)
+}
+
 /// Server-side input freshness used to turn a prolonged missing stream neutral.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputFreshness {

@@ -266,3 +266,7 @@ closeout-hot-zone:
 # Build the dedicated server with process-global Lightyear metrics for measurement runs.
 build-server-metrics:
     cargo build --locked --no-default-features --features "server,process-metrics" --bin brawler-server
+
+# Run the M03 owner-prediction comparison matrix (experimental feature build).
+prediction-comparison:
+    cargo test --locked --no-default-features --features "network-test,owner-prediction" --test network prediction -- --test-threads=1 --nocapture

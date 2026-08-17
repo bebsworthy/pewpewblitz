@@ -14,6 +14,48 @@ impl bevy::prelude::Plugin for MismatchedProtocolPlugin {
     }
 }
 
+/// Deterministic receive-delay line for impairment profiles: every inbound packet is
+/// held for `delay` client ticks before delivery, modelling one-way latency without
+/// wall-clock sleeps.
+#[derive(Resource, Debug)]
+pub(super) struct ReplicationDelayLine {
+    pub(super) delay: usize,
+    queue: std::collections::VecDeque<Vec<lightyear::link::RecvPayload>>,
+}
+
+impl Default for ReplicationDelayLine {
+    fn default() -> Self {
+        Self {
+            delay: 0,
+            queue: std::collections::VecDeque::new(),
+        }
+    }
+}
+
+fn delay_packets(
+    mut delay_line: ResMut<ReplicationDelayLine>,
+    mut links: Query<&mut Link, With<Client>>,
+) {
+    if delay_line.delay == 0 {
+        return;
+    }
+    for mut link in &mut links {
+        let inbound: Vec<_> = link.recv.drain().collect();
+        if !inbound.is_empty() {
+            delay_line.queue.push_back(inbound);
+        }
+    }
+    if delay_line.queue.len() > delay_line.delay {
+        if let Some(outbound) = delay_line.queue.pop_front() {
+            if let Some(mut link) = links.iter_mut().next() {
+                for packet in outbound {
+                    link.recv.push_raw(packet);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Resource, Debug, Default)]
 pub(super) struct DeterministicPacketImpairment {
     pub(super) armed: bool,
@@ -276,14 +318,23 @@ impl Harness {
         if extra_protocol {
             client.add_plugins(MismatchedProtocolPlugin);
         }
+        #[cfg(feature = "owner-prediction")]
+        client.add_plugins(brawler::client::prediction::OwnerPredictionPlugin);
         client
             .insert_resource(DeterministicPacketImpairment::default())
+            .insert_resource(ReplicationDelayLine::default())
             .add_systems(
                 PreUpdate,
-                impair_packets
-                    .after(LinkSystems::Receive)
-                    .before(TransportSystems::Receive)
-                    .before(MessageSystems::Receive),
+                (
+                    delay_packets
+                        .after(LinkSystems::Receive)
+                        .before(TransportSystems::Receive)
+                        .before(MessageSystems::Receive),
+                    impair_packets
+                        .after(LinkSystems::Receive)
+                        .before(TransportSystems::Receive)
+                        .before(MessageSystems::Receive),
+                ),
             );
         client.insert_resource(CaptureCombatCues::default());
         client.add_plugins(ClientNetworkPlugin);
@@ -332,6 +383,13 @@ impl Harness {
 
     pub(super) fn client_cues(&self, index: usize) -> &[CombatCue] {
         &self.client_cues[index]
+    }
+
+    pub(super) fn set_replication_delay(&mut self, index: usize, delay: usize) {
+        self.clients[index]
+            .world_mut()
+            .resource_mut::<ReplicationDelayLine>()
+            .delay = delay;
     }
 
     pub(super) fn arm_packet_impairment(&mut self, index: usize) {

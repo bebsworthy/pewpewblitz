@@ -52,6 +52,8 @@ mod assets;
 mod audio;
 mod hud;
 mod input;
+#[cfg(feature = "owner-prediction")]
+pub mod prediction;
 mod presentation;
 mod session;
 mod settings;
@@ -421,6 +423,8 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         crate::diagnostics::ProcessDiagnosticsPlugin,
         crate::diagnostics::ClientDiagnosticsOverlayPlugin,
     ));
+    #[cfg(feature = "owner-prediction")]
+    app.add_plugins(prediction::OwnerPredictionPlugin);
     if !headless {
         app.add_plugins(ClientPresentationPlugin);
         if let Some(schedule) = screenshot_schedule {

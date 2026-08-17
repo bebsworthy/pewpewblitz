@@ -12,8 +12,9 @@ pub use arena::*;
 #[cfg(feature = "server")]
 pub use input::InputValidationState;
 pub use input::{
-    InputFreshness, InputTuning, committed_aim, decoded_move, desired_pose_step,
-    input_should_neutralize, latest_present_remote_tick, radial_deadzone, trigger_pressed,
+    InputFreshness, InputTuning, active_slow_multiplier, adrenaline_multiplier, committed_aim,
+    decoded_move, desired_pose_step, input_should_neutralize, latest_present_remote_tick,
+    radial_deadzone, trigger_pressed,
 };
 
 /// Live input-trace switch and last-seen inputs. Read only by the server-gated coordinator.

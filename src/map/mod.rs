@@ -21,7 +21,7 @@ pub use definitions::{
     MapContentCatalog, MapContentPlugin, MapLayoutRequirements, MapPreset, MapRecipePolicy,
     PRACTICE_DUMMY_ANCHOR_DEFINITION, RequiredAnchorShape, SANDBOX_LAYOUT_SCHEMA_VERSION,
     WIPEOUT_LAYOUT_SCHEMA_VERSION, WIPEOUT_MODE_DEFINITION, objective_presentation_profile,
-    resolve_initial_terrain, resolve_map_recipe,
+    overlaps_geometry, resolve_initial_terrain, resolve_map_recipe,
 };
 pub use model::*;
 #[cfg(feature = "server")]

@@ -46,6 +46,10 @@ network-test = [
 # client, server, or network-test: the metrics recorder is one per OS process, so
 # separate-App tests must keep per-World isolation.
 process-metrics = ["lightyear/metrics"]
+# Experimental M03 owner-prediction candidate for the comparison measurement only. Never
+# nested in client, server, or network-test: prediction stays disabled in supported v1
+# unless the recorded gate evidence accepts it.
+owner-prediction = []
 bevy-client = [
   "bevy/bevy_asset",
   "bevy/bevy_audio",

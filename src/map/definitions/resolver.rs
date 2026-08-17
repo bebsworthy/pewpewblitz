@@ -544,7 +544,8 @@ fn expand_visuals(
     Ok(resolved)
 }
 
-pub(super) fn overlaps_geometry(point: Vec2, radius: f32, geometry: &[GeometryPlacement]) -> bool {
+#[must_use]
+pub fn overlaps_geometry(point: Vec2, radius: f32, geometry: &[GeometryPlacement]) -> bool {
     geometry.iter().any(|placement| match placement.shape {
         MapShape::Circle { radius: obstacle } => {
             point.distance_squared(placement.position) < (radius + obstacle).powi(2)

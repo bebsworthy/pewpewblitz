@@ -459,6 +459,7 @@ fn valid_display_name(value: &str) -> bool {
 mod resolver;
 mod terrain;
 use resolver::normalize_recipe;
+pub use resolver::overlaps_geometry;
 pub use resolver::resolve_map_recipe;
 pub use terrain::{
     DESTRUCTIBLE_TERRAIN_REGION_PROFILE, InitialTerrainLayout, resolve_initial_terrain,
