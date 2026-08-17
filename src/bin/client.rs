@@ -161,6 +161,15 @@ fn main() -> AppExit {
         Err(error) => {
             eprintln!("brawler-client: {error}");
             usage();
+            if let Some(path) = env::var_os("BRAWLER_FAILURE_REPORT") {
+                brawler::diagnostics::write_failure_record(
+                    std::path::Path::new(&path),
+                    &brawler::diagnostics::ProcessFailureRecordV1::new(
+                        brawler::diagnostics::FailureCategory::VerificationFailed,
+                        format!("configuration rejected: {error}"),
+                    ),
+                );
+            }
             process::exit(2);
         }
     };

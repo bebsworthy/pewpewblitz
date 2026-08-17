@@ -411,6 +411,8 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         ProtocolPlugin,
         AvianNetworkPlugin,
         ClientNetworkPlugin,
+        crate::diagnostics::ProcessDiagnosticsPlugin,
+        crate::diagnostics::ClientDiagnosticsOverlayPlugin,
     ));
     if !headless {
         app.add_plugins(ClientPresentationPlugin);

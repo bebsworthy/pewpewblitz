@@ -315,12 +315,15 @@ impl Plugin for ServerNetworkPlugin {
                     verify_process_combat,
                     verify_process_match,
                     verify_process_terrain,
+                    exit_after_verification,
                 )
                     .chain(),
             )
             .add_systems(
                 Last,
-                (forward_app_exit_to_server_stop, finish_server_shutdown).chain(),
+                (forward_app_exit_to_server_stop, finish_server_shutdown)
+                    .chain()
+                    .before(crate::diagnostics::DiagnosticsSet),
             )
             .add_plugins((ServerCombatPlugin, crate::abilities::ServerAbilityPlugin));
     }
@@ -376,6 +379,7 @@ fn observe_server_endpoint(
             Without<Linked>,
         ),
     >,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     if startup.ready_reported || startup.failure_reported {
@@ -384,6 +388,17 @@ fn observe_server_endpoint(
     if failed_query.iter().next().is_some() {
         startup.failure_reported = true;
         error!("brawler server endpoint failed to bind or link");
+        if let Some(settings) = diagnostics
+            && let Some(path) = settings.failure_record_path()
+        {
+            crate::diagnostics::write_failure_record(
+                &path,
+                &crate::diagnostics::ProcessFailureRecordV1::new(
+                    crate::diagnostics::FailureCategory::EndpointStart,
+                    "server endpoint failed to bind or link",
+                ),
+            );
+        }
         app_exit.write(AppExit::error());
         return;
     }
@@ -1035,6 +1050,33 @@ fn enforce_session_deadlines(
     }
 }
 
+/// Deterministic graceful exit for measurement runs: once every enabled verification check has
+/// completed, request a clean shutdown so terminal evidence (closeout reports, ordered stop)
+/// is produced instead of the launcher terminating the process.
+fn exit_after_verification(
+    movement: Res<ProcessMovementCheck>,
+    combat: Res<ProcessCombatCheck>,
+    match_check: Res<ProcessMatchCheck>,
+    terrain: Res<ProcessTerrainCheck>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    if env::var("BRAWLER_SERVER_EXIT_AFTER_VERIFICATION").as_deref() != Ok("1") {
+        return;
+    }
+    let checks = [
+        (movement.enabled, movement.completed),
+        (combat.enabled, combat.completed),
+        (match_check.enabled, match_check.completed),
+        (terrain.enabled, terrain.completed),
+    ];
+    let any_enabled = checks.iter().any(|(enabled, _)| *enabled);
+    let all_done = checks.iter().all(|(enabled, done)| !enabled || *done);
+    if any_enabled && all_done {
+        info!("brawler server exiting after completed process verification");
+        app_exit.write(AppExit::Success);
+    }
+}
+
 fn disconnect_rejected_sessions(
     mut commands: Commands,
     mut query: Query<(Entity, &mut ServerSession), With<LinkOf>>,
@@ -1119,7 +1161,13 @@ pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
             DedicatedServerPlugin,
             AuthoritativeMatchPlugin,
             crate::terrain::AuthoritativeTerrainPlugin,
+            crate::diagnostics::ProcessDiagnosticsPlugin,
         ));
+    if let Some(path) =
+        crate::diagnostics::ProcessDiagnosticsSettings::default().failure_record_path()
+    {
+        crate::diagnostics::install_panic_failure_hook(path);
+    }
     install_server_game_mode(&mut app);
     app
 }

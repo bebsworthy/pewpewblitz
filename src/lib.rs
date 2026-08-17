@@ -5,6 +5,7 @@ pub mod builds;
 pub mod combat;
 pub mod config;
 pub mod content;
+pub mod diagnostics;
 pub mod gameplay;
 pub mod map;
 pub mod matchplay;

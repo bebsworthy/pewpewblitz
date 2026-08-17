@@ -11,6 +11,8 @@ windowed_controller_demo="${BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO:-0}"
 combat_report_file="${BRAWLER_NETWORK_COMBAT_REPORT_FILE:-}"
 combat_test_preset="${BRAWLER_NETWORK_COMBAT_TEST_PRESET:-}"
 network_run_id="${BRAWLER_NETWORK_RUN_ID:-network-script}"
+diagnostics_dir="${BRAWLER_DIAGNOSTICS_DIR:-}"
+diagnostics_scenario_id="${BRAWLER_DIAGNOSTICS_SCENARIO_ID:-}"
 network_timeout_seconds="${BRAWLER_NETWORK_TIMEOUT_SECONDS:-}"
 startup_timeout_seconds=10
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -161,10 +163,96 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+validate_closeout_reports() {
+    if [[ -z "$diagnostics_dir" ]]; then
+        return 0
+    fi
+    python3 - "$diagnostics_dir" <<'PYVALIDATE'
+import sys
+from pathlib import Path
+
+directory = Path(sys.argv[1])
+required = [
+    "schema_version",
+    "scenario_id",
+    "run_id",
+    "end_reason",
+    "exit_category",
+    "fixed_ticks",
+    "checkpoint_digest",
+]
+for name in ("server.closeout", "client-1.closeout", "client-2.closeout"):
+    path = directory / name
+    if not path.is_file():
+        sys.exit(f"closeout report missing: {path}")
+    seen = set()
+    fields = {}
+    for line in path.read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if not sep or not key:
+            sys.exit(f"malformed closeout line in {path}: {line}")
+        if key in seen:
+            sys.exit(f"duplicate closeout field {key} in {path}")
+        seen.add(key)
+        fields[key] = value
+    if fields.get("schema_version") != "1":
+        sys.exit(f"unknown closeout schema revision in {path}")
+    missing = [key for key in required if key not in seen]
+    if missing:
+        sys.exit(f"closeout report {path} missing required fields: {missing}")
+    if fields.get("exit_category") != "clean-exit":
+        sys.exit(f"unexpected exit category in {path}: {fields.get('exit_category')}")
+PYVALIDATE
+    printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
+    if command -v shasum >/dev/null 2>&1; then
+        printf 'brawler network: terminal digest '
+        cat "$diagnostics_dir"/*.closeout | shasum
+    fi
+}
+
+wait_for_server_closeout() {
+    if [[ -z "$diagnostics_dir" ]]; then
+        return 0
+    fi
+    # The measurement server exits by itself once every enabled verification completes;
+    # give the graceful stop path time to flush terminal evidence before validating.
+    local waited=0
+    while job_is_running "$server_pid" && [[ "$waited" -lt 150 ]]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+}
+
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features server --bin brawler-server
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features client --bin brawler-client
 
 server_env=(env "BRAWLER_SERVER_READY_FILE=$ready_file")
+if [[ -n "$diagnostics_dir" ]]; then
+    # Closeout-report identity for deterministic scenario reproduction. These are development
+    # verification controls, not a v2 worker manifest or IPC contract.
+    if [[ -z "$diagnostics_scenario_id" ]]; then
+        diagnostics_scenario_id="network-${game_mode}-${network_run_id}"
+    fi
+    source_revision="$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    if [[ -n "$(git -C "$repo_root" status --porcelain 2>/dev/null)" ]]; then
+        source_dirty=1
+    else
+        source_dirty=0
+    fi
+    mkdir -p "$diagnostics_dir"
+    identity_env=(
+        "BRAWLER_DIAGNOSTICS_SCENARIO_ID=$diagnostics_scenario_id"
+        "BRAWLER_NETWORK_RUN_ID=$network_run_id"
+        "BRAWLER_SOURCE_REVISION=$source_revision"
+        "BRAWLER_SOURCE_DIRTY=$source_dirty"
+        "BRAWLER_DIAGNOSTICS_MODE=$game_mode"
+        "BRAWLER_SERVER_EXIT_AFTER_VERIFICATION=1"
+    )
+    server_env+=(
+        "${identity_env[@]}"
+        "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE=$diagnostics_dir/server.closeout"
+    )
+fi
 if [[ "$headless" == "1" ]]; then
     if [[ "$combat_assert" == "1" ]]; then
         server_env+=(
@@ -295,6 +383,16 @@ if [[ "$combat_assert" == "1" ]]; then
     client_one_env+=("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE=$combat_client_ready_dir/client-1.ready")
     client_two_env+=("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE=$combat_client_ready_dir/client-2.ready")
 fi
+if [[ -n "$diagnostics_dir" ]]; then
+    client_one_env+=(
+        "${identity_env[@]}"
+        "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE=$diagnostics_dir/client-1.closeout"
+    )
+    client_two_env+=(
+        "${identity_env[@]}"
+        "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE=$diagnostics_dir/client-2.closeout"
+    )
+fi
 
 (trap '' INT; exec "${client_one_env[@]}" "$client_binary" "${client_one_args[@]}") &
 client_one_pid=$!
@@ -317,6 +415,11 @@ while :; do
         fi
         server_done=1
         printf 'brawler network: server exited with status %s; stopping clients\n' "$server_exit_code" >&2
+        if [[ "$server_exit_code" -eq 0 && -n "$diagnostics_dir" ]]; then
+            # The measurement server exits by itself after completing every enabled
+            # verification; let the clients finish their tick budgets before validating.
+            continue
+        fi
         if [[ "$server_exit_code" -eq 0 ]]; then
             exit 1
         fi
@@ -354,15 +457,21 @@ while :; do
             if [[ -s "$combat_ready_file" \
                 && -s "$combat_client_ready_dir/client-1.ready" \
                 && -s "$combat_client_ready_dir/client-2.ready" ]]; then
+                wait_for_server_closeout
+                validate_closeout_reports
                 exit 0
             fi
             printf 'brawler network: clients finished before combat assertion completed; waiting for server evidence\n' >&2
         elif [[ "$terrain_assert" == "1" ]]; then
             if [[ -s "$terrain_ready_file" ]]; then
+                wait_for_server_closeout
+                validate_closeout_reports
                 exit 0
             fi
             printf 'brawler network: clients finished before terrain assertion completed; waiting for server evidence\n' >&2
         elif [[ -s "$movement_ready_file" ]]; then
+            wait_for_server_closeout
+            validate_closeout_reports
             exit 0
         else
             printf 'brawler network: clients finished before movement assertion completed; waiting for server evidence\n' >&2

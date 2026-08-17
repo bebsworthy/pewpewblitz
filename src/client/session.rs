@@ -69,7 +69,8 @@ impl Plugin for ClientNetworkPlugin {
                     forward_app_exit_to_client_disconnect,
                     finish_client_shutdown,
                 )
-                    .chain(),
+                    .chain()
+                    .before(crate::diagnostics::DiagnosticsSet),
             );
         app.add_observer(add_controlled_input_marker);
     }

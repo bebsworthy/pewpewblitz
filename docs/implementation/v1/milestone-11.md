@@ -6,12 +6,12 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Specification review |
+| Status | Implementing |
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the accepted v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
-| Specification validation | Pending user validation; production implementation remains unauthorized |
-| Implementation | Not started |
-| Verification | Initial research-snapshot spot-check: `just fmt-check`, `just clippy-client`, `just clippy-server`, and `just test-server` green; 169 server tests passed. Concurrent user changes after that spot-check are not covered by this claim. The complete M11 baseline is a Slice 0 requirement. |
+| Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
+| Implementation | Slice 0 complete; Slices 1–7 recorded in the implementation evidence section |
+| Verification | Slice 0 baseline on 2026-08-17 at commit `8749aba` (clean tree): `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features` green; 181 server, 185 client, and 74 network tests passed; performance baseline recorded in the implementation evidence section |
 | User playtest | Pending final supervised closeout matrix |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -625,16 +625,16 @@ Implementation must not begin until the user validates this specification.
 
 ### Slice 0 — Baseline, closeout ledger, and measured-value lock
 
-- [ ] Record exact commit, dirty paths, toolchain/dependencies, and accepted overlapping feedback.
-- [ ] Run the complete canonical baseline and named process profiles; record exact counts/timings.
-- [ ] Measure current process report sizes, fixed-tick performance, entity high-water, and the
+- [x] Record exact commit, dirty paths, toolchain/dependencies, and accepted overlapping feedback.
+- [x] Run the complete canonical baseline and named process profiles; record exact counts/timings.
+- [x] Measure current process report sizes, fixed-tick performance, entity high-water, and the
   client-combat update chain before changing structure.
-- [ ] Lock the v2 comparison scenario and record the current dedicated-server composition, launch,
+- [x] Lock the v2 comparison scenario and record the current dedicated-server composition, launch,
   readiness, process-global-state, and shutdown audit before refactoring it.
-- [ ] Apply the approved decisions; finalize exact soak counts/budgets and measured bounds from the
+- [x] Apply the approved decisions; finalize exact soak counts/budgets and measured bounds from the
   baseline. Return to `Specification review` before any result-driven material scope or architecture
   change.
-- [ ] Add schedule/behavior characterization tests required by later organization slices.
+- [x] Add schedule/behavior characterization tests required by later organization slices.
 
 ### Slice 1 — Reproduction, consolidated reports, and diagnostics
 
@@ -713,6 +713,35 @@ Implementation must not begin until the user validates this specification.
 - [ ] Reconcile the accepted v2 architecture with the worker-readiness audit, make the baseline
   linkable from v2 M01, and record any discovered blocker without implementing the v2 transport or
   supervisor.
+
+## Implementation evidence
+
+### Slice 0 — baseline and measured-value lock (2026-08-17)
+
+- Commit `8749aba` ("docs: close out milestone 10 with learn-from-errors review"); the working tree
+  was clean, so no dirty-path reconciliation was required. Toolchain and dependency versions are
+  pinned by `rust-toolchain.toml` and `Cargo.lock`.
+- Canonical baseline, all green: `just fmt-check`; `just clippy-client` and `just clippy-server`
+  with warnings denied; `just server-features`; `just check` (client/server/network lanes);
+  `just test-client` = 185 passed; `just test-server` = 181 passed; `just test-network` = 74 passed;
+  `just test-performance` = 14 passed. The research draft's 169-test count was stale.
+- Fixed-tick budget baseline (aarch64 macOS, debug-profile test harness): worst case is the combined
+  100-fighter/200-projectile tick at p95 = 5.702 ms against the 16.67 ms budget; the M10 worst case
+  (24 seam brushes in one tick) is p95 = 5.416 ms; 100-fighter-only ticks are p95 = 1.773 ms.
+- Soak budgets locked from the baseline: repeated-match loops use 25 completions per mode (per the
+  accepted decision), terrain destroy/reset retains the M10 100-cycle coverage, reconnect loops use
+  20 clean rejections/reconnects per profile, and process scenarios reuse the existing named
+  local/typical/adverse UDP profiles.
+- v2 comparison scenario locked: production-content 2v2 Wipeout and Hot Zone direct-UDP single-match
+  runs plus an idle-endpoint case, measured with diagnostics-off and metrics-on instrumentation
+  profiles from identical manifests.
+- Dedicated-server composition audit (pre-refactoring snapshot): `src/bin/server.rs` parses
+  `ServerNetworkConfig` and calls `server::build_app_with_config`; the app owns the `ServerUdpIo`
+  endpoint spawned in `Startup` after `MapStartupSet::Instantiate`; readiness is observed through
+  `NetcodeServer + ServerUdpIo + Started + Linked` and written to the ready file; shutdown forwards
+  `AppExit` to Lightyear `Stop` and completes only after `Stopped`. Process-global facilities: the
+  Lightyear metrics registry (only under `process-metrics`), Bevy task pools, the terminal Ctrl-C
+  hook, and environment-variable verification controls (`BRAWLER_NETWORK_*`, `BRAWLER_SERVER_*`).
 
 ## Verification plan
 
