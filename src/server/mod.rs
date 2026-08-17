@@ -5,9 +5,9 @@ use crate::{
     VERSION,
     combat::{
         ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
-        CombatTelemetry, ResolvedWeapon, SelectedBuild, SelectingBuild, ServerCombatPlugin,
-        SpawnState, TeamId, TestDummy, WeaponCatalogResource, WeaponPresetId, WeaponTelemetry,
-        WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
+        CombatTelemetry, SelectingBuild, ServerCombatPlugin, SpawnState, TeamId, TestDummy,
+        WeaponCatalogResource, WeaponPresetId, WeaponTelemetry, WeaponTelemetryKey,
+        decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
     },
     config::{GameMode, MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -566,7 +566,7 @@ fn process_client_hellos(
                                 .expect("validated map has a finite spawn for each Wipeout team");
                                 let spawn_position = spawn_point.position;
                                 let spawn_facing = spawn_point.facing;
-                                let (fighter_definition, _build, team, health, _weapon) =
+                                let (fighter_definition, team, health, _weapon) =
                                     default_fighter_runtime(assigned_team, &fighters, &weapons);
                                 let fighter_entity = commands
                                     .spawn((

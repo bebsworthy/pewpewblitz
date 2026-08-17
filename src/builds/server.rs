@@ -9,9 +9,7 @@
     reason = "the multi-receiver session query and multi-field fighter install query mirror the server composition the transaction moved from"
 )]
 
-use crate::combat::{
-    ActiveEffects, WeaponCatalogResource, WeaponDefinitionId, WeaponPhase, WeaponState,
-};
+use crate::combat::{ActiveEffects, WeaponCatalogResource, WeaponPhase, WeaponState};
 use crate::matchplay::{MatchParticipant, MatchPhase, MatchRoot, MatchState};
 use crate::protocol::{
     BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest, FighterInput,
@@ -202,17 +200,7 @@ pub fn process_build_selection(
                             commands
                                 .entity(fighter_entity)
                                 .insert((
-                                    crate::combat::SelectedBuild {
-                                        primary_weapon: WeaponDefinitionId(
-                                            legacy_preset.map_or(1, |id| id.0),
-                                        ),
-                                        source_preset_id: legacy_preset,
-                                        recipe_fingerprint: Some(
-                                            resolved.primary_weapon.recipe_fingerprint,
-                                        ),
-                                    },
                                     resolved.identity,
-                                    resolved.primary_weapon.clone(),
                                     resolved.clone(),
                                     super::AbilityState::default(),
                                     super::PassiveRuntimeState::default(),

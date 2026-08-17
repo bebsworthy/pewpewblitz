@@ -14,8 +14,10 @@ fn native_input_moves_the_server_owned_fighter_and_replicates_position() {
     let initial = harness.server_positions();
     let resolved_speed = {
         let world = harness.server.world_mut();
-        let mut query =
-            world.query_filtered::<&brawler::builds::ResolvedMatchLoadout, With<Fighter>>();
+        let mut query = world.query_filtered::<
+            &brawler::builds::ResolvedMatchLoadout,
+            (With<Fighter>, Without<TestDummy>),
+        >();
         query.single(world).unwrap().fighter_stats.movement_speed
     };
     assert_eq!(initial.len(), 1);
@@ -389,8 +391,7 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(
             &PlayerId,
-            &SelectedBuild,
-            &ResolvedWeapon,
+            &brawler::builds::SelectedBuild,
             &WeaponState,
             &Position,
             &brawler::builds::ResolvedMatchLoadout,
@@ -398,13 +399,13 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
             &brawler::builds::PassiveRuntimeState,
             &CurrentHealth,
         ), With<Fighter>>();
-        let (_, build, resolved, weapon, position, loadout, ability, passives, health) = query
+        let (_, build, weapon, position, loadout, ability, passives, health) = query
             .iter(world)
             .find(|(player, ..)| **player == player_id)
             .expect("server fighter");
         (
             *build,
-            resolved.recipe_fingerprint,
+            loadout.primary_weapon.recipe_fingerprint,
             *weapon,
             *position,
             loadout.clone(),
@@ -417,19 +418,13 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
     {
         let world = harness.clients[0].world_mut();
         let mut forged_build = server_build;
-        forged_build.source_preset_id = Some(WeaponPresetId(4));
-        forged_build.recipe_fingerprint = Some(WeaponRecipeFingerprint(0xdead_beef));
-        let mut forged_resolved = world
-            .get::<ResolvedWeapon>(client_entity)
-            .expect("client resolved weapon")
-            .clone();
-        forged_resolved.recipe_fingerprint = WeaponRecipeFingerprint(0xdead_beef);
+        forged_build.recipe_fingerprint = brawler::builds::BuildRecipeFingerprint(0xdead_beef);
         let mut forged_loadout = server_loadout.clone();
+        forged_loadout.primary_weapon.recipe_fingerprint = WeaponRecipeFingerprint(0xdead_beef);
         forged_loadout.total_points = 0;
         forged_loadout.fighter_stats.maximum_health = u16::MAX;
         world.entity_mut(client_entity).insert((
             forged_build,
-            forged_resolved,
             WeaponState {
                 ammo: 0,
                 phase: WeaponPhase::Reloading { ready_at_tick: 1 },
@@ -464,8 +459,7 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(
             &PlayerId,
-            &SelectedBuild,
-            &ResolvedWeapon,
+            &brawler::builds::SelectedBuild,
             &WeaponState,
             &Position,
             &brawler::builds::ResolvedMatchLoadout,
@@ -473,13 +467,13 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
             &brawler::builds::PassiveRuntimeState,
             &CurrentHealth,
         ), With<Fighter>>();
-        let (_, build, resolved, weapon, position, loadout, ability, passives, health) = query
+        let (_, build, weapon, position, loadout, ability, passives, health) = query
             .iter(world)
             .find(|(player, ..)| **player == player_id)
             .expect("server fighter");
         (
             *build,
-            resolved.recipe_fingerprint,
+            loadout.primary_weapon.recipe_fingerprint,
             *weapon,
             *position,
             loadout.clone(),

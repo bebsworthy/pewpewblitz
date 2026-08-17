@@ -1,7 +1,7 @@
 use super::{MatchId, MatchResult};
 use crate::combat::{
-    CombatOutcomeFact, CombatOutcomeKind, DistanceBand, SelectedBuild, TeamId, WeaponPresetId,
-    WeaponTelemetry, WeaponTelemetryAggregate, WeaponTelemetryKey, distance_band,
+    CombatOutcomeFact, CombatOutcomeKind, DistanceBand, TeamId, WeaponPresetId, WeaponTelemetry,
+    WeaponTelemetryAggregate, WeaponTelemetryKey, distance_band,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::ResolvedMapIdentity;
@@ -77,8 +77,8 @@ pub struct MatchParticipantSummary {
     pub player_id: u64,
     pub network_entity_id: u64,
     pub team: TeamId,
-    pub selected_build: SelectedBuild,
-    pub selected_brawler_build: Option<crate::builds::SelectedBuild>,
+    pub selected_build: crate::builds::SelectedBuild,
+    pub weapon_preset: Option<WeaponPresetId>,
     pub total_points: Option<u8>,
     pub ultimate_id: Option<crate::builds::UltimateDefinitionId>,
     pub passive_ids: Option<[crate::builds::PassiveDefinitionId; 2]>,
@@ -280,7 +280,7 @@ impl MatchTelemetry {
                         .find(|participant| {
                             participant.network_entity_id == fact.target_network_id.0
                         })
-                        .and_then(|participant| participant.selected_build.source_preset_id)
+                        .and_then(|participant| participant.weapon_preset)
                 });
                 if let Some(first_damage) = live
                     .first_damage_by_target

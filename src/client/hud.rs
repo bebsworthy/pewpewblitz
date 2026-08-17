@@ -146,7 +146,8 @@ fn update_readiness_hud(
             &PlayerId,
             &TeamId,
             &MatchParticipant,
-            Option<&crate::combat::SelectedBuild>,
+            Option<&crate::builds::SelectedBuild>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
             Option<&RespawnState>,
             Option<&SpawnProtection>,
             Option<&crate::combat::Defeated>,
@@ -367,7 +368,8 @@ fn sync_roster_and_collect_phase_facts<'a>(
             &'a PlayerId,
             &'a TeamId,
             &'a MatchParticipant,
-            Option<&'a crate::combat::SelectedBuild>,
+            Option<&'a crate::builds::SelectedBuild>,
+            Option<&'a crate::builds::ResolvedMatchLoadout>,
             Option<&'a RespawnState>,
             Option<&'a SpawnProtection>,
             Option<&'a crate::combat::Defeated>,
@@ -386,7 +388,7 @@ fn sync_roster_and_collect_phase_facts<'a>(
         entry.connected = false;
     }
     let mut facts = PhasePresentationFacts::default();
-    for (player, team, participant, build, respawn, protection, defeated) in participants {
+    for (player, team, participant, build, loadout, respawn, protection, defeated) in participants {
         if participant.match_id != state.match_id {
             continue;
         }
@@ -402,8 +404,12 @@ fn sync_roster_and_collect_phase_facts<'a>(
             player.0,
             CachedRosterEntry {
                 team: *team,
-                weapon_preset: build
-                    .and_then(|build| build.source_preset_id.map(|preset| preset.0)),
+                weapon_preset: loadout.and_then(|loadout| {
+                    loadout
+                        .primary_weapon
+                        .source_preset_id
+                        .map(|preset| preset.0)
+                }),
                 status: if let Some(respawn) = respawn {
                     CachedRosterStatus::Respawning(respawn.respawn_at_tick)
                 } else if let Some(protection) = protection {

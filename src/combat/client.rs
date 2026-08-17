@@ -986,8 +986,8 @@ fn update_combat_hud(
             &CurrentHealth,
             &WeaponState,
             Option<&AuthoritativeTick>,
-            Option<&SelectedBuild>,
-            Option<&ResolvedWeapon>,
+            Option<&crate::builds::SelectedBuild>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
             Option<&ActiveEffects>,
             Option<&Defeated>,
             Option<&crate::builds::ResolvedMatchLoadout>,
@@ -1013,7 +1013,7 @@ fn update_combat_hud(
         health,
         state,
         authoritative_tick,
-        build,
+        _build,
         resolved,
         active_effects,
         defeated,
@@ -1024,17 +1024,24 @@ fn update_combat_hud(
     else {
         return;
     };
-    let weapon_id = build.map_or(PULSE_SIDEARM_DEFINITION, |build| build.primary_weapon);
+    let weapon_id = loadout.map_or(PULSE_SIDEARM_DEFINITION, |loadout| {
+        loadout
+            .primary_weapon
+            .source_preset_id
+            .map_or(PULSE_SIDEARM_DEFINITION, |preset| {
+                WeaponDefinitionId(preset.0)
+            })
+    });
     let capacity = resolved.map_or_else(
         || {
             weapons
                 .get(weapon_id)
                 .map_or(0, |weapon| weapon.magazine_capacity)
         },
-        |resolved| resolved.recipe.economy.capacity(),
+        |loadout| loadout.primary_weapon.recipe.economy.capacity(),
     );
     let weapon_name = resolved
-        .and_then(|resolved| resolved.source_preset_id)
+        .and_then(|loadout| loadout.primary_weapon.source_preset_id)
         .and_then(|id| catalog.as_ref().and_then(|catalog| catalog.0.preset(id)))
         .map_or_else(
             || {

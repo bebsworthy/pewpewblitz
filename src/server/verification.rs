@@ -87,7 +87,7 @@ pub(super) fn verify_process_match(
     let build_preset_ids = summary
         .participants
         .iter()
-        .filter_map(|participant| participant.selected_brawler_build)
+        .map(|participant| participant.selected_build)
         .filter_map(|build| build.source_build_preset_id)
         .map(|id| id.0.to_string())
         .collect::<Vec<_>>()
@@ -95,13 +95,13 @@ pub(super) fn verify_process_match(
     let custom_builds = summary
         .participants
         .iter()
-        .filter_map(|participant| participant.selected_brawler_build)
+        .map(|participant| participant.selected_build)
         .filter(|build| build.source_build_preset_id.is_none())
         .count();
     let build_fingerprints = summary
         .participants
         .iter()
-        .filter_map(|participant| participant.selected_brawler_build)
+        .map(|participant| participant.selected_build)
         .map(|build| build.recipe_fingerprint.0.to_string())
         .collect::<Vec<_>>()
         .join(",");
@@ -416,7 +416,13 @@ pub(super) fn verify_process_combat(
     catalog: Res<WeaponCatalogResource>,
     fighters: Res<crate::combat::FighterDefinitions>,
     sessions: Query<&ServerSession, With<LinkOf>>,
-    selected_fighters: Query<(&SelectedBuild, &ResolvedWeapon), With<Fighter>>,
+    selected_fighters: Query<
+        (
+            &crate::builds::SelectedBuild,
+            &crate::builds::ResolvedMatchLoadout,
+        ),
+        With<Fighter>,
+    >,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     if !check.enabled || check.completed {
@@ -457,10 +463,10 @@ pub(super) fn verify_process_combat(
         app_exit.write(AppExit::error());
         return;
     };
-    let tested_fighter = selected_fighters.iter().any(|(build, resolved)| {
-        build.source_preset_id == Some(expected_preset_id)
-            && resolved.source_preset_id == Some(expected_preset_id)
-            && resolved.recipe_fingerprint == expected_resolved.recipe_fingerprint
+    let tested_fighter = selected_fighters.iter().any(|(build, loadout)| {
+        build.source_build_preset_id.is_some()
+            && loadout.primary_weapon.source_preset_id == Some(expected_preset_id)
+            && loadout.primary_weapon.recipe_fingerprint == expected_resolved.recipe_fingerprint
     });
     let expected_attacks = weapon_telemetry
         .accepted_attacks

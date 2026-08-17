@@ -4,12 +4,13 @@ use avian2d::prelude::{
 };
 use bevy::{prelude::*, time::TimeUpdateStrategy};
 use brawler::{
+    builds::SelectingBuild,
     combat::{
         ActiveEffects, AttackId, AttackSource, CombatSourceKind, CombatWorldEffectFact,
         ComposedProjectileRuntime, CurrentHealth, ExternalMotion, FighterDefinitionId,
-        FighterDefinitions, LobbedFlight, Projectile, SelectedBuild, SlowEffect, TeamId,
-        WeaponDefinitionId, WeaponDefinitions, WeaponPhase, WeaponPresentationProfileId,
-        WeaponPresetId, WeaponState, WorldEffectDefinition, WorldPoint, default_fighter_runtime,
+        FighterDefinitions, LobbedFlight, Projectile, SlowEffect, TeamId, WeaponDefinitions,
+        WeaponPhase, WeaponPresentationProfileId, WeaponPresetId, WeaponState,
+        WorldEffectDefinition, WorldPoint, default_fighter_runtime,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -73,7 +74,7 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
                 // Keep benchmark fighters clear of the central destructible block.
                 position.x += 260.0;
             }
-            let (fighter_id, build, team, health, weapon) = default_fighter_runtime(
+            let (fighter_id, team, health, weapon) = default_fighter_runtime(
                 TeamId(u8::try_from(player_id % 2).expect("benchmark team fits in u8")),
                 &fighters,
                 &weapons,
@@ -85,7 +86,7 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
                     PlayerId(player_id),
                     NetworkEntityId(player_id),
                     fighter_id,
-                    build,
+                    SelectingBuild,
                     team,
                     health,
                     weapon,
@@ -128,13 +129,29 @@ fn spawn_m05_fighter(
         .resource::<FighterDefinitions>()
         .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
         .expect("standard fighter definition");
-    let resolved = app
+    let weapon_catalog = app
         .world()
         .resource::<brawler::combat::WeaponCatalogResource>()
         .0
-        .resolve_preset(WeaponPresetId(preset_id), &fighter)
-        .expect("benchmark preset resolves");
-    let source_preset_id = WeaponPresetId(preset_id);
+        .clone();
+    let build_catalog =
+        brawler::builds::BuildCatalog::embedded().expect("embedded build catalog is valid");
+    let base_recipe = build_catalog
+        .preset(brawler::builds::BuildPresetId(1))
+        .expect("build preset 1 exists")
+        .recipe;
+    let recipe = brawler::builds::BrawlerBuildRecipe {
+        weapon: brawler::builds::WeaponChoice::Preset(WeaponPresetId(preset_id)),
+        ..base_recipe
+    };
+    let loadout = brawler::builds::resolve_build_recipe(
+        &build_catalog,
+        &weapon_catalog,
+        &fighter,
+        recipe,
+        None,
+    )
+    .expect("benchmark loadout resolves");
     let entity = app
         .world_mut()
         .spawn((
@@ -142,16 +159,12 @@ fn spawn_m05_fighter(
             PlayerId(player_id),
             NetworkEntityId(player_id),
             FighterDefinitionId(fighter.id.0),
-            SelectedBuild {
-                primary_weapon: WeaponDefinitionId(preset_id),
-                source_preset_id: Some(source_preset_id),
-                recipe_fingerprint: Some(resolved.recipe_fingerprint),
-            },
-            resolved.clone(),
+            loadout.identity,
+            loadout.clone(),
             team,
             CurrentHealth(fighter.maximum_health),
             WeaponState {
-                ammo: resolved.recipe.economy.capacity(),
+                ammo: loadout.primary_weapon.recipe.economy.capacity(),
                 phase: WeaponPhase::Ready,
             },
         ))
@@ -1137,7 +1150,7 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
     let weapons = app.world().resource::<WeaponDefinitions>().clone();
     let mut active = Vec::with_capacity(24);
     for index in 0..24_u16 {
-        let (fighter_id, build, team, health, weapon) =
+        let (fighter_id, team, health, weapon) =
             default_fighter_runtime(TeamId(u8::try_from(index % 2).unwrap()), fighters, &weapons);
         let position = Vec2::new(2000.0 + f32::from(index) * 80.0, -56.0);
         let entity = app
@@ -1147,7 +1160,7 @@ fn m10_24_fighters_and_24_simultaneous_seam_brushes_stay_within_fixed_tick_budge
                 PlayerId(u64::from(index) + 1),
                 NetworkEntityId(u64::from(index) + 1),
                 fighter_id,
-                build,
+                SelectingBuild,
                 team,
                 health,
                 weapon,

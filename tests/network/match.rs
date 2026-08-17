@@ -1200,7 +1200,7 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
             &TeamId,
             &CurrentHealth,
             &WeaponState,
-            &SelectedBuild,
+            &brawler::builds::SelectedBuild,
         ), (With<Fighter>, With<MatchParticipant>)>();
         query
             .iter(world)
@@ -1241,8 +1241,8 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         target_network_id: target.2,
         target_kind: brawler::combat::CombatTargetKind::Fighter,
         target_team: target.3,
-        preset_id: source.6.source_preset_id,
-        recipe_fingerprint: source.6.recipe_fingerprint,
+        preset_id: None,
+        recipe_fingerprint: None,
         position: WorldPoint { x: 0.0, y: 0.0 },
         engagement_distance: 200.0,
         kind: CombatOutcomeKind::Defeat,

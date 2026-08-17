@@ -305,8 +305,11 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
     });
     let (projectile, health_before) = {
         let world = harness.server.world_mut();
-        let mut dummy_query =
-            world.query_filtered::<(&Position, &CurrentHealth, &ResolvedWeapon), With<TestDummy>>();
+        let mut dummy_query = world.query_filtered::<(
+            &Position,
+            &CurrentHealth,
+            &brawler::builds::ResolvedMatchLoadout,
+        ), With<TestDummy>>();
         let (dummy_position, health, resolved) = dummy_query
             .single(world)
             .map(|(position, health, resolved)| (*position, *health, resolved.clone()))
@@ -317,10 +320,10 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
             player_id: PlayerId(99),
             owner_network_entity_id: NetworkEntityId(99_999),
             team_id: TeamId(0),
-            recipe_fingerprint: resolved.recipe_fingerprint,
-            presentation_profile_id: resolved.presentation_profile_id,
+            recipe_fingerprint: resolved.primary_weapon.recipe_fingerprint,
+            presentation_profile_id: resolved.primary_weapon.presentation_profile_id,
             legacy_compatibility: false,
-            source_preset_id: resolved.source_preset_id,
+            source_preset_id: resolved.primary_weapon.source_preset_id,
             origin: WorldPoint::from(dummy_position.0 - Vec2::new(20.0, 0.0)),
             facing: 0.0,
         };
@@ -343,7 +346,7 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
                     maximum_range: 1_000.0,
                     radius: 6.0,
                     landing: None,
-                    recipe: resolved.recipe,
+                    recipe: resolved.primary_weapon.recipe,
                 },
                 Position(dummy_position.0 - Vec2::new(20.0, 0.0)),
                 Rotation::IDENTITY,

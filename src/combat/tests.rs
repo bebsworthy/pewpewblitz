@@ -112,7 +112,7 @@ fn fighter_runtime_reads_health_and_ammo_from_selected_definitions() {
     let mut weapons = WeaponDefinitions::default();
     weapons.entries[0].magazine_capacity = 3;
 
-    let (_, _, _, health, weapon) = default_fighter_runtime(TeamId(4), &fighters, &weapons);
+    let (_, _, health, weapon) = default_fighter_runtime(TeamId(4), &fighters, &weapons);
 
     assert_eq!(health, CurrentHealth(77));
     assert_eq!(weapon.ammo, 3);

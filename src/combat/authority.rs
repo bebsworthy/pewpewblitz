@@ -57,12 +57,21 @@ pub(super) fn spawn_test_dummy(
     let position = map_spawn.position;
     let spawn_facing = map_spawn.facing;
     let body_radius = fighter.body_radius;
-    let (fighter_definition, build, team, health, weapon) =
+    let (fighter_definition, team, health, weapon) =
         default_fighter_runtime(NEUTRAL_TEAM, &fighters, &weapons);
-    let resolved = catalog
-        .0
-        .resolve_preset(WeaponPresetId(PULSE_SIDEARM_DEFINITION.0), fighter)
-        .expect("dummy pulse preset must resolve");
+    let build_catalog =
+        crate::builds::BuildCatalog::embedded().expect("embedded build catalog is valid");
+    let build_preset = build_catalog
+        .preset(crate::builds::BuildPresetId(1))
+        .expect("build preset 1 exists");
+    let loadout = crate::builds::resolve_build_recipe(
+        &build_catalog,
+        &catalog.0,
+        fighter,
+        build_preset.recipe,
+        Some(build_preset.id),
+    )
+    .expect("dummy build-preset loadout resolves");
     let dummy = commands
         .spawn((
             Fighter,
@@ -71,7 +80,6 @@ pub(super) fn spawn_test_dummy(
             DUMMY_NETWORK_ENTITY,
             crate::protocol::PlaceholderState { spawn_slot: 255 },
             fighter_definition,
-            build,
             team,
             health,
             weapon,
@@ -86,12 +94,8 @@ pub(super) fn spawn_test_dummy(
         ))
         .id();
     commands.entity(dummy).insert((
-        SelectedBuild {
-            primary_weapon: PULSE_SIDEARM_DEFINITION,
-            source_preset_id: Some(WeaponPresetId(PULSE_SIDEARM_DEFINITION.0)),
-            recipe_fingerprint: Some(resolved.recipe_fingerprint),
-        },
-        resolved,
+        loadout.identity,
+        loadout,
         AuthoritativeTick::default(),
         Collider::circle(body_radius),
         RigidBody::Kinematic,
@@ -126,7 +130,6 @@ pub(super) fn reset_due_fighters(
     mut commands: Commands,
     tick: Res<SimulationTick>,
     fighters: Res<FighterDefinitions>,
-    weapons: Res<WeaponDefinitions>,
     mut telemetry: ResMut<CombatTelemetry>,
     mut ids: ResMut<NextCombatIds>,
     mut outbox: ResMut<CombatOutbox>,
@@ -135,36 +138,24 @@ pub(super) fn reset_due_fighters(
             Entity,
             &NetworkEntityId,
             &FighterDefinitionId,
-            &SelectedBuild,
-            Option<&ResolvedWeapon>,
+            &crate::builds::ResolvedMatchLoadout,
             &TestDummyResetDeadline,
             &SpawnState,
         ),
         With<TestDummy>,
     >,
 ) {
-    for (entity, network_id, fighter_id, build, resolved, deadline, spawn) in &query {
+    for (entity, network_id, fighter_id, loadout, deadline, spawn) in &query {
         if !reset_is_due(tick.0, deadline.0) {
             continue;
         }
         let Some(fighter) = fighters.get(*fighter_id) else {
             continue;
         };
-        let (capacity, refill_ticks) = resolved
-            .map_or_else(
-                || {
-                    weapons
-                        .get(build.primary_weapon)
-                        .map(|weapon| (weapon.magazine_capacity, weapon.reload_duration_ticks))
-                },
-                |weapon| {
-                    Some((
-                        weapon.recipe.economy.capacity(),
-                        weapon.recipe.economy.refill_ticks(),
-                    ))
-                },
-            )
-            .unwrap_or((0, 0));
+        let (capacity, refill_ticks) = (
+            loadout.primary_weapon.recipe.economy.capacity(),
+            loadout.primary_weapon.recipe.economy.refill_ticks(),
+        );
         if capacity == 0 || refill_ticks == 0 {
             continue;
         }

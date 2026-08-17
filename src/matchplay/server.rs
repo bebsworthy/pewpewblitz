@@ -17,8 +17,8 @@ use super::{
 use crate::{
     combat::{
         ActiveAttackTrackers, CombatOutbox, CombatOutcomeFacts, Defeated, FighterDefinitions,
-        MeleeAttack, PendingDelivery, PendingPayload, SelectedBuild, SpawnState, TeamId,
-        WeaponDefinitions, WeaponTelemetry,
+        MeleeAttack, PendingDelivery, PendingPayload, SpawnState, TeamId, WeaponDefinitions,
+        WeaponTelemetry,
     },
     gameplay::GameplaySet,
     map::{MapStartupSet, ResolvedMap, WIPEOUT_MODE_DEFINITION},
@@ -486,7 +486,7 @@ fn refresh_match_roster(
             &NetworkEntityId,
             &MatchParticipant,
             &TeamId,
-            &SelectedBuild,
+            &crate::builds::SelectedBuild,
             Option<&crate::builds::ResolvedMatchLoadout>,
             Option<&ControlledBy>,
         ),
@@ -515,13 +515,16 @@ fn refresh_match_roster(
             network_entity_id: network_id.0,
             team: *team,
             selected_build: *build,
-            selected_brawler_build: selected.map(|loadout| loadout.identity),
+            weapon_preset: selected.and_then(|loadout| loadout.primary_weapon.source_preset_id),
             total_points: selected.map(|loadout| loadout.total_points),
             ultimate_id: selected.map(|loadout| loadout.ultimate.id),
             passive_ids: selected.map(|loadout| loadout.passives.map(|passive| passive.id)),
         });
         if matches!(state.phase, MatchPhase::Active { .. }) {
-            telemetry.record_participant_active_tick(*team, build.source_preset_id);
+            telemetry.record_participant_active_tick(
+                *team,
+                selected.and_then(|loadout| loadout.primary_weapon.source_preset_id),
+            );
         }
     }
     summaries.sort_by_key(|participant| participant.player_id);
@@ -609,8 +612,7 @@ fn activate_started_match(
         Entity,
         &MatchParticipant,
         &crate::combat::FighterDefinitionId,
-        &SelectedBuild,
-        Option<&crate::combat::ResolvedWeapon>,
+        &crate::builds::SelectedBuild,
         Option<&crate::builds::ResolvedMatchLoadout>,
         &SpawnState,
     )>,
@@ -630,7 +632,7 @@ fn activate_started_match(
         rules_revision: state.rules_revision,
         participants: roster.participants.clone(),
     });
-    for (entity, participant, fighter_id, build, resolved, loadout, spawn) in &fighters {
+    for (entity, participant, fighter_id, build, loadout, spawn) in &fighters {
         if participant.match_id != match_id {
             continue;
         }
@@ -639,7 +641,6 @@ fn activate_started_match(
                 fighter_runtime_values(
                     *fighter_id,
                     build,
-                    resolved,
                     &fighter_definitions,
                     &weapon_definitions,
                 )
@@ -824,8 +825,7 @@ fn commit_match_restart(
     fighters: Query<(
         Entity,
         &crate::combat::FighterDefinitionId,
-        &SelectedBuild,
-        Option<&crate::combat::ResolvedWeapon>,
+        &crate::builds::SelectedBuild,
         Option<&crate::builds::ResolvedMatchLoadout>,
         &SpawnState,
     )>,
@@ -846,13 +846,12 @@ fn commit_match_restart(
         commands.entity(entity).insert(MatchMember(slot.next_id));
         complete_fighter_lifecycle(&mut commands, entity);
     }
-    for (entity, fighter_id, build, resolved, loadout, spawn) in &fighters {
+    for (entity, fighter_id, build, loadout, spawn) in &fighters {
         let Some((maximum_health, ammunition)) = loadout.map_or_else(
             || {
                 fighter_runtime_values(
                     *fighter_id,
                     build,
-                    resolved,
                     &fighter_definitions,
                     &weapon_definitions,
                 )

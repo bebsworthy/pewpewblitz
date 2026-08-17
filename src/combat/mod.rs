@@ -444,27 +444,15 @@ pub fn default_fighter_runtime(
     team_id: TeamId,
     fighters: &FighterDefinitions,
     weapons: &WeaponDefinitions,
-) -> (
-    FighterDefinitionId,
-    SelectedBuild,
-    TeamId,
-    CurrentHealth,
-    WeaponState,
-) {
+) -> (FighterDefinitionId, TeamId, CurrentHealth, WeaponState) {
     let fighter = fighters
         .get(STANDARD_FIGHTER_DEFINITION)
         .expect("standard fighter definition exists");
-    let build = SelectedBuild {
-        primary_weapon: PULSE_SIDEARM_DEFINITION,
-        source_preset_id: None,
-        recipe_fingerprint: None,
-    };
     let weapon = weapons
-        .get(build.primary_weapon)
+        .get(PULSE_SIDEARM_DEFINITION)
         .expect("standard weapon definition exists");
     (
         STANDARD_FIGHTER_DEFINITION,
-        build,
         team_id,
         CurrentHealth(fighter.maximum_health),
         WeaponState {

@@ -526,8 +526,8 @@ pub(super) fn authoritative_composed_fire(
             Entity,
             &Position,
             &Rotation,
-            &SelectedBuild,
-            &ResolvedWeapon,
+            &crate::builds::SelectedBuild,
+            &crate::builds::ResolvedMatchLoadout,
             &TeamId,
             &PlayerId,
             &NetworkEntityId,
@@ -547,8 +547,8 @@ pub(super) fn authoritative_composed_fire(
         entity,
         position,
         rotation,
-        build,
-        resolved,
+        _build_identity,
+        loadout,
         team,
         player_id,
         network_id,
@@ -572,6 +572,7 @@ pub(super) fn authoritative_composed_fire(
         {
             continue;
         }
+        let resolved = &loadout.primary_weapon;
         let recipe = &resolved.recipe;
         advance_composed_weapon_state(&mut state, recipe, tick.0);
         let input = action.map_or(FighterInput::default(), |value| value.0);
@@ -672,7 +673,9 @@ pub(super) fn authoritative_composed_fire(
             origin: WorldPoint::from(origin),
             facing,
         };
-        let weapon_id = build.primary_weapon;
+        let weapon_id = resolved
+            .source_preset_id
+            .map_or(WeaponDefinitionId(1), |id| WeaponDefinitionId(id.0));
         let source_component = ProjectileSource {
             shot_id: ShotId(attack_id.0),
             player_id: *player_id,

@@ -21,9 +21,9 @@ use brawler::{
         CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind,
         CombatTelemetry, ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
         FighterDefinitions, MeleeAttack, PendingDelivery, PendingPayload, Projectile,
-        ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, SelectedBuild, SelectingBuild,
-        SpawnState, TeamId, TestDummy, TestDummyFixture, TestDummyResetDeadline, WeaponPhase,
-        WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
+        ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, SelectingBuild, SpawnState,
+        TeamId, TestDummy, TestDummyFixture, TestDummyResetDeadline, WeaponPhase, WeaponPresetId,
+        WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
     },
     config::{
         ClientNetworkConfig, NetworkImpairmentProfile, NetworkTransport, ServerNetworkConfig,

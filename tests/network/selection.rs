@@ -32,18 +32,29 @@ fn build_selection_resolves_distinct_primary_weapons_and_spawns_spread_deliverie
     });
 
     let world = harness.server.world_mut();
-    let mut query = world.query_filtered::<(&PlayerId, &SelectedBuild, &ResolvedWeapon, &WeaponState), With<Fighter>>();
+    let mut query = world.query_filtered::<(
+        &PlayerId,
+        &brawler::builds::SelectedBuild,
+        &brawler::builds::ResolvedMatchLoadout,
+        &WeaponState,
+    ), With<Fighter>>();
     let mut selections: Vec<_> = query
         .iter(world)
         .filter(|(player, _, _, _)| player.0 != 0)
-        .map(|(player, build, resolved, state)| (player.0, build, resolved, state))
+        .map(|(player, build, loadout, state)| (player.0, build, loadout, state))
         .collect();
-    selections.sort_by_key(|(_, build, _, _)| build.source_preset_id);
+    selections.sort_by_key(|(_, _, loadout, _)| loadout.primary_weapon.source_preset_id);
     assert_eq!(selections.len(), 2);
-    assert_eq!(selections[0].1.source_preset_id, Some(WeaponPresetId(2)));
-    assert_eq!(selections[1].1.source_preset_id, Some(WeaponPresetId(4)));
-    assert_eq!(selections[0].2.recipe.economy.capacity(), 4);
-    assert_eq!(selections[1].2.recipe.economy.capacity(), 3);
+    assert_eq!(
+        selections[0].2.primary_weapon.source_preset_id,
+        Some(WeaponPresetId(2))
+    );
+    assert_eq!(
+        selections[1].2.primary_weapon.source_preset_id,
+        Some(WeaponPresetId(4))
+    );
+    assert_eq!(selections[0].2.primary_weapon.recipe.economy.capacity(), 4);
+    assert_eq!(selections[1].2.primary_weapon.recipe.economy.capacity(), 3);
     assert_eq!(selections[0].3.ammo, 4);
     assert_eq!(selections[1].3.ammo, 3);
 
@@ -84,12 +95,14 @@ fn selection_channel_is_connection_scoped_idempotent_and_strictly_ordered() {
     harness.step();
     let selected = {
         let world = harness.server.world_mut();
-        let mut query =
-            world.query_filtered::<(&SelectedBrawlerBuild, &ResolvedWeapon), With<Fighter>>();
+        let mut query = world.query_filtered::<(
+            &SelectedBrawlerBuild,
+            &brawler::builds::ResolvedMatchLoadout,
+        ), (With<Fighter>, Without<TestDummy>)>();
         query
             .iter(world)
             .find(|(build, _)| Some(**build) == accepted.accepted_identity)
-            .map(|(build, resolved)| (*build, resolved.recipe_fingerprint))
+            .map(|(build, loadout)| (*build, loadout.primary_weapon.recipe_fingerprint))
             .expect("accepted selection")
     };
     let duplicate = harness

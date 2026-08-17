@@ -31,8 +31,7 @@ use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
     CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback,
     LobbedFlight, Projectile, ProjectileDeadline, ProjectileSource, ReplicatedAttackSource,
-    ResolvedWeapon, SelectedBuild, SelectingBuild, StraightFlight, TeamId, WeaponDefinitionId,
-    WeaponState,
+    SelectingBuild, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -48,7 +47,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 11;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 12;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -429,7 +428,6 @@ impl Plugin for ProtocolPlugin {
         app.component::<PlaceholderState>().replicate();
         app.component::<FighterDefinitionId>().replicate_once();
         app.component::<WeaponDefinitionId>().replicate_once();
-        app.component::<SelectedBuild>().replicate();
         app.component::<crate::builds::SelectedBuild>().replicate();
         app.component::<ResolvedMatchLoadout>().replicate();
         app.component::<AbilityState>().replicate();
@@ -440,7 +438,6 @@ impl Plugin for ProtocolPlugin {
         app.component::<crate::abilities::SentryDeadline>()
             .replicate_once();
         app.component::<SelectingBuild>().replicate();
-        app.component::<ResolvedWeapon>().replicate();
         app.component::<ActiveEffects>().replicate();
         app.component::<KnockbackFeedback>().replicate();
         app.component::<AttackDelivery>().replicate_once();
@@ -561,7 +558,9 @@ mod tests {
         assert!(components.is_registered::<PlaceholderState>());
         assert!(components.is_registered::<FighterDefinitionId>());
         assert!(components.is_registered::<WeaponDefinitionId>());
-        assert!(components.is_registered::<SelectedBuild>());
+        assert!(components.is_registered::<crate::builds::SelectedBuild>());
+        assert!(components.is_registered::<ResolvedMatchLoadout>());
+        assert!(!components.is_registered::<crate::combat::ResolvedWeapon>());
         assert!(components.is_registered::<TeamId>());
         assert!(components.is_registered::<CurrentHealth>());
         assert!(components.is_registered::<WeaponState>());

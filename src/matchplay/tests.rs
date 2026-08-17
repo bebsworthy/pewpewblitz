@@ -437,16 +437,16 @@ fn two_preset_telemetry_context() -> MatchTelemetryContext {
         ]
         .into_iter()
         .map(
-            |(player_id, network_entity_id, team, weapon, preset)| MatchParticipantSummary {
+            |(player_id, network_entity_id, team, _weapon, preset)| MatchParticipantSummary {
                 player_id,
                 network_entity_id,
                 team,
-                selected_build: crate::combat::SelectedBuild {
-                    primary_weapon: crate::combat::WeaponDefinitionId(weapon),
-                    source_preset_id: Some(preset),
-                    recipe_fingerprint: None,
+                selected_build: crate::builds::SelectedBuild {
+                    source_build_preset_id: None,
+                    recipe_fingerprint: crate::builds::BuildRecipeFingerprint(0),
+                    revision: crate::builds::BuildRevision(1),
                 },
-                selected_brawler_build: None,
+                weapon_preset: Some(preset),
                 total_points: None,
                 ultimate_id: None,
                 passive_ids: None,

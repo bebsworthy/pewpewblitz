@@ -6,8 +6,8 @@ use super::{
 };
 use crate::{
     combat::{
-        ActiveEffects, CurrentHealth, Defeated, FighterDefinitions, SelectedBuild, SpawnState,
-        WeaponDefinitions, WeaponPhase, WeaponState,
+        ActiveEffects, CurrentHealth, Defeated, FighterDefinitions, SpawnState, WeaponDefinitions,
+        WeaponPhase, WeaponState,
     },
     gameplay::GameplaySet,
     protocol::NetworkEntityId,
@@ -47,20 +47,15 @@ pub(crate) struct FighterReset {
 
 pub(crate) fn fighter_runtime_values(
     fighter_id: crate::combat::FighterDefinitionId,
-    build: &SelectedBuild,
-    resolved: Option<&crate::combat::ResolvedWeapon>,
+    build: &crate::builds::SelectedBuild,
     fighters: &FighterDefinitions,
     weapons: &WeaponDefinitions,
 ) -> Option<(u16, u8)> {
+    let _ = build;
     let maximum_health = fighters.get(fighter_id)?.maximum_health;
-    let ammunition = resolved.map_or_else(
-        || {
-            weapons
-                .get(build.primary_weapon)
-                .map_or(0, |weapon| weapon.magazine_capacity)
-        },
-        |weapon| weapon.recipe.economy.capacity(),
-    );
+    let ammunition = weapons
+        .get(crate::combat::PULSE_SIDEARM_DEFINITION)
+        .map_or(0, |weapon| weapon.magazine_capacity);
     Some((maximum_health, ammunition))
 }
 
@@ -157,8 +152,7 @@ fn respawn_due_fighters(
         &NetworkEntityId,
         &MatchParticipant,
         &crate::combat::FighterDefinitionId,
-        &SelectedBuild,
-        Option<&crate::combat::ResolvedWeapon>,
+        &crate::builds::SelectedBuild,
         Option<&crate::builds::ResolvedMatchLoadout>,
         &RespawnState,
         &SpawnState,
@@ -168,15 +162,13 @@ fn respawn_due_fighters(
     if !matches!(state.phase, MatchPhase::Active { .. }) {
         return;
     }
-    for (entity, network_id, participant, fighter_id, build, resolved, loadout, respawn, spawn) in
-        &query
-    {
+    for (entity, network_id, participant, fighter_id, build, loadout, respawn, spawn) in &query {
         if participant.match_id != state.match_id || tick.0 < respawn.respawn_at_tick {
             continue;
         }
         let Some((maximum_health, ammunition)) = resolved_runtime_values(
             loadout,
-            fighter_runtime_values(*fighter_id, build, resolved, &fighters, &weapons),
+            fighter_runtime_values(*fighter_id, build, &fighters, &weapons),
         ) else {
             continue;
         };

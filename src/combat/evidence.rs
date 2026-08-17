@@ -9,8 +9,8 @@ use super::client::ClientCombatObservation;
 use super::*;
 use super::{
     ActiveEffects, AttackDelivery, AttackId, AuthoritativeTick, Defeated, KnockbackFeedback,
-    NetworkEntityId, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, SelectedBuild,
-    StraightFlight, WeaponRecipeFingerprint, WeaponState, WorldPoint,
+    NetworkEntityId, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, StraightFlight,
+    WeaponRecipeFingerprint, WeaponState, WorldPoint,
 };
 #[cfg(feature = "server")]
 use bevy::prelude::Resource;
@@ -35,7 +35,7 @@ pub struct CombatStateSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CombatFighterSnapshot {
     pub network_entity_id: NetworkEntityId,
-    pub selected_build: Option<SelectedBuild>,
+    pub selected_build: Option<crate::builds::SelectedBuild>,
     pub resolved_weapon: Option<ResolvedWeapon>,
     pub weapon_state: Option<WeaponState>,
     pub active_effects: Option<ActiveEffects>,
@@ -302,8 +302,8 @@ pub(super) fn capture_server_combat_checkpoints(
     fighters: Query<
         (
             &NetworkEntityId,
-            Option<&SelectedBuild>,
-            Option<&ResolvedWeapon>,
+            Option<&crate::builds::SelectedBuild>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
             Option<&WeaponState>,
             Option<&ActiveEffects>,
             Option<&Defeated>,
@@ -369,7 +369,7 @@ pub(super) fn capture_server_combat_checkpoints(
                 CombatFighterSnapshot {
                     network_entity_id: *network_id,
                     selected_build: selected_build.copied(),
-                    resolved_weapon: resolved_weapon.cloned(),
+                    resolved_weapon: resolved_weapon.map(|loadout| loadout.primary_weapon.clone()),
                     weapon_state: weapon_state.copied(),
                     active_effects: active_effects.copied(),
                     knockback_feedback: knockback_feedback.copied(),
@@ -557,8 +557,8 @@ pub(super) fn capture_client_combat_checkpoints(
     fighters: Query<
         (
             &NetworkEntityId,
-            Option<&SelectedBuild>,
-            Option<&ResolvedWeapon>,
+            Option<&crate::builds::SelectedBuild>,
+            Option<&crate::builds::ResolvedMatchLoadout>,
             Option<&WeaponState>,
             Option<&ActiveEffects>,
             Option<&KnockbackFeedback>,
@@ -605,7 +605,7 @@ pub(super) fn capture_client_combat_checkpoints(
             )| CombatFighterSnapshot {
                 network_entity_id: *network_id,
                 selected_build: selected_build.copied(),
-                resolved_weapon: resolved_weapon.cloned(),
+                resolved_weapon: resolved_weapon.map(|loadout| loadout.primary_weapon.clone()),
                 weapon_state: weapon_state.copied(),
                 active_effects: active_effects.copied(),
                 knockback_feedback: knockback_feedback.copied(),
@@ -930,10 +930,10 @@ mod tests {
     fn fighter(network_entity_id: NetworkEntityId) -> CombatFighterSnapshot {
         CombatFighterSnapshot {
             network_entity_id,
-            selected_build: Some(SelectedBuild {
-                primary_weapon: WeaponDefinitionId(3),
-                source_preset_id: Some(WeaponPresetId(3)),
-                recipe_fingerprint: Some(WeaponRecipeFingerprint(77)),
+            selected_build: Some(crate::builds::SelectedBuild {
+                source_build_preset_id: Some(crate::builds::BuildPresetId(3)),
+                recipe_fingerprint: crate::builds::BuildRecipeFingerprint(77),
+                revision: crate::builds::BuildRevision(1),
             }),
             resolved_weapon: None,
             weapon_state: Some(WeaponState {

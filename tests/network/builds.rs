@@ -20,7 +20,11 @@ fn build_runtime_snapshot(world: &bevy::prelude::World, entity: Entity) -> Build
     BuildRuntimeSnapshot {
         identity: *world.get::<brawler::builds::SelectedBuild>(entity).unwrap(),
         loadout: world.get::<ResolvedMatchLoadout>(entity).unwrap().clone(),
-        weapon: world.get::<ResolvedWeapon>(entity).unwrap().clone(),
+        weapon: world
+            .get::<ResolvedMatchLoadout>(entity)
+            .unwrap()
+            .primary_weapon
+            .clone(),
         ability: *world.get::<brawler::builds::AbilityState>(entity).unwrap(),
         passives: *world
             .get::<brawler::builds::PassiveRuntimeState>(entity)

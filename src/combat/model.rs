@@ -10,14 +10,6 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use std::collections::BTreeMap;
-/// A selected build is a stable choice, not mutable weapon state.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SelectedBuild {
-    pub primary_weapon: WeaponDefinitionId,
-    pub source_preset_id: Option<WeaponPresetId>,
-    pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,
-}
-
 /// Stable source identity for a player action. Delivery entities and payloads refer to this
 /// identity rather than a process-local ECS entity or a preset-specific behavior class.
 #[derive(
