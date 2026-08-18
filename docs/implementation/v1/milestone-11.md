@@ -10,8 +10,8 @@
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the proposed v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
-| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2), second round (5 findings, 1×P1/4×P2), third round (5 findings, 1×P1/4×P2), and fourth round (4 findings, 3×P1/1×P2) were each remediated in full — see the review-round evidence below |
-| Verification | Green after every slice through `9131095`, after the review-round remediation, and again after the second, third, and fourth review rounds: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (241), `just test-server` (213), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry profile-correct checkpoint evidence (nonzero digests with cross-endpoint agreement on combat-assert runs, zero digests on movement/terrain/match runs), zero drop/error/rejection counters, one shared run identity, and full typed-value reconstruction through the binaries' own schema-v1 `validate-closeout` reader |
+| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2), second round (5 findings, 1×P1/4×P2), third round (5 findings, 1×P1/4×P2), fourth round (4 findings, 3×P1/1×P2), and fifth round (5 findings, 3×P1/2×P2) were each remediated in full — see the review-round evidence below |
+| Verification | Green after every slice through `9131095` and after every review-round remediation through the fifth round: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (243), `just test-server` (216), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose schema-2 reports carry the consolidated gameplay aggregates, during-run participant caching with cross-endpoint roster agreement, scenario-derived seed/scripted-action/checkpoint declarations, profile-correct checkpoint evidence (nonzero digests with cross-endpoint agreement on combat-assert runs, zero digests on movement/terrain/match runs), zero drop/error/rejection counters, one shared run identity including source revision and participants, and full typed-value reconstruction through the binaries' own `validate-closeout` reader |
 | User playtest | Handoff delivered 2026-08-17 (see "Slice 7 — supervised playtest handoff"); awaiting physical controller/keyboard, audio, HUD/layout, and pacing observations |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -1247,6 +1247,74 @@ Verification after the fourth round: `just fmt-check`, `just clippy-client`, `ju
 `just prediction-comparison` (6), `git diff --check`; live movement and combat-assert
 closeout-instrumented runs through the profile-aware `validate-closeout` gate plus the negative
 probes above.
+
+### Fifth review round remediation (2026-08-18)
+
+A fifth review filed five findings (three P1, two P2); all were remediated in one pass with the
+canonical gates and fresh live launcher runs re-verified afterward. The closeout schema moved to
+revision 2 (revision-1 reports are refused with a named error), so the committed
+`evidence/v2-baseline/` reports remain valid historical artifacts of the schema that produced them.
+
+- **P1 — the consolidated report carried no gameplay aggregates.** `CloseoutReportV1` stored only
+  process, transport, and checkpoint evidence while the spec requires one report assembled from the
+  bounded telemetry summaries plus process/network measurements. A new `GameplayAggregatesV1`
+  section (22 typed fields: completed matches and the latest match's result label, active ticks,
+  respawns, team defeats, first-hostile-damage tick, build selections, ability attempts/accepts and
+  dash/sentry uses, summed weapon attacks/deliveries/contact/damage, and terrain brush
+  request/apply/reject/defer/erase counters) is consolidated by `observe_gameplay_aggregates` in
+  `TerminalObservationSet` — it reads `MatchTelemetry`, `BuildTelemetry`, and `TerrainTelemetry`
+  while the process still owns them, so finalization gains no gameplay-query parameters and the
+  consolidation cannot become a second gameplay path. The authoritative match/build/ability/weapon
+  aggregates exist only in the server process; both roles report terrain (the client records its
+  convergence facts), and the schema documents those per-endpoint zeros. Validation enforces the
+  block's semantics (aggregates may not reference a match the process did not complete, a completed
+  match carries a `MatchResult` report label with render/parse on the type, weapon contact cannot
+  exceed accepted attacks, terrain outcomes cannot exceed requests), and a schedule test drives a
+  real `MatchTelemetry::complete_with_mode` summary plus staged build/weapon/terrain telemetry to
+  prove the field mapping.
+- **P1 — manifests were not populated with actual scenario inputs or participants.** The finalizer
+  sampled fighters at terminal finalization — after the role shutdown chain despawned them — so the
+  committed 2v2 evidence reported `participants=0` on every endpoint, and the launcher never
+  supplied seed or scripted-action metadata. Participant rows are now cached during the run by
+  `observe_manifest_participants` (sorted by stable player id; build replacement updates the row in
+  place; the cache survives fighter despawn), and the finalizer reads the cache. The launcher
+  derives the manifest declarations from the selected scenario: a deterministic seed (default 1;
+  the simulation has no ambient randomness — match ids and spawn selection are deterministic — so
+  the seed is the shared reproduction label), a scripted-action count of one per scripted input
+  channel applied to the two scripted headless clients (move axis, aim source, fire: 4 for
+  movement/match profiles, 6 for terrain and combat-assert), and the combat-assert checkpoint
+  declaration (six named checkpoints; observed evidence still overwrites the count at closeout).
+  A schedule test proves the cache's sort/update/survive-shutdown behavior. Verified live: the
+  movement run reports `participants=2` with build identities on both endpoints and the
+  combat-assert run `participants=3` (both clients plus the replicated practice dummy), all
+  agreeing through the identity gate.
+- **P1 — cross-endpoint validation ignored source identity and rosters.** `RUN_IDENTITY_FIELDS`
+  omitted `source_revision`, `source_dirty`, and the participant/build assignment, so a client
+  report from another source tree — or with different build selections — passed when version and
+  fingerprints happened to match. All three are now part of the agreement check (participants
+  rendered canonically as `player_id:build` rows), and the directory gate additionally requires
+  every endpoint to carry at least one observed participant row, since supervised roster runs
+  spawn fighters before the scenario completes. Verified live: probes editing one endpoint's
+  participant build, emptying its roster, or downgrading its schema revision each fail with the
+  named error and exit 2.
+- **P2 — a retired protocol component remained in a client evidence query.**
+  `record_headless_combat_observation` still queried `Option<&ResolvedWeapon>` although M11 stopped
+  replicating that component and the value was unused. The query (and its destructure) now carries
+  only live replicated components, so the evidence path cannot encourage future reliance on the
+  retired boundary.
+- **P2 — typed validation missed jitter percentile ordering.** `CloseoutReportV1::validate`
+  checked fixed-tick and RTT monotonicity but not `jitter_p50 <= jitter_p95 <= jitter_max`. The
+  jitter check is enforced in `validate` (and therefore in the reader's reconstructed-report gate);
+  a probe with an inverted jitter p95 fails with "jitter percentiles are not monotonic".
+
+Verification after the fifth round: `just fmt-check`, `just clippy-client`, `just clippy-server`,
+`just server-features`, `just check` (zero warnings), `just test-client` (243), `just test-server`
+(216), `just test-network` (77), `just test-performance` (14), `just network-smoke`,
+`just prediction-comparison` (6), `git diff --check`; live movement and combat-assert
+closeout-instrumented runs through the schema-2 gate (movement: participants 2, seed 1,
+scripted actions 4, zero digests, `expect 0`; combat-assert: participants 3, scripted actions 6,
+five observed checkpoints with equal nonzero digests, `expect 1`, server aggregates 61 accepted
+attacks / 600 hostile damage) plus the negative probes above.
 
 ## Verification plan
 
