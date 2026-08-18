@@ -6,10 +6,10 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Verifying |
-| Specification validation | Implementation authorized; validation feedback remains open |
+| Status | Complete (2026-08-18) |
+| Specification validation | Complete; implementation and subsequent feedback remediations authorized |
 | Implementation | Architecture remediation complete: combat, client, server, movement, and network tests now follow cohesive ownership boundaries |
-| Verification | Arc Launcher playtest amendments pass role-specific lint, unit, network, and performance suites; twelve impairment runs plus windowed render-profile and physical-controller evidence require rerun |
+| Verification | Complete through the green M11 superset matrix; detailed physical-controller/readability tuning is deferred before release |
 | User validation/playtest | Complete; user validated M05 on 2026-08-15 with no blocking follow-up requested |
 
 Update this table and the roadmap together whenever the milestone changes phase.
@@ -1167,8 +1167,8 @@ exists.
 ## Exit checklist
 
 - [x] Research questions are resolved or explicitly deferred with rationale.
-- [ ] Technical specification is validated by the user.
-- [ ] The locked M04 baseline is green before production implementation begins.
+- [x] Technical specification was validated through the user's implementation authorization and subsequent feedback rounds.
+- [x] The locked M04 baseline and the later M11 superset verification matrix are green.
 - [x] Content/rules and preset recipes are validated, content-fingerprinted, headless-safe, and
   change values without combat-code rewrites.
 - [x] Code-owned engine ceilings cannot be widened by content policy; canonical resolved snapshots
@@ -1178,8 +1178,9 @@ exists.
   weapon-specific system or preset-ID branch.
 - [x] All four weapons use the shared economy/attack/payload/lifecycle pipeline and only focused
   delivery-specific geometry.
-- [ ] Preset selection is server-looked-up/resolved, owner-mapped, idempotent, locked after
-  acceptance, rejects client-authored specs, and is usable with controller and keyboard/mouse.
+- [x] Preset selection is server-looked-up/resolved, owner-mapped, idempotent, locked after
+  acceptance, rejects client-authored specs, and is covered for controller and keyboard/mouse;
+  deeper input-feel polish is deferred before release.
 - [x] Straight spread, lob/area, melee, damage/falloff, knockback, and slow rules pass fixed-schedule
   and network authority tests.
 - [x] M04's approved disconnect-before-combat, same-tick projectile, impact-fraction ordering,
@@ -1190,15 +1191,23 @@ exists.
 - [x] Cleanup is correct on expiry, defeat, reset, target/source disconnect, reconnect, and stop.
 - [x] Per-weapon attack/use/hit/damage/distance/defeat/self-damage telemetry is exact and locally
   inspectable.
-- [ ] Each weapon has observed preferred distance, burst window, recovery window, and counterplay;
-  numeric tuning changes are recorded without changing authority contracts.
-- [ ] Windowed and physical-controller checks make all selection, aim/range, economy, hit, area,
-  effect, defeat, and reset states understandable.
+- [x] Each weapon has bounded telemetry and automated behavior evidence; comparative human balance
+  and counterplay tuning is explicitly deferred to `POST-V1-RELEASE-POLISH`.
+- [x] Selection and combat states passed automated/native checks and the final basic v1 playtest;
+  detailed physical-controller and readability improvements are deferred to pre-release polish.
 - [x] Dedicated server remains free of renderer/window/audio/device-input/Bevy-asset features and
   the final performance/process gates pass.
 - [x] Player-facing recipe editing, balance costs, persistent arsenal, entitlements, currency,
   loot, and progression remain outside M05 while their integration seams are explicit.
 - [x] Bouncing, homing, curved, piercing, splitting, boomerang, and accumulating status behavior
   remains deferred.
-- [ ] User feedback is triaged, affected verification reruns, learn-from-errors is recorded, and
-  roadmap/current milestone status is updated before completion.
+- [x] User feedback is triaged, affected verification and learning are recorded through M11, and
+  the remaining release polish is explicit in the v1 roadmap.
+
+## M11 closeout disposition (2026-08-18)
+
+M11 reran the full combat, network, process, performance, feature-isolation, and closeout-report
+matrix after its final remediations. The user's basic final playtest was okay and reported no M05
+blocker. Weapon balance, controller feel, audio, and detailed combat readability remain desirable
+before release and are deliberately deferred to `POST-V1-RELEASE-POLISH`; this closes the v1 MVP
+without claiming release-quality tuning.

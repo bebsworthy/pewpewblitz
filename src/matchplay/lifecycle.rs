@@ -9,7 +9,6 @@ use crate::{
         ActiveEffects, CurrentHealth, Defeated, FighterDefinitions, SpawnState, WeaponDefinitions,
         WeaponPhase, WeaponState,
     },
-    gameplay::GameplaySet,
     protocol::NetworkEntityId,
     timing::SimulationTick,
 };
@@ -28,7 +27,6 @@ impl Plugin for AuthoritativeFighterLifecyclePlugin {
             FixedUpdate,
             (expire_protection, respawn_due_fighters)
                 .chain()
-                .in_set(GameplaySet::Lifecycle)
                 .in_set(MatchSet::FighterLifecycle),
         );
     }

@@ -29,7 +29,12 @@ use serde::{Deserialize, Serialize};
 /// summaries) to revision 1's manifest, process, transport, and evidence fields, so the
 /// consolidated report ties the gameplay subsystems to the run identity instead of
 /// carrying process/network measurements alone.
-pub const CLOSEOUT_SCHEMA_VERSION: u16 = 2;
+/// The only closeout schema revision produced or accepted by this build. Revision 3 adds
+/// the mode-aggregate fields (mode identity plus the typed Wipeout/Hot Zone summaries),
+/// the observed-checkpoint count distinct from the declared scenario contract, the
+/// terrain no-op brush counter, and includes the declared scenario counts in the shared
+/// run identity.
+pub const CLOSEOUT_SCHEMA_VERSION: u16 = 3;
 
 /// Upper bound on manifest identity strings; rejects oversized or runaway scripted fields.
 pub const MAX_IDENTITY_BYTES: usize = 96;
@@ -242,6 +247,21 @@ pub struct GameplayAggregatesV1 {
     pub team_a_defeats: u32,
     pub team_b_defeats: u32,
     pub first_hostile_damage_tick: Option<u64>,
+    /// Stable authored mode-definition ID of the latest completed match. `None` while
+    /// the process completed no match.
+    pub mode_definition_id: Option<u16>,
+    /// Wipeout terminal scores (`None` unless the completed match was Wipeout).
+    pub wipeout_final_scores: Option<[u16; 2]>,
+    pub wipeout_target_score: Option<u16>,
+    pub wipeout_score_margin: Option<u16>,
+    /// Hot Zone terminal state and objective-behavior counters (`None` unless the
+    /// completed match was Hot Zone).
+    pub hot_zone_final_progress: Option<[u16; 2]>,
+    pub hot_zone_target_progress_ticks: Option<u16>,
+    pub hot_zone_controlled_ticks: Option<[u64; 2]>,
+    pub hot_zone_contested_ticks: Option<u64>,
+    pub hot_zone_control_gained_transitions: Option<[u32; 2]>,
+    pub hot_zone_longest_control_ticks: Option<[u64; 2]>,
     /// Build selections accepted by this process's build telemetry.
     pub build_selections: u32,
     pub build_dropped_records: u64,
@@ -255,6 +275,7 @@ pub struct GameplayAggregatesV1 {
     pub hostile_damage: u64,
     pub terrain_requested_brushes: u64,
     pub terrain_applied_brushes: u64,
+    pub terrain_no_op_brushes: u64,
     pub terrain_rejected_brushes: u64,
     pub terrain_deferred_brushes: u64,
     pub terrain_cells_erased: u64,
@@ -262,13 +283,18 @@ pub struct GameplayAggregatesV1 {
 
 impl GameplayAggregatesV1 {
     /// Enforce the block's semantic contract: aggregates only reference matches the
-    /// process completed, a completed match carries a result label, weapon contact cannot
-    /// exceed accepted attacks, and terrain outcome buckets stay inside the request count.
+    /// process completed, a completed match carries a result label plus exactly one
+    /// complete and internally consistent mode summary, weapon contact cannot exceed
+    /// accepted attacks, and terminal terrain brush outcomes stay inside the
+    /// submitted-brush count.
     fn validate(&self) -> Result<(), String> {
         if self.matches_completed == 0 {
             if self.match_result.is_some()
                 || self.match_active_ticks != 0
                 || self.match_respawns != 0
+                || self.mode_definition_id.is_some()
+                || self.wipeout_fields_some()
+                || self.hot_zone_fields_some()
             {
                 return Err(
                     "closeout gameplay aggregates reference a match the process did not complete"
@@ -283,19 +309,100 @@ impl GameplayAggregatesV1 {
         {
             return Err("closeout match_result is missing or not a match result label".to_string());
         }
+        if self.matches_completed > 0 && self.mode_definition_id.is_none() {
+            return Err("closeout mode_definition_id is missing".to_string());
+        }
+        self.validate_mode_summary()?;
         if self.attacks_with_hostile_contact > self.accepted_attacks {
             return Err(
                 "closeout weapon aggregates carry more attacks with contact than accepted attacks"
                     .to_string(),
             );
         }
+        // Deferral is a lifecycle event, not a terminal outcome: a brush deferred for
+        // admission or collider budget is re-queued and later counted in exactly one of
+        // the applied, no-op, or rejected terminal buckets.
         if self
             .terrain_applied_brushes
+            .saturating_add(self.terrain_no_op_brushes)
             .saturating_add(self.terrain_rejected_brushes)
-            .saturating_add(self.terrain_deferred_brushes)
             > self.terrain_requested_brushes
         {
-            return Err("closeout terrain brush outcomes exceed the requested brushes".to_string());
+            return Err(
+                "closeout terrain terminal brush outcomes exceed the submitted brushes".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    fn wipeout_fields_some(&self) -> bool {
+        self.wipeout_final_scores.is_some()
+            || self.wipeout_target_score.is_some()
+            || self.wipeout_score_margin.is_some()
+    }
+
+    fn hot_zone_fields_some(&self) -> bool {
+        self.hot_zone_final_progress.is_some()
+            || self.hot_zone_target_progress_ticks.is_some()
+            || self.hot_zone_controlled_ticks.is_some()
+            || self.hot_zone_contested_ticks.is_some()
+            || self.hot_zone_control_gained_transitions.is_some()
+            || self.hot_zone_longest_control_ticks.is_some()
+    }
+
+    /// Exactly one mode variant may carry fields, and it must be complete and internally
+    /// consistent with the summary it claims to be.
+    fn validate_mode_summary(&self) -> Result<(), String> {
+        match self.mode_definition_id {
+            Some(id) if id == crate::map::WIPEOUT_MODE_DEFINITION.0 => {
+                let (Some(scores), Some(_), Some(margin)) = (
+                    self.wipeout_final_scores,
+                    self.wipeout_target_score,
+                    self.wipeout_score_margin,
+                ) else {
+                    return Err("closeout wipeout mode aggregates are incomplete".to_string());
+                };
+                if self.hot_zone_fields_some() {
+                    return Err(
+                        "closeout wipeout mode aggregates carry hot-zone fields".to_string()
+                    );
+                }
+                if margin != scores[0].abs_diff(scores[1]) {
+                    return Err(
+                        "closeout wipeout score margin does not match the final scores".to_string(),
+                    );
+                }
+            }
+            Some(id) if id == crate::map::HOT_ZONE_MODE_DEFINITION.0 => {
+                let (Some(progress), Some(target), Some(_), Some(_), Some(_), Some(_)) = (
+                    self.hot_zone_final_progress,
+                    self.hot_zone_target_progress_ticks,
+                    self.hot_zone_controlled_ticks,
+                    self.hot_zone_contested_ticks,
+                    self.hot_zone_control_gained_transitions,
+                    self.hot_zone_longest_control_ticks,
+                ) else {
+                    return Err("closeout hot-zone mode aggregates are incomplete".to_string());
+                };
+                if self.wipeout_fields_some() {
+                    return Err(
+                        "closeout hot-zone mode aggregates carry wipeout fields".to_string()
+                    );
+                }
+                if progress[0] > target || progress[1] > target {
+                    return Err("closeout hot-zone final progress exceeds the target".to_string());
+                }
+            }
+            None => {
+                if self.wipeout_fields_some() || self.hot_zone_fields_some() {
+                    return Err(
+                        "closeout mode aggregates carry fields without a mode identity".to_string(),
+                    );
+                }
+            }
+            Some(_) => {
+                return Err("closeout mode_definition_id is not a supported match mode".to_string());
+            }
         }
         Ok(())
     }
@@ -303,11 +410,66 @@ impl GameplayAggregatesV1 {
     /// Render the block's deterministic `key=value` lines.
     #[must_use]
     fn to_report_lines(&self) -> Vec<String> {
+        let render_optional_u16 = |value: Option<u16>| {
+            value.map_or_else(|| "none".to_string(), |value| value.to_string())
+        };
+        let render_optional_u64 = |value: Option<u64>| {
+            value.map_or_else(|| "none".to_string(), |value| value.to_string())
+        };
+        let render_u16_pair = |value: Option<[u16; 2]>| {
+            value.map_or_else(|| "none".to_string(), |[a, b]| format!("{a}:{b}"))
+        };
+        let render_u64_pair = |value: Option<[u64; 2]>| {
+            value.map_or_else(|| "none".to_string(), |[a, b]| format!("{a}:{b}"))
+        };
+        let render_u32_pair = |value: Option<[u32; 2]>| {
+            value.map_or_else(|| "none".to_string(), |[a, b]| format!("{a}:{b}"))
+        };
         vec![
             format!("matches_completed={}", self.matches_completed),
             format!(
                 "match_result={}",
                 self.match_result.as_deref().unwrap_or("none")
+            ),
+            format!(
+                "mode_definition_id={}",
+                render_optional_u16(self.mode_definition_id)
+            ),
+            format!(
+                "wipeout_final_scores={}",
+                render_u16_pair(self.wipeout_final_scores)
+            ),
+            format!(
+                "wipeout_target_score={}",
+                render_optional_u16(self.wipeout_target_score)
+            ),
+            format!(
+                "wipeout_score_margin={}",
+                render_optional_u16(self.wipeout_score_margin)
+            ),
+            format!(
+                "hot_zone_final_progress={}",
+                render_u16_pair(self.hot_zone_final_progress)
+            ),
+            format!(
+                "hot_zone_target_progress_ticks={}",
+                render_optional_u16(self.hot_zone_target_progress_ticks)
+            ),
+            format!(
+                "hot_zone_controlled_ticks={}",
+                render_u64_pair(self.hot_zone_controlled_ticks)
+            ),
+            format!(
+                "hot_zone_contested_ticks={}",
+                render_optional_u64(self.hot_zone_contested_ticks)
+            ),
+            format!(
+                "hot_zone_control_gained_transitions={}",
+                render_u32_pair(self.hot_zone_control_gained_transitions)
+            ),
+            format!(
+                "hot_zone_longest_control_ticks={}",
+                render_u64_pair(self.hot_zone_longest_control_ticks)
             ),
             format!("match_active_ticks={}", self.match_active_ticks),
             format!("match_respawns={}", self.match_respawns),
@@ -336,6 +498,7 @@ impl GameplayAggregatesV1 {
                 self.terrain_requested_brushes
             ),
             format!("terrain_applied_brushes={}", self.terrain_applied_brushes),
+            format!("terrain_no_op_brushes={}", self.terrain_no_op_brushes),
             format!("terrain_rejected_brushes={}", self.terrain_rejected_brushes),
             format!("terrain_deferred_brushes={}", self.terrain_deferred_brushes),
             format!("terrain_cells_erased={}", self.terrain_cells_erased),
@@ -345,15 +508,8 @@ impl GameplayAggregatesV1 {
     /// Reconstruct the block from already-presence-checked report lines, failing any
     /// value that does not encode its declared scalar type.
     fn from_report_lines(lines: &[(&str, &str)]) -> Result<Self, String> {
-        let parse_optional_tick = |key: &str| -> Result<Option<u64>, String> {
-            match parse_report_field(lines, key).expect("presence was checked") {
-                "none" => Ok(None),
-                value => value
-                    .parse()
-                    .map(Some)
-                    .map_err(|_| format!("{key}={value} is not a u64")),
-            }
-        };
+        let parse_optional_tick =
+            |key: &str| -> Result<Option<u64>, String> { parse_optional_field(lines, key, "u64") };
         Ok(Self {
             matches_completed: parse_typed_field(lines, "matches_completed", "u32")?,
             match_result: match parse_report_field(lines, "match_result")
@@ -362,6 +518,36 @@ impl GameplayAggregatesV1 {
                 "none" => None,
                 label => Some(label.to_string()),
             },
+            mode_definition_id: parse_optional_field(lines, "mode_definition_id", "u16")?,
+            wipeout_final_scores: parse_optional_pair(lines, "wipeout_final_scores", "u16")?,
+            wipeout_target_score: parse_optional_field(lines, "wipeout_target_score", "u16")?,
+            wipeout_score_margin: parse_optional_field(lines, "wipeout_score_margin", "u16")?,
+            hot_zone_final_progress: parse_optional_pair(lines, "hot_zone_final_progress", "u16")?,
+            hot_zone_target_progress_ticks: parse_optional_field(
+                lines,
+                "hot_zone_target_progress_ticks",
+                "u16",
+            )?,
+            hot_zone_controlled_ticks: parse_optional_pair(
+                lines,
+                "hot_zone_controlled_ticks",
+                "u64",
+            )?,
+            hot_zone_contested_ticks: parse_optional_field(
+                lines,
+                "hot_zone_contested_ticks",
+                "u64",
+            )?,
+            hot_zone_control_gained_transitions: parse_optional_pair(
+                lines,
+                "hot_zone_control_gained_transitions",
+                "u32",
+            )?,
+            hot_zone_longest_control_ticks: parse_optional_pair(
+                lines,
+                "hot_zone_longest_control_ticks",
+                "u64",
+            )?,
             match_active_ticks: parse_typed_field(lines, "match_active_ticks", "u64")?,
             match_respawns: parse_typed_field(lines, "match_respawns", "u32")?,
             team_a_defeats: parse_typed_field(lines, "team_a_defeats", "u32")?,
@@ -387,6 +573,7 @@ impl GameplayAggregatesV1 {
                 "u64",
             )?,
             terrain_applied_brushes: parse_typed_field(lines, "terrain_applied_brushes", "u64")?,
+            terrain_no_op_brushes: parse_typed_field(lines, "terrain_no_op_brushes", "u64")?,
             terrain_rejected_brushes: parse_typed_field(lines, "terrain_rejected_brushes", "u64")?,
             terrain_deferred_brushes: parse_typed_field(lines, "terrain_deferred_brushes", "u64")?,
             terrain_cells_erased: parse_typed_field(lines, "terrain_cells_erased", "u64")?,
@@ -424,6 +611,10 @@ pub struct CloseoutReportV1 {
     pub channel_messages_sent: u64,
     pub channel_messages_received: u64,
     pub checkpoint_digest: u64,
+    /// Checkpoint evidence this process actually observed. Distinct from the manifest's
+    /// declared `checkpoint_count`, which preserves the scenario's expectation so the
+    /// terminal gate can compare declaration against observation.
+    pub checkpoints_observed: u32,
     pub first_divergence: Option<String>,
     pub dropped_messages: u64,
     pub rejected_connections: u64,
@@ -513,6 +704,7 @@ impl CloseoutReportV1 {
                 self.channel_messages_received
             ),
             format!("checkpoint_digest={}", self.checkpoint_digest),
+            format!("checkpoints_observed={}", self.checkpoints_observed),
             format!(
                 "first_divergence={}",
                 self.first_divergence.as_deref().unwrap_or("none")
@@ -563,10 +755,10 @@ pub fn split_report_lines(contents: &str) -> Result<Vec<(&str, &str)>, String> {
     Ok(lines)
 }
 
-/// Every non-participant field a schema-2 closeout report carries exactly once. The reader
+/// Every non-participant field a schema-3 closeout report carries exactly once. The reader
 /// rejects reports that drop, duplicate, or oversize any of these fields, mirroring
 /// `CloseoutReportV1::to_report_lines`.
-const REPORT_REQUIRED_KEYS: [&str; 70] = [
+const REPORT_REQUIRED_KEYS: [&str; 82] = [
     "schema_version",
     "scenario_id",
     "scenario_revision",
@@ -611,12 +803,23 @@ const REPORT_REQUIRED_KEYS: [&str; 70] = [
     "channel_messages_sent",
     "channel_messages_received",
     "checkpoint_digest",
+    "checkpoints_observed",
     "first_divergence",
     "dropped_messages",
     "rejected_connections",
     "error_count",
     "matches_completed",
     "match_result",
+    "mode_definition_id",
+    "wipeout_final_scores",
+    "wipeout_target_score",
+    "wipeout_score_margin",
+    "hot_zone_final_progress",
+    "hot_zone_target_progress_ticks",
+    "hot_zone_controlled_ticks",
+    "hot_zone_contested_ticks",
+    "hot_zone_control_gained_transitions",
+    "hot_zone_longest_control_ticks",
     "match_active_ticks",
     "match_respawns",
     "team_a_defeats",
@@ -634,6 +837,7 @@ const REPORT_REQUIRED_KEYS: [&str; 70] = [
     "hostile_damage",
     "terrain_requested_brushes",
     "terrain_applied_brushes",
+    "terrain_no_op_brushes",
     "terrain_rejected_brushes",
     "terrain_deferred_brushes",
     "terrain_cells_erased",
@@ -667,6 +871,41 @@ fn parse_typed_field<T: core::str::FromStr>(
     let value = parse_report_field(lines, key)
         .ok_or_else(|| format!("missing or duplicated required field: {key}"))?;
     T::from_str(value).map_err(|_| format!("{key}={value} is not a {type_name}"))
+}
+
+/// Parse one required optional-scalar field: `none` maps to `None`, anything else must
+/// encode the declared scalar type. Presence was checked before.
+fn parse_optional_field<T: core::str::FromStr>(
+    lines: &[(&str, &str)],
+    key: &str,
+    type_name: &str,
+) -> Result<Option<T>, String> {
+    match parse_report_field(lines, key).expect("presence was checked") {
+        "none" => Ok(None),
+        value => T::from_str(value)
+            .map(Some)
+            .map_err(|_| format!("{key}={value} is not a {type_name}")),
+    }
+}
+
+/// Parse one required `a:b` pair field, where each half must encode the declared scalar
+/// type; `none` maps to `None`. Presence was checked before.
+fn parse_optional_pair<T: core::str::FromStr>(
+    lines: &[(&str, &str)],
+    key: &str,
+    type_name: &str,
+) -> Result<Option<[T; 2]>, String> {
+    let value = parse_report_field(lines, key).expect("presence was checked");
+    if value == "none" {
+        return Ok(None);
+    }
+    let (left, right) = value
+        .split_once(':')
+        .ok_or_else(|| format!("{key}={value} is not an a:b pair"))?;
+    let left = T::from_str(left).map_err(|_| format!("{key}={value} is not a {type_name} pair"))?;
+    let right =
+        T::from_str(right).map_err(|_| format!("{key}={value} is not a {type_name} pair"))?;
+    Ok(Some([left, right]))
 }
 
 /// One already-presence-checked field value, as an owned string.
@@ -714,34 +953,7 @@ pub fn parse_closeout_report(lines: &[(&str, &str)]) -> Result<CloseoutReportV1,
     let exit_category = ProcessExitCategory::parse(exit_category)
         .ok_or_else(|| format!("unknown exit_category {exit_category}"))?;
     validate_report_participant_block(lines)?;
-    let declared_participants = parse_typed_field::<u32>(lines, "participants", "u32")? as usize;
-    let mut participants = Vec::with_capacity(declared_participants);
-    for index in 0..declared_participants {
-        participants.push(ManifestParticipant {
-            player_id: parse_typed_field(lines, &format!("participant_{index}_player_id"), "u64")?,
-            build_identity: owned_field(lines, &format!("participant_{index}_build")),
-        });
-    }
-    let manifest = RunManifestV1 {
-        schema_version: schema,
-        scenario_id: owned_field(lines, "scenario_id"),
-        scenario_revision: parse_typed_field(lines, "scenario_revision", "u32")?,
-        run_id: owned_field(lines, "run_id"),
-        build_version: owned_field(lines, "build_version"),
-        source_revision: owned_field(lines, "source_revision"),
-        source_dirty: parse_typed_field(lines, "source_dirty", "bool")?,
-        protocol_version: parse_typed_field(lines, "protocol_version", "u16")?,
-        registry_fingerprint: parse_typed_field(lines, "registry_fingerprint", "u64")?,
-        content_fingerprint: parse_typed_field(lines, "content_fingerprint", "u64")?,
-        mode: owned_field(lines, "mode"),
-        rules_profile: owned_field(lines, "rules_profile"),
-        network_profile: owned_field(lines, "network_profile"),
-        render_profile: owned_field(lines, "render_profile"),
-        seed: parse_typed_field(lines, "seed", "u64")?,
-        participants,
-        scripted_action_count: parse_typed_field(lines, "scripted_actions", "u32")?,
-        checkpoint_count: parse_typed_field(lines, "checkpoints", "u32")?,
-    };
+    let manifest = parse_run_manifest(lines, schema)?;
     let report = CloseoutReportV1 {
         manifest,
         end_reason: owned_field(lines, "end_reason"),
@@ -770,6 +982,7 @@ pub fn parse_closeout_report(lines: &[(&str, &str)]) -> Result<CloseoutReportV1,
         channel_messages_sent: parse_typed_field(lines, "channel_messages_sent", "u64")?,
         channel_messages_received: parse_typed_field(lines, "channel_messages_received", "u64")?,
         checkpoint_digest: parse_typed_field(lines, "checkpoint_digest", "u64")?,
+        checkpoints_observed: parse_typed_field(lines, "checkpoints_observed", "u32")?,
         first_divergence: match parse_report_field(lines, "first_divergence")
             .expect("presence was checked")
         {
@@ -785,6 +998,39 @@ pub fn parse_closeout_report(lines: &[(&str, &str)]) -> Result<CloseoutReportV1,
         .validate()
         .map_err(|error| format!("reconstructed report failed validation: {error}"))?;
     Ok(report)
+}
+
+/// Reconstruct the run manifest from already-presence-checked report lines: the bounded
+/// participant rows plus every identity, fingerprint, and scenario-declaration field.
+fn parse_run_manifest(lines: &[(&str, &str)], schema: u16) -> Result<RunManifestV1, String> {
+    let declared_participants = parse_typed_field::<u32>(lines, "participants", "u32")? as usize;
+    let mut participants = Vec::with_capacity(declared_participants);
+    for index in 0..declared_participants {
+        participants.push(ManifestParticipant {
+            player_id: parse_typed_field(lines, &format!("participant_{index}_player_id"), "u64")?,
+            build_identity: owned_field(lines, &format!("participant_{index}_build")),
+        });
+    }
+    Ok(RunManifestV1 {
+        schema_version: schema,
+        scenario_id: owned_field(lines, "scenario_id"),
+        scenario_revision: parse_typed_field(lines, "scenario_revision", "u32")?,
+        run_id: owned_field(lines, "run_id"),
+        build_version: owned_field(lines, "build_version"),
+        source_revision: owned_field(lines, "source_revision"),
+        source_dirty: parse_typed_field(lines, "source_dirty", "bool")?,
+        protocol_version: parse_typed_field(lines, "protocol_version", "u16")?,
+        registry_fingerprint: parse_typed_field(lines, "registry_fingerprint", "u64")?,
+        content_fingerprint: parse_typed_field(lines, "content_fingerprint", "u64")?,
+        mode: owned_field(lines, "mode"),
+        rules_profile: owned_field(lines, "rules_profile"),
+        network_profile: owned_field(lines, "network_profile"),
+        render_profile: owned_field(lines, "render_profile"),
+        seed: parse_typed_field(lines, "seed", "u64")?,
+        participants,
+        scripted_action_count: parse_typed_field(lines, "scripted_actions", "u32")?,
+        checkpoint_count: parse_typed_field(lines, "checkpoints", "u32")?,
+    })
 }
 
 /// Validate the `participants=N` count against the contiguous, bounded participant rows.
@@ -827,12 +1073,13 @@ fn validate_report_participant_block(lines: &[(&str, &str)]) -> Result<(), Strin
 }
 
 /// The manifest identity fields one launcher run shares across every endpoint. Source
-/// identity and the canonical participant/build assignment are part of the shared
-/// identity, so a report from another source tree or a different roster cannot satisfy
-/// this run's gate when version and fingerprints happen to match. Network and render
-/// profiles stay per-endpoint (a run may mix native and headless clients), so they are
-/// deliberately excluded from the agreement check.
-const RUN_IDENTITY_FIELDS: [&str; 13] = [
+/// identity, the canonical participant/build assignment, and the declared scenario
+/// contract (scripted actions and expected checkpoints) are part of the shared identity,
+/// so a report from another source tree, a different roster, or a diverging scenario
+/// declaration cannot satisfy this run's gate when version and fingerprints happen to
+/// match. Network and render profiles stay per-endpoint (a run may mix native and
+/// headless clients), so they are deliberately excluded from the agreement check.
+const RUN_IDENTITY_FIELDS: [&str; 15] = [
     "scenario_id",
     "scenario_revision",
     "run_id",
@@ -846,6 +1093,8 @@ const RUN_IDENTITY_FIELDS: [&str; 13] = [
     "rules_profile",
     "seed",
     "participants",
+    "scripted_actions",
+    "checkpoints",
 ];
 
 /// Render one manifest's shared run identity as `(field, value)` pairs for comparison.
@@ -874,6 +1123,8 @@ fn run_identity_pairs(manifest: &RunManifestV1) -> Vec<(&'static str, String)> {
                     })
                     .collect::<Vec<_>>()
                     .join(";"),
+                "scripted_actions" => manifest.scripted_action_count.to_string(),
+                "checkpoints" => manifest.checkpoint_count.to_string(),
                 _ => unreachable!("the field list is closed"),
             };
             (*field, value)
@@ -919,19 +1170,24 @@ fn enforce_closeout_terminal_gate(
 /// Validate a finished closeout-report directory for one launcher run: exactly one report
 /// per configured endpoint (`server.closeout` plus `client-1..N.closeout`), every report
 /// reconstructing and validating as the current schema, one shared run identity (source
-/// revision, seed, and the canonical participant/build assignment included) across
-/// endpoints with at least one observed participant row per endpoint, every endpoint
-/// exiting clean with zero dropped messages, rejections, errors, and divergence, and one
-/// checkpoint digest across endpoints that carries real evidence exactly when
-/// `expect_checkpoint_evidence` says the run profile records checkpoints (combat-assert
-/// runs do; movement, terrain, and match profiles do not). Verification launchers reach
-/// this through `brawler-server validate-closeout` so the terminal gate and the report
-/// writer share a single schema definition instead of a launcher-side subset. Returns the
-/// number of validated reports.
+/// revision, seed, the canonical participant/build assignment, and the declared scenario
+/// contract included) across endpoints with at least one observed participant row per
+/// endpoint, every endpoint exiting clean with zero dropped messages, rejections, errors,
+/// and divergence, and one checkpoint digest across endpoints that carries real evidence
+/// exactly when `expect_checkpoint_evidence` says the run profile records checkpoints
+/// (combat-assert runs do; movement, terrain, and match profiles do not). When
+/// `declared_checkpoint_requirement` carries the asserted preset's required checkpoint
+/// count, every report's declared `checkpoint_count` must equal it and its observed
+/// checkpoints must cover it, so a launcher declaration that drifted from the preset
+/// fails the gate instead of being overwritten by observation. Verification launchers
+/// reach this through `brawler-server validate-closeout` so the terminal gate and the
+/// report writer share a single schema definition instead of a launcher-side subset.
+/// Returns the number of validated reports.
 pub fn validate_closeout_directory(
     directory: &std::path::Path,
     client_count: u32,
     expect_checkpoint_evidence: bool,
+    declared_checkpoint_requirement: Option<u32>,
 ) -> Result<usize, String> {
     if client_count == 0 || client_count > 8 {
         return Err(format!(
@@ -1000,6 +1256,9 @@ pub fn validate_closeout_directory(
                 path.display()
             ));
         }
+        if let Some(required) = declared_checkpoint_requirement {
+            enforce_declared_checkpoint_requirement(&report, &path, required)?;
+        }
         digests.push(report.checkpoint_digest);
     }
     if digests.iter().any(|digest| digest != &digests[0]) {
@@ -1013,6 +1272,34 @@ pub fn validate_closeout_directory(
         ));
     }
     Ok(expected.len())
+}
+
+/// Enforce one report's declared scenario contract against the asserted preset's
+/// requirement: the declaration must equal the requirement, and observed evidence must
+/// cover it. Observed may exceed the requirement when the roster fights mixed presets;
+/// it must never fall short of the scenario's declared contract.
+fn enforce_declared_checkpoint_requirement(
+    report: &CloseoutReportV1,
+    path: &std::path::Path,
+    required: u32,
+) -> Result<(), String> {
+    if report.manifest.checkpoint_count != required {
+        return Err(format!(
+            "{}: declared checkpoints {} diverge from the asserted preset's required {}",
+            path.display(),
+            report.manifest.checkpoint_count,
+            required
+        ));
+    }
+    if report.checkpoints_observed < required {
+        return Err(format!(
+            "{}: observed {} of the {} checkpoints the scenario declares",
+            path.display(),
+            report.checkpoints_observed,
+            required
+        ));
+    }
+    Ok(())
 }
 
 /// FNV-1a digest over ordered checkpoint values; stable across runs and platforms.

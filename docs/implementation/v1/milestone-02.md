@@ -6,11 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | User playtest |
+| Status | Complete (2026-08-18) |
 | Specification validation | User requested implementation directly |
 | Implementation | Complete |
 | Verification | Complete |
-| User validation/playtest | Pending handoff |
+| User validation/playtest | Closed by the final v1 basic playtest; no connection/lifecycle blocker reported |
 
 Update this table and the roadmap together whenever the milestone changes phase.
 
@@ -505,8 +505,8 @@ The launcher must follow Milestone 01's corrected supervision rules and must not
   execution, explicit server readiness, and propagated exit statuses.
 - [x] Document individual and combined locked commands plus expected logs/outcomes.
 - [x] Add locked CI checks for network-test and retain isolated client/server lint/test/build lanes.
-- [x] Record exact automated, UDP, and process evidence; interactive user evidence remains pending
-  handoff rather than being inferred from automation.
+- [x] Record exact automated, UDP, and process evidence; final basic user testing was accepted on
+  2026-08-18 without inferring detailed ergonomics evidence from automation.
 
 ## Test plan
 
@@ -635,7 +635,7 @@ No gameplay controls or fighter visuals are expected in this milestone.
 | R5 | `spawn_slot: u16` imposed an unintended session cap. | Implemented | Use the monotonic `u64` player ID directly as placeholder slot state. | `src/protocol.rs`, `src/server.rs` |
 | R6 | Bind failure could leave a server process alive while the smoke clients joined a different pre-existing server. | Implemented | Require a `Started` + `Linked` readiness sentinel before launching clients; fail startup and cleanly supervise the failed child. | `src/server.rs`, `scripts/network.sh` |
 | R7 | A clean server exit or late AppExit producer could bypass smoke failure or Lightyear shutdown. | Implemented | Map premature clean server exit to status 1 and run AppExit forwarding in `Last` after `Update` producers, with regression tests. | `scripts/network.sh`, `src/client.rs`, `src/server.rs` |
-| — | Awaiting interactive Milestone 02 smoke feedback | Pending | Automated and process verification are complete; window behavior and operator ergonomics still need user observation. | User playtest handoff below |
+| F8 | Final v1 basic playtest was okay; detailed window/operator polish remains desirable before release. | Accepted / deferred | No M02 connection or lifecycle blocker was reported. Detailed ergonomics move to `POST-V1-RELEASE-POLISH`. | [v1 roadmap](./roadmap.md) |
 
 ## Learn from errors
 
@@ -688,6 +688,6 @@ Completed on 2026-08-13:
 - [x] Crossbeam deterministic tests and real UDP/process tests each provide evidence for their own
   layer.
 - [x] The dedicated server remains headless by dependency graph and runtime behavior.
-- [ ] User smoke-test feedback is incorporated or triaged; awaiting the interactive handoff.
+- [x] User smoke-test feedback is incorporated or triaged; final basic v1 testing reported no M02 blocker.
 - [x] Learn-from-errors review is complete and reusable lessons are captured where justified.
 - [x] Roadmap status and current milestone are updated.

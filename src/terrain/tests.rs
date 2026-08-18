@@ -606,6 +606,98 @@ mod authority_tests {
     }
 
     #[test]
+    fn duplicate_brush_facts_count_and_evaluate_once() {
+        let mut app = terrain_app();
+        let duplicate = fact(1, (0.0, 0.0), 48.0);
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .extend([duplicate.clone(), duplicate]);
+        app.update();
+        let telemetry = app
+            .world()
+            .resource::<super::super::telemetry::TerrainTelemetry>();
+        assert_eq!(telemetry.aggregates.requested_brushes, 1);
+        assert_eq!(telemetry.aggregates.applied_brushes, 1);
+        assert_eq!(telemetry.aggregates.no_op_brushes, 0);
+        assert_eq!(telemetry.aggregates.rejected_brushes, 0);
+    }
+
+    #[test]
+    fn deferred_brushes_are_requested_once_and_apply_on_later_ticks() {
+        let mut app = terrain_app();
+        app.world_mut()
+            .insert_resource(crate::terrain::authority::TerrainAdmissionCapacity(1));
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fact(1, (0.0, 0.0), 48.0));
+        app.world_mut()
+            .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .push(fact(2, (40.0, 40.0), 48.0));
+        app.update();
+        {
+            let world = app.world_mut();
+            let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+            assert_eq!(
+                telemetry.aggregates.requested_brushes, 2,
+                "both submissions count exactly once"
+            );
+            assert_eq!(telemetry.aggregates.applied_brushes, 1);
+            assert_eq!(telemetry.aggregates.deferred_brushes, 1);
+            assert_eq!(
+                world.resource::<PendingTerrainBrushes>().queue.len(),
+                1,
+                "the excess whole brush defers"
+            );
+        }
+        // The deferred brush re-enters the next batch without being counted as a new
+        // request, so deferral stays a lifecycle event inside the submission count.
+        app.update();
+        let world = app.world_mut();
+        let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+        assert_eq!(
+            telemetry.aggregates.requested_brushes, 2,
+            "re-admission does not recount the deferred brush"
+        );
+        assert_eq!(telemetry.aggregates.applied_brushes, 2);
+        assert_eq!(telemetry.aggregates.deferred_brushes, 1);
+        assert!(world.resource::<PendingTerrainBrushes>().queue.is_empty());
+    }
+
+    #[test]
+    fn queue_full_rejection_is_terminal_inside_the_submission_count() {
+        let mut app = terrain_app();
+        app.world_mut()
+            .insert_resource(crate::terrain::authority::TerrainAdmissionCapacity(1));
+        let overflow = MAX_PENDING_TERRAIN_BRUSHES + 2;
+        for attack in 1..=overflow {
+            app.world_mut()
+                .resource_mut::<crate::combat::CombatWorldEffectFacts>()
+                .0
+                .push(fact(attack as u64, (0.0, 0.0), 48.0));
+        }
+        app.update();
+        let world = app.world_mut();
+        let telemetry = world.resource::<super::super::telemetry::TerrainTelemetry>();
+        assert_eq!(
+            telemetry.aggregates.requested_brushes, overflow as u64,
+            "every submitted brush is counted, including the rejected one"
+        );
+        assert_eq!(telemetry.aggregates.applied_brushes, 1);
+        assert_eq!(
+            telemetry.aggregates.deferred_brushes, MAX_PENDING_TERRAIN_BRUSHES as u64,
+            "the pending queue fills with whole deferred brushes"
+        );
+        assert_eq!(telemetry.aggregates.rejected_brushes, 1);
+        assert_eq!(
+            world.resource::<PendingTerrainBrushes>().queue.len(),
+            MAX_PENDING_TERRAIN_BRUSHES
+        );
+    }
+
+    #[test]
     fn revision_exhaustion_rejects_brushes_without_mutation() {
         let mut app = terrain_app();
         // Fabricate an exhausted root: unreachable in play, but the invariant must hold.

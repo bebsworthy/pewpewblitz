@@ -183,9 +183,15 @@ impl TerrainTelemetry {
         self.records.push_back(record);
     }
 
-    /// Observe one brush request before admission.
-    pub fn record_request(&mut self) {
-        self.aggregates.requested_brushes = self.aggregates.requested_brushes.saturating_add(1);
+    /// Observe `count` unique brushes submitted for evaluation after epoch filtering and
+    /// deduplication. Deferred and collider-refused facts re-enter later batches without
+    /// being recounted, so `requested_brushes` stays the unique-submission denominator
+    /// for the terminal outcome buckets.
+    pub fn record_requests(&mut self, count: usize) {
+        self.aggregates.requested_brushes = self
+            .aggregates
+            .requested_brushes
+            .saturating_add(count as u64);
     }
 
     /// Observe the per-tick maxima of admitted brushes and collider rebuilds.

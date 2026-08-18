@@ -13,10 +13,10 @@
 | Implementation | Complete from starting commit `7a7a2baa0dc6aaa8bcacf61155e4d75727f397db`, delivered as `5cb219f` and remediated from the 2026-08-16 and 2026-08-17 implementation reviews as follow-up fix commits; all six slices delivered with per-slice evidence below |
 | Verification | Complete 2026-08-16 and re-run after all three review remediations: canonical gate, both-mode terrain process profiles under local/typical/adverse conditions, and windowed visual capture green (see Slice 6 evidence); pre-existing `network-combat-profiles` failure recorded in the backlog |
 
-Milestone 09 is complete, but Milestones 01–03, 05, and 08 retain their recorded user or hardware
-gates. M10 implementation may build on the accepted M09 codebase without rewriting those historical
-statuses. Before entering `Implementing`, record the exact starting commit, reconcile any newly
-accepted overlapping feedback, and rerun the complete automated baseline.
+At M10's start, Milestone 09 was complete while Milestones 01–03, 05, and 08 retained recorded user
+or hardware gates. M10 therefore built on the accepted M09 codebase without rewriting those
+historical statuses. M11 later reconciled and closed those owning milestones from the final basic
+v1 acceptance while explicitly deferring release-quality polish.
 
 ### Slice 0 evidence (2026-08-16)
 

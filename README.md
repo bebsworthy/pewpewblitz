@@ -1,8 +1,16 @@
 # Brawler
 
-Brawler is a server-authoritative top-down arena shooter. The current v1 slice includes typed weapon
-and map recipes, four weapon profiles, a server-resolved Wipeout arena, replicated match/map/combat
-state, and a client-only presentation shell over the Lightyear Netcode/UDP connection.
+Brawler is a server-authoritative top-down arena shooter built around player-authored fighter builds.
+V1 completed on 2026-08-18 as a gameplay MVP: Wipeout and Hot Zone, typed weapon/build/map recipes,
+four weapon profiles, bounded passives and ultimates, generated arenas, quantized destructible
+terrain, replicated match/map/combat state, local input settings, and client-only presentation over
+Lightyear Netcode/UDP.
+
+V1 completion is not a release-ready claim. Controller feel, audio, HUD/readability, balance, match
+pacing, and related tuning remain explicit pre-release polish. V2 is now in M01 research for a
+single-public-port routed supervisor with isolated lobby and match workers; production implementation
+does not begin until the M01 specification is validated. See the [v2 roadmap](docs/implementation/v2/roadmap.md),
+[active milestone](docs/implementation/v2/milestone-01.md), and [completed v1 roadmap](docs/implementation/v1/roadmap.md).
 
 ## Toolchain
 
@@ -18,7 +26,7 @@ just
 
 `just` lists the development recipes. Use `just run` for one server and one client, `just network`
 for one server and two distinguishable client windows, `just network-combat` for two windows with
-client 1 automatically engaging its opponent, `just network-controller` for a synthetic controller-path
+client 1 automatically firing at the test-only neutral dummy, `just network-controller` for a synthetic controller-path
 window smoke, or `just network-smoke` for a bounded headless process check.
 `just verify` runs the automated development-cycle gates, and `just user-test`
 runs verification first and then starts the interactive end-of-cycle scenario. Close either window
@@ -47,6 +55,11 @@ just network-combat-30
 just network-combat-60
 just network-combat-high
 just network-smoke
+just network-terrain
+just network-terrain-hot-zone
+just closeout-wipeout
+just closeout-hot-zone
+just prediction-comparison
 just help
 just check
 just build
@@ -57,6 +70,12 @@ just user-test
 just docs
 just clean
 ```
+
+The current `just run`, `just network`, and `scripts/network.sh` paths use the completed v1
+direct-UDP topology. During v2 M01 they are the reproducible comparison baseline, not an
+implementation of the proposed routed supervisor/worker architecture. M01 will introduce and
+document routed commands only after specification validation; the direct path remains available
+under an explicit baseline/compatibility name until its roadmap retirement gate is met.
 
 The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. The client accepts
 `--server`, required `--client-id`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
@@ -92,8 +111,9 @@ remains running when one windowed client closes so the remaining roster can be o
 that client with the same individual command and `--client-id`; set
 `BRAWLER_NETWORK_TIMEOUT_SECONDS` to add a bounded windowed-session deadline when needed.
 
-Milestones 03–08 provide movement, combat, the first authored arena, a complete Wipeout loop, and
-bounded brawler builds. At build selection, use Left/Right or A/D to choose a preset and Space/Enter
+The completed v1 milestones provide movement, combat, authored arenas, Wipeout and Hot Zone,
+bounded brawler builds/abilities, destructible terrain, and closeout diagnostics. At build selection,
+use Left/Right or A/D to choose a preset and Space/Enter
 to confirm; on a controller use the D-pad or left stick and South. On Custom, Up/Down selects one of
 six fields and Left/Right changes its value; Escape or East returns to Runner. In Waiting,
 Space/Enter or South readies the participant, and the same input
@@ -113,10 +133,10 @@ The arena is reconstructed from the authoritative replicated map snapshot. Its p
 block fighters and weapon delivery, while client sprites, audio, and HUD state remain presentation-only.
 For a reproducible single-shooter visual combat pass, run `just network-combat`; it starts two
 windowed clients, with client 1 using `--combat-demo` and client 2 idle. The demo uses the same native
-input buffer while continuously aiming at and firing on the opposing fighter. To launch the processes
+input buffer while continuously aiming at and firing on the neutral dummy. To launch the processes
 manually, start `brawler-server`, then run one client with `--client-id 1 --combat-demo` and the
 second without `--combat-demo`; enabling the flag on both clients intentionally produces one
-projectile stream from each player toward the dummy.
+projectile stream from each player toward the neutral dummy.
 
 Repeat the same scenario at the milestone's render conditions with `just network-combat-30`,
 `just network-combat-60`, and `just network-combat-high`. These select
@@ -136,3 +156,5 @@ Do not use `--all-features` as a supported application build: client and server 
 Authoritative authored gameplay data lives under `content/v1/` and is compiled into both roles.
 Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
 recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.
+The active implementation scope is always the current milestone file; deferred release polish must
+remain visible in the roadmap rather than being folded into unrelated v2 infrastructure work.

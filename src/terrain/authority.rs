@@ -233,7 +233,8 @@ pub(crate) fn register_terrain_schedule(app: &mut App) {
 }
 
 /// Merge deferred and new world-effect facts into one deterministic sorted batch, dropping
-/// any fact that predates the current match generation's brush epoch.
+/// any fact that predates the current match generation's brush epoch and counting each
+/// newly submitted brush once as a terrain request.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
@@ -246,16 +247,28 @@ fn collect_terrain_brushes(
     mut telemetry: ResMut<TerrainTelemetry>,
 ) {
     let mut brushes = std::mem::take(&mut batch.brushes);
-    brushes.append(&mut facts.0);
     brushes.extend(deferred.queue.drain(..).map(|pending| pending.fact));
-    let before = brushes.len();
+    let mut submitted = std::mem::take(&mut facts.0);
+    let before = brushes.len() + submitted.len();
     brushes.retain(|fact| fact.tick >= epoch.0);
+    submitted.retain(|fact| fact.tick >= epoch.0);
     telemetry.aggregates.stale_generation_brushes = telemetry
         .aggregates
         .stale_generation_brushes
-        .saturating_add((before - brushes.len()) as u64);
+        .saturating_add((before - brushes.len() - submitted.len()) as u64);
+
+    // Requests are counted once per unique first submission. Existing/deferred facts
+    // win duplicate keys because they were counted on an earlier tick; duplicates inside
+    // this tick's incoming facts likewise contribute one request and one evaluation.
     brushes.sort_by(brush_order);
     brushes.dedup_by(|left, right| brush_key(left) == brush_key(right));
+    let existing_keys: BTreeSet<_> = brushes.iter().map(brush_key).collect();
+    submitted.sort_by(brush_order);
+    submitted.dedup_by(|left, right| brush_key(left) == brush_key(right));
+    submitted.retain(|fact| !existing_keys.contains(&brush_key(fact)));
+    telemetry.record_requests(submitted.len());
+    brushes.append(&mut submitted);
+    brushes.sort_by(brush_order);
     batch.brushes = brushes;
 }
 
@@ -315,10 +328,9 @@ fn apply_terrain_brushes(
     let mut scratch: BTreeMap<TerrainChunkId, TerrainBits> = BTreeMap::new();
     let mut previous: BTreeMap<TerrainChunkId, TerrainBits> = BTreeMap::new();
     let mut revision = root.revision;
-    let mut staged_events = Vec::new();
-    let mut pending_records = Vec::new();
+    let (mut staged_events, mut pending_records, mut retry_facts) =
+        (Vec::new(), Vec::new(), Vec::new());
     for fact in &admitted {
-        mutation.telemetry.record_request();
         let WorldEffectDefinition::DestroyTerrain { radius } = fact.effect;
         let Some(brush) = terrain_grid::quantize_brush(fact.position.as_vec2(), radius) else {
             mutation.telemetry.record(no_op_record(
@@ -378,6 +390,7 @@ fn apply_terrain_brushes(
             },
             brush_dirty,
         });
+        retry_facts.push(fact.clone());
         staged_events.push(event);
     }
 
@@ -395,7 +408,7 @@ fn apply_terrain_brushes(
     *mutation.transaction = TerrainTransaction {
         changed,
         changed_masks,
-        facts: admitted,
+        facts: retry_facts,
         staged_events,
         pending_records,
         revision,

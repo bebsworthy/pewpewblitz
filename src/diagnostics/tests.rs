@@ -157,6 +157,10 @@ fn report_line_validation_rejects_duplicates_missing_and_unknown_schemas() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the test mutates one report fixture through the full semantic probe sequence; its length is the probe sequence itself"
+)]
 fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
     // The reader reconstructs the report and runs the writer's own validation, so a
     // field-complete file whose values violate the report contract is still rejected.
@@ -229,6 +233,10 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
     let mut weapon = ghost_match;
     weapon.gameplay.matches_completed = 1;
     weapon.gameplay.match_result = Some("draw".to_string());
+    weapon.gameplay.mode_definition_id = Some(crate::map::WIPEOUT_MODE_DEFINITION.0);
+    weapon.gameplay.wipeout_final_scores = Some([6, 6]);
+    weapon.gameplay.wipeout_target_score = Some(10);
+    weapon.gameplay.wipeout_score_margin = Some(0);
     weapon.gameplay.attacks_with_hostile_contact = 5;
     weapon.gameplay.accepted_attacks = 4;
     let weapon_contents = weapon.to_report_lines().join("\n");
@@ -244,9 +252,90 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
     terrain.gameplay.terrain_applied_brushes = 3;
     let terrain_contents = terrain.to_report_lines().join("\n");
     let pairs = split_report_lines(&terrain_contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_err_and(|error| {
+        error.contains("terminal brush outcomes exceed the submitted brushes")
+    }));
+
+    // Deferral is a lifecycle event, not a terminal outcome: a brush deferred once and
+    // later applied must still validate against its single submission.
+    let mut deferred = terrain;
+    deferred.gameplay.terrain_requested_brushes = 1;
+    deferred.gameplay.terrain_applied_brushes = 1;
+    deferred.gameplay.terrain_deferred_brushes = 1;
+    let deferred_contents = deferred.to_report_lines().join("\n");
+    let pairs = split_report_lines(&deferred_contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_ok());
+
+    let mut duplicate_terminal = deferred.clone();
+    duplicate_terminal.gameplay.terrain_no_op_brushes = 1;
+    let contents = duplicate_terminal.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_err_and(|error| {
+        error.contains("terminal brush outcomes exceed the submitted brushes")
+    }));
+
+    // A completed match must carry exactly one complete, consistent mode summary.
+    let mut mode = deferred;
+    mode.gameplay.wipeout_final_scores = None;
+    mode.gameplay.wipeout_target_score = None;
+    mode.gameplay.wipeout_score_margin = None;
+    mode.gameplay.mode_definition_id = Some(999);
+    let contents = mode.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_err_and(|error| {
+        error.contains("mode_definition_id is not a supported match mode")
+    }));
+
+    mode.gameplay.mode_definition_id = Some(crate::map::WIPEOUT_MODE_DEFINITION.0);
+    let contents = mode.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
     assert!(
         parse_closeout_report(&pairs)
-            .is_err_and(|error| error.contains("outcomes exceed the requested brushes"))
+            .is_err_and(|error| error.contains("wipeout mode aggregates are incomplete"))
+    );
+
+    mode.gameplay.wipeout_final_scores = Some([10, 2]);
+    mode.gameplay.wipeout_target_score = Some(10);
+    mode.gameplay.wipeout_score_margin = Some(3);
+    let contents = mode.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("score margin does not match the final scores"))
+    );
+
+    mode.gameplay.wipeout_score_margin = Some(8);
+    let contents = mode.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_ok());
+
+    mode.gameplay.mode_definition_id = Some(crate::map::HOT_ZONE_MODE_DEFINITION.0);
+    mode.gameplay.hot_zone_final_progress = Some([30, 12]);
+    mode.gameplay.hot_zone_target_progress_ticks = Some(30);
+    mode.gameplay.hot_zone_controlled_ticks = Some([120, 45]);
+    mode.gameplay.hot_zone_contested_ticks = Some(35);
+    mode.gameplay.hot_zone_control_gained_transitions = Some([4, 2]);
+    mode.gameplay.hot_zone_longest_control_ticks = Some([80, 30]);
+    let contents = mode.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("hot-zone mode aggregates carry wipeout fields"))
+    );
+
+    mode.gameplay.wipeout_final_scores = None;
+    mode.gameplay.wipeout_target_score = None;
+    mode.gameplay.wipeout_score_margin = None;
+    let contents = mode.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_ok());
+
+    mode.gameplay.hot_zone_final_progress = Some([31, 2]);
+    let contents = mode.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("hot-zone final progress exceeds the target"))
     );
 }
 
@@ -993,7 +1082,7 @@ fn manifest_participants_are_cached_while_fighters_live_and_survive_shutdown() {
 /// The consolidated report's gameplay block comes from the process's own bounded
 /// telemetry summaries: match/mode, weapon, and ability aggregates from the latest match
 /// summary, build selections from the build telemetry, and terrain aggregates from the
-/// terrain telemetry.
+/// terrain telemetry. Process-lifetime totals include records the bounded queues evicted.
 #[cfg(feature = "server")]
 #[test]
 #[allow(
@@ -1011,7 +1100,7 @@ fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
         TeamId, WeaponPresetId, WeaponRecipeFingerprint, WeaponTelemetry, WeaponTelemetryAggregate,
         WeaponTelemetryKey,
     };
-    use crate::map::ModeDefinitionId;
+    use crate::map::WIPEOUT_MODE_DEFINITION;
     use crate::matchplay::{MatchId, MatchResult, MatchTelemetry, ModeSummary, WipeoutSummary};
     use crate::protocol::NetworkEntityId;
     use crate::terrain::telemetry::TerrainTelemetry;
@@ -1034,7 +1123,7 @@ fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
     );
     matches.complete_with_mode(
         250,
-        ModeDefinitionId(1),
+        WIPEOUT_MODE_DEFINITION,
         ModeSummary::Wipeout(WipeoutSummary {
             final_scores: [10, 2],
             target_score: 10,
@@ -1045,6 +1134,9 @@ fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
         &weapons,
         &AbilityTelemetry::default(),
     );
+    // One summary was already evicted by the bound: the process-lifetime total still
+    // counts it, while consolidation reads the retained tail.
+    matches.dropped_summaries = 1;
 
     let mut builds = BuildTelemetry::default();
     for request_id in 1..=2 {
@@ -1063,10 +1155,13 @@ fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
             passive_ids: [PassiveDefinitionId(1), PassiveDefinitionId(6)],
         });
     }
+    // Five earlier selection records were evicted by the bound.
+    builds.dropped_records = 5;
 
     let mut terrain = TerrainTelemetry::default();
     terrain.aggregates.requested_brushes = 3;
     terrain.aggregates.applied_brushes = 2;
+    terrain.aggregates.no_op_brushes = 1;
     terrain.aggregates.deferred_brushes = 1;
     terrain.aggregates.cells_erased = 48;
 
@@ -1081,15 +1176,22 @@ fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
     let GameplayAggregatesV1 {
         matches_completed,
         match_result,
+        mode_definition_id,
+        wipeout_final_scores,
+        wipeout_target_score,
+        wipeout_score_margin,
+        hot_zone_controlled_ticks,
         match_active_ticks,
         team_a_defeats,
         build_selections,
+        build_dropped_records,
         accepted_attacks,
         emitted_deliveries,
         attacks_with_hostile_contact,
         hostile_damage,
         terrain_requested_brushes,
         terrain_applied_brushes,
+        terrain_no_op_brushes,
         terrain_deferred_brushes,
         terrain_cells_erased,
         ..
@@ -1102,9 +1204,26 @@ fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
     assert_eq!(match_result, "victory:0");
     assert_eq!(
         (matches_completed, match_active_ticks, team_a_defeats),
-        (1, 150, 0)
+        (2, 150, 0),
+        "one retained summary plus one evicted summary still completes two matches"
     );
-    assert_eq!(build_selections, 2);
+    assert_eq!(
+        mode_definition_id,
+        Some(WIPEOUT_MODE_DEFINITION.0),
+        "the completed match carries its mode identity"
+    );
+    assert_eq!(wipeout_final_scores, Some([10, 2]));
+    assert_eq!(wipeout_target_score, Some(10));
+    assert_eq!(wipeout_score_margin, Some(8));
+    assert_eq!(
+        hot_zone_controlled_ticks, None,
+        "a Wipeout match carries no Hot Zone fields"
+    );
+    assert_eq!(
+        (build_selections, build_dropped_records),
+        (7, 5),
+        "two retained selections plus five evicted records report seven"
+    );
     assert_eq!(
         (
             accepted_attacks,
@@ -1118,11 +1237,84 @@ fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
         (
             terrain_requested_brushes,
             terrain_applied_brushes,
+            terrain_no_op_brushes,
             terrain_deferred_brushes
         ),
-        (3, 2, 1)
+        (3, 2, 1, 1)
     );
     assert_eq!(terrain_cells_erased, 48);
+}
+
+/// Hot Zone closeouts carry the mode identity plus the terminal objective state the
+/// match telemetry owns, so objective behavior stays evidenced without a full
+/// mode summary dump.
+#[cfg(feature = "server")]
+#[test]
+fn gameplay_aggregates_consolidate_hot_zone_terminal_state() {
+    use super::process::ProcessDiagnosticsState;
+    use crate::abilities::AbilityTelemetry;
+    use crate::combat::{TeamId, WeaponTelemetry};
+    use crate::map::HOT_ZONE_MODE_DEFINITION;
+    use crate::matchplay::{HotZoneSummary, MatchId, MatchResult, MatchTelemetry, ModeSummary};
+
+    let mut matches = MatchTelemetry::default();
+    matches.begin(MatchId(3), 40);
+    matches.complete_with_mode(
+        400,
+        HOT_ZONE_MODE_DEFINITION,
+        ModeSummary::HotZone(HotZoneSummary {
+            final_progress_ticks: [30, 12],
+            target_progress_ticks: 30,
+            first_entry_tick_by_team: [Some(60), Some(90)],
+            first_progress_tick_by_team: [Some(75), Some(110)],
+            controlled_ticks_by_team: [120, 45],
+            occupant_fighter_ticks_by_team: [200, 180],
+            empty_ticks: 20,
+            contested_ticks: 35,
+            control_gained_transitions_by_team: [4, 2],
+            longest_consecutive_control_ticks_by_team: [80, 30],
+            near_zone_damage_suffered_by_team: [50, 70],
+            near_zone_defeats_suffered_by_team: [1, 2],
+        }),
+        MatchResult::TeamVictory { team: TeamId(0) },
+        8,
+        &WeaponTelemetry::default(),
+        &AbilityTelemetry::default(),
+    );
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ProcessDiagnosticsState>()
+        .insert_resource(matches)
+        .add_systems(Update, process::observe_gameplay_aggregates);
+    app.update();
+    let gameplay = app
+        .world()
+        .resource::<ProcessDiagnosticsState>()
+        .gameplay
+        .clone();
+    assert_eq!(
+        gameplay.mode_definition_id,
+        Some(HOT_ZONE_MODE_DEFINITION.0)
+    );
+    assert_eq!(gameplay.hot_zone_final_progress, Some([30, 12]));
+    assert_eq!(gameplay.hot_zone_target_progress_ticks, Some(30));
+    assert_eq!(gameplay.hot_zone_controlled_ticks, Some([120, 45]));
+    assert_eq!(gameplay.hot_zone_contested_ticks, Some(35));
+    assert_eq!(gameplay.hot_zone_control_gained_transitions, Some([4, 2]));
+    assert_eq!(gameplay.hot_zone_longest_control_ticks, Some([80, 30]));
+    assert_eq!(gameplay.wipeout_final_scores, None);
+    // The consolidated block round-trips and validates as one report.
+    let report = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        gameplay,
+        ..Default::default()
+    };
+    assert!(report.validate().is_ok());
+    let contents = report.to_report_lines().join("\n");
+    let pairs = split_report_lines(&contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_ok());
 }
 
 #[test]
@@ -1153,7 +1345,10 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     write_report("server.closeout", 42);
     write_report("client-1.closeout", 42);
     write_report("client-2.closeout", 42);
-    assert_eq!(validate_closeout_directory(&directory, 2, true), Ok(3));
+    assert_eq!(
+        validate_closeout_directory(&directory, 2, true, None),
+        Ok(3)
+    );
 
     // A truncated report still parses line-by-line; only the full 48-field schema reader
     // catches it, which is exactly the drift the launcher gate must not allow.
@@ -1170,7 +1365,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
         + "\n";
     std::fs::write(directory.join("client-2.closeout"), truncated).unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error.contains("missing or duplicated required field"))
     );
 
@@ -1178,19 +1373,19 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     let non_numeric = full.replace("fixed_ticks=0", "fixed_ticks=not-a-number");
     std::fs::write(directory.join("client-2.closeout"), non_numeric).unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error.contains("fixed_ticks") && error.contains("is not a u64"))
     );
 
     write_report("client-2.closeout", 43);
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error.contains("digests diverged"))
     );
 
     write_report("client-2.closeout", 0);
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error.contains("checkpoint digest is zero"))
     );
 
@@ -1209,7 +1404,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error.contains("run identity run_id diverged")
                 && error.contains("different-run"))
     );
@@ -1230,7 +1425,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true).is_err_and(|error| error
+        validate_closeout_directory(&directory, 2, true, None).is_err_and(|error| error
             .contains("run identity source_revision diverged")
             && error.contains("deadbee"))
     );
@@ -1251,7 +1446,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error.contains("run identity participants diverged"))
     );
 
@@ -1265,7 +1460,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error.contains("no participant rows"))
     );
 
@@ -1283,7 +1478,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 3, true)
+        validate_closeout_directory(&directory, 3, true, None)
             .is_err_and(|error| error.contains("error_count=1"))
     );
 
@@ -1291,12 +1486,12 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     // once the roster drops back to two.
     write_report("client-3.closeout", 42);
     assert!(
-        validate_closeout_directory(&directory, 2, true)
+        validate_closeout_directory(&directory, 2, true, None)
             .is_err_and(|error| error
                 .contains("expected exactly one closeout report per configured endpoint"))
     );
-    assert!(validate_closeout_directory(&directory, 0, true).is_err());
-    assert!(validate_closeout_directory(&directory, 9, true).is_err());
+    assert!(validate_closeout_directory(&directory, 0, true, None).is_err());
+    assert!(validate_closeout_directory(&directory, 9, true, None).is_err());
 
     // Movement, terrain, and match profiles record no combat checkpoints: their zero
     // digests are the expected evidence, and a nonzero digest is a stale combat report.
@@ -1304,11 +1499,84 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     write_report("client-1.closeout", 0);
     write_report("client-2.closeout", 0);
     write_report("client-3.closeout", 0);
-    assert_eq!(validate_closeout_directory(&directory, 3, false), Ok(4));
+    assert_eq!(
+        validate_closeout_directory(&directory, 3, false, None),
+        Ok(4)
+    );
     write_report("client-3.closeout", 42);
     assert!(
-        validate_closeout_directory(&directory, 3, false)
+        validate_closeout_directory(&directory, 3, false, None)
             .is_err_and(|error| error.contains("checkpoint digest is nonzero"))
+    );
+
+    // Combat-assert gate: the declared scenario contract is checked against the asserted
+    // preset's required checkpoints, and observed evidence must cover the declaration.
+    // Extra observed checkpoints stay legal because mixed-preset rosters can record
+    // checkpoint names beyond one preset's required set.
+    let declared_gate = |checkpoint_count: u32, observed: u32| {
+        for name in [
+            "server.closeout",
+            "client-1.closeout",
+            "client-2.closeout",
+            "client-3.closeout",
+        ] {
+            let mut report = CloseoutReportV1 {
+                manifest: valid_manifest(),
+                end_reason: "completed".to_string(),
+                checkpoint_digest: 42,
+                checkpoints_observed: observed,
+                ..Default::default()
+            };
+            report.manifest.checkpoint_count = checkpoint_count;
+            assert!(report.validate().is_ok());
+            std::fs::write(
+                directory.join(name),
+                report.to_report_lines().join("\n") + "\n",
+            )
+            .expect("report written");
+        }
+    };
+
+    declared_gate(6, 6);
+    assert!(
+        validate_closeout_directory(&directory, 3, true, Some(5))
+            .is_err_and(|error| error.contains("declared checkpoints 6 diverge"))
+    );
+    declared_gate(5, 4);
+    assert!(
+        validate_closeout_directory(&directory, 3, true, Some(5))
+            .is_err_and(|error| error.contains("observed 4 of the 5 checkpoints"))
+    );
+    declared_gate(5, 7);
+    assert_eq!(
+        validate_closeout_directory(&directory, 3, true, Some(5)),
+        Ok(4)
+    );
+    declared_gate(5, 5);
+    assert_eq!(
+        validate_closeout_directory(&directory, 3, true, Some(5)),
+        Ok(4)
+    );
+
+    // One endpoint declaring a different scenario contract breaks shared run identity
+    // before the preset requirement is even consulted.
+    let mut drifted_actions = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        checkpoint_digest: 42,
+        checkpoints_observed: 5,
+        ..Default::default()
+    };
+    drifted_actions.manifest.checkpoint_count = 5;
+    drifted_actions.manifest.scripted_action_count += 1;
+    std::fs::write(
+        directory.join("client-3.closeout"),
+        drifted_actions.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 3, true, Some(5))
+            .is_err_and(|error| error.contains("run identity scripted_actions diverged"))
     );
 
     let _ = std::fs::remove_dir_all(&directory);

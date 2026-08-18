@@ -989,7 +989,7 @@ pub(super) fn checkpoint_latencies(
         .collect()
 }
 
-pub(super) fn required_process_checkpoints(preset_id: WeaponPresetId) -> &'static [&'static str] {
+pub(crate) fn required_process_checkpoints(preset_id: WeaponPresetId) -> &'static [&'static str] {
     match preset_id.0 {
         2 => &["active_scatter_flight", "defeat", "reset"],
         3 => &[

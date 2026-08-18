@@ -9,6 +9,7 @@
 | Architecture | [Multi-process server and single-port UDP/IPC transport](../../14-multiplayer-server-architecture.md) |
 | Status | Researching |
 | Research | Initial topology, current server/harness, and exact Lightyear 0.29 transport-source findings recorded 2026-08-17; the milestone remains in research until framing, IPC backend, route handshake, lobby lifecycle, module boundaries, baselines, thresholds, and the port-range reference cost are resolved |
+| Entry artifacts | Complete 2026-08-18: worker-readiness audit delivered in [V1 M11](../v1/milestone-11.md#v2-worker-readiness-handoff), [direct-UDP baseline](../v1/evidence/v2-baseline/README.md) delivered, and final Slice 7 reconciliation found no v2 blocker |
 | Specification validation | Pending; this research draft does not authorize production implementation |
 | Implementation | Not started |
 | Verification | Not started |
@@ -28,8 +29,9 @@ is no throwaway protocol, fake server architecture, or second gameplay implement
 
 ## V1 M11 entry artifacts
 
-M01 consumes, but does not ask M11 to implement, the worker foundation. Before this specification
-can leave `Researching`, link the completed M11 worker-readiness handoff containing:
+M01 consumes, but does not ask M11 to implement, the worker foundation. The worker-readiness audit
+is recorded in [V1 M11](../v1/milestone-11.md#v2-worker-readiness-handoff), and the reproducible
+[direct-UDP baseline](../v1/evidence/v2-baseline/README.md) is available now. Together they contain:
 
 - the exact dedicated-server composition, executable/feature, startup inputs, endpoint readiness,
   result/report outputs, exit codes, and shutdown sequence;
@@ -37,6 +39,10 @@ can leave `Researching`, link the completed M11 worker-readiness handoff contain
   terminal cleanup assumptions;
 - the reproducible direct-UDP comparison scenario and its cold readiness, idle/loaded resident
   memory, fixed-tick, transport-byte, entity/link, report-size, stop-to-exit, and cleanup evidence.
+
+M11 Slice 7 closed on 2026-08-18 after the user accepted the basic v1 MVP. Its final reconciliation
+confirmed these delivered artifacts and found no blocker to M01 research or specification review;
+release-quality gameplay polish remains a separate pre-release backlog item.
 
 M01 reruns that same gameplay scenario through the routed UDP/IPC path. It owns the comparison,
 numeric overhead thresholds, worker manifest, transport adapter, process lifecycle, and every
@@ -56,6 +62,10 @@ invent or retroactively modify the v1 result.
   focused tests may substitute the backend, but not create a test-only connection architecture;
 - role-specific immutable lobby/match manifests and spawn, ready, heartbeat, stop, result, failure,
   and exit messages over shared framing/supervision machinery;
+- a minimal isolated lobby authority that accepts inner Lightyear/Netcode-authenticated
+  default-route sessions, requests one bounded worker allocation through the M01 transition driver,
+  and delivers supervisor-minted route capabilities; complete game-type advertisement, queueing,
+  formation, results, and requeue remain owned by M03–M06;
 - one production match-worker composition reusing existing `brawler-server` authoritative plugins;
 - deterministic in-memory backend plus one real cross-process IPC backend on macOS;
 - bounded queues, frame limits, malformed-input handling, rate/admission limits, route revocation,
@@ -141,6 +151,11 @@ invent or retroactively modify the v1 result.
 
 ### Process lifecycle and ownership
 
+- What owns the supervisor event loop and scheduling: a plain Rust process, a minimal
+  infrastructure-only Bevy `App`, or another bounded runtime? Identify which threads/tasks poll
+  public UDP, packet IPC, control IPC, child status, timers, and shutdown signals; compare fairness,
+  wake-up behavior, testability, dependency/feature isolation, and cleanup. The choice must not
+  introduce a supervisor gameplay `World` or client/gameplay dependencies.
 - What role-specific manifest, restart/reconciliation, readiness, and shutdown policy does the
   default isolated lobby worker require beyond process supervision and framing shared with match
   workers? Embedding it in the supervisor requires evidence and a return to specification review.
@@ -198,9 +213,12 @@ validation or acquire gameplay authority merely because a focused case avoids an
 
 The match-worker entry evolves the composition currently reached through `src/bin/server.rs` and
 `server::build_app_with_config`; it does not copy the gameplay plugin graph into a second server.
-The v1 direct-UDP executable may remain while v1 compatibility and baseline tests require it, but
-new gameplay composition must be shared and drift-tested. The lobby worker is a distinct role over
-the same supervision/framing foundation, not a mode of the match simulation.
+After the minimum routed transition driver is validated, `network.sh` and `just network` default to
+the routed supervisor path. The v1 direct-UDP executable remains only behind an explicitly named
+compatibility/baseline command while M01 comparisons require it; M09 reviews its removal after the
+final comparison evidence. New gameplay composition must be shared and drift-tested. The lobby
+worker is a distinct role over the same supervision/framing foundation, not a mode of the match
+simulation.
 
 ## Provisional lifecycle
 
@@ -320,6 +338,7 @@ production transports.
 - `docs/13-player-ux.md`
 - `docs/implementation/v1/roadmap.md`
 - `docs/implementation/v1/milestone-11.md`
+- `docs/implementation/v1/evidence/v2-baseline/README.md`
 - `src/server/mod.rs`
 - `tests/network/harness.rs`
 - `/Users/boyd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lightyear_link-0.29.0/src/lib.rs`

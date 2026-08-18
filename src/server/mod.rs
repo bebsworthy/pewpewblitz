@@ -867,7 +867,14 @@ fn exit_after_verification(
     ];
     let any_enabled = checks.iter().any(|(enabled, _)| *enabled);
     let all_done = checks.iter().all(|(enabled, done)| !enabled || *done);
-    if any_enabled && all_done {
+    // Some process profiles intentionally keep clients running after the authoritative
+    // assertion completes so each endpoint can produce its own clean closeout. The
+    // launcher may therefore hold the server until a bounded minimum simulation tick.
+    let minimum_tick = env::var("BRAWLER_SERVER_EXIT_AFTER_VERIFICATION_MIN_TICKS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    if any_enabled && all_done && tick.0 >= minimum_tick {
         info!("brawler server exiting after completed process verification");
         app_exit.write(AppExit::Success);
     }
@@ -997,6 +1004,14 @@ fn install_server_game_mode(app: &mut App) {
                 .add_plugins(crate::matchplay::HotZoneModePlugin);
         }
     }
+}
+
+/// The required scenario checkpoints for one asserted weapon preset. Public for the
+/// `validate-closeout` terminal gate, which re-derives the declared checkpoint count
+/// from the asserted preset so a launcher-side declaration cannot drift silently.
+#[must_use]
+pub fn required_process_checkpoints(preset_id: WeaponPresetId) -> &'static [&'static str] {
+    verification::required_process_checkpoints(preset_id)
 }
 
 /// Common lifecycle rules for one rules profile; deadlines shorten without changing semantics.

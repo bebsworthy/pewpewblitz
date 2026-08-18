@@ -6,13 +6,13 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | User playtest |
+| Status | Complete (2026-08-18) |
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the proposed v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
-| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2), second round (5 findings, 1×P1/4×P2), third round (5 findings, 1×P1/4×P2), fourth round (4 findings, 3×P1/1×P2), and fifth round (5 findings, 3×P1/2×P2) were each remediated in full — see the review-round evidence below |
-| Verification | Green after every slice through `9131095` and after every review-round remediation through the fifth round: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (243), `just test-server` (216), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose schema-2 reports carry the consolidated gameplay aggregates, during-run participant caching with cross-endpoint roster agreement, scenario-derived seed/scripted-action/checkpoint declarations, profile-correct checkpoint evidence (nonzero digests with cross-endpoint agreement on combat-assert runs, zero digests on movement/terrain/match runs), zero drop/error/rejection counters, one shared run identity including source revision and participants, and full typed-value reconstruction through the binaries' own `validate-closeout` reader |
-| User playtest | Handoff delivered 2026-08-17 (see "Slice 7 — supervised playtest handoff"); awaiting physical controller/keyboard, audio, HUD/layout, and pacing observations |
+| Implementation | Slices 0–7 complete; the full clean-tree measurement matrix and `evidence/v2-baseline/` handoff are recorded, all six 2026-08-18 code-review rounds were remediated, and the final basic user playtest/feedback disposition was accepted on 2026-08-18 |
+| Verification | Green after every slice through `9131095` and all six review-round remediations: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (243), `just test-server` (220), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), `git diff --check`, and fresh combat/terrain closeout-instrumented UDP runs whose schema-3 reports pass the binaries' own full typed reader with clean endpoint exits, shared scenario declarations, stable numeric mode identity, declared-versus-observed checkpoint evidence, and terminal terrain accounting |
+| User playtest | Completed 2026-08-18; the user reported basic testing was okay, accepted v1 as a non-release MVP, and deferred improvement/tuning work to the pre-release phase |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
 contained user-owned terrain changes, and additional user-owned documentation, matchplay, terrain,
@@ -745,15 +745,17 @@ Implementation must not begin until the user validates this specification.
   Wipeout and Hot Zone, named/custom builds, terrain, complete HUD states, audio, restart, and
   normal-duration pacing. (Delivered 2026-08-17 with the run path, controls, scenario matrix,
   known limitations, and requested observations — recorded under "Slice 7 — supervised playtest
-  handoff" below; the physical observations themselves remain user-gated.)
-- [ ] Record aspect ratios, devices, profiles, reports, observations, and unavailable checks without
-  claiming human/perceptual evidence from automation.
-- [ ] Triage every feedback item and rerun affected verification.
-- [ ] Update M01–M03, M05, M08, M10, the M07/M09 backlog rows, and the M11 ledger from actual evidence.
-- [ ] Complete learn-from-errors and decide whether any recurring workflow merits a project skill.
-- [ ] Reconcile the proposed v2 architecture with the worker-readiness audit, make the baseline
+  handoff" below; the user later accepted a basic pass and deferred the detailed physical observations.)
+- [x] Record aspect ratios, devices, profiles, reports, observations, and unavailable checks without
+  claiming human/perceptual evidence from automation. (The user reported a basic pass was okay;
+  detailed device/layout/audio/tuning observations were not supplied and are explicitly deferred.)
+- [x] Triage every feedback item and rerun affected verification. (No new v1 correction was
+  requested; the already-green round-six matrix remains the final technical evidence.)
+- [x] Update M01–M03, M05, M08, M10, the M07/M09 backlog rows, and the M11 ledger from actual evidence.
+- [x] Complete learn-from-errors and decide whether any recurring workflow merits a project skill.
+- [x] Reconcile the proposed v2 architecture with the worker-readiness audit, make the baseline
   linkable from v2 M01, and record any discovered blocker without implementing the v2 transport or
-  supervisor.
+  supervisor. (The audit and baseline are linked from v2 M01; no blocker was discovered.)
 
 ## Implementation evidence
 
@@ -946,19 +948,19 @@ Implemented slices 0–6 leave these items open, in milestone order:
    diagnostics-off versus metrics-on overhead comparison, and the recorded direct-UDP single-match
    baseline artifact for the v2 M01 handoff (Slice 6 remainder)~~ (executed from the clean `9131095`
    tree; see the slice 6 measurement evidence and `evidence/v2-baseline/`);
-4. Slice 7 user-gated remainder: the supervised playtest observations, feedback triage,
-   source-milestone status updates from actual evidence, learn-from-errors review, and the final
-   v2 handoff record — all of which require the user's physical controllers, display, and
-   perceptual judgment.
+4. ~~Slice 7 user-gated remainder: supervised playtest, feedback triage, source-milestone updates,
+   learn-from-errors review, and final v2 handoff~~ (closed 2026-08-18: the user accepted the basic
+   v1 MVP pass and explicitly deferred improvement/tuning work until before release).
 
-The closeout ledger rows below therefore remain **pending user evidence**; no earlier milestone's
-status was changed by this pass.
+No M11 implementation work remains. The closeout ledger uses the user's explicit deferral rather
+than treating unreported detailed controller/audio/layout/balance observations as passing evidence.
 
 ### Slice 7 — supervised playtest handoff (delivered 2026-08-17)
 
-Delivered with the milestone status move to `User playtest`; the physical observations, feedback
-triage, source-milestone updates, learn-from-errors review, and explicit v1 acceptance remain
-user-gated. Run path (binaries build through the recipes; Ctrl-C terminates the real processes):
+Delivered with the milestone status move to `User playtest`. The user accepted a basic pass on
+2026-08-18; feedback triage, source-milestone updates, learning review, and explicit v1 acceptance
+are now complete, while detailed physical observations are deferred. Run path (binaries build
+through the recipes; Ctrl-C terminates the real processes):
 
 - Two windowed clients vs one dedicated server: `just network` (Wipeout) / `just network-hot-zone`.
 - Single-client convenience run: `just run`. Reproducible scripted combat: `just network-combat`
@@ -1316,6 +1318,87 @@ scripted actions 4, zero digests, `expect 0`; combat-assert: participants 3, scr
 five observed checkpoints with equal nonzero digests, `expect 1`, server aggregates 61 accepted
 attacks / 600 hostile damage) plus the negative probes above.
 
+### Sixth review round remediation (2026-08-18)
+
+A sixth review filed five findings (three P1, two P2); all were remediated in one pass with the
+canonical gates and fresh live launcher runs re-verified afterward. The closeout schema moved to
+revision 3: revision 3 adds the mode-aggregate fields (mode identity plus the typed
+Wipeout/Hot Zone summaries), the observed-checkpoint count kept distinct from the declared
+scenario contract, the terrain no-op brush counter, and the declared scenario counts in the shared
+run identity. Revision-2 reports (including the committed `evidence/v2-baseline/` artifacts) are
+refused with the named schema error and remain valid history of the schema that produced them.
+
+- **P1 — valid terrain deferral could silently suppress the closeout report.** The gameplay-block
+  validator treated applied, rejected, and deferred brushes as mutually exclusive terminal
+  outcomes, but they are lifecycle events: `record_request` fired only for admitted facts while
+  `defer_excess_brushes` recorded deferral/rejection before that point, and a deferred brush
+  re-entered the next tick's batch to be counted as requested and applied. One deferred-then-applied
+  brush produced requested=1/applied=1/deferred=1, failed validation, and the finalizer dropped the
+  whole report with only an error log. Requests are now counted once per brush at first submission
+  — `collect_terrain_brushes` filters the active epoch, deduplicates against both the current input
+  and already-counted deferred facts, then counts only the surviving new keys. Collider refusal
+  requeues only prospective applied brushes; no-op and rejected brushes remain terminal. Validation
+  therefore enforces `applied + no-op + rejected <= requested`, with deferral excluded as a
+  transition. The new `terrain_no_op_brushes` field makes that complete terminal set visible.
+  Focused tests drive a duplicate pair, a
+  deferred-then-applied pair (requested stays 2 across both ticks), a queue-full batch of 66 facts
+  (requested 66, deferred 64, rejected 1, applied 1), and the report-level validation for both the
+  deferral shape and the exceeding case.
+- **P1 — mode telemetry was absent from the consolidated report.** `MatchSummary` carries the
+  stable `mode_definition_id` and a typed `ModeSummary`, but `consolidate_match_summary` folded
+  only match/weapon/ability fields, so Hot Zone closeouts carried no objective evidence and the
+  spec's "combat/build/ability/match/mode/terrain aggregates" contract was unmet. The gameplay
+  block now carries the actual numeric `MatchSummary::mode_definition_id` plus Wipeout final
+  scores/target/margin and Hot Zone
+  final progress/target with the controlled-ticks, contested-ticks, control-gained-transitions,
+  and longest-control counters. Validation enforces that a completed match carries exactly one
+  complete matching variant (unknown IDs, ID/variant mismatches, cross-variant fields, incomplete
+  variants, a Wipeout margin
+  that contradicts the final scores, and Hot Zone progress past the target are all named errors)
+  and that an incomplete process carries no mode fields at all. Consolidation tests drive real
+  `complete_with_mode` summaries for both modes.
+- **P1 — the manifest neither preserved nor validated the declared scenario contract.**
+  `scripted_actions` and `checkpoints` were excluded from `RUN_IDENTITY_FIELDS`, finalization
+  overwrote the declared checkpoint count with the observed count, and the launcher declared a
+  flat six combat checkpoints while `required_process_checkpoints` expects 2/3/5/3 per preset —
+  so a wrong declaration passed every gate and the final manifest could not reproduce the
+  expectation. The declaration is now immutable evidence: the report carries a separate
+  `checkpoints_observed` field fed from the process's own evidence; both declared counts joined
+  the shared run identity (a diverging endpoint fails with "run identity scripted_actions
+  diverged"); the launcher derives the declaration from the asserted preset with a case that
+  mirrors `required_process_checkpoints`; and `validate-closeout` takes the preset, re-derives the
+  requirement through the new public `brawler::server::required_process_checkpoints`, and enforces
+  declared == derived with observed >= declared (observed may exceed one preset's set when the
+  roster fights mixed presets). The launcher's declaration now calls the binary's
+  `required-checkpoint-count` command instead of duplicating the preset mapping in Bash. Gate tests
+  probe the drifted declaration, the uncovered
+  requirement, the mixed-preset superset, and the diverging-endpoint identity.
+- **P2 — process-lifetime totals undercounted bounded telemetry.** `build_selections` and
+  `matches_completed` read only retained queue lengths, so once the bounds evicted records the
+  reported totals froze while `dropped_records`/`dropped_summaries` kept counting. Both totals now
+  add the matching dropped counter with saturation, and the consolidation test stages evicted
+  summaries and selections (2 retained + 5 dropped reports 7).
+- **P2 — match scheduling emitted redundant-hierarchy warnings.** `MatchSet::{Lifecycle,
+  PreGameOutcomes, FighterLifecycle}` are nested in `GameplaySet::Lifecycle`, but the roster/
+  countdown/activation, restart-cleanup/spawn-selection, pregame-outcome, and fighter-lifecycle
+  registrations also carried the direct parent membership, which Bevy reports as redundant edges
+  at startup. The four direct parent memberships (and their now-unused imports) were removed; set
+  containment is transitive, so scheduling semantics are unchanged and startup logs are clean. A
+  repo-wide sweep confirmed the pattern existed only in `matchplay`.
+
+Verification after the sixth round: `just fmt-check`, `just clippy-client`, `just clippy-server`,
+`just check` (zero warnings), `just server-features`, `just test-client` (243), `just test-server`
+(220), `just test-network` (77), `just test-performance` (14), `just network-smoke`,
+`just prediction-comparison` (6), and `git diff --check`. Fresh schema-3 UDP closeouts also pass
+the binary gate: `target/diagnostics/m11-round6-final-combat/` has three clean endpoints, declared
+and observed checkpoints 5, one shared nonzero digest (`15370571139874157408`), and server
+`mode_definition_id=2`; `target/diagnostics/m11-round6-final-terrain/` has three clean endpoints,
+zero checkpoint digests as required, server `mode_definition_id=2`, and 19 unique terrain requests
+resolved into 5 applied + 14 no-op + 0 rejected outcomes. The terrain diagnostics profile now
+holds the verified server to tick 1050 so both clients finish their 900-tick clean-exit budget
+before its orderly shutdown; this replaces the interrupted run whose clients recorded
+`shutdown-incomplete`. Neither live startup emitted Bevy redundant-set hierarchy warnings.
+
 ## Verification plan
 
 ### Pure and focused ECS tests
@@ -1408,54 +1491,61 @@ modes under local/typical/adverse profiles where applicable and finish with `git
 
 ## Exit criteria
 
-- [ ] User has validated the M11 technical specification and every accepted scope change is recorded.
-- [ ] One versioned manifest/report path reproduces named Wipeout and Hot Zone scenarios and
+- [x] User has validated the M11 technical specification and every accepted scope change is recorded.
+- [x] One versioned manifest/report path reproduces named Wipeout and Hot Zone scenarios and
   consolidates existing gameplay telemetry with bounded process/network measurements.
-- [ ] Structured local failure records distinguish configuration, compatibility, endpoint,
+- [x] Structured local failure records distinguish configuration, compatibility, endpoint,
   verification, timeout, panic, and shutdown outcomes without remote services or sensitive dumps.
-- [ ] Client settings provide bounded remapping/calibration with default-equivalent authoritative
+- [x] Client settings provide bounded remapping/calibration with default-equivalent authoritative
   behavior, keyboard/controller parity, and no new client authority.
-- [ ] Combat client, authoritative movement, terrain client/network, build transaction, and payload
+- [x] Combat client, authoritative movement, terrain client/network, build transaction, and payload
   transaction follow the accepted ownership boundaries with public paths and schedule invariants
   covered by tests.
-- [ ] Legacy fighter build/weapon replication is removed, protocol compatibility is intentionally
+- [x] Legacy fighter build/weapon replication is removed, protocol compatibility is intentionally
   migrated, and current peers converge on one selected identity/resolved loadout/runtime model.
-- [ ] Every touched module-wide complexity/pass-by-value suppression is removed or receives an
+- [x] Every touched module-wide complexity/pass-by-value suppression is removed or receives an
   explicit narrow reviewed disposition; no suppression is widened to make the gate green.
-- [ ] The M03 prediction comparison is executed and the keep/defer decision follows recorded latency,
+- [x] The M03 prediction comparison is executed and the keep/defer decision follows recorded latency,
   correction, convergence, render, and performance evidence.
-- [ ] Repeated match/restart, rejection/reconnect, terrain recovery, and shutdown scenarios stay
+- [x] Repeated match/restart, rejection/reconnect, terrain recovery, and shutdown scenarios stay
   within exact entity/resource/queue/record/time/byte bounds under named profiles.
-- [ ] Current two-client, 2v2, and broader synthetic-capacity paths are documented and measured; no
+- [x] Current two-client, 2v2, and broader synthetic-capacity paths are documented and measured; no
   demonstration profile becomes an accidental engine limit.
-- [ ] The v2 worker-readiness handoff records the reusable server composition and launch/shutdown
+- [x] The v2 worker-readiness handoff records the reusable server composition and launch/shutdown
   contract, process-global assumptions, and reproducible direct-UDP single-match baseline, with no
   supervisor/router or IPC implementation added to v1.
-- [ ] Complete role-specific format/Clippy/check/build/test, server isolation, network, performance,
+- [x] Complete role-specific format/Clippy/check/build/test, server isolation, network, performance,
   process, soak, and `git diff --check` gates are green with exact evidence.
-- [ ] Final supervised controller/keyboard, HUD/layout, audio, counterplay, match-length, terrain,
-  and Hot Zone pacing feedback is recorded and triaged with rationale.
-- [ ] Every earlier non-complete v1 milestone/backlog item due at M11 has a source-owned completed or
+- [x] Final supervised controller/keyboard, HUD/layout, audio, counterplay, match-length, terrain,
+  and Hot Zone pacing feedback is recorded and triaged with rationale. (Basic testing was okay;
+  deeper release-quality observations and tuning are explicitly deferred, not claimed as passing.)
+- [x] Every earlier non-complete v1 milestone/backlog item due at M11 has a source-owned completed or
   explicit user-approved open/deferred disposition.
-- [ ] The learn-from-errors review and proposed-v2-architecture handoff are complete.
-- [ ] The user explicitly accepts v1 before M11 and the version are marked `Complete`.
+- [x] The learn-from-errors review and proposed-v2-architecture handoff are complete.
+- [x] The user explicitly accepts v1 before M11 and the version are marked `Complete`.
 
 ## Feedback review
 
-Not started. During feedback review, record each item as implemented now, deferred to the version or
-future backlog, rejected with rationale, or awaiting evidence. Re-run every affected verification
-gate after accepted changes.
+Completed 2026-08-18. The user reported that basic testing was okay and that improvements and tweaks
+will be needed before release, but not during v1 closeout. Decision: accept the server-authoritative
+v1 gameplay MVP and defer detailed controller feel, audio mix, HUD/layout polish, combat/terrain
+readability tuning, weapon/build balance, match-length tuning, and Hot Zone pacing refinement to
+`POST-V1-RELEASE-POLISH`. No v1 implementation change was requested, so the green post-round-six
+verification matrix and fresh schema-3 process runs remain the final affected evidence. This is a
+bounded MVP acceptance, not a claim that release-quality polish or exhaustive perceptual testing
+has passed.
 
 ## Learn-from-errors review
 
-Complete after implementation, verification, playtest, and feedback triage:
+Completed 2026-08-18:
 
 | Mistake or surprise | Cause | Prevention/change | Reusable project lesson |
 |---|---|---|---|
-| _Pending implementation and playtest_ |  |  |  |
+| Repeated review rounds found evidence-path defects after gameplay was already green. | Presence checks and happy-path reports did not exercise lifecycle transitions, bounded eviction, or declared-versus-observed contracts. | Reconstruct and semantically validate reports through the production reader; test deferral, eviction, shutdown, and cross-endpoint disagreement explicitly. | Evidence code needs adversarial lifecycle tests just as authority code does. |
+| The first round-six terrain run produced clean server evidence but `shutdown-incomplete` clients. | The authoritative terrain assertion completed before the clients' clean-exit budget. | Keep diagnostics servers alive to a bounded minimum tick when endpoint closeouts must finish independently. | Multi-process success requires a terminal contract for every process, not only the authority process. |
+| A typed mode summary initially replaced rather than preserved its stable authored ID. | The report design conflated a human-readable variant label with identity. | Carry stable IDs and validate them against typed variants. | Diagnostic schemas must preserve the same stable identity boundaries as the wire/gameplay model. |
+| Closeout bookkeeping lagged behind implementation and accumulated stale statuses. | Historical milestone ownership was deliberately preserved, but the final reconciliation was left until Slice 7. | Keep source-owned history, then perform one explicit final ledger reconciliation from actual evidence and user dispositions. | A closeout milestone needs a named reconciliation step; later evidence must not silently imply earlier acceptance. |
+| The automated matrix exceeded what the final human pass needed to establish. | v1 is an MVP gate, while release polish requires broader subjective iteration. | Separate technical correctness from release-quality tuning and keep the latter visible as a bounded post-v1 backlog item. | “Accepted MVP” and “release ready” are different product states and should remain explicit. |
 
-At minimum review scope control in a closeout milestone, whether characterization tests caught every
-schedule/protocol dependency, whether process metrics changed timing, whether settings preserved
-authority, whether soak counts found growth missed by focused tests, and whether the final evidence
-ledger made open human observations clearer. Create or improve a skill only for a recurring lesson
-that is reusable beyond this repository.
+No new reusable skill is justified. The existing Bevy workflow plus the repository's milestone,
+authority, evidence, and narrow-lint rules cover the recurring prevention measures.

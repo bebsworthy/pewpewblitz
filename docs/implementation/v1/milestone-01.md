@@ -6,11 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | User playtest |
+| Status | Complete (2026-08-18) |
 | Specification validation | Implemented from the checked-in scope contract on 2026-08-13 |
 | Implementation | Complete |
 | Verification | Complete |
-| User validation/playtest | Pending user smoke-test feedback |
+| User validation/playtest | Closed by the final v1 basic playtest; no M01 startup or shutdown blocker reported |
 
 Update this table and the roadmap together whenever the milestone changes phase.
 
@@ -123,11 +123,13 @@ Record primary sources, inspected examples, findings, and implications. Do not c
 | 2026-08-13 | `references/lightyear/crates/core/lightyear/src/{client.rs,server.rs,shared.rs,protocol.rs}`, `references/lightyear/crates/transport/{messages/src/registry.rs,transport/src/channel/registry.rs}` | Lightyear 0.29 uses client/server plugin groups, a shared fixed tick, and stable typed message registration. Protocol registration must happen after the application networking plugin group; this milestone registers only the shared message registry. | Install the shared protocol plugin after Brawler's base/gameplay setup and omit network entities/connections until Milestone 02. |
 | 2026-08-13 | `references/bevy/Cargo.toml`, `references/lightyear/Cargo.toml` | The Bevy development snapshot is 0.20-dev, while Lightyear 0.29's workspace pins Bevy 0.19 and Rust 1.95. | Validate implementation APIs against released Bevy 0.19.1 and pin Bevy `=0.19.1`, Lightyear `=0.29.0`, Rust `1.95.0`. |
 
-These entries record the implementation research used for the selected topology. User playtest validation remains pending.
+These entries record the implementation research used for the selected topology. Final v1 basic
+playtest acceptance on 2026-08-18 closed the remaining M01 validation; release polish is tracked in
+the v1 roadmap rather than reopening this foundation milestone.
 
 ## Technical specification
 
-Status: **Implemented; awaiting user smoke-test validation.**
+Status: **Complete; final basic v1 smoke-test validation accepted 2026-08-18.**
 
 ### Decisions
 
@@ -287,6 +289,7 @@ Verification evidence (2026-08-13, macOS arm64, Rust 1.95.0):
 | F3 | Review found that the launcher could hide a server startup failure and bypass Cargo's configured target directory. | Implemented | The launcher supervises Cargo-run process statuses, stops the client when the server exits, returns the server status, and uses `cargo run` rather than a hard-coded repository target path. | [`justfile`](../../../justfile) |
 | F4 | Review found that the fixed-tick test manually ran `FixedUpdate` and did not prove Bevy's fixed loop or set chain. | Implemented | The headless test now uses `MinimalPlugins` with `TimeUpdateStrategy::FixedTimesteps(1)`, advances through `App::update()`, and records the declared Input → Simulation → Finalize order. | [`src/gameplay.rs`](../../../src/gameplay.rs) |
 | F5 | Review found that CI Clippy, tests, and builds omitted `--locked`. | Implemented | All dependency-resolving CI commands now enforce the committed lockfile. | [`ci.yml`](../../../.github/workflows/ci.yml) |
+| F6 | Final v1 basic playtest was okay; further improvement is wanted before release, not during v1 closeout. | Accepted / deferred | No M01 foundation blocker was reported. Product polish is tracked as `POST-V1-RELEASE-POLISH`. | [v1 roadmap](./roadmap.md) |
 
 ## Learn from errors
 
@@ -307,7 +310,7 @@ Implementation review (2026-08-13):
 - [x] Client and dedicated server launch from documented commands and shut down cleanly.
 - [x] Dedicated-server feature isolation is verified with recorded dependency evidence.
 - [x] Plugin composition and fixed-tick ownership are verified without enforcing a layered architecture.
-- [ ] User smoke-test feedback is incorporated or triaged.
-- [x] Learn-from-errors review is complete for implementation verification; user feedback remains pending.
+- [x] User smoke-test feedback is incorporated or triaged; final basic v1 testing reported no M01 blocker.
+- [x] Learn-from-errors review is complete, including the final user disposition.
 - [x] Reusable skills were evaluated; no new skill was justified.
 - [x] Roadmap status and current milestone are updated.

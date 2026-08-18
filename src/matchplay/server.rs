@@ -20,7 +20,6 @@ use crate::{
         MeleeAttack, PendingDelivery, PendingPayload, SpawnState, TeamId, WeaponDefinitions,
         WeaponTelemetry,
     },
-    gameplay::GameplaySet,
     map::{MapStartupSet, ResolvedMap, WIPEOUT_MODE_DEFINITION},
     protocol::{Fighter, FighterInput, NetworkEntityId, PlayerId},
     timing::SimulationTick,
@@ -354,7 +353,6 @@ impl Plugin for AuthoritativeMatchPlugin {
                     activate_started_match,
                 )
                     .chain()
-                    .in_set(GameplaySet::Lifecycle)
                     .in_set(MatchSet::Lifecycle),
             )
             .add_systems(
@@ -369,15 +367,12 @@ impl Plugin for AuthoritativeMatchPlugin {
                 FixedUpdate,
                 (cleanup_restarted_match, select_due_respawn_spawns)
                     .chain()
-                    .in_set(GameplaySet::Lifecycle)
                     .in_set(MatchSet::Lifecycle)
                     .after(MatchRestartSet::Commit),
             )
             .add_systems(
                 FixedUpdate,
-                resolve_pregame_outcomes
-                    .in_set(GameplaySet::Lifecycle)
-                    .in_set(MatchSet::PreGameOutcomes),
+                resolve_pregame_outcomes.in_set(MatchSet::PreGameOutcomes),
             )
             .add_systems(
                 FixedPostUpdate,

@@ -11,7 +11,10 @@ fn usage() {
         "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>]"
     );
     eprintln!(
-        "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS>   validate finished closeout reports against the current report schema (EXPECT-CHECKPOINTS is 1 for combat-assert runs, 0 otherwise)"
+        "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS> [WEAPON-PRESET]   validate finished closeout reports against the current report schema (EXPECT-CHECKPOINTS is 1 for combat-assert runs, 0 otherwise; WEAPON-PRESET re-derives the declared checkpoint requirement from the asserted preset)"
+    );
+    eprintln!(
+        "       brawler-server required-checkpoint-count <WEAPON-PRESET>   print the asserted preset's required process-checkpoint count"
     );
     eprintln!(
         "note: --wipeout-rules <production|verification> is a deprecated alias for --match-rules"
@@ -82,7 +85,12 @@ fn parse_args() -> Result<ServerNetworkConfig, String> {
 /// Headless closeout-report gate for verification launchers: enforces the same report
 /// reader the binaries' report writer uses, so the terminal check cannot drift from the
 /// writer's contract. Exits 0 when every configured endpoint validated.
-fn run_closeout_validation(directory: &str, client_count: &str, expect_checkpoints: &str) -> ! {
+fn run_closeout_validation(
+    directory: &str,
+    client_count: &str,
+    expect_checkpoints: &str,
+    weapon_preset: Option<&String>,
+) -> ! {
     let Ok(client_count) = client_count.parse::<u32>() else {
         eprintln!("brawler-server: validate-closeout requires a numeric client count");
         process::exit(2);
@@ -95,10 +103,24 @@ fn run_closeout_validation(directory: &str, client_count: &str, expect_checkpoin
             process::exit(2);
         }
     };
+    // With the asserted weapon preset, the gate re-derives the required checkpoint set
+    // from the same mapping the combat assertion uses, so the launcher's declared
+    // scenario counts are checked against the preset instead of trusting the launcher.
+    let declared_checkpoint_requirement = weapon_preset.map(|preset| {
+        let Ok(preset_id) = preset.parse::<u16>() else {
+            eprintln!("brawler-server: validate-closeout WEAPON-PRESET must be numeric");
+            process::exit(2);
+        };
+        let required = brawler::server::required_process_checkpoints(
+            brawler::combat::WeaponPresetId(preset_id),
+        );
+        u32::try_from(required.len()).unwrap_or(u32::MAX)
+    });
     match brawler::diagnostics::validate_closeout_directory(
         std::path::Path::new(directory),
         client_count,
         expect_checkpoint_evidence,
+        declared_checkpoint_requirement,
     ) {
         Ok(count) => {
             println!("brawler-server: validated {count} closeout reports in {directory}");
@@ -111,20 +133,42 @@ fn run_closeout_validation(directory: &str, client_count: &str, expect_checkpoin
     }
 }
 
+fn run_required_checkpoint_count(weapon_preset: &str) -> ! {
+    let Ok(preset_id) = weapon_preset.parse::<u16>() else {
+        eprintln!("brawler-server: required-checkpoint-count WEAPON-PRESET must be numeric");
+        process::exit(2);
+    };
+    let required =
+        brawler::server::required_process_checkpoints(brawler::combat::WeaponPresetId(preset_id));
+    println!("{}", required.len());
+    process::exit(0);
+}
+
 fn main() -> AppExit {
     let raw_args: Vec<String> = env::args().skip(1).collect();
     if raw_args
         .first()
+        .is_some_and(|arg| arg == "required-checkpoint-count")
+    {
+        if raw_args.len() != 2 {
+            eprintln!("brawler-server: required-checkpoint-count requires <WEAPON-PRESET>");
+            usage();
+            process::exit(2);
+        }
+        run_required_checkpoint_count(&raw_args[1]);
+    }
+    if raw_args
+        .first()
         .is_some_and(|arg| arg == "validate-closeout")
     {
-        if raw_args.len() != 4 {
+        if raw_args.len() != 4 && raw_args.len() != 5 {
             eprintln!(
-                "brawler-server: validate-closeout requires <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS>"
+                "brawler-server: validate-closeout requires <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS> [WEAPON-PRESET]"
             );
             usage();
             process::exit(2);
         }
-        run_closeout_validation(&raw_args[1], &raw_args[2], &raw_args[3]);
+        run_closeout_validation(&raw_args[1], &raw_args[2], &raw_args[3], raw_args.get(4));
     }
     let config = match parse_args() {
         Ok(config) => config,

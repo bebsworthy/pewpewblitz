@@ -315,11 +315,24 @@ pub(super) fn observe_gameplay_aggregates(
     let mut gameplay = GameplayAggregatesV1::default();
     #[cfg(feature = "server")]
     if let Some(builds) = build_telemetry.as_deref() {
-        gameplay.build_selections = u32::try_from(builds.selections.len()).unwrap_or(u32::MAX);
+        // Process-lifetime totals count evicted records too: once a bounded queue starts
+        // dropping, retained length alone would freeze the reported total while its
+        // dropped counter keeps climbing.
+        gameplay.build_selections = u32::try_from(
+            u64::try_from(builds.selections.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(builds.dropped_records),
+        )
+        .unwrap_or(u32::MAX);
         gameplay.build_dropped_records = builds.dropped_records;
     }
     if let Some(matches) = match_telemetry.as_deref() {
-        gameplay.matches_completed = u32::try_from(matches.summaries.len()).unwrap_or(u32::MAX);
+        gameplay.matches_completed = u32::try_from(
+            u64::try_from(matches.summaries.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(matches.dropped_summaries),
+        )
+        .unwrap_or(u32::MAX);
         if let Some(summary) = matches.summaries.back() {
             consolidate_match_summary(summary, &mut gameplay);
         }
@@ -328,6 +341,7 @@ pub(super) fn observe_gameplay_aggregates(
         let aggregates = &terrain.aggregates;
         gameplay.terrain_requested_brushes = aggregates.requested_brushes;
         gameplay.terrain_applied_brushes = aggregates.applied_brushes;
+        gameplay.terrain_no_op_brushes = aggregates.no_op_brushes;
         gameplay.terrain_rejected_brushes = aggregates.rejected_brushes;
         gameplay.terrain_deferred_brushes = aggregates.deferred_brushes;
         gameplay.terrain_cells_erased = aggregates.cells_erased;
@@ -336,12 +350,33 @@ pub(super) fn observe_gameplay_aggregates(
 }
 
 /// Fold the latest completed match summary's mode, ability, and weapon aggregates into
-/// the gameplay block. Weapon aggregates are summed across every preset that fought.
+/// the gameplay block. The mode identity and its typed summary ride along so closeouts
+/// carry the objective evidence (Wipeout scores, Hot Zone terminal state) the match
+/// telemetry already owns. Weapon aggregates are summed across every preset that fought.
 fn consolidate_match_summary(
     summary: &crate::matchplay::MatchSummary,
     gameplay: &mut GameplayAggregatesV1,
 ) {
+    use crate::matchplay::ModeSummary;
     gameplay.match_result = Some(summary.result.report_label());
+    gameplay.mode_definition_id = Some(summary.mode_definition_id.0);
+    match summary.mode_summary {
+        ModeSummary::Wipeout(wipeout) => {
+            gameplay.wipeout_final_scores = Some(wipeout.final_scores);
+            gameplay.wipeout_target_score = Some(wipeout.target_score);
+            gameplay.wipeout_score_margin = Some(wipeout.score_margin);
+        }
+        ModeSummary::HotZone(hot_zone) => {
+            gameplay.hot_zone_final_progress = Some(hot_zone.final_progress_ticks);
+            gameplay.hot_zone_target_progress_ticks = Some(hot_zone.target_progress_ticks);
+            gameplay.hot_zone_controlled_ticks = Some(hot_zone.controlled_ticks_by_team);
+            gameplay.hot_zone_contested_ticks = Some(hot_zone.contested_ticks);
+            gameplay.hot_zone_control_gained_transitions =
+                Some(hot_zone.control_gained_transitions_by_team);
+            gameplay.hot_zone_longest_control_ticks =
+                Some(hot_zone.longest_consecutive_control_ticks_by_team);
+        }
+    }
     gameplay.match_active_ticks = summary.active_duration_ticks;
     gameplay.match_respawns = summary.respawns;
     gameplay.team_a_defeats = summary.credited_defeats_by_team[0];
@@ -544,9 +579,12 @@ fn finalize_closeout_report(
         manifest.content_fingerprint = content.0;
     }
     // Checkpoint convergence evidence comes from the process's own recorded scenario
-    // checkpoints, so the digest and divergence fields reflect observed gameplay rather
-    // than schema presence. Each App registers only its own role's evidence resources, so
-    // sequential role resolution stays correct even in both-features test builds.
+    // checkpoints, so the digest, observation count, and divergence fields reflect
+    // observed gameplay rather than schema presence. The manifest's declared
+    // `checkpoint_count` stays untouched: it is the scenario's expectation, and the
+    // terminal gate compares declaration against observation instead of overwriting
+    // one with the other. Each App registers only its own role's evidence resources,
+    // so sequential role resolution stays correct even in both-features test builds.
     #[cfg_attr(not(any(feature = "server", feature = "client")), allow(unused_mut))]
     let mut evidence = CloseoutEvidence::default();
     #[cfg(feature = "server")]
@@ -556,10 +594,6 @@ fn finalize_closeout_report(
     #[cfg(feature = "client")]
     if let Some(observation) = client_observation.as_deref() {
         evidence = client_closeout_evidence(observation);
-    }
-    if evidence.observed_checkpoints > 0 {
-        manifest.checkpoint_count =
-            u32::try_from(evidence.observed_checkpoints).unwrap_or(u32::MAX);
     }
     // Participant rows come from the during-run cache: by the terminal frame the role
     // shutdown chain may already have despawned every replicated fighter.
@@ -638,6 +672,7 @@ fn assemble_closeout_report(
         channel_messages_sent: state.transport.channel_messages_sent,
         channel_messages_received: state.transport.channel_messages_received,
         checkpoint_digest: evidence.checkpoint_digest,
+        checkpoints_observed: u32::try_from(evidence.observed_checkpoints).unwrap_or(u32::MAX),
         first_divergence: evidence.first_divergence,
         dropped_messages: evidence.dropped_messages,
         rejected_connections: state.rejected_connections,

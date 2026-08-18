@@ -197,8 +197,14 @@ validate_closeout_reports() {
     # exits, zero drops/rejections/errors, and cross-endpoint digest agreement) instead
     # of a launcher-side subset that can drift from the writer. Combat-assert runs must
     # carry nonzero checkpoint digests; movement/terrain/match profiles record no combat
-    # checkpoints, so their digests must be zero.
-    "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" "$combat_assert"
+    # checkpoints, so their digests must be zero. Combat-assert runs also pass the
+    # asserted weapon preset so the gate re-derives and enforces the declared checkpoint
+    # requirement.
+    if [[ "$combat_assert" == "1" && -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
+        "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" "$combat_assert" "$BRAWLER_NETWORK_WEAPON_PRESET"
+    else
+        "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" "$combat_assert"
+    fi
     printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
     if command -v shasum >/dev/null 2>&1; then
         printf 'brawler network: terminal digest '
@@ -234,16 +240,17 @@ if [[ -n "$diagnostics_dir" ]]; then
     # recipes have no ambient randomness, so the declared seed is the scenario label all
     # endpoints must agree on); the scripted-action count is one per scripted input
     # channel the launcher applies to the two scripted headless clients (move axis, aim
-    # source, and fire where the profile fires); combat-assert runs declare the six
-    # named checkpoints the assertion watches (four active_* weapon effects plus defeat
-    # and reset — observed evidence overwrites the declared count at closeout).
+    # source, and fire where the profile fires); combat-assert runs declare the asserted
+    # preset's required checkpoints. The server binary derives this from
+    # required_process_checkpoints, and validate-closeout re-derives the same requirement,
+    # so declaration and validation share the authoritative Rust mapping.
     diagnostics_seed="${BRAWLER_DIAGNOSTICS_SEED:-1}"
     scripted_actions=0
     declared_checkpoints=0
     if [[ "$headless" == "1" ]]; then
         if [[ "$combat_assert" == "1" ]]; then
             scripted_actions=6
-            declared_checkpoints=6
+            declared_checkpoints="$($server_binary required-checkpoint-count "${BRAWLER_NETWORK_WEAPON_PRESET:-}")"
         elif [[ "$terrain_assert" == "1" ]]; then
             scripted_actions=6
         else
@@ -301,6 +308,12 @@ if [[ "$headless" == "1" ]]; then
             "BRAWLER_NETWORK_TERRAIN_READY_FILE=$terrain_ready_file"
             "BRAWLER_NETWORK_TERRAIN_TEST_DUMMY=1"
         )
+        if [[ -n "$diagnostics_dir" ]]; then
+            # The terrain assertion can complete before the clients' 900-tick clean-exit
+            # budget. Keep the server alive long enough for both endpoint reports rather
+            # than turning its expected disconnect into shutdown-incomplete evidence.
+            server_env+=("BRAWLER_SERVER_EXIT_AFTER_VERIFICATION_MIN_TICKS=1050")
+        fi
         if [[ -n "${BRAWLER_NETWORK_TERRAIN_TARGET_REVISION:-}" ]]; then
             server_env+=("BRAWLER_NETWORK_TERRAIN_TARGET_REVISION=$BRAWLER_NETWORK_TERRAIN_TARGET_REVISION")
         fi

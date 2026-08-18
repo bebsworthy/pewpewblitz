@@ -12,10 +12,9 @@
 | Implementation | Complete through all five slices on top of accepted baseline commit `90ef47a` (M08 automated gate re-verified green on that exact commit before work began) |
 | Verification | Automated gate green: format, both role Clippy graphs with `-D warnings`, server feature isolation, client/server binary checks, focused library tests, deterministic network tests, performance tests, and real-process Wipeout plus Hot Zone match runs; the automated playtest pass and feedback triage are recorded below with explicit dispositions for the human-perceptual remainder |
 
-Milestone 08 remains in feedback review. Researching and reviewing this specification in parallel is
-safe, but M09 implementation must begin from the accepted M08 result rather than from a moving review
-worktree. Before entering `Implementing`, record the exact starting commit, reconcile all accepted M08
-feedback, and rerun the M08 automated technical gate.
+At M09's start, Milestone 08 remained in feedback review. Parallel research was safe, while M09
+implementation was gated on the accepted M08 result, reconciliation of accepted feedback, and a
+green rerun of the M08 automated technical gate. Those prerequisites and both milestones are now complete.
 
 ## Outcome
 

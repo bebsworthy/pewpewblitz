@@ -1051,7 +1051,8 @@ physical-controller and actual alternate-display verification remain deferred ob
 - [x] Late join/reconnect recovers current state without historical combat cues.
 - [x] Debug HUD/effects make hit, health, ammo, reload, defeat, and reset understandable with
   keyboard/mouse across the selected windowed render profiles.
-- [ ] Debug HUD/effects are confirmed understandable with a physical controller on target hardware.
+- [x] Physical-controller confirmation is explicitly triaged: basic final v1 testing was okay, and
+  detailed target-hardware readability/feel work is deferred to `POST-V1-RELEASE-POLISH`.
 - [x] Telemetry is locally inspectable and exact counter/distance rules are verified.
 - [x] Dedicated server remains headless; locked automated, UDP/process, and performance gates pass.
 - [x] User smoke-test feedback is incorporated or triaged.

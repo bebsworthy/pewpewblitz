@@ -33,7 +33,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 |---|---|
 | Status | Researching |
 | Current milestone | M01 — Routed multi-process server foundation |
-| Entry gate | V2 research and planning may proceed while V1 M11 is in specification review; production implementation waits for M11 closeout—including its worker-readiness audit/direct-UDP baseline—and M01 specification validation |
+| Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. Production implementation still waits for M01 specification validation |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
 ## Milestone overview
@@ -130,7 +130,9 @@ process or alternate authority path after normal or failed shutdown.
 
 Harden abuse boundaries, impaired-network behavior, diagnostics, host ceilings,
 reconnect-to-lobby, soak/growth evidence, usability flows, attribution, and feedback/learning
-records. This closes gaps; it does not add global matchmaking or fleet services.
+records. Review and remove the legacy v1 direct-UDP executable/configuration after the final
+comparison evidence unless a documented compatibility requirement remains. This closes gaps; it
+does not add global matchmaking or fleet services.
 
 Gate: the version completion gate and every prior deferred exit observation have evidence and user
 feedback disposition.
@@ -175,6 +177,7 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 | V2-TRANSPORT-CONTINGENCY | Bounded worker-port range using standard Lightyear UDP | Cost the reference design before M01 specification validation; implement only if accepted single-port routing fails a hard threshold after bounded optimization |
 | V2-WINDOWS-IPC | Production Windows named-pipe backend | Preserve the contract in M01; implement when Windows becomes an active target |
 | V2-ROUTE-RESUMPTION | Resume an interrupted match connection | Deferred; v2 returns to a fresh lobby session |
+| V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | M01 makes the routed supervisor path the default for `network.sh`/`just network` after validating its minimum transition driver and retains direct UDP only as an explicitly named compatibility/baseline command; M09 removes the legacy executable/configuration after final comparison evidence unless a documented compatibility requirement remains |
 
 ## Explicitly deferred beyond v2
 

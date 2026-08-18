@@ -7,14 +7,26 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/05-gameplay-mvp.md` for v1 gameplay scope and acceptance criteria.
-3. `docs/08-network-architecture.md` for authority and replication boundaries.
-4. `docs/implementation/v1/roadmap.md` for current progress and milestone order.
-5. The current `docs/implementation/v1/milestone-NN.md` for validated scope and tracked work.
+2. `docs/13-player-ux.md` for the active v2 player-flow boundary.
+3. `docs/14-multiplayer-server-architecture.md` for the active v2 process/routing decision.
+4. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
+5. `docs/implementation/v2/roadmap.md` for current progress and milestone order.
+6. `docs/implementation/v2/milestone-01.md` for the current research contract. It does not yet
+   authorize production implementation.
+7. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
+   verification evidence, deferred release polish, and the direct-UDP comparison baseline.
+
+V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
+playtest. It is not a release-ready claim: controller feel, audio, HUD/readability, balance, pacing,
+and related tuning remain tracked as `POST-V1-RELEASE-POLISH`. V2 M01 is currently `Researching`;
+do not implement the routed supervisor/worker topology until its specification is validated.
 
 ## Technical stack
 
-- Rust project with independently buildable macOS-client and dedicated headless-server application configurations; Milestone 01 decides the package, target, and Cargo-feature topology from evidence.
+- One Rust package currently provides independently buildable macOS-client and dedicated
+  headless-server application configurations. V2 M01 researches whether routed protocol,
+  supervisor, lobby-worker, match-worker, or IPC boundaries justify additional targets/modules or
+  a crate; do not pre-create those boundaries before specification validation.
 - Bevy 0.19 for ECS, application/plugin structure, rendering, input, assets, audio, and UI.
 - Lightyear 0.29 for client/server transport, input networking, replication, interpolation, and later prediction/rollback where evidence justifies it.
 - Avian 2D 0.7 only when collision queries, contact handling, or generated terrain colliders justify it.
@@ -53,6 +65,7 @@ src/
     mod.rs                 build composition root and public API
     model.rs               authored selections and resolved immutable loadouts
     definitions.rs         catalogs, validation, resolution, fingerprints
+    server.rs              waiting-phase authoritative build transaction
     telemetry.rs           bounded selection/build records and aggregates
     tests.rs               focused build rule and composition tests
   combat/
@@ -63,12 +76,12 @@ src/
     authority.rs           authoritative fighter lifecycle and authority helpers
     attack.rs              economy, attack acceptance, firing expansion, attack telemetry
     delivery.rs            straight, lobbed, and melee delivery geometry/execution
-    effects.rs             targeting, payloads, damage, effects, defeat, ordered outcomes
+    effects/               staged payload planning/application/runtime transaction and tests
     outcomes.rs            bounded authoritative outcome-fact ownership
     telemetry.rs           bounded records, trackers, aggregates, summaries
     evidence.rs            bounded process/checkpoint evidence and convergence schemas
     server.rs              server combat plugin and schedule registration
-    client.rs              combat-specific previews, cues, effects, projectiles, and HUD
+    client/                previews, cues, world visuals, transient effects, HUD, and tests
     tests.rs               shared combat model/composition tests
   map/
     mod.rs                 map composition root, stable IDs/profiles, public re-exports
@@ -90,6 +103,7 @@ src/
   movement/
     mod.rs                 movement plugins and authoritative schedule composition
     arena.rs               arena definitions, geometry, colliders, and spawn helpers
+    authority.rs           server-owned movement decisions, collision, and mutation
     input.rs               pure input shaping plus server validation/freshness rules
     tests.rs               focused movement tests
   client/
@@ -100,11 +114,29 @@ src/
     input.rs               keyboard, mouse, gamepad, and native-input sampling
     presentation.rs        camera, arena, effects, and replicated-pose presentation
     session.rs             connection, selection, shutdown, and headless automation lifecycle
+    settings/              local calibration/rebinding state and pause-overlay UI
     tests.rs               client composition and behavior tests
+  diagnostics/
+    mod.rs                 closeout schemas, aggregation, registration, and public API
+    failure.rs             bounded process failure classification
+    overlay.rs             client authority/network diagnostics presentation
+    process.rs             process-owned report/checkpoint lifecycle
+    tests.rs               schema, lifecycle, and validation tests
   server/
     mod.rs                 dedicated-server and connection/session composition
     verification.rs        process-only movement/combat evidence validation
     tests.rs               server composition and lifecycle tests
+  terrain/
+    mod.rs                 terrain composition root and public API
+    model.rs               stable terrain/grid/runtime state shapes
+    grid.rs                quantized occupancy rules and rasterization
+    collider.rs            generated collider ownership and rebuild rules
+    lifecycle.rs           install, reset, teardown, and generation transitions
+    authority.rs           authoritative brush transaction
+    network/               server publication and client convergence rules
+    client/                presentation and recovery ownership
+    telemetry.rs           bounded mutation/convergence evidence
+    tests.rs               terrain rule, lifecycle, and schedule tests
 tests/
   network.rs               integration-test composition entry point
   network/
@@ -115,6 +147,11 @@ tests/
 
 `content/v1/` owns build-embedded authored gameplay data. `references/` contains read-only upstream
 material and is not part of Brawler's production module layout.
+
+The routed supervisor, route envelope, IPC transport, and isolated lobby/match-worker composition
+described by v2 M01 are research targets, not current source layout. The existing `brawler-server`,
+`brawler-client`, `scripts/network.sh`, and `just network` still exercise the v1 direct-UDP topology
+and provide M01's comparison baseline.
 
 ## Code organization rules
 
@@ -228,4 +265,7 @@ For the next non-complete milestone:
 - Visual verification complements automated tests; it does not replace them.
 - Preserve unrelated user changes and keep deferred work visible in the active version backlog.
 
-Do not invent build or test commands before the Cargo project exists. Milestone 01 must establish and document the canonical commands here or in the root README when implementation begins.
+Canonical build, test, process, closeout, and playtest commands already live in `justfile` and the
+root `README.md`; use those rather than inventing substitutes. V2 M01 must document any new routed
+commands only after specification validation, and must preserve an explicitly named direct-UDP
+baseline command until the roadmap's retirement gate is satisfied.

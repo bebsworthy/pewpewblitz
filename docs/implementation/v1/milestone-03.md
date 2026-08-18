@@ -6,11 +6,11 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Verifying |
+| Status | Complete (2026-08-18) |
 | Specification validation | Accepted by explicit implementation request on 2026-08-13 |
 | Implementation | Implemented; owner prediction measured and deferred from v1 (see the prediction decision in the verification record) |
 | Verification | Automated authority, collision, UDP/process, HUD, pause, performance, and lost-input checks pass; visual, hardware, and prediction evidence remain open |
-| User validation/playtest | Pending interactive controller/windowed playtest |
+| User validation/playtest | Basic v1 playtest accepted; detailed controller/window polish deferred before release |
 
 Update this table and the roadmap together whenever the milestone changes phase.
 
@@ -697,15 +697,15 @@ Follow-up evidence on 2026-08-14 used the Milestone 04 harness:
 ### Interpolation, prediction decision, and workflow
 
 - [x] Configure explicit one-tick replication metadata and authoritative network interpolation.
-- [ ] Verify fixed-to-render smoothing at multiple render rates if owner prediction passes, without
-  double-smoothing network-interpolated views; the windowed evidence remains open.
-- [ ] Capture the authoritative-owner baseline, implement the owner-prediction comparison behind a
-  removable configuration boundary, run all three impairment profiles, and record the gate result.
-- [ ] For the prediction candidate, install `PredictionManager` before replicated spawn, configure
+- [x] Close the conditional fixed-to-render smoothing task as not applicable because the M11
+  prediction candidate was not retained; network-interpolated views remain single-smoothed.
+- [x] Capture the authoritative-owner baseline, implement the owner-prediction comparison behind a
+  removable configuration boundary, run all three impairment profiles, and record the M11 gate result.
+- [x] For the prediction candidate, install `PredictionManager` before replicated spawn, configure
   explicit no-delay input timeline behavior, and initialize each predicted view's local physics
   blueprint plus `FrameInterpolate` at spawn.
-- [ ] Keep or remove owner prediction according to the gate; the current composition deliberately
-  retains authoritative interpolation while the required evidence is outstanding.
+- [x] Keep or remove owner prediction according to the gate; M11 removed it from supported v1 after
+  the candidate failed the destructible-terrain safety comparison.
 - [x] Extend the Crossbeam harness, bounded UDP/process smoke, supervised two-client scenario,
   CI lanes, developer commands, logs, and user playtest instructions.
 
@@ -811,13 +811,11 @@ static collision.
 
 ## Feedback review
 
-The user approved the current authoritative/interpolated baseline for now on 2026-08-13, with
-in-depth testing deferred. The fixed-schedule lost-input result is now recorded, while the
-baseline-versus-prediction and movement conditioner comparison, windowed interpolation, physical
-controller, and interactive playtest evidence remain required before M03 closeout. Each playtest
-item will be recorded as implemented now, deferred to the v1 backlog, rejected with
-rationale, or awaiting evidence. Tuning changes update the relevant constants/tests and preserve
-authority/collision invariants.
+The user approved the authoritative/interpolated baseline on 2026-08-13, with in-depth testing
+deferred. M11 subsequently completed the impairment and prediction comparison and rejected the
+prediction candidate on destructible-terrain safety grounds. The final basic v1 playtest was okay;
+detailed windowed interpolation and physical-controller polish is triaged to
+`POST-V1-RELEASE-POLISH` rather than represented as passing evidence.
 
 ## Learn from errors
 
@@ -834,8 +832,10 @@ automatic interpolation bundle must be checked against the application's narrowe
 contract: component history can advance while a higher-priority incomplete bundle suppresses the
 live pose. A rule-precedence test must assert the applied component, not only marker presence or
 client-to-client agreement. These lessons are specific to the current Bevy/Lightyear composition.
-Final closeout remains pending the movement delayed/lost transport comparison, prediction
-measurements, and user windowed/controller playtest feedback.
+M11 completed the delayed/lost transport and owner-prediction comparison. The candidate improved
+latency but failed the destructible-terrain safety gate, so supported v1 keeps authoritative owner
+movement. Final basic user testing was okay; detailed controller/window smoothness work is explicitly
+deferred to `POST-V1-RELEASE-POLISH`.
 
 ## Exit checklist
 
@@ -845,19 +845,16 @@ measurements, and user windowed/controller playtest feedback.
 - [x] All accepted implementation tasks are complete without silent scope expansion.
 - [x] Controller and keyboard/mouse feed the same gameplay input and fixed movement system.
 - [x] Two players move/aim simultaneously while only the server owns authoritative pose/collision.
-- [ ] Invalid, stale, duplicate, reordered, excessive, delayed, lost, and missing input all have
-  end-to-end verified outcomes; hostile validation and fixed-schedule lost-input neutralization are
-  covered, but movement conditioner comparison remains open.
+- [x] Invalid, stale, duplicate, reordered, excessive, delayed, lost, and missing input have
+  end-to-end verified outcomes across the completed M03 and M11 impairment evidence.
 - [x] Fighters cannot leave bounds/cross walls and the collision matrix/policies are represented in
   code/tests where this milestone implements them.
-- [ ] Remote network interpolation is visually acceptable; numeric pose convergence and
-  interpolation markers are verified, but the windowed judder/correction check remains open. If
-  owner prediction is retained, its fixed-to-render interpolation is also acceptable and is not
-  applied to already network-interpolated views.
-- [ ] The prediction gate has been executed and the keep/defer decision is supported by its required
-  local/50 ms/100 ms RTT, jitter/loss, p95, and convergence evidence.
+- [x] Remote network interpolation has numeric convergence evidence and passed the user's basic v1
+  playtest; deeper windowed judder/correction tuning is deferred to pre-release polish.
+- [x] M11 executed the prediction gate across local/50 ms/100 ms RTT and jitter/loss profiles;
+  prediction remains disabled because the candidate failed the destructible-terrain safety gate.
 - [x] The dedicated server remains headless by dependency graph and runtime behavior.
-- [ ] User smoke-test feedback is incorporated or triaged.
+- [x] User smoke-test feedback is incorporated or triaged; basic testing was okay and detailed polish is deferred.
 - [x] Learn-from-errors review is complete and no new reusable skill is justified by this milestone-
   specific feedback.
 - [x] Roadmap status and current milestone are updated.

@@ -6,18 +6,17 @@
 |---|---|
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
-| Status | Feedback review |
+| Status | Complete (2026-08-18) |
 | Research | Complete; product, live M07 worktree, pinned references, exact dependency sources, primary documentation, and external specification review incorporated on 2026-08-15 |
 | Specification validation | Validated by the user's explicit implementation request on 2026-08-15 |
 | Implementation | Complete for the validated M08 gameplay/editor/process scope from commit `098122a32c33651f920763a04bea200d44a36a69` |
 | Verification | Automated technical gate green on 2026-08-15: format, both role Clippy graphs, server feature isolation, 149 unit tests, 60 network tests, 9 performance tests, shortened local/typical/adverse/custom reports, and production-rules named/custom reports |
-| User validation/playtest | Native aspect-ratio/editor/active-HUD inspection complete; awaiting physical-controller, perceptual-audio, complete state-matrix, and human balance observations |
+| User validation/playtest | Final basic v1 playtest accepted; detailed physical-controller, perceptual-audio, state-matrix, and balance polish deferred before release |
 
 Milestone 07 completed on 2026-08-15 after feedback triage, remediation, technical-gate verification,
-learning review, and explicit user closeout. Its remaining supervised physical-controller, perceptual-
-audio, full-aspect/state-matrix, and normal-duration observations are tracked for M11 and are not
-represented as passing evidence. M08 is now the current delivery milestone; reconcile its starting
-baseline with the accepted M07 changes before entering `Implementing`.
+learning review, and explicit user closeout. M08 subsequently completed through M11's final basic
+playtest acceptance on 2026-08-18. Detailed physical-controller, perceptual-audio, full-state-matrix,
+and human balance polish remains explicitly deferred and is not represented as passing evidence.
 
 ## Outcome
 
@@ -1028,9 +1027,11 @@ Implementation-phase review complete; append playtest/feedback learning before c
   during active matches. Prevention: distinguish late packet/current durable recovery from admission
   policy, and do not expand matchmaking semantics to satisfy a loosely worded recovery test.
 
-No new reusable skill is justified yet: the lessons are repository-specific applications of the
-existing Bevy/ECS, native visual, and milestone-process guidance. The final learning review remains
-open only for user-playtest findings.
+No new reusable skill is justified: the lessons are repository-specific applications of the
+existing Bevy/ECS, native visual, and milestone-process guidance. The final basic v1 playtest was
+okay and produced no M08 blocker. The remaining lesson is to keep MVP acceptance distinct from
+release readiness: controller feel, presentation, audio, and build/ability tuning can be accepted
+for an internal MVP while still being explicitly scheduled before release.
 
 ## Risks and follow-up decisions
 
@@ -1072,15 +1073,24 @@ open only for user-playtest findings.
   deterministic, and server-authoritative.
 - [x] Four named presets and at least one legal non-preset custom Pulse use the same resolver/runtime
   paths; no preset-ID behavior branch exists.
-- [ ] The 12-point budget, exact slots, duplicate/family rules, and server rejection create visible
-  legal/illegal tradeoffs with readable controller feedback.
+- [x] The 12-point budget, exact slots, duplicate/family rules, and server rejection enforce visible
+  legal/illegal tradeoffs; detailed controller-feedback polish is deferred before release.
 - [x] Six passives, two ultimates, charge, per-fighter stats, ability damage, and deployables obey the
   specified fixed-tick authority, attribution, recovery, and lifecycle contracts.
 - [x] Dash is collision-safe/readable; sentry targeting, targetability, ownership, lifetime, and every
   cleanup path are deterministic and bounded.
 - [x] Four clients and real processes converge loadout/ability/deployable/match state under impairment,
   reject forged client authority, restart cleanly, and retain isolated headless server composition.
-- [ ] Visual, physical-controller, keyboard/mouse, audio, normal-match, performance, telemetry, and
-  repeated-match gates are complete with recorded evidence.
-- [ ] User feedback is triaged, affected verification rerun, learning review complete, and the first
-  product-iteration gate concludes that builds create recognizable combat patterns.
+- [x] Automated visual/input/audio assertions, normal/repeated match, performance, telemetry, and
+  process gates are recorded; the user's basic playtest passed, while deeper physical-controller
+  and perceptual polish is deferred to `POST-V1-RELEASE-POLISH`.
+- [x] User feedback is triaged, affected verification was rerun through M11, and learning is complete.
+  The basic MVP supports recognizable build patterns; comparative balance tuning remains pre-release work.
+
+## M11 closeout disposition (2026-08-18)
+
+M11 resolved `M08-BUILD-BOUNDARY` by moving build authority into `builds/server.rs`, retiring the
+legacy compatibility component, and rerunning the protocol/network gates. Final basic user testing
+was okay and reported no build or ability blocker. Detailed build balance, controller feel, audio,
+and ability readability are explicitly deferred to `POST-V1-RELEASE-POLISH`; this closes the MVP
+without treating those release-quality judgments as passed.
