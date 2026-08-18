@@ -19,6 +19,46 @@ pub enum MatchResult {
     },
 }
 
+impl MatchResult {
+    /// Deterministic closeout-report label for this result: `victory:<team>`, `draw`, or
+    /// `forfeit:<winner>:<departed>`. Paired with [`Self::parse_report_label`] so report
+    /// writers and readers share one result vocabulary.
+    #[must_use]
+    pub fn report_label(&self) -> String {
+        match *self {
+            Self::TeamVictory { team } => format!("victory:{}", team.0),
+            Self::Draw => "draw".to_string(),
+            Self::Forfeit {
+                winner,
+                departed_team,
+            } => format!("forfeit:{}:{}", winner.0, departed_team.0),
+        }
+    }
+
+    /// Inverse of [`Self::report_label`]; returns `None` for anything that is not a
+    /// result label, including the report block's `none` sentinel.
+    #[must_use]
+    pub fn parse_report_label(label: &str) -> Option<Self> {
+        if label == "draw" {
+            return Some(Self::Draw);
+        }
+        let (head, rest) = label.split_once(':')?;
+        match head {
+            "victory" => Some(Self::TeamVictory {
+                team: TeamId(rest.parse().ok()?),
+            }),
+            "forfeit" => {
+                let (winner, departed) = rest.split_once(':')?;
+                Some(Self::Forfeit {
+                    winner: TeamId(winner.parse().ok()?),
+                    departed_team: TeamId(departed.parse().ok()?),
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub enum MatchPhase {
     Waiting,

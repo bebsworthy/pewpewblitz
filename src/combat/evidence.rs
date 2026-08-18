@@ -796,7 +796,6 @@ pub fn record_headless_combat_observation(
             &CurrentHealth,
             &WeaponState,
             &FighterDefinitionId,
-            Option<&ResolvedWeapon>,
             Option<&Defeated>,
         ),
         With<Fighter>,
@@ -860,7 +859,7 @@ pub fn record_headless_combat_observation(
     }
     let Some(_) = fighters
         .iter()
-        .find(|(network_id, _, _, _, _, _)| network_id.0 != DUMMY_NETWORK_ENTITY.0)
+        .find(|(network_id, _, _, _, _)| network_id.0 != DUMMY_NETWORK_ENTITY.0)
     else {
         return;
     };

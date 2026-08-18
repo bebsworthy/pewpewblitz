@@ -24,8 +24,12 @@ pub use process::{
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// The only closeout schema revision produced or accepted by this build.
-pub const CLOSEOUT_SCHEMA_VERSION: u16 = 1;
+/// The only closeout schema revision produced or accepted by this build. Revision 2 adds
+/// the gameplay-aggregate block (match/mode, build, ability, weapon, and terrain
+/// summaries) to revision 1's manifest, process, transport, and evidence fields, so the
+/// consolidated report ties the gameplay subsystems to the run identity instead of
+/// carrying process/network measurements alone.
+pub const CLOSEOUT_SCHEMA_VERSION: u16 = 2;
 
 /// Upper bound on manifest identity strings; rejects oversized or runaway scripted fields.
 pub const MAX_IDENTITY_BYTES: usize = 96;
@@ -33,8 +37,9 @@ pub const MAX_IDENTITY_BYTES: usize = 96;
 /// Upper bound on manifest participants; matches the engine's 24-fighter terrain capacity.
 pub const MAX_MANIFEST_PARTICIPANTS: usize = 24;
 
-/// Upper bound on closeout report lines before the report itself is rejected as malformed.
-pub const MAX_REPORT_LINES: usize = 96;
+/// Upper bound on closeout report lines before the report itself is rejected as malformed:
+/// every required field exactly once plus two row lines per bounded participant.
+pub const MAX_REPORT_LINES: usize = REPORT_REQUIRED_KEYS.len() + 2 * MAX_MANIFEST_PARTICIPANTS;
 
 /// Stable process exit categories shared by failure records and closeout reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +225,175 @@ impl RunManifestV1 {
     }
 }
 
+/// The gameplay-aggregate block of one closeout report: the bounded telemetry summaries
+/// the process consolidated at terminal observation. The authoritative
+/// match/mode/weapon/ability aggregates and build selections exist only in the server
+/// process, while terrain aggregates exist in both roles (the client records its own
+/// convergence facts), so a client legitimately reports zeros outside terrain.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GameplayAggregatesV1 {
+    /// Completed matches recorded by this process's match telemetry.
+    pub matches_completed: u32,
+    /// Terminal result of the latest completed match (`none` without one), as a
+    /// [`crate::matchplay::MatchResult`] report label.
+    pub match_result: Option<String>,
+    pub match_active_ticks: u64,
+    pub match_respawns: u32,
+    pub team_a_defeats: u32,
+    pub team_b_defeats: u32,
+    pub first_hostile_damage_tick: Option<u64>,
+    /// Build selections accepted by this process's build telemetry.
+    pub build_selections: u32,
+    pub build_dropped_records: u64,
+    pub ability_attempts: u64,
+    pub ability_accepts: u64,
+    pub dash_uses: u64,
+    pub sentry_uses: u64,
+    pub accepted_attacks: u64,
+    pub emitted_deliveries: u64,
+    pub attacks_with_hostile_contact: u64,
+    pub hostile_damage: u64,
+    pub terrain_requested_brushes: u64,
+    pub terrain_applied_brushes: u64,
+    pub terrain_rejected_brushes: u64,
+    pub terrain_deferred_brushes: u64,
+    pub terrain_cells_erased: u64,
+}
+
+impl GameplayAggregatesV1 {
+    /// Enforce the block's semantic contract: aggregates only reference matches the
+    /// process completed, a completed match carries a result label, weapon contact cannot
+    /// exceed accepted attacks, and terrain outcome buckets stay inside the request count.
+    fn validate(&self) -> Result<(), String> {
+        if self.matches_completed == 0 {
+            if self.match_result.is_some()
+                || self.match_active_ticks != 0
+                || self.match_respawns != 0
+            {
+                return Err(
+                    "closeout gameplay aggregates reference a match the process did not complete"
+                        .to_string(),
+                );
+            }
+        } else if self
+            .match_result
+            .as_deref()
+            .and_then(crate::matchplay::MatchResult::parse_report_label)
+            .is_none()
+        {
+            return Err("closeout match_result is missing or not a match result label".to_string());
+        }
+        if self.attacks_with_hostile_contact > self.accepted_attacks {
+            return Err(
+                "closeout weapon aggregates carry more attacks with contact than accepted attacks"
+                    .to_string(),
+            );
+        }
+        if self
+            .terrain_applied_brushes
+            .saturating_add(self.terrain_rejected_brushes)
+            .saturating_add(self.terrain_deferred_brushes)
+            > self.terrain_requested_brushes
+        {
+            return Err("closeout terrain brush outcomes exceed the requested brushes".to_string());
+        }
+        Ok(())
+    }
+
+    /// Render the block's deterministic `key=value` lines.
+    #[must_use]
+    fn to_report_lines(&self) -> Vec<String> {
+        vec![
+            format!("matches_completed={}", self.matches_completed),
+            format!(
+                "match_result={}",
+                self.match_result.as_deref().unwrap_or("none")
+            ),
+            format!("match_active_ticks={}", self.match_active_ticks),
+            format!("match_respawns={}", self.match_respawns),
+            format!("team_a_defeats={}", self.team_a_defeats),
+            format!("team_b_defeats={}", self.team_b_defeats),
+            format!(
+                "first_hostile_damage_tick={}",
+                self.first_hostile_damage_tick
+                    .map_or_else(|| "none".to_string(), |tick| tick.to_string())
+            ),
+            format!("build_selections={}", self.build_selections),
+            format!("build_dropped_records={}", self.build_dropped_records),
+            format!("ability_attempts={}", self.ability_attempts),
+            format!("ability_accepts={}", self.ability_accepts),
+            format!("dash_uses={}", self.dash_uses),
+            format!("sentry_uses={}", self.sentry_uses),
+            format!("accepted_attacks={}", self.accepted_attacks),
+            format!("emitted_deliveries={}", self.emitted_deliveries),
+            format!(
+                "attacks_with_hostile_contact={}",
+                self.attacks_with_hostile_contact
+            ),
+            format!("hostile_damage={}", self.hostile_damage),
+            format!(
+                "terrain_requested_brushes={}",
+                self.terrain_requested_brushes
+            ),
+            format!("terrain_applied_brushes={}", self.terrain_applied_brushes),
+            format!("terrain_rejected_brushes={}", self.terrain_rejected_brushes),
+            format!("terrain_deferred_brushes={}", self.terrain_deferred_brushes),
+            format!("terrain_cells_erased={}", self.terrain_cells_erased),
+        ]
+    }
+
+    /// Reconstruct the block from already-presence-checked report lines, failing any
+    /// value that does not encode its declared scalar type.
+    fn from_report_lines(lines: &[(&str, &str)]) -> Result<Self, String> {
+        let parse_optional_tick = |key: &str| -> Result<Option<u64>, String> {
+            match parse_report_field(lines, key).expect("presence was checked") {
+                "none" => Ok(None),
+                value => value
+                    .parse()
+                    .map(Some)
+                    .map_err(|_| format!("{key}={value} is not a u64")),
+            }
+        };
+        Ok(Self {
+            matches_completed: parse_typed_field(lines, "matches_completed", "u32")?,
+            match_result: match parse_report_field(lines, "match_result")
+                .expect("presence was checked")
+            {
+                "none" => None,
+                label => Some(label.to_string()),
+            },
+            match_active_ticks: parse_typed_field(lines, "match_active_ticks", "u64")?,
+            match_respawns: parse_typed_field(lines, "match_respawns", "u32")?,
+            team_a_defeats: parse_typed_field(lines, "team_a_defeats", "u32")?,
+            team_b_defeats: parse_typed_field(lines, "team_b_defeats", "u32")?,
+            first_hostile_damage_tick: parse_optional_tick("first_hostile_damage_tick")?,
+            build_selections: parse_typed_field(lines, "build_selections", "u32")?,
+            build_dropped_records: parse_typed_field(lines, "build_dropped_records", "u64")?,
+            ability_attempts: parse_typed_field(lines, "ability_attempts", "u64")?,
+            ability_accepts: parse_typed_field(lines, "ability_accepts", "u64")?,
+            dash_uses: parse_typed_field(lines, "dash_uses", "u64")?,
+            sentry_uses: parse_typed_field(lines, "sentry_uses", "u64")?,
+            accepted_attacks: parse_typed_field(lines, "accepted_attacks", "u64")?,
+            emitted_deliveries: parse_typed_field(lines, "emitted_deliveries", "u64")?,
+            attacks_with_hostile_contact: parse_typed_field(
+                lines,
+                "attacks_with_hostile_contact",
+                "u64",
+            )?,
+            hostile_damage: parse_typed_field(lines, "hostile_damage", "u64")?,
+            terrain_requested_brushes: parse_typed_field(
+                lines,
+                "terrain_requested_brushes",
+                "u64",
+            )?,
+            terrain_applied_brushes: parse_typed_field(lines, "terrain_applied_brushes", "u64")?,
+            terrain_rejected_brushes: parse_typed_field(lines, "terrain_rejected_brushes", "u64")?,
+            terrain_deferred_brushes: parse_typed_field(lines, "terrain_deferred_brushes", "u64")?,
+            terrain_cells_erased: parse_typed_field(lines, "terrain_cells_erased", "u64")?,
+        })
+    }
+}
+
 /// Versioned consolidated observation record for one scenario run.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CloseoutReportV1 {
@@ -254,6 +428,8 @@ pub struct CloseoutReportV1 {
     pub dropped_messages: u64,
     pub rejected_connections: u64,
     pub error_count: u64,
+    /// Consolidated build, ability, match/mode, weapon, and terrain summaries.
+    pub gameplay: GameplayAggregatesV1,
 }
 
 impl CloseoutReportV1 {
@@ -289,11 +465,17 @@ impl CloseoutReportV1 {
         if self.rtt_p50_micros > self.rtt_p95_micros || self.rtt_p95_micros > self.rtt_max_micros {
             return Err("closeout RTT percentiles are not monotonic".to_string());
         }
+        if self.jitter_p50_micros > self.jitter_p95_micros
+            || self.jitter_p95_micros > self.jitter_max_micros
+        {
+            return Err("closeout jitter percentiles are not monotonic".to_string());
+        }
         if self.terminal_entities > self.entity_high_water
             || self.terminal_links > self.link_high_water
         {
             return Err("closeout terminal counts exceed recorded high-water marks".to_string());
         }
+        self.gameplay.validate()?;
         Ok(())
     }
 
@@ -339,6 +521,7 @@ impl CloseoutReportV1 {
             format!("rejected_connections={}", self.rejected_connections),
             format!("error_count={}", self.error_count),
         ]);
+        lines.extend(self.gameplay.to_report_lines());
         lines
     }
 }
@@ -380,10 +563,10 @@ pub fn split_report_lines(contents: &str) -> Result<Vec<(&str, &str)>, String> {
     Ok(lines)
 }
 
-/// Every non-participant field a schema-1 closeout report carries exactly once. The reader
+/// Every non-participant field a schema-2 closeout report carries exactly once. The reader
 /// rejects reports that drop, duplicate, or oversize any of these fields, mirroring
 /// `CloseoutReportV1::to_report_lines`.
-const REPORT_REQUIRED_KEYS: [&str; 48] = [
+const REPORT_REQUIRED_KEYS: [&str; 70] = [
     "schema_version",
     "scenario_id",
     "scenario_revision",
@@ -432,12 +615,34 @@ const REPORT_REQUIRED_KEYS: [&str; 48] = [
     "dropped_messages",
     "rejected_connections",
     "error_count",
+    "matches_completed",
+    "match_result",
+    "match_active_ticks",
+    "match_respawns",
+    "team_a_defeats",
+    "team_b_defeats",
+    "first_hostile_damage_tick",
+    "build_selections",
+    "build_dropped_records",
+    "ability_attempts",
+    "ability_accepts",
+    "dash_uses",
+    "sentry_uses",
+    "accepted_attacks",
+    "emitted_deliveries",
+    "attacks_with_hostile_contact",
+    "hostile_damage",
+    "terrain_requested_brushes",
+    "terrain_applied_brushes",
+    "terrain_rejected_brushes",
+    "terrain_deferred_brushes",
+    "terrain_cells_erased",
 ];
 
 /// Report fields whose values are bounded identity strings. The reader enforces the same
 /// bound the writer's `validate` path enforces, so an oversized identity cannot slip into
 /// a verification script through the file format.
-const REPORT_IDENTITY_KEYS: [&str; 11] = [
+const REPORT_IDENTITY_KEYS: [&str; 12] = [
     "scenario_id",
     "run_id",
     "build_version",
@@ -449,6 +654,7 @@ const REPORT_IDENTITY_KEYS: [&str; 11] = [
     "end_reason",
     "first_divergence",
     "exit_category",
+    "match_result",
 ];
 
 /// Parse one required field as its declared scalar type. Presence was checked before,
@@ -470,7 +676,7 @@ fn owned_field(lines: &[(&str, &str)], key: &str) -> String {
         .to_string()
 }
 
-/// Parse and validate report lines into the schema-v1 closeout report they must encode.
+/// Parse and validate report lines into the closeout report they must encode.
 ///
 /// Beyond requiring every field exactly once with bounded identities, every numeric and
 /// boolean field must parse as its declared type, and the reconstructed report must pass
@@ -573,6 +779,7 @@ pub fn parse_closeout_report(lines: &[(&str, &str)]) -> Result<CloseoutReportV1,
         dropped_messages: parse_typed_field(lines, "dropped_messages", "u64")?,
         rejected_connections: parse_typed_field(lines, "rejected_connections", "u64")?,
         error_count: parse_typed_field(lines, "error_count", "u64")?,
+        gameplay: GameplayAggregatesV1::from_report_lines(lines)?,
     };
     report
         .validate()
@@ -619,20 +826,26 @@ fn validate_report_participant_block(lines: &[(&str, &str)]) -> Result<(), Strin
     Ok(())
 }
 
-/// The manifest identity fields one launcher run shares across every endpoint. Network
-/// and render profiles stay per-endpoint (a run may mix native and headless clients),
-/// so they are deliberately excluded from the agreement check.
-const RUN_IDENTITY_FIELDS: [&str; 10] = [
+/// The manifest identity fields one launcher run shares across every endpoint. Source
+/// identity and the canonical participant/build assignment are part of the shared
+/// identity, so a report from another source tree or a different roster cannot satisfy
+/// this run's gate when version and fingerprints happen to match. Network and render
+/// profiles stay per-endpoint (a run may mix native and headless clients), so they are
+/// deliberately excluded from the agreement check.
+const RUN_IDENTITY_FIELDS: [&str; 13] = [
     "scenario_id",
     "scenario_revision",
     "run_id",
     "build_version",
+    "source_revision",
+    "source_dirty",
     "protocol_version",
     "registry_fingerprint",
     "content_fingerprint",
     "mode",
     "rules_profile",
     "seed",
+    "participants",
 ];
 
 /// Render one manifest's shared run identity as `(field, value)` pairs for comparison.
@@ -645,12 +858,22 @@ fn run_identity_pairs(manifest: &RunManifestV1) -> Vec<(&'static str, String)> {
                 "scenario_revision" => manifest.scenario_revision.to_string(),
                 "run_id" => manifest.run_id.clone(),
                 "build_version" => manifest.build_version.clone(),
+                "source_revision" => manifest.source_revision.clone(),
+                "source_dirty" => manifest.source_dirty.to_string(),
                 "protocol_version" => manifest.protocol_version.to_string(),
                 "registry_fingerprint" => manifest.registry_fingerprint.to_string(),
                 "content_fingerprint" => manifest.content_fingerprint.to_string(),
                 "mode" => manifest.mode.clone(),
                 "rules_profile" => manifest.rules_profile.clone(),
                 "seed" => manifest.seed.to_string(),
+                "participants" => manifest
+                    .participants
+                    .iter()
+                    .map(|participant| {
+                        format!("{}:{}", participant.player_id, participant.build_identity)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(";"),
                 _ => unreachable!("the field list is closed"),
             };
             (*field, value)
@@ -658,16 +881,53 @@ fn run_identity_pairs(manifest: &RunManifestV1) -> Vec<(&'static str, String)> {
         .collect()
 }
 
+/// Enforce the per-report terminal gate: a clean exit, zero dropped messages,
+/// rejections, and errors, no divergence, and an actually-observed participant roster.
+fn enforce_closeout_terminal_gate(
+    report: &CloseoutReportV1,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    if report.exit_category != ProcessExitCategory::CleanExit {
+        return Err(format!(
+            "{}: unexpected exit category {}",
+            path.display(),
+            report.exit_category.name()
+        ));
+    }
+    for (counter, value) in [
+        ("dropped_messages", report.dropped_messages),
+        ("rejected_connections", report.rejected_connections),
+        ("error_count", report.error_count),
+    ] {
+        if value != 0 {
+            return Err(format!("{}: {counter}={value}", path.display()));
+        }
+    }
+    if let Some(divergence) = &report.first_divergence {
+        return Err(format!("{}: divergence {divergence}", path.display()));
+    }
+    if report.manifest.participants.is_empty() {
+        return Err(format!(
+            "{}: manifest carries no participant rows; supervised roster runs spawn \
+             fighters before the scenario completes",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 /// Validate a finished closeout-report directory for one launcher run: exactly one report
 /// per configured endpoint (`server.closeout` plus `client-1..N.closeout`), every report
-/// reconstructing and validating as schema v1, one shared run identity across endpoints,
-/// every endpoint exiting clean with zero dropped messages, rejections, errors, and
-/// divergence, and one checkpoint digest across endpoints that carries real evidence
-/// exactly when `expect_checkpoint_evidence` says the run profile records checkpoints
-/// (combat-assert runs do; movement, terrain, and match profiles do not). Verification
-/// launchers reach this through `brawler-server validate-closeout` so the terminal gate
-/// and the report writer share a single schema definition instead of a launcher-side
-/// subset. Returns the number of validated reports.
+/// reconstructing and validating as the current schema, one shared run identity (source
+/// revision, seed, and the canonical participant/build assignment included) across
+/// endpoints with at least one observed participant row per endpoint, every endpoint
+/// exiting clean with zero dropped messages, rejections, errors, and divergence, and one
+/// checkpoint digest across endpoints that carries real evidence exactly when
+/// `expect_checkpoint_evidence` says the run profile records checkpoints (combat-assert
+/// runs do; movement, terrain, and match profiles do not). Verification launchers reach
+/// this through `brawler-server validate-closeout` so the terminal gate and the report
+/// writer share a single schema definition instead of a launcher-side subset. Returns the
+/// number of validated reports.
 pub fn validate_closeout_directory(
     directory: &std::path::Path,
     client_count: u32,
@@ -713,25 +973,7 @@ pub fn validate_closeout_directory(
             .map_err(|error| format!("{}: {error}", path.display()))?;
         let report = parse_closeout_report(&lines)
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        if report.exit_category != ProcessExitCategory::CleanExit {
-            return Err(format!(
-                "{}: unexpected exit category {}",
-                path.display(),
-                report.exit_category.name()
-            ));
-        }
-        for (counter, value) in [
-            ("dropped_messages", report.dropped_messages),
-            ("rejected_connections", report.rejected_connections),
-            ("error_count", report.error_count),
-        ] {
-            if value != 0 {
-                return Err(format!("{}: {counter}={value}", path.display()));
-            }
-        }
-        if let Some(divergence) = &report.first_divergence {
-            return Err(format!("{}: divergence {divergence}", path.display()));
-        }
+        enforce_closeout_terminal_gate(&report, &path)?;
         let identity = run_identity_pairs(&report.manifest);
         if let Some((reference_name, reference_identity)) = &reference_identity {
             let mismatch = reference_identity

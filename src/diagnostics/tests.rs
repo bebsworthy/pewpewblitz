@@ -130,7 +130,10 @@ fn report_line_validation_rejects_duplicates_missing_and_unknown_schemas() {
     let pairs = split_report_lines(&missing).expect("lines split");
     assert!(parse_closeout_report(&pairs).is_err_and(|error| error.contains("checkpoint_digest")));
 
-    let unknown_schema = contents.replace("schema_version=1", "schema_version=99");
+    let unknown_schema = contents.replace(
+        &format!("schema_version={CLOSEOUT_SCHEMA_VERSION}"),
+        "schema_version=99",
+    );
     let pairs = split_report_lines(&unknown_schema).expect("lines split");
     assert!(
         parse_closeout_report(&pairs)
@@ -183,6 +186,67 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
     assert!(
         parse_closeout_report(&pairs)
             .is_err_and(|error| error.contains("RTT percentiles are not monotonic"))
+    );
+
+    let mut jitter = non_monotonic;
+    jitter.rtt_p50_micros = 0;
+    jitter.rtt_p95_micros = 0;
+    jitter.jitter_p50_micros = 40;
+    jitter.jitter_p95_micros = 30;
+    jitter.jitter_max_micros = 50;
+    let jitter_contents = jitter.to_report_lines().join("\n");
+    let pairs = split_report_lines(&jitter_contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("jitter percentiles are not monotonic"))
+    );
+
+    let mut ghost_match = jitter;
+    ghost_match.jitter_p50_micros = 20;
+    ghost_match.gameplay.match_result = Some("draw".to_string());
+    let ghost_contents = ghost_match.to_report_lines().join("\n");
+    let pairs = split_report_lines(&ghost_contents).expect("lines split");
+    assert!(parse_closeout_report(&pairs).is_err_and(|error| {
+        error.contains("aggregates reference a match the process did not complete")
+    }));
+
+    ghost_match.gameplay.matches_completed = 2;
+    ghost_match.gameplay.match_result = Some("mystery".to_string());
+    let unknown_label = ghost_match.to_report_lines().join("\n");
+    let pairs = split_report_lines(&unknown_label).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("not a match result label"))
+    );
+
+    ghost_match.gameplay.match_result = None;
+    let unlabelled = ghost_match.to_report_lines().join("\n");
+    let pairs = split_report_lines(&unlabelled).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs).is_err_and(|error| error.contains("match_result is missing"))
+    );
+
+    let mut weapon = ghost_match;
+    weapon.gameplay.matches_completed = 1;
+    weapon.gameplay.match_result = Some("draw".to_string());
+    weapon.gameplay.attacks_with_hostile_contact = 5;
+    weapon.gameplay.accepted_attacks = 4;
+    let weapon_contents = weapon.to_report_lines().join("\n");
+    let pairs = split_report_lines(&weapon_contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("more attacks with contact than accepted"))
+    );
+
+    let mut terrain = weapon;
+    terrain.gameplay.attacks_with_hostile_contact = 0;
+    terrain.gameplay.terrain_requested_brushes = 2;
+    terrain.gameplay.terrain_applied_brushes = 3;
+    let terrain_contents = terrain.to_report_lines().join("\n");
+    let pairs = split_report_lines(&terrain_contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("outcomes exceed the requested brushes"))
     );
 }
 
@@ -864,6 +928,203 @@ fn disabled_process_diagnostics_install_no_observation_systems() {
     let _ = std::fs::remove_file(probe_path);
 }
 
+/// Participant rows must be cached while fighters are live: finalization runs after the
+/// role shutdown chain may have despawned every replicated fighter, and a build
+/// replacement must update the cached row instead of duplicating it.
+#[test]
+fn manifest_participants_are_cached_while_fighters_live_and_survive_shutdown() {
+    use super::process::ProcessDiagnosticsState;
+    use crate::builds::{BuildPresetId, BuildRecipeFingerprint, BuildRevision, SelectedBuild};
+    use crate::protocol::{Fighter, PlayerId};
+
+    fn rows(app: &App) -> Vec<ManifestParticipant> {
+        app.world()
+            .resource::<ProcessDiagnosticsState>()
+            .manifest_participants
+            .clone()
+    }
+    let build = |revision: u16| SelectedBuild {
+        source_build_preset_id: Some(BuildPresetId(3)),
+        recipe_fingerprint: BuildRecipeFingerprint(7),
+        revision: BuildRevision(revision),
+    };
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ProcessDiagnosticsState>()
+        .add_systems(Update, process::observe_manifest_participants);
+    let fighters: Vec<_> = app
+        .world_mut()
+        .spawn_batch([
+            (Fighter, PlayerId(2), build(1)),
+            (Fighter, PlayerId(1), build(1)),
+        ])
+        .collect();
+    app.update();
+    // Spawn order is nondeterministic across archetypes; the cache is keyed by stable
+    // player identity and stays sorted.
+    assert_eq!(
+        rows(&app)
+            .iter()
+            .map(|row| row.player_id)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+
+    // A build replacement revises the existing row in place.
+    app.world_mut().entity_mut(fighters[0]).insert(build(2));
+    app.update();
+    assert!(
+        rows(&app)
+            .iter()
+            .any(|row| row.player_id == 2 && row.build_identity.contains("revision:2")),
+        "a replaced build must update its cached participant row"
+    );
+    assert_eq!(rows(&app).len(), 2);
+
+    // After every fighter is gone — the terminal shutdown state — the cached rows stay.
+    for fighter in fighters {
+        app.world_mut().despawn(fighter);
+    }
+    app.update();
+    assert_eq!(rows(&app).len(), 2);
+}
+
+/// The consolidated report's gameplay block comes from the process's own bounded
+/// telemetry summaries: match/mode, weapon, and ability aggregates from the latest match
+/// summary, build selections from the build telemetry, and terrain aggregates from the
+/// terrain telemetry.
+#[cfg(feature = "server")]
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the test stages four telemetry resources and asserts the consolidated block; its length is the staging itself"
+)]
+fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
+    use super::process::ProcessDiagnosticsState;
+    use crate::abilities::AbilityTelemetry;
+    use crate::builds::{
+        BuildPresetId, BuildRecipeFingerprint, BuildRevision, BuildSelectionTelemetryRecord,
+        BuildTelemetry, PassiveDefinitionId, UltimateDefinitionId,
+    };
+    use crate::combat::{
+        TeamId, WeaponPresetId, WeaponRecipeFingerprint, WeaponTelemetry, WeaponTelemetryAggregate,
+        WeaponTelemetryKey,
+    };
+    use crate::map::ModeDefinitionId;
+    use crate::matchplay::{MatchId, MatchResult, MatchTelemetry, ModeSummary, WipeoutSummary};
+    use crate::protocol::NetworkEntityId;
+    use crate::terrain::telemetry::TerrainTelemetry;
+
+    let mut matches = MatchTelemetry::default();
+    matches.begin(MatchId(7), 100);
+    let mut weapons = WeaponTelemetry::default();
+    weapons.source_aggregates.insert(
+        WeaponTelemetryKey {
+            preset_id: WeaponPresetId(1),
+            recipe_fingerprint: WeaponRecipeFingerprint(5),
+        },
+        WeaponTelemetryAggregate {
+            accepted_attacks: 4,
+            emitted_deliveries: 6,
+            attacks_with_hostile_contact: 3,
+            hostile_damage: 40,
+            ..WeaponTelemetryAggregate::default()
+        },
+    );
+    matches.complete_with_mode(
+        250,
+        ModeDefinitionId(1),
+        ModeSummary::Wipeout(WipeoutSummary {
+            final_scores: [10, 2],
+            target_score: 10,
+            score_margin: 8,
+        }),
+        MatchResult::TeamVictory { team: TeamId(0) },
+        8,
+        &weapons,
+        &AbilityTelemetry::default(),
+    );
+
+    let mut builds = BuildTelemetry::default();
+    for request_id in 1..=2 {
+        builds.record(BuildSelectionTelemetryRecord {
+            tick: request_id,
+            request_id,
+            owner_network_id: NetworkEntityId(request_id),
+            identity: crate::builds::SelectedBuild {
+                source_build_preset_id: Some(BuildPresetId(3)),
+                recipe_fingerprint: BuildRecipeFingerprint(7),
+                revision: BuildRevision(1),
+            },
+            total_points: 8,
+            weapon_fingerprint: WeaponRecipeFingerprint(5),
+            ultimate_id: UltimateDefinitionId(1),
+            passive_ids: [PassiveDefinitionId(1), PassiveDefinitionId(6)],
+        });
+    }
+
+    let mut terrain = TerrainTelemetry::default();
+    terrain.aggregates.requested_brushes = 3;
+    terrain.aggregates.applied_brushes = 2;
+    terrain.aggregates.deferred_brushes = 1;
+    terrain.aggregates.cells_erased = 48;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<ProcessDiagnosticsState>()
+        .insert_resource(matches)
+        .insert_resource(builds)
+        .insert_resource(terrain)
+        .add_systems(Update, process::observe_gameplay_aggregates);
+    app.update();
+    let GameplayAggregatesV1 {
+        matches_completed,
+        match_result,
+        match_active_ticks,
+        team_a_defeats,
+        build_selections,
+        accepted_attacks,
+        emitted_deliveries,
+        attacks_with_hostile_contact,
+        hostile_damage,
+        terrain_requested_brushes,
+        terrain_applied_brushes,
+        terrain_deferred_brushes,
+        terrain_cells_erased,
+        ..
+    } = app
+        .world()
+        .resource::<ProcessDiagnosticsState>()
+        .gameplay
+        .clone();
+    let match_result = match_result.expect("a completed match carries its result label");
+    assert_eq!(match_result, "victory:0");
+    assert_eq!(
+        (matches_completed, match_active_ticks, team_a_defeats),
+        (1, 150, 0)
+    );
+    assert_eq!(build_selections, 2);
+    assert_eq!(
+        (
+            accepted_attacks,
+            emitted_deliveries,
+            attacks_with_hostile_contact,
+            hostile_damage
+        ),
+        (4, 6, 3, 40)
+    );
+    assert_eq!(
+        (
+            terrain_requested_brushes,
+            terrain_applied_brushes,
+            terrain_deferred_brushes
+        ),
+        (3, 2, 1)
+    );
+    assert_eq!(terrain_cells_erased, 48);
+}
+
 #[test]
 #[allow(
     clippy::too_many_lines,
@@ -951,6 +1212,61 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
         validate_closeout_directory(&directory, 2, true)
             .is_err_and(|error| error.contains("run identity run_id diverged")
                 && error.contains("different-run"))
+    );
+
+    // A report from a different source tree must not satisfy this run's gate even when
+    // version and fingerprints happen to match: source identity is part of the agreement.
+    write_report("client-2.closeout", 42);
+    let mut other_source = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        checkpoint_digest: 42,
+        ..Default::default()
+    };
+    other_source.manifest.source_revision = "deadbee".to_string();
+    std::fs::write(
+        directory.join("client-2.closeout"),
+        other_source.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 2, true).is_err_and(|error| error
+            .contains("run identity source_revision diverged")
+            && error.contains("deadbee"))
+    );
+
+    // A different participant/build assignment is a different run, not a matching report.
+    write_report("client-2.closeout", 42);
+    let mut other_roster = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        checkpoint_digest: 42,
+        ..Default::default()
+    };
+    other_roster.manifest.participants[0].build_identity =
+        "preset:9 fingerprint:1 revision:1".to_string();
+    std::fs::write(
+        directory.join("client-2.closeout"),
+        other_roster.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 2, true)
+            .is_err_and(|error| error.contains("run identity participants diverged"))
+    );
+
+    // Supervised roster runs spawn fighters before the scenario completes, so a report
+    // that observed no participants at all cannot satisfy the gate.
+    let mut empty_roster = other_roster;
+    empty_roster.manifest.participants = Vec::new();
+    std::fs::write(
+        directory.join("client-2.closeout"),
+        empty_roster.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 2, true)
+            .is_err_and(|error| error.contains("no participant rows"))
     );
 
     write_report("client-2.closeout", 42);

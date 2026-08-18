@@ -765,3 +765,34 @@ mod capacity_composition_tests {
         assert!(wide.validate_against_map(&embedded_snapshot()).is_err());
     }
 }
+
+#[test]
+fn match_result_report_labels_round_trip() {
+    let results = [
+        MatchResult::TeamVictory { team: TeamId(0) },
+        MatchResult::TeamVictory { team: TeamId(1) },
+        MatchResult::Draw,
+        MatchResult::Forfeit {
+            winner: TeamId(1),
+            departed_team: TeamId(0),
+        },
+    ];
+    for result in results {
+        assert_eq!(
+            MatchResult::parse_report_label(&result.report_label()),
+            Some(result)
+        );
+    }
+    // Anything that is not a result label is refused, including the closeout block's
+    // `none` sentinel and malformed team payloads.
+    for hostile in [
+        "none",
+        "victory",
+        "victory:256",
+        "forfeit:0",
+        "forfeit:0:1:2",
+        "",
+    ] {
+        assert_eq!(MatchResult::parse_report_label(hostile), None);
+    }
+}

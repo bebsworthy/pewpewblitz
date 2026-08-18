@@ -11,7 +11,7 @@ fn usage() {
         "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>]"
     );
     eprintln!(
-        "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS>   validate finished closeout reports against schema v1 (EXPECT-CHECKPOINTS is 1 for combat-assert runs, 0 otherwise)"
+        "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS>   validate finished closeout reports against the current report schema (EXPECT-CHECKPOINTS is 1 for combat-assert runs, 0 otherwise)"
     );
     eprintln!(
         "note: --wipeout-rules <production|verification> is a deprecated alias for --match-rules"
@@ -79,7 +79,7 @@ fn parse_args() -> Result<ServerNetworkConfig, String> {
     Ok(config)
 }
 
-/// Headless closeout-report gate for verification launchers: enforces the same schema-v1
+/// Headless closeout-report gate for verification launchers: enforces the same report
 /// reader the binaries' report writer uses, so the terminal check cannot drift from the
 /// writer's contract. Exits 0 when every configured endpoint validated.
 fn run_closeout_validation(directory: &str, client_count: &str, expect_checkpoints: &str) -> ! {

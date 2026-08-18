@@ -190,13 +190,14 @@ validate_closeout_reports() {
     if [[ -z "$diagnostics_dir" ]]; then
         return 0
     fi
-    # Reuse the binaries' own schema-v1 report reader so the terminal gate enforces the
-    # full closeout contract (48 required fields with typed values, bounded identities,
-    # participant rows, one shared run identity, clean exits, zero drops/rejections/
-    # errors, and cross-endpoint digest agreement) instead of a launcher-side subset that
-    # can drift from the writer. Combat-assert runs must carry nonzero checkpoint
-    # digests; movement/terrain/match profiles record no combat checkpoints, so their
-    # digests must be zero.
+    # Reuse the binaries' own closeout-report reader so the terminal gate enforces the
+    # full schema contract (every required field with typed values, bounded identities,
+    # participant rows, the gameplay-aggregate consistency rules, one shared run identity
+    # including source revision and the canonical participant/build assignment, clean
+    # exits, zero drops/rejections/errors, and cross-endpoint digest agreement) instead
+    # of a launcher-side subset that can drift from the writer. Combat-assert runs must
+    # carry nonzero checkpoint digests; movement/terrain/match profiles record no combat
+    # checkpoints, so their digests must be zero.
     "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" "$combat_assert"
     printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
     if command -v shasum >/dev/null 2>&1; then
@@ -228,6 +229,27 @@ if [[ -n "$diagnostics_dir" ]]; then
     if [[ -z "$diagnostics_scenario_id" ]]; then
         diagnostics_scenario_id="network-${game_mode}-${network_run_id}"
     fi
+    # Scenario declarations derived from the selected profile, not free-form metadata:
+    # the seed names the deterministic reproduction (match ids, spawn selection, and map
+    # recipes have no ambient randomness, so the declared seed is the scenario label all
+    # endpoints must agree on); the scripted-action count is one per scripted input
+    # channel the launcher applies to the two scripted headless clients (move axis, aim
+    # source, and fire where the profile fires); combat-assert runs declare the six
+    # named checkpoints the assertion watches (four active_* weapon effects plus defeat
+    # and reset — observed evidence overwrites the declared count at closeout).
+    diagnostics_seed="${BRAWLER_DIAGNOSTICS_SEED:-1}"
+    scripted_actions=0
+    declared_checkpoints=0
+    if [[ "$headless" == "1" ]]; then
+        if [[ "$combat_assert" == "1" ]]; then
+            scripted_actions=6
+            declared_checkpoints=6
+        elif [[ "$terrain_assert" == "1" ]]; then
+            scripted_actions=6
+        else
+            scripted_actions=4
+        fi
+    fi
     source_revision="$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     if [[ -n "$(git -C "$repo_root" status --porcelain 2>/dev/null)" ]]; then
         source_dirty=1
@@ -241,6 +263,9 @@ if [[ -n "$diagnostics_dir" ]]; then
         "BRAWLER_SOURCE_REVISION=$source_revision"
         "BRAWLER_SOURCE_DIRTY=$source_dirty"
         "BRAWLER_DIAGNOSTICS_MODE=$game_mode"
+        "BRAWLER_DIAGNOSTICS_SEED=$diagnostics_seed"
+        "BRAWLER_DIAGNOSTICS_SCRIPTED_ACTIONS=$scripted_actions"
+        "BRAWLER_DIAGNOSTICS_CHECKPOINTS=$declared_checkpoints"
         "BRAWLER_SERVER_EXIT_AFTER_VERIFICATION=1"
     )
     server_env+=(

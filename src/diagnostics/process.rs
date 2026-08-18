@@ -2,7 +2,8 @@
 //! Lightyear transport counters, and closeout report finalization.
 
 use super::{
-    CloseoutReportV1, ProcessExitCategory, RunManifestV1, SampleRing, env_identity, unix_micros_now,
+    CloseoutReportV1, GameplayAggregatesV1, ManifestParticipant, ProcessExitCategory,
+    RunManifestV1, SampleRing, env_identity, unix_micros_now,
 };
 use bevy::app::AppExit;
 use bevy::prelude::*;
@@ -79,6 +80,13 @@ pub(crate) struct ProcessDiagnosticsState {
     pub(crate) transport: TransportCounters,
     rejected_connections: u64,
     error_count: u64,
+    /// Manifest participant rows cached while fighters were live. Finalization runs after
+    /// the role shutdown chain may have despawned replicated fighters, so the roster is
+    /// observed during the run and the terminal report reads this cache, not the world.
+    pub(crate) manifest_participants: Vec<ManifestParticipant>,
+    /// Gameplay aggregates consolidated by `observe_gameplay_aggregates` at terminal
+    /// observation; the finalizer only copies them into the report.
+    pub(crate) gameplay: GameplayAggregatesV1,
     report_written: bool,
 }
 
@@ -98,6 +106,8 @@ impl Default for ProcessDiagnosticsState {
             transport: TransportCounters::default(),
             rejected_connections: 0,
             error_count: 0,
+            manifest_participants: Vec::new(),
+            gameplay: GameplayAggregatesV1::default(),
             report_written: false,
         }
     }
@@ -185,7 +195,13 @@ impl Plugin for ProcessDiagnosticsPlugin {
                 .add_systems(FixedLast, finish_fixed_tick_observation)
                 .add_systems(
                     Last,
-                    (observe_process_counts, sample_link_stats).in_set(TerminalObservationSet),
+                    (
+                        observe_process_counts,
+                        sample_link_stats,
+                        observe_manifest_participants,
+                        observe_gameplay_aggregates,
+                    )
+                        .in_set(TerminalObservationSet),
                 )
                 .add_systems(Last, finalize_closeout_report.in_set(DiagnosticsSet));
         }
@@ -249,6 +265,106 @@ fn sample_link_stats(links: Query<&Link>, mut state: ResMut<ProcessDiagnosticsSt
     state
         .jitter_samples
         .push(duration_to_micros(worst.stats.jitter));
+}
+
+/// Cache the manifest participant rows while fighters are live. The observation runs every
+/// frame of a diagnostics-enabled process, so build replacements update their row in place
+/// and the cache stays sorted by stable player identity; finalization then reads the cache
+/// even after the role shutdown chain has despawned every replicated fighter.
+pub(super) fn observe_manifest_participants(
+    mut state: ResMut<ProcessDiagnosticsState>,
+    fighters: Query<
+        (&crate::protocol::PlayerId, &crate::builds::SelectedBuild),
+        With<crate::protocol::Fighter>,
+    >,
+) {
+    let mut participants = std::mem::take(&mut state.manifest_participants);
+    for (player, build) in &fighters {
+        let row = ManifestParticipant {
+            player_id: player.0,
+            build_identity: participant_build_identity(build),
+        };
+        match participants.binary_search_by_key(&player.0, |row| row.player_id) {
+            Ok(index) => participants[index] = row,
+            Err(index) if participants.len() < super::MAX_MANIFEST_PARTICIPANTS => {
+                participants.insert(index, row);
+            }
+            _ => {}
+        }
+    }
+    state.manifest_participants = participants;
+}
+
+/// Consolidate the bounded gameplay telemetry summaries into the terminal observation
+/// state, so the consolidated report ties the run to its build, ability, match/mode, and
+/// terrain observations instead of process/network measurements alone. The authoritative
+/// match, build, and ability telemetry resources exist only in the server process; both
+/// roles own terrain telemetry (the client records its convergence facts). Reading them
+/// here — while the process still owns the resources — keeps report finalization free of
+/// gameplay-query parameters.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+pub(super) fn observe_gameplay_aggregates(
+    mut state: ResMut<ProcessDiagnosticsState>,
+    match_telemetry: Option<Res<crate::matchplay::MatchTelemetry>>,
+    #[cfg(feature = "server")] build_telemetry: Option<Res<crate::builds::BuildTelemetry>>,
+    terrain_telemetry: Option<Res<crate::terrain::telemetry::TerrainTelemetry>>,
+) {
+    let mut gameplay = GameplayAggregatesV1::default();
+    #[cfg(feature = "server")]
+    if let Some(builds) = build_telemetry.as_deref() {
+        gameplay.build_selections = u32::try_from(builds.selections.len()).unwrap_or(u32::MAX);
+        gameplay.build_dropped_records = builds.dropped_records;
+    }
+    if let Some(matches) = match_telemetry.as_deref() {
+        gameplay.matches_completed = u32::try_from(matches.summaries.len()).unwrap_or(u32::MAX);
+        if let Some(summary) = matches.summaries.back() {
+            consolidate_match_summary(summary, &mut gameplay);
+        }
+    }
+    if let Some(terrain) = terrain_telemetry.as_deref() {
+        let aggregates = &terrain.aggregates;
+        gameplay.terrain_requested_brushes = aggregates.requested_brushes;
+        gameplay.terrain_applied_brushes = aggregates.applied_brushes;
+        gameplay.terrain_rejected_brushes = aggregates.rejected_brushes;
+        gameplay.terrain_deferred_brushes = aggregates.deferred_brushes;
+        gameplay.terrain_cells_erased = aggregates.cells_erased;
+    }
+    state.gameplay = gameplay;
+}
+
+/// Fold the latest completed match summary's mode, ability, and weapon aggregates into
+/// the gameplay block. Weapon aggregates are summed across every preset that fought.
+fn consolidate_match_summary(
+    summary: &crate::matchplay::MatchSummary,
+    gameplay: &mut GameplayAggregatesV1,
+) {
+    gameplay.match_result = Some(summary.result.report_label());
+    gameplay.match_active_ticks = summary.active_duration_ticks;
+    gameplay.match_respawns = summary.respawns;
+    gameplay.team_a_defeats = summary.credited_defeats_by_team[0];
+    gameplay.team_b_defeats = summary.credited_defeats_by_team[1];
+    gameplay.first_hostile_damage_tick = summary.time_to_first_hostile_damage_ticks;
+    gameplay.ability_attempts = summary.ability_telemetry.attempts;
+    gameplay.ability_accepts = summary.ability_telemetry.accepts;
+    gameplay.dash_uses = summary.ability_telemetry.dash_uses;
+    gameplay.sentry_uses = summary.ability_telemetry.sentry_uses;
+    for (_, aggregate) in &summary.weapon_aggregates {
+        gameplay.accepted_attacks = gameplay
+            .accepted_attacks
+            .saturating_add(aggregate.accepted_attacks);
+        gameplay.emitted_deliveries = gameplay
+            .emitted_deliveries
+            .saturating_add(aggregate.emitted_deliveries);
+        gameplay.attacks_with_hostile_contact = gameplay
+            .attacks_with_hostile_contact
+            .saturating_add(aggregate.attacks_with_hostile_contact);
+        gameplay.hostile_damage = gameplay
+            .hostile_damage
+            .saturating_add(aggregate.hostile_damage);
+    }
 }
 
 #[cfg(feature = "process-metrics")]
@@ -392,8 +508,7 @@ pub(super) fn checkpoint_evidence_digest(
 }
 
 // Bevy system parameters are owned by the scheduling runtime; `Res` cannot be borrowed here.
-// The fighter read observes only stable wire identities for the manifest participant rows,
-// and the role-gated evidence parameters are how one finalizer serves both role lanes.
+// The role-gated evidence parameters are how one finalizer serves both role lanes.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -407,12 +522,6 @@ fn finalize_closeout_report(
     classification: Res<ProcessExitClassification>,
     protocol: Option<Res<crate::protocol::ProtocolFingerprint>>,
     content: Option<Res<crate::content::GameplayContentFingerprint>>,
-    fighters: Option<
-        Query<
-            (&crate::protocol::PlayerId, &crate::builds::SelectedBuild),
-            With<crate::protocol::Fighter>,
-        >,
-    >,
     #[cfg(feature = "server")] server_evidence: Option<Res<crate::combat::CombatEvidenceSnapshots>>,
     #[cfg(feature = "server")] combat_telemetry: Option<Res<crate::combat::CombatTelemetry>>,
     #[cfg(feature = "client")] client_observation: Option<
@@ -427,9 +536,6 @@ fn finalize_closeout_report(
     };
     state.report_written = true;
     let exit_category = classification.classified_category(exit);
-    let fixed = state.fixed_tick_samples.ordered();
-    let rtt = state.rtt_samples.ordered();
-    let jitter = state.jitter_samples.ordered();
     let mut manifest = settings.manifest.clone();
     if let Some(protocol) = protocol {
         manifest.registry_fingerprint = protocol.0;
@@ -455,21 +561,55 @@ fn finalize_closeout_report(
         manifest.checkpoint_count =
             u32::try_from(evidence.observed_checkpoints).unwrap_or(u32::MAX);
     }
-    if let Some(fighters) = fighters
-        && manifest.participants.is_empty()
-    {
-        let mut participants: Vec<_> = fighters
-            .iter()
-            .map(|(player, build)| super::ManifestParticipant {
-                player_id: player.0,
-                build_identity: participant_build_identity(build),
-            })
-            .collect();
-        participants.sort_unstable_by_key(|participant| participant.player_id);
-        participants.truncate(super::MAX_MANIFEST_PARTICIPANTS);
-        manifest.participants = participants;
+    // Participant rows come from the during-run cache: by the terminal frame the role
+    // shutdown chain may already have despawned every replicated fighter.
+    if manifest.participants.is_empty() && !state.manifest_participants.is_empty() {
+        manifest
+            .participants
+            .clone_from(&state.manifest_participants);
     }
-    let report = CloseoutReportV1 {
+    let gameplay = std::mem::take(&mut state.gameplay);
+    let report = assemble_closeout_report(
+        manifest,
+        &settings,
+        exit_category,
+        &state,
+        evidence,
+        gameplay,
+    );
+    if let Err(error) = report.validate() {
+        bevy::log::error!(?error, "closeout report failed validation; not written");
+        return;
+    }
+    if let Some(path) = &settings.report_path {
+        let contents = report.to_report_lines().join("\n") + "\n";
+        if let Err(error) = std::fs::write(path, contents.as_bytes()) {
+            bevy::log::error!(path = %path.display(), ?error, "closeout report write failed");
+        } else {
+            bevy::log::info!(path = %path.display(), "closeout report written");
+        }
+    }
+}
+
+/// Assemble the terminal report from the finalized manifest, the observed process
+/// samples, and the consolidated evidence/gameplay blocks. Pure assembly: every value is
+/// read from already-owned observation state, so the finalizer stays a lifecycle system.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "evidence and gameplay are consumed by the assembled report"
+)]
+fn assemble_closeout_report(
+    manifest: RunManifestV1,
+    settings: &ProcessDiagnosticsSettings,
+    exit_category: ProcessExitCategory,
+    state: &ProcessDiagnosticsState,
+    evidence: CloseoutEvidence,
+    gameplay: GameplayAggregatesV1,
+) -> CloseoutReportV1 {
+    let fixed = state.fixed_tick_samples.ordered();
+    let rtt = state.rtt_samples.ordered();
+    let jitter = state.jitter_samples.ordered();
+    CloseoutReportV1 {
         manifest,
         end_reason: settings.end_reason.clone(),
         exit_category,
@@ -502,18 +642,7 @@ fn finalize_closeout_report(
         dropped_messages: evidence.dropped_messages,
         rejected_connections: state.rejected_connections,
         error_count: state.error_count,
-    };
-    if let Err(error) = report.validate() {
-        bevy::log::error!(?error, "closeout report failed validation; not written");
-        return;
-    }
-    if let Some(path) = &settings.report_path {
-        let contents = report.to_report_lines().join("\n") + "\n";
-        if let Err(error) = std::fs::write(path, contents.as_bytes()) {
-            bevy::log::error!(path = %path.display(), ?error, "closeout report write failed");
-        } else {
-            bevy::log::info!(path = %path.display(), "closeout report written");
-        }
+        gameplay,
     }
 }
 
