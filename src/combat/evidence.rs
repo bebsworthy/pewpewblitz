@@ -296,6 +296,11 @@ fn enqueue_pending_checkpoint(
 
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the queries declare the full snapshot view this checkpoint records"
+)]
 pub(super) fn capture_server_combat_checkpoints(
     tick: Res<SimulationTick>,
     mut evidence: ResMut<CombatEvidenceSnapshots>,
@@ -552,6 +557,10 @@ pub fn receive_combat_evidence_checkpoints(
 
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::type_complexity,
+    reason = "the queries declare the full snapshot view this checkpoint records"
+)]
 pub fn capture_client_combat_checkpoints(
     mut observation: ResMut<ClientCombatObservation>,
     fighters: Query<
@@ -771,6 +780,11 @@ pub fn capture_client_combat_checkpoints(
 
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub fn record_headless_combat_observation(
     mut observation: ResMut<ClientCombatObservation>,
     mut status: ResMut<ClientCombatEvidenceStatus>,

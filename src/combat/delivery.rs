@@ -80,6 +80,11 @@ pub fn repaired_landing_point(
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn sweep_composed_projectiles(
     mut commands: Commands,
     tick: Res<SimulationTick>,
@@ -330,6 +335,11 @@ pub(super) fn sweep_composed_projectiles(
 
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn resolve_melee_attacks(
     mut attacks: MessageReader<MeleeAttack>,
     mut pending: MessageWriter<PendingPayload>,

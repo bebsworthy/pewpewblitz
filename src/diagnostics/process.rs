@@ -69,7 +69,7 @@ pub(crate) struct ProcessDiagnosticsState {
     pub(crate) enabled: bool,
     tick_started_at: Option<Instant>,
     fixed_tick_samples: SampleRing,
-    fixed_ticks: u64,
+    pub(crate) fixed_ticks: u64,
     rtt_samples: SampleRing,
     jitter_samples: SampleRing,
     entity_high_water: u32,
@@ -171,18 +171,24 @@ impl Plugin for ProcessDiagnosticsPlugin {
             enabled: settings.report_path.is_some(),
             ..ProcessDiagnosticsState::default()
         };
+        let enabled = state.enabled;
         #[cfg(feature = "process-metrics")]
-        let metrics_enabled = state.enabled;
+        let metrics_enabled = enabled;
         app.insert_resource(state);
         app.init_resource::<ProcessExitClassification>();
-        app.add_systems(FixedFirst, begin_fixed_tick_observation)
-            .add_systems(FixedLast, finish_fixed_tick_observation)
-            .configure_sets(Last, TerminalObservationSet.before(DiagnosticsSet))
-            .add_systems(
-                Last,
-                (observe_process_counts, sample_link_stats).in_set(TerminalObservationSet),
-            )
-            .add_systems(Last, finalize_closeout_report.in_set(DiagnosticsSet));
+        // The observation sets stay configured in every build because the role shutdown
+        // chains order against them; without a report path the set holds no systems and
+        // the process keeps its zero-cost inert behavior.
+        app.configure_sets(Last, TerminalObservationSet.before(DiagnosticsSet));
+        if enabled {
+            app.add_systems(FixedFirst, begin_fixed_tick_observation)
+                .add_systems(FixedLast, finish_fixed_tick_observation)
+                .add_systems(
+                    Last,
+                    (observe_process_counts, sample_link_stats).in_set(TerminalObservationSet),
+                )
+                .add_systems(Last, finalize_closeout_report.in_set(DiagnosticsSet));
+        }
 
         #[cfg(feature = "process-metrics")]
         if metrics_enabled {

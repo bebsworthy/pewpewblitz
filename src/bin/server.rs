@@ -11,6 +11,9 @@ fn usage() {
         "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>]"
     );
     eprintln!(
+        "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT>   validate finished closeout reports against schema v1"
+    );
+    eprintln!(
         "note: --wipeout-rules <production|verification> is a deprecated alias for --match-rules"
     );
 }
@@ -76,7 +79,42 @@ fn parse_args() -> Result<ServerNetworkConfig, String> {
     Ok(config)
 }
 
+/// Headless closeout-report gate for verification launchers: enforces the same schema-v1
+/// reader the binaries' report writer uses, so the terminal check cannot drift from the
+/// writer's contract. Exits 0 when every configured endpoint validated.
+fn run_closeout_validation(directory: &str, client_count: &str) -> ! {
+    let Ok(client_count) = client_count.parse::<u32>() else {
+        eprintln!("brawler-server: validate-closeout requires a numeric client count");
+        process::exit(2);
+    };
+    match brawler::diagnostics::validate_closeout_directory(
+        std::path::Path::new(directory),
+        client_count,
+    ) {
+        Ok(count) => {
+            println!("brawler-server: validated {count} closeout reports in {directory}");
+            process::exit(0);
+        }
+        Err(error) => {
+            eprintln!("brawler-server: closeout validation failed: {error}");
+            process::exit(2);
+        }
+    }
+}
+
 fn main() -> AppExit {
+    let raw_args: Vec<String> = env::args().skip(1).collect();
+    if raw_args
+        .first()
+        .is_some_and(|arg| arg == "validate-closeout")
+    {
+        if raw_args.len() != 3 {
+            eprintln!("brawler-server: validate-closeout requires <DIRECTORY> <CLIENT-COUNT>");
+            usage();
+            process::exit(2);
+        }
+        run_closeout_validation(&raw_args[1], &raw_args[2]);
+    }
     let config = match parse_args() {
         Ok(config) => config,
         Err(error) => {

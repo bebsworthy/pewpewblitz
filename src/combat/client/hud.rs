@@ -18,6 +18,11 @@ pub struct CombatHudText;
 pub struct BuildSelectionText;
 
 #[cfg(feature = "client")]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(crate) fn update_health_bars(
     mut commands: Commands,
     fighters: Query<
@@ -100,6 +105,11 @@ pub(crate) fn update_health_bars(
 
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(crate) fn update_combat_hud(
     mut text: Query<&mut Text, With<CombatHudText>>,
     fighter: Query<

@@ -528,6 +528,91 @@ fn validate_report_participant_block(lines: &[(&str, &str)]) -> Result<(), Strin
     Ok(())
 }
 
+/// Validate a finished closeout-report directory for one launcher run: exactly one report
+/// per configured endpoint (`server.closeout` plus `client-1..N.closeout`), every report
+/// passing the full schema-v1 reader, every endpoint exiting clean with zero dropped
+/// messages, rejections, errors, and divergence, and one identical checkpoint digest
+/// across endpoints. Verification launchers reach this through
+/// `brawler-server validate-closeout` so the terminal gate and the report writer share a
+/// single schema definition instead of a launcher-side subset. Returns the number of
+/// validated reports.
+pub fn validate_closeout_directory(
+    directory: &std::path::Path,
+    client_count: u32,
+) -> Result<usize, String> {
+    if client_count == 0 || client_count > 8 {
+        return Err(format!(
+            "client count {client_count} is outside the supervised 1-8 roster"
+        ));
+    }
+    let mut expected: Vec<String> = (1..=client_count)
+        .map(|index| format!("client-{index}.closeout"))
+        .collect();
+    expected.push("server.closeout".to_string());
+    expected.sort();
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("{}: {error}", directory.display()))?;
+    let mut present: Vec<String> = entries
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.file_name())
+        .filter_map(|name| name.into_string().ok())
+        .filter(|name| name.ends_with(".closeout"))
+        .collect();
+    present.sort();
+    if present != expected {
+        return Err(format!(
+            "expected exactly one closeout report per configured endpoint ({}); found: {}",
+            expected.join(", "),
+            if present.is_empty() {
+                "none".to_string()
+            } else {
+                present.join(", ")
+            }
+        ));
+    }
+    let mut digests: Vec<String> = Vec::new();
+    for name in &expected {
+        let path = directory.join(name);
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let lines = split_report_lines(&contents)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        validate_report_lines(&lines).map_err(|error| format!("{}: {error}", path.display()))?;
+        let field = |key: &str| {
+            parse_report_field(&lines, key)
+                .ok_or_else(|| format!("{}: missing or duplicated {key}", path.display()))
+        };
+        let exit_category = field("exit_category")?;
+        if exit_category != ProcessExitCategory::CleanExit.name() {
+            return Err(format!(
+                "{}: unexpected exit category {exit_category}",
+                path.display()
+            ));
+        }
+        for counter in ["dropped_messages", "rejected_connections", "error_count"] {
+            let value = field(counter)?;
+            let parsed: u64 = value
+                .parse()
+                .map_err(|_| format!("{}: {counter}={value} is not a counter", path.display()))?;
+            if parsed != 0 {
+                return Err(format!("{}: {counter}={value}", path.display()));
+            }
+        }
+        let divergence = field("first_divergence")?;
+        if divergence != "none" {
+            return Err(format!("{}: divergence {divergence}", path.display()));
+        }
+        digests.push(field("checkpoint_digest")?.to_string());
+    }
+    if digests.iter().any(|digest| digest != &digests[0]) {
+        return Err(format!(
+            "checkpoint digests diverged across endpoints: {}",
+            digests.join(", ")
+        ));
+    }
+    Ok(expected.len())
+}
+
 /// FNV-1a digest over ordered checkpoint values; stable across runs and platforms.
 #[must_use]
 pub fn stable_digest(values: &[&str]) -> u64 {

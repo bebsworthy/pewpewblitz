@@ -58,6 +58,10 @@ pub(crate) fn sync_dash_trails(
 }
 
 #[cfg(feature = "client")]
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(crate) fn ensure_sentry_visuals(
     mut commands: Commands,
     sentries: Query<
@@ -103,6 +107,10 @@ pub(crate) fn sync_sentry_visuals(
 
 /// Coordinates the headless client lifecycle with its process-level combat evidence contract.
 #[cfg(feature = "client")]
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(crate) fn ensure_projectile_visuals(
     mut commands: Commands,
     mut query: Query<

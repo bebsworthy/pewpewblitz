@@ -18,13 +18,16 @@ pub const OVERLAY_ENV: &str = "BRAWLER_DIAGNOSTICS_OVERLAY";
 
 /// Marker for the overlay text node.
 #[derive(Component)]
-struct DiagnosticsOverlayText;
+pub(super) struct DiagnosticsOverlayText;
 
-/// Bounded overlay visibility state.
+/// Bounded overlay visibility state. `forced` records that `BRAWLER_DIAGNOSTICS_OVERLAY`
+/// pinned the visibility at startup; while set, the F3 toggle is suppressed so the
+/// environment control keeps its promised meaning for supervised observations.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiagnosticsOverlayState {
     pub visible: bool,
     pub lines: usize,
+    pub forced: bool,
 }
 
 /// Optional client overlay plugin; installs only local presentation systems.
@@ -41,6 +44,7 @@ impl Plugin for ClientDiagnosticsOverlayPlugin {
         app.insert_resource(DiagnosticsOverlayState {
             visible: initial,
             lines: 0,
+            forced: forced.is_some(),
         })
         .add_systems(Startup, spawn_diagnostics_overlay.run_if(move || initial))
         .add_systems(
@@ -77,7 +81,7 @@ fn spawn_overlay_text(commands: &mut Commands) {
 
 // Bevy system parameters are owned by the scheduling runtime; `Res` cannot be borrowed here.
 #[allow(clippy::needless_pass_by_value)]
-fn toggle_diagnostics_overlay(
+pub(super) fn toggle_diagnostics_overlay(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     state: Res<DiagnosticsOverlayState>,
     overlay: Query<Entity, With<DiagnosticsOverlayText>>,
@@ -86,6 +90,11 @@ fn toggle_diagnostics_overlay(
     let Some(keyboard) = keyboard else {
         return;
     };
+    if state.forced {
+        // BRAWLER_DIAGNOSTICS_OVERLAY pinned the visibility; the forced mode must survive
+        // F3 so scripted and supervised observations keep a stable overlay state.
+        return;
+    }
     if !keyboard.just_pressed(KeyCode::F3) {
         return;
     }
@@ -100,6 +109,7 @@ fn toggle_diagnostics_overlay(
     commands.insert_resource(DiagnosticsOverlayState {
         visible: next_visible,
         lines: state.lines,
+        forced: state.forced,
     });
 }
 

@@ -26,6 +26,10 @@ pub(super) fn legacy_compatibility_recipe(recipe: &WeaponRecipe) -> bool {
         )
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn validate_definitions(
     fighters: Res<FighterDefinitions>,
     weapons: Res<WeaponDefinitions>,
@@ -39,6 +43,10 @@ pub(super) fn validate_definitions(
 }
 
 #[cfg(feature = "server")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn spawn_test_dummy(
     mut commands: Commands,
     catalog: Res<WeaponCatalogResource>,
@@ -126,6 +134,11 @@ pub struct TestDummyResetDeadline(pub u64);
 
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn reset_due_fighters(
     mut commands: Commands,
     tick: Res<SimulationTick>,
@@ -206,6 +219,11 @@ pub(super) fn reset_due_fighters(
 }
 
 #[cfg(feature = "server")]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn expire_runtime_effects(
     tick: Res<SimulationTick>,
     mut commands: Commands,
@@ -319,6 +337,10 @@ pub(super) fn terrain_muzzle_contact(
 
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::type_complexity,
+    reason = "the query parameter is the shared area-targeting view, declared inline where the payload plan is built"
+)]
 pub(super) fn queue_area_payloads(
     landing: Vec2,
     source: AttackSource,
@@ -445,6 +467,10 @@ pub(super) fn record_delivery_termination(
 }
 
 #[cfg(feature = "server")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn publish_authoritative_tick(
     tick: Res<SimulationTick>,
     mut fighters: Query<&mut AuthoritativeTick, With<Fighter>>,
@@ -456,6 +482,10 @@ pub(super) fn publish_authoritative_tick(
 
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn cleanup_disconnected_projectiles(
     mut commands: Commands,
     tick: Res<SimulationTick>,
@@ -515,6 +545,10 @@ pub(super) fn send_combat_cues(
 }
 
 #[cfg(feature = "server")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn emit_combat_summary(
     mut summary_logged: ResMut<CombatSummaryLogged>,
     telemetry: Res<CombatTelemetry>,

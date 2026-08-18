@@ -380,6 +380,10 @@ struct AcceptedAttackRecord<'a> {
 }
 
 #[cfg(feature = "server")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the record is a small copied fact bundle owned by this recording step"
+)]
 #[allow(clippy::too_many_lines)]
 fn record_accepted_attack(
     record: AcceptedAttackRecord<'_>,
@@ -505,6 +509,14 @@ fn record_accepted_attack(
 #[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn authoritative_composed_fire(
     mut commands: Commands,
     tick: Res<SimulationTick>,

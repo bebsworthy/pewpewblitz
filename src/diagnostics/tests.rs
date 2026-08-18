@@ -724,3 +724,177 @@ fn exit_frame_report_observes_terminal_counts_after_the_shutdown_chain() {
     );
     let _ = std::fs::remove_file(&report_path);
 }
+
+#[cfg(feature = "client")]
+#[test]
+fn forced_overlay_visibility_is_not_togglable() {
+    let mut keyboard = ButtonInput::<KeyCode>::default();
+    keyboard.press(KeyCode::F3);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(keyboard)
+        .insert_resource(overlay::DiagnosticsOverlayState {
+            visible: false,
+            lines: 0,
+            forced: true,
+        })
+        .add_systems(Update, overlay::toggle_diagnostics_overlay);
+
+    // BRAWLER_DIAGNOSTICS_OVERLAY=0 pins the overlay off; F3 must not resurrect it.
+    app.update();
+    assert!(
+        !app.world()
+            .resource::<overlay::DiagnosticsOverlayState>()
+            .visible
+    );
+
+    // Without the forced pin the same F3 press toggles normally, so the suppressed frame
+    // above proves the forced mode, not a broken toggle.
+    app.world_mut()
+        .insert_resource(overlay::DiagnosticsOverlayState {
+            visible: false,
+            lines: 0,
+            forced: false,
+        });
+    app.update();
+    assert!(
+        app.world()
+            .resource::<overlay::DiagnosticsOverlayState>()
+            .visible
+    );
+}
+
+#[test]
+fn disabled_process_diagnostics_install_no_observation_systems() {
+    use super::process::ProcessDiagnosticsState;
+    fn run_one_fixed_observation(app: &mut App) {
+        app.world_mut().run_schedule(FixedFirst);
+        app.world_mut().run_schedule(FixedLast);
+    }
+
+    // Without a report path the plugin must not install the per-tick timing systems at
+    // all: driven fixed schedules leave the observation state untouched.
+    let mut idle = App::new();
+    idle.add_plugins(MinimalPlugins)
+        .insert_resource(ProcessDiagnosticsSettings {
+            report_path: None,
+            ..ProcessDiagnosticsSettings::default()
+        })
+        .add_plugins(ProcessDiagnosticsPlugin)
+        .init_schedule(FixedFirst)
+        .init_schedule(FixedLast);
+    run_one_fixed_observation(&mut idle);
+    run_one_fixed_observation(&mut idle);
+    assert_eq!(
+        idle.world()
+            .resource::<ProcessDiagnosticsState>()
+            .fixed_ticks,
+        0
+    );
+
+    // With a report path the same driven schedules sample exactly the ticks that ran, so
+    // the idle result above comes from registration gating, not from a stale test driver.
+    let probe_path = std::env::temp_dir().join(format!(
+        "brawler-diagnostics-inert-{}.closeout",
+        std::process::id()
+    ));
+    let mut observed = App::new();
+    observed
+        .add_plugins(MinimalPlugins)
+        .insert_resource(ProcessDiagnosticsSettings::default().with_report_path(probe_path.clone()))
+        .add_plugins(ProcessDiagnosticsPlugin)
+        .init_schedule(FixedFirst)
+        .init_schedule(FixedLast);
+    run_one_fixed_observation(&mut observed);
+    assert_eq!(
+        observed
+            .world()
+            .resource::<ProcessDiagnosticsState>()
+            .fixed_ticks,
+        1
+    );
+    let _ = std::fs::remove_file(probe_path);
+}
+
+#[test]
+fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
+    let directory =
+        std::env::temp_dir().join(format!("brawler-closeout-gate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("test gate directory");
+    let write_report = |name: &str, digest: u64| {
+        let report = CloseoutReportV1 {
+            manifest: valid_manifest(),
+            end_reason: "completed".to_string(),
+            checkpoint_digest: digest,
+            ..Default::default()
+        };
+        assert!(report.validate().is_ok());
+        std::fs::write(
+            directory.join(name),
+            report.to_report_lines().join("\n") + "\n",
+        )
+        .expect("report written");
+    };
+
+    write_report("server.closeout", 42);
+    write_report("client-1.closeout", 42);
+    write_report("client-2.closeout", 42);
+    assert_eq!(validate_closeout_directory(&directory, 2), Ok(3));
+
+    // A truncated report still parses line-by-line; only the full 48-field schema reader
+    // catches it, which is exactly the drift the launcher gate must not allow.
+    let full = std::fs::read_to_string(directory.join("client-2.closeout")).unwrap();
+    let truncated: String = full
+        .lines()
+        .filter(|line| {
+            !line.starts_with("transport_bytes_")
+                && !line.starts_with("packets_")
+                && !line.starts_with("started_at_")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(directory.join("client-2.closeout"), truncated).unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 2)
+            .is_err_and(|error| error.contains("missing or duplicated required field"))
+    );
+
+    write_report("client-2.closeout", 43);
+    assert!(
+        validate_closeout_directory(&directory, 2)
+            .is_err_and(|error| error.contains("digests diverged"))
+    );
+
+    write_report("client-2.closeout", 42);
+    let mut failing = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        checkpoint_digest: 42,
+        ..Default::default()
+    };
+    failing.error_count = 1;
+    std::fs::write(
+        directory.join("client-3.closeout"),
+        failing.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 3)
+            .is_err_and(|error| error.contains("error_count=1"))
+    );
+
+    // Exactly one report per configured endpoint: an unconfigured client-3 is rejected
+    // once the roster drops back to two.
+    write_report("client-3.closeout", 42);
+    assert!(
+        validate_closeout_directory(&directory, 2)
+            .is_err_and(|error| error
+                .contains("expected exactly one closeout report per configured endpoint"))
+    );
+    assert!(validate_closeout_directory(&directory, 0).is_err());
+    assert!(validate_closeout_directory(&directory, 9).is_err());
+
+    let _ = std::fs::remove_dir_all(&directory);
+}

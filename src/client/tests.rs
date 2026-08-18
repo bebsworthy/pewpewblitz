@@ -263,6 +263,62 @@ fn logical_keyboard_movement_supports_non_us_layouts() {
 }
 
 #[test]
+fn activity_thresholds_are_strict_and_require_nonzero_progress() {
+    // The default move deadzone is 0.0, so a centered stick must not count as activity.
+    assert!(!exceeds_activity_threshold(0.0, 0.0));
+    assert!(exceeds_activity_threshold(0.01, 0.0));
+    assert!(!exceeds_activity_threshold(0.25, 0.25));
+    assert!(exceeds_activity_threshold(0.26, 0.25));
+}
+
+#[test]
+fn idle_gamepad_does_not_become_the_active_input_device() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .init_resource::<PendingLocalActions>()
+        .insert_resource(ClientPlayableGate(true))
+        .init_resource::<ClientInputContext>()
+        .init_resource::<InputDeviceActivity>()
+        .init_resource::<ClientInputSettings>()
+        .add_systems(Update, sample_local_input);
+    let gamepad_entity = app.world_mut().spawn(Gamepad::default()).id();
+
+    // A connected-but-resting gamepad must never register meaningful activity, even on
+    // its first sample: the default move deadzone is 0.0 and a centered stick reads 0.0.
+    for _ in 0..5 {
+        app.update();
+    }
+    assert_eq!(
+        app.world().resource::<PendingLocalActions>().active_device,
+        ActiveInputDevice::KeyboardMouse
+    );
+    assert!(
+        app.world()
+            .resource::<InputDeviceActivity>()
+            .recent_gamepads
+            .is_empty()
+    );
+    assert_eq!(
+        app.world().resource::<PendingLocalActions>().move_axis,
+        Vec2::ZERO
+    );
+
+    // Real stick input beyond the (zero) deadzone still adopts the gamepad.
+    let mut gamepads = app.world_mut().query::<&mut Gamepad>();
+    gamepads
+        .single_mut(app.world_mut())
+        .expect("idle test gamepad")
+        .analog_mut()
+        .set(GamepadAxis::LeftStickX, 0.6);
+    app.update();
+    assert_eq!(
+        app.world().resource::<PendingLocalActions>().active_device,
+        ActiveInputDevice::Gamepad(gamepad_entity)
+    );
+}
+
+#[test]
 fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
     let mut gamepad = Gamepad::default();
     gamepad.analog_mut().set(GamepadAxis::LeftStickX, 0.75);

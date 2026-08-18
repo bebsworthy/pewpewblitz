@@ -50,6 +50,10 @@ pub(super) struct CombatTransactionState<'w> {
 /// access discipline mirrors the original single system: disjoint `ParamSet` members are
 /// borrowed per stage, never across stages that conflict.
 #[cfg(feature = "server")]
+#[allow(
+    clippy::type_complexity,
+    reason = "each field is the complete world view one payload stage needs; factoring them into aliases would hide the stage contracts"
+)]
 #[derive(bevy::ecs::system::SystemParam)]
 pub(super) struct CombatTargetState<'w, 's> {
     targets: ParamSet<
@@ -127,7 +131,8 @@ pub(super) struct CombatTargetState<'w, 's> {
 #[cfg(feature = "server")]
 #[allow(
     clippy::too_many_arguments,
-    reason = "the stage coordinator hands each stage the fixed-tick state it owns; the parameter list is the pipeline's explicit data flow"
+    clippy::needless_pass_by_value,
+    reason = "the stage coordinator hands each stage the fixed-tick state it owns; the parameter list is the pipeline's explicit data flow, and every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 pub(super) fn resolve_composed_payloads(
     mut commands: Commands,

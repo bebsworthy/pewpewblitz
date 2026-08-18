@@ -190,73 +190,11 @@ validate_closeout_reports() {
     if [[ -z "$diagnostics_dir" ]]; then
         return 0
     fi
-    python3 - "$diagnostics_dir" "$client_count" <<'PYVALIDATE'
-import sys
-from pathlib import Path
-
-directory = Path(sys.argv[1])
-client_count = int(sys.argv[2])
-required = [
-    "schema_version",
-    "scenario_id",
-    "run_id",
-    "end_reason",
-    "exit_category",
-    "fixed_ticks",
-    "checkpoint_digest",
-    "first_divergence",
-    "dropped_messages",
-    "rejected_connections",
-    "error_count",
-]
-expected = ["server.closeout"] + [
-    f"client-{index}.closeout" for index in range(1, client_count + 1)
-]
-present = sorted(path.name for path in directory.glob("*.closeout"))
-if present != sorted(expected):
-    sys.exit(
-        "expected exactly one closeout report per configured endpoint ("
-        + ", ".join(sorted(expected))
-        + "); found: "
-        + (", ".join(present) or "none")
-    )
-digests = set()
-for name in expected:
-    path = directory / name
-    if not path.is_file():
-        sys.exit(f"closeout report missing: {path}")
-    seen = set()
-    fields = {}
-    for line in path.read_text().splitlines():
-        key, sep, value = line.partition("=")
-        if not sep or not key:
-            sys.exit(f"malformed closeout line in {path}: {line}")
-        if key in seen:
-            sys.exit(f"duplicate closeout field {key} in {path}")
-        seen.add(key)
-        fields[key] = value
-    if fields.get("schema_version") != "1":
-        sys.exit(f"unknown closeout schema revision in {path}")
-    missing = [key for key in required if key not in seen]
-    if missing:
-        sys.exit(f"closeout report {path} missing required fields: {missing}")
-    if fields.get("exit_category") != "clean-exit":
-        sys.exit(f"unexpected exit category in {path}: {fields.get('exit_category')}")
-    for zero_field in ("dropped_messages", "rejected_connections", "error_count"):
-        if fields.get(zero_field) != "0":
-            sys.exit(
-                f"closeout report {path} reported {zero_field}={fields.get(zero_field)}"
-            )
-    if fields.get("first_divergence") != "none":
-        sys.exit(
-            f"closeout report {path} reported divergence: {fields.get('first_divergence')}"
-        )
-    digests.add(fields.get("checkpoint_digest", ""))
-if len(digests) > 1:
-    sys.exit(
-        "checkpoint digests diverged across endpoints: " + ", ".join(sorted(digests))
-    )
-PYVALIDATE
+    # Reuse the binaries' own schema-v1 report reader so the terminal gate enforces the
+    # full closeout contract (48 required fields, bounded identities, participant rows,
+    # clean exits, zero drops/rejections/errors, and cross-endpoint digest agreement)
+    # instead of a launcher-side subset that can drift from the writer.
+    "$server_binary" validate-closeout "$diagnostics_dir" "$client_count"
     printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
     if command -v shasum >/dev/null 2>&1; then
         printf 'brawler network: terminal digest '

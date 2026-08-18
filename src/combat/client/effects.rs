@@ -22,6 +22,11 @@ pub(crate) enum CombatStatusKind {
     Knockback,
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(crate) fn update_durable_effect_markers(
     mut commands: Commands,
     fighters: Query<
@@ -93,6 +98,10 @@ pub(crate) fn update_durable_effect_markers(
 }
 
 #[cfg(feature = "client")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(crate) fn update_combat_effects(
     mut commands: Commands,
     time: Res<Time<Real>>,

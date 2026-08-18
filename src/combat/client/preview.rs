@@ -210,6 +210,11 @@ pub(crate) struct WeaponPreviewVisual {
 }
 
 #[cfg(feature = "client")]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(crate) fn update_weapon_preview(
     mut commands: Commands,
     maps: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,

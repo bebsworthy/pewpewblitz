@@ -10,8 +10,8 @@
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the proposed v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
-| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2) was remediated in full — see the review-round evidence below |
-| Verification | Green after every slice through `9131095`, after the review-round remediation, and again after the second review round: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (234), `just test-server` (209), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry real checkpoint digests, zero drop/error/rejection counters, and cross-endpoint digest agreement |
+| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2), second round (5 findings, 1×P1/4×P2), and third round (5 findings, 1×P1/4×P2) were each remediated in full — see the review-round evidence below |
+| Verification | Green after every slice through `9131095`, after the review-round remediation, and again after the second and third review rounds: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (239), `just test-server` (211), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry real checkpoint digests, zero drop/error/rejection counters, and cross-endpoint digest agreement, gated through the binaries' own schema-v1 `validate-closeout` reader |
 | User playtest | Handoff delivered 2026-08-17 (see "Slice 7 — supervised playtest handoff"); awaiting physical controller/keyboard, audio, HUD/layout, and pacing observations |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -1124,6 +1124,72 @@ Verification after the second round: `just fmt-check`, `just clippy-client`, `ju
 `just prediction-comparison` (6), `git diff --check`; live combat-assert closeout runs (five
 checkpoints, cross-endpoint digest agreement, zero drop/error/rejection counters, participant
 rows) and the dead-port client failure probe.
+
+### Third review round remediation (2026-08-18)
+
+A further review filed five findings (one P1, four P2); all were remediated in one pass with the
+canonical gates and fresh launcher runs re-verified afterward.
+
+- **P1 — the launcher's closeout gate validated a field subset.** `validate_closeout_reports` in
+  `scripts/network.sh` checked 11 fields while schema v1 carries 48 non-participant fields plus
+  participant rows, so a truncated report missing fingerprints, timestamps, terminal counts,
+  transport metrics, or participant data passed the actual M11 closeout gate. Instead of mirroring
+  the schema in the launcher (the same drift that caused the gap), the server binary gained a
+  headless `validate-closeout <DIRECTORY> <CLIENT-COUNT>` subcommand backed by a new
+  `brawler::diagnostics::validate_closeout_directory`, which reuses `split_report_lines` and
+  `validate_report_lines` — the exact reader the report writer is validated against — then enforces
+  the terminal gate (clean exit, zero `dropped_messages`/`rejected_connections`/`error_count`,
+  `first_divergence=none`) and cross-endpoint checkpoint-digest agreement over exactly one report
+  per configured endpoint (1–8 roster bound). The launcher now calls that subcommand; its inline
+  Python validator was deleted. Verified live: movement and combat-assert instrumented runs print
+  `validated 3 closeout reports`, and negative probes (a report stripped of transport/packet/rtt
+  fields, a 9-client roster, missing arguments) each fail with the named-field or roster error and
+  exit 2.
+- **P2 — an idle controller could claim the active input device.** The meaningful-gamepad check
+  used `left.length() >= settings.move_deadzone`, and the default move deadzone is 0.0, so a
+  centered stick satisfied the threshold and a connected idle gamepad was marked meaningful (its
+  first sample also counts as changed). Stick and trigger activity now goes through
+  `exceeds_activity_threshold`, which requires strict progress past a positive threshold and an
+  explicit nonzero sample at a zero threshold. New tests: a pure threshold table
+  (strict-at-boundary, nonzero-at-zero) and an end-to-end idle-gamepad test that runs
+  `sample_local_input` for five frames against a resting `Gamepad::default()` (device stays
+  keyboard/mouse, `recent_gamepads` stays empty) and then adopts the gamepad once the stick really
+  moves.
+- **P2 — disabled diagnostics still ran every frame/tick.** `enabled` gated only report
+  finalization and the metrics-plugin install, while the fixed-tick timing pair, entity/link
+  scans, and RTT sampling stayed scheduled and mutated their rings with no report path. The
+  observation systems are now registered only when a report path exists; `TerminalObservationSet`
+  and `DiagnosticsSet` stay configured in every build because the role shutdown chains order
+  against them, so an inert build keeps the ordering anchors with zero scheduled observation
+  work. A new test drives `FixedFirst`/`FixedLast` directly: with no report path two driven
+  fixed ticks leave `fixed_ticks` at 0, while the same driven schedules with a report path sample
+  exactly the ticks that ran — proving the inertness comes from registration, not a stale driver.
+- **P2 — `BRAWLER_DIAGNOSTICS_OVERLAY` did not actually force.** The variable only chose the
+  initial state and F3 kept toggling afterward, contradicting the documented force semantics.
+  `DiagnosticsOverlayState` now carries `forced`; while set, `toggle_diagnostics_overlay` returns
+  before handling F3, so `=1`/`=0` pin the overlay for scripted and supervised observations and
+  unset keeps normal toggling. A new test presses F3 against a forced-off state (visibility
+  unchanged) and then against an unforced state (toggles normally), proving the suppression is
+  the forced mode rather than a broken toggle.
+- **P2 — broad lint suppression remained in the combat subtree and terrain authority.** The
+  `combat/mod.rs` subtree-wide `needless_pass_by_value`/`type_complexity` allowance (and its
+  round-two disposition note) was removed; the 25 genuinely needing sites across
+  `combat/{attack,authority,delivery,evidence,effects}`, `combat/definitions/resolver.rs`, and
+  `combat/client/{effects,hud,preview,world}.rs` now carry item-scoped allows with ownership
+  reasons (system parameters owned by the scheduling runtime; queries declared inline at their
+  schedule boundary; small copied definition facts). `terrain/authority.rs`'s module-wide
+  suppression was also removed: the model re-export allow moved onto the `use` item, three
+  systems gained item-scoped pass-by-value allows, and the single `bits.count() as u16` cast
+  carries a block-scoped allow citing the 16-word (1024-voxel) chunk bound. The cast-family and
+  wildcard allowances with reviewed reasons elsewhere (`terrain/grid.rs`, `terrain/collider.rs`,
+  `combat/mod.rs` casts) are untouched; no suppression was widened.
+
+Verification after the third round: `just fmt-check`, `just clippy-client`, `just clippy-server`,
+`just server-features`, `just check` (zero warnings), `just test-client` (239), `just test-server`
+(211), `just test-network` (77), `just test-performance` (14), `just network-smoke`,
+`just prediction-comparison` (6), `git diff --check`; live movement and combat-assert
+closeout-instrumented runs through the new `validate-closeout` gate plus its negative probes
+(truncated report, out-of-roster count, missing arguments).
 
 ## Verification plan
 

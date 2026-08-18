@@ -17,6 +17,10 @@ pub fn resolve_configuration(
     )
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "authored weapon configuration and policy are small copied definition facts consumed by validation"
+)]
 pub fn resolve_configuration_with_policy(
     source_preset_id: Option<WeaponPresetId>,
     configuration: WeaponConfiguration,

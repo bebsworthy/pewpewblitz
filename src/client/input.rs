@@ -14,6 +14,17 @@ pub(super) fn logical_key_pressed(keyboard: Option<&ButtonInput<Key>>, expected:
     })
 }
 
+/// A device value counts as activity only when it strictly exceeds its threshold. A zero
+/// threshold still requires a nonzero sample, so a connected-but-resting stick or trigger
+/// cannot claim the active input device (the default move deadzone is 0.0).
+pub(super) fn exceeds_activity_threshold(value: f32, threshold: f32) -> bool {
+    if threshold > 0.0 {
+        value > threshold
+    } else {
+        value > 0.0
+    }
+}
+
 /// Converts controller, keyboard, and mouse state to the shared action representation.
 ///
 /// All device shaping (deadzones, aim commit, trigger hysteresis, inversion, bindings) is
@@ -93,9 +104,9 @@ pub(super) fn sample_local_input(
         let left = gamepad.left_stick();
         let right = gamepad.right_stick();
         let trigger = gamepad.get(settings.gamepad.primary).unwrap_or(0.0);
-        let meaningful = left.length() >= settings.move_deadzone
-            || right.length() >= settings.aim_deadzone
-            || trigger >= settings.trigger_release
+        let meaningful = exceeds_activity_threshold(left.length(), settings.move_deadzone)
+            || exceeds_activity_threshold(right.length(), settings.aim_deadzone)
+            || exceeds_activity_threshold(trigger, settings.trigger_release)
             || settings
                 .gamepad
                 .rows()

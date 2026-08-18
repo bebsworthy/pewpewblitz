@@ -1,19 +1,13 @@
 //! Server-authoritative terrain ownership: chunk state, brush admission transactions,
 //! Avian collider commits, and defensive fighter repair. Generation install/teardown
 //! and the match-restart reset live in `lifecycle.rs`.
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::needless_pass_by_value,
-    clippy::wildcard_imports,
-    reason = "integer grid math, small copied facts, and the shared model re-export mirror the sibling modules"
-)]
-
 use super::TerrainSet;
 use super::collider;
 use super::grid as terrain_grid;
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the terrain model re-export mirrors the sibling modules' shared-shape imports"
+)]
 use super::model::*;
 use super::telemetry::{TerrainTelemetry, TerrainTelemetryOutcome, TerrainTelemetryRecord};
 use crate::combat::{CombatWorldEffectFact, SpawnState, WorldEffectDefinition};
@@ -240,6 +234,10 @@ pub(crate) fn register_terrain_schedule(app: &mut App) {
 
 /// Merge deferred and new world-effect facts into one deterministic sorted batch, dropping
 /// any fact that predates the current match generation's brush epoch.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn collect_terrain_brushes(
     mut facts: ResMut<crate::combat::CombatWorldEffectFacts>,
     mut deferred: ResMut<PendingTerrainBrushes>,
@@ -282,6 +280,10 @@ struct TerrainMutationState<'w> {
     transaction: ResMut<'w, TerrainTransaction>,
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn apply_terrain_brushes(
     mut batch: ResMut<TerrainBrushBatch>,
     mut deferred: ResMut<PendingTerrainBrushes>,
@@ -723,7 +725,15 @@ pub(super) fn commit_terrain_collision(world: &mut World) {
             last_modified_revision: transaction.revision,
         });
         entity_mut.insert(TerrainChunkCollision {
-            occupied_cells: bits.count() as u16,
+            occupied_cells: {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "a chunk carries at most 16 u64 words (1024 voxels), so the count always fits u16"
+                )]
+                {
+                    bits.count() as u16
+                }
+            },
             collider_revision: transaction.revision,
         });
         if bits.is_empty() {
@@ -930,6 +940,10 @@ fn nearest_repair_candidate(
     best.map(|(_, cell_y, cell_x)| terrain_grid::cell_center_world((cell_x, cell_y)))
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn repair_embedded_fighters(
     mut commands: Commands,
     tick: Res<crate::timing::SimulationTick>,
