@@ -2,11 +2,12 @@
 
 ## Purpose and scope
 
-This document defines the agreed product direction for the v2 player experience. It connects the
-current prototype to a product-quality client shell, direct-connect multiplayer, server-local game
-queues, automatic match formation, concurrent authoritative match workers, and a dependable
-bot-practice path. It is a feature and architecture boundary, not a milestone specification: every
-v2 milestone still begins with its own research and user-validated technical specification.
+This document defines the proposed v2 product direction, pending user validation through the v2
+roadmap and per-milestone specification reviews. It connects the current prototype to a
+product-quality client shell, direct-connect multiplayer, server-local game queues, automatic match
+formation, concurrent authoritative match workers, and a dependable bot-practice path. It is a
+feature and architecture boundary, not a milestone specification: every v2 milestone still begins
+with its own research and user-validated technical specification.
 
 In this document, **matchmaking** means direct-connect, server-local, skill-free queueing: the
 player first joins a known server, selects one of its game types, and the server forms matches from
@@ -22,7 +23,7 @@ Status triage used below:
   research and validate the technical architecture before implementation.
 - **Deferred** — explicitly outside v2.
 
-## Agreed v2 feature boundary
+## V2 feature boundary (proposed)
 
 V2 includes:
 
@@ -68,7 +69,7 @@ Authoritative simulation always runs in a `brawler-server` worker configuration.
 is a thin supervisor/router plus a long-lived lobby worker and isolated match worker processes. A
 product practice launcher may start the same supervisor and worker topology locally, but the
 windowed client never owns gameplay authority or bypasses the routed network, validation, and
-server-owned simulation path. The accepted topology and its remaining R&D gates are recorded in
+server-owned simulation path. The proposed topology and its remaining R&D gates are recorded in
 [Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md).
 
 ### Joining and discovery
@@ -131,7 +132,7 @@ owning milestone; clients do not vote or author rules in v2. Runtime hot-editing
 
 ### Concurrent matches as isolated workers
 
-Concurrent matches are a committed v2 capability and a mandatory R&D gate, not an assumed
+Concurrent matches are a v2 capability and a mandatory R&D gate, not an assumed
 extension of the current single-match server. Each active match runs the existing authoritative
 gameplay composition in its own OS process and Bevy `App`/`World`. The supervisor owns the single
 public UDP socket, bounded routing and admission state, worker process lifecycle, and control/packet

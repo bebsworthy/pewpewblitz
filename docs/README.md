@@ -21,8 +21,8 @@ The project is intentionally starting with the gameplay loop. Production matchma
 - [Bots](./10-bots.md) — decision record for player-filling bots as external headless clients, first-version scope, and open questions.
 - [Art and presentation direction](./11-art-and-presentation-direction.md) — validated visual style, owned blob-template terrain contract, skeleton character rig and skins, VFX architecture, and rendering decisions.
 - [Sprite inventory](./12-sprite-inventory.md) — complete list of objects that require sprite images, triaged by schedule status.
-- [Player UX and server-local matchmaking](./13-player-ux.md) — agreed v2 feature boundary, player flow, queues, build selection, settings, accessibility, and verification requirements.
-- [Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md) — accepted v2 supervisor, routed transport, isolated match-worker, and connection-handoff architecture.
+- [Player UX and server-local matchmaking](./13-player-ux.md) — proposed v2 feature boundary, player flow, queues, build selection, settings, accessibility, and verification requirements.
+- [Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md) — proposed v2 supervisor, routed transport, isolated match-worker, and connection-handoff architecture.
 - [Version 1 implementation roadmap](./implementation/v1/roadmap.md) — tracked MVP milestones from the Rust and Bevy application foundation through playtest hardening and closeout.
 - [Version 2 implementation roadmap](./implementation/v2/roadmap.md) — planned player UX, server-local matchmaking, reusable routed transport, and concurrent worker milestones.
 

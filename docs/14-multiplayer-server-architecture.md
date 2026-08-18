@@ -2,9 +2,10 @@
 
 ## Decision status
 
-Accepted for v2 planning on 2026-08-17. Exact IPC primitives, framing details, and measured limits
+Proposed for v2 planning on 2026-08-17; pending user validation of the v2 roadmap and the M01
+specification. Exact IPC primitives, framing details, and measured limits
 remain R&D items for [v2 Milestone 01](./implementation/v2/milestone-01.md); the process and authority
-topology described here is the committed direction.
+topology described here is the proposed direction until that validation completes.
 
 ## Context
 
