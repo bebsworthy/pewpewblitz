@@ -70,6 +70,50 @@ fn started_unlinked_udp_server_requests_error_exit() {
     assert!(app.should_exit().is_some_and(|exit| exit.is_error()));
 }
 
+/// A failed process verification must classify as `verification-failed` instead of
+/// collapsing into the undifferentiated error-exit mapping, and must carry the shared
+/// server failure path (failure record selected by the environment control).
+#[test]
+fn movement_verification_failure_classifies_as_verification_failed() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(crate::timing::SimulationTick(1_000))
+        .insert_resource(ProcessMovementCheck {
+            enabled: true,
+            ready_file: None,
+            initial_poses: vec![
+                (PlayerId(1), Vec2::ZERO, 0.0),
+                (PlayerId(2), Vec2::ZERO, 0.0),
+            ],
+            initial_tick: Some(0),
+            completed: false,
+        })
+        .init_resource::<crate::diagnostics::ProcessExitClassification>()
+        .add_systems(Update, verify_process_movement);
+    app.world_mut().spawn((
+        Fighter,
+        PlayerId(1),
+        Position::from_xy(0.0, 0.0),
+        Rotation::radians(0.0),
+    ));
+    app.world_mut().spawn((
+        Fighter,
+        PlayerId(2),
+        Position::from_xy(10.0, 0.0),
+        Rotation::radians(0.0),
+    ));
+
+    app.update();
+
+    assert!(app.should_exit().is_some_and(|exit| exit.is_error()));
+    assert_eq!(
+        app.world()
+            .resource::<crate::diagnostics::ProcessExitClassification>()
+            .classified_category(&AppExit::error()),
+        crate::diagnostics::ProcessExitCategory::VerificationFailed
+    );
+}
+
 #[test]
 fn app_exit_is_forwarded_after_update_producers_run() {
     fn request_exit(mut app_exit: MessageWriter<AppExit>) {

@@ -272,6 +272,29 @@ fn log_server_startup(config: Option<Res<ServerNetworkConfig>>) {
 /// Installs the server Lightyear group, protocol, endpoint, and authoritative session systems.
 pub struct ServerNetworkPlugin;
 
+/// Classify a server error exit, append the bounded local failure record when the
+/// `BRAWLER_FAILURE_REPORT` control selects one, and request the error exit. Every
+/// server error path funnels through here so exit categories and failure records
+/// cannot drift apart.
+pub(super) fn record_server_failure(
+    category: crate::diagnostics::FailureCategory,
+    message: &str,
+    diagnostics: Option<&crate::diagnostics::ProcessDiagnosticsSettings>,
+    classification: &mut crate::diagnostics::ProcessExitClassification,
+    app_exit: &mut MessageWriter<AppExit>,
+) {
+    classification.record_error_exit(category.into());
+    if let Some(settings) = diagnostics
+        && let Some(path) = settings.failure_record_path()
+    {
+        crate::diagnostics::write_failure_record(
+            &path,
+            &crate::diagnostics::ProcessFailureRecordV1::new(category, message),
+        );
+    }
+    app_exit.write(AppExit::error());
+}
+
 impl Plugin for ServerNetworkPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FallbackErrorHandler(error))
@@ -362,8 +385,9 @@ fn spawn_server_endpoint(mut commands: Commands, config: Res<ServerNetworkConfig
 }
 
 #[allow(
+    clippy::needless_pass_by_value,
     clippy::type_complexity,
-    reason = "the query declares this system's complete world view inline at its schedule boundary"
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
 )]
 fn observe_server_endpoint(
     mut startup: ResMut<ServerStartup>,
@@ -395,19 +419,13 @@ fn observe_server_endpoint(
     if failed_query.iter().next().is_some() {
         startup.failure_reported = true;
         error!("brawler server endpoint failed to bind or link");
-        classification.record_error_exit(crate::diagnostics::ProcessExitCategory::EndpointStart);
-        if let Some(settings) = diagnostics
-            && let Some(path) = settings.failure_record_path()
-        {
-            crate::diagnostics::write_failure_record(
-                &path,
-                &crate::diagnostics::ProcessFailureRecordV1::new(
-                    crate::diagnostics::FailureCategory::EndpointStart,
-                    "server endpoint failed to bind or link",
-                ),
-            );
-        }
-        app_exit.write(AppExit::error());
+        record_server_failure(
+            crate::diagnostics::FailureCategory::EndpointStart,
+            "server endpoint failed to bind or link",
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+        );
         return;
     }
     if ready_query.iter().next().is_none() {
@@ -417,9 +435,13 @@ fn observe_server_endpoint(
         if let Err(error) = fs::write(&path, b"ready\n") {
             startup.failure_reported = true;
             error!(path = %path.display(), ?error, "brawler server readiness signal failed");
-            classification
-                .record_error_exit(crate::diagnostics::ProcessExitCategory::EndpointStart);
-            app_exit.write(AppExit::error());
+            record_server_failure(
+                crate::diagnostics::FailureCategory::EndpointStart,
+                "server readiness signal write failed",
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+            );
             return;
         }
         info!(path = %path.display(), "brawler server readiness signal written");

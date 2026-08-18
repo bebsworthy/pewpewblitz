@@ -191,10 +191,13 @@ validate_closeout_reports() {
         return 0
     fi
     # Reuse the binaries' own schema-v1 report reader so the terminal gate enforces the
-    # full closeout contract (48 required fields, bounded identities, participant rows,
-    # clean exits, zero drops/rejections/errors, and cross-endpoint digest agreement)
-    # instead of a launcher-side subset that can drift from the writer.
-    "$server_binary" validate-closeout "$diagnostics_dir" "$client_count"
+    # full closeout contract (48 required fields with typed values, bounded identities,
+    # participant rows, one shared run identity, clean exits, zero drops/rejections/
+    # errors, and cross-endpoint digest agreement) instead of a launcher-side subset that
+    # can drift from the writer. Combat-assert runs must carry nonzero checkpoint
+    # digests; movement/terrain/match profiles record no combat checkpoints, so their
+    # digests must be zero.
+    "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" "$combat_assert"
     printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
     if command -v shasum >/dev/null 2>&1; then
         printf 'brawler network: terminal digest '

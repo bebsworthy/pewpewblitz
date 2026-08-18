@@ -5,7 +5,9 @@ use crate::combat::client::cues::{
 };
 use crate::combat::client::effects::{CombatEffect, update_combat_effects};
 use crate::combat::client::hud::{CombatHudText, update_combat_hud};
-use crate::combat::client::preview::{MAX_PREVIEW_SEGMENTS, preview_segments};
+use crate::combat::client::preview::{
+    MAX_PREVIEW_SEGMENTS, WeaponPreviewVisual, preview_segments, update_weapon_preview,
+};
 use crate::combat::client::world::{
     ensure_projectile_visuals, ensure_sentry_visuals, sync_projectile_visuals,
 };
@@ -149,6 +151,83 @@ fn launcher_preview_repairs_landings_against_committed_terrain() {
         repaired[1].0.x
     );
     assert_eq!(repaired[1].3, Color::srgba(0.95, 0.35, 1.0, 0.45));
+}
+
+/// Resolve a loadout through the real build pipeline, so presentation tests observe the
+/// same `ResolvedMatchLoadout` a joined client receives by replication.
+fn resolved_loadout(preset: u16) -> crate::builds::ResolvedMatchLoadout {
+    let build_catalog = crate::builds::BuildCatalog::embedded().unwrap();
+    let weapons = WeaponCatalog::embedded().unwrap();
+    let fighter = FighterDefinitions::default().entries[0];
+    crate::builds::resolve_build_recipe(
+        &build_catalog,
+        &weapons,
+        &fighter,
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(WeaponPresetId(preset)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(6),
+            ],
+        },
+        None,
+    )
+    .unwrap()
+}
+
+/// The preview must read the replicated `ResolvedMatchLoadout`: a standalone
+/// `ResolvedWeapon` is not replicated, so previews keyed on it stay hidden in real
+/// network play. This schedule test fails if the system queries the un-replicated shape.
+#[test]
+fn weapon_preview_reads_the_replicated_match_loadout() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<crate::client::PendingLocalActions>()
+        .add_systems(Update, update_weapon_preview);
+    let map_catalog = MapContentCatalog::embedded().unwrap();
+    let map = map_catalog
+        .resolve_preset(
+            ArenaPresetId(1),
+            MapInstanceId(1),
+            &MapLayoutRequirements::wipeout(),
+        )
+        .unwrap();
+    app.world_mut().spawn((crate::map::MapRoot, map.snapshot));
+    let weapons = WeaponCatalog::embedded().unwrap();
+    let fighter = FighterDefinitions::default().entries[0];
+    let pulse = weapons.resolve_preset(WeaponPresetId(1), &fighter).unwrap();
+    let controlled = app
+        .world_mut()
+        .spawn((
+            Fighter,
+            lightyear::prelude::Controlled,
+            Position::from_xy(0.0, 0.0),
+            Rotation::radians(0.0),
+            pulse,
+        ))
+        .id();
+
+    // A standalone ResolvedWeapon is not the wire shape: previews must stay hidden.
+    app.update();
+    app.update();
+    assert_eq!(visible_previews(app.world_mut()), 0);
+
+    // The replicated loadout is: the pulse preview shows its two segments.
+    app.world_mut()
+        .entity_mut(controlled)
+        .insert(resolved_loadout(1));
+    app.update();
+    app.update();
+    assert_eq!(visible_previews(app.world_mut()), 2);
+}
+
+fn visible_previews(world: &mut World) -> usize {
+    world
+        .query_filtered::<&Visibility, With<WeaponPreviewVisual>>()
+        .iter(world)
+        .filter(|visibility| **visibility == Visibility::Inherited)
+        .count()
 }
 
 #[test]

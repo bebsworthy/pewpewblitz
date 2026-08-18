@@ -4,7 +4,7 @@ use crate::{
     VERSION,
     combat::{
         AuthoritativeTick, BuildSelectionText, ClientCombatEvidenceStatus, ClientCombatPlugin,
-        CombatHudText, ResolvedWeapon, SelectingBuild,
+        CombatHudText, SelectingBuild,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
@@ -68,6 +68,8 @@ pub use session::ClientNetworkPlugin;
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
 use session::*;
+pub use settings::ui::{InputSettingsField, InputSettingsSelection, compose_input_settings_lines};
+use settings::ui::{adjust_input_settings_from_pause_keys, update_input_settings_overlay};
 pub use settings::{
     CalibrationField, ClientInputSettings, GamepadAction, GamepadBindings, KeyboardAction,
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,

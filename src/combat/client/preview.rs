@@ -221,7 +221,11 @@ pub(crate) fn update_weapon_preview(
     pending: Res<crate::client::PendingLocalActions>,
     convergence: Option<Res<crate::terrain::ClientTerrainConvergence>>,
     fighters: Query<
-        (&Position, &Rotation, Option<&ResolvedWeapon>),
+        (
+            &Position,
+            &Rotation,
+            Option<&crate::builds::ResolvedMatchLoadout>,
+        ),
         (With<Fighter>, With<lightyear::prelude::Controlled>),
     >,
     mut visuals: Query<(
@@ -237,18 +241,21 @@ pub(crate) fn update_weapon_preview(
         }
         return;
     };
-    let Some((position, rotation, resolved)) = fighters.iter().next() else {
+    // The replicated loadout is the wire shape: the preview reads the loadout's primary
+    // weapon, because a standalone `ResolvedWeapon` is never replicated to clients.
+    let Some((position, rotation, loadout)) = fighters.iter().next() else {
         for (_, _, _, mut visibility) in &mut visuals {
             *visibility = Visibility::Hidden;
         }
         return;
     };
-    let Some(resolved) = resolved else {
+    let Some(loadout) = loadout else {
         for (_, _, _, mut visibility) in &mut visuals {
             *visibility = Visibility::Hidden;
         }
         return;
     };
+    let resolved = &loadout.primary_weapon;
     let origin = position.0;
     let facing = rotation.as_radians();
     // The preview repairs against the committed destructible occupancy exactly like the

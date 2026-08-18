@@ -3,6 +3,26 @@
 
 use super::*;
 
+/// Every failure path in this module funnels through here: classify the exit as
+/// `verification-failed`, append the bounded failure record when the
+/// `BRAWLER_FAILURE_REPORT` control selects one, and request the error exit, so process
+/// verification failures keep the structured-failure contract instead of reporting as
+/// unclassified `shutdown-incomplete`.
+fn fail_verification(
+    diagnostics: Option<&crate::diagnostics::ProcessDiagnosticsSettings>,
+    classification: &mut crate::diagnostics::ProcessExitClassification,
+    app_exit: &mut MessageWriter<AppExit>,
+    message: &str,
+) {
+    record_server_failure(
+        crate::diagnostics::FailureCategory::VerificationFailed,
+        message,
+        diagnostics,
+        classification,
+        app_exit,
+    );
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
@@ -11,6 +31,8 @@ use super::*;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn verify_process_match(
     mut check: ResMut<ProcessMatchCheck>,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     roots: Query<&MatchState, With<MatchRoot>>,
     telemetry: Res<crate::matchplay::MatchTelemetry>,
     build_telemetry: Res<crate::builds::BuildTelemetry>,
@@ -43,7 +65,12 @@ pub(super) fn verify_process_match(
         (summary.map_identity, summary.content_fingerprint)
     else {
         error!("match summary omitted map or content identity");
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "match summary omitted map or content identity",
+        );
         check.completed = true;
         return;
     };
@@ -52,19 +79,34 @@ pub(super) fn verify_process_match(
             participant_count = summary.participants.len(),
             "match summary omitted initial participant identity"
         );
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "match summary omitted initial participant identity",
+        );
         check.completed = true;
         return;
     }
     if !has_preset_outcome_evidence(summary) {
         error!("match summary omitted preset defeat/death evidence");
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "match summary omitted preset defeat/death evidence",
+        );
         check.completed = true;
         return;
     }
     if summary.respawns == 0 {
         error!("match summary did not prove a completed respawn");
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "match summary did not prove a completed respawn",
+        );
         check.completed = true;
         return;
     }
@@ -306,7 +348,12 @@ pub(super) fn verify_process_match(
         && let Err(error) = fs::write(path, report.as_bytes())
     {
         error!(path = %path.display(), ?error, "match report write failed");
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "match report write failed",
+        );
         check.completed = true;
         return;
     }
@@ -350,6 +397,8 @@ const MOVEMENT_SMOKE_WINDOW_TICKS: u64 = 420;
 )]
 pub(super) fn verify_process_movement(
     mut check: ResMut<ProcessMovementCheck>,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     tick: Res<crate::timing::SimulationTick>,
     fighters: Query<(&PlayerId, &Position, &Rotation), With<Fighter>>,
     mut app_exit: MessageWriter<AppExit>,
@@ -401,7 +450,12 @@ pub(super) fn verify_process_movement(
                 ?error,
                 "network movement smoke readiness signal failed"
             );
-            app_exit.write(AppExit::error());
+            fail_verification(
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+                "network movement smoke readiness signal failed",
+            );
         }
         check.completed = true;
     } else {
@@ -409,7 +463,12 @@ pub(super) fn verify_process_movement(
             tick = tick.0,
             moved, aimed, "network movement smoke assertion failed"
         );
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "network movement smoke assertion failed",
+        );
         check.completed = true;
     }
 }
@@ -422,6 +481,8 @@ pub(super) fn verify_process_movement(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn verify_process_combat(
     mut check: ResMut<ProcessCombatCheck>,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     telemetry: Res<CombatTelemetry>,
     weapon_telemetry: Res<WeaponTelemetry>,
     evidence: Res<CombatEvidenceSnapshots>,
@@ -448,7 +509,12 @@ pub(super) fn verify_process_combat(
     let Some(expected_preset_id) = check.expected_preset_id else {
         error!("combat process assertion is missing BRAWLER_NETWORK_WEAPON_PRESET");
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat process assertion is missing BRAWLER_NETWORK_WEAPON_PRESET",
+        );
         return;
     };
     let Some(_) = catalog.0.preset(expected_preset_id) else {
@@ -457,7 +523,12 @@ pub(super) fn verify_process_combat(
             "combat assertion requested an unknown preset"
         );
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat assertion requested an unknown preset",
+        );
         return;
     };
     let Some(fighter_definition) = fighters.get(crate::combat::STANDARD_FIGHTER_DEFINITION) else {
@@ -472,7 +543,12 @@ pub(super) fn verify_process_combat(
             "combat assertion could not resolve the requested preset"
         );
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat assertion could not resolve the requested preset",
+        );
         return;
     };
     let tested_fighter = selected_fighters.iter().any(|(build, loadout)| {
@@ -520,14 +596,24 @@ pub(super) fn verify_process_combat(
     let Some(path) = check.ready_file.clone() else {
         error!("combat process assertion is enabled without a readiness file");
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat process assertion is enabled without a readiness file",
+        );
         return;
     };
 
     let Some(client_ready_dir) = check.client_ready_dir.clone() else {
         error!("combat process assertion is enabled without a client evidence directory");
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat process assertion is enabled without a client evidence directory",
+        );
         return;
     };
     let client_one_path = client_ready_dir.join("client-1.ready");
@@ -537,7 +623,12 @@ pub(super) fn verify_process_combat(
         Err(error) => {
             error!(path = %client_one_path.display(), ?error, "client one combat evidence could not be read");
             check.completed = true;
-            app_exit.write(AppExit::error());
+            fail_verification(
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+                "client one combat evidence could not be read",
+            );
             return;
         }
     };
@@ -546,7 +637,12 @@ pub(super) fn verify_process_combat(
         Err(error) => {
             error!(path = %client_two_path.display(), ?error, "client two combat evidence could not be read");
             check.completed = true;
-            app_exit.write(AppExit::error());
+            fail_verification(
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+                "client two combat evidence could not be read",
+            );
             return;
         }
     };
@@ -570,7 +666,12 @@ pub(super) fn verify_process_combat(
             "combat evidence history was truncated"
         );
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat evidence history was truncated",
+        );
         return;
     }
     let through_reset = |cues: &[CombatCue]| {
@@ -622,7 +723,12 @@ pub(super) fn verify_process_combat(
             "combat cue stream evidence is incomplete"
         );
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat cue stream evidence is incomplete",
+        );
         return;
     }
     let required_checkpoints = required_process_checkpoints(expected_preset_id);
@@ -692,7 +798,12 @@ pub(super) fn verify_process_combat(
             "authoritative combat state snapshots did not converge on both clients"
         );
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "authoritative combat state snapshots did not converge on both clients",
+        );
         return;
     }
     let client_one_state_latencies =
@@ -704,7 +815,12 @@ pub(super) fn verify_process_combat(
     else {
         error!("client one state convergence latency evidence is incomplete");
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "client one state convergence latency evidence is incomplete",
+        );
         return;
     };
     let Some((client_two_state_median_us, client_two_state_p95_us)) =
@@ -712,7 +828,12 @@ pub(super) fn verify_process_combat(
     else {
         error!("client two state convergence latency evidence is incomplete");
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "client two state convergence latency evidence is incomplete",
+        );
         return;
     };
     if let Some(report_path) = check.report_file.clone() {
@@ -740,7 +861,12 @@ pub(super) fn verify_process_combat(
         if latency_evidence.is_empty() {
             error!("combat fire-to-cue latency evidence is incomplete");
             check.completed = true;
-            app_exit.write(AppExit::error());
+            fail_verification(
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+                "combat fire-to-cue latency evidence is incomplete",
+            );
             return;
         }
         let client_one_cue_count = parse_report_counter(&client_one, "cue_count");
@@ -751,7 +877,12 @@ pub(super) fn verify_process_combat(
                 client_two_cue_count, "client cue volume evidence is incomplete"
             );
             check.completed = true;
-            app_exit.write(AppExit::error());
+            fail_verification(
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+                "client cue volume evidence is incomplete",
+            );
             return;
         }
         let report = format!(
@@ -790,14 +921,24 @@ pub(super) fn verify_process_combat(
         if let Err(error) = fs::write(&report_path, report) {
             error!(path = %report_path.display(), ?error, "combat report write failed");
             check.completed = true;
-            app_exit.write(AppExit::error());
+            fail_verification(
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+                "combat report write failed",
+            );
             return;
         }
     }
     if let Err(error) = fs::write(&path, b"combat-ready\n") {
         error!(path = %path.display(), ?error, "combat readiness signal failed");
         check.completed = true;
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "combat readiness signal failed",
+        );
         return;
     }
     check.completed = true;
@@ -909,8 +1050,12 @@ pub(super) fn parse_client_cue_stream(contents: &str) -> Vec<CombatCue> {
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn verify_process_terrain(
     mut check: ResMut<ProcessTerrainCheck>,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     tick: Res<crate::timing::SimulationTick>,
     terrain_roots: Query<&crate::terrain::TerrainRoot>,
     terrain_chunks: Query<(
@@ -963,7 +1108,12 @@ pub(super) fn verify_process_terrain(
                 no_op_brushes = aggregates.no_op_brushes,
                 "network terrain assertion failed"
             );
-            app_exit.write(AppExit::error());
+            fail_verification(
+                diagnostics.as_deref(),
+                &mut classification,
+                &mut app_exit,
+                "network terrain assertion failed",
+            );
             check.completed = true;
         }
         return;
@@ -994,7 +1144,12 @@ pub(super) fn verify_process_terrain(
         && let Err(error) = fs::write(path, report)
     {
         error!(?path, ?error, "network terrain report write failed");
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "network terrain report write failed",
+        );
         check.completed = true;
         return;
     }
@@ -1009,7 +1164,12 @@ pub(super) fn verify_process_terrain(
         && let Err(error) = fs::write(path, b"passed\n")
     {
         error!(?path, ?error, "network terrain readiness signal failed");
-        app_exit.write(AppExit::error());
+        fail_verification(
+            diagnostics.as_deref(),
+            &mut classification,
+            &mut app_exit,
+            "network terrain readiness signal failed",
+        );
     }
     check.completed = true;
 }

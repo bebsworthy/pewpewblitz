@@ -318,6 +318,29 @@ fn idle_gamepad_does_not_become_the_active_input_device() {
     );
 }
 
+/// Resolve the Arc Launcher loadout through the real build pipeline, so input shaping
+/// tests observe the same `ResolvedMatchLoadout` a joined client receives by replication.
+fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
+    let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
+    let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    crate::builds::resolve_build_recipe(
+        &build_catalog,
+        &weapons,
+        &fighter,
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(6),
+            ],
+        },
+        None,
+    )
+    .expect("arc launcher loadout resolves")
+}
+
 #[test]
 fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
     let mut gamepad = Gamepad::default();
@@ -336,13 +359,12 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
         .init_resource::<ClientInputSettings>()
         .add_systems(Update, sample_local_input);
     let gamepad_entity = app.world_mut().spawn(gamepad).id();
-    let catalog = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
-    let launcher = catalog
-        .resolve_preset(crate::combat::WeaponPresetId(3), &fighter)
-        .expect("arc launcher preset");
+    // The controlled fighter carries the replicated loadout; a standalone
+    // `ResolvedWeapon` never arrives in network play, so the lob range must come from
+    // the loadout's primary weapon exactly as a joined client observes it.
+    let loadout = resolved_arc_launcher_loadout();
     app.world_mut()
-        .spawn((Fighter, Controlled, Position::default(), launcher));
+        .spawn((Fighter, Controlled, Position::default(), loadout));
 
     app.update();
 

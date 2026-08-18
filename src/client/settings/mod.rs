@@ -4,7 +4,10 @@
 //! magnitude of the quantized `FighterInput`; it never sees physical devices. These settings
 //! shape device input *before* quantization, so the default calibration is the identity for
 //! movement (the server remains the sole default move-shaping authority) and mirrors the
-//! authoritative aim thresholds so default facing behavior is unchanged.
+//! authoritative aim thresholds so default facing behavior is unchanged. The pause-overlay
+//! presentation of these settings lives in the `ui` submodule.
+
+pub mod ui;
 
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::{GamepadButton, MouseButton, Resource, Vec2};

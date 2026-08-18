@@ -10,8 +10,8 @@
 | Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the proposed v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
-| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2), second round (5 findings, 1×P1/4×P2), and third round (5 findings, 1×P1/4×P2) were each remediated in full — see the review-round evidence below |
-| Verification | Green after every slice through `9131095`, after the review-round remediation, and again after the second and third review rounds: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (239), `just test-server` (211), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry real checkpoint digests, zero drop/error/rejection counters, and cross-endpoint digest agreement, gated through the binaries' own schema-v1 `validate-closeout` reader |
+| Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2), second round (5 findings, 1×P1/4×P2), third round (5 findings, 1×P1/4×P2), and fourth round (4 findings, 3×P1/1×P2) were each remediated in full — see the review-round evidence below |
+| Verification | Green after every slice through `9131095`, after the review-round remediation, and again after the second, third, and fourth review rounds: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (241), `just test-server` (213), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry profile-correct checkpoint evidence (nonzero digests with cross-endpoint agreement on combat-assert runs, zero digests on movement/terrain/match runs), zero drop/error/rejection counters, one shared run identity, and full typed-value reconstruction through the binaries' own schema-v1 `validate-closeout` reader |
 | User playtest | Handoff delivered 2026-08-17 (see "Slice 7 — supervised playtest handoff"); awaiting physical controller/keyboard, audio, HUD/layout, and pacing observations |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -1190,6 +1190,63 @@ Verification after the third round: `just fmt-check`, `just clippy-client`, `jus
 `just prediction-comparison` (6), `git diff --check`; live movement and combat-assert
 closeout-instrumented runs through the new `validate-closeout` gate plus its negative probes
 (truncated report, out-of-roster count, missing arguments).
+
+### Fourth review round remediation (2026-08-18)
+
+A fourth review filed four findings (three P1, one P2); all were remediated with the full canonical
+gate set and fresh live launcher runs re-verified afterward.
+
+- **P1 — the protocol migration broke weapon previews and controller lob distance.** `ResolvedWeapon`
+  stopped being replicated in favor of `ResolvedMatchLoadout` (the protocol test even asserts the
+  component is unregistered), but `sample_local_input`/`controlled_lob_range` and
+  `update_weapon_preview` still queried a standalone `ResolvedWeapon`, which in real network play is
+  therefore always absent: previews stayed hidden and controller Arc Launcher aiming never supplied
+  `aim_distance`. Both consumers now read `loadout.primary_weapon` from the replicated
+  `ResolvedMatchLoadout`. The regression was hidden because tests spawned a standalone
+  `ResolvedWeapon` or tested pure geometry: the gamepad mapping test now resolves an Arc Launcher
+  loadout through the real `resolve_build_recipe` pipeline and spawns that (the wire shape), and a
+  new `update_weapon_preview` schedule test proves a standalone `ResolvedWeapon` keeps previews
+  hidden while inserting the replicated loadout shows the expected segments.
+- **P1 — the closeout validator accepted malformed or unrelated reports.** `validate_report_lines`
+  checked presence, not values: `fixed_ticks=not-a-number` passed, and the directory gate accepted
+  an unrelated `run_id=different-run` client report and all-zero checkpoint digests. The reader is
+  now `parse_closeout_report`, which parses every numeric/boolean field as its declared type,
+  reconstructs the full `CloseoutReportV1` (participant rows included), and runs the writer's own
+  `validate` (timestamp ordering, monotonic percentiles, terminal-versus-high-water) — so the file
+  format and the report contract share one definition. The directory gate additionally requires one
+  shared run identity across endpoints (scenario/revision/run/build/protocol/registry/content/
+  mode/rules/seed; network and render profiles stay per-endpoint) and treats the checkpoint digest
+  as profile evidence: `validate-closeout <DIR> <CLIENTS> <EXPECT-CHECKPOINTS>` (the launcher passes
+  its combat-assert flag) rejects a zero digest on combat-assert runs and a nonzero digest on
+  movement/terrain/match runs, plus the existing cross-endpoint digest agreement. Verified live:
+  movement (zero digests, `expect 0`) and combat-assert (equal nonzero digests, `expect 1`)
+  instrumented runs validate, and each reviewer probe — `fixed_ticks=not-a-number`,
+  `run_id=different-run`, wrong expect flag, missing arguments — fails with the named error and
+  exit 2.
+- **P1 — server verification failures were not classified.** Every process-verification failure path
+  wrote `AppExit::error()` directly, so `FailureCategory::VerificationFailed` was unused in
+  production and verification failures reported as `shutdown-incomplete`, violating the structured
+  failure contract. A shared `record_server_failure` helper in `server/mod.rs` (classify, append the
+  bounded failure record when `BRAWLER_FAILURE_REPORT` selects one, request the error exit) now backs
+  the endpoint-failure sites and a `fail_verification` wrapper used by all 26 verification failure
+  paths in `server/verification.rs`, each carrying its named message. A new schedule test drives a
+  failed movement smoke assertion and asserts the classification resolves to `verification-failed`
+  with an error exit.
+- **P2 — the settings UI lived inside the input module.** `client/input.rs` had grown to 1,072 lines
+  mixing device-to-intent conversion with settings selection, text composition, rebind capture, and
+  overlay updates. The settings UI (the `InputSettingsField`/`InputSettingsSelection` model,
+  `compose_input_settings_lines`, `adjust_input_settings_from_pause_keys`,
+  `update_input_settings_overlay`, and the line composers) moved to a focused
+  `client/settings/ui.rs` beside the settings model it presents; `input.rs` (736 lines) keeps native
+  sampling, active-device selection, headless automation, input writing/tracing, and aim geometry.
+  The settings composition root re-exports the moved names, so registration and tests are unchanged.
+
+Verification after the fourth round: `just fmt-check`, `just clippy-client`, `just clippy-server`,
+`just server-features`, `just check` (zero warnings), `just test-client` (241), `just test-server`
+(213), `just test-network` (77), `just test-performance` (14), `just network-smoke`,
+`just prediction-comparison` (6), `git diff --check`; live movement and combat-assert
+closeout-instrumented runs through the profile-aware `validate-closeout` gate plus the negative
+probes above.
 
 ## Verification plan
 

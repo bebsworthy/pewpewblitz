@@ -11,7 +11,7 @@ fn usage() {
         "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>]"
     );
     eprintln!(
-        "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT>   validate finished closeout reports against schema v1"
+        "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS>   validate finished closeout reports against schema v1 (EXPECT-CHECKPOINTS is 1 for combat-assert runs, 0 otherwise)"
     );
     eprintln!(
         "note: --wipeout-rules <production|verification> is a deprecated alias for --match-rules"
@@ -82,14 +82,23 @@ fn parse_args() -> Result<ServerNetworkConfig, String> {
 /// Headless closeout-report gate for verification launchers: enforces the same schema-v1
 /// reader the binaries' report writer uses, so the terminal check cannot drift from the
 /// writer's contract. Exits 0 when every configured endpoint validated.
-fn run_closeout_validation(directory: &str, client_count: &str) -> ! {
+fn run_closeout_validation(directory: &str, client_count: &str, expect_checkpoints: &str) -> ! {
     let Ok(client_count) = client_count.parse::<u32>() else {
         eprintln!("brawler-server: validate-closeout requires a numeric client count");
         process::exit(2);
     };
+    let expect_checkpoint_evidence = match expect_checkpoints {
+        "0" => false,
+        "1" => true,
+        _ => {
+            eprintln!("brawler-server: validate-closeout requires EXPECT-CHECKPOINTS of 0 or 1");
+            process::exit(2);
+        }
+    };
     match brawler::diagnostics::validate_closeout_directory(
         std::path::Path::new(directory),
         client_count,
+        expect_checkpoint_evidence,
     ) {
         Ok(count) => {
             println!("brawler-server: validated {count} closeout reports in {directory}");
@@ -108,12 +117,14 @@ fn main() -> AppExit {
         .first()
         .is_some_and(|arg| arg == "validate-closeout")
     {
-        if raw_args.len() != 3 {
-            eprintln!("brawler-server: validate-closeout requires <DIRECTORY> <CLIENT-COUNT>");
+        if raw_args.len() != 4 {
+            eprintln!(
+                "brawler-server: validate-closeout requires <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS>"
+            );
             usage();
             process::exit(2);
         }
-        run_closeout_validation(&raw_args[1], &raw_args[2]);
+        run_closeout_validation(&raw_args[1], &raw_args[2], &raw_args[3]);
     }
     let config = match parse_args() {
         Ok(config) => config,

@@ -118,23 +118,71 @@ fn report_line_validation_rejects_duplicates_missing_and_unknown_schemas() {
     };
     let contents = report.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("report lines split");
-    assert_eq!(validate_report_lines(&pairs), Ok(CLOSEOUT_SCHEMA_VERSION));
+    assert_eq!(parse_closeout_report(&pairs), Ok(report));
 
     let duplicated = format!("{contents}\nrun_id=run-42\n");
     let pairs = split_report_lines(&duplicated).expect("lines split");
     assert!(
-        validate_report_lines(&pairs).is_err_and(|error| error.contains("duplicate report field"))
+        parse_closeout_report(&pairs).is_err_and(|error| error.contains("duplicate report field"))
     );
 
     let missing = contents.replace("checkpoint_digest=0\n", "");
     let pairs = split_report_lines(&missing).expect("lines split");
-    assert!(validate_report_lines(&pairs).is_err_and(|error| error.contains("checkpoint_digest")));
+    assert!(parse_closeout_report(&pairs).is_err_and(|error| error.contains("checkpoint_digest")));
 
     let unknown_schema = contents.replace("schema_version=1", "schema_version=99");
     let pairs = split_report_lines(&unknown_schema).expect("lines split");
     assert!(
-        validate_report_lines(&pairs)
+        parse_closeout_report(&pairs)
             .is_err_and(|error| error.contains("unknown closeout schema revision"))
+    );
+
+    // Field presence alone is not schema compliance: a non-numeric counter must fail its
+    // declared type instead of satisfying the gate.
+    let non_numeric = contents.replace("fixed_ticks=0", "fixed_ticks=not-a-number");
+    let pairs = split_report_lines(&non_numeric).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("fixed_ticks") && error.contains("is not a u64"))
+    );
+    let boolean = contents.replace("source_dirty=false", "source_dirty=maybe");
+    let pairs = split_report_lines(&boolean).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("source_dirty") && error.contains("is not a bool"))
+    );
+}
+
+#[test]
+fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
+    // The reader reconstructs the report and runs the writer's own validation, so a
+    // field-complete file whose values violate the report contract is still rejected.
+    let mut inverted = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    inverted.started_at_unix_micros = 200;
+    inverted.ended_at_unix_micros = 100;
+    let inverted_contents = inverted.to_report_lines().join("\n");
+    let pairs = split_report_lines(&inverted_contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("end timestamp precedes its start timestamp"))
+    );
+
+    let mut non_monotonic = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    non_monotonic.rtt_p50_micros = 30;
+    non_monotonic.rtt_p95_micros = 20;
+    let non_monotonic_contents = non_monotonic.to_report_lines().join("\n");
+    let pairs = split_report_lines(&non_monotonic_contents).expect("lines split");
+    assert!(
+        parse_closeout_report(&pairs)
+            .is_err_and(|error| error.contains("RTT percentiles are not monotonic"))
     );
 }
 
@@ -168,7 +216,7 @@ fn report_reader_rejects_missing_required_counter_fields() {
             .join("\n");
         let pairs = split_report_lines(&stripped).expect("lines split");
         assert!(
-            validate_report_lines(&pairs).is_err_and(|error| error.contains(missing)),
+            parse_closeout_report(&pairs).is_err_and(|error| error.contains(missing)),
             "the reader must reject a report missing {missing}"
         );
     }
@@ -185,7 +233,7 @@ fn report_reader_rejects_oversized_identities_and_embedded_separators() {
     let oversized = report.to_report_lines().join("\n");
     let pairs = split_report_lines(&oversized).expect("lines split");
     assert!(
-        validate_report_lines(&pairs)
+        parse_closeout_report(&pairs)
             .is_err_and(|error| error.contains("oversized") && error.contains("run_id"))
     );
 
@@ -206,7 +254,7 @@ fn report_reader_rejects_oversized_identities_and_embedded_separators() {
     );
     let pairs = split_report_lines(&hostile).expect("lines split");
     assert!(
-        validate_report_lines(&pairs)
+        parse_closeout_report(&pairs)
             .is_err_and(|error| error.contains("end_reason") && error.contains('='))
     );
 }
@@ -224,14 +272,14 @@ fn report_reader_enforces_the_declared_participant_block() {
     let shrunk = contents.replace("participants=1", "participants=0");
     let pairs = split_report_lines(&shrunk).expect("lines split");
     assert!(
-        validate_report_lines(&pairs).is_err_and(|error| error.contains("beyond the declared"))
+        parse_closeout_report(&pairs).is_err_and(|error| error.contains("beyond the declared"))
     );
 
     // Declared count above the carried rows: the extra row is rejected outright.
     let grown = format!("{contents}\nparticipant_1_player_id=2\n");
     let pairs = split_report_lines(&grown).expect("lines split");
     assert!(
-        validate_report_lines(&pairs).is_err_and(|error| error.contains("beyond the declared"))
+        parse_closeout_report(&pairs).is_err_and(|error| error.contains("beyond the declared"))
     );
 
     // Declared count with a missing required row field.
@@ -242,7 +290,7 @@ fn report_reader_enforces_the_declared_participant_block() {
         .join("\n");
     let pairs = split_report_lines(&gappy).expect("lines split");
     assert!(
-        validate_report_lines(&pairs).is_err_and(|error| error.contains("participant_0_build"))
+        parse_closeout_report(&pairs).is_err_and(|error| error.contains("participant_0_build"))
     );
 
     // Oversized participant identity.
@@ -252,7 +300,7 @@ fn report_reader_enforces_the_declared_participant_block() {
     );
     let pairs = split_report_lines(&hostile).expect("lines split");
     assert!(
-        validate_report_lines(&pairs).is_err_and(|error| error.contains("participant_0_build"))
+        parse_closeout_report(&pairs).is_err_and(|error| error.contains("participant_0_build"))
     );
 }
 
@@ -703,7 +751,7 @@ fn exit_frame_report_observes_terminal_counts_after_the_shutdown_chain() {
     let contents =
         std::fs::read_to_string(&report_path).expect("closeout report written on the exit frame");
     let pairs = split_report_lines(&contents).expect("exit-frame report lines split");
-    assert_eq!(validate_report_lines(&pairs), Ok(CLOSEOUT_SCHEMA_VERSION));
+    assert!(parse_closeout_report(&pairs).is_ok());
     assert_eq!(
         parse_report_field(&pairs, "error_count"),
         Some("1"),
@@ -817,6 +865,10 @@ fn disabled_process_diagnostics_install_no_observation_systems() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the test stages one directory of report mutations end to end; its length is the probe sequence itself"
+)]
 fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     let directory =
         std::env::temp_dir().join(format!("brawler-closeout-gate-{}", std::process::id()));
@@ -840,7 +892,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     write_report("server.closeout", 42);
     write_report("client-1.closeout", 42);
     write_report("client-2.closeout", 42);
-    assert_eq!(validate_closeout_directory(&directory, 2), Ok(3));
+    assert_eq!(validate_closeout_directory(&directory, 2, true), Ok(3));
 
     // A truncated report still parses line-by-line; only the full 48-field schema reader
     // catches it, which is exactly the drift the launcher gate must not allow.
@@ -857,14 +909,48 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
         + "\n";
     std::fs::write(directory.join("client-2.closeout"), truncated).unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2)
+        validate_closeout_directory(&directory, 2, true)
             .is_err_and(|error| error.contains("missing or duplicated required field"))
+    );
+
+    // A field-complete report with a non-numeric value must fail its declared type.
+    let non_numeric = full.replace("fixed_ticks=0", "fixed_ticks=not-a-number");
+    std::fs::write(directory.join("client-2.closeout"), non_numeric).unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 2, true)
+            .is_err_and(|error| error.contains("fixed_ticks") && error.contains("is not a u64"))
     );
 
     write_report("client-2.closeout", 43);
     assert!(
-        validate_closeout_directory(&directory, 2)
+        validate_closeout_directory(&directory, 2, true)
             .is_err_and(|error| error.contains("digests diverged"))
+    );
+
+    write_report("client-2.closeout", 0);
+    assert!(
+        validate_closeout_directory(&directory, 2, true)
+            .is_err_and(|error| error.contains("checkpoint digest is zero"))
+    );
+
+    // An unrelated report from a different run must not satisfy this run's gate even
+    // when its digest matches: the shared run identity has to agree across endpoints.
+    let mut other_run = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        checkpoint_digest: 42,
+        ..Default::default()
+    };
+    other_run.manifest.run_id = "different-run".to_string();
+    std::fs::write(
+        directory.join("client-2.closeout"),
+        other_run.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 2, true)
+            .is_err_and(|error| error.contains("run identity run_id diverged")
+                && error.contains("different-run"))
     );
 
     write_report("client-2.closeout", 42);
@@ -881,7 +967,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 3)
+        validate_closeout_directory(&directory, 3, true)
             .is_err_and(|error| error.contains("error_count=1"))
     );
 
@@ -889,12 +975,25 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     // once the roster drops back to two.
     write_report("client-3.closeout", 42);
     assert!(
-        validate_closeout_directory(&directory, 2)
+        validate_closeout_directory(&directory, 2, true)
             .is_err_and(|error| error
                 .contains("expected exactly one closeout report per configured endpoint"))
     );
-    assert!(validate_closeout_directory(&directory, 0).is_err());
-    assert!(validate_closeout_directory(&directory, 9).is_err());
+    assert!(validate_closeout_directory(&directory, 0, true).is_err());
+    assert!(validate_closeout_directory(&directory, 9, true).is_err());
+
+    // Movement, terrain, and match profiles record no combat checkpoints: their zero
+    // digests are the expected evidence, and a nonzero digest is a stale combat report.
+    write_report("server.closeout", 0);
+    write_report("client-1.closeout", 0);
+    write_report("client-2.closeout", 0);
+    write_report("client-3.closeout", 0);
+    assert_eq!(validate_closeout_directory(&directory, 3, false), Ok(4));
+    write_report("client-3.closeout", 42);
+    assert!(
+        validate_closeout_directory(&directory, 3, false)
+            .is_err_and(|error| error.contains("checkpoint digest is nonzero"))
+    );
 
     let _ = std::fs::remove_dir_all(&directory);
 }
