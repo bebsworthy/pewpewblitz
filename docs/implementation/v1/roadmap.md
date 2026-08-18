@@ -36,8 +36,8 @@ The milestone sections below are outcome briefs and research prompts, not preval
 ## Version status
 
 - **Version:** v1 — gameplay MVP
-- **Overall status:** Milestone 11 entered specification review on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 completed 2026-08-17 after three implementation-review rounds and the user-playtest round were remediated (destructible terrain blocks straight shots; the lob-landing and crater-readability redesign is reserved as `GAP-DESIGN-TERRAIN-RESERVATION`); Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing. The accepted v2 topology adds only a worker-readiness audit and direct-UDP comparison baseline to M11; v2 infrastructure remains out of scope.
-- **Current milestone:** Milestone 11 — User playtest (slices 0–6 complete through `9131095`, plus the 2026-08-18 code-review round fully remediated: uniform 1–8 client supervision and exact per-endpoint report validation in the network launcher, evidence-derived checkpoint digests/divergence/drop/error/rejection counters with cross-endpoint agreement checks, the complete pause-overlay rebinding path including trigger thresholds and controller navigation, and the settings/failure-record bounds fixes; the supervised playtest handoff is delivered, and the user observations, feedback triage, learn-from-errors review, and explicit v1 acceptance remain; see [milestone-11.md](./milestone-11.md))
+- **Overall status:** Milestone 11 entered specification review on 2026-08-17 to harden and close the v1 MVP. Milestone 08 remains in feedback review; Milestone 10 completed 2026-08-17 after three implementation-review rounds and the user-playtest round were remediated (destructible terrain blocks straight shots; the lob-landing and crater-readability redesign is reserved as `GAP-DESIGN-TERRAIN-RESERVATION`); Milestone 09 is complete. Milestone 01–02 user playtests, Milestone 03 prediction/visual/controller verification, Milestone 05 verification closeout, and the supervised M07/M09 observations remain open and are explicitly included in the M11 closeout ledger rather than being silently treated as passing. The proposed v2 topology adds only a worker-readiness audit and direct-UDP comparison baseline to M11; v2 infrastructure remains out of scope.
+- **Current milestone:** Milestone 11 — User playtest (slices 0–6 complete through `9131095`, plus two 2026-08-18 code-review rounds fully remediated: round one delivered uniform 1–8 client supervision with exact per-endpoint report validation, evidence-derived checkpoint digests/divergence/drop/error/rejection counters with cross-endpoint agreement, and the complete pause-overlay rebinding path; round two ordered terminal observations after shutdown and before closeout finalization with an exit-frame schedule test, implemented client failure categories end-to-end (classification, failure records, panic hook, `configuration` category), decomposed the composed-payload coordinator into its collect/plan/apply/commit stages, replaced the touched modules' broad lint suppressions with 59 item-scoped allows, and made the report reader enforce the full 48-field bounded schema; the supervised playtest handoff is delivered, and the user observations, feedback triage, learn-from-errors review, and explicit v1 acceptance remain; see [milestone-11.md](./milestone-11.md))
 - **Last completed milestone:** Milestone 10 — Quantized destructible terrain
 
 The roadmap status values are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`. Update the overview and current-milestone fields whenever a milestone changes phase.
@@ -685,7 +685,7 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 - replace broad production complexity/pass-by-value Clippy suppressions with narrow justified
   exceptions after the owning systems have been inspected and decomposed;
 - final user playtest and feedback triage;
-- technical-debt review and evidence-based handoff to the accepted next-version architecture;
+- technical-debt review and evidence-based handoff to the proposed next-version architecture;
 - explicitly no v2 supervisor, router, IPC, worker manifest, lobby, queue, or multi-worker
   implementation during v1 closeout;
 - learn-from-errors review and justified skill creation or improvement.
@@ -705,7 +705,7 @@ A stable v1 MVP with useful measurement, diagnostics, repeatable test scenarios,
 - balance decisions use captured data and playtests;
 - repeatable two-client, 2v2, and broader multi-client sessions are documented;
 - server tick and bandwidth limits are measured for the current content set;
-- the accepted v2 architecture has a bounded handoff record and direct-UDP worker comparison
+- the proposed v2 architecture has a bounded handoff record and direct-UDP worker comparison
   baseline without expanding M11 into v2 infrastructure;
 - build selection, movement, combat payload resolution, and client presentation have cohesive
   ownership boundaries with schedule and protocol invariants covered by focused tests;

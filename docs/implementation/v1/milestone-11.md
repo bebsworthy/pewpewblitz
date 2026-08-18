@@ -7,11 +7,11 @@
 | Version | v1 — gameplay MVP |
 | Roadmap | [roadmap.md](./roadmap.md) |
 | Status | User playtest |
-| Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the accepted v2 multi-process architecture |
+| Research | Complete for specification review on 2026-08-17 across product/network contracts, every open v1 milestone gate, the live M10 tree, local Bevy/Lightyear references, installed exact-version sources, current primary documentation, and the proposed v2 multi-process architecture |
 | Review findings | External maintainability findings and the v2 impact review were validated against the live source on 2026-08-17; scope, boundaries, provisional dispositions, and the worker-readiness handoff are recorded below |
 | Specification validation | User authorized implementation on 2026-08-17 ("implement milestone 11 as per milestone-11.md"), accepting the sixteen presented decisions as written |
 | Implementation | Slices 0–6 implemented through commit `9131095`; the full clean-tree measurement matrix (impairment profiles, 2v2 both modes, idle endpoints, overhead pair) is recorded in the slice 6 evidence and `evidence/v2-baseline/`; the slice 7 supervised-playtest handoff is delivered and awaits the user; the 2026-08-18 code-review round (7 findings, 3×P1/4×P2) was remediated in full — see the review-round evidence below |
-| Verification | Green after every slice through `9131095`, and again after the review-round remediation: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (226), `just test-server` (201), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry real checkpoint digests, zero drop/error/rejection counters, and cross-endpoint digest agreement |
+| Verification | Green after every slice through `9131095`, after the review-round remediation, and again after the second review round: `just fmt-check`, `just clippy-client`, `just clippy-server`, `just server-features`, `just check`, `just test-client` (234), `just test-server` (209), `just test-network` (77 incl. soaks), `just test-performance` (14), `just network-smoke`, `just prediction-comparison` (6), and closeout-instrumented UDP runs whose reports carry real checkpoint digests, zero drop/error/rejection counters, and cross-endpoint digest agreement |
 | User playtest | Handoff delivered 2026-08-17 (see "Slice 7 — supervised playtest handoff"); awaiting physical controller/keyboard, audio, HUD/layout, and pacing observations |
 
 Research began from commit `73e36e462b2aeaa0a612f04761150f3fc81ed8e3`. The worktree already
@@ -41,7 +41,7 @@ architectural target, create service/domain layers around Bevy's `World`, or spl
 transaction into implicitly ordered systems merely to satisfy Clippy.
 
 The final gate is a supervised controller and keyboard/mouse playtest, explicit triage of every open
-v1 item, a learn-from-errors review, and a bounded handoff to the accepted v2 architecture. M11
+v1 item, a learn-from-errors review, and a bounded handoff to the proposed v2 architecture. M11
 cannot mark earlier milestones complete by proxy: it supplies evidence, then updates each owning
 milestone's actual status and record.
 
@@ -177,7 +177,7 @@ The following remain provisional until the user approves the M11 specification:
 - The existing match report already joins match, weapon, build, and ability summaries. Terrain and
   process/network measurements need a versioned common envelope and exact run identity rather than a
   second gameplay telemetry path.
-- The accepted v2 topology treats the existing one-match server as the future worker payload. M11
+- The proposed v2 topology treats the existing one-match server as the future worker payload. M11
   therefore affects v2 chiefly through measurement and composition discipline: it should leave one
   headless match authority runnable without client dependencies and reveal process-global or
   shutdown assumptions before M01 wraps it. Changing its transport or teaching it about routing in
@@ -751,7 +751,7 @@ Implementation must not begin until the user validates this specification.
 - [ ] Triage every feedback item and rerun affected verification.
 - [ ] Update M01–M03, M05, M08, M10, the M07/M09 backlog rows, and the M11 ledger from actual evidence.
 - [ ] Complete learn-from-errors and decide whether any recurring workflow merits a project skill.
-- [ ] Reconcile the accepted v2 architecture with the worker-readiness audit, make the baseline
+- [ ] Reconcile the proposed v2 architecture with the worker-readiness audit, make the baseline
   linkable from v2 M01, and record any discovered blocker without implementing the v2 transport or
   supervisor.
 
@@ -1053,6 +1053,78 @@ closeout-instrumented movement, combat-assert (nonzero cross-endpoint digests + 
 and four-client Hot Zone runs with validated reports; validator negative paths (extra report,
 divergent digest) and the early-exit cleanup checked directly.
 
+### Second review round remediation (2026-08-18)
+
+A follow-up review filed five findings (one P1, four P2); all were remediated on top of the first
+round with the full canonical gate set and fresh live runs re-verified afterward.
+
+- **P1 — terminal observations were unordered against finalization.** `observe_process_counts`,
+  link-statistics sampling, and the Lightyear metrics sampler ran unordered relative to the role
+  shutdown chains and `DiagnosticsSet`, so on the exit frame the report could serialize before the
+  final error count, transport sample, and post-shutdown entity/link counts were observed. All
+  terminal observations now live in `TerminalObservationSet`, configured
+  `before(DiagnosticsSet)`; the server and client shutdown chains order
+  `before(TerminalObservationSet)`, making the exit-frame sequence explicit: shutdown → terminal
+  observation → report finalization. The Lightyear sampler stays inside the observation set and
+  ahead of `ClearBucketsSystem`. A new exit-frame schedule test drives the drain-stash-rewire
+  shutdown pattern across two frames and asserts the report carries the re-emitted exit
+  (`error_count=1`), post-shutdown terminal counts, and the pre-shutdown high-water mark, proving
+  a schedule regression now fails loudly instead of silently dropping terminal evidence.
+- **P2 — client failure categories were not implemented end-to-end.** `AppExit` cannot carry a
+  category, so the client's join-rejection, disconnect, and timeout exits all collapsed into the
+  undifferentiated `ShutdownIncomplete` mapping and no client failure record existed. A
+  `ProcessExitClassification` resource (first recorded category wins, so a shutdown storm cannot
+  overwrite the root cause) is now recorded at every client failure site: join rejections map to
+  `protocol_mismatch` (version/build/registry), `content_mismatch`, `timeout` (handshake), or
+  `shutdown_incomplete` (server/match full, in-progress, identifier exhaustion); disconnects map
+  to `shutdown_incomplete`; connection timeouts to `timeout`. Each site also appends a bounded
+  failure record under `BRAWLER_FAILURE_REPORT`, the client now installs the panic hook exactly
+  like the dedicated server, the server's endpoint-start exits are classified as
+  `endpoint_start`, and `FailureCategory::Configuration` exists so both binaries' argument errors
+  stop reporting as `verification_failed`. Closeout finalization prefers the recorded category.
+  Verified live: a client pointed at a dead port writes a `shutdown_incomplete` failure record
+  and a closeout with `exit_category=shutdown-incomplete`, `error_count=1`.
+- **P2 — `resolve_composed_payloads` was moved, not decomposed.** The ~650-line coordinator was
+  split into the four ordered stages the slice promised, with the queries bundled into a
+  `CombatTargetState` system param so each stage receives one coherent world view:
+  `collect_composed_batch` (deterministic ordering + owner/passive sets), `plan_composed_events`
+  (snapshot dry-run, event-count requirement, reservation, drop accounting), a slim
+  `resolve_composed_payloads` that only sequences stages, `apply_composed_records` (per-record
+  gating through the pure `payload_target_gate` truth table, damage application via
+  `record_damage_application`/`record_target_defeat`, runtime effects), and
+  `commit_composed_batch` (deferred effect/motion/cue commit + tracker completion). The vestigial
+  per-target projection loop (dead since the dry-run moved into `required_payload_event_count`)
+  was deleted. Behavior preservation is guarded by the deterministic lanes (52 combat unit tests,
+  77 separate-App network tests) plus live combat-assert runs whose five checkpoints, participant
+  rows, zero counters, and cross-endpoint digest agreement match the pre-refactor shape; note the
+  checkpoint digest is transport-timing dependent and only comparable within one run, never across
+  runs (two identical post-refactor runs produced different but internally identical digests, as
+  did the pre-refactor runs).
+- **P2 — module-wide lint suppressions in touched ownership modules.** The broad
+  `needless_pass_by_value`/`type_complexity` allowances were removed from `client/mod.rs`,
+  `server/mod.rs`, `movement/mod.rs`, `protocol.rs`, `terrain/client/mod.rs` (whose allow was
+  dead), `terrain/network/server.rs`, and `terrain/network/convergence.rs`; the 59 systems that
+  genuinely need the exception (every one a Bevy system param owned by the scheduling runtime)
+  now carry item-scoped allows with ownership reasons. `combat/mod.rs`'s subtree disposition was
+  reviewed and kept with an explicit in-source reason (37 further sites, Bevy system-parameter
+  idiom throughout; conversion belongs to combat organization work, not unrelated remediations).
+  The cast-family allows in `combat/mod.rs`, `terrain/grid.rs`, and `terrain/tests.rs` gained
+  explicit reasons but keep their reviewed scope. No suppression was widened.
+- **P2 — the report reader did not enforce its documented schema.** `validate_report_lines` now
+  requires all 48 non-participant fields exactly once, enforces the identity bound and rejects
+  embedded `=` on every string field, validates `exit_category`, and checks the participant block
+  (declared count against contiguous rows, no rows beyond it, bounded build identities).
+  `CloseoutReportV1::validate` rejects newline/`=` separators in `first_divergence`. Reports
+  missing `dropped_messages`, `rejected_connections`, `error_count`, oversized identities, or
+  corrupt participant rows are rejected with named-field errors.
+
+Verification after the second round: `just fmt-check`, `just clippy-client`, `just clippy-server`,
+`just server-features`, `just check` (zero warnings), `just test-client` (234), `just test-server`
+(209), `just test-network` (77), `just test-performance` (14), `just network-smoke`,
+`just prediction-comparison` (6), `git diff --check`; live combat-assert closeout runs (five
+checkpoints, cross-endpoint digest agreement, zero drop/error/rejection counters, participant
+rows) and the dead-port client failure probe.
+
 ## Verification plan
 
 ### Pure and focused ECS tests
@@ -1174,7 +1246,7 @@ modes under local/typical/adverse profiles where applicable and finish with `git
   and Hot Zone pacing feedback is recorded and triaged with rationale.
 - [ ] Every earlier non-complete v1 milestone/backlog item due at M11 has a source-owned completed or
   explicit user-approved open/deferred disposition.
-- [ ] The learn-from-errors review and accepted-v2-architecture handoff are complete.
+- [ ] The learn-from-errors review and proposed-v2-architecture handoff are complete.
 - [ ] The user explicitly accepts v1 before M11 and the version are marked `Complete`.
 
 ## Feedback review

@@ -147,6 +147,181 @@ fn split_report_lines_rejects_malformed_lines_and_size_overrun() {
 }
 
 #[test]
+fn report_reader_rejects_missing_required_counter_fields() {
+    let report = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    let contents = report.to_report_lines().join("\n");
+    for missing in [
+        "dropped_messages",
+        "rejected_connections",
+        "error_count",
+        "terminal_links",
+        "first_divergence",
+    ] {
+        let stripped = contents
+            .lines()
+            .filter(|line| !line.starts_with(&format!("{missing}=")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let pairs = split_report_lines(&stripped).expect("lines split");
+        assert!(
+            validate_report_lines(&pairs).is_err_and(|error| error.contains(missing)),
+            "the reader must reject a report missing {missing}"
+        );
+    }
+}
+
+#[test]
+fn report_reader_rejects_oversized_identities_and_embedded_separators() {
+    let mut report = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    report.manifest.run_id = "r".repeat(MAX_IDENTITY_BYTES + 1);
+    let oversized = report.to_report_lines().join("\n");
+    let pairs = split_report_lines(&oversized).expect("lines split");
+    assert!(
+        validate_report_lines(&pairs)
+            .is_err_and(|error| error.contains("oversized") && error.contains("run_id"))
+    );
+
+    // An embedded '=' inside a value would corrupt key=value parsing for later consumers.
+    let hostile = format!(
+        "{}\nend_reason=done=early\n",
+        CloseoutReportV1 {
+            manifest: valid_manifest(),
+            end_reason: "completed".to_string(),
+            ..Default::default()
+        }
+        .to_report_lines()
+        .iter()
+        .filter(|line| !line.starts_with("end_reason="))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n")
+    );
+    let pairs = split_report_lines(&hostile).expect("lines split");
+    assert!(
+        validate_report_lines(&pairs)
+            .is_err_and(|error| error.contains("end_reason") && error.contains('='))
+    );
+}
+
+#[test]
+fn report_reader_enforces_the_declared_participant_block() {
+    let report = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    let contents = report.to_report_lines().join("\n");
+
+    // Declared count below the carried rows: participant row 0 becomes unexpected.
+    let shrunk = contents.replace("participants=1", "participants=0");
+    let pairs = split_report_lines(&shrunk).expect("lines split");
+    assert!(
+        validate_report_lines(&pairs).is_err_and(|error| error.contains("beyond the declared"))
+    );
+
+    // Declared count above the carried rows: the extra row is rejected outright.
+    let grown = format!("{contents}\nparticipant_1_player_id=2\n");
+    let pairs = split_report_lines(&grown).expect("lines split");
+    assert!(
+        validate_report_lines(&pairs).is_err_and(|error| error.contains("beyond the declared"))
+    );
+
+    // Declared count with a missing required row field.
+    let gappy = contents
+        .lines()
+        .filter(|line| !line.starts_with("participant_0_build="))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let pairs = split_report_lines(&gappy).expect("lines split");
+    assert!(
+        validate_report_lines(&pairs).is_err_and(|error| error.contains("participant_0_build"))
+    );
+
+    // Oversized participant identity.
+    let hostile = contents.replace(
+        "participant_0_build=runner",
+        &format!("participant_0_build={}", "b".repeat(MAX_IDENTITY_BYTES + 1)),
+    );
+    let pairs = split_report_lines(&hostile).expect("lines split");
+    assert!(
+        validate_report_lines(&pairs).is_err_and(|error| error.contains("participant_0_build"))
+    );
+}
+
+#[test]
+fn closeout_validation_rejects_separator_characters_in_first_divergence() {
+    let mut report = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    report.first_divergence = Some("checkpoint x".to_string());
+    assert!(report.validate().is_ok());
+    report.first_divergence = Some("checkpoint=unmatched".to_string());
+    assert!(
+        report
+            .validate()
+            .is_err_and(|error| error.contains("first_divergence"))
+    );
+    report.first_divergence = Some("checkpoint\nunmatched".to_string());
+    assert!(
+        report
+            .validate()
+            .is_err_and(|error| error.contains("first_divergence"))
+    );
+}
+
+#[test]
+fn exit_classification_prefers_the_first_recorded_error_category() {
+    use process::ProcessExitClassification;
+
+    let mut classification = ProcessExitClassification::default();
+    assert_eq!(
+        classification.classified_category(&AppExit::error()),
+        ProcessExitCategory::ShutdownIncomplete,
+        "an unclassified error exit keeps the undifferentiated category"
+    );
+    assert_eq!(
+        classification.classified_category(&AppExit::Success),
+        ProcessExitCategory::CleanExit
+    );
+
+    classification.record_error_exit(ProcessExitCategory::ContentMismatch);
+    classification.record_error_exit(ProcessExitCategory::Timeout);
+    assert_eq!(
+        classification.classified_category(&AppExit::error()),
+        ProcessExitCategory::ContentMismatch,
+        "the root-cause classification must survive a later shutdown storm"
+    );
+    assert_eq!(
+        classification.classified_category(&AppExit::Success),
+        ProcessExitCategory::CleanExit
+    );
+}
+
+#[test]
+fn configuration_failures_carry_their_own_category() {
+    let record = ProcessFailureRecordV1::new(FailureCategory::Configuration, "bad flag");
+    assert!(
+        record
+            .to_report_lines()
+            .contains(&"category=configuration".to_string())
+    );
+    assert_eq!(
+        ProcessExitCategory::from(FailureCategory::Configuration),
+        ProcessExitCategory::Configuration
+    );
+}
+
+#[test]
 fn stable_digest_is_order_sensitive_and_repeatable() {
     let a = stable_digest(&["one", "two"]);
     let b = stable_digest(&["one", "two"]);
@@ -401,4 +576,151 @@ fn overlay_lines_are_bounded_and_hide_wire_entities() {
             .iter()
             .any(|line| line.contains("Entity") || line.contains("0x"))
     );
+}
+
+/// The exit frame must observe terminal counts after the role shutdown chain has cleaned
+/// entities and re-emitted the stashed exit, and finalize the report after that
+/// observation. The stand-in chain mirrors the real server/client drain-stash-rewire
+/// pattern, so a schedule regression makes the report miss the exit or count pre-shutdown
+/// entities.
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the test stages one two-frame exit scenario end to end; its length is the scenario itself"
+)]
+fn exit_frame_report_observes_terminal_counts_after_the_shutdown_chain() {
+    #[derive(Resource, Default)]
+    struct TestShutdown {
+        requested_exit: Option<AppExit>,
+        stop_requested: bool,
+        stopped: bool,
+    }
+    #[derive(Resource, Default)]
+    struct TestFrames(u32);
+    // Entities the shutdown chain despawns before the report is finalized.
+    #[derive(Component)]
+    struct ShutdownCleanup;
+
+    fn advance_frame(mut frames: ResMut<TestFrames>) {
+        frames.0 += 1;
+    }
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "test system parameters are owned by the scheduling runtime"
+    )]
+    fn request_exit(mut app_exits: MessageWriter<AppExit>, shutdown: Res<TestShutdown>) {
+        if shutdown.requested_exit.is_none() && !shutdown.stop_requested {
+            app_exits.write(AppExit::error());
+        }
+    }
+    fn forward_exit(mut app_exits: ResMut<Messages<AppExit>>, mut shutdown: ResMut<TestShutdown>) {
+        if shutdown.requested_exit.is_some() {
+            return;
+        }
+        let exits: Vec<_> = app_exits.drain().collect();
+        let Some(exit) = exits
+            .iter()
+            .find(|exit| exit.is_error())
+            .or_else(|| exits.first())
+            .cloned()
+        else {
+            return;
+        };
+        shutdown.requested_exit = Some(exit);
+        // The real chains also trigger the endpoint stop here; the next frame observes it
+        // done, which is what the frames-below-two guard in stop_and_cleanup models.
+        shutdown.stop_requested = true;
+    }
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "test system parameters are owned by the scheduling runtime"
+    )]
+    fn stop_and_cleanup(
+        frames: Res<TestFrames>,
+        mut shutdown: ResMut<TestShutdown>,
+        mut commands: Commands,
+        cleanup: Query<Entity, With<ShutdownCleanup>>,
+    ) {
+        if !shutdown.stop_requested || shutdown.stopped || frames.0 < 2 {
+            return;
+        }
+        shutdown.stopped = true;
+        for entity in cleanup.iter() {
+            commands.entity(entity).despawn();
+        }
+    }
+    fn finish_exit(mut app_exits: ResMut<Messages<AppExit>>, mut shutdown: ResMut<TestShutdown>) {
+        if shutdown.stopped
+            && let Some(exit) = shutdown.requested_exit.take()
+        {
+            app_exits.write(exit);
+        }
+    }
+
+    let directory =
+        std::env::temp_dir().join(format!("brawler-diagnostics-exit-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("test directory is created");
+    let report_path = directory.join("exit-frame.closeout");
+    let _ = std::fs::remove_file(&report_path);
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(
+            ProcessDiagnosticsSettings::default().with_report_path(report_path.clone()),
+        )
+        .add_plugins(ProcessDiagnosticsPlugin)
+        .init_resource::<TestShutdown>()
+        .init_resource::<TestFrames>()
+        .add_systems(Update, (advance_frame, request_exit).chain())
+        .add_systems(
+            Last,
+            (forward_exit, stop_and_cleanup, finish_exit)
+                .chain()
+                .before(TerminalObservationSet),
+        );
+    let _ = app
+        .world_mut()
+        .spawn_batch((0..4).map(|_| ShutdownCleanup))
+        .collect::<Vec<_>>();
+    app.world_mut().spawn_empty();
+    // MinimalPlugins apps carry their own baseline entities, so the ordering assertions
+    // compare against the observed pre/post-shutdown counts rather than absolute values.
+    let pre_shutdown_entities = app.world().entities().len();
+
+    // Frame one: the exit is requested and drained into the shutdown chain; the endpoint
+    // stop is still pending, so no report may exist.
+    app.update();
+    assert!(
+        !report_path.exists(),
+        "no report may be finalized while shutdown is still pending"
+    );
+    let high_water_entities = pre_shutdown_entities.max(app.world().entities().len());
+
+    // Frame two: shutdown completes, cleanup despawns run, and the stashed exit is
+    // re-emitted before observation and finalization.
+    app.update();
+    let post_shutdown_entities = app.world().entities().len();
+    let contents =
+        std::fs::read_to_string(&report_path).expect("closeout report written on the exit frame");
+    let pairs = split_report_lines(&contents).expect("exit-frame report lines split");
+    assert_eq!(validate_report_lines(&pairs), Ok(CLOSEOUT_SCHEMA_VERSION));
+    assert_eq!(
+        parse_report_field(&pairs, "error_count"),
+        Some("1"),
+        "the re-emitted terminal exit must be counted on the exit frame"
+    );
+    assert_eq!(
+        parse_report_field(&pairs, "terminal_entities"),
+        Some(post_shutdown_entities.to_string().as_str()),
+        "terminal counts must reflect the post-shutdown entity state"
+    );
+    assert_eq!(
+        parse_report_field(&pairs, "entity_high_water"),
+        Some(high_water_entities.to_string().as_str())
+    );
+    assert_eq!(
+        parse_report_field(&pairs, "exit_category"),
+        Some("shutdown-incomplete")
+    );
+    let _ = std::fs::remove_file(&report_path);
 }

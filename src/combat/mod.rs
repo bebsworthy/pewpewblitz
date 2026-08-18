@@ -2,9 +2,17 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "combat math quantizes float weapon/effect values into the bounded u16/u8 wire forms at single, reviewed sites"
+)]
+// Combat subtree disposition (reviewed 2026-08-18): every system here takes Bevy system
+// parameters by value because the scheduling runtime owns them, and the orchestration
+// queries read clearest inline. Converting the subtree's remaining sites to item-scoped
+// allows belongs to the combat organization backlog, not to unrelated remediations.
+#![allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
-    clippy::cast_precision_loss
+    reason = "Bevy system parameters are owned by the scheduling runtime and must be taken by value"
 )]
 
 pub mod attack;

@@ -13,9 +13,11 @@ pub const FAILURE_SCHEMA_VERSION: u16 = 1;
 /// Bounded message length; longer diagnostics are truncated deterministically.
 pub const MAX_FAILURE_MESSAGE_BYTES: usize = 512;
 
-/// Stable runtime failure category. Configuration/argument errors remain process exit code 2.
+/// Stable runtime failure category. Configuration/argument errors remain process exit code 2
+/// and carry the dedicated `Configuration` category.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FailureCategory {
+    Configuration,
     EndpointStart,
     ProtocolMismatch,
     ContentMismatch,
@@ -29,6 +31,7 @@ impl FailureCategory {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Configuration => "configuration",
             Self::EndpointStart => "endpoint_start",
             Self::ProtocolMismatch => "protocol_mismatch",
             Self::ContentMismatch => "content_mismatch",
@@ -43,6 +46,7 @@ impl FailureCategory {
 impl From<FailureCategory> for ProcessExitCategory {
     fn from(category: FailureCategory) -> Self {
         match category {
+            FailureCategory::Configuration => ProcessExitCategory::Configuration,
             FailureCategory::EndpointStart => ProcessExitCategory::EndpointStart,
             FailureCategory::ProtocolMismatch => ProcessExitCategory::ProtocolMismatch,
             FailureCategory::ContentMismatch => ProcessExitCategory::ContentMismatch,

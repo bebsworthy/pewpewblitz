@@ -1,5 +1,4 @@
 //! Stable protocol registration shared by the client and dedicated server.
-#![allow(clippy::needless_pass_by_value)]
 
 use avian2d::prelude::{Position, Rotation};
 use bevy::ecs::entity::{EntityMapper, MapEntities};
@@ -467,6 +466,10 @@ impl Plugin for ProtocolPlugin {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn initialize_content_fingerprint(
     weapons: Res<crate::combat::WeaponCatalogResource>,
     maps: Res<crate::map::MapCatalogResource>,

@@ -2,10 +2,8 @@
 //! the ordered publication drain over the terrain channel.
 
 #![allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
     clippy::wildcard_imports,
-    reason = "the shared model mirror, small copied wire facts, and the multi-receiver wire queries match the sibling terrain and transport modules"
+    reason = "the shared model mirror keeps the wire shapes nameable beside their rules"
 )]
 
 use crate::protocol::TerrainChannel;
@@ -53,6 +51,11 @@ fn rejection_record(
 /// Validate and serve recovery requests from accepted links only. Rejections never
 /// mutate terrain and never produce a response. The cache and outbox exist only
 /// between terrain install and teardown.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn receive_terrain_recovery_requests(
     mut commands: Commands,

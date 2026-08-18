@@ -179,6 +179,11 @@ fn spawn_client_hud(mut commands: Commands) {
     ));
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn ensure_fighter_visuals(
     mut commands: Commands,
     assets: Option<Res<ClientAssetHandles>>,
@@ -247,6 +252,10 @@ fn fighter_sprite(
 /// The client intentionally does not replicate a server `RigidBody`, so Avian's normal
 /// `RigidBody -> Transform` writeback is not sufficient for every interpolated fighter.  The
 /// replicated Position/Rotation pair is the canonical presentation pose in Position mode.
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn write_interpolated_fighter_pose_to_transform(
     trace: Option<ResMut<LiveInputTrace>>,
     fighters: Query<(Entity, &Position, &Rotation, &mut Transform), (With<Fighter>, With<Remote>)>,
@@ -278,6 +287,10 @@ pub(super) fn write_interpolated_fighter_pose_to_transform(
     }
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 fn follow_controlled_camera(
     map: Option<Res<crate::map::PresentedMap>>,
     fighters: Query<&Position, (With<Fighter>, With<Controlled>, Without<ArenaCamera>)>,
@@ -328,6 +341,10 @@ pub(super) fn clamp_camera_center(
     )
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn update_pause_overlay(
     context: Res<ClientInputContext>,
     mut overlays: Query<&mut Visibility, With<PauseOverlay>>,
@@ -341,6 +358,10 @@ fn update_pause_overlay(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn update_client_hud(
     pending: Res<PendingLocalActions>,
     context: Res<ClientInputContext>,

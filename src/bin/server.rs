@@ -86,7 +86,7 @@ fn main() -> AppExit {
                 brawler::diagnostics::write_failure_record(
                     std::path::Path::new(&path),
                     &brawler::diagnostics::ProcessFailureRecordV1::new(
-                        brawler::diagnostics::FailureCategory::VerificationFailed,
+                        brawler::diagnostics::FailureCategory::Configuration,
                         format!("configuration rejected: {error}"),
                     ),
                 );

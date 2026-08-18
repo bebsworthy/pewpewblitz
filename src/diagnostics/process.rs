@@ -112,8 +112,46 @@ impl ProcessDiagnosticsState {
     }
 }
 
-/// Ordering anchor for report finalization. The dedicated server orders its shutdown chain
-/// before this set so the report observes the final terminal exit.
+/// Structured exit classification recorded by whichever system requests an error exit.
+/// `AppExit` cannot carry a category, so closeout finalization reads this resource to
+/// report the true failure class instead of the undifferentiated error mapping.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProcessExitClassification {
+    category: Option<ProcessExitCategory>,
+}
+
+impl ProcessExitClassification {
+    /// Record the category of an error exit being requested now. The first recorded
+    /// category wins, so a shutdown storm cannot overwrite the root cause.
+    pub(crate) fn record_error_exit(&mut self, category: ProcessExitCategory) {
+        if self.category.is_none() {
+            self.category = Some(category);
+        }
+    }
+
+    /// Resolve the closeout category for `exit`: a classified error exit reports its
+    /// recorded category, an unclassified error exit stays `ShutdownIncomplete`, and a
+    /// success exit stays `CleanExit`.
+    #[must_use]
+    pub fn classified_category(&self, exit: &AppExit) -> ProcessExitCategory {
+        if exit.is_error() {
+            self.category
+                .unwrap_or(ProcessExitCategory::ShutdownIncomplete)
+        } else {
+            ProcessExitCategory::CleanExit
+        }
+    }
+}
+
+/// Ordering anchor for terminal observations: final process counts, link statistics, and
+/// the Lightyear transport sample. Role shutdown chains order before this set, so its
+/// systems observe post-shutdown entity/link counts and the re-emitted terminal exit.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TerminalObservationSet;
+
+/// Ordering anchor for report finalization. Terminal observations in
+/// [`TerminalObservationSet`] must complete first so the exit-frame report carries the
+/// final error count, transport sample, and post-shutdown entity/link counts.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DiagnosticsSet;
 
@@ -136,19 +174,28 @@ impl Plugin for ProcessDiagnosticsPlugin {
         #[cfg(feature = "process-metrics")]
         let metrics_enabled = state.enabled;
         app.insert_resource(state);
+        app.init_resource::<ProcessExitClassification>();
         app.add_systems(FixedFirst, begin_fixed_tick_observation)
             .add_systems(FixedLast, finish_fixed_tick_observation)
-            .add_systems(Last, (observe_process_counts, sample_link_stats))
+            .configure_sets(Last, TerminalObservationSet.before(DiagnosticsSet))
+            .add_systems(
+                Last,
+                (observe_process_counts, sample_link_stats).in_set(TerminalObservationSet),
+            )
             .add_systems(Last, finalize_closeout_report.in_set(DiagnosticsSet));
 
         #[cfg(feature = "process-metrics")]
         if metrics_enabled {
             // Lightyear's metrics registry is process-global; install it once and only in
-            // dedicated measurement processes that opted in through the feature flag.
+            // dedicated measurement processes that opted in through the feature flag. The
+            // sampler stays inside the terminal observation set so the closeout report sees
+            // the final bucket values before Lightyear clears them.
             app.add_plugins(lightyear::metrics::prelude::MetricsPlugin::default());
             app.add_systems(
                 Last,
-                sample_lightyear_metrics.before(lightyear::metrics::prelude::ClearBucketsSystem),
+                sample_lightyear_metrics
+                    .in_set(TerminalObservationSet)
+                    .before(lightyear::metrics::prelude::ClearBucketsSystem),
             );
         }
     }
@@ -351,6 +398,7 @@ fn finalize_closeout_report(
     mut exits: MessageReader<AppExit>,
     settings: Res<ProcessDiagnosticsSettings>,
     mut state: ResMut<ProcessDiagnosticsState>,
+    classification: Res<ProcessExitClassification>,
     protocol: Option<Res<crate::protocol::ProtocolFingerprint>>,
     content: Option<Res<crate::content::GameplayContentFingerprint>>,
     fighters: Option<
@@ -372,7 +420,7 @@ fn finalize_closeout_report(
         return;
     };
     state.report_written = true;
-    let exit_category = ProcessExitCategory::from_app_exit(exit);
+    let exit_category = classification.classified_category(exit);
     let fixed = state.fixed_tick_samples.ordered();
     let rtt = state.rtt_samples.ordered();
     let jitter = state.jitter_samples.ordered();

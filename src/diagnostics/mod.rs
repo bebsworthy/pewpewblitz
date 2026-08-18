@@ -17,8 +17,8 @@ pub use overlay::ClientDiagnosticsOverlayPlugin;
 #[cfg(feature = "server")]
 pub(crate) use process::ProcessDiagnosticsState;
 pub use process::{
-    DiagnosticsSet, ProcessDiagnosticsPlugin, ProcessDiagnosticsSettings, TransportCounters,
-    percentile_micros,
+    DiagnosticsSet, ProcessDiagnosticsPlugin, ProcessDiagnosticsSettings,
+    ProcessExitClassification, TerminalObservationSet, TransportCounters, percentile_micros,
 };
 
 use bevy::prelude::*;
@@ -271,6 +271,13 @@ impl CloseoutReportV1 {
         {
             return Err("closeout first_divergence must be non-empty and bounded".to_string());
         }
+        if self
+            .first_divergence
+            .as_ref()
+            .is_some_and(|divergence| divergence.contains(['\n', '\r', '=']))
+        {
+            return Err("closeout first_divergence must not contain newlines or '='".to_string());
+        }
         if self.ended_at_unix_micros < self.started_at_unix_micros {
             return Err("closeout end timestamp precedes its start timestamp".to_string());
         }
@@ -373,7 +380,79 @@ pub fn split_report_lines(contents: &str) -> Result<Vec<(&str, &str)>, String> {
     Ok(lines)
 }
 
-/// Verify that parsed report lines carry a supported schema revision and every required key.
+/// Every non-participant field a schema-1 closeout report carries exactly once. The reader
+/// rejects reports that drop, duplicate, or oversize any of these fields, mirroring
+/// `CloseoutReportV1::to_report_lines`.
+const REPORT_REQUIRED_KEYS: [&str; 48] = [
+    "schema_version",
+    "scenario_id",
+    "scenario_revision",
+    "run_id",
+    "build_version",
+    "source_revision",
+    "source_dirty",
+    "protocol_version",
+    "registry_fingerprint",
+    "content_fingerprint",
+    "mode",
+    "rules_profile",
+    "network_profile",
+    "render_profile",
+    "seed",
+    "participants",
+    "scripted_actions",
+    "checkpoints",
+    "end_reason",
+    "exit_category",
+    "started_at_unix_micros",
+    "ended_at_unix_micros",
+    "fixed_ticks",
+    "wall_duration_micros",
+    "fixed_tick_p50_micros",
+    "fixed_tick_p95_micros",
+    "fixed_tick_max_micros",
+    "entity_high_water",
+    "link_high_water",
+    "terminal_entities",
+    "terminal_links",
+    "rtt_p50_micros",
+    "rtt_p95_micros",
+    "rtt_max_micros",
+    "jitter_p50_micros",
+    "jitter_p95_micros",
+    "jitter_max_micros",
+    "transport_bytes_sent",
+    "transport_bytes_received",
+    "packets_sent",
+    "packets_received",
+    "channel_messages_sent",
+    "channel_messages_received",
+    "checkpoint_digest",
+    "first_divergence",
+    "dropped_messages",
+    "rejected_connections",
+    "error_count",
+];
+
+/// Report fields whose values are bounded identity strings. The reader enforces the same
+/// bound the writer's `validate` path enforces, so an oversized identity cannot slip into
+/// a verification script through the file format.
+const REPORT_IDENTITY_KEYS: [&str; 11] = [
+    "scenario_id",
+    "run_id",
+    "build_version",
+    "source_revision",
+    "mode",
+    "rules_profile",
+    "network_profile",
+    "render_profile",
+    "end_reason",
+    "first_divergence",
+    "exit_category",
+];
+
+/// Verify that parsed report lines carry a supported schema revision, every required field
+/// exactly once, bounded identity values, and a well-formed participant block.
 pub fn validate_report_lines(lines: &[(&str, &str)]) -> Result<u16, String> {
     let mut seen = std::collections::HashSet::new();
     for (key, _) in lines {
@@ -390,23 +469,63 @@ pub fn validate_report_lines(lines: &[(&str, &str)]) -> Result<u16, String> {
             "unknown closeout schema revision {schema} (expected {CLOSEOUT_SCHEMA_VERSION})"
         ));
     }
-    for key in [
-        "scenario_id",
-        "run_id",
-        "end_reason",
-        "exit_category",
-        "fixed_ticks",
-        "checkpoint_digest",
-    ] {
+    for key in REPORT_REQUIRED_KEYS {
         if parse_report_field(lines, key).is_none() {
             return Err(format!("missing or duplicated required field: {key}"));
         }
     }
-    let exit_category =
-        parse_report_field(lines, "exit_category").expect("presence was checked above");
+    for key in REPORT_IDENTITY_KEYS {
+        let value = parse_report_field(lines, key).expect("presence was checked above");
+        if value.is_empty() || value.len() > MAX_IDENTITY_BYTES || value.contains('=') {
+            return Err(format!(
+                "report field {key} is empty, oversized, or carries an '=' separator"
+            ));
+        }
+    }
+    let exit_category = parse_report_field(lines, "exit_category").expect("presence was checked");
     ProcessExitCategory::parse(exit_category)
         .ok_or_else(|| format!("unknown exit_category {exit_category}"))?;
+    validate_report_participant_block(lines)?;
     Ok(schema)
+}
+
+/// Validate the `participants=N` count against the contiguous, bounded participant rows.
+fn validate_report_participant_block(lines: &[(&str, &str)]) -> Result<(), String> {
+    let declared = parse_report_field(lines, "participants")
+        .expect("presence was checked above")
+        .parse::<u32>()
+        .map_err(|_| "participants is not a u32".to_string())?;
+    let count = usize::try_from(declared).unwrap_or(usize::MAX);
+    if count > MAX_MANIFEST_PARTICIPANTS {
+        return Err(format!(
+            "report declares {declared} participants above the {MAX_MANIFEST_PARTICIPANTS} cap"
+        ));
+    }
+    for (key, _) in lines {
+        if let Some(index) = key
+            .strip_prefix("participant_")
+            .and_then(|rest| rest.split_once('_'))
+            .and_then(|(index, _)| index.parse::<usize>().ok())
+            && index >= count
+        {
+            return Err(format!(
+                "report carries participant row {index} beyond the declared {declared}"
+            ));
+        }
+    }
+    for index in 0..count {
+        for suffix in ["player_id", "build"] {
+            let key = format!("participant_{index}_{suffix}");
+            let value = parse_report_field(lines, &key)
+                .ok_or_else(|| format!("missing or duplicated report field: {key}"))?;
+            if value.is_empty() || value.len() > MAX_IDENTITY_BYTES || value.contains('=') {
+                return Err(format!(
+                    "report field {key} is empty, oversized, or carries an '=' separator"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// FNV-1a digest over ordered checkpoint values; stable across runs and platforms.

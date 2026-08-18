@@ -130,6 +130,11 @@ fn spawn_readiness_hud(mut commands: Commands) {
         .insert(BackgroundColor(Color::srgba(0.025, 0.035, 0.055, 0.92)));
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn update_readiness_hud(
     joins: Query<&ClientJoinStatus>,

@@ -2,10 +2,8 @@
 //! event application, and reset handling with no ECS or transport access.
 
 #![allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
     clippy::wildcard_imports,
-    reason = "the shared model mirror, small copied wire facts, and the multi-receiver wire queries match the sibling terrain and transport modules"
+    reason = "the shared model mirror keeps the wire shapes nameable beside their rules"
 )]
 
 use crate::terrain::grid as terrain_grid;
@@ -460,6 +458,10 @@ impl ClientTerrainConvergence {
 
     /// Apply one event whose revision is exactly the next expected revision, verifying
     /// the locally rasterized result against the server's erased-cell and chunk report.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "the wire fact is a small Copy mirror type; by value matches the shared wire style"
+    )]
     fn commit_verified_event(
         &mut self,
         event: TerrainDestructionEvent,

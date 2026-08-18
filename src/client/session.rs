@@ -23,6 +23,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<MatchCommandState>()
             .init_resource::<ClientInputSettings>()
             .init_resource::<InputSettingsSelection>()
+            .init_resource::<crate::diagnostics::ProcessExitClassification>()
             .add_systems(
                 Startup,
                 (spawn_client_connection, spawn_controller_demo_gamepad).chain(),
@@ -73,7 +74,9 @@ impl Plugin for ClientNetworkPlugin {
                     finish_client_shutdown,
                 )
                     .chain()
-                    .before(crate::diagnostics::DiagnosticsSet),
+                    // Order before the terminal observation set so closeout observations and
+                    // the final report see post-shutdown counts and the re-emitted exit.
+                    .before(crate::diagnostics::TerminalObservationSet),
             );
         app.add_observer(add_controlled_input_marker);
     }
@@ -93,6 +96,11 @@ fn process_match_command_outcomes(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_arguments)]
 fn send_match_command(
     config: Res<ClientNetworkConfig>,
@@ -183,6 +191,10 @@ pub(super) fn automatic_match_command_enabled(
             .is_none_or(|target| roster_count >= target)
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn spawn_client_connection(
     mut commands: Commands,
     config: Res<ClientNetworkConfig>,
@@ -234,6 +246,10 @@ pub(super) fn spawn_client_connection(
     Ok(())
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn spawn_controller_demo_gamepad(
     mut commands: Commands,
     config: Res<ClientNetworkConfig>,
@@ -246,6 +262,10 @@ pub(super) fn spawn_controller_demo_gamepad(
 
 /// Keep the synthetic controller aimed at the server-owned neutral dummy while preserving the
 /// normal gamepad sampling path. This is only a visual/input smoke aid; it is not gameplay logic.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn update_controller_demo_gamepad(
     config: Res<ClientNetworkConfig>,
     mut gamepads: Query<&mut Gamepad, With<ControllerDemoGamepad>>,
@@ -276,6 +296,11 @@ pub(super) fn update_controller_demo_gamepad(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn send_client_hello(
     config: Res<ClientNetworkConfig>,
     fingerprint: Res<ProtocolFingerprint>,
@@ -315,6 +340,11 @@ pub(super) fn process_build_selection_outcomes(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
 pub(super) fn send_build_selection_request(
@@ -560,6 +590,11 @@ pub(super) fn crossbeam_transport(config: &ClientNetworkConfig) -> bool {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_lines)]
 pub(super) fn update_build_selection_overlay(
     state: Res<BuildSelectionState>,
@@ -680,6 +715,49 @@ pub(super) fn update_build_selection_overlay(
     }
 }
 
+/// Map one server join rejection to the stable failure category its evidence belongs to.
+pub(super) fn join_rejection_category(
+    reason: &JoinRejection,
+) -> crate::diagnostics::FailureCategory {
+    match reason {
+        JoinRejection::ProtocolVersionMismatch
+        | JoinRejection::BuildVersionMismatch
+        | JoinRejection::RegistryMismatch => crate::diagnostics::FailureCategory::ProtocolMismatch,
+        JoinRejection::ContentMismatch => crate::diagnostics::FailureCategory::ContentMismatch,
+        JoinRejection::HandshakeTimeout => crate::diagnostics::FailureCategory::Timeout,
+        JoinRejection::ServerFull
+        | JoinRejection::MatchFull
+        | JoinRejection::MatchInProgress
+        | JoinRejection::IdentifierExhausted => {
+            crate::diagnostics::FailureCategory::ShutdownIncomplete
+        }
+    }
+}
+
+/// Classify a client error exit and append the bounded local failure record when the
+/// `BRAWLER_FAILURE_REPORT` control selects one, so client failures keep the same stable
+/// categories the dedicated server already records.
+fn record_client_failure(
+    diagnostics: Option<&Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    classification: &mut crate::diagnostics::ProcessExitClassification,
+    category: crate::diagnostics::FailureCategory,
+    message: String,
+) {
+    classification.record_error_exit(category.into());
+    if let Some(settings) = diagnostics
+        && let Some(path) = settings.failure_record_path()
+    {
+        crate::diagnostics::write_failure_record(
+            &path,
+            &crate::diagnostics::ProcessFailureRecordV1::new(category, message),
+        );
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn process_join_outcome(
     mut query: Query<
         (
@@ -688,6 +766,8 @@ pub(super) fn process_join_outcome(
         ),
         With<Client>,
     >,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     for (mut status, receiver) in query.iter_mut() {
@@ -712,6 +792,12 @@ pub(super) fn process_join_outcome(
                 }
                 JoinOutcome::Rejected { reason } => {
                     warn!(?reason, "brawler client rejected");
+                    record_client_failure(
+                        diagnostics.as_ref(),
+                        &mut classification,
+                        join_rejection_category(&reason),
+                        format!("join rejected: {reason:?}"),
+                    );
                     status.phase = ClientJoinPhase::Rejected(reason);
                     app_exit.write(AppExit::error());
                 }
@@ -732,6 +818,11 @@ pub(super) fn disconnect_rejected_client(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn observe_client_lifecycle(
     mut query: Query<
         (
@@ -741,6 +832,8 @@ pub(super) fn observe_client_lifecycle(
         ),
         With<Client>,
     >,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     for (mut status, disconnected, connecting) in query.iter_mut() {
@@ -753,12 +846,23 @@ pub(super) fn observe_client_lifecycle(
         {
             let reason = disconnected.map(|disconnected| disconnected.reason.to_string());
             warn!(?reason, "brawler client disconnected");
+            record_client_failure(
+                diagnostics.as_ref(),
+                &mut classification,
+                crate::diagnostics::FailureCategory::ShutdownIncomplete,
+                format!("client disconnected: {reason:?}"),
+            );
             status.phase = ClientJoinPhase::Disconnected;
             app_exit.write(AppExit::error());
         }
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn log_replicated_roster(
     config: Res<ClientNetworkConfig>,
     automation: Res<HeadlessAutomation>,
@@ -794,11 +898,17 @@ pub(super) fn log_replicated_roster(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn enforce_client_timeout(
     config: Res<ClientNetworkConfig>,
     time: Res<Time<Real>>,
     status_query: Query<&ClientJoinStatus, With<Client>>,
     roster: Query<(), (With<Remote>, With<Fighter>)>,
+    diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     let now = time.elapsed();
@@ -816,6 +926,12 @@ pub(super) fn enforce_client_timeout(
         });
         if connection_timed_out || roster_timed_out {
             error!("brawler client connection timed out");
+            record_client_failure(
+                diagnostics.as_ref(),
+                &mut classification,
+                crate::diagnostics::FailureCategory::Timeout,
+                "client connection timed out".to_string(),
+            );
             app_exit.write(AppExit::error());
         }
     }

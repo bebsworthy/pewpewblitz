@@ -3,6 +3,10 @@
 
 use super::*;
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn verify_process_match(
@@ -340,6 +344,10 @@ fn format_preset_rates(values: &[(WeaponPresetId, f64)]) -> String {
 /// against the join-time baseline, so a wider window cannot pass a fighter that never moved.
 const MOVEMENT_SMOKE_WINDOW_TICKS: u64 = 420;
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn verify_process_movement(
     mut check: ResMut<ProcessMovementCheck>,
     tick: Res<crate::timing::SimulationTick>,
@@ -406,6 +414,10 @@ pub(super) fn verify_process_movement(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn verify_process_combat(
@@ -893,6 +905,10 @@ pub(super) fn parse_client_cue_stream(contents: &str) -> Vec<CombatCue> {
 /// Terrain-profile smoke: authoritative destruction must reach a target revision and strictly
 /// reduce occupancy within a bounded window. The ready file doubles as the launcher's wait
 /// target, and the optional report records the terrain traffic evidence for the profile run.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn verify_process_terrain(
     mut check: ResMut<ProcessTerrainCheck>,
     tick: Res<crate::timing::SimulationTick>,

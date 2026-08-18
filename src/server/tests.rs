@@ -57,6 +57,7 @@ fn started_unlinked_udp_server_requests_error_exit() {
     app.add_plugins((MinimalPlugins, StatesPlugin))
         .init_resource::<lightyear::prelude::PeerMetadata>()
         .init_resource::<ServerStartup>()
+        .init_resource::<crate::diagnostics::ProcessExitClassification>()
         .add_systems(Update, observe_server_endpoint);
     app.world_mut().spawn((
         NetcodeServer::new(NetcodeConfig::default()),

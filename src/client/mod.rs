@@ -1,5 +1,4 @@
 //! Client application composition across input, presentation, and network-session concerns.
-#![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 
 use crate::{
     VERSION,
@@ -425,6 +424,13 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     ));
     #[cfg(feature = "owner-prediction")]
     app.add_plugins(prediction::OwnerPredictionPlugin);
+    if let Some(path) =
+        crate::diagnostics::ProcessDiagnosticsSettings::default().failure_record_path()
+    {
+        // Parity with the dedicated server: a panic appends a bounded local failure record
+        // before terminating, so client crashes keep the same category evidence.
+        crate::diagnostics::install_panic_failure_hook(path);
+    }
     if !headless {
         app.add_plugins(ClientPresentationPlugin);
         if let Some(schedule) = screenshot_schedule {

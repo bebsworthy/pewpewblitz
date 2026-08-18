@@ -76,10 +76,18 @@ impl Plugin for ClientAssetPlugin {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn load_client_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(ClientAssetHandles::load(&asset_server));
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn update_asset_readiness(
     handles: Option<Res<ClientAssetHandles>>,
     asset_server: Res<AssetServer>,

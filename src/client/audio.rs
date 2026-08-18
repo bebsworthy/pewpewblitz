@@ -67,6 +67,11 @@ impl Plugin for ClientAudioPlugin {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn play_ability_audio(
     mut commands: Commands,
     handles: Option<Res<ClientAssetHandles>>,
@@ -128,6 +133,11 @@ fn play_ability_audio(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn play_match_audio(
     mut commands: Commands,
     handles: Option<Res<ClientAssetHandles>>,
@@ -189,6 +199,10 @@ fn play_match_audio(
 /// Bounded objective feedback: control gained/lost, contested entry, and 50%/90% thresholds.
 /// Cues are deduplicated per match/team from durable replicated state. Match completion is
 /// owned by `play_match_audio` so exactly one completion cue can play per match.
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 #[allow(clippy::needless_pass_by_value)]
 fn play_hot_zone_audio(
     mut commands: Commands,
@@ -264,6 +278,10 @@ fn play_hot_zone_audio(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn play_combat_audio(
     mut commands: Commands,
     handles: Option<Res<ClientAssetHandles>>,
@@ -337,6 +355,11 @@ const fn live_limit_for(kind: SoundKind) -> usize {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn play_reload_audio(
     mut commands: Commands,
     handles: Option<Res<ClientAssetHandles>>,
@@ -364,6 +387,10 @@ fn play_reload_audio(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_arguments)]
 fn play_session_audio(
     mut commands: Commands,

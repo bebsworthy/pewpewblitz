@@ -178,6 +178,10 @@ pub(crate) fn clear_telemetry_on_generation_change(
 
 /// Receive terrain traffic, drive the pure convergence machine, and send at most one
 /// outstanding recovery request for the awaited generation.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn drive_terrain_wire_convergence(
     tick: Option<Res<SimulationTick>>,

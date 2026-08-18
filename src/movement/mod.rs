@@ -1,5 +1,4 @@
 //! Shared movement rules and server-authoritative Avian integration.
-#![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 
 use avian2d::prelude::*;
 use bevy::prelude::*;

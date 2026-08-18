@@ -143,6 +143,10 @@ fn neighbor_bits(
 
 /// Ensure one sprite per expected chunk, repaint dirty chunks and their orthogonal
 /// visual neighbors, and retire sprites that left the expected generation.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(crate) fn update_terrain_visuals(
     mut commands: Commands,
     mut images: Option<ResMut<Assets<Image>>>,
@@ -240,6 +244,10 @@ pub(crate) fn update_terrain_visuals(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(crate) fn spawn_terrain_debris(
     mut commands: Commands,
     images: Option<ResMut<Assets<Image>>>,
@@ -292,6 +300,10 @@ pub(crate) fn spawn_terrain_debris(
 /// Expire debris by client presentation time and immediately retire any debris whose
 /// terrain generation left the convergence machine (reset, map replacement, or
 /// disconnect); the durable crater stays.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(crate) fn expire_terrain_debris(
     mut commands: Commands,
     time: Res<Time<Virtual>>,

@@ -889,3 +889,48 @@ fn settings_overlay_reports_calibration_bindings_and_conflicts() {
             .any(|line| line.contains("Conflict: Active item, Ultimate, Interact, Cancel"))
     );
 }
+
+#[test]
+fn join_rejections_map_to_stable_failure_categories() {
+    use crate::diagnostics::FailureCategory;
+    use crate::protocol::JoinRejection;
+
+    let cases = [
+        (
+            JoinRejection::ProtocolVersionMismatch,
+            FailureCategory::ProtocolMismatch,
+        ),
+        (
+            JoinRejection::BuildVersionMismatch,
+            FailureCategory::ProtocolMismatch,
+        ),
+        (
+            JoinRejection::RegistryMismatch,
+            FailureCategory::ProtocolMismatch,
+        ),
+        (
+            JoinRejection::ContentMismatch,
+            FailureCategory::ContentMismatch,
+        ),
+        (JoinRejection::HandshakeTimeout, FailureCategory::Timeout),
+        (
+            JoinRejection::ServerFull,
+            FailureCategory::ShutdownIncomplete,
+        ),
+        (
+            JoinRejection::MatchFull,
+            FailureCategory::ShutdownIncomplete,
+        ),
+        (
+            JoinRejection::MatchInProgress,
+            FailureCategory::ShutdownIncomplete,
+        ),
+        (
+            JoinRejection::IdentifierExhausted,
+            FailureCategory::ShutdownIncomplete,
+        ),
+    ];
+    for (reason, expected) in cases {
+        assert_eq!(join_rejection_category(&reason), expected);
+    }
+}

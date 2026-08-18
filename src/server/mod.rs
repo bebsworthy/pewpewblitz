@@ -1,5 +1,4 @@
 //! Dedicated-server composition and authoritative network-session concerns.
-#![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 
 use crate::{
     VERSION,
@@ -284,6 +283,7 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ProcessMatchCheck>()
             .init_resource::<ProcessTerrainCheck>()
             .init_resource::<crate::builds::BuildTelemetry>()
+            .init_resource::<crate::diagnostics::ProcessExitClassification>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
             .add_systems(
@@ -315,18 +315,28 @@ impl Plugin for ServerNetworkPlugin {
                 Last,
                 (forward_app_exit_to_server_stop, finish_server_shutdown)
                     .chain()
-                    .before(crate::diagnostics::DiagnosticsSet),
+                    // Order before the terminal observation set so closeout observations and
+                    // the final report see post-shutdown counts and the re-emitted exit.
+                    .before(crate::diagnostics::TerminalObservationSet),
             )
             .add_plugins((ServerCombatPlugin, crate::abilities::ServerAbilityPlugin));
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "observer triggers are delivered by value by the Bevy observer runtime"
+)]
 fn configure_new_link(trigger: On<Add, LinkOf>, mut commands: Commands) {
     commands
         .entity(trigger.entity)
         .insert((ReplicationSender, InputValidationState::default()));
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn spawn_server_endpoint(mut commands: Commands, config: Res<ServerNetworkConfig>) -> Result {
     if config.transport != NetworkTransport::Udp {
         return Ok(());
@@ -351,6 +361,10 @@ fn spawn_server_endpoint(mut commands: Commands, config: Res<ServerNetworkConfig
     Ok(())
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 fn observe_server_endpoint(
     mut startup: ResMut<ServerStartup>,
     ready_query: Query<
@@ -372,6 +386,7 @@ fn observe_server_endpoint(
         ),
     >,
     diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
+    mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     if startup.ready_reported || startup.failure_reported {
@@ -380,6 +395,7 @@ fn observe_server_endpoint(
     if failed_query.iter().next().is_some() {
         startup.failure_reported = true;
         error!("brawler server endpoint failed to bind or link");
+        classification.record_error_exit(crate::diagnostics::ProcessExitCategory::EndpointStart);
         if let Some(settings) = diagnostics
             && let Some(path) = settings.failure_record_path()
         {
@@ -401,6 +417,8 @@ fn observe_server_endpoint(
         if let Err(error) = fs::write(&path, b"ready\n") {
             startup.failure_reported = true;
             error!(path = %path.display(), ?error, "brawler server readiness signal failed");
+            classification
+                .record_error_exit(crate::diagnostics::ProcessExitCategory::EndpointStart);
             app_exit.write(AppExit::error());
             return;
         }
@@ -409,6 +427,11 @@ fn observe_server_endpoint(
     startup.ready_reported = true;
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn initialize_sessions(
     mut commands: Commands,
     config: Res<ServerNetworkConfig>,
@@ -433,6 +456,11 @@ fn initialize_sessions(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 fn process_client_hellos(
@@ -651,6 +679,11 @@ fn process_client_hellos(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn process_match_commands(
     tick: Res<crate::timing::SimulationTick>,
     match_root: Query<&MatchState, With<MatchRoot>>,
@@ -748,6 +781,10 @@ fn process_match_commands(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn enforce_session_deadlines(
     time: Res<Time<Real>>,
     mut diagnostics: Option<ResMut<crate::diagnostics::ProcessDiagnosticsState>>,
@@ -774,6 +811,10 @@ fn enforce_session_deadlines(
 /// Deterministic graceful exit for measurement runs: once every enabled verification check has
 /// completed, request a clean shutdown so terminal evidence (closeout reports, ordered stop)
 /// is produced instead of the launcher terminating the process.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn exit_after_verification(
     tick: Res<crate::timing::SimulationTick>,
     movement: Res<ProcessMovementCheck>,

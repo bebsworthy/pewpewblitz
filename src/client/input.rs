@@ -19,6 +19,11 @@ pub(super) fn logical_key_pressed(keyboard: Option<&ButtonInput<Key>>, expected:
 /// All device shaping (deadzones, aim commit, trigger hysteresis, inversion, bindings) is
 /// client-owned and applied before quantization; the server keeps validating the quantized
 /// intent without seeing physical devices.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sample_local_input(
@@ -287,6 +292,11 @@ pub(super) fn sample_local_input(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn apply_headless_input(
     automation: Res<HeadlessAutomation>,
     mut pending: ResMut<PendingLocalActions>,
@@ -495,6 +505,10 @@ pub(super) fn advance_headless_automation(
     }
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 fn controlled_lob_range(
     fighters: &Query<(&Position, Option<&ResolvedWeapon>), (With<Fighter>, With<Controlled>)>,
 ) -> Option<f32> {
@@ -508,6 +522,10 @@ fn controlled_lob_range(
         })
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn mouse_aim(
     windows: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Camera, &GlobalTransform), (With<Camera2d>, Without<IsDefaultUiCamera>)>,
@@ -522,6 +540,11 @@ pub(super) fn mouse_aim(
         .then(|| (delta.normalize(), delta.length()))
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn write_client_input(
     mut pending: ResMut<PendingLocalActions>,
     trace: Option<ResMut<LiveInputTrace>>,
@@ -580,6 +603,10 @@ pub(super) fn write_client_input(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn trace_client_interpolation_sync(
     trace: Option<ResMut<LiveInputTrace>>,
     timeline: Res<InterpolationTimeline>,
@@ -604,6 +631,10 @@ pub(super) fn trace_client_interpolation_sync(
     }
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn trace_client_interpolation_history(
     trace: Option<ResMut<LiveInputTrace>>,
     fighters: Query<
@@ -669,6 +700,10 @@ pub(super) fn trace_client_interpolation_history(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn add_controlled_input_marker(
     trigger: On<Add, Controlled>,
     mut commands: Commands,
@@ -908,6 +943,10 @@ pub fn compose_input_settings_lines(
 
 /// Adjust session-local input calibration from the pause context only. These keys never
 /// enter `FighterInput`: the authoritative match is unaffected by local settings.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn adjust_input_settings_from_pause_keys(
     context: Res<ClientInputContext>,
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
@@ -1002,6 +1041,10 @@ pub(super) fn adjust_input_settings_from_pause_keys(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn update_input_settings_overlay(
     context: Res<ClientInputContext>,
     settings: Res<ClientInputSettings>,

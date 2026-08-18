@@ -1,10 +1,6 @@
 //! Client terrain composition: convergence state ownership, plugin schedule, and the
 //! terrain readiness input gate. Recovery/wire logic lives in `recovery`; images,
 //! sprites, and debris live in `presentation`.
-#![allow(
-    clippy::needless_pass_by_value,
-    reason = "system parameters follow the sibling client modules' shared-resource style"
-)]
 
 pub(crate) mod presentation;
 pub(crate) mod recovery;
@@ -77,6 +73,10 @@ impl Plugin for ClientTerrainPlugin {
 /// Terrain is the fourth readiness observation: inputs stay suppressed until convergence
 /// reports the matching generation committed. Runs after the Update-stage readiness
 /// writers so the clamp is authoritative for the next sampled frame.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 fn gate_inputs_on_terrain_readiness(
     readiness: Res<ClientTerrainReadiness>,
     config: Option<Res<crate::config::ClientNetworkConfig>>,

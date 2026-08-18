@@ -154,6 +154,10 @@ pub(super) fn install_input_validators(app: &mut App) {
         );
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares this system's complete world view inline at its schedule boundary"
+)]
 pub(super) fn record_unauthorized_input_targets(
     mut receivers: Query<(
         Entity,
@@ -182,6 +186,10 @@ pub(super) fn record_unauthorized_input_targets(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 pub(super) fn validate_fighter_input_messages(
     timeline: Res<LocalTimeline>,
     time: Res<Time<Real>>,
@@ -271,6 +279,11 @@ pub(super) fn validate_fighter_input_messages(
 
 /// Fixed-tick authoritative movement coordinator. One system by design: intermediate
 /// movement state must never become visible to combat or mode systems mid-tick.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn authoritative_movement(
