@@ -6,6 +6,10 @@ rust-version = "1.95"
 description = "Brawler — a server-authoritative top-down arena shooter"
 publish = false
 
+[workspace]
+members = ["packages/brawler-routing"]
+resolver = "3"
+
 [features]
 default = ["client"]
 client = [
@@ -78,6 +82,7 @@ avian2d = { version = "=0.7.0", default-features = false, features = [
   "parry-f32",
   "serialize",
 ] }
+brawler-routing = { path = "packages/brawler-routing" }
 bevy = { version = "=0.19.1", default-features = false, features = [
   "async_executor",
   "bevy_log",
@@ -108,6 +113,11 @@ required-features = ["network-test"]
 [[test]]
 name = "performance"
 path = "tests/performance.rs"
+required-features = ["network-test"]
+
+[[test]]
+name = "routed-process"
+path = "tests/routed_process.rs"
 required-features = ["network-test"]
 
 [lints.rust]

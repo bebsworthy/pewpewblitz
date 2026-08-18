@@ -155,6 +155,200 @@ fn app_exit_is_forwarded_after_update_producers_run() {
 }
 
 #[test]
+fn routed_unexpected_disconnect_is_terminal_but_expected_handoff_is_not() {
+    fn app_for(phase: RoutedClientPhase) -> App {
+        let mut config = ClientNetworkConfig::new(1);
+        config.transport = NetworkTransport::RoutedUdp;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AppExit>()
+            .insert_resource(config)
+            .insert_resource(RoutedClientLifecycle {
+                phase,
+                generation: 1,
+                ..default()
+            })
+            .init_resource::<crate::diagnostics::ProcessExitClassification>()
+            .add_systems(Update, observe_client_lifecycle);
+        app.world_mut().spawn((
+            Client,
+            RoutedClientSession {
+                generation: 1,
+                kind: RoutedClientSessionKind::Lobby,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::Active {
+                    player_id: PlayerId(1),
+                    network_entity_id: NetworkEntityId(1),
+                },
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+            Disconnected::default(),
+        ));
+        app
+    }
+
+    let mut unexpected = app_for(RoutedClientPhase::Lobby);
+    unexpected.update();
+    assert!(unexpected.should_exit().is_some_and(|exit| exit.is_error()));
+
+    let mut expected = app_for(RoutedClientPhase::AwaitingLobbyUnlink);
+    expected.update();
+    assert!(expected.should_exit().is_none());
+}
+
+#[test]
+fn routed_handoff_disconnects_netcode_before_unlinking_transport() {
+    use lightyear::link::{LinkPlugin, Linked};
+
+    let mut config = ClientNetworkConfig::new(1);
+    config.transport = NetworkTransport::RoutedUdp;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_plugins(LinkPlugin)
+        .insert_resource(config)
+        .insert_resource(RoutedClientLifecycle {
+            phase: RoutedClientPhase::AwaitingLobbyUnlink,
+            generation: 1,
+            ..default()
+        })
+        .add_systems(Update, drive_routed_transition)
+        .add_observer(|trigger: On<Disconnect>, mut commands: Commands| {
+            commands
+                .entity(trigger.entity)
+                .insert(Disconnected::default());
+        });
+    let client = app
+        .world_mut()
+        .spawn((
+            Client,
+            Link::default(),
+            Linked,
+            RoutedClientSession {
+                generation: 1,
+                kind: RoutedClientSessionKind::Lobby,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::Active {
+                    player_id: PlayerId(1),
+                    network_entity_id: NetworkEntityId(1),
+                },
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ))
+        .id();
+
+    app.update();
+    assert!(app.world().get::<Disconnected>(client).is_some());
+    assert!(app.world().get::<Unlinked>(client).is_none());
+
+    app.update();
+    assert!(app.world().get::<Unlinked>(client).is_some());
+    assert!(app.world().get::<Linked>(client).is_none());
+}
+
+#[test]
+fn routed_connect_timeout_never_expires_an_active_lobby_or_match_session() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.transport = NetworkTransport::RoutedUdp;
+    config.connect_timeout = Duration::from_secs(1);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            Duration::from_secs(2),
+        ))
+        .insert_resource(config)
+        .insert_resource(RoutedClientLifecycle {
+            phase: RoutedClientPhase::Match,
+            generation: 1,
+            ..default()
+        })
+        .add_systems(Update, enforce_routed_timeout)
+        .add_observer(|trigger: On<Disconnect>, mut commands: Commands| {
+            commands
+                .entity(trigger.entity)
+                .insert(Disconnected::default());
+        });
+    let client = app
+        .world_mut()
+        .spawn((
+            Client,
+            RoutedClientSession {
+                generation: 1,
+                kind: RoutedClientSessionKind::Match,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::Active {
+                    player_id: PlayerId(1),
+                    network_entity_id: NetworkEntityId(1),
+                },
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ))
+        .id();
+
+    app.update();
+    assert!(app.world().get::<Disconnected>(client).is_none());
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::Match
+    );
+
+    app.world_mut()
+        .get_mut::<ClientJoinStatus>(client)
+        .unwrap()
+        .phase = ClientJoinPhase::AwaitingOutcome;
+    app.update();
+    assert!(app.world().get::<Disconnected>(client).is_some());
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::AwaitingMatchUnlink
+    );
+}
+
+#[test]
+fn routed_teardown_deadline_forces_stale_session_recovery() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.transport = NetworkTransport::RoutedUdp;
+    config.connect_timeout = Duration::from_secs(1);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            Duration::from_secs(2),
+        ))
+        .insert_resource(config)
+        .insert_resource(RoutedClientLifecycle {
+            phase: RoutedClientPhase::AwaitingMatchUnlink,
+            generation: 2,
+            ..default()
+        })
+        .add_systems(Update, enforce_routed_timeout);
+    let client = app
+        .world_mut()
+        .spawn((
+            Client,
+            RoutedClientSession {
+                generation: 2,
+                kind: RoutedClientSessionKind::Match,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::AwaitingOutcome,
+                started_at: Duration::ZERO,
+                disconnect_requested: true,
+            },
+            RoutedTransitionDeadline(Duration::ZERO),
+        ))
+        .id();
+
+    app.update();
+
+    assert!(app.world().get_entity(client).is_err());
+}
+
+#[test]
 fn input_sampling_schedule_runs_before_fixed_update() {
     #[derive(Resource, Default)]
     struct Trace(Vec<&'static str>);
@@ -1011,4 +1205,131 @@ fn join_rejections_map_to_stable_failure_categories() {
     for (reason, expected) in cases {
         assert_eq!(join_rejection_category(&reason), expected);
     }
+}
+
+#[test]
+fn routed_grant_is_bound_to_the_current_session_and_accepted_once() {
+    use crate::{config::GameMode, protocol::RouteCapability};
+    use brawler_routing::{AllocationId, MatchId, PeerId, RequestId, RouteId};
+
+    let mut lifecycle = RoutedClientLifecycle::default();
+    lifecycle.start_lobby();
+    let request_id = RequestId::new(41).expect("non-zero request ID");
+    let grant = MatchRouteGrantV1 {
+        request_id,
+        allocation_id: AllocationId::new(2).expect("non-zero allocation ID"),
+        match_id: MatchId::new(3).expect("non-zero match ID"),
+        route_id: RouteId::new(4).expect("non-zero route ID"),
+        peer_id: PeerId::new(5).expect("non-zero peer ID"),
+        game_mode: GameMode::Wipeout,
+        capability: RouteCapability::from_bytes([7; RouteCapability::BYTES])
+            .expect("non-zero route capability"),
+        activation_expiry_unix_ms: 10,
+        route_expiry_unix_ms: 20,
+    };
+    assert!(lifecycle.accept_grant(grant));
+    assert_eq!(lifecycle.phase, RoutedClientPhase::AwaitingLobbyUnlink);
+    assert_eq!(lifecycle.current_request_id, Some(request_id));
+    assert!(
+        !lifecycle.accept_grant(grant),
+        "duplicate grants must not replace a route"
+    );
+}
+
+#[test]
+fn routed_return_to_lobby_is_an_intentional_nonterminal_transition() {
+    let mut lifecycle = RoutedClientLifecycle {
+        phase: RoutedClientPhase::Match,
+        generation: 2,
+        ..default()
+    };
+    assert!(lifecycle.request_return_to_lobby());
+    assert_eq!(
+        lifecycle.phase,
+        RoutedClientPhase::AwaitingMatchUnlink,
+        "disconnect is issued only after this state is observed"
+    );
+    assert!(!lifecycle.request_return_to_lobby());
+}
+
+#[test]
+fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.transport = NetworkTransport::RoutedUdp;
+    let mut app = App::new();
+    app.insert_resource(config)
+        .insert_resource(RoutedClientLifecycle {
+            phase: RoutedClientPhase::Match,
+            generation: 2,
+            ..default()
+        });
+    app.add_systems(Update, observe_completed_match);
+    app.world_mut().spawn((
+        MatchRoot,
+        MatchState {
+            match_id: crate::matchplay::MatchId(9),
+            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+            phase: MatchPhase::Completed {
+                completed_at_tick: 12,
+                restart_unlocked_at_tick: 72,
+                result: crate::matchplay::MatchResult::Draw,
+            },
+            rules_revision: 1,
+        },
+    ));
+    app.update();
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::AwaitingMatchUnlink
+    );
+}
+
+#[test]
+fn routed_headless_return_exit_requires_a_fresh_lobby_generation() {
+    fn app_for(generation: u64) -> App {
+        let mut config = ClientNetworkConfig::new(1);
+        config.headless = true;
+        config.transport = NetworkTransport::RoutedUdp;
+        config.exit_after_roster = Some(2);
+        config.exit_after_lobby_return = true;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AppExit>()
+            .insert_resource(config)
+            .add_systems(Update, observe_fresh_lobby_return);
+        app.world_mut().spawn((
+            Client,
+            RoutedClientSession {
+                generation,
+                kind: RoutedClientSessionKind::Lobby,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::Active {
+                    player_id: PlayerId(1),
+                    network_entity_id: NetworkEntityId(1),
+                },
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ));
+        app
+    }
+
+    let mut initial_retry = app_for(2);
+    initial_retry.update();
+    assert!(initial_retry.should_exit().is_none());
+    let mut returned = app_for(3);
+    returned.update();
+    assert!(returned.should_exit().is_some_and(|exit| exit.is_success()));
+}
+
+#[test]
+fn routed_lobby_generations_and_request_ids_are_fresh() {
+    let mut lifecycle = RoutedClientLifecycle::default();
+    lifecycle.start_lobby();
+    let first_generation = lifecycle.generation;
+    lifecycle.start_lobby();
+    assert_eq!(lifecycle.generation, first_generation + 1);
+    assert_eq!(lifecycle.current_request_id, None);
+    assert_eq!(lifecycle.accepted_grant, None);
 }

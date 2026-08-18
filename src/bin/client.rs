@@ -3,14 +3,15 @@
 use bevy::app::AppExit;
 use brawler::client::build_app_with_config;
 use brawler::config::{
-    ClientNetworkConfig, ScreenshotSchedule, WindowedCombatDemo, WindowedControllerDemo,
+    ClientNetworkConfig, NetworkTransport, ScreenshotSchedule, WindowedCombatDemo,
+    WindowedControllerDemo,
 };
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
+        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> [--exit-after-lobby-return] --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
     );
 }
 
@@ -40,12 +41,30 @@ fn parse_axis(flag: &str, value: Option<String>) -> Result<(i8, i8), String> {
     Ok((x, y))
 }
 
+fn parse_transport(flag: &str, value: Option<String>) -> Result<NetworkTransport, String> {
+    match value
+        .ok_or_else(|| format!("{flag} requires udp or routed-udp"))?
+        .as_str()
+    {
+        "udp" | "direct-udp" => Ok(NetworkTransport::Udp),
+        "routed" | "routed-udp" => Ok(NetworkTransport::RoutedUdp),
+        value => Err(format!("invalid value for {flag}: {value}")),
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the executable's bounded flag parser keeps its complete CLI contract visible"
+)]
 fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut args = env::args().skip(1);
     let mut client_id = None;
     let mut server = None;
+    let mut local_addr = None;
+    let mut transport = NetworkTransport::Udp;
     let mut headless = false;
     let mut exit_after_roster = None;
+    let mut exit_after_lobby_return = false;
     let mut headless_move = None;
     let mut headless_aim = None;
     let mut headless_aim_at_dummy = false;
@@ -64,10 +83,13 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
         match flag.as_str() {
             "--client-id" => client_id = Some(parse_value(&flag, args.next())?),
             "--server" => server = Some(parse_value::<SocketAddr>(&flag, args.next())?),
+            "--local-addr" => local_addr = Some(parse_value::<SocketAddr>(&flag, args.next())?),
+            "--transport" => transport = parse_transport(&flag, args.next())?,
             "--headless" => headless = true,
             "--exit-after-roster" => {
                 exit_after_roster = Some(parse_value(&flag, args.next())?);
             }
+            "--exit-after-lobby-return" => exit_after_lobby_return = true,
             "--move-axis" => headless_move = Some(parse_axis(&flag, args.next())?),
             "--aim-axis" => headless_aim = Some(parse_axis(&flag, args.next())?),
             "--aim-dummy" => headless_aim_at_dummy = true,
@@ -110,8 +132,22 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     }
     let mut config = ClientNetworkConfig::new(client_id);
     config.server_addr = server.unwrap_or(config.server_addr);
+    // A routed IPv6 supervisor must be reached from an IPv6 client socket. Preserve the
+    // historical loopback defaults for IPv4 while deriving the local family from an explicitly
+    // selected server address. `--local-addr` remains available for a concrete interface or
+    // port when a caller needs one.
+    config.local_addr = local_addr.unwrap_or_else(|| match config.server_addr {
+        SocketAddr::V4(_) => "127.0.0.1:0"
+            .parse()
+            .expect("default IPv4 local address is valid"),
+        SocketAddr::V6(_) => "[::]:0"
+            .parse()
+            .expect("default IPv6 local address is valid"),
+    });
+    config.transport = transport;
     config.headless = headless;
     config.exit_after_roster = exit_after_roster;
+    config.exit_after_lobby_return = exit_after_lobby_return;
     config.headless_move = headless_move;
     config.headless_aim = headless_aim;
     config.headless_aim_at_dummy = headless_aim_at_dummy;

@@ -7,13 +7,13 @@
 | Version | v2 — player UX and server-local matchmaking |
 | Roadmap | [roadmap.md](./roadmap.md) |
 | Architecture | [Multi-process server and single-port UDP/IPC transport](../../14-multiplayer-server-architecture.md) |
-| Status | Specification review |
+| Status | User playtest |
 | Research | Complete 2026-08-18. Exact Lightyear 0.29 link, connection, Netcode, UDP, Crossbeam, and transport sources; current Brawler composition; macOS IPC/process APIs; and the delivered M11 baseline were inspected. Decisions, limits, risks, contingency, and implementation contract are below. |
 | Entry artifacts | Complete 2026-08-18: [V1 M11 worker-readiness handoff](../v1/milestone-11.md#v2-worker-readiness-handoff) and [direct-UDP baseline](../v1/evidence/v2-baseline/README.md) |
-| Specification validation | Pending user approval. This completed specification does not authorize implementation. |
-| Implementation | Not started |
-| Verification | Not started |
-| User playtest | Defined below; not started |
+| Specification validation | Approved 2026-08-18 when the user explicitly directed implementation of v2 M01. |
+| Implementation | Complete 2026-08-18. All implementation slices below are present in production role graphs and commands. |
+| Verification | Development-use gate passed 2026-08-19. Canonical `CARGO_INCREMENTAL=0 just verify` passed: formatting; client/server/routing Clippy; 95 routing, 270 client, 261 server, 77 network integration, and 14 performance tests; server feature isolation; and a clean two-client routed lobby→match→fresh-lobby smoke with graceful match/lobby reap. Both-mode, crash/restart, RSS, public-envelope accounting, cleanup, and an exact 3,600-tick paired lane are also implemented. Exhaustive production campaigns and performance optimization are deferred to M09 by the user-approved scope decision below. |
+| User playtest | Ready. The canonical windowed check is defined below; feedback is not yet recorded. |
 
 ## Outcome and evidence labels
 
@@ -31,8 +31,20 @@ The following labels distinguish fact from choice:
 - **Derived limit** means arithmetic from observed evidence is shown.
 - **Deferred** means a later milestone owns the behavior and M01 must not approximate it.
 
-M01 is a production foundation, not a disposable spike. Implementation remains prohibited until the
-user approves this specification and the milestone is explicitly moved to Implementing.
+M01 is a production foundation, not a disposable spike. The user approved this specification on
+2026-08-18; implementation is complete and verification is active.
+
+### 2026-08-19 verification scope decision
+
+The user accepted the routed topology for development use and explicitly rejected treating a small
+performance-threshold miss as grounds to discard the implementation. M01 therefore requires its
+correctness, isolation, bounded-lifecycle, clean-smoke, and user-playtest gates, while exhaustive
+production campaigns and late-stage performance optimization move to M09. This does not turn a
+failed or unsupported measurement into a pass: the latest exact 3,600-tick paired run remains
+recorded as 12.31% routed egress overhead versus the selected 10% target (ingress +0.35%, total
++7.92%), and
+full IPC latency, packet-only IPC overhead, correlated CPU, dual-stack capture, and full campaign
+cardinalities remain deferred work.
 
 ## Scope boundary
 
@@ -177,6 +189,14 @@ components and replaces UdpIo only.
   the envelope, and sends one datagram per inner packet.
 - LinkMtu is 1,133 for lobby and match.
 - All-zero selector is lobby-only. Match capability installs only from authenticated AllocationGrant.
+- M01 retains the existing development manual Netcode credential. AllocationGranted carries no
+  second Netcode token; after Netcode authentication the match worker admits only client IDs listed
+  in its immutable manifest. Production credential issuance is deferred security hardening.
+- The lobby delivers a registered `MatchRouteGrantV1` Lightyear message containing RequestId,
+  AllocationId, MatchId, RouteId, PeerId, game mode, the 32-byte capability, and both expiries. The
+  message is server-to-client on the authenticated lobby session, is redacted in Debug/log output,
+  and is accepted only once for the client's current LobbySessionId/request. Outer route and IPC
+  types remain outside `src/protocol.rs`.
 - Transition is Disconnect lobby -> observe Unlinked/apply deferred work -> replace route -> Connect
   fresh Netcode. Error/timeout returns to a fresh lobby attempt; no match resumption.
 
@@ -292,7 +312,7 @@ own sequence.
 | 1 Manifest | role u8; manifest_length u32; canonical manifest | 4,101 / 4,153 B |
 | 2 Ready | manifest_digest[32]; generation u64; route_version u8; packet_version u8; control_version u8; flags u8=0 | 44 / 96 B |
 | 3 Heartbeat | generation u64; uptime_ms u64; active_peers u16; packet_frames u16; packet_bytes u32; control_frames u16; control_bytes u32; fixed_tick_lag_us u32; health_flags u32 | 38 / 90 B |
-| 4 AllocateRequest | RequestId u64; LobbySessionId u128; mode u16; participant_count u8; participants | 331 / 383 B |
+| 4 AllocateRequest | RequestId u64; LobbySessionId u128; mode u16; participant_count u8; participants | 395 / 447 B |
 | 5 AllocationGranted | RequestId u64; AllocationId u128; MatchId u128; WorkerId u128; grant_count u8; grants | 825 / 877 B |
 | 6 AllocationRejected | RequestId u64; reason u16; retry_after_ms u32 | 14 / 66 B |
 | 7 PeerClose | RouteId u128; PeerId u128; reason u16 | 34 / 86 B |
@@ -301,8 +321,9 @@ own sequence.
 | 10 Failure | phase u16; category u16; related_sequence u64; detail_code u32 | 16 / 68 B |
 | 11 Exit | role u8; exit_category u16; result_sent u8; terminal_peers u16; terminal_queue_bytes u32 | 10 / 62 B |
 
-Allocate participant: LobbySessionId u128, PlayerId u64, team u8, optional source preset u16, build
-recipe fingerprint u64, build revision u16. M01 accepts exactly two; format max is eight.
+Allocate participant: LobbySessionId u128, PlayerId u64, authenticated Netcode client ID u64, team
+u8, optional source preset u16, build recipe fingerprint u64, build revision u16. M01 accepts
+exactly two; format max is eight.
 
 Grant: LobbySessionId u128, RouteId u128, PeerId u128, capability[32], activation_expiry_unix_ms
 u64, route_expiry_unix_ms u64. It is secret-bearing and never logged.
@@ -316,9 +337,10 @@ Common prefix: manifest_version u16=1, role u8=1, LogicalServerId/ProcessId/Work
 generation u64, Brawler network protocol u64, protocol registry fingerprint u64, content
 fingerprint u64, route/packet/control versions each u8, flags u8=0.
 
-Lobby fields: default RouteId u128, max authenticated sessions u16=32, outstanding allocations
-u16=2, active matches u16=4, heartbeat_ms u32=1,000, nonce u128, digest[32]. Maximum 256 bytes.
-Digest covers preceding manifest bytes. Validate before Netcode install/Ready.
+Lobby fields: game mode u16 (1 Wipeout, 2 Hot Zone), default RouteId u128, max authenticated
+sessions u16=32, outstanding allocations u16=2, active matches u16=4, heartbeat_ms u32=1,000,
+nonce u128, digest[32]. Maximum 256 bytes. Digest covers preceding manifest bytes. Validate before
+Netcode install/Ready.
 
 ### Match manifest v1
 
@@ -326,10 +348,12 @@ Common prefix role=2. Fields: MatchId u128, AllocationId u128, game mode u16 (1 
 map preset u16, map revision u16, rules profile u8, reserved u8=0, seed u64, participant_count u8,
 participants, heartbeat_ms u32, nonce u128, digest[32].
 
-Participant: LobbySessionId u128, PlayerId u64, PeerId u128, team u8, optional source build preset
-u16, recipe fingerprint u64, revision u16. Worker resolves selection against matching embedded
-content fingerprint before Ready. Max eight participants and 4,096 total bytes. Entities, resolved
-floats, tokens, capabilities, and addresses are excluded.
+Participant: LobbySessionId u128, PlayerId u64, authenticated Netcode client ID u64, PeerId u128,
+team u8, optional source build preset u16, recipe fingerprint u64, revision u16. The Netcode client
+ID and routed PeerId are distinct identities and must never be inferred from one another. Worker
+resolves selection against matching embedded content fingerprint before Ready. Max eight
+participants and 4,096 total bytes. Entities, resolved floats, tokens, capabilities, and addresses
+are excluded.
 
 ## IPC decision
 
@@ -395,6 +419,8 @@ create fresh sessions. Match workers never auto-restart: fail result, revoke rou
 - Pending 30 s; first valid envelope activates once. Token repeats per UDP packet until expiry.
 - Active idle timeout 10 s, hard lifetime 10 min. No rotation; replacement means fresh session/token.
 - Valid token permits at most two source address changes/10 s for NAT rebind; old source then drops.
+- Only the most recently accepted source address remains valid after a rebind; the prior address is
+  removed immediately so the allowance bounds changes rather than simultaneous bindings.
 - Stop/failure/cancel/activation/idle/hard expiry/PeerClose revokes and unlinks. Bounded negative
   record lasts to original hard expiry.
 - Secret type redacts Debug/Display and is forbidden in argv/env/log/panic/metrics/evidence.
@@ -402,13 +428,16 @@ create fresh sessions. Match workers never auto-restart: fail result, revoke rou
 - Theft can consume bounded queue/route work, race activation, or redirect within rebind limits, but
   cannot pass inner Netcode or create gameplay identity. Revoke and return to fresh lobby.
 - Valid capability never replaces match-worker Netcode and manifest participant authentication.
+- For M01, manifest participant authentication means matching the authenticated Netcode client ID
+  against the immutable participant manifest; the shared development private key is an explicit
+  local-foundation limitation, not a production credential claim.
 
 ## Capacity, backpressure, fairness
 
 | Limit | Value | Basis |
 |---|---:|---|
 | Public datagram | 1,200 B | IPv6-safe derivation above |
-| Pre-auth source | 8 datagrams and 8 KiB/10 s | multiple 1,120 B handshakes, bounded work |
+| Pre-auth source | 8 datagrams and 9 KiB/10 s | eight 1,120 B handshakes, bounded work |
 | Malformed source | 32/10 s then suppress 60 s | conservative, no reply amplification |
 | Capabilities | 2 per authenticated lobby session/source | active plus one replacement |
 | Active routes | 64 | 32 lobby + 4×8 match |
@@ -456,7 +485,7 @@ There are no routed measurements yet. Existing values are from
 |---|---|---|
 | Overhead | Selected exact formats | **Hard:** 42 B public; 62 B packet IPC including prefix. Assert codec and counters |
 | MTU | Lightyear 1,200; Netcode max wrapper 25 | **Hard:** public≤1,200, inner≤1,158, LinkMtu=1,133, no IP fragmentation. Boundary tests + IPv4/6 capture |
-| Route/IPC latency | fixed tick 16.67 ms; none routed | **Hard:** added one-way p95≤2 ms (12% of one tick); p99/max diagnostic. 10,000 timestamped packets/direction with stage split |
+| Route/IPC latency | fixed tick 16.67 ms; none routed | **Hard:** added routing/IPC one-way p95≤2 ms (12% of one tick), measured by stage timestamps from supervisor public receive through IPC decode (and the symmetric send path), excluding ordinary wait for the next Bevy schedule; paired routed-minus-direct end-to-end p95 is corroborating evidence. p99/max diagnostic; 10,000 packets/direction |
 | Queues/drops | M11 zero transport drops/errors | **Hard:** zero nominal and zero unaffected-route stall drops; **target:** nominal HWM≤25%. Counters across local/typical/adverse/burst/stall |
 | Spawn-ready | UDP bind ~0.3 ms; first metrics launch had 1.356 s whole-process overhead beyond its 10.03 s tick window, not a readiness measure | **Hard:** each≤5 s = 3 s handshake + 1.356 s cold envelope + 0.644 s margin; **target:** p95≤2 s/20 cold starts. Spawn call to validated Ready |
 | Stop-reaped | AppExit-to-report 21–23 ms | **Hard:** graceful≤2 s, forced total≤3 s over 25 cycles |
@@ -487,7 +516,7 @@ closes admission and performs bounded global shutdown.
 
 ## Implementation slices and ownership
 
-Implementation remains prohibited before approval.
+The approved implementation proceeds in the following slices.
 
 1. **Contract/baseline:** add Bevy-free routing package, IDs/constants/errors/codecs/secrets/memory
    backend and exhaustive parser tests. Preserve current routed-unaware commands; add named direct
@@ -506,6 +535,21 @@ Implementation remains prohibited before approval.
    scripts/network.sh and just network default routed; direct stays under explicit baseline name.
 8. **Closeout:** remove temporary diagnostics, lock commands/contracts, limitations, feedback and
    learning; meet exit or return to review with contingency evidence.
+
+### Implementation log
+
+| Slice | Status | Evidence |
+|---|---|---|
+| Contract and named direct baseline | Complete | Bevy-free `brawler-routing` workspace package; exact BRTE/BRPK codecs, typed IDs, redacted OS-CSPRNG capability, byte-faithful memory backend; `just network-direct` and `just network-direct-smoke` |
+| Supervisor core | Complete | Bounded worker/route/capability registries, packet/control queues, reserved lobby fairness, activation/rebind/expiry/revocation, stalled-route isolation, metrics, and exactly-once cleanup |
+| Control and manifests | Complete | Exact BRCT bodies/framing/sequence validation and canonical SHA-256 lobby/match manifests with redacted secret-bearing diagnostics |
+| Allocate identity correction and supervisor orchestration | Complete (bounded slice) | `AllocateParticipant` now carries authenticated `NetcodeClientId` immediately after `PlayerId` (395 B body / 447 B framed maximum); allocation keeps that identity distinct from generated routed `PeerId`, validates exact-two/idempotent requests, and waits for match Ready before routes/capabilities and bounded Grant delivery |
+| Client routed link adapter | Complete | BRTE UDP adapter, bounded receive burst, observable transport failure, spawn-time `LinkMtu=1,133`, focused Lightyear ordering/MTU/IPv4+IPv6 loopback tests, and routed session lifecycle selects it explicitly; client derives an IPv6 local socket when `--server` selects IPv6 and accepts explicit `--local-addr` |
+| Unix IO and supervisor runtime | Complete (routing vertical slice) | Nonblocking partial packet/control streams, private endpoint cleanup, bounded Mio public UDP routing, per-source lobby routes, peer validation, teardown, and real local UDP/Unix tests |
+| Match-worker manifest admission | Complete | Explicit Netcode client ID plus exact manifest PeerId, exact u128 MatchId, immutable whitelist/team/build validation, and reuse of the authoritative App graph |
+| Worker link and process roles | Complete | Routed Lightyear peer links, bounded per-peer post-Netcode send FIFO, control sequencing/heartbeat/Result/Exit, and supervisor child spawn/reap/restart lifecycle |
+| Minimum lobby and sequential transition | Complete | Two authenticated clients allocate one match worker, receive redacted grants, fully unlink lobby Netcode/Link, reconnect at the same public address, pass manifest admission, and replicate the two-player roster |
+| Real-process evidence and measurement | Development-use gate complete; hardening deferred | Production two-worker isolation, lobby restart, Wipeout and Hot Zone Result→packet-drain→Exit→reap→fresh-lobby cycles pass. The 2026-08-18 both-mode run recorded 12,228/12,335 supervisor-owner diagnostic samples (maximum per-cycle p95 64 µs; not the IPC hard gate), supervisor/lobby/match RSS maxima 6.5/29.8/41.4 MiB, exact public-envelope overhead, directional mixed IPC diagnostics, zero live routes/capabilities/queues/source limits, and no leftover children/socket files. IPv4 and IPv6 production loopback smokes pass. On 2026-08-19 a clean two-client routed smoke again completed allocation, both handoffs, authoritative Result/Exit, graceful worker/lobby reap, and cleanup. The paired lane now proves an exact 3,600-tick authoritative interval with identical nonzero protocol/content fingerprints; the latest run measured routed ingress +0.35%, egress +12.31%, and total +7.92% versus direct. The egress target remains an honest miss, most plausibly affected by startup replication and transport-boundary sampling, and is deferred with full IPC latency, packet-only IPC overhead, correlated CPU, dual-stack MTU capture, fixed-tick comparison, and full 25/20-cycle campaigns to M09. See [routed evidence](./evidence/m01-routed/README.md) and [paired evidence](./evidence/m01-paired/README.md). |
 
 After approval, expected existing ownership touched is workspace/Cargo; client session; server
 entry/composition; diagnostics; network/process tests; canonical scripts/justfile/README.
@@ -543,9 +587,41 @@ implementation choices; authority/dependency boundaries do not.
 ### Command requirements
 
 Implementation adds canonical just commands for isolated role checks/tests, deterministic routing,
-real routed smoke/two-worker, impairment/backpressure/crash/cleanup, paired measurement, and named
-direct-UDP baseline. README records exact names. Existing role checks/tests/Clippy/feature audit/
-network/performance gates remain. Deterministic ECS tests advance schedules/time without sleeps.
+real routed smoke/two-worker, impairment/backpressure/crash/cleanup, bounded routed process
+evidence, paired measurement when its instrumentation exists, and named direct-UDP baseline. The
+bounded evidence command is `just network-routed-evidence`; it runs 5 cold Wipeout cycles by
+default (or `just network-routed-evidence <cycles> <timeout-seconds> <mode>`, with 1–25 cycles),
+captures per-role RSS from `ps`, requires one exact
+spawn→Ready→Result→successful-reap→graceful-stop→cleanup chain, validates final supervisor
+route/queue/drop counters, and writes
+`target/routed-evidence-<UTC timestamp>.json`. Pass `mode=hot-zone` for Hot Zone, `mode=both` to
+run the requested cycles per mode, or `mode=crash-restart` for bounded production-worker crash
+isolation plus lobby restart tests; the latter's Rust assertions require zero children, routes,
+live capabilities, queued bytes, and private socket files at terminal cleanup. Every selected mode
+is carried by the digest-bound lobby manifest and recorded per cycle. Public-envelope overhead is
+validated exactly. Directional mixed IPC counters and supervisor owner-boundary latency are
+diagnostic only: they do not include worker decode and cannot satisfy the IPC hard gate. It marks
+full routed IPC latency, packet-only IPC overhead, IPv4/IPv6 MTU capture, and fixed-tick paired
+regression as `unsupported`; correlated stop/reap and allocation-to-connected samples are measured
+but remain below their campaign cardinalities. `just network-paired-evidence 1 90
+wipeout` is the bounded one-pair comparison smoke; `just network-paired-evidence 3 90 wipeout`
+(or `hot-zone`) is the three-pair CPU/inner-gameplay-bandwidth gate. It runs the existing direct
+and routed launchers sequentially with the same host/build/scenario contract, records per-process
+CPU/RSS samples, requires exact process-role cardinality, and compares direct server transport
+bytes against match-worker routed inner ingress/egress only after a correlated common observation
+interval is proven. Until then it reports raw totals as unthresholded diagnostics and the hard
+gates as unsupported. Public-envelope and mixed packet/control IPC bytes remain separate.
+`just test-paired-evidence` exercises the parser and threshold math without launching processes.
+The implementation now provides `just network-routed-ipv6-smoke` for a production IPv6 loopback
+run and `just network-routed-capture capture=<path>` for an optional macOS `tcpdump` run. The
+capture wrapper requires BPF permission (it does not invoke `sudo`) and delegates final evidence
+to `scripts/verify-routed-capture.py`, which only passes a real classic pcap containing observed
+IPv4/IPv6 UDP traffic with payloads ≤1,200 bytes and no IPv4 fragmentation or IPv6 Fragment
+headers; an unavailable, empty, malformed, or unsupported capture remains `unsupported`.
+Set `--keep-artifacts`
+when inspecting per-cycle logs. README records exact names. Existing role checks/tests/Clippy/
+feature audit/network/performance gates remain. Deterministic ECS tests advance schedules/time
+without sleeps.
 
 ### User handoff
 
@@ -586,21 +662,29 @@ do not qualify. No silent switch or dual production transport is permitted.
 
 ## Exit criteria and limitations
 
-M01 leaves Specification review only after user approval. Complete requires:
+M01 leaves Specification review only after user approval. Complete requires the approved
+development-use scope:
 
 - one endpoint routes real lobby/match Lightyear over real IPC;
 - fresh lobby->match->lobby sessions at same address;
 - normal client owner and existing authoritative match graph;
-- all hard gates/tests or approved contingency after renewed review;
+- focused/role/integration/process correctness tests and the clean routed smoke pass;
 - two-worker process/route/peer/World/gameplay/terrain/result/failure isolation;
 - bounded observable malformed/stolen/expired/pressure/IPC/crash/shutdown behavior;
 - isolated feature graphs; identical memory/real semantics; no test-only authority;
-- commands, measurements, user check, feedback, learning complete;
+- commands, honest measurements, user check, feedback, and learning complete;
 - direct UDP retained explicitly; M09 owns removal.
+
+The 2026-08-19 scope decision defers exhaustive latency/CPU/overhead/MTU measurement, performance
+optimization, and full campaign cardinalities to M09. Those observations retain their failed or
+unsupported labels; they are not production-readiness completion claims.
 
 Limitations: scripted two-client transition, four-worker provisional host cap, one host, no
 resumption/join/durable lobby reconciliation/product lobby/results UI/Windows backend, and bounded
-but not eliminated bearer-capability theft.
+but not eliminated bearer-capability theft. The production two-match isolation test drives the
+supervisor allocation seam and terminates one real Bevy child; it does not connect public clients
+to both matches concurrently, so per-match replicated gameplay/terrain/result convergence remains
+covered by the sequential routed smoke and deferred to the concurrent lifecycle milestone.
 
 ## Research log
 

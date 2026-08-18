@@ -16,6 +16,9 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
 - Every milestone starts with R&D against the then-current code and exact pinned dependencies.
 - Only the next milestone receives a detailed file. Later entries define outcomes, ordering,
   dependencies, and gates—not premature technical specifications.
+- By explicit user direction on 2026-08-18, M02 is the bounded exception: its specification was
+  prepared while M01 finishes verification. M01 remains the only implementation milestone, and M02
+  cannot enter `Implementing` until M01 completes and the user validates the M02 specification.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -31,17 +34,17 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Specification review |
+| Status | User playtest |
 | Current milestone | M01 — Routed multi-process server foundation |
-| Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. M01 research/specification is complete and pending user validation; production implementation has not started |
+| Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
 ## Milestone overview
 
 | Milestone | Status | Deliverable | Plan |
 |---|---|---|---|
-| 01 | Specification review | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
-| 02 | Not started | Product client shell, navigation, settings, and persistence | Create when next |
+| 01 | User playtest | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
+| 02 | Specification review | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
 | 03 | Not started | Direct-connect lobby session and advertised game selection | Create when next |
 | 04 | Not started | Product build editor and authoritative queue admission | Create when next |
 | 05 | Not started | Exact formation, worker allocation, and match loading/handoff | Create when next |
@@ -66,12 +69,15 @@ contingency returns to specification review with evidence.
 
 ### M02 — Product client shell, navigation, settings, and persistence
 
-Replace auto-connect/terminal windowed flow with controller-first Title, Settings, Credits, error
-overlay, flow/overlay state separation, focus restoration, device glyphs, and versioned atomic local
-settings. Preserve headless automation and authoritative networking.
+Replace the auto-connect/terminal windowed entry with a functional controller-friendly Title,
+Settings, Credits, one local-error overlay, visible focus, simple styling/motion, and versioned atomic
+local settings. Preserve headless automation and authoritative networking. Defer the general screen
+flow and richer UI framework until later milestones demonstrate a need.
 
-Gate: controller and keyboard/mouse navigate every implemented screen and recover from local
-configuration errors without restarting the client.
+Gate: controller and keyboard/mouse can operate every delivered action with visible focus; settings
+survive restart and fail safely; three representative layouts remain usable; and explicit headless,
+direct, and routed auto-connect paths retain their accepted behavior. See
+[milestone-02.md](./milestone-02.md).
 
 ### M03 — Direct-connect lobby session and advertised game selection
 
@@ -129,7 +135,8 @@ process or alternate authority path after normal or failed shutdown.
 ### M09 — Recovery, security, capacity, usability, and v2 closeout
 
 Harden abuse boundaries, impaired-network behavior, diagnostics, host ceilings,
-reconnect-to-lobby, soak/growth evidence, usability flows, attribution, and feedback/learning
+reconnect-to-lobby, soak/growth evidence, routed performance/IPC/MTU measurement and optimization,
+usability flows, attribution, and feedback/learning
 records. Review and remove the legacy v1 direct-UDP executable/configuration after the final
 comparison evidence unless a documented compatibility requirement remains. This closes gaps; it
 does not add global matchmaking or fleet services.
@@ -177,6 +184,7 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 | V2-TRANSPORT-CONTINGENCY | Bounded worker-port range using standard Lightyear UDP | Costed in M01. A qualifying routed hard-gate failure may only return M01 to specification review with evidence; selecting or implementing this contingency requires the user's express approval |
 | V2-WINDOWS-IPC | Production Windows named-pipe backend | Preserve the contract in M01; implement when Windows becomes an active target |
 | V2-ROUTE-RESUMPTION | Resume an interrupted match connection | Deferred; v2 returns to a fresh lobby session |
+| V2-ROUTED-HARDENING | Complete routed latency, packet-only IPC overhead, correlated CPU, dual-stack MTU capture, 25/20-cycle campaigns, and optimize the latest recorded +12.31% directional egress delta | Deferred from M01 to M09 by the user-approved 2026-08-19 development-use scope decision; measurements retain their failed/unsupported labels until rerun |
 | V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | M01 makes the routed supervisor path the default for `network.sh`/`just network` after validating its minimum transition driver and retains direct UDP only as an explicitly named compatibility/baseline command; M09 removes the legacy executable/configuration after final comparison evidence unless a documented compatibility requirement remains |
 
 ## Explicitly deferred beyond v2

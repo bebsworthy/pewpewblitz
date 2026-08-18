@@ -3,6 +3,16 @@ use crate::{combat::TeamId, map::SpawnPointId, protocol::PlayerId};
 use bevy::prelude::Vec2;
 
 #[test]
+fn match_id_preserves_full_u128_through_format_parse_and_serde() {
+    let value = MatchId(u128::MAX);
+    assert_eq!(value.to_string(), u128::MAX.to_string());
+    assert_eq!(value.to_string().parse::<MatchId>().unwrap(), value);
+    let bytes = postcard::to_allocvec(&value).expect("match ID serializes");
+    let decoded: MatchId = postcard::from_bytes(&bytes).expect("match ID deserializes");
+    assert_eq!(decoded, value);
+}
+
+#[test]
 fn production_rules_match_the_approved_contract() {
     let wipeout = WipeoutRules::default().validate().unwrap();
     assert_eq!(wipeout.target_score, 10);
@@ -202,6 +212,42 @@ fn spawn_selection_is_order_independent_cycles_and_falls_back_safely() {
         )
         .is_none()
     );
+}
+
+#[test]
+fn spawn_selection_folds_full_width_match_ids_deterministically() {
+    let candidates = vec![
+        SpawnCandidate {
+            id: SpawnPointId(1),
+            position: Vec2::new(10.0, 0.0),
+            facing: 0.0,
+        },
+        SpawnCandidate {
+            id: SpawnPointId(2),
+            position: Vec2::new(20.0, 0.0),
+            facing: 0.0,
+        },
+    ];
+    let routed_match_id = MatchId((u128::from(u64::MAX) << 64) | 7);
+    let first = select_spawn(
+        candidates.clone(),
+        &[],
+        TeamId(0),
+        1.0,
+        routed_match_id,
+        PlayerId(1),
+        0,
+    );
+    let second = select_spawn(
+        candidates,
+        &[],
+        TeamId(0),
+        1.0,
+        routed_match_id,
+        PlayerId(1),
+        0,
+    );
+    assert_eq!(first, second);
 }
 
 #[test]

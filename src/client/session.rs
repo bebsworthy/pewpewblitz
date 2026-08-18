@@ -6,8 +6,17 @@ use super::*;
 /// Installs the client Lightyear group, protocol, connection, and status systems.
 pub struct ClientNetworkPlugin;
 
+/// Deadline for an intentional routed session teardown. A normal teardown reaches `Unlinked`
+/// quickly; if lifecycle markers never arrive, this bounded fallback lets the next generation
+/// recover instead of leaving the client permanently in an awaiting phase.
+#[derive(Component, Clone, Copy, Debug)]
+pub(super) struct RoutedTransitionDeadline(pub(super) Duration);
+
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
+        if app.world().resource::<ClientNetworkConfig>().transport == NetworkTransport::RoutedUdp {
+            app.add_plugins(RoutedUdpPlugin);
+        }
         app.insert_resource(FallbackErrorHandler(error))
             .add_plugins(ClientCombatPlugin)
             .add_plugins(crate::terrain::ClientTerrainPlugin)
@@ -23,6 +32,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<MatchCommandState>()
             .init_resource::<ClientInputSettings>()
             .init_resource::<InputSettingsSelection>()
+            .init_resource::<RoutedClientLifecycle>()
             .init_resource::<crate::diagnostics::ProcessExitClassification>()
             .add_systems(
                 Startup,
@@ -51,6 +61,17 @@ impl Plugin for ClientNetworkPlugin {
                 (
                     send_client_hello,
                     process_join_outcome,
+                    process_match_route_grant,
+                    drive_routed_transition,
+                    observe_routed_transition,
+                    advance_routed_transition,
+                    enforce_routed_timeout,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (
                     process_build_selection_outcomes,
                     send_build_selection_request,
                     process_match_command_outcomes,
@@ -65,7 +86,8 @@ impl Plugin for ClientNetworkPlugin {
                     trace_client_interpolation_sync,
                     trace_client_interpolation_history,
                 )
-                    .chain(),
+                    .chain()
+                    .after(enforce_routed_timeout),
             )
             .add_systems(
                 Last,
@@ -78,6 +100,21 @@ impl Plugin for ClientNetworkPlugin {
                     // the final report see post-shutdown counts and the re-emitted exit.
                     .before(crate::diagnostics::TerminalObservationSet),
             );
+        // Keep this observer separate from the large lifecycle tuple (Bevy's tuple system
+        // implementations are deliberately bounded), while preserving the grant->match and
+        // completion->disconnect ordering explicitly.
+        app.add_systems(
+            Update,
+            observe_fresh_lobby_return
+                .after(process_join_outcome)
+                .before(process_match_route_grant),
+        );
+        app.add_systems(
+            Update,
+            observe_completed_match
+                .after(process_match_route_grant)
+                .before(drive_routed_transition),
+        );
         app.add_observer(add_controlled_input_marker);
     }
 }
@@ -104,6 +141,7 @@ fn process_match_command_outcomes(
 #[allow(clippy::too_many_arguments)]
 fn send_match_command(
     config: Res<ClientNetworkConfig>,
+    routed: Res<RoutedClientLifecycle>,
     mut state: ResMut<MatchCommandState>,
     pending: Res<PendingLocalActions>,
     roots: Query<&MatchState, With<MatchRoot>>,
@@ -115,6 +153,9 @@ fn send_match_command(
     roster: Query<(), (With<Remote>, With<Fighter>)>,
     mut senders: Query<&mut MessageSender<MatchCommandRequest>, With<Client>>,
 ) {
+    if config.transport == NetworkTransport::RoutedUdp && routed.phase != RoutedClientPhase::Match {
+        return;
+    }
     let Ok(match_state) = roots.single() else {
         return;
     };
@@ -199,10 +240,58 @@ pub(super) fn spawn_client_connection(
     mut commands: Commands,
     config: Res<ClientNetworkConfig>,
     time: Res<Time<Real>>,
+    mut routed: ResMut<RoutedClientLifecycle>,
 ) -> Result {
+    if config.transport == NetworkTransport::RoutedUdp {
+        routed.start_lobby();
+        let generation = routed.generation;
+        spawn_client_entity(
+            &mut commands,
+            &config,
+            time.elapsed(),
+            Some((
+                RoutedUdpIo::lobby(config.server_addr),
+                RoutedClientSession {
+                    generation,
+                    kind: RoutedClientSessionKind::Lobby,
+                },
+            )),
+        )?;
+        info!(
+            mode = "client",
+            transport = "routed-udp",
+            version = VERSION,
+            tick_hz = crate::timing::SIMULATION_TICK_HZ,
+            client_id = config.client_id,
+            server = %config.server_addr,
+            generation,
+            "brawler client connecting to lobby selector"
+        );
+        return Ok(());
+    }
     if config.transport != NetworkTransport::Udp {
         return Ok(());
     }
+    spawn_client_entity(&mut commands, &config, time.elapsed(), None)?;
+    info!(
+        mode = "client",
+        version = VERSION,
+        tick_hz = crate::timing::SIMULATION_TICK_HZ,
+        client_id = config.client_id,
+        server = %config.server_addr,
+        "brawler client connecting"
+    );
+    Ok(())
+}
+
+/// Spawn exactly one fresh Lightyear client entity. `routed` is either a lobby/match adapter and
+/// generation marker or `None` for the unchanged direct-UDP baseline.
+fn spawn_client_entity(
+    commands: &mut Commands,
+    config: &ClientNetworkConfig,
+    started_at: Duration,
+    routed: Option<(RoutedUdpIo, RoutedClientSession)>,
+) -> Result<Entity> {
     let auth = Authentication::Manual {
         server_addr: config.server_addr,
         client_id: config.client_id,
@@ -217,33 +306,46 @@ pub(super) fn spawn_client_connection(
             token_expire_secs: -1,
             ..default()
         };
-    let entity = commands
-        .spawn((
-            ClientJoinStatus {
-                phase: ClientJoinPhase::Connecting,
-                started_at: time.elapsed(),
-                disconnect_requested: false,
-            },
-            PingManager::default(),
-            ReplicationReceiver,
-            Link::default().with_conditioner(config.impairment_profile.receive_conditioner()),
-            NetcodeClient::new(auth, netcode_config)?,
-            LocalAddr(config.local_addr),
-            PeerAddr(config.server_addr),
-            UdpIo::default(),
-            Name::new(format!("Brawler client {}", config.client_id)),
-        ))
-        .id();
+    let netcode = NetcodeClient::new(auth, netcode_config)?;
+    let status = ClientJoinStatus {
+        phase: ClientJoinPhase::Connecting,
+        started_at,
+        disconnect_requested: false,
+    };
+    let entity = if let Some((io, session)) = routed {
+        commands
+            .spawn((
+                status,
+                session,
+                PingManager::default(),
+                ReplicationReceiver,
+                Link::default()
+                    .with_mtu(LinkMtu::new(ROUTED_LINK_MTU))
+                    .with_conditioner(config.impairment_profile.receive_conditioner()),
+                netcode,
+                LocalAddr(config.local_addr),
+                PeerAddr(config.server_addr),
+                io,
+                Name::new(format!("Brawler routed client {}", config.client_id)),
+            ))
+            .id()
+    } else {
+        commands
+            .spawn((
+                status,
+                PingManager::default(),
+                ReplicationReceiver,
+                Link::default().with_conditioner(config.impairment_profile.receive_conditioner()),
+                netcode,
+                LocalAddr(config.local_addr),
+                PeerAddr(config.server_addr),
+                UdpIo::default(),
+                Name::new(format!("Brawler client {}", config.client_id)),
+            ))
+            .id()
+    };
     commands.trigger(Connect { entity });
-    info!(
-        mode = "client",
-        version = VERSION,
-        tick_hz = crate::timing::SIMULATION_TICK_HZ,
-        client_id = config.client_id,
-        server = %config.server_addr,
-        "brawler client connecting"
-    );
-    Ok(())
+    Ok(entity)
 }
 
 #[allow(
@@ -306,12 +408,17 @@ pub(super) fn send_client_hello(
     fingerprint: Res<ProtocolFingerprint>,
     content_fingerprint: Res<crate::content::GameplayContentFingerprint>,
     time: Res<Time<Real>>,
+    routed: Res<RoutedClientLifecycle>,
     mut query: Query<
-        (&mut ClientJoinStatus, &mut MessageSender<ClientHello>),
+        (
+            &mut ClientJoinStatus,
+            &mut MessageSender<ClientHello>,
+            Option<&RoutedClientSession>,
+        ),
         (With<Client>, With<Connected>),
     >,
 ) {
-    for (mut status, mut sender) in query.iter_mut() {
+    for (mut status, mut sender, routed_session) in query.iter_mut() {
         if matches!(status.phase, ClientJoinPhase::Connecting) {
             sender.send::<SessionChannel>(ClientHello {
                 protocol_version: config.expected_protocol_version,
@@ -322,6 +429,26 @@ pub(super) fn send_client_hello(
             status.phase = ClientJoinPhase::AwaitingOutcome;
             status.started_at = time.elapsed();
             info!("brawler client connected; awaiting compatibility outcome");
+            if routed_session.is_some_and(|session| session.kind == RoutedClientSessionKind::Match)
+                && let Some(request_id) = routed.current_request_id
+            {
+                // This marker intentionally contains only stable correlation IDs. It is emitted
+                // at the Lightyear Connected boundary for the fresh match session; capabilities,
+                // player identities, and manifests are never logged.
+                let timestamp_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_millis());
+                let marker = format!(
+                    "brawler-client timing handoff-connected client_id={} request_id={} ts_ms={}\n",
+                    config.client_id,
+                    request_id.get(),
+                    timestamp_ms,
+                );
+                // Both verification clients inherit one stderr file descriptor. Format the whole
+                // bounded marker first and issue one write so process output cannot splice stable
+                // IDs into an unparsable half-line.
+                let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
+            }
         }
     }
 }
@@ -349,6 +476,7 @@ pub(super) fn process_build_selection_outcomes(
 #[allow(clippy::too_many_lines)]
 pub(super) fn send_build_selection_request(
     config: Res<ClientNetworkConfig>,
+    routed: Res<RoutedClientLifecycle>,
     mut state: ResMut<BuildSelectionState>,
     catalog: Res<crate::builds::BuildCatalogResource>,
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
@@ -358,6 +486,9 @@ pub(super) fn send_build_selection_request(
     statuses: Query<&ClientJoinStatus, With<Client>>,
     mut senders: Query<&mut MessageSender<BuildSelectionRequest>, With<Client>>,
 ) {
+    if config.transport == NetworkTransport::RoutedUdp && routed.phase != RoutedClientPhase::Match {
+        return;
+    }
     if !statuses
         .iter()
         .any(|status| matches!(status.phase, ClientJoinPhase::Active { .. }))
@@ -766,6 +897,8 @@ pub(super) fn process_join_outcome(
         ),
         With<Client>,
     >,
+    config: Res<ClientNetworkConfig>,
+    routed: Res<RoutedClientLifecycle>,
     diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
     mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
@@ -791,6 +924,20 @@ pub(super) fn process_join_outcome(
                     };
                 }
                 JoinOutcome::Rejected { reason } => {
+                    if config.transport == NetworkTransport::RoutedUdp
+                        && matches!(
+                            routed.phase,
+                            RoutedClientPhase::AwaitingLobbyUnlink
+                                | RoutedClientPhase::AwaitingLobbyRetryUnlink
+                                | RoutedClientPhase::AwaitingMatchUnlink
+                        )
+                    {
+                        warn!(
+                            ?reason,
+                            "ignoring join rejection during routed session teardown"
+                        );
+                        continue;
+                    }
                     warn!(?reason, "brawler client rejected");
                     record_client_failure(
                         diagnostics.as_ref(),
@@ -803,6 +950,307 @@ pub(super) fn process_join_outcome(
                 }
             }
         }
+    }
+}
+
+/// Finish the routed process smoke only after the match session has completed, its routes have
+/// been revoked, and the client has authenticated one fresh lobby generation. Generation one is
+/// the initial lobby and generation two is the match; a generation of three or greater therefore
+/// cannot be satisfied by an initial lobby retry.
+#[allow(clippy::needless_pass_by_value)]
+pub(super) fn observe_fresh_lobby_return(
+    config: Res<ClientNetworkConfig>,
+    mut app_exit: MessageWriter<AppExit>,
+    query: Query<(&RoutedClientSession, &ClientJoinStatus), With<Client>>,
+) {
+    if !config.exit_after_lobby_return {
+        return;
+    }
+    if query.iter().any(|(session, status)| {
+        session.kind == RoutedClientSessionKind::Lobby
+            && session.generation >= 3
+            && matches!(status.phase, ClientJoinPhase::Active { .. })
+    }) {
+        info!("brawler client authenticated a fresh lobby after match completion");
+        app_exit.write(AppExit::Success);
+    }
+}
+
+/// Accept one authenticated lobby grant and begin the explicit unlink boundary. A stale or
+/// duplicate grant is ignored; it cannot replace the capability already selected for this
+/// request.
+fn process_match_route_grant(
+    mut lifecycle: ResMut<RoutedClientLifecycle>,
+    mut receivers: Query<
+        (
+            &RoutedClientSession,
+            Option<&mut MessageReceiver<MatchRouteGrantV1>>,
+        ),
+        With<Client>,
+    >,
+) {
+    if lifecycle.phase != RoutedClientPhase::Lobby {
+        return;
+    }
+    for (session, receiver) in &mut receivers {
+        if session.kind != RoutedClientSessionKind::Lobby
+            || session.generation != lifecycle.generation
+        {
+            continue;
+        }
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for grant in receiver.receive() {
+            if lifecycle.accept_grant(grant) {
+                info!(
+                    request_id = grant.request_id.get(),
+                    allocation_id = grant.allocation_id.get(),
+                    match_id = grant.match_id.get(),
+                    "brawler client accepted authenticated match route grant"
+                );
+                // The capability is intentionally absent from this log record.
+                return;
+            }
+        }
+    }
+}
+
+/// A replicated authoritative completion is the only gameplay signal that starts the routed
+/// match-to-lobby transition. The client intentionally does not wait for a worker Result or
+/// terminal disconnect: the supervisor owns that control-plane fact while the client closes its
+/// current session and then creates one fresh lobby session.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy resources are schedule-owned system parameters"
+)]
+pub(super) fn observe_completed_match(
+    config: Res<ClientNetworkConfig>,
+    mut lifecycle: ResMut<RoutedClientLifecycle>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+) {
+    if config.transport != NetworkTransport::RoutedUdp
+        || lifecycle.phase != RoutedClientPhase::Match
+    {
+        return;
+    }
+    if roots
+        .iter()
+        .any(|state| matches!(state.phase, MatchPhase::Completed { .. }))
+        && lifecycle.request_return_to_lobby()
+    {
+        info!("brawler client observed authoritative match completion; returning to lobby");
+    }
+}
+
+/// Issue the one deliberate disconnect required by a routed session transition. The new entity
+/// is not spawned here: `advance_routed_transition` waits for the old entity to be despawned by
+/// the deferred `Unlinked` observation.
+#[allow(clippy::needless_pass_by_value)]
+pub(super) fn drive_routed_transition(
+    mut commands: Commands,
+    config: Res<ClientNetworkConfig>,
+    time: Res<Time<Real>>,
+    mut query: Query<
+        (Entity, &mut ClientJoinStatus, Option<&Disconnected>),
+        With<RoutedClientSession>,
+    >,
+    lifecycle: Res<RoutedClientLifecycle>,
+) {
+    if config.transport != NetworkTransport::RoutedUdp
+        || !matches!(
+            lifecycle.phase,
+            RoutedClientPhase::AwaitingLobbyUnlink
+                | RoutedClientPhase::AwaitingLobbyRetryUnlink
+                | RoutedClientPhase::AwaitingMatchUnlink
+        )
+    {
+        return;
+    }
+    for (entity, mut status, disconnected) in &mut query {
+        if disconnected.is_none() && !status.disconnect_requested {
+            status.disconnect_requested = true;
+            commands.entity(entity).insert(RoutedTransitionDeadline(
+                time.elapsed().saturating_add(config.connect_timeout),
+            ));
+            commands.trigger(Disconnect { entity });
+        } else if disconnected.is_some() && status.disconnect_requested {
+            // Netcode's `Disconnect` deliberately leaves the underlying Link established. Wait
+            // one frame so its disconnect datagrams can flush through PostUpdate, then close the
+            // routed socket and expose `Unlinked` to the deferred teardown observer below.
+            commands.trigger(Unlink {
+                entity,
+                reason: UnlinkReason::UserRequested(None),
+            });
+        }
+    }
+}
+
+/// Observe the transport's deferred `Unlinked` marker before any replacement is requested. This
+/// is the ownership boundary that guarantees a fixed local address never has two live sockets.
+#[allow(clippy::needless_pass_by_value)]
+fn observe_routed_transition(
+    mut commands: Commands,
+    config: Res<ClientNetworkConfig>,
+    lifecycle: Res<RoutedClientLifecycle>,
+    query: Query<(Entity, Option<&Unlinked>), With<RoutedClientSession>>,
+) {
+    if config.transport != NetworkTransport::RoutedUdp {
+        return;
+    }
+    for (entity, unlinked) in &query {
+        let Some(_unlinked) = unlinked else {
+            continue;
+        };
+        if !matches!(
+            lifecycle.phase,
+            RoutedClientPhase::AwaitingLobbyUnlink
+                | RoutedClientPhase::AwaitingLobbyRetryUnlink
+                | RoutedClientPhase::AwaitingMatchUnlink
+        ) {
+            // Unexpected routed disconnects stay visible to the normal lifecycle observer, which
+            // classifies them as terminal failures. Only an explicitly requested transition may
+            // consume Unlinked and replace the entity.
+            continue;
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+/// Spawn the next generation only after the previous routed entity's deferred despawn has been
+/// applied. This keeps the Lightyear topology at exactly one `Client` entity.
+#[allow(clippy::needless_pass_by_value)]
+fn advance_routed_transition(
+    mut commands: Commands,
+    config: Res<ClientNetworkConfig>,
+    time: Res<Time<Real>>,
+    mut lifecycle: ResMut<RoutedClientLifecycle>,
+    clients: Query<(), With<Client>>,
+) -> Result {
+    if config.transport != NetworkTransport::RoutedUdp || clients.iter().next().is_some() {
+        return Ok(());
+    }
+    match lifecycle.phase {
+        RoutedClientPhase::AwaitingLobbyUnlink => {
+            let Some(grant) = lifecycle.accepted_grant else {
+                lifecycle.phase = RoutedClientPhase::AwaitingLobbyRetryUnlink;
+                return Ok(());
+            };
+            let generation = lifecycle.generation.saturating_add(1).max(1);
+            let io = RoutedUdpIo::with_match_capability(
+                config.server_addr,
+                grant.capability.to_routing_capability(),
+            );
+            spawn_client_entity(
+                &mut commands,
+                &config,
+                time.elapsed(),
+                Some((
+                    io,
+                    RoutedClientSession {
+                        generation,
+                        kind: RoutedClientSessionKind::Match,
+                    },
+                )),
+            )?;
+            lifecycle.generation = generation;
+            debug_assert_eq!(lifecycle.begin_match(), Some(grant));
+        }
+        RoutedClientPhase::AwaitingLobbyRetryUnlink | RoutedClientPhase::AwaitingMatchUnlink => {
+            lifecycle.begin_lobby_after_match();
+            let generation = lifecycle.generation;
+            spawn_client_entity(
+                &mut commands,
+                &config,
+                time.elapsed(),
+                Some((
+                    RoutedUdpIo::lobby(config.server_addr),
+                    RoutedClientSession {
+                        generation,
+                        kind: RoutedClientSessionKind::Lobby,
+                    },
+                )),
+            )?;
+            info!(generation, "brawler client starting fresh lobby session");
+        }
+        RoutedClientPhase::Disabled | RoutedClientPhase::Lobby | RoutedClientPhase::Match => {}
+    }
+    Ok(())
+}
+
+/// Routed failures recover through a fresh lobby attempt. Direct UDP keeps its existing terminal
+/// timeout behavior below.
+#[allow(clippy::needless_pass_by_value)]
+pub(super) fn enforce_routed_timeout(
+    mut commands: Commands,
+    config: Res<ClientNetworkConfig>,
+    time: Res<Time<Real>>,
+    mut lifecycle: ResMut<RoutedClientLifecycle>,
+    mut query: Query<
+        (
+            Entity,
+            &mut ClientJoinStatus,
+            &RoutedClientSession,
+            Option<&RoutedTransitionDeadline>,
+        ),
+        With<Client>,
+    >,
+) {
+    if config.transport != NetworkTransport::RoutedUdp {
+        return;
+    }
+    let now = time.elapsed();
+    for (entity, mut status, session, transition_deadline) in &mut query {
+        if status.disconnect_requested {
+            let deadline = transition_deadline.map_or_else(
+                || {
+                    let deadline = now.saturating_add(config.connect_timeout);
+                    commands
+                        .entity(entity)
+                        .insert(RoutedTransitionDeadline(deadline));
+                    deadline
+                },
+                |deadline| deadline.0,
+            );
+            if now >= deadline {
+                // The normal path has already had a full timeout window to produce Disconnected
+                // and Unlinked. Force the transport boundary and remove the stale root so the
+                // next schedule can spawn the appropriate fresh generation.
+                warn!(
+                    ?session.kind,
+                    "routed session teardown deadline expired; forcing recovery"
+                );
+                commands.trigger(Unlink {
+                    entity,
+                    reason: UnlinkReason::TransportError(
+                        "routed session teardown deadline expired".to_owned(),
+                    ),
+                });
+                commands.entity(entity).despawn();
+            }
+            continue;
+        }
+        if matches!(status.phase, ClientJoinPhase::Active { .. })
+            || now < status.started_at.saturating_add(config.connect_timeout)
+        {
+            continue;
+        }
+        match session.kind {
+            RoutedClientSessionKind::Lobby if lifecycle.phase == RoutedClientPhase::Lobby => {
+                warn!("routed lobby session timed out; retrying with a fresh request");
+                lifecycle.phase = RoutedClientPhase::AwaitingLobbyRetryUnlink;
+            }
+            RoutedClientSessionKind::Match if lifecycle.phase == RoutedClientPhase::Match => {
+                warn!("routed match session timed out; returning to a fresh lobby request");
+                lifecycle.phase = RoutedClientPhase::AwaitingMatchUnlink;
+            }
+            _ => continue,
+        }
+        status.disconnect_requested = true;
+        commands.entity(entity).insert(RoutedTransitionDeadline(
+            now.saturating_add(config.connect_timeout),
+        ));
+        commands.trigger(Disconnect { entity });
     }
 }
 
@@ -824,6 +1272,8 @@ pub(super) fn disconnect_rejected_client(
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 pub(super) fn observe_client_lifecycle(
+    config: Res<ClientNetworkConfig>,
+    routed: Res<RoutedClientLifecycle>,
     mut query: Query<
         (
             &mut ClientJoinStatus,
@@ -836,6 +1286,19 @@ pub(super) fn observe_client_lifecycle(
     mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
+    // Routed sessions recover through their explicit Unlinked/deferred-teardown state machine;
+    // treating the deliberate lobby->match disconnect as a terminal direct-UDP failure would
+    // incorrectly exit the client.
+    if config.transport == NetworkTransport::RoutedUdp
+        && matches!(
+            routed.phase,
+            RoutedClientPhase::AwaitingLobbyUnlink
+                | RoutedClientPhase::AwaitingLobbyRetryUnlink
+                | RoutedClientPhase::AwaitingMatchUnlink
+        )
+    {
+        return;
+    }
     for (mut status, disconnected, connecting) in query.iter_mut() {
         if disconnected.is_some()
             && !connecting
@@ -861,10 +1324,12 @@ pub(super) fn observe_client_lifecycle(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
+    clippy::too_many_arguments,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 pub(super) fn log_replicated_roster(
     config: Res<ClientNetworkConfig>,
+    routed: Res<RoutedClientLifecycle>,
     automation: Res<HeadlessAutomation>,
     combat_evidence: Option<Res<ClientCombatEvidenceStatus>>,
     mut roster_state: ResMut<RosterLogState>,
@@ -872,6 +1337,12 @@ pub(super) fn log_replicated_roster(
     roster: Query<(&PlayerId, &NetworkEntityId), (With<Remote>, With<Fighter>)>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
+    if config.transport == NetworkTransport::RoutedUdp && routed.phase != RoutedClientPhase::Match {
+        return;
+    }
+    if config.exit_after_lobby_return {
+        return;
+    }
     let mut current: Vec<_> = roster
         .iter()
         .map(|(player, entity)| (*player, *entity))
@@ -911,6 +1382,9 @@ pub(super) fn enforce_client_timeout(
     mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
+    if config.transport == NetworkTransport::RoutedUdp {
+        return;
+    }
     let now = time.elapsed();
     let roster_count = roster.iter().count();
     for status in status_query.iter() {

@@ -96,6 +96,8 @@ impl NetworkImpairmentProfile {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetworkTransport {
     Udp,
+    /// Routed public UDP through the M01 supervisor.  Direct UDP remains the default baseline.
+    RoutedUdp,
     #[cfg(feature = "network-test")]
     Crossbeam,
 }
@@ -213,6 +215,9 @@ pub struct ClientNetworkConfig {
     pub impairment_profile: NetworkImpairmentProfile,
     pub headless: bool,
     pub exit_after_roster: Option<usize>,
+    /// In routed headless automation, wait for the completed match to tear down and a fresh
+    /// lobby session to be accepted before exiting successfully.
+    pub exit_after_lobby_return: bool,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
     pub headless_aim_at_dummy: bool,
@@ -264,6 +269,7 @@ impl ClientNetworkConfig {
             impairment_profile: NetworkImpairmentProfile::from_env(),
             headless: false,
             exit_after_roster: None,
+            exit_after_lobby_return: false,
             headless_move: None,
             headless_aim: None,
             headless_aim_at_dummy: false,
@@ -282,6 +288,12 @@ impl ClientNetworkConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.exit_after_roster.is_some_and(|count| count == 0) {
             return Err("--exit-after-roster must be greater than zero".to_string());
+        }
+        if self.exit_after_lobby_return && !self.headless {
+            return Err("--exit-after-lobby-return requires --headless".to_string());
+        }
+        if self.exit_after_lobby_return && self.transport != NetworkTransport::RoutedUdp {
+            return Err("--exit-after-lobby-return requires --transport routed-udp".to_string());
         }
         if self
             .headless_simulation_ticks

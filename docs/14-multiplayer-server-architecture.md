@@ -2,10 +2,9 @@
 
 ## Decision status
 
-Proposed for v2 planning on 2026-08-17; pending user validation of the v2 roadmap and the M01
-specification. Exact IPC primitives, framing details, and measured limits
-remain R&D items for [v2 Milestone 01](./implementation/v2/milestone-01.md); the process and authority
-topology described here is the proposed direction until that validation completes.
+Accepted for v2 implementation on 2026-08-18 when the user directed implementation of
+[v2 Milestone 01](./implementation/v2/milestone-01.md). That milestone owns the exact IPC
+primitives, framing, limits, implementation evidence, and any evidence-backed return to review.
 
 ## Context
 
@@ -87,6 +86,15 @@ The capability is not a displayable or predictable `MatchId`. It is a high-entro
 authority. The router strips it before forwarding and never treats it as player/gameplay identity.
 The receiving Lightyear/Netcode authority still performs its normal connection authentication,
 reliability, fragmentation, protocol, and replication behavior.
+
+M01 retains Brawler's existing development manual Netcode credentials and additionally admits a
+match connection only when its authenticated Netcode client ID is present in the immutable match
+manifest. The routing grant therefore carries no second Netcode token. Replacing development
+credentials with production-issued credentials is security hardening outside M01; the route
+capability never substitutes for the manifest/client-ID admission check.
+
+The manifest carries that nonzero Netcode client ID separately from the supervisor-minted routed
+`PeerId`; neither identity is derived from or substituted for the other.
 
 Possession is nevertheless security-relevant: a stolen capability can direct traffic toward its
 assigned authority and consume bounded router, IPC, and worker work even when inner authentication

@@ -23,6 +23,22 @@ pub struct SpawnCandidate {
     pub facing: f32,
 }
 
+/// Reduce a routed match identity to the u64 seed accepted by the spawn-selection algorithm.
+///
+/// The common case remains the exact low 64 bits. Routed IDs may use the full u128 space, so the
+/// checked conversion explicitly falls back to a deterministic fold instead of silently
+/// truncating or rejecting an otherwise valid match worker identity.
+fn match_seed_component(match_id: MatchId) -> u64 {
+    if let Ok(value) = u64::try_from(match_id.0) {
+        value
+    } else {
+        let low =
+            u64::try_from(match_id.0 & u128::from(u64::MAX)).expect("masked match ID must fit u64");
+        let high = u64::try_from(match_id.0 >> 64).expect("shifted match ID must fit u64");
+        low ^ high.rotate_left(32)
+    }
+}
+
 /// Select a deterministic, clearance-aware spawn for one activation or respawn.
 #[must_use]
 pub fn select_spawn(
@@ -59,8 +75,7 @@ pub fn select_spawn(
         .map(|(_, position)| *position)
         .collect();
     if hostiles.is_empty() {
-        let seed = match_id
-            .0
+        let seed = match_seed_component(match_id)
             .wrapping_add(player_id.0)
             .wrapping_add(respawn_ordinal);
         let index = usize::try_from(seed % u64::try_from(pool.len()).ok()?).ok()?;

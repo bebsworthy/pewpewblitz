@@ -2,7 +2,7 @@
 
 use bevy::app::AppExit;
 use brawler::config::{GameMode, MatchRulesProfile, ServerNetworkConfig};
-use brawler::server::build_app_with_config;
+use brawler::server::{WorkerBootstrap, build_app_with_config, parse_worker_arguments};
 use core::{net::SocketAddr, time::Duration};
 use std::{env, process};
 
@@ -11,10 +11,19 @@ fn usage() {
         "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>]"
     );
     eprintln!(
+        "       brawler-server lobby-worker --role lobby --logical-server-id <U128> --supervisor-generation <U64> --worker-id <U128> --process-id <U128> --worker-generation <U64> --packet-socket <PATH> --control-socket <PATH>"
+    );
+    eprintln!(
+        "       brawler-server match-worker --role match --logical-server-id <U128> --supervisor-generation <U64> --worker-id <U128> --process-id <U128> --worker-generation <U64> --packet-socket <PATH> --control-socket <PATH>"
+    );
+    eprintln!(
         "       brawler-server validate-closeout <DIRECTORY> <CLIENT-COUNT> <EXPECT-CHECKPOINTS> [WEAPON-PRESET]   validate finished closeout reports against the current report schema (EXPECT-CHECKPOINTS is 1 for combat-assert runs, 0 otherwise; WEAPON-PRESET re-derives the declared checkpoint requirement from the asserted preset)"
     );
     eprintln!(
         "       brawler-server required-checkpoint-count <WEAPON-PRESET>   print the asserted preset's required process-checkpoint count"
+    );
+    eprintln!(
+        "       brawler-server routing-identity   print routed network and content identity as key=value lines"
     );
     eprintln!(
         "note: --wipeout-rules <production|verification> is a deprecated alias for --match-rules"
@@ -144,8 +153,63 @@ fn run_required_checkpoint_count(weapon_preset: &str) -> ! {
     process::exit(0);
 }
 
+fn run_routing_identity() -> ! {
+    let identity = match brawler::server::routing_identity() {
+        Ok(identity) => identity,
+        Err(error) => {
+            eprintln!("brawler-server: cannot compute routing identity: {error:?}");
+            process::exit(2);
+        }
+    };
+    println!("network_protocol={}", identity.network_protocol);
+    println!(
+        "protocol_registry_fingerprint={}",
+        identity.protocol_registry_fingerprint
+    );
+    println!("content_fingerprint={}", identity.content_fingerprint);
+    process::exit(0);
+}
+
 fn main() -> AppExit {
     let raw_args: Vec<String> = env::args().skip(1).collect();
+    let explicit_worker_role = match raw_args.first().map(String::as_str) {
+        Some("lobby-worker") => Some("lobby"),
+        Some("match-worker") => Some("match"),
+        _ => None,
+    };
+    let argv_worker = raw_args.first().is_some_and(|arg| arg == "--role");
+    if let Some(expected_role) = explicit_worker_role.or(argv_worker.then_some("")) {
+        let worker_args = if explicit_worker_role.is_some() {
+            raw_args.iter().skip(1).cloned().collect::<Vec<_>>()
+        } else {
+            raw_args.clone()
+        };
+        let parsed = match parse_worker_arguments(worker_args) {
+            Ok(args) => args,
+            Err(error) => {
+                eprintln!("brawler-server: {error}");
+                usage();
+                process::exit(2);
+            }
+        };
+        if !expected_role.is_empty()
+            && ((expected_role == "lobby"
+                && parsed.role != brawler::server::WorkerEntrypointRole::Lobby)
+                || (expected_role == "match"
+                    && parsed.role != brawler::server::WorkerEntrypointRole::Match))
+        {
+            eprintln!("brawler-server: worker mode and --role disagree");
+            process::exit(2);
+        }
+        let mut app = match WorkerBootstrap::connect(parsed).and_then(WorkerBootstrap::start) {
+            Ok(app) => app,
+            Err(error) => {
+                eprintln!("brawler-server: {error}");
+                process::exit(2);
+            }
+        };
+        return app.run();
+    }
     if raw_args
         .first()
         .is_some_and(|arg| arg == "required-checkpoint-count")
@@ -156,6 +220,17 @@ fn main() -> AppExit {
             process::exit(2);
         }
         run_required_checkpoint_count(&raw_args[1]);
+    }
+    if raw_args
+        .first()
+        .is_some_and(|arg| arg == "routing-identity")
+    {
+        if raw_args.len() != 1 {
+            eprintln!("brawler-server: routing-identity takes no arguments");
+            usage();
+            process::exit(2);
+        }
+        run_routing_identity();
     }
     if raw_args
         .first()

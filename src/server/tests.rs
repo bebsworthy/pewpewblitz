@@ -41,7 +41,7 @@ fn production_startup_instantiates_wipeout_map_and_match_without_practice_dummy(
 #[test]
 fn shortened_rules_require_the_explicit_verification_profile() {
     let lifecycle = match_lifecycle_rules_for_profile(MatchRulesProfile::ProcessVerification);
-    assert_eq!(lifecycle.minimum_participants_per_team, 2);
+    assert_eq!(lifecycle.minimum_participants_per_team, 1);
     assert_eq!(lifecycle.active_limit_ticks, 3_600);
     assert_eq!(lifecycle.countdown_ticks, 30);
     let wipeout = wipeout_rules_for_profile(MatchRulesProfile::ProcessVerification);

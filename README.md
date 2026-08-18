@@ -7,9 +7,9 @@ terrain, replicated match/map/combat state, local input settings, and client-onl
 Lightyear Netcode/UDP.
 
 V1 completion is not a release-ready claim. Controller feel, audio, HUD/readability, balance, match
-pacing, and related tuning remain explicit pre-release polish. V2 is now in M01 research for a
-single-public-port routed supervisor with isolated lobby and match workers; production implementation
-does not begin until the M01 specification is validated. See the [v2 roadmap](docs/implementation/v2/roadmap.md),
+pacing, and related tuning remain explicit pre-release polish. V2 M01 is implementing a
+single-public-port routed supervisor with isolated lobby and match workers after specification
+validation on 2026-08-18. See the [v2 roadmap](docs/implementation/v2/roadmap.md),
 [active milestone](docs/implementation/v2/milestone-01.md), and [completed v1 roadmap](docs/implementation/v1/roadmap.md).
 
 ## Toolchain
@@ -55,12 +55,24 @@ just network-combat-30
 just network-combat-60
 just network-combat-high
 just network-smoke
+just network-routed-smoke
+just network-routed-ipv6-smoke
+just network-routed-evidence
+just network-routed-capture
+just verify-routed-capture capture=target/routed-capture.pcap
+just network-paired-evidence
+just test-paired-evidence
+just network-direct
+just network-direct-smoke
 just network-terrain
 just network-terrain-hot-zone
 just closeout-wipeout
 just closeout-hot-zone
 just prediction-comparison
 just help
+just check-routing
+just test-routing
+just clippy-routing
 just check
 just build
 just test
@@ -71,14 +83,47 @@ just docs
 just clean
 ```
 
-The current `just run`, `just network`, and `scripts/network.sh` paths use the completed v1
-direct-UDP topology. During v2 M01 they are the reproducible comparison baseline, not an
-implementation of the proposed routed supervisor/worker architecture. M01 will introduce and
-document routed commands only after specification validation; the direct path remains available
-under an explicit baseline/compatibility name until its roadmap retirement gate is met.
+`just network` now launches the v2 routed topology at one public UDP address: a plain supervisor,
+an isolated lobby worker, a match worker after allocation, and two clients. Use
+`just network-routed-smoke` for the bounded headless lobby-to-match check. The completed v1 direct
+UDP topology remains available as `just network-direct` and `just network-direct-smoke` until the
+roadmap's M09 retirement gate.
+
+`just network-routed-evidence` runs bounded cold routed-process cycles (five by default; use
+`just network-routed-evidence <cycles> <timeout-seconds> <wipeout|hot-zone|both|crash-restart>`).
+It records the exact
+Result-driven worker lifecycle, per-role RSS, directional public/inner/IPC traffic, bounded routing
+owner-loop latency diagnostics, final route/queue/drop counters, and process cleanup in
+`target/routed-evidence-<UTC timestamp>.json`. The report explicitly marks paired CPU/direct
+bandwidth, full IPC-to-worker latency, packet-only IPC overhead, packet-capture MTU, and paired
+fixed-tick gates unsupported; correlated stop/reap and allocation-to-connected samples remain
+below their required campaign cardinalities. It never fabricates those measurements. Add
+`--keep-artifacts` by invoking `python3 scripts/network-routed-evidence.py --keep-artifacts` to
+retain per-cycle logs.
+
+`just network-routed-ipv6-smoke` runs the same production routed process check over `[::1]`; the
+client derives an IPv6 local socket from the selected `--server` address, or accepts an explicit
+`--local-addr`. On macOS, `just network-routed-capture capture=target/routed-capture.pcap` runs
+both IPv4 and IPv6 headless smokes under `tcpdump` on `lo0` and parses the resulting classic pcap with
+`scripts/verify-routed-capture.py`. BPF capture permission may require an approved administrator
+session. No capture result is considered evidence unless a real pcap is produced and the parser
+observes IPv4/IPv6 UDP payloads no larger than 1,200 bytes with no IPv4 fragmentation or IPv6
+Fragment header; unavailable or malformed captures stay unsupported.
+
+`just network-paired-evidence 1 90 wipeout` runs the bounded one-pair M01 comparison smoke; the
+canonical gate is `just network-paired-evidence 3 90 wipeout` (or `hot-zone`). It runs the existing
+direct and routed verification launchers sequentially on the same host, source tree, mode, and
+verification rules, requires the exact expected process-role cardinalities, samples every Brawler process's CPU time and RSS, and writes
+`target/paired-evidence-<UTC timestamp>.json`. Aggregate routed CPU must be no more than 20% over
+the direct aggregate when both process series and a correlated common observation interval are
+comparable. Direct server transport bytes are compared with routed supervisor match-worker inner
+ingress/egress bytes independently, with a 10% limit per direction and for the total. Routed public-envelope and mixed packet/control IPC bytes are
+reported as overhead diagnostics and are never compared with direct gameplay bytes. Missing
+comparable samples or common-window checkpoints produce an explicit `unsupported` result. Run `just test-paired-evidence` for
+the parser and threshold-gate tests without starting processes.
 
 The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. The client accepts
-`--server`, required `--client-id`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
+`--server`, `--local-addr`, required `--client-id`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
 `4` Duelist, `5` the default legal custom Pulse), plus bounded automation flags `--headless --exit-after-roster 2
 --move-axis X,Y --aim-axis X,Y --aim-dummy --fire --ultimate --simulation-ticks N`. `--combat-demo` enables the
 same authoritative aim-at-dummy/fire loop in a windowed client for a reproducible visual smoke run.
@@ -91,7 +136,8 @@ still uses the normal gamepad sampler and native input buffer, but does not subs
 physical controller.
 `RUST_LOG` controls log filtering, for example `RUST_LOG=brawler=info`. Window titles identify the two clients; structured logs report
 connection outcome and stable `(player_id, network_entity_id)` roster entries. `just network-smoke`
-also requires a server-side movement/facing assertion before it succeeds.
+is the routed two-client lobby-to-match check; `just network-direct-smoke` retains the v1
+server-side movement/facing assertion.
 
 For the supervised combat path, use `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_COMBAT=1
 ./scripts/network.sh`. Its legacy combat verifier composes an explicit test-only dummy fixture and

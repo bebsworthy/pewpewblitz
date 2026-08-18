@@ -25,6 +25,11 @@ use lightyear::prelude::{
 };
 use serde::{Deserialize, Serialize};
 
+// These identifiers remain owned by the engine-independent routing package. Keep this import
+// private so the protocol module does not accidentally become a second public ID namespace; the
+// routed message types below remain directly constructible by using the routing package's IDs.
+use brawler_routing::{AllocationId, MatchId, PeerId, RequestId, RouteId};
+
 use crate::builds::{AbilityState, PassiveRuntimeState, ResolvedMatchLoadout};
 use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
@@ -46,7 +51,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 12;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 13;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -233,6 +238,177 @@ pub struct ClientHello {
     pub content_fingerprint: GameplayContentFingerprint,
 }
 
+/// A route selector capability delivered over the authenticated lobby session.
+///
+/// Capabilities are bearer secrets. Keep the bytes private and redact both Debug and Display so a
+/// grant can safely be included in bounded diagnostics or a test failure without leaking the
+/// selector that routes public traffic to a match worker.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RouteCapability([u8; 32]);
+
+impl RouteCapability {
+    pub const BYTES: usize = 32;
+
+    #[must_use]
+    pub const fn from_bytes(bytes: [u8; Self::BYTES]) -> Option<Self> {
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] != 0 {
+                return Some(Self(bytes));
+            }
+            index += 1;
+        }
+        None
+    }
+
+    #[must_use]
+    pub(crate) const fn bytes(self) -> [u8; Self::BYTES] {
+        self.0
+    }
+
+    /// Convert the authenticated protocol capability into the engine-independent route selector.
+    ///
+    /// The bytes remain private and the routing type redacts them in diagnostics; this bridge is
+    /// deliberately crate-visible so only the client transport can install a received grant.
+    #[cfg(feature = "client")]
+    pub(crate) fn to_routing_capability(self) -> brawler_routing::Capability {
+        brawler_routing::Capability::from_bytes(self.0)
+            .expect("validated route capability must be non-zero")
+    }
+}
+
+impl core::fmt::Debug for RouteCapability {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("RouteCapability([REDACTED])")
+    }
+}
+
+impl core::fmt::Display for RouteCapability {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("[REDACTED]")
+    }
+}
+
+/// Authenticated lobby-to-client grant for a fresh routed match session.
+///
+/// The grant is accepted at most once by the client for its current lobby request. It carries no
+/// Netcode credential; the match worker still authenticates the fresh session and checks the
+/// immutable participant manifest.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct MatchRouteGrantV1 {
+    pub request_id: RequestId,
+    pub allocation_id: AllocationId,
+    pub match_id: MatchId,
+    pub route_id: RouteId,
+    pub peer_id: PeerId,
+    pub game_mode: crate::config::GameMode,
+    pub capability: RouteCapability,
+    pub activation_expiry_unix_ms: u64,
+    pub route_expiry_unix_ms: u64,
+}
+
+impl MatchRouteGrantV1 {
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.activation_expiry_unix_ms > self.route_expiry_unix_ms {
+            return Err("activation expiry must not exceed route expiry");
+        }
+        Ok(())
+    }
+}
+
+impl core::fmt::Debug for MatchRouteGrantV1 {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("MatchRouteGrantV1")
+            .field("request_id", &self.request_id)
+            .field("allocation_id", &self.allocation_id)
+            .field("match_id", &self.match_id)
+            .field("route_id", &self.route_id)
+            .field("peer_id", &self.peer_id)
+            .field("game_mode", &self.game_mode)
+            .field("capability", &self.capability)
+            .field("activation_expiry_unix_ms", &self.activation_expiry_unix_ms)
+            .field("route_expiry_unix_ms", &self.route_expiry_unix_ms)
+            .finish()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct MatchRouteGrantV1Wire {
+    request_id: u64,
+    allocation_id: u128,
+    match_id: u128,
+    route_id: u128,
+    peer_id: u128,
+    game_mode: u16,
+    capability: [u8; RouteCapability::BYTES],
+    activation_expiry_unix_ms: u64,
+    route_expiry_unix_ms: u64,
+}
+
+impl Serialize for MatchRouteGrantV1 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.validate().map_err(serde::ser::Error::custom)?;
+        MatchRouteGrantV1Wire {
+            request_id: self.request_id.get(),
+            allocation_id: self.allocation_id.get(),
+            match_id: self.match_id.get(),
+            route_id: self.route_id.get(),
+            peer_id: self.peer_id.get(),
+            game_mode: match self.game_mode {
+                crate::config::GameMode::Wipeout => 1,
+                crate::config::GameMode::HotZone => 2,
+            },
+            capability: self.capability.bytes(),
+            activation_expiry_unix_ms: self.activation_expiry_unix_ms,
+            route_expiry_unix_ms: self.route_expiry_unix_ms,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for MatchRouteGrantV1 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = MatchRouteGrantV1Wire::deserialize(deserializer)?;
+        let request_id = RequestId::new(wire.request_id)
+            .ok_or_else(|| serde::de::Error::custom("request ID must be nonzero"))?;
+        let allocation_id = AllocationId::new(wire.allocation_id)
+            .ok_or_else(|| serde::de::Error::custom("allocation ID must be nonzero"))?;
+        let match_id = MatchId::new(wire.match_id)
+            .ok_or_else(|| serde::de::Error::custom("match ID must be nonzero"))?;
+        let route_id = RouteId::new(wire.route_id)
+            .ok_or_else(|| serde::de::Error::custom("route ID must be nonzero"))?;
+        let peer_id = PeerId::new(wire.peer_id)
+            .ok_or_else(|| serde::de::Error::custom("peer ID must be nonzero"))?;
+        let game_mode = match wire.game_mode {
+            1 => crate::config::GameMode::Wipeout,
+            2 => crate::config::GameMode::HotZone,
+            _ => return Err(serde::de::Error::custom("unsupported game mode")),
+        };
+        let capability = RouteCapability::from_bytes(wire.capability)
+            .ok_or_else(|| serde::de::Error::custom("route capability must be nonzero"))?;
+        let grant = Self {
+            request_id,
+            allocation_id,
+            match_id,
+            route_id,
+            peer_id,
+            game_mode,
+            capability,
+            activation_expiry_unix_ms: wire.activation_expiry_unix_ms,
+            route_expiry_unix_ms: wire.route_expiry_unix_ms,
+        };
+        grant.validate().map_err(serde::de::Error::custom)?;
+        Ok(grant)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BuildSelectionRequest {
     pub request_id: u64,
@@ -373,6 +549,8 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<ClientHello>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<JoinOutcome>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<MatchRouteGrantV1>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<BuildSelectionRequest>()
             .add_direction(NetworkDirection::ClientToServer);
@@ -530,6 +708,7 @@ mod tests {
 
         assert!(app.is_message_registered::<ClientHello>());
         assert!(app.is_message_registered::<JoinOutcome>());
+        assert!(app.is_message_registered::<MatchRouteGrantV1>());
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());
         assert!(app.is_message_registered::<CombatCue>());
@@ -638,6 +817,95 @@ mod tests {
     }
 
     #[test]
+    fn gameplay_match_messages_preserve_full_u128_match_id() {
+        let message = MatchCommandRequest {
+            request_id: 1,
+            match_id: crate::matchplay::MatchId(u128::MAX),
+            command: MatchCommand::ReadyForRestart,
+        };
+        let bytes = postcard::to_allocvec(&message).expect("match command serializes");
+        let decoded: MatchCommandRequest =
+            postcard::from_bytes(&bytes).expect("match command deserializes");
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn match_route_grant_round_trips_and_rejects_zero_identity() {
+        let message = MatchRouteGrantV1 {
+            request_id: RequestId::new(1).expect("nonzero request ID"),
+            allocation_id: AllocationId::new(2).expect("nonzero allocation ID"),
+            match_id: MatchId::new(3).expect("nonzero match ID"),
+            route_id: RouteId::new(4).expect("nonzero route ID"),
+            peer_id: PeerId::new(5).expect("nonzero peer ID"),
+            game_mode: crate::config::GameMode::HotZone,
+            capability: RouteCapability::from_bytes([0xa5; RouteCapability::BYTES])
+                .expect("nonzero capability"),
+            activation_expiry_unix_ms: 1_700_000_000_000,
+            route_expiry_unix_ms: 1_700_000_600_000,
+        };
+        let bytes = postcard::to_allocvec(&message).expect("grant serializes");
+        let decoded: MatchRouteGrantV1 = postcard::from_bytes(&bytes).expect("grant deserializes");
+        assert_eq!(decoded, message);
+
+        let mut zero_request = bytes;
+        zero_request[0] = 0;
+        assert!(postcard::from_bytes::<MatchRouteGrantV1>(&zero_request).is_err());
+    }
+
+    #[test]
+    fn match_route_grant_rejects_activation_after_route_expiry() {
+        let message = MatchRouteGrantV1 {
+            request_id: RequestId::new(1).unwrap(),
+            allocation_id: AllocationId::new(2).unwrap(),
+            match_id: MatchId::new(3).unwrap(),
+            route_id: RouteId::new(4).unwrap(),
+            peer_id: PeerId::new(5).unwrap(),
+            game_mode: crate::config::GameMode::Wipeout,
+            capability: RouteCapability::from_bytes([0xa5; RouteCapability::BYTES]).unwrap(),
+            activation_expiry_unix_ms: 3,
+            route_expiry_unix_ms: 2,
+        };
+        assert!(postcard::to_allocvec(&message).is_err());
+
+        let wire = MatchRouteGrantV1Wire {
+            request_id: 1,
+            allocation_id: 2,
+            match_id: 3,
+            route_id: 4,
+            peer_id: 5,
+            game_mode: 1,
+            capability: [0xa5; RouteCapability::BYTES],
+            activation_expiry_unix_ms: 3,
+            route_expiry_unix_ms: 2,
+        };
+        let bytes = postcard::to_allocvec(&wire).unwrap();
+        assert!(postcard::from_bytes::<MatchRouteGrantV1>(&bytes).is_err());
+    }
+
+    #[test]
+    fn match_route_grant_debug_redacts_capability_bytes() {
+        let message = MatchRouteGrantV1 {
+            request_id: RequestId::new(11).expect("nonzero request ID"),
+            allocation_id: AllocationId::new(12).expect("nonzero allocation ID"),
+            match_id: MatchId::new(13).expect("nonzero match ID"),
+            route_id: RouteId::new(14).expect("nonzero route ID"),
+            peer_id: PeerId::new(15).expect("nonzero peer ID"),
+            game_mode: crate::config::GameMode::Wipeout,
+            capability: RouteCapability::from_bytes([0x7a; RouteCapability::BYTES])
+                .expect("nonzero capability"),
+            activation_expiry_unix_ms: 1,
+            route_expiry_unix_ms: 2,
+        };
+        let debug = format!("{message:?}");
+        assert!(debug.contains("REDACTED"));
+        assert!(!debug.contains("7a"));
+        assert_eq!(
+            format!("{:?}", message.capability),
+            "RouteCapability([REDACTED])"
+        );
+    }
+
+    #[test]
     fn terrain_messages_install_senders_only_in_their_exact_directions() {
         let mut client = App::new();
         client.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
@@ -671,6 +939,11 @@ mod tests {
             assert!(
                 world
                     .get::<MessageSender<crate::terrain::TerrainRecoverySnapshot>>(client_link)
+                    .is_none()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<MatchRouteGrantV1>>(client_link)
                     .is_none()
             );
             assert!(
@@ -718,6 +991,11 @@ mod tests {
                 world
                     .get::<MessageSender<crate::terrain::TerrainRecoveryRequest>>(server_link)
                     .is_none()
+            );
+            assert!(
+                world
+                    .get::<MessageSender<MatchRouteGrantV1>>(server_link)
+                    .is_some()
             );
         }
     }

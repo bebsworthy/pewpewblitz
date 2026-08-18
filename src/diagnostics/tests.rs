@@ -1017,6 +1017,151 @@ fn disabled_process_diagnostics_install_no_observation_systems() {
     let _ = std::fs::remove_file(probe_path);
 }
 
+/// The authoritative marker must use the fixed tick in which the lifecycle state is observed,
+/// not the incremented value visible to a later app-frame `Last` system. This reproduces the
+/// paired-run seam with a 3,600-tick interval and guards the explicit fixed-post ordering.
+#[cfg(feature = "server")]
+#[test]
+#[allow(clippy::too_many_lines)] // One cohesive schedule-boundary regression fixture.
+fn common_window_uses_fixed_authoritative_tick_boundaries() {
+    use crate::{
+        map::ModeDefinitionId,
+        matchplay::{MatchPhase, MatchResult, MatchRoot, MatchState},
+        timing::SimulationTick,
+    };
+    use bevy::prelude::{FixedPostUpdate, Last};
+
+    let directory = std::env::temp_dir().join(format!(
+        "brawler-diagnostics-common-window-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("test directory is created");
+    let marker = directory.join("match.window");
+    let _ = std::fs::remove_file(&marker);
+
+    // The marker must use the process's runtime resources, not stale environment/manifest
+    // declarations. Keep these intentionally different from the fixture values above.
+    let mut manifest = valid_manifest();
+    manifest.registry_fingerprint = 700;
+    manifest.content_fingerprint = 900;
+    let settings = ProcessDiagnosticsSettings {
+        report_path: None,
+        window_path: Some(marker.clone()),
+        manifest,
+        ..ProcessDiagnosticsSettings::default()
+    };
+
+    let mut app = App::new();
+    app.insert_resource(settings)
+        .init_resource::<ProcessDiagnosticsState>()
+        .insert_resource(SimulationTick(202))
+        .configure_sets(FixedPostUpdate, crate::matchplay::MatchSet::Outcomes)
+        .add_systems(
+            FixedPostUpdate,
+            process::observe_common_window_fixed
+                .after(crate::matchplay::MatchSet::Outcomes)
+                .before(crate::gameplay::advance_simulation_tick),
+        )
+        .add_systems(FixedPostUpdate, crate::gameplay::advance_simulation_tick)
+        .add_systems(Last, process::finalize_common_window);
+    let root = app
+        .world_mut()
+        .spawn((
+            MatchRoot,
+            MatchState {
+                match_id: crate::matchplay::MatchId(1),
+                mode_definition_id: ModeDefinitionId(2),
+                phase: MatchPhase::Active {
+                    ends_at_tick: 3_802,
+                },
+                rules_revision: 2,
+            },
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<ProcessDiagnosticsState>()
+        .transport = TransportCounters {
+        bytes_sent: 100,
+        bytes_received: 200,
+        packets_sent: 1,
+        packets_received: 2,
+        ..TransportCounters::default()
+    };
+
+    // The first fixed-post boundary records 202 before the shared tick increment.
+    app.world_mut().run_schedule(FixedPostUpdate);
+    assert_eq!(app.world().resource::<SimulationTick>().0, 203);
+
+    // Recreate the completion tick at 3,802: the second boundary must be exactly 3,802,
+    // producing 3,600 ticks even though the increment makes 3,803 visible afterward.
+    app.world_mut().resource_mut::<SimulationTick>().0 = 3_802;
+    app.world_mut()
+        .entity_mut(root)
+        .get_mut::<MatchState>()
+        .expect("match root state")
+        .phase = MatchPhase::Completed {
+        completed_at_tick: 3_802,
+        restart_unlocked_at_tick: 3_812,
+        result: MatchResult::Draw,
+    };
+    app.world_mut()
+        .resource_mut::<ProcessDiagnosticsState>()
+        .transport = TransportCounters {
+        bytes_sent: 300,
+        bytes_received: 500,
+        packets_sent: 3,
+        packets_received: 4,
+        ..TransportCounters::default()
+    };
+    app.world_mut().run_schedule(FixedPostUpdate);
+    assert_eq!(app.world().resource::<SimulationTick>().0, 3_803);
+    app.world_mut().run_schedule(Last);
+    assert!(
+        !marker.exists(),
+        "missing runtime fingerprints must not write a marker"
+    );
+
+    app.world_mut()
+        .insert_resource(crate::protocol::ProtocolFingerprint(0));
+    app.world_mut()
+        .insert_resource(crate::content::GameplayContentFingerprint(9));
+    app.world_mut().run_schedule(Last);
+    assert!(
+        !marker.exists(),
+        "zero protocol fingerprint must not write a marker"
+    );
+
+    app.world_mut()
+        .insert_resource(crate::protocol::ProtocolFingerprint(7));
+    app.world_mut()
+        .insert_resource(crate::content::GameplayContentFingerprint(0));
+    app.world_mut().run_schedule(Last);
+    assert!(
+        !marker.exists(),
+        "zero content fingerprint must not write a marker"
+    );
+
+    app.world_mut()
+        .insert_resource(crate::content::GameplayContentFingerprint(9));
+    app.world_mut().run_schedule(Last);
+
+    let marker_contents = std::fs::read_to_string(&marker).expect("common-window marker written");
+    let fields = split_report_lines(&marker_contents).expect("marker lines parse");
+    assert_eq!(parse_report_field(&fields, "start_tick"), Some("202"));
+    assert_eq!(parse_report_field(&fields, "end_tick"), Some("3802"));
+    assert_eq!(parse_report_field(&fields, "tick_count"), Some("3600"));
+    assert_eq!(
+        parse_report_field(&fields, "registry_fingerprint"),
+        Some("7")
+    );
+    assert_eq!(
+        parse_report_field(&fields, "content_fingerprint"),
+        Some("9")
+    );
+
+    let _ = std::fs::remove_file(&marker);
+}
+
 /// Participant rows must be cached while fighters are live: finalization runs after the
 /// role shutdown chain may have despawned every replicated fighter, and a build
 /// replacement must update the cached row instead of duplicating it.

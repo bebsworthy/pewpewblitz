@@ -16,10 +16,14 @@ use std::{
 /// How many recent fixed-tick/RTT samples feed report percentiles.
 const SAMPLE_RING_CAPACITY: usize = 4096;
 
-/// Diagnostics configuration. The plugin stays inert without a report path.
+/// Diagnostics configuration. The plugin stays inert without a report or window path.
 #[derive(Resource, Clone, Debug)]
 pub struct ProcessDiagnosticsSettings {
     pub report_path: Option<PathBuf>,
+    /// Optional bounded marker for a comparable authoritative match observation window.
+    /// This is separate from the closeout schema because it is an opt-in measurement seam,
+    /// not a gameplay or process-report field.
+    pub window_path: Option<PathBuf>,
     pub manifest: RunManifestV1,
     pub started_at: SystemTime,
     pub started_instant: Instant,
@@ -30,6 +34,7 @@ impl Default for ProcessDiagnosticsSettings {
     fn default() -> Self {
         Self {
             report_path: std::env::var_os("BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE").map(PathBuf::from),
+            window_path: std::env::var_os("BRAWLER_DIAGNOSTICS_WINDOW_FILE").map(PathBuf::from),
             manifest: RunManifestV1::from_env(),
             started_at: SystemTime::now(),
             started_instant: Instant::now(),
@@ -64,6 +69,19 @@ pub struct TransportCounters {
     pub channel_messages_received: u64,
 }
 
+/// One bounded, authoritative match interval. The marker is emitted only after the first
+/// completed match, so a launcher cannot accidentally compare a direct run's second match with
+/// a routed run's first match. Counters use the same `Last` app-frame observation boundary on
+/// both topologies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CommonWindowObservation {
+    start_tick: Option<u64>,
+    end_tick: Option<u64>,
+    start_transport: TransportCounters,
+    end_transport: TransportCounters,
+    written: bool,
+}
+
 /// Observational state; nothing here is gameplay state.
 #[derive(Resource, Debug)]
 pub(crate) struct ProcessDiagnosticsState {
@@ -78,6 +96,7 @@ pub(crate) struct ProcessDiagnosticsState {
     terminal_entities: Option<u32>,
     terminal_links: Option<u32>,
     pub(crate) transport: TransportCounters,
+    common_window: CommonWindowObservation,
     rejected_connections: u64,
     error_count: u64,
     /// Manifest participant rows cached while fighters were live. Finalization runs after
@@ -104,6 +123,7 @@ impl Default for ProcessDiagnosticsState {
             terminal_entities: None,
             terminal_links: None,
             transport: TransportCounters::default(),
+            common_window: CommonWindowObservation::default(),
             rejected_connections: 0,
             error_count: 0,
             manifest_participants: Vec::new(),
@@ -178,7 +198,7 @@ impl Plugin for ProcessDiagnosticsPlugin {
             .get_resource_or_insert_with(ProcessDiagnosticsSettings::default)
             .clone();
         let state = ProcessDiagnosticsState {
-            enabled: settings.report_path.is_some(),
+            enabled: settings.report_path.is_some() || settings.window_path.is_some(),
             ..ProcessDiagnosticsState::default()
         };
         let enabled = state.enabled;
@@ -202,8 +222,30 @@ impl Plugin for ProcessDiagnosticsPlugin {
                         observe_gameplay_aggregates,
                     )
                         .in_set(TerminalObservationSet),
-                )
-                .add_systems(Last, finalize_closeout_report.in_set(DiagnosticsSet));
+                );
+            // The server owns the authoritative match lifecycle. Capture the interval
+            // inside its fixed-post transaction, after the mode outcome has committed and
+            // before `SimulationTick` advances, so both boundaries name the exact
+            // authoritative ticks rather than whichever app frame happens to observe them.
+            #[cfg(feature = "server")]
+            app.add_systems(
+                FixedPostUpdate,
+                observe_common_window_fixed
+                    .after(crate::matchplay::MatchSet::Outcomes)
+                    .before(crate::gameplay::advance_simulation_tick),
+            );
+            // A client has no authoritative outcome transaction. Keep its opt-in marker
+            // observational and app-frame based; paired M01 comparison uses the server
+            // and routed match-worker markers above.
+            #[cfg(not(feature = "server"))]
+            app.add_systems(
+                Last,
+                observe_common_window_client
+                    .in_set(TerminalObservationSet)
+                    .before(finalize_common_window),
+            );
+            app.add_systems(Last, finalize_common_window.in_set(TerminalObservationSet));
+            app.add_systems(Last, finalize_closeout_report.in_set(DiagnosticsSet));
         }
 
         #[cfg(feature = "process-metrics")]
@@ -217,6 +259,7 @@ impl Plugin for ProcessDiagnosticsPlugin {
                 Last,
                 sample_lightyear_metrics
                     .in_set(TerminalObservationSet)
+                    .before(finalize_common_window)
                     .before(lightyear::metrics::prelude::ClearBucketsSystem),
             );
         }
@@ -440,6 +483,246 @@ fn sample_lightyear_metrics(
         .unwrap_or(state.transport.channel_messages_sent);
     state.transport.channel_messages_received = counter(&registry, "channel/recv_messages")
         .unwrap_or(state.transport.channel_messages_received);
+}
+
+/// Capture the authoritative match boundaries in the fixed-post transaction. The lifecycle
+/// outcome has committed by this point, while `SimulationTick` still names the tick that just
+/// ran. This avoids an app-frame-dependent `Last` observation shifting one topology's interval
+/// by one tick when its render/update cadence differs from the other.
+#[cfg(feature = "server")]
+#[allow(clippy::needless_pass_by_value)] // Bevy systems receive `Res<T>` by value.
+pub(super) fn observe_common_window_fixed(
+    settings: Res<ProcessDiagnosticsSettings>,
+    tick: Res<crate::timing::SimulationTick>,
+    roots: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
+    mut state: ResMut<ProcessDiagnosticsState>,
+) {
+    if settings.window_path.is_none() {
+        return;
+    }
+    let Ok(match_state) = roots.single() else {
+        return;
+    };
+    let current_tick = tick.0;
+    if state.common_window.start_tick.is_none()
+        && matches!(
+            match_state.phase,
+            crate::matchplay::MatchPhase::Active { .. }
+        )
+    {
+        state.common_window.start_tick = Some(current_tick);
+        state.common_window.start_transport = state.transport;
+    }
+    if state.common_window.end_tick.is_none()
+        && state.common_window.start_tick.is_some()
+        && matches!(
+            match_state.phase,
+            crate::matchplay::MatchPhase::Completed { .. }
+        )
+    {
+        state.common_window.end_tick = Some(current_tick);
+        state.common_window.end_transport = state.transport;
+    }
+}
+
+/// Client-side fallback for an opt-in marker. Clients do not own the authoritative outcome
+/// transaction, so they retain the old observational behavior; paired M01 comparisons consume
+/// only the server and routed match-worker markers produced by [`observe_common_window_fixed`].
+#[cfg(not(feature = "server"))]
+#[allow(clippy::needless_pass_by_value)] // Bevy systems receive `Res<T>` by value.
+fn observe_common_window_client(
+    settings: Res<ProcessDiagnosticsSettings>,
+    tick: Option<Res<crate::timing::SimulationTick>>,
+    roots: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
+    mut state: ResMut<ProcessDiagnosticsState>,
+) {
+    if settings.window_path.is_none() {
+        return;
+    }
+    let Some(tick) = tick else {
+        return;
+    };
+    let Ok(match_state) = roots.single() else {
+        return;
+    };
+    let current_tick = tick.0;
+    if state.common_window.start_tick.is_none()
+        && matches!(
+            match_state.phase,
+            crate::matchplay::MatchPhase::Active { .. }
+        )
+    {
+        state.common_window.start_tick = Some(current_tick);
+        state.common_window.start_transport = state.transport;
+    }
+    if state.common_window.end_tick.is_none()
+        && state.common_window.start_tick.is_some()
+        && matches!(
+            match_state.phase,
+            crate::matchplay::MatchPhase::Completed { .. }
+        )
+    {
+        state.common_window.end_tick = Some(current_tick);
+        state.common_window.end_transport = state.transport;
+    }
+}
+
+/// Finalize one captured interval after the terminal app-frame transport sample. Tick bounds
+/// were captured by the fixed authoritative boundary on the server; only the marker's stable
+/// identity and transport deltas are assembled here.
+#[allow(clippy::needless_pass_by_value)] // Bevy systems receive `Res<T>` by value.
+pub(super) fn finalize_common_window(
+    settings: Res<ProcessDiagnosticsSettings>,
+    roots: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
+    participants: Query<&crate::matchplay::MatchParticipant>,
+    protocol: Option<Res<crate::protocol::ProtocolFingerprint>>,
+    content: Option<Res<crate::content::GameplayContentFingerprint>>,
+    mut state: ResMut<ProcessDiagnosticsState>,
+) {
+    let Some(path) = settings.window_path.as_deref() else {
+        return;
+    };
+    let Ok(match_state) = roots.single() else {
+        return;
+    };
+    let (Some(start_tick), Some(end_tick)) =
+        (state.common_window.start_tick, state.common_window.end_tick)
+    else {
+        return;
+    };
+    if state.common_window.written {
+        return;
+    }
+    let Some(protocol) = protocol.filter(|fingerprint| fingerprint.0 != 0) else {
+        bevy::log::error!(
+            path = %path.display(),
+            "common authoritative measurement window requires a non-zero protocol fingerprint"
+        );
+        return;
+    };
+    let Some(content) = content.filter(|fingerprint| fingerprint.0 != 0) else {
+        bevy::log::error!(
+            path = %path.display(),
+            "common authoritative measurement window requires a non-zero content fingerprint"
+        );
+        return;
+    };
+    // The end boundary is guaranteed to have happened in the fixed schedule, while this
+    // terminal observation sees the freshest process-global metrics sample for the frame.
+    state.common_window.end_transport = state.transport;
+    let start = state.common_window.start_transport;
+    let end = state.common_window.end_transport;
+    if end_tick < start_tick
+        || end.bytes_sent < start.bytes_sent
+        || end.bytes_received < start.bytes_received
+        || end.packets_sent < start.packets_sent
+        || end.packets_received < start.packets_received
+    {
+        bevy::log::error!(
+            path = %path.display(),
+            start_tick,
+            end_tick,
+            "common authoritative measurement window was not monotonic"
+        );
+        return;
+    }
+    let role = std::env::var("BRAWLER_DIAGNOSTICS_ROLE").unwrap_or_else(|_| "unknown".into());
+    let participant_count = participants
+        .iter()
+        .filter(|participant| participant.match_id == match_state.match_id)
+        .count();
+    let (result_kind, result_team_a, result_team_b) = match match_state.phase {
+        crate::matchplay::MatchPhase::Completed {
+            result: crate::matchplay::MatchResult::TeamVictory { team },
+            ..
+        } => ("team-victory", team.0, 0),
+        crate::matchplay::MatchPhase::Completed {
+            result: crate::matchplay::MatchResult::Draw,
+            ..
+        } => ("draw", 0, 0),
+        crate::matchplay::MatchPhase::Completed {
+            result:
+                crate::matchplay::MatchResult::Forfeit {
+                    winner,
+                    departed_team,
+                },
+            ..
+        } => ("forfeit", winner.0, departed_team.0),
+        _ => return,
+    };
+    let contents = encode_common_window_marker(&CommonWindowMarker {
+        settings: &settings,
+        match_state,
+        role: &role,
+        participant_count,
+        result_kind,
+        result_team_a,
+        result_team_b,
+        start_tick,
+        end_tick,
+        start,
+        end,
+        protocol: protocol.0,
+        content: content.0,
+    });
+    match std::fs::write(path, contents) {
+        Ok(()) => {
+            state.common_window.written = true;
+            bevy::log::info!(path = %path.display(), start_tick, end_tick, "common authoritative measurement window written");
+        }
+        Err(error) => {
+            bevy::log::error!(path = %path.display(), ?error, "common authoritative measurement window write failed");
+        }
+    }
+}
+
+struct CommonWindowMarker<'a> {
+    settings: &'a ProcessDiagnosticsSettings,
+    match_state: &'a crate::matchplay::MatchState,
+    role: &'a str,
+    participant_count: usize,
+    result_kind: &'a str,
+    result_team_a: u8,
+    result_team_b: u8,
+    start_tick: u64,
+    end_tick: u64,
+    start: TransportCounters,
+    end: TransportCounters,
+    protocol: u64,
+    content: u64,
+}
+
+fn encode_common_window_marker(marker: &CommonWindowMarker<'_>) -> String {
+    format!(
+        "schema=brawler-common-window-v1\nstatus=complete\nrole={role}\nrun_id={}\nscenario_id={}\nscenario_revision={}\nmode={}\nrules_profile={}\nnetwork_profile={}\nprotocol_version={}\nregistry_fingerprint={}\ncontent_fingerprint={}\nmode_definition_id={}\nrules_revision={}\nparticipant_count={participant_count}\nresult_kind={result_kind}\nresult_team_a={result_team_a}\nresult_team_b={result_team_b}\nstart_tick={start_tick}\nend_tick={end_tick}\ntick_count={}\ntransport_bytes_sent_start={}\ntransport_bytes_sent_end={}\ntransport_bytes_received_start={}\ntransport_bytes_received_end={}\npackets_sent_start={}\npackets_sent_end={}\npackets_received_start={}\npackets_received_end={}\n",
+        marker.settings.manifest.run_id,
+        marker.settings.manifest.scenario_id,
+        marker.settings.manifest.scenario_revision,
+        marker.settings.manifest.mode,
+        marker.settings.manifest.rules_profile,
+        marker.settings.manifest.network_profile,
+        marker.settings.manifest.protocol_version,
+        marker.protocol,
+        marker.content,
+        marker.match_state.mode_definition_id.0,
+        marker.match_state.rules_revision,
+        marker.end_tick.saturating_sub(marker.start_tick),
+        marker.start.bytes_sent,
+        marker.end.bytes_sent,
+        marker.start.bytes_received,
+        marker.end.bytes_received,
+        marker.start.packets_sent,
+        marker.end.packets_sent,
+        marker.start.packets_received,
+        marker.end.packets_received,
+        role = marker.role,
+        participant_count = marker.participant_count,
+        result_kind = marker.result_kind,
+        result_team_a = marker.result_team_a,
+        result_team_b = marker.result_team_b,
+        start_tick = marker.start_tick,
+        end_tick = marker.end_tick,
+    )
 }
 
 /// Compute the p`percentile` sample of a bounded microsecond sample list.

@@ -1858,10 +1858,21 @@ version = "0.1.0"
 dependencies = [
  "avian2d",
  "bevy",
+ "brawler-routing",
  "lightyear",
  "postcard",
  "ron",
  "serde",
+]
+
+[[package]]
+name = "brawler-routing"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "getrandom 0.3.4",
+ "mio",
+ "sha2",
 ]
 
 [[package]]
@@ -4740,6 +4751,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30d65c71f1ce40ab09135ce117d742b9f8a19ff91a41a8b57ed50bc2de59c427"
 dependencies = [
  "libc",
+ "log",
  "wasi",
  "windows-sys 0.61.2",
 ]

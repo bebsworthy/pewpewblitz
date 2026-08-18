@@ -197,7 +197,7 @@ impl PendingMatchRestart {
 }
 
 #[derive(Resource, Debug)]
-pub(crate) struct NextMatchId(u64);
+pub(crate) struct NextMatchId(u128);
 
 #[derive(Resource, Default, Debug)]
 struct RespawnOrdinals(BTreeMap<u64, u64>);
@@ -236,6 +236,15 @@ impl Default for NextMatchId {
 }
 
 impl NextMatchId {
+    /// Keep local restart allocation strictly after an externally assigned worker identity.
+    ///
+    /// A routed worker starts from its manifest's `u128` `MatchId` rather than this local counter.
+    /// Advancing the counter here prevents the first restart from reusing a low default value.
+    fn observe(&mut self, match_id: MatchId) {
+        let next = match_id.0.saturating_add(1);
+        self.0 = self.0.max(next);
+    }
+
     fn allocate(&mut self) -> MatchId {
         let id = MatchId(self.0.max(1));
         self.0 =
@@ -431,10 +440,19 @@ pub(crate) fn initialize_match_root(
     mut commands: Commands,
     mut ids: ResMut<NextMatchId>,
     setup: Res<MatchModeSetup>,
+    role: Option<Res<crate::server::ServerRoleResource>>,
     roots: Query<(), With<MatchRoot>>,
 ) {
     if roots.is_empty() {
-        let match_id = ids.allocate();
+        let manifest_match_id = role
+            .as_deref()
+            .and_then(crate::server::ServerRoleResource::match_worker_match_id);
+        let match_id = if let Some(match_id) = manifest_match_id {
+            ids.observe(match_id);
+            match_id
+        } else {
+            ids.allocate()
+        };
         commands.spawn((
             MatchRoot,
             MatchState {

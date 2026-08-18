@@ -1,12 +1,15 @@
 //! Dedicated-server composition and authoritative network-session concerns.
 
+#[cfg(test)]
+use crate::combat::TestDummy;
 use crate::{
     VERSION,
+    builds::{AbilityState, PassiveRuntimeState},
     combat::{
         ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
-        CombatTelemetry, SelectingBuild, ServerCombatPlugin, SpawnState, TeamId, TestDummy,
-        WeaponCatalogResource, WeaponPresetId, WeaponTelemetry, WeaponTelemetryKey,
-        decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
+        CombatTelemetry, CurrentHealth, SelectingBuild, ServerCombatPlugin, SpawnState, TeamId,
+        WeaponCatalogResource, WeaponPhase, WeaponPresetId, WeaponState, WeaponTelemetry,
+        WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
     },
     config::{GameMode, MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -51,14 +54,42 @@ use lightyear::prelude::{
     ControlledBy, InterpolationTarget, Lifetime, MessageReceiver, MessageSender, NetworkTarget,
     Replicate, ReplicationMetadata, ReplicationSender,
 };
-use std::{collections::BTreeMap, env, fmt::Write as _, fs, path::PathBuf, time::Instant};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    env,
+    fmt::Write as _,
+    fs,
+    path::PathBuf,
+    time::Instant,
+};
 
+mod admission;
+mod lobby;
+mod routed_worker;
 mod verification;
+mod worker;
+pub use admission::{
+    MatchWorkerManifestError, ServerRole, ServerRoleResource, admit_manifest_client,
+    authenticated_netcode_id, build_lobby_worker_app, build_match_worker_app, routing_identity,
+    validate_match_manifest,
+};
+pub use lobby::{
+    LobbyBuildIdentity, LobbyClient, LobbyControlFrame, LobbyPlugin, LobbySessionIdSource,
+    LobbyState, default_build_identity,
+};
+pub use routed_worker::{
+    RoutedPeer, RoutedPeerClose, RoutedWorker, RoutedWorkerFailure, RoutedWorkerPlugin,
+};
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
 use verification::*;
 use verification::{
     verify_process_combat, verify_process_match, verify_process_movement, verify_process_terrain,
+};
+pub use worker::{
+    LobbyControlInbox, LobbyControlOutbox, WorkerBootstrap, WorkerBootstrapError,
+    WorkerEntrypointRole, WorkerLaunchArguments, install_routed_worker_endpoint,
+    parse_worker_arguments,
 };
 
 /// Server-side session phase. Lightyear lifecycle components remain the connection truth.
@@ -298,6 +329,7 @@ pub(super) fn record_server_failure(
 impl Plugin for ServerNetworkPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FallbackErrorHandler(error))
+            .init_resource::<ServerRoleResource>()
             .init_resource::<NextSessionIds>()
             .init_resource::<ServerShutdown>()
             .init_resource::<ServerStartup>()
@@ -342,7 +374,11 @@ impl Plugin for ServerNetworkPlugin {
                     // the final report see post-shutdown counts and the re-emitted exit.
                     .before(crate::diagnostics::TerminalObservationSet),
             )
-            .add_plugins((ServerCombatPlugin, crate::abilities::ServerAbilityPlugin));
+            .add_plugins((
+                ServerCombatPlugin,
+                crate::abilities::ServerAbilityPlugin,
+                RoutedWorkerPlugin,
+            ));
     }
 }
 
@@ -360,7 +396,24 @@ fn configure_new_link(trigger: On<Add, LinkOf>, mut commands: Commands) {
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
-fn spawn_server_endpoint(mut commands: Commands, config: Res<ServerNetworkConfig>) -> Result {
+fn spawn_server_endpoint(
+    mut commands: Commands,
+    config: Res<ServerNetworkConfig>,
+    role: Res<ServerRoleResource>,
+) -> Result {
+    // A routed worker installs its already-connected endpoint during control-plane bootstrap.
+    // The production graph remains shared with direct UDP, but must not accidentally bind a
+    // second public socket in a worker process.
+    if !matches!(role.0, ServerRole::DirectBaseline) {
+        return Ok(());
+    }
+    // The role resource is initialized by ServerNetworkPlugin before Startup.  It is queried in
+    // a separate system parameter below so this function's direct-UDP behavior remains unchanged
+    // for the v1 baseline.
+    spawn_server_endpoint_udp(&mut commands, &config)
+}
+
+fn spawn_server_endpoint_udp(commands: &mut Commands, config: &ServerNetworkConfig) -> Result {
     if config.transport != NetworkTransport::Udp {
         return Ok(());
     }
@@ -395,18 +448,18 @@ fn observe_server_endpoint(
         (),
         (
             With<NetcodeServer>,
-            With<ServerUdpIo>,
             With<Started>,
             With<Linked>,
+            Or<(With<ServerUdpIo>, With<RoutedWorker>)>,
         ),
     >,
     failed_query: Query<
         (),
         (
             With<NetcodeServer>,
-            With<ServerUdpIo>,
             With<Started>,
             Without<Linked>,
+            Or<(With<ServerUdpIo>, With<RoutedWorker>)>,
         ),
     >,
     diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
@@ -488,6 +541,7 @@ fn initialize_sessions(
 fn process_client_hellos(
     mut commands: Commands,
     config: Res<ServerNetworkConfig>,
+    role: Res<ServerRoleResource>,
     fingerprint: Res<ProtocolFingerprint>,
     content_fingerprint: Res<crate::content::GameplayContentFingerprint>,
     spawn_points: Res<SpawnPointCatalog>,
@@ -504,13 +558,13 @@ fn process_client_hellos(
         &mut MessageReceiver<ClientHello>,
         &mut MessageSender<JoinOutcome>,
         &mut ServerSession,
+        Option<&RoutedPeer>,
         Has<Disconnected>,
     )>,
-    placeholders: Query<(), (With<Fighter>, Without<TestDummy>)>,
     match_root: Query<&MatchState, With<MatchRoot>>,
     participants: Query<(&TeamId, &MatchParticipant, &Position), With<Fighter>>,
 ) {
-    let mut active_count = placeholders.iter().count();
+    let mut active_count = participants.iter().count();
     let Ok(match_state) = match_root.single() else {
         return;
     };
@@ -523,8 +577,20 @@ fn process_client_hellos(
         }
     }
     let mut ordered_receivers: Vec<_> = receivers.iter_mut().collect();
-    ordered_receivers.sort_by_key(|(_, remote_id, _, _, _, _)| remote_id.0.to_bits());
-    for (connection, _, mut receiver, mut sender, mut session, disconnected) in ordered_receivers {
+    ordered_receivers.sort_by_key(|(_, remote_id, _, _, _, _, _)| remote_id.0.to_bits());
+    let mut admitted_client_ids: BTreeSet<u64> = ordered_receivers
+        .iter()
+        .filter_map(|(_, remote_id, _, _, session, _, disconnected)| {
+            if !disconnected && matches!(session.phase, ServerSessionPhase::Active { .. }) {
+                authenticated_netcode_id(remote_id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (connection, remote_id, mut receiver, mut sender, mut session, routed_peer, disconnected) in
+        ordered_receivers
+    {
         if disconnected {
             receiver.receive().for_each(drop);
             continue;
@@ -565,6 +631,20 @@ fn process_client_hellos(
                         JoinOutcome::Rejected {
                             reason: JoinRejection::ContentMismatch,
                         }
+                    } else if matches!(role.0, ServerRole::MatchWorker(_))
+                        && authenticated_netcode_id(remote_id).is_none_or(|client_id| {
+                            admit_manifest_client(
+                                role.manifest().expect("match worker has a manifest"),
+                                client_id,
+                                routed_peer.map(|peer| peer.peer_id),
+                                &admitted_client_ids,
+                            )
+                            .is_err()
+                        })
+                    {
+                        JoinOutcome::Rejected {
+                            reason: JoinRejection::MatchFull,
+                        }
                     } else if !matches!(match_state.phase, MatchPhase::Waiting) {
                         JoinOutcome::Rejected {
                             reason: JoinRejection::MatchInProgress,
@@ -573,27 +653,78 @@ fn process_client_hellos(
                         JoinOutcome::Rejected {
                             reason: JoinRejection::ServerFull,
                         }
-                    } else if assigned_team(
-                        team_counts,
-                        lifecycle_rules.maximum_participants_per_team,
-                    )
-                    .is_none()
+                    } else if !matches!(role.0, ServerRole::MatchWorker(_))
+                        && assigned_team(team_counts, lifecycle_rules.maximum_participants_per_team)
+                            .is_none()
                     {
                         JoinOutcome::Rejected {
                             reason: JoinRejection::MatchFull,
                         }
                     } else {
                         match ids.allocate() {
-                            Some((player_id, network_entity_id)) => {
+                            Some((baseline_player_id, baseline_network_entity_id)) => {
+                                let worker_participant = role
+                                    .manifest()
+                                    .and_then(|manifest| {
+                                        authenticated_netcode_id(remote_id).and_then(|client_id| {
+                                            admit_manifest_client(
+                                                manifest,
+                                                client_id,
+                                                routed_peer.map(|peer| peer.peer_id),
+                                                &admitted_client_ids,
+                                            )
+                                            .ok()
+                                        })
+                                    })
+                                    .copied();
                                 let accepted = JoinOutcome::Accepted {
-                                    player_id,
-                                    network_entity_id,
+                                    player_id: worker_participant
+                                        .map_or(baseline_player_id, |participant| {
+                                            PlayerId(participant.player_id.get())
+                                        }),
+                                    network_entity_id: baseline_network_entity_id,
                                 };
-                                let assigned_team = assigned_team(
-                                    team_counts,
-                                    lifecycle_rules.maximum_participants_per_team,
-                                )
-                                .expect("capacity was checked before identifier allocation");
+                                let (assigned_team, manifest_loadout) = if let Some(participant) =
+                                    worker_participant.as_ref()
+                                {
+                                    let team = TeamId(participant.team);
+                                    let builds = crate::builds::BuildCatalog::embedded()
+                                        .expect("validated match-worker build catalog");
+                                    let weapons_catalog = crate::combat::WeaponCatalog::embedded()
+                                        .expect("validated match-worker weapon catalog");
+                                    let fighter = fighters
+                                        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
+                                        .expect("validated standard fighter definition");
+                                    let preset_id = crate::builds::BuildPresetId(
+                                        participant
+                                            .source_build_preset
+                                            .expect("validated manifest preset"),
+                                    );
+                                    let preset = builds
+                                        .preset(preset_id)
+                                        .expect("validated manifest build preset");
+                                    let loadout = crate::builds::resolve_build_recipe(
+                                        &builds,
+                                        &weapons_catalog,
+                                        fighter,
+                                        preset.recipe,
+                                        Some(preset_id),
+                                    )
+                                    .expect("validated manifest build resolution");
+                                    (team, Some(loadout))
+                                } else {
+                                    let assigned_team = assigned_team(
+                                        team_counts,
+                                        lifecycle_rules.maximum_participants_per_team,
+                                    )
+                                    .expect("capacity was checked before identifier allocation");
+                                    (assigned_team, None)
+                                };
+                                let player_id = worker_participant
+                                    .map_or(baseline_player_id, |participant| {
+                                        PlayerId(participant.player_id.get())
+                                    });
+                                let network_entity_id = baseline_network_entity_id;
                                 let candidates = spawn_points
                                     .0
                                     .get(&assigned_team.0)
@@ -617,8 +748,15 @@ fn process_client_hellos(
                                 .expect("validated map has a finite spawn for each Wipeout team");
                                 let spawn_position = spawn_point.position;
                                 let spawn_facing = spawn_point.facing;
-                                let (fighter_definition, team, health, _weapon) =
+                                let (fighter_definition, team, mut health, mut weapon) =
                                     default_fighter_runtime(assigned_team, &fighters, &weapons);
+                                if let Some(loadout) = manifest_loadout.as_ref() {
+                                    health = CurrentHealth(loadout.fighter_stats.maximum_health);
+                                    weapon = WeaponState {
+                                        ammo: loadout.primary_weapon.recipe.economy.capacity(),
+                                        phase: WeaponPhase::Ready,
+                                    };
+                                }
                                 let fighter_entity = commands
                                     .spawn((
                                         Fighter,
@@ -671,11 +809,27 @@ fn process_client_hellos(
                                         lifetime: Lifetime::SessionBased,
                                     },
                                 ));
+                                if let Some(loadout) = manifest_loadout {
+                                    commands
+                                        .entity(fighter_entity)
+                                        .insert((
+                                            loadout.identity,
+                                            loadout,
+                                            AbilityState::default(),
+                                            PassiveRuntimeState::default(),
+                                            weapon,
+                                            ActiveEffects::default(),
+                                        ))
+                                        .remove::<SelectingBuild>();
+                                }
                                 session.phase = ServerSessionPhase::Active {
                                     player_id,
                                     network_entity_id,
                                 };
                                 active_count += 1;
+                                if let Some(client_id) = authenticated_netcode_id(remote_id) {
+                                    admitted_client_ids.insert(client_id);
+                                }
                                 team_counts[usize::from(assigned_team.0)] =
                                     team_counts[usize::from(assigned_team.0)].saturating_add(1);
                                 living_fighters.push((assigned_team, spawn_position));
@@ -941,6 +1095,16 @@ fn finish_server_shutdown(
 
 /// Build the production headless dedicated server application.
 pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
+    build_authoritative_app(config, true)
+}
+
+/// Build an authoritative worker whose shutdown is owned by supervisor control IPC rather than
+/// process-local terminal signal handling.
+fn build_match_worker_graph(config: ServerNetworkConfig) -> App {
+    build_authoritative_app(config, false)
+}
+
+fn build_authoritative_app(config: ServerNetworkConfig, install_terminal_handler: bool) -> App {
     let mut app = App::new();
     let lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
     app.insert_resource(config)
@@ -948,9 +1112,11 @@ pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
             crate::timing::SIMULATION_TICK,
         )))
-        .add_plugins(StatesPlugin)
-        .add_plugins(TerminalCtrlCHandlerPlugin)
-        .add_plugins(LogPlugin::default())
+        .add_plugins(StatesPlugin);
+    if install_terminal_handler {
+        app.add_plugins(TerminalCtrlCHandlerPlugin);
+    }
+    app.add_plugins(LogPlugin::default())
         .add_plugins(ServerPlugins {
             tick_duration: crate::timing::SIMULATION_TICK,
         })
@@ -1020,7 +1186,11 @@ pub fn match_lifecycle_rules_for_profile(profile: MatchRulesProfile) -> MatchLif
     match profile {
         MatchRulesProfile::Production => MatchLifecycleRules::default(),
         MatchRulesProfile::ProcessVerification => MatchLifecycleRules {
-            minimum_participants_per_team: 2,
+            // Keep the verification profile's minimum compatible with the production
+            // lifecycle so a two-client routed 1v1 can reach its authoritative deadline.  The
+            // profile still supports the production 2v2 capacity through its unchanged maximum;
+            // the four-client process-match harness therefore retains its 2v2 coverage.
+            minimum_participants_per_team: 1,
             countdown_ticks: 30,
             active_limit_ticks: 3_600,
             respawn_delay_ticks: 30,

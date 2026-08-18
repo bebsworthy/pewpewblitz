@@ -15,8 +15,8 @@ use crate::{
     protocol::{
         BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
         ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, MatchCommand,
-        MatchCommandOutcome, MatchCommandRequest, NetworkEntityId, PlayerId, ProtocolFingerprint,
-        ProtocolPlugin, SessionChannel,
+        MatchCommandOutcome, MatchCommandRequest, MatchRouteGrantV1, NetworkEntityId, PlayerId,
+        ProtocolFingerprint, ProtocolPlugin, SessionChannel,
     },
 };
 use avian2d::prelude::{AngularVelocity, LinearVelocity, PhysicsSystems, Position, Rotation};
@@ -32,6 +32,7 @@ use bevy::{
     window::{PresentMode, PrimaryWindow, WindowCloseRequested, WindowResolution},
     winit::{UpdateMode, WinitSettings},
 };
+use brawler_routing::{ROUTED_LINK_MTU, RequestId};
 use core::time::Duration;
 use lightyear::prelude::InterpolationSystems;
 use lightyear::prelude::client::input::InputSystems;
@@ -41,7 +42,8 @@ use lightyear::prelude::client::{
 };
 use lightyear::prelude::input::native::{ActionState, InputMarker};
 use lightyear::prelude::{
-    Authentication, InterpolationTimeline, Link, LocalAddr, NetworkTimeline, PeerAddr,
+    Authentication, InterpolationTimeline, Link, LinkMtu, LocalAddr, NetworkTimeline, PeerAddr,
+    Unlink, UnlinkReason, Unlinked,
 };
 use lightyear::prelude::{ConfirmedHistory, Controlled, Interpolated};
 use lightyear::prelude::{MessageReceiver, MessageSender, PingManager, ReplicationReceiver, UdpIo};
@@ -54,6 +56,7 @@ mod input;
 #[cfg(feature = "owner-prediction")]
 pub mod prediction;
 mod presentation;
+mod routed_udp;
 mod session;
 mod settings;
 pub(crate) use assets::ClientAssetHandles;
@@ -64,6 +67,7 @@ pub use presentation::{ClientPresentationPlugin, MovementPresentationPlugin};
 use presentation::{
     clamp_camera_center, update_client_hud, write_interpolated_fighter_pose_to_transform,
 };
+pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
 pub use session::ClientNetworkPlugin;
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
@@ -74,6 +78,96 @@ pub use settings::{
     CalibrationField, ClientInputSettings, GamepadAction, GamepadBindings, KeyboardAction,
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
+
+/// Explicit client-side state for the sequential routed transport lifecycle.
+///
+/// A routed client owns exactly one Lightyear `Client` entity at a time.  The lobby and match
+/// sessions are intentionally separate Netcode sessions: a grant moves this state to
+/// `AwaitingLobbyUnlink`, and only after the old entity has been deferred-unlinked and despawned
+/// does the session system create a fresh match entity.  The same sequence is used in reverse for
+/// an intentional return to the lobby.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RoutedClientPhase {
+    #[default]
+    Disabled,
+    Lobby,
+    AwaitingLobbyUnlink,
+    AwaitingLobbyRetryUnlink,
+    Match,
+    AwaitingMatchUnlink,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct RoutedClientLifecycle {
+    pub phase: RoutedClientPhase,
+    /// Request accepted on the current authenticated lobby session. M01 has no lobby session ID
+    /// in the client-visible grant yet, so the request ID is the strongest available binding.
+    pub current_request_id: Option<RequestId>,
+    /// The one grant accepted for the current lobby request. Its capability is redacted by the
+    /// protocol and routing types when this resource is logged or formatted for diagnostics.
+    pub accepted_grant: Option<MatchRouteGrantV1>,
+    /// Monotonic local generation. Every fresh lobby or match Netcode entity gets a new value.
+    pub generation: u64,
+}
+
+impl RoutedClientLifecycle {
+    /// Start a fresh lobby request/session. This is also the recovery path after any transition
+    /// failure; no match session is resumed.
+    pub fn start_lobby(&mut self) {
+        self.generation = self.generation.saturating_add(1).max(1);
+        self.phase = RoutedClientPhase::Lobby;
+        // The lobby owns RequestId. The client records it only after receiving the authenticated
+        // grant; generating a local value here would not bind to the server's request namespace.
+        self.current_request_id = None;
+        self.accepted_grant = None;
+    }
+
+    /// Accept exactly one authenticated grant for the current lobby request.
+    pub fn accept_grant(&mut self, grant: MatchRouteGrantV1) -> bool {
+        if self.phase != RoutedClientPhase::Lobby || self.accepted_grant.is_some() {
+            return false;
+        }
+        self.accepted_grant = Some(grant);
+        self.current_request_id = Some(grant.request_id);
+        self.phase = RoutedClientPhase::AwaitingLobbyUnlink;
+        true
+    }
+
+    /// Request an intentional match-to-lobby transition. The caller still needs the session
+    /// system to issue `Disconnect`; this separation makes the deferred unlink boundary explicit.
+    pub fn request_return_to_lobby(&mut self) -> bool {
+        if self.phase != RoutedClientPhase::Match {
+            return false;
+        }
+        self.phase = RoutedClientPhase::AwaitingMatchUnlink;
+        true
+    }
+
+    fn begin_match(&mut self) -> Option<MatchRouteGrantV1> {
+        if self.phase != RoutedClientPhase::AwaitingLobbyUnlink {
+            return None;
+        }
+        self.phase = RoutedClientPhase::Match;
+        self.accepted_grant
+    }
+
+    fn begin_lobby_after_match(&mut self) {
+        self.start_lobby();
+    }
+}
+
+/// Identifies which side of the sequential routed lifecycle owns a fresh Lightyear entity.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoutedClientSession {
+    pub generation: u64,
+    pub kind: RoutedClientSessionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoutedClientSessionKind {
+    Lobby,
+    Match,
+}
 
 /// User-visible client connection state. Lightyear lifecycle components remain the truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -511,6 +605,10 @@ pub fn build_app() -> App {
 }
 
 #[cfg(feature = "network-test")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "network-test callers pass an owned configuration alongside the owned Crossbeam IO"
+)]
 pub fn spawn_crossbeam_client(
     world: &mut World,
     config: ClientNetworkConfig,

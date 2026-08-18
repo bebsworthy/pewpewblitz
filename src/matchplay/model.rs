@@ -1,11 +1,30 @@
 use crate::{combat::TeamId, map::ModeDefinitionId};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
 
+/// Stable match identity shared by gameplay state and the routed match manifest.
+///
+/// Match workers receive this value from the routing layer as a nonzero `u128`. Keeping the
+/// gameplay identity at the same width avoids a second identity or lossy admission conversion.
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Reflect,
 )]
-pub struct MatchId(pub u64);
+pub struct MatchId(pub u128);
+
+impl fmt::Display for MatchId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for MatchId {
+    type Err = <u128 as FromStr>::Err;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value.parse().map(Self)
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub enum MatchResult {

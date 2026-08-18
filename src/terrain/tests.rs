@@ -1263,7 +1263,7 @@ mod convergence_tests {
     pub(super) fn generation(match_id: u64) -> TerrainGeneration {
         TerrainGeneration {
             map_instance_id: crate::map::MapInstanceId(1),
-            match_id: MatchId(match_id),
+            match_id: MatchId(match_id.into()),
             terrain_fingerprint: 0xabcd_ef01,
         }
     }
@@ -1888,8 +1888,8 @@ mod reset_cycle_tests {
             app.world_mut()
                 .resource_mut::<crate::matchplay::PendingMatchRestart>()
                 .stage_for_test(crate::matchplay::PendingMatchRestartSlot {
-                    previous_id: crate::matchplay::MatchId(cycle * 2 + 1),
-                    next_id: crate::matchplay::MatchId(cycle * 2 + 3),
+                    previous_id: crate::matchplay::MatchId((cycle * 2 + 1).into()),
+                    next_id: crate::matchplay::MatchId((cycle * 2 + 3).into()),
                     restart_tick: cycle,
                 });
             crate::terrain::reset_terrain_on_match_restart(app.world_mut());

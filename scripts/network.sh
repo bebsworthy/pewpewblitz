@@ -14,8 +14,10 @@ network_run_id="${BRAWLER_NETWORK_RUN_ID:-network-script}"
 diagnostics_dir="${BRAWLER_DIAGNOSTICS_DIR:-}"
 client_count="${BRAWLER_NETWORK_CLIENT_COUNT:-2}"
 server_features="${BRAWLER_NETWORK_SERVER_FEATURES:-server}"
+client_features="${BRAWLER_NETWORK_CLIENT_FEATURES:-client}"
 diagnostics_scenario_id="${BRAWLER_DIAGNOSTICS_SCENARIO_ID:-}"
 network_timeout_seconds="${BRAWLER_NETWORK_TIMEOUT_SECONDS:-}"
+simulation_ticks="${BRAWLER_NETWORK_SIMULATION_TICKS:-}"
 startup_timeout_seconds=10
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
@@ -45,6 +47,10 @@ if ! [[ "$client_count" =~ ^[1-8]$ ]]; then
 fi
 if ! [[ "$network_timeout_seconds" =~ ^[0-9]+$ ]]; then
     printf 'brawler network: BRAWLER_NETWORK_TIMEOUT_SECONDS must be a non-negative integer\n' >&2
+    exit 2
+fi
+if [[ -n "$simulation_ticks" ]] && ! [[ "$simulation_ticks" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_SIMULATION_TICKS must be a positive integer\n' >&2
     exit 2
 fi
 if [[ "$headless" != "0" && "$headless" != "1" ]]; then
@@ -226,7 +232,7 @@ wait_for_server_closeout() {
 }
 
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features "$server_features" --bin brawler-server
-cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features client --bin brawler-client
+cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features "$client_features" --bin brawler-client
 
 server_env=(env "BRAWLER_SERVER_READY_FILE=$ready_file")
 if [[ -n "$diagnostics_dir" ]]; then
@@ -278,6 +284,8 @@ if [[ -n "$diagnostics_dir" ]]; then
     server_env+=(
         "${identity_env[@]}"
         "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE=$diagnostics_dir/server.closeout"
+        "BRAWLER_DIAGNOSTICS_WINDOW_FILE=$diagnostics_dir/server.window"
+        "BRAWLER_DIAGNOSTICS_ROLE=server"
     )
 fi
 if [[ "$headless" == "1" ]]; then
@@ -352,7 +360,12 @@ done
 
 client_args=(--server "$network_addr")
 if [[ "$headless" == "1" ]]; then
-    if [[ "$combat_assert" == "1" ]]; then
+    if [[ -n "$simulation_ticks" ]]; then
+        client_args+=(--headless --exit-after-roster 2 --simulation-ticks "$simulation_ticks")
+        if [[ "$combat_assert" == "1" ]]; then
+            client_args+=(--fire)
+        fi
+    elif [[ "$combat_assert" == "1" ]]; then
         client_args+=(--headless --exit-after-roster 2 --simulation-ticks 1200 --fire)
     else
         # Outlast the production countdown (180 ticks) plus travel so the movement
@@ -420,10 +433,14 @@ if [[ -n "$diagnostics_dir" ]]; then
     client_one_env+=(
         "${identity_env[@]}"
         "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE=$diagnostics_dir/client-1.closeout"
+        "BRAWLER_DIAGNOSTICS_WINDOW_FILE=$diagnostics_dir/client-1.window"
+        "BRAWLER_DIAGNOSTICS_ROLE=client"
     )
     client_two_env+=(
         "${identity_env[@]}"
         "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE=$diagnostics_dir/client-2.closeout"
+        "BRAWLER_DIAGNOSTICS_WINDOW_FILE=$diagnostics_dir/client-2.window"
+        "BRAWLER_DIAGNOSTICS_ROLE=client"
     )
 fi
 
