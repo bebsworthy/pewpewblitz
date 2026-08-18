@@ -7,17 +7,17 @@
 | Version | v2 — player UX and server-local matchmaking |
 | Roadmap | [roadmap.md](./roadmap.md) |
 | Architecture | [Multi-process server and single-port UDP/IPC transport](../../14-multiplayer-server-architecture.md) |
-| Status | User playtest |
+| Status | Complete |
 | Research | Complete 2026-08-18. Exact Lightyear 0.29 link, connection, Netcode, UDP, Crossbeam, and transport sources; current Brawler composition; macOS IPC/process APIs; and the delivered M11 baseline were inspected. Decisions, limits, risks, contingency, and implementation contract are below. |
 | Entry artifacts | Complete 2026-08-18: [V1 M11 worker-readiness handoff](../v1/milestone-11.md#v2-worker-readiness-handoff) and [direct-UDP baseline](../v1/evidence/v2-baseline/README.md) |
 | Specification validation | Approved 2026-08-18 when the user explicitly directed implementation of v2 M01. |
 | Implementation | Complete 2026-08-18. All implementation slices below are present in production role graphs and commands. |
 | Verification | Development-use gate passed 2026-08-19. Canonical `CARGO_INCREMENTAL=0 just verify` passed: formatting; client/server/routing Clippy; 95 routing, 270 client, 261 server, 77 network integration, and 14 performance tests; server feature isolation; and a clean two-client routed lobby→match→fresh-lobby smoke with graceful match/lobby reap. Both-mode, crash/restart, RSS, public-envelope accounting, cleanup, and an exact 3,600-tick paired lane are also implemented. Exhaustive production campaigns and performance optimization are deferred to M09 by the user-approved scope decision below. |
-| User playtest | Ready. The canonical windowed check is defined below; feedback is not yet recorded. |
+| User playtest | Accepted 2026-08-19. The user reported that the routed build “seems to work roughly” and directed M01 closeout. No specific correctness defect was reported; roughness remains visible for later UX/performance hardening. |
 
 ## Outcome and evidence labels
 
-M01 will establish one logical Brawler server at one public UDP endpoint, with a thin process
+M01 established one logical Brawler server at one public UDP endpoint, with a thin process
 supervisor routing opaque Lightyear/Netcode datagrams to one isolated lobby worker and isolated
 authoritative match workers. A client closes its lobby session and creates a fresh match session at
 the same public address. The supervisor owns routing and process admission only; it never decodes or
@@ -32,7 +32,7 @@ The following labels distinguish fact from choice:
 - **Deferred** means a later milestone owns the behavior and M01 must not approximate it.
 
 M01 is a production foundation, not a disposable spike. The user approved this specification on
-2026-08-18; implementation is complete and verification is active.
+2026-08-18 and accepted the development-use implementation on 2026-08-19; closeout is complete.
 
 ### 2026-08-19 verification scope decision
 
@@ -732,14 +732,44 @@ Implementation explicitly locks the smallest compatible direct dependency, not a
 
 ## Specification validation
 
-Research is resolved and this complete specification awaits user approval. Approval authorizes
-moving to Implementing; Specification review alone does not. Requested architecture, format,
-capacity, or hard-gate changes must be recorded before implementation.
+Research resolved and the user approved this specification on 2026-08-18 before implementation.
+The later 2026-08-19 development-use scope decision and its deferred hardening are recorded above;
+no unapproved transport contingency was selected.
 
 ## Feedback review
 
-Pending implementation verification and user handoff.
+| Feedback | Disposition |
+|---|---|
+| Routed development build “seems to work roughly.” | **Accepted for M01.** The successful interaction satisfies the development-usability gate. No actionable correctness defect was identified, so no speculative code change is made. General transition/presentation roughness remains owned by M02–M07, while routed performance and exhaustive production hardening remain `V2-ROUTED-HARDENING` in M09. |
+| Close M01. | **Implemented.** Verification evidence, limitations, deferred measurements, and this feedback disposition are recorded; M01 and the roadmap are marked Complete. |
 
 ## Learn-from-errors review
 
-Pending implementation closeout.
+1. **Development usability and production hardening were initially conflated.** The first exit
+   contract allowed narrow performance thresholds and exhaustive campaigns to block use of an
+   otherwise functioning foundation. Cause: the specification optimized for production confidence
+   before the product needed that confidence. Prevention: future infrastructure milestones must
+   separate correctness/development-use gates from later capacity, optimization, and operational
+   hardening at specification time. M09 now owns the deferred routed gates without relabeling their
+   failed or unsupported evidence.
+2. **Control ownership was too distributed.** Runtime and lifecycle code could allocate from the
+   same BRCT sequence space during shutdown, and Result could overtake final packet IPC on a
+   separate stream. Cause: cross-stream ordering and sequence ownership were implicit. Prevention:
+   keep one explicit sequence owner, suppress non-shutdown controls after Stop, retain lifecycle
+   polling/reaping, and require the packet-EOF drain barrier before Result cleanup. Focused
+   regressions now cover both boundaries.
+3. **Evidence labels briefly exceeded what the instrumentation measured.** Owner-loop timing was
+   not full public-to-worker IPC latency; mixed control/packet counters were not packet-only
+   overhead; matching zero fingerprints did not prove build identity. Cause: convenient counters
+   were treated as end-to-end facts. Prevention: name the exact observation boundary, fail closed
+   on absent identity/cardinality, preserve `unsupported` when a boundary is missing, and keep raw
+   diagnostics separate from threshold claims.
+4. **The final canonical gate found issues narrower checks missed.** Interrupted incremental builds
+   complicated linking, and late diagnostics/outbox edits passed focused tests before all-role
+   Clippy exposed reviewability issues. Prevention: use clean non-incremental recovery when a build
+   is interrupted and run the canonical `just verify` after the final source edit, not merely before
+   handoff. The closeout run passed formatting, all role Clippy lanes, 95 routing, 270 client, 261
+   server, 77 network, and 14 performance tests, feature isolation, and the routed process smoke.
+5. **Reusable lesson:** preserve strict truthfulness without letting measurement work displace the
+   product stage. A failed optimization target stays failed and documented, but it blocks a
+   milestone only when the user-visible or correctness outcome actually depends on it.

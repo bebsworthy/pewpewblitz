@@ -17,8 +17,8 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
 - Only the next milestone receives a detailed file. Later entries define outcomes, ordering,
   dependencies, and gates—not premature technical specifications.
 - By explicit user direction on 2026-08-18, M02 is the bounded exception: its specification was
-  prepared while M01 finishes verification. M01 remains the only implementation milestone, and M02
-  cannot enter `Implementing` until M01 completes and the user validates the M02 specification.
+  prepared during M01 verification. M01 completed on 2026-08-19; M02 is now the current milestone
+  but cannot enter `Implementing` until the user validates its specification.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -34,8 +34,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M01 — Routed multi-process server foundation |
+| Status | Specification review |
+| Current milestone | M02 — Product client shell, navigation, settings, and persistence |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
@@ -43,7 +43,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Milestone | Status | Deliverable | Plan |
 |---|---|---|---|
-| 01 | User playtest | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
+| 01 | Complete | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Specification review | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
 | 03 | Not started | Direct-connect lobby session and advertised game selection | Create when next |
 | 04 | Not started | Product build editor and authoritative queue admission | Create when next |
