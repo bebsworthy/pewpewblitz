@@ -31,16 +31,16 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Researching |
+| Status | Specification review |
 | Current milestone | M01 — Routed multi-process server foundation |
-| Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. Production implementation still waits for M01 specification validation |
+| Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. M01 research/specification is complete and pending user validation; production implementation has not started |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
 ## Milestone overview
 
 | Milestone | Status | Deliverable | Plan |
 |---|---|---|---|
-| 01 | Researching | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
+| 01 | Specification review | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Not started | Product client shell, navigation, settings, and persistence | Create when next |
 | 03 | Not started | Direct-connect lobby session and advertised game selection | Create when next |
 | 04 | Not started | Product build editor and authoritative queue admission | Create when next |
@@ -174,7 +174,7 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 
 | ID | Item | Disposition |
 |---|---|---|
-| V2-TRANSPORT-CONTINGENCY | Bounded worker-port range using standard Lightyear UDP | Cost the reference design before M01 specification validation; implement only if accepted single-port routing fails a hard threshold after bounded optimization |
+| V2-TRANSPORT-CONTINGENCY | Bounded worker-port range using standard Lightyear UDP | Costed in M01. A qualifying routed hard-gate failure may only return M01 to specification review with evidence; selecting or implementing this contingency requires the user's express approval |
 | V2-WINDOWS-IPC | Production Windows named-pipe backend | Preserve the contract in M01; implement when Windows becomes an active target |
 | V2-ROUTE-RESUMPTION | Resume an interrupted match connection | Deferred; v2 returns to a fresh lobby session |
 | V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | M01 makes the routed supervisor path the default for `network.sh`/`just network` after validating its minimum transition driver and retains direct UDP only as an explicitly named compatibility/baseline command; M09 removes the legacy executable/configuration after final comparison evidence unless a documented compatibility requirement remains |
