@@ -173,7 +173,7 @@ Countdown failure from silently restoring Waiting.
 - [x] Let the match worker directly unlock the existing authoritative Countdown.
 - [x] End failed pre-Active attempts cleanly without requeue/reconciliation machinery.
 - [x] Block additional product admission after the one M05 match reaches Active.
-- [x] Add routed 1v1/2v2/3v3 and direct-baseline commands.
+- [x] Put routed 1v1/2v2/3v3 coverage behind the shared `run` and `e2e` commands.
 - [x] Complete the final canonical verification matrix after simplification.
 - [ ] Run the user playtest and record feedback decisions.
 - [x] Complete the learn-from-errors review.
@@ -183,13 +183,11 @@ Countdown failure from silently restoring Waiting.
 
 Automated gates:
 
-1. `just fmt-check`
-2. `just lint`
-3. `just test`
-4. `just server-features`
-5. canonical routed 2v2 product smoke
-6. canonical routed 3v3 product smoke
-7. canonical direct-UDP baseline smoke
+1. `just lint`
+2. `just test`
+3. `just e2e 2`
+4. `just e2e 4`
+5. `just e2e 6`
 
 Focused assertions cover exact formation, balanced topology, map capacity, build snapshot
 revalidation, recipient-correct grants, manifest-only admission, the complete readiness predicate,
@@ -197,13 +195,13 @@ full-roster Countdown activation, clean pre-Active failure, and the one-match ad
 
 Manual playtest:
 
-1. Run `just network-first-blood` and join First Blood from both windows.
+1. Run `just run 2` and join First Blood from both windows.
 2. Confirm both clients reach Active and the first defeat completes the match.
-3. Run `just network-product-match` and join one advertised 2v2 game from all four windows.
+3. Run `just run 4` and join one advertised 2v2 game from all four windows.
 4. Confirm Queue changes to Match Loading only for the exact roster.
 5. Confirm all clients show the same game/map/topology and only their own build.
 6. Confirm all clients reach the server-authored Countdown and then Active.
-7. Run `just network-product-match-3v3` and repeat with the 3v3 game and all six windows.
+7. Run `just run 6` and repeat with the 3v3 game and all six windows.
 8. Repeat once with a pre-Countdown cancel or disconnected client; confirm the attempted start ends
    and clients can return to Game Select and queue afresh.
 
@@ -252,6 +250,10 @@ Manual playtest:
 - The follow-up consistency pass updated the player UX contract, M01 manifest field list, M03
   operator-catalog specification, M05 contract, roadmap, README, and owned code comments. `just
   docs`, formatting checks, and whitespace validation passed.
+- The command-surface cleanup reduced the advertised `just` recipes from 70 to 11. `just lint`,
+  `just test`, and the two-client `just e2e` path passed; the new routed server launcher also
+  started and stopped cleanly on an alternate local port while an existing port-5000 session was
+  left untouched.
 
 The redundant match-loading acknowledgement removal was followed by the full lint/test/smoke
 matrix. The subsequent removal of the unused successful check-in response was followed by
@@ -271,6 +273,7 @@ formatting, warning-free lint, both complete role checks, and fresh 2v2, 3v3, an
 | Three players queue, one disconnects, and one replacement causes a three-player match attempt | Implement now | Formation now cross-checks every selected ticket against a current non-disconnected lobby entity, so a stale ticket can remain visible briefly but can never count toward an exact roster |
 | Add a short 1v1 match where one kill wins, named First Blood | Implement now | Added an advertised First Blood game, an authoritative one-kill objective, exact 1v1 admission, and two-client windowed/smoke commands |
 | Replace inconvenient game-type rule profiles with basic parameters and no shared defaults block | Implement now | Every game now directly declares `kills_to_win` or `capture_seconds`, plus its own match duration, countdown, and respawn seconds; resolved values travel in the worker manifest |
+| Replace the growing flat list of `just` recipes with development basics plus `server`, `client`, and `run <n>` | Implement now | Reduced the advertised surface from 70 recipes to 11; deterministic checks live under `test`, real-process matches live under `e2e [2|4|6]`, and specialized evidence remains in focused scripts |
 
 No feedback item is deferred or rejected. The remaining feedback gate is a rerun of the hands-on
 1v1/2v2/3v3 and cancel-path playtest using the corrected canonical windowed commands.

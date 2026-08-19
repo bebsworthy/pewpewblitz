@@ -7,10 +7,11 @@ terrain, replicated match/map/combat state, local input settings, and client-onl
 Lightyear Netcode/UDP.
 
 V1 completion is not a release-ready claim. Controller feel, audio, HUD/readability, balance, match
-pacing, and related tuning remain explicit pre-release polish. V2 M01 is implementing a
-single-public-port routed supervisor with isolated lobby and match workers after specification
-validation on 2026-08-18. See the [v2 roadmap](docs/implementation/v2/roadmap.md),
-[active milestone](docs/implementation/v2/milestone-01.md), and [completed v1 roadmap](docs/implementation/v1/roadmap.md).
+pacing, and related tuning remain explicit pre-release polish. V2 M05 is in user playtest with a
+single-public-port routed supervisor and isolated lobby and match workers. See the
+[v2 roadmap](docs/implementation/v2/roadmap.md),
+[active milestone](docs/implementation/v2/milestone-05.md), and
+[completed v1 roadmap](docs/implementation/v1/roadmap.md).
 
 ## Toolchain
 
@@ -18,95 +19,40 @@ The repository pins Rust 1.95.0 in [`rust-toolchain.toml`](rust-toolchain.toml).
 
 ## Canonical commands
 
-Run these from the repository root:
+The everyday development surface is intentionally small:
 
 ```sh
 just
-```
+just server
+just client
+just run <client-count>
 
-`just` lists the development recipes. Use `just run` for one server and one client, `just network`
-for one server and two distinguishable client windows, `just network-combat` for two windows with
-client 1 automatically firing at the test-only neutral dummy, `just network-controller` for a synthetic controller-path
-window smoke, or `just network-smoke` for a bounded headless process check.
-`just verify` runs the automated development-cycle gates, and `just user-test`
-runs verification first and then starts the interactive end-of-cycle scenario. Close either window
-or press Ctrl-C when the user test is complete; set `BRAWLER_NETWORK_TIMEOUT_SECONDS` for a bounded
-session. The launcher runs through Cargo's target resolution, supervises every child, propagates
-failures, and leaves no Brawler processes after shutdown. The individual Cargo commands remain
-available for focused checks:
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings
-cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings
-cargo test --locked --no-default-features --features client --all-targets
-cargo test --locked --no-default-features --features server --all-targets
-cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1
-cargo test --locked --no-default-features --features network-test --test performance -- --nocapture
-cargo build --locked --no-default-features --features client --bin brawler-client
-cargo build --locked --no-default-features --features server --bin brawler-server
-cargo run --locked --no-default-features --features client --bin brawler-client
-cargo run --locked --no-default-features --features server --bin brawler-server -- --bind 127.0.0.1:5000
-./scripts/check-server-features.sh
-just network
-just network-combat
-just network-controller
-just network-combat-30
-just network-combat-60
-just network-combat-high
-just network-smoke
-just network-routed-smoke
-just network-product-lobby
-just network-product-lobby-smoke
-just network-product-queue-smoke
-just network-product-match
-just network-product-match-3v3
-just network-first-blood
-just network-product-match-smoke
-just network-product-match-3v3-smoke
-just network-first-blood-smoke
-just network-routed-ipv6-smoke
-just network-routed-evidence
-just network-routed-capture
-just verify-routed-capture capture=target/routed-capture.pcap
-just network-paired-evidence
-just test-paired-evidence
-just network-direct
-just network-direct-smoke
-just network-terrain
-just network-terrain-hot-zone
-just closeout-wipeout
-just closeout-hot-zone
-just prediction-comparison
-just help
-just check-routing
-just test-routing
-just clippy-routing
+just fmt
 just check
-just build
-just test
 just lint
-just verify
-just user-test
-just docs
+just test
+just e2e [client-count]
+just ci
 just clean
 ```
 
-`just network` now launches the v2 routed topology at one public UDP address: a plain supervisor,
-an isolated lobby worker, a match worker after allocation, and two clients. Use
-`just network-routed-smoke` for the bounded headless lobby-to-match check. The completed v1 direct
-UDP topology remains available as `just network-direct` and `just network-direct-smoke` until the
-roadmap's M09 retirement gate.
+`just server` starts the routed supervisor and production lobby at `127.0.0.1:5000`. `just client`
+opens one normal product client against that address. `just run <client-count>` builds once, starts
+the routed server, and opens exactly that many interactive clients; counts from 1 through 16 are
+accepted so partial queues and disconnects are easy to reproduce. Press Ctrl-C to stop the complete
+local process tree.
 
-Normal `brawler-client` startup now opens the product Title without connecting. Play opens Server
-Select, whose first-run address is `127.0.0.1:5000`; the client connects to a supervisor-backed
-product lobby and shows its advertised game types without allocating a match. Use
-`just network-product-lobby` for the windowed playtest or `just network-product-lobby-smoke` for the
-bounded two-client real-process check of that welcome boundary and the no-allocation guarantee.
-Use `just network-first-blood`, `just network-product-match`, or `just network-product-match-3v3`
-to open two, four, or six product windows against one local supervisor. Select Play in every
-window, then join the advertised game.
-The corresponding `-smoke` commands drive the same match path headlessly.
+`just test` owns all deterministic Rust suites, including routing, client, server, network, and
+performance tests. `just e2e` runs the shortest real-process product path with two clients and First
+Blood; pass `4` or `6` to exercise the 2v2 or 3v3 path. `just ci` runs formatting, Clippy, server
+feature isolation, all deterministic tests, and the complete 2/4/6-client E2E matrix. Focused Cargo
+commands and scripts remain available for diagnostics, but they are deliberately not separate
+top-level `just` recipes. E2E runs choose an unused loopback port by default, so they can run beside
+an interactive server; set `BRAWLER_ROUTED_BIND` only when a fixed test address is required.
+
+Normal client startup opens the product Title without connecting. Play opens Server Select, whose
+first-run address is `127.0.0.1:5000`; the client then connects to the supervisor-backed lobby and
+shows its advertised game types.
 
 Server game types are authored in `config/server/game-types.ron`. Each entry owns flat match rules:
 Wipeout uses `kills_to_win`, Hot Zone uses `capture_seconds`, and every entry declares
@@ -114,8 +60,7 @@ Wipeout uses `kills_to_win`, Hot Zone uses `capture_seconds`, and every entry de
 block or operator-facing rules profile; startup validates and passes the resolved values to the
 authoritative match worker.
 
-`just network-routed-evidence` runs bounded cold routed-process cycles (five by default; use
-`just network-routed-evidence <cycles> <timeout-seconds> <wipeout|hot-zone|both|crash-restart>`).
+`python3 scripts/network-routed-evidence.py` runs bounded cold routed-process cycles.
 It records the exact
 Result-driven worker lifecycle, per-role RSS, directional public/inner/IPC traffic, bounded routing
 owner-loop latency diagnostics, final route/queue/drop counters, and process cleanup in
@@ -126,17 +71,18 @@ below their required campaign cardinalities. It never fabricates those measureme
 `--keep-artifacts` by invoking `python3 scripts/network-routed-evidence.py --keep-artifacts` to
 retain per-cycle logs.
 
-`just network-routed-ipv6-smoke` runs the same production routed process check over `[::1]`; the
+`BRAWLER_NETWORK_HEADLESS=1 BRAWLER_ROUTED_BIND="[::1]:5000" ./scripts/network-routed.sh` runs the
+same production routed process check over `[::1]`; the
 client derives an IPv6 local socket from the selected `--server` address, or accepts an explicit
-`--local-addr`. On macOS, `just network-routed-capture capture=target/routed-capture.pcap` runs
+`--local-addr`. On macOS, `./scripts/network-routed-capture.sh target/routed-capture.pcap` runs
 both IPv4 and IPv6 headless smokes under `tcpdump` on `lo0` and parses the resulting classic pcap with
 `scripts/verify-routed-capture.py`. BPF capture permission may require an approved administrator
 session. No capture result is considered evidence unless a real pcap is produced and the parser
 observes IPv4/IPv6 UDP payloads no larger than 1,200 bytes with no IPv4 fragmentation or IPv6
 Fragment header; unavailable or malformed captures stay unsupported.
 
-`just network-paired-evidence 1 90 wipeout` runs the bounded one-pair M01 comparison smoke; the
-canonical gate is `just network-paired-evidence 3 90 wipeout` (or `hot-zone`). It runs the existing
+`python3 scripts/network-paired-evidence.py --pairs 1 --timeout 90 --mode wipeout` runs the bounded
+one-pair M01 comparison smoke. The historical M01 gate used three pairs. It runs the existing
 direct and routed verification launchers sequentially on the same host, source tree, mode, and
 verification rules, requires the exact expected process-role cardinalities, samples every Brawler process's CPU time and RSS, and writes
 `target/paired-evidence-<UTC timestamp>.json`. Aggregate routed CPU must be no more than 20% over
@@ -144,8 +90,9 @@ the direct aggregate when both process series and a correlated common observatio
 comparable. Direct server transport bytes are compared with routed supervisor match-worker inner
 ingress/egress bytes independently, with a 10% limit per direction and for the total. Routed public-envelope and mixed packet/control IPC bytes are
 reported as overhead diagnostics and are never compared with direct gameplay bytes. Missing
-comparable samples or common-window checkpoints produce an explicit `unsupported` result. Run `just test-paired-evidence` for
-the parser and threshold-gate tests without starting processes.
+comparable samples or common-window checkpoints produce an explicit `unsupported` result. Run
+`python3 -m unittest scripts/test_network_paired_evidence.py` for the parser and threshold-gate
+tests without starting processes.
 
 The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. A normal windowed client
 starts at the controller-friendly Title screen and does not connect; `--client-id` defaults to 1 in
@@ -162,9 +109,9 @@ production application composition.
 still uses the normal gamepad sampler and native input buffer, but does not substitute for a
 physical controller.
 `RUST_LOG` controls log filtering, for example `RUST_LOG=brawler=info`. Window titles identify the two clients; structured logs report
-connection outcome and stable `(player_id, network_entity_id)` roster entries. `just network-smoke`
-is the routed two-client lobby-to-match check; `just network-direct-smoke` retains the v1
-server-side movement/facing assertion.
+connection outcome and stable `(player_id, network_entity_id)` roster entries. `just e2e` is the
+canonical routed product check. The retained `scripts/network.sh` is the legacy direct-UDP baseline
+until its roadmap retirement gate.
 
 For the supervised combat path, use `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_COMBAT=1
 ./scripts/network.sh`. Its legacy combat verifier composes an explicit test-only dummy fixture and
@@ -174,7 +121,7 @@ match, respawn, telemetry, and restart process gate. It defaults to the shortene
 set `BRAWLER_NETWORK_WIPEOUT_RULES=production`, raise `BRAWLER_NETWORK_SIMULATION_TICKS`, and set a
 matching `BRAWLER_NETWORK_MATCH_TIMEOUT_SECONDS` for a controlled normal-duration comparison.
 `BRAWLER_NETWORK_PROFILE=local|typical|adverse` applies the corresponding Lightyear receive
-conditioner; `just network-combat-profiles` repeats all three profiles and reports median/p95
+conditioner; `./scripts/network-combat-profiles.sh` repeats all three profiles and reports median/p95
 convergence timings.
 
 The network launcher waits for its own server's readiness signal before starting clients, so a bind
@@ -204,21 +151,13 @@ roster/loadout/readiness, respawn and protection state, health, ammo, ultimate m
 state, sentry health/lifetime, and cooldown/reload; fighters also show debug health bars.
 The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
 block fighters and weapon delivery, while client sprites, audio, and HUD state remain presentation-only.
-For a reproducible single-shooter visual combat pass, run `just network-combat`; it starts two
-windowed clients, with client 1 using `--combat-demo` and client 2 idle. The demo uses the same native
-input buffer while continuously aiming at and firing on the neutral dummy. To launch the processes
-manually, start `brawler-server`, then run one client with `--client-id 1 --auto-connect --combat-demo` and the
-second with `--client-id 2 --auto-connect`; enabling the demo flag on both clients intentionally produces one
-projectile stream from each player toward the neutral dummy.
-
-Repeat the same scenario at the milestone's render conditions with `just network-combat-30`,
-`just network-combat-60`, and `just network-combat-high`. These select
-`BRAWLER_RENDER_PROFILE=30|60|high`; the fixed authoritative simulation remains 60 Hz. The
-high-refresh profile uses continuous updates and no-vsync presentation, while actual display refresh
-and physical-controller behavior still require the target hardware.
+The legacy direct-UDP diagnostic script still accepts `BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1`,
+weapon presets, controller-demo selection, and `BRAWLER_RENDER_PROFILE=30|60|high` when a focused
+v1 comparison is needed. These are diagnostic parameters rather than everyday development recipes;
+the fixed authoritative simulation remains 60 Hz.
 
 For a focused live movement trace, run
-`BRAWLER_INPUT_TRACE=1 RUST_LOG=brawler=info just run`. The trace reports focused-window WASD
+`BRAWLER_INPUT_TRACE=1 RUST_LOG=brawler=info just run 1`. The trace reports focused-window WASD
 sampling, the Lightyear input target, authoritative server movement, replicated interpolation
 history, and the final client presentation pose only when those states materially change.
 
