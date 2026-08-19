@@ -504,6 +504,13 @@ impl LobbyState {
             },
             map_revision: 1,
             rules_profile: 1,
+            objective_target: match self.mode {
+                GameMode::Wipeout => 10,
+                GameMode::HotZone => 1_800,
+            },
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
             team_count: 2,
             players_per_team: 1,
             participants,
@@ -569,6 +576,9 @@ impl LobbyState {
             .first()
             .ok_or(CodecError::InvalidValue)?
             .lobby_session_id;
+        let rules = catalog
+            .rules(&reservation.game_type_id)
+            .ok_or(CodecError::InvalidValue)?;
         self.pending = Some(PendingAllocation {
             body: AllocateRequestBody {
                 request_id,
@@ -580,7 +590,11 @@ impl LobbyState {
                 },
                 map_preset: reservation.map_preset_id.0,
                 map_revision: 1,
-                rules_profile: 1,
+                rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
+                objective_target: rules.objective_target,
+                match_duration_ticks: rules.match_duration_ticks,
+                countdown_ticks: rules.countdown_ticks,
+                respawn_ticks: rules.respawn_ticks,
                 team_count: reservation.team_count,
                 players_per_team: reservation.players_per_team,
                 participants,
@@ -1558,6 +1572,8 @@ fn form_product_reservation(
     mut clients: Query<(
         &LobbyClient,
         &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+        Has<Connected>,
+        Has<Disconnected>,
     )>,
 ) {
     if formation.occupied || formation.active.is_some() || queue.reservation_count() != 0 {
@@ -1572,7 +1588,14 @@ fn form_product_reservation(
     )) else {
         return;
     };
-    let Some(reservation) = queue.reserve_oldest_exact(&catalog, reservation_id) else {
+    let live_sessions = clients
+        .iter_mut()
+        .filter_map(|(client, _, connected, disconnected)| {
+            (connected && !disconnected).then_some(client.lobby_session_id)
+        })
+        .collect();
+    let Some(reservation) = queue.reserve_oldest_exact(&catalog, reservation_id, &live_sessions)
+    else {
         return;
     };
     if state
@@ -1587,7 +1610,10 @@ fn form_product_reservation(
     formation.loading_deadline = Some(time.elapsed().saturating_add(Duration::from_secs(30)));
     formation.grant_deadline = Some(time.elapsed().saturating_add(Duration::from_secs(10)));
     frame.snapshot_changed = true;
-    for (client, mut sender) in &mut clients {
+    for (client, mut sender, connected, disconnected) in &mut clients {
+        if !connected || disconnected {
+            continue;
+        }
         let Some(ticket) = queue.ticket_for_session(client.lobby_session_id) else {
             continue;
         };

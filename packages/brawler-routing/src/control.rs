@@ -244,6 +244,10 @@ pub struct AllocateRequestBody {
     pub map_preset: u16,
     pub map_revision: u16,
     pub rules_profile: u8,
+    pub objective_target: u16,
+    pub match_duration_ticks: u64,
+    pub countdown_ticks: u64,
+    pub respawn_ticks: u64,
     pub team_count: u8,
     pub players_per_team: u8,
     pub participants: Vec<AllocateParticipant>,
@@ -267,6 +271,10 @@ impl AllocateRequestBody {
         if self.map_preset == 0
             || self.map_revision == 0
             || self.rules_profile == 0
+            || self.objective_target == 0
+            || self.match_duration_ticks == 0
+            || self.countdown_ticks == 0
+            || self.respawn_ticks == 0
             || self.team_count == 0
             || self.players_per_team == 0
             || self.participants.is_empty()
@@ -283,7 +291,7 @@ impl AllocateRequestBody {
             .checked_mul(usize::from(self.players_per_team))
             .ok_or(CodecError::InvalidValue)?;
         if self.team_count != 2
-            || !matches!(self.players_per_team, 2 | 3)
+            || !matches!(self.players_per_team, 1..=3)
             || self.participants.len() != expected
         {
             return Err(CodecError::InvalidValue);
@@ -882,6 +890,10 @@ impl ControlBody {
                 encoder.put_u16(value.map_preset);
                 encoder.put_u16(value.map_revision);
                 encoder.put_u8(value.rules_profile);
+                encoder.put_u16(value.objective_target);
+                encoder.put_u64(value.match_duration_ticks);
+                encoder.put_u64(value.countdown_ticks);
+                encoder.put_u64(value.respawn_ticks);
                 encoder.put_u8(value.team_count);
                 encoder.put_u8(value.players_per_team);
                 encoder.put_u8(
@@ -1032,6 +1044,10 @@ impl ControlBody {
                 let map_preset = decoder.u16()?;
                 let map_revision = decoder.u16()?;
                 let rules_profile = decoder.u8()?;
+                let objective_target = decoder.u16()?;
+                let match_duration_ticks = decoder.u64()?;
+                let countdown_ticks = decoder.u64()?;
+                let respawn_ticks = decoder.u64()?;
                 let team_count = decoder.u8()?;
                 let players_per_team = decoder.u8()?;
                 let count = usize::from(decoder.u8()?);
@@ -1049,6 +1065,10 @@ impl ControlBody {
                     map_preset,
                     map_revision,
                     rules_profile,
+                    objective_target,
+                    match_duration_ticks,
+                    countdown_ticks,
+                    respawn_ticks,
                     team_count,
                     players_per_team,
                     participants,
@@ -1517,6 +1537,10 @@ mod tests {
                 map_preset: 1,
                 map_revision: 1,
                 rules_profile: 1,
+                objective_target: 10,
+                match_duration_ticks: 10_800,
+                countdown_ticks: 180,
+                respawn_ticks: 180,
                 team_count: 2,
                 players_per_team: 1,
                 participants: vec![participant(1), participant(2)],
@@ -1607,6 +1631,10 @@ mod tests {
             map_preset: 1,
             map_revision: 1,
             rules_profile: 1,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
             team_count: 2,
             players_per_team: 4,
             participants: (1..=8).map(participant).collect(),
@@ -1616,7 +1644,7 @@ mod tests {
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 434
+            52 + 460
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),
@@ -1689,6 +1717,10 @@ mod tests {
             map_preset: 1,
             map_revision: 1,
             rules_profile: 1,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
             team_count: 1,
             players_per_team: 1,
             participants: vec![participant(3)],

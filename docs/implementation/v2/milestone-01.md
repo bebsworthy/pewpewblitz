@@ -345,8 +345,11 @@ Netcode install/Ready.
 ### Match manifest v1
 
 Common prefix role=2. Fields: MatchId u128, AllocationId u128, game mode u16 (1 Wipeout, 2 Hot Zone),
-map preset u16, map revision u16, rules profile u8, reserved u8=0, seed u64, participant_count u8,
-participants, heartbeat_ms u32, nonce u128, digest[32].
+map preset u16, map revision u16, internal execution rules profile u8, objective target u16,
+match-duration/countdown/respawn ticks each u64, reserved u8=0, seed u64, participant_count u8,
+participants, heartbeat_ms u32, nonce u128, digest[32]. The execution profile remains an internal
+production-versus-verification selector; operator-authored game types use the explicit objective
+and timing values.
 
 Participant: LobbySessionId u128, PlayerId u64, authenticated Netcode client ID u64, PeerId u128,
 team u8, optional source build preset u16, recipe fingerprint u64, revision u16. The Netcode client

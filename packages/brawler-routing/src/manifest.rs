@@ -407,6 +407,10 @@ pub struct MatchManifestV1 {
     pub map_preset: u16,
     pub map_revision: u16,
     pub rules_profile: u8,
+    pub objective_target: u16,
+    pub match_duration_ticks: u64,
+    pub countdown_ticks: u64,
+    pub respawn_ticks: u64,
     pub reserved: u8,
     pub seed: u64,
     pub participants: Vec<MatchManifestParticipant>,
@@ -427,6 +431,10 @@ impl fmt::Debug for MatchManifestV1 {
             .field("map_preset", &self.map_preset)
             .field("map_revision", &self.map_revision)
             .field("rules_profile", &self.rules_profile)
+            .field("objective_target", &self.objective_target)
+            .field("match_duration_ticks", &self.match_duration_ticks)
+            .field("countdown_ticks", &self.countdown_ticks)
+            .field("respawn_ticks", &self.respawn_ticks)
             .field("reserved", &self.reserved)
             .field("seed", &self.seed)
             .field("participant_count", &self.participants.len())
@@ -460,6 +468,10 @@ impl MatchManifestV1 {
         encoder.put_u16(self.map_preset);
         encoder.put_u16(self.map_revision);
         encoder.put_u8(self.rules_profile);
+        encoder.put_u16(self.objective_target);
+        encoder.put_u64(self.match_duration_ticks);
+        encoder.put_u64(self.countdown_ticks);
+        encoder.put_u64(self.respawn_ticks);
         encoder.put_u8(self.reserved);
         encoder.put_u64(self.seed);
         encoder.put_u8(u8::try_from(self.participants.len()).map_err(|_| CodecError::Oversize)?);
@@ -504,6 +516,10 @@ impl MatchManifestV1 {
         let map_preset = decoder.u16()?;
         let map_revision = decoder.u16()?;
         let rules_profile = decoder.u8()?;
+        let objective_target = decoder.u16()?;
+        let match_duration_ticks = decoder.u64()?;
+        let countdown_ticks = decoder.u64()?;
+        let respawn_ticks = decoder.u64()?;
         let reserved = decoder.u8()?;
         let seed = decoder.u64()?;
         let count = usize::from(decoder.u8()?);
@@ -523,6 +539,10 @@ impl MatchManifestV1 {
             map_preset,
             map_revision,
             rules_profile,
+            objective_target,
+            match_duration_ticks,
+            countdown_ticks,
+            respawn_ticks,
             reserved,
             seed,
             participants,
@@ -541,6 +561,10 @@ impl MatchManifestV1 {
         if self.match_id.get() == 0
             || self.allocation_id.get() == 0
             || self.reserved != 0
+            || self.objective_target == 0
+            || self.match_duration_ticks == 0
+            || self.countdown_ticks == 0
+            || self.respawn_ticks == 0
             || self.participants.is_empty()
             || self.participants.len() > MAX_PARTICIPANTS
             || self.heartbeat_ms == 0
@@ -611,6 +635,10 @@ mod tests {
             map_preset: 10,
             map_revision: 11,
             rules_profile: 12,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
             reserved: 0,
             seed: 13,
             participants: (1..=u64::try_from(participant_count).unwrap())
@@ -623,7 +651,8 @@ mod tests {
     }
 
     // Common fields through seed, before the participant count byte.
-    const PARTICIPANT_COUNT_OFFSET: usize = 87 + 8 + 16 + 16 + 2 + 2 + 2 + 1 + 1 + 8;
+    const PARTICIPANT_COUNT_OFFSET: usize =
+        87 + 8 + 16 + 16 + 2 + 2 + 2 + 1 + 2 + 8 + 8 + 8 + 1 + 8;
     const ALLOCATION_ID_OFFSET: usize = 87 + 8 + 16;
 
     #[test]
@@ -634,7 +663,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 328);
+        assert_eq!(encoded.len(), 354);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])

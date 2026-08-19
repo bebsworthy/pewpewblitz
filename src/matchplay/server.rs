@@ -269,7 +269,7 @@ fn reject_under_provisioned_connection_capacity(app: &App, capacity: &ResolvedMa
 }
 
 /// Map validation proves the map satisfies its mode definition; this composition step
-/// proves it satisfies the *resolved rules profile*: identical team slots and enough
+/// proves it satisfies the resolved rules: identical team slots and enough
 /// spawn points for every simultaneous participant. Runs once the selected map is
 /// installed, before the match root exists.
 #[allow(clippy::needless_pass_by_value)]

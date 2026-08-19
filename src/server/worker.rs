@@ -1256,6 +1256,10 @@ fn config_from_manifest(
                 2 => MatchRulesProfile::ProcessVerification,
                 _ => return Err(WorkerBootstrapError::Invalid("unknown match rules profile")),
             };
+            config.match_objective_target = Some(manifest.objective_target);
+            config.match_duration_ticks = Some(manifest.match_duration_ticks);
+            config.match_countdown_ticks = Some(manifest.countdown_ticks);
+            config.match_respawn_ticks = Some(manifest.respawn_ticks);
             // The manifest whitelist controls who may join this isolated match. Keep the
             // production endpoint capacity because match composition validates it against the
             // selected rules profile's maximum active-fighter capacity, not only this roster's
@@ -1365,6 +1369,10 @@ mod tests {
             map_preset: 1,
             map_revision: 1,
             rules_profile: 1,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
             team_count: 2,
             players_per_team: 2,
             participants: Vec::new(),

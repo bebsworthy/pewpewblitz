@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# M05 product path: form one exact 2v2 or 3v3 reservation, deliver each participant's grant,
+# M05 product path: form one exact 1v1, 2v2, or 3v3 reservation, deliver each participant's grant,
 # connect every fresh match session, check in, and exit after authoritative Active.
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -17,10 +17,11 @@ case "$headless" in
         ;;
 esac
 case "$players_per_team" in
+    1) client_count=2; match_flag=--product-match-smoke-1v1 ;;
     2) client_count=4; match_flag=--product-match-smoke ;;
     3) client_count=6; match_flag=--product-match-smoke-3v3 ;;
     *)
-        echo "brawler product match: players per team must be 2 or 3" >&2
+        echo "brawler product match: players per team must be 1, 2, or 3" >&2
         exit 2
         ;;
 esac

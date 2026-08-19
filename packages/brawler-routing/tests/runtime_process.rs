@@ -83,6 +83,10 @@ fn allocation_request() -> AllocateRequestBody {
         map_preset: 1,
         map_revision: 1,
         rules_profile: 1,
+        objective_target: 10,
+        match_duration_ticks: 10_800,
+        countdown_ticks: 180,
+        respawn_ticks: 180,
         team_count: 2,
         players_per_team: 2,
         participants: vec![

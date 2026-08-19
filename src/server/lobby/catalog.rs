@@ -13,7 +13,7 @@ use crate::{
 };
 use bevy::prelude::Resource;
 use serde::Deserialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 1;
 pub const MAX_OPERATOR_CATALOG_BYTES: usize = 16 * 1024;
@@ -23,6 +23,21 @@ pub(crate) struct ResolvedLobbyCatalog {
     pub server_name: String,
     pub revision: CatalogRevision,
     pub game_types: Vec<AdvertisedGameType>,
+    game_rules: BTreeMap<GameTypeId, ResolvedGameRules>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedGameRules {
+    pub objective_target: u16,
+    pub match_duration_ticks: u64,
+    pub countdown_ticks: u64,
+    pub respawn_ticks: u64,
+}
+
+impl ResolvedLobbyCatalog {
+    pub(crate) fn rules(&self, game_type_id: &GameTypeId) -> Option<ResolvedGameRules> {
+        self.game_rules.get(game_type_id).copied()
+    }
 }
 
 #[derive(Deserialize)]
@@ -43,7 +58,13 @@ struct OperatorGameType {
     maps: Vec<String>,
     teams: u8,
     players_per_team: u8,
-    rules_profile: String,
+    #[serde(default)]
+    kills_to_win: u16,
+    #[serde(default)]
+    capture_seconds: u16,
+    match_duration_seconds: u16,
+    countdown_seconds: u16,
+    respawn_seconds: u16,
 }
 
 #[allow(
@@ -73,11 +94,8 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     let lifecycle = MatchLifecycleRules::default()
         .validate()
         .map_err(str::to_string)?;
-    let wipeout = WipeoutRules::default().validate().map_err(str::to_string)?;
-    let hot_zone = HotZoneRules::default()
-        .validate_with(&lifecycle)
-        .map_err(str::to_string)?;
     let mut advertised = Vec::with_capacity(operator.game_types.len());
+    let mut game_rules = BTreeMap::new();
     for entry in operator.game_types {
         let id =
             GameTypeId::new(entry.id).map_err(|error| format!("invalid game-type ID: {error}"))?;
@@ -88,19 +106,30 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         }
         if entry.teams != lifecycle.team_count
             || entry.teams != 2
-            || !matches!(entry.players_per_team, 2 | 3)
+            || !matches!(entry.players_per_team, 1..=3)
         {
             return Err(format!(
-                "game type {} must use the supported exact 2v2 or 3v3 topology",
+                "game type {} must use the supported exact 1v1, 2v2, or 3v3 topology",
                 id.as_str()
             ));
         }
-        if entry.rules_profile != "standard" {
-            return Err(format!(
-                "game type {} has an unknown rules profile",
-                id.as_str()
-            ));
+        let seconds_to_ticks = |seconds: u16| {
+            u64::from(seconds)
+                .checked_mul(crate::timing::SIMULATION_TICK_HZ)
+                .filter(|ticks| *ticks > 0)
+                .ok_or_else(|| format!("game type {} has invalid timing", id.as_str()))
+        };
+        let match_duration_ticks = seconds_to_ticks(entry.match_duration_seconds)?;
+        let countdown_ticks = seconds_to_ticks(entry.countdown_seconds)?;
+        let respawn_ticks = seconds_to_ticks(entry.respawn_seconds)?;
+        let entry_lifecycle = MatchLifecycleRules {
+            active_limit_ticks: match_duration_ticks,
+            countdown_ticks,
+            respawn_delay_ticks: respawn_ticks,
+            ..lifecycle
         }
+        .validate()
+        .map_err(|error| format!("game type {} has invalid timing: {error}", id.as_str()))?;
         if entry.maps.is_empty() || entry.maps.len() > MAX_MAPS_PER_GAME_TYPE {
             return Err(format!(
                 "game type {} must contain 1..={MAX_MAPS_PER_GAME_TYPE} maps",
@@ -108,27 +137,53 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             ));
         }
 
-        let (mode_definition_id, requirements, rules_summary) = match entry.mode.as_str() {
-            "wipeout" => (
-                WIPEOUT_MODE_DEFINITION,
-                MapLayoutRequirements::wipeout(),
-                AdvertisedRulesSummary::Wipeout {
-                    target_score: wipeout.target_score,
-                    active_limit_ticks: lifecycle.active_limit_ticks,
-                },
-            ),
-            "hot-zone" => (
-                HOT_ZONE_MODE_DEFINITION,
-                MapLayoutRequirements::hot_zone(),
-                AdvertisedRulesSummary::HotZone {
-                    target_progress_ticks: hot_zone.target_progress_ticks,
-                    active_limit_ticks: lifecycle.active_limit_ticks,
-                },
-            ),
-            _ => {
-                return Err(format!("game type {} has an unknown mode key", id.as_str()));
-            }
-        };
+        let (mode_definition_id, requirements, objective_target, rules_summary) =
+            match entry.mode.as_str() {
+                "wipeout" if entry.capture_seconds == 0 => {
+                    let target_score = entry.kills_to_win;
+                    WipeoutRules { target_score }.validate().map_err(|error| {
+                        format!("game type {} has invalid objective: {error}", id.as_str())
+                    })?;
+                    (
+                        WIPEOUT_MODE_DEFINITION,
+                        MapLayoutRequirements::wipeout(),
+                        target_score,
+                        AdvertisedRulesSummary::Wipeout {
+                            target_score,
+                            active_limit_ticks: match_duration_ticks,
+                        },
+                    )
+                }
+                "hot-zone" if entry.kills_to_win == 0 => {
+                    let capture_seconds = entry.capture_seconds;
+                    let target_progress_ticks = u16::try_from(seconds_to_ticks(capture_seconds)?)
+                        .map_err(|_| {
+                        format!("game type {} capture duration is too long", id.as_str())
+                    })?;
+                    HotZoneRules {
+                        target_progress_ticks,
+                    }
+                    .validate_with(&entry_lifecycle)
+                    .map_err(|error| {
+                        format!("game type {} has invalid objective: {error}", id.as_str())
+                    })?;
+                    (
+                        HOT_ZONE_MODE_DEFINITION,
+                        MapLayoutRequirements::hot_zone(),
+                        target_progress_ticks,
+                        AdvertisedRulesSummary::HotZone {
+                            target_progress_ticks,
+                            active_limit_ticks: match_duration_ticks,
+                        },
+                    )
+                }
+                _ => {
+                    return Err(format!(
+                        "game type {} has an unknown mode or mismatched objective",
+                        id.as_str()
+                    ));
+                }
+            };
 
         let mut map_ids = Vec::with_capacity(entry.maps.len());
         let mut unique_maps = BTreeSet::new();
@@ -156,7 +211,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 crate::matchplay::ResolvedMatchCapacity::from_rules(&MatchLifecycleRules {
                     minimum_participants_per_team: entry.players_per_team,
                     maximum_participants_per_team: entry.players_per_team,
-                    ..lifecycle
+                    ..entry_lifecycle
                 })
                 .ok_or_else(|| format!("game type {} has invalid capacity", id.as_str()))?;
             capacity
@@ -170,6 +225,15 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             map_ids.push(MapPresetId(preset.id.0));
         }
 
+        game_rules.insert(
+            id.clone(),
+            ResolvedGameRules {
+                objective_target,
+                match_duration_ticks,
+                countdown_ticks,
+                respawn_ticks,
+            },
+        );
         advertised.push(AdvertisedGameType {
             id,
             configuration_revision: entry.revision,
@@ -201,6 +265,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         server_name,
         revision,
         game_types: advertised,
+        game_rules,
     })
 }
 
@@ -214,25 +279,46 @@ mod tests {
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local Brawler");
-        assert_eq!(catalog.game_types.len(), 3);
+        assert_eq!(catalog.game_types.len(), 4);
+        let first_blood = &catalog.game_types[3];
+        assert_eq!(first_blood.display_name, "First Blood");
+        assert_eq!(first_blood.players_per_team, 1);
+        assert_eq!(
+            first_blood.rules_summary,
+            AdvertisedRulesSummary::Wipeout {
+                target_score: 1,
+                active_limit_ticks: MatchLifecycleRules::default().active_limit_ticks,
+            }
+        );
+        assert_eq!(
+            catalog.rules(&first_blood.id),
+            Some(ResolvedGameRules {
+                objective_target: 1,
+                match_duration_ticks: 10_800,
+                countdown_ticks: 180,
+                respawn_ticks: 180,
+            })
+        );
         assert_eq!(
             catalog.revision.0,
             [
-                0x9f, 0x41, 0x9c, 0x04, 0xf4, 0x35, 0x26, 0x81, 0x0c, 0x4d, 0x0d, 0x04, 0x9f, 0xf5,
-                0x18, 0x07, 0xab, 0xe0, 0xae, 0xa8, 0x58, 0xed, 0xc4, 0x4e, 0xf3, 0x48, 0xff, 0x6d,
-                0xb3, 0x2a, 0x3b, 0x39,
+                0xe8, 0xde, 0xf1, 0x34, 0x7b, 0x3c, 0x24, 0x5e, 0xb7, 0xeb, 0x23, 0xb2, 0x5c, 0x1f,
+                0xc5, 0xf4, 0x42, 0x83, 0x40, 0xd0, 0x2d, 0x4e, 0x36, 0x2d, 0x02, 0x15, 0xe1, 0x8a,
+                0x6c, 0x75, 0xe4, 0x8f,
             ]
         );
     }
 
     #[test]
-    fn catalog_rejects_unknown_fields_modes_maps_profiles_and_unsupported_topology() {
+    fn catalog_rejects_unknown_fields_modes_maps_objectives_and_unsupported_topology() {
         for invalid in [
             VALID.replace("schema_version: 1", "schema_version: 1, surprise: true"),
             VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
             VALID.replace("crossroads-facility\"", "missing-map\""),
-            VALID.replace("rules_profile: \"standard\"", "rules_profile: \"fast\""),
             VALID.replace("players_per_team: 2", "players_per_team: 4"),
+            VALID.replace("kills_to_win: 1", "kills_to_win: 0"),
+            VALID.replace("capture_seconds: 30", "kills_to_win: 10"),
+            VALID.replace("countdown_seconds: 3", "countdown_seconds: 0"),
         ] {
             assert!(resolve_operator_catalog(invalid.as_bytes()).is_err());
         }

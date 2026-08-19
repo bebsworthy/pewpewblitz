@@ -121,14 +121,14 @@ ticket reservation exists, so it does not fabricate a formation-boundary race.
 
 ### M05 — Exact formation and match handoff
 
-Form exact 2v2/3v3 rosters, assign teams deterministically, select a compatible map, reserve
+Form exact 1v1/2v2/3v3 rosters, assign teams deterministically, select a compatible map, reserve
 tickets, admit host capacity, start/validate a worker, issue routing capabilities, establish fresh
 worker connections, synchronize match state, and check in before the one authoritative countdown.
 M05 exposes one honest product match per logical-server process: after Active it pauses admission,
 capacity-removes queued overflow, suppresses legacy fixed-roster restart, and retains only minimal
 completed-match Disconnect presentation until M06 supplies reusable lifecycle.
 
-Gate: an exact 2v2 and exact 3v3 roster each reach an existing Wipeout or Hot Zone worker through
+Gate: exact 1v1, 2v2, and 3v3 rosters reach an existing Wipeout or Hot Zone worker through
 the public endpoint and enter the server-owned Countdown. A failed pre-Active start discards its
 reservation and returns clients to a clean Game Select; no exact roster remains invisibly stranded
 behind the temporary one-match product slot.

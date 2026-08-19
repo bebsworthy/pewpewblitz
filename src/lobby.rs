@@ -304,7 +304,7 @@ impl AdvertisedGameType {
         if maps.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(LobbyModelError::DuplicateMap);
         }
-        if self.team_count != 2 || !matches!(self.players_per_team, 2 | 3) {
+        if self.team_count != 2 || !matches!(self.players_per_team, 1..=3) {
             return Err(LobbyModelError::InvalidTopology);
         }
         match self.rules_summary {

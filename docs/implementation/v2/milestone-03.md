@@ -173,13 +173,13 @@ packages/brawler-routing/src/
 `src/lobby.rs` is a shared wire-model boundary, not shared authority. It owns bounded stable IDs,
 advertisement shapes, structural wire validation, display-name primitives, and the canonical
 catalog-revision encoder. It does not parse operator RON or decide that a topology, map, mode, or
-rules profile is playable. `src/server/lobby/catalog.rs` owns that authoritative resolution because
-it depends on server-gated `MatchLifecycleRules`, resolved capacity, and production mode rules. The
-client checks the authenticated snapshot's structural bounds and resolves presentation names only
-after the build/protocol/content fingerprints match; it does not reproduce the server's admission
-decision. The lobby worker owns accepted sessions and the resolved authoritative catalog. The
-supervisor transports bounded opaque catalog bytes and a digest; it never parses game types or owns
-lobby state.
+resolved rule set is playable. `src/server/lobby/catalog.rs` owns that authoritative resolution
+because it depends on server-gated `MatchLifecycleRules`, resolved capacity, and authoritative mode
+rules. The client checks the authenticated snapshot's structural bounds and resolves presentation
+names only after the build/protocol/content fingerprints match; it does not reproduce the server's
+admission decision. The lobby worker owns accepted sessions and the resolved authoritative catalog.
+The supervisor transports bounded opaque catalog bytes and a digest; it never parses game types or
+owns lobby state.
 
 Converting the already-large `src/server/lobby.rs` into a directory is justified because product
 session/catalog ownership and the automatic test allocation driver now have different lifecycles and
@@ -535,7 +535,10 @@ runtime state:
       maps: ["crossroads-facility"],
       teams: 2,
       players_per_team: 2,
-      rules_profile: "standard",
+      kills_to_win: 10,
+      match_duration_seconds: 180,
+      countdown_seconds: 3,
+      respawn_seconds: 3,
     ),
     (
       id: "hot-zone-2v2",
@@ -545,7 +548,10 @@ runtime state:
       maps: ["crossroads-facility-hot-zone"],
       teams: 2,
       players_per_team: 2,
-      rules_profile: "standard",
+      capture_seconds: 30,
+      match_duration_seconds: 180,
+      countdown_seconds: 3,
+      respawn_seconds: 3,
     ),
   ],
 )
@@ -563,11 +569,14 @@ Startup rules:
 - revision is nonzero; display name is 1–48 graphemes/96 bytes; map count is 1–8 with no duplicate;
 - mode and map keys resolve to stable embedded IDs; every map fully resolves and passes that mode's
   layout/anchor/spawn-capacity validation;
-- only exactly two teams and exactly two players per team are advertised in M03 because current
-  production `MatchLifecycleRules` rejects 3v3. M05 must extend and re-prove runtime capacity before
-  a 3v3 catalog entry becomes valid;
-- `standard` resolves to the exact existing production lifecycle and mode rules. M03 does not
-  expose arbitrary score/timing fields that match workers cannot yet consume;
+- exactly two teams and one, two, or three players per team are supported after M05's runtime
+  capacity proof; M03 initially advertised only 2v2;
+- each game directly declares exactly one matching objective: positive `kills_to_win` for Wipeout
+  or positive `capture_seconds` for Hot Zone;
+- each game directly declares positive `match_duration_seconds`, `countdown_seconds`, and
+  `respawn_seconds`; there is no shared defaults block or operator-authored rules profile;
+- catalog resolution converts seconds to authoritative fixed ticks, validates the complete mode and
+  lifecycle composition, and M05 carries those resolved values through allocation into the worker;
 - the complete catalog must fit the authenticated advertisement bounds and declared lobby/session
   capacity.
 

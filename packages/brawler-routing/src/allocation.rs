@@ -101,7 +101,7 @@ impl AllocationPolicy {
     }
 }
 
-/// Validate one exact 2v2/3v3 request without consulting runtime state.
+/// Validate one exact 1v1, 2v2, or 3v3 request without consulting runtime state.
 pub fn validate_m01_request(request: &AllocateRequestBody) -> Result<(), CodecError> {
     request.validate_product()?;
     let mut sessions = HashSet::with_capacity(request.participants.len());
@@ -187,6 +187,10 @@ mod tests {
             map_preset: 1,
             map_revision: 1,
             rules_profile: 1,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
             team_count: 2,
             players_per_team: 2,
             participants: vec![participant, participant],
@@ -195,5 +199,36 @@ mod tests {
             validate_m01_request(&request),
             Err(CodecError::InvalidValue)
         );
+    }
+
+    #[test]
+    fn request_validation_accepts_exact_one_v_one() {
+        let participant = |identity: u64, team| crate::AllocateParticipant {
+            lobby_session_id: crate::LobbySessionId::new(u128::from(identity)).unwrap(),
+            player_id: crate::PlayerId::new(identity).unwrap(),
+            netcode_client_id: crate::NetcodeClientId::new(identity).unwrap(),
+            team,
+            source_build_preset: Some(1),
+            recipe_fingerprint: identity,
+            build_revision: 1,
+            build_snapshot: crate::MatchBuildSnapshot::new(&[1]).unwrap(),
+        };
+        let request = AllocateRequestBody {
+            request_id: crate::RequestId::new(1).unwrap(),
+            lobby_session_id: crate::LobbySessionId::new(1).unwrap(),
+            mode: GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            objective_target: 1,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
+            team_count: 2,
+            players_per_team: 1,
+            participants: vec![participant(1, 0), participant(2, 1)],
+        };
+
+        assert_eq!(validate_m01_request(&request), Ok(()));
     }
 }

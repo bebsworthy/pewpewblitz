@@ -38,7 +38,7 @@ V2 includes:
 5. Concurrent authoritative matches as isolated worker processes behind one logical server and one
    public UDP endpoint, with supervisor-owned admission, routing, cleanup, recovery, and measured
    host admission ceilings.
-6. Exact 2v2 and 3v3 Wipeout and Hot Zone game types, subject to mode/map validation and each
+6. Exact 1v1, 2v2, and 3v3 Wipeout and Hot Zone game types, subject to mode/map validation and each
    milestone's R&D.
 7. A redesigned combat HUD, scoreboard, in-match menu, results flow, and non-fatal session
    lifecycle.
@@ -89,29 +89,29 @@ The server operator defines a bounded immutable list of game types at process st
 type has a stable `GameTypeId` and configuration revision distinct from its display name, and binds
 one mode to compatible maps, exact team topology, and validated settings:
 
-```toml
-[[game_types]]
-id = "wipeout-2v2"
-name = "Wipeout 2v2"
-mode = "wipeout"
-maps = ["arena"]
-teams = 2
-players_per_team = 2
-rules = { target_score = 10 }
-
-[[game_types]]
-id = "hot-zone-3v3"
-name = "Hot Zone 3v3"
-mode = "hot-zone"
-maps = ["hot_zone_arena"]
-teams = 2
-players_per_team = 3
+```ron
+(
+  id: "first-blood",
+  revision: 1,
+  name: "First Blood",
+  mode: "wipeout",
+  maps: ["crossroads-facility"],
+  teams: 2,
+  players_per_team: 1,
+  kills_to_win: 1,
+  match_duration_seconds: 180,
+  countdown_seconds: 3,
+  respawn_seconds: 3,
+)
 ```
 
-Startup validation proves mode/rules compatibility, map anchors and spawn capacity, formation size,
-content identities/revisions, and process ceilings before the server advertises a game type. The
-server selects among multiple allowed maps by a deterministic rotation policy specified during the
-owning milestone; clients do not vote or author rules in v2. Runtime hot-editing is deferred.
+Every game repeats its own flat timing values; there is no shared defaults block or operator-facing
+rules profile. Wipeout declares `kills_to_win`; Hot Zone declares `capture_seconds`. Startup
+validation proves the objective/mode pairing, positive bounded timings, map anchors and spawn
+capacity, formation size, content identities/revisions, and process ceilings before advertisement.
+The resolved values are carried into the isolated match worker and installed as authoritative ECS
+rule resources. The server selects among multiple allowed maps by deterministic rotation; clients
+do not vote or author rules in v2. Runtime hot-editing is deferred.
 
 ### Server-local pool formation
 
@@ -461,8 +461,8 @@ These are technical research tasks rather than unsettled product behavior:
    modifying Lightyear connection, replication, or gameplay layers?
 3. What role-specific manifest, restart, reconciliation, and shutdown policy does the long-lived
    lobby worker require beyond the process/IPC machinery shared with match workers?
-4. What measured host ceilings allow concurrent 2v2/3v3 worker processes with independent terrain
-   while preserving fixed-tick, memory, IPC, and bandwidth budgets?
+4. What measured host ceilings allow concurrent 1v1/2v2/3v3 worker processes with independent
+   terrain while preserving fixed-tick, memory, IPC, and bandwidth budgets?
 5. What exact deterministic team-assignment and map-rotation algorithms are simplest and testable?
 6. What bounded check-in timeout and ticket-return policy behaves best under local and impaired
    network profiles?

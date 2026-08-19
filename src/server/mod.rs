@@ -1405,6 +1405,15 @@ fn build_authoritative_app(
 ) -> App {
     let mut app = App::new();
     let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
+    if let Some(ticks) = config.match_duration_ticks {
+        lifecycle.active_limit_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_countdown_ticks {
+        lifecycle.countdown_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_respawn_ticks {
+        lifecycle.respawn_delay_ticks = ticks;
+    }
     if let Some(players) = exact_players_per_team {
         lifecycle.minimum_participants_per_team = players;
         lifecycle.maximum_participants_per_team = players;
@@ -1454,21 +1463,41 @@ fn install_server_game_mode(app: &mut App) {
         .world()
         .resource::<ServerNetworkConfig>()
         .match_rules_profile;
+    let objective_target = app
+        .world()
+        .resource::<ServerNetworkConfig>()
+        .match_objective_target;
     match mode {
         GameMode::Wipeout => {
             app.insert_resource(MatchModeSetup {
                 mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
                 rules_revision: WIPEOUT_RULES_REVISION,
             })
-            .insert_resource(wipeout_rules_for_profile(profile))
+            .insert_resource(objective_target.map_or_else(
+                || wipeout_rules_for_profile(profile),
+                |target_score| {
+                    WipeoutRules { target_score }
+                        .validate()
+                        .expect("validated manifest Wipeout objective")
+                },
+            ))
             .insert_resource(ServerMapSelection {
                 preset_id: BUILT_IN_MAP_PRESET,
             })
             .add_plugins(WipeoutModePlugin);
         }
         GameMode::HotZone => {
+            let rules = objective_target.map_or_else(
+                || crate::matchplay::hot_zone_rules_for_profile(profile),
+                |target_progress_ticks| crate::matchplay::HotZoneRules {
+                    target_progress_ticks,
+                },
+            );
+            let rules = rules
+                .validate_with(app.world().resource::<MatchLifecycleRules>())
+                .expect("validated manifest Hot Zone objective");
             app.insert_resource(crate::matchplay::hot_zone_setup_for_composition())
-                .insert_resource(crate::matchplay::hot_zone_rules_for_profile(profile))
+                .insert_resource(rules)
                 .insert_resource(ServerMapSelection {
                     preset_id: HOT_ZONE_MAP_PRESET,
                 })

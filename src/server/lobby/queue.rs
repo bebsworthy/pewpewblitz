@@ -987,6 +987,7 @@ impl QueueState {
         &mut self,
         catalog: &ResolvedLobbyCatalog,
         reservation_id: crate::lobby::MatchReservationId,
+        live_sessions: &BTreeSet<LobbySessionId>,
     ) -> Option<QueueReservation> {
         if !self.reservations.is_empty() || self.reservations.contains_key(&reservation_id) {
             return None;
@@ -997,9 +998,10 @@ impl QueueState {
             let selected = pool
                 .iter()
                 .filter(|id| {
-                    self.tickets
-                        .get(id)
-                        .is_some_and(|ticket| ticket.formation_eligible)
+                    self.tickets.get(id).is_some_and(|ticket| {
+                        ticket.formation_eligible
+                            && live_sessions.contains(&ticket.lobby_session_id)
+                    })
                 })
                 .take(formation_size)
                 .copied()
@@ -1668,8 +1670,11 @@ mod tests {
             }
         }
         let reservation_id = crate::lobby::MatchReservationId::new(9).unwrap();
+        let live_sessions = (1..=5)
+            .map(|value| LobbySessionId::new(value).unwrap())
+            .collect();
         let reservation = queue
-            .reserve_oldest_exact(&catalog, reservation_id)
+            .reserve_oldest_exact(&catalog, reservation_id, &live_sessions)
             .expect("four acknowledged 2v2 tickets form");
         assert_eq!(reservation.participants.len(), 4);
         assert_eq!(
@@ -1691,6 +1696,35 @@ mod tests {
     }
 
     #[test]
+    fn stale_disconnected_ticket_cannot_complete_a_live_roster() {
+        let catalog = catalog();
+        let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(1));
+        for value in 1..=4 {
+            let player = session(value);
+            submit(&mut queue, player, 1, join(&catalog, 1), 0);
+            queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
+        }
+        let live_sessions = [1, 3, 4]
+            .map(|value| LobbySessionId::new(value).unwrap())
+            .into_iter()
+            .collect();
+
+        assert!(
+            queue
+                .reserve_oldest_exact(
+                    &catalog,
+                    crate::lobby::MatchReservationId::new(9).unwrap(),
+                    &live_sessions,
+                )
+                .is_none(),
+            "three live players plus one stale ticket must not form a 2v2 match"
+        );
+        assert_eq!(queue.reservation_count(), 0);
+        assert_eq!(queue.snapshot().pools[0].queued, 4);
+        assert!(queue.indexes_are_valid());
+    }
+
+    #[test]
     fn exact_six_player_catalog_entry_forms_balanced_3v3() {
         let catalog = catalog();
         let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(1));
@@ -1700,7 +1734,13 @@ mod tests {
             queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
         }
         let reservation = queue
-            .reserve_oldest_exact(&catalog, crate::lobby::MatchReservationId::new(20).unwrap())
+            .reserve_oldest_exact(
+                &catalog,
+                crate::lobby::MatchReservationId::new(20).unwrap(),
+                &(1..=6)
+                    .map(|value| LobbySessionId::new(value).unwrap())
+                    .collect(),
+            )
             .unwrap();
         assert_eq!(reservation.players_per_team, 3);
         assert_eq!(

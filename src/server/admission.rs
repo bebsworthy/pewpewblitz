@@ -180,10 +180,7 @@ fn expected_mode_fields(mode: GameMode) -> (brawler_routing::GameMode, u16, u16)
 }
 
 fn expected_rules_profile(profile: MatchRulesProfile) -> u8 {
-    match profile {
-        MatchRulesProfile::Production => 1,
-        MatchRulesProfile::ProcessVerification => 2,
-    }
+    profile.routing_id()
 }
 
 fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerManifestError> {
@@ -273,7 +270,7 @@ pub fn validate_match_manifest(
         }
         teams[usize::from(participant.team)] += 1;
     }
-    if !matches!(teams, [2, 2] | [3, 3]) {
+    if !matches!(teams, [1, 1] | [2, 2] | [3, 3]) {
         return Err(MatchWorkerManifestError::ParticipantCapacity);
     }
     validate_build_rows(manifest)?;
@@ -304,9 +301,13 @@ fn validate_runtime_identity(
 /// Build a match worker by reusing the production dedicated-server graph. The role is installed
 /// before the caller can run or update the app; invalid compatibility never reaches Ready.
 pub fn build_match_worker_app(
-    config: ServerNetworkConfig,
+    mut config: ServerNetworkConfig,
     manifest: MatchManifestV1,
 ) -> Result<App, MatchWorkerManifestError> {
+    config.match_objective_target = Some(manifest.objective_target);
+    config.match_duration_ticks = Some(manifest.match_duration_ticks);
+    config.match_countdown_ticks = Some(manifest.countdown_ticks);
+    config.match_respawn_ticks = Some(manifest.respawn_ticks);
     validate_match_manifest(&config, &manifest)?;
     let players_per_team = u8::try_from(manifest.participants.len() / 2)
         .map_err(|_| MatchWorkerManifestError::ParticipantCapacity)?;
@@ -419,6 +420,10 @@ mod tests {
             map_preset,
             map_revision,
             rules_profile: 1,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
             reserved: 0,
             seed: 1,
             participants: {
@@ -537,12 +542,29 @@ mod tests {
         value.match_id = MatchId::new(u128::from(u64::MAX) + 1).unwrap();
         value.common.protocol_registry_fingerprint = protocol;
         value.common.content_fingerprint = content.0;
+        value.objective_target = 1;
+        value.match_duration_ticks = 3_600;
+        value.countdown_ticks = 60;
+        value.respawn_ticks = 120;
         let mut worker = build_match_worker_app(config, value.clone()).unwrap();
         assert_eq!(
             worker.world().resource::<ServerRoleResource>().manifest(),
             Some(&value)
         );
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
+        assert_eq!(
+            worker
+                .world()
+                .resource::<crate::matchplay::WipeoutRules>()
+                .target_score,
+            1
+        );
+        let lifecycle = worker
+            .world()
+            .resource::<crate::matchplay::MatchLifecycleRules>();
+        assert_eq!(lifecycle.active_limit_ticks, 3_600);
+        assert_eq!(lifecycle.countdown_ticks, 60);
+        assert_eq!(lifecycle.respawn_delay_ticks, 120);
         worker.update();
         let world = worker.world_mut();
         let state = world

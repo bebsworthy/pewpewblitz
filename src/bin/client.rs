@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process, time::Duration};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --product-queue-smoke | --product-match-smoke | --product-match-smoke-3v3 | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --product-queue-smoke | --product-match-smoke-1v1 | --product-match-smoke | --product-match-smoke-3v3 | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
     );
 }
 
@@ -99,6 +99,10 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--exit-after-lobby-welcome" => exit_after_lobby_welcome = true,
             "--product-queue-smoke" => product_queue_smoke = true,
             "--product-match-smoke" => product_match_smoke = true,
+            "--product-match-smoke-1v1" => {
+                product_match_smoke = true;
+                product_match_players_per_team = 1;
+            }
             "--product-match-smoke-3v3" => {
                 product_match_smoke = true;
                 product_match_players_per_team = 3;

@@ -6,7 +6,7 @@
 |---|---|
 | Status | User playtest |
 | Prepared | 2026-08-19; simplified during implementation review on the same date |
-| Objective | Turn an exact 2v2 or 3v3 lobby queue roster into one isolated authoritative match and reach the existing server-owned Countdown |
+| Objective | Turn an exact lobby queue roster into one isolated authoritative match and reach the existing server-owned Countdown |
 | Entry dependency | M04 complete |
 | Scope authority | User validated implementation, then explicitly directed the implementation to be reduced to the smallest lobby-queue vertical slice |
 
@@ -35,7 +35,7 @@ Queue Again, Change Game, and concurrent product matches belong to M06.
 
 M05 includes:
 
-- exact oldest-roster formation for advertised 2v2 and 3v3 games;
+- exact oldest-roster formation for advertised 1v1, 2v2, and 3v3 games;
 - deterministic balanced team assignment and compatible-map selection;
 - one supervisor allocation request containing the selected game topology and roster;
 - bounded application-owned build snapshots in the immutable worker manifest;
@@ -45,7 +45,7 @@ M05 includes:
 - worker-owned full-roster check-in and authoritative Countdown start;
 - a small Match Loading UI and minimal Match presentation;
 - clean pre-Active failure and cancel behavior;
-- 2v2 and 3v3 routed process smoke coverage; and
+- 1v1, 2v2, and 3v3 routed process smoke coverage; and
 - preservation of the named direct-UDP development baseline.
 
 M05 excludes:
@@ -67,7 +67,7 @@ The lobby queue remains the only matchmaking authority. A game forms when its po
 least `team_count * players_per_team` application-acknowledged tickets. It removes exactly the
 oldest required tickets, ordered by `(admission_order, ticket_id)`, and leaves overflow queued.
 
-V2 game types have exactly two teams and either two or three players per team. Sorted participants
+V2 game types have exactly two teams and one, two, or three players per team. Sorted participants
 receive `team = index % 2`, producing a stable balanced roster. Compatible maps rotate in catalog
 order after a complete worker grant set is accepted.
 
@@ -85,7 +85,10 @@ validation.
 The request and manifest carry stable game, map, topology, rules, player, team, routed peer, and
 Netcode identities. Each participant also carries a maximum-256-byte opaque
 `MatchBuildSnapshotV1`. The match worker decodes and revalidates that snapshot against embedded
-content before it reports Ready. Routing code never imports gameplay definitions.
+content before it reports Ready. The rule payload is the resolved objective target plus match,
+countdown, and respawn ticks from the selected flat catalog entry. Wipeout resolves
+`kills_to_win`; Hot Zone resolves `capture_seconds`. Routing code never imports gameplay
+definitions or interprets those values.
 
 The single current routing/control/manifest schema and the global application protocol version are
 updated together. M05 adds no compatibility decoder or per-message version.
@@ -158,11 +161,11 @@ Countdown failure from silently restoring Waiting.
 
 ## Implementation checklist
 
-- [x] Advertise and validate exact 2v2 and 3v3 game types.
+- [x] Advertise and validate exact 1v1, 2v2, and 3v3 game types.
 - [x] Form the oldest exact acknowledged roster with deterministic teams and map selection.
 - [x] Add reservation ownership without adding a second matchmaking authority.
 - [x] Carry selected topology and bounded build snapshots through allocation and manifest.
-- [x] Generalize routing allocation and worker admission to four or six participants.
+- [x] Generalize routing allocation and worker admission to two, four, or six participants.
 - [x] Deliver complete grants directly as per-participant Begin messages.
 - [x] Integrate fresh routed lobby-to-match connection replacement into product flow.
 - [x] Add Match Loading progress, cancel confirmation, and minimal Match presentation.
@@ -170,7 +173,7 @@ Countdown failure from silently restoring Waiting.
 - [x] Let the match worker directly unlock the existing authoritative Countdown.
 - [x] End failed pre-Active attempts cleanly without requeue/reconciliation machinery.
 - [x] Block additional product admission after the one M05 match reaches Active.
-- [x] Add routed 2v2/3v3 and direct-baseline commands.
+- [x] Add routed 1v1/2v2/3v3 and direct-baseline commands.
 - [x] Complete the final canonical verification matrix after simplification.
 - [ ] Run the user playtest and record feedback decisions.
 - [x] Complete the learn-from-errors review.
@@ -194,17 +197,19 @@ full-roster Countdown activation, clean pre-Active failure, and the one-match ad
 
 Manual playtest:
 
-1. Run `just network-product-match` and join one advertised 2v2 game from all four windows.
-2. Confirm Queue changes to Match Loading only for the exact roster.
-3. Confirm all clients show the same game/map/topology and only their own build.
-4. Confirm all clients reach the server-authored Countdown and then Active.
-5. Run `just network-product-match-3v3` and repeat with the 3v3 game and all six windows.
-6. Repeat once with a pre-Countdown cancel or disconnected client; confirm the attempted start ends
+1. Run `just network-first-blood` and join First Blood from both windows.
+2. Confirm both clients reach Active and the first defeat completes the match.
+3. Run `just network-product-match` and join one advertised 2v2 game from all four windows.
+4. Confirm Queue changes to Match Loading only for the exact roster.
+5. Confirm all clients show the same game/map/topology and only their own build.
+6. Confirm all clients reach the server-authored Countdown and then Active.
+7. Run `just network-product-match-3v3` and repeat with the 3v3 game and all six windows.
+8. Repeat once with a pre-Countdown cancel or disconnected client; confirm the attempted start ends
    and clients can return to Game Select and queue afresh.
 
 ## Exit criteria
 
-- An exact 2v2 and exact 3v3 roster each reach one isolated match worker's authoritative Countdown.
+- Exact 1v1, 2v2, and 3v3 rosters reach an isolated match worker's authoritative Countdown.
 - No client can start Countdown, join outside the manifest, or receive another player's grant.
 - Pre-Active failure leaves no reservation or invisible queue membership.
 - The direct-UDP baseline remains available.
@@ -235,6 +240,18 @@ Manual playtest:
 - After allowing explicit rematches for returning identities, the focused second-allocation
   regression passed, the complete server library suite passed, and server Clippy completed with
   warnings denied.
+- After making formation require live lobby sessions, the exact stale-ticket regression passed,
+  all 298 server library tests passed, and server Clippy completed with warnings denied.
+- `just network-first-blood-smoke`: the advertised exact 1v1 formed, both clients completed routed
+  handoff, and the worker reached authoritative Active using the catalog's one-kill objective.
+- First Blood follow-up verification passed: 299 server library tests, 348 client library tests,
+  routing's exact-1v1 validation regression, and client/server Clippy with warnings denied.
+- After replacing authored profiles with flat per-game parameters, 298 server tests, 348 client
+  tests, and every routing target passed; routing/client/server Clippy passed with warnings denied.
+  Fresh First Blood 1v1 and Hot Zone 3v3 process smokes both reached authoritative Active.
+- The follow-up consistency pass updated the player UX contract, M01 manifest field list, M03
+  operator-catalog specification, M05 contract, roadmap, README, and owned code comments. `just
+  docs`, formatting checks, and whitespace validation passed.
 
 The redundant match-loading acknowledgement removal was followed by the full lint/test/smoke
 matrix. The subsequent removal of the unused successful check-in response was followed by
@@ -251,9 +268,12 @@ formatting, warning-free lint, both complete role checks, and fresh 2v2, 3v3, an
 | Match reaches Active, but WASD and mouse input do nothing | Implement now | Entering product Match now transfers the existing input context from Shell to Gameplay; leaving Match returns it to Shell, while pause remains stateful |
 | Match completion exposes “Preparing sandbox” and “waiting for match state” | Implement now | A retained Match Complete overlay now covers the routed return, and Game Select resumes only after the fresh lobby authenticates; stale loading state is cleared with the lobby generation |
 | The same four players queue again, a second worker starts, but nobody connects | Implement now | Removed the M01 one-allocation-per-client rejection from explicit product allocations; returning identities reuse their existing bounded identity slots and receive fresh grants |
+| Three players queue, one disconnects, and one replacement causes a three-player match attempt | Implement now | Formation now cross-checks every selected ticket against a current non-disconnected lobby entity, so a stale ticket can remain visible briefly but can never count toward an exact roster |
+| Add a short 1v1 match where one kill wins, named First Blood | Implement now | Added an advertised First Blood game, an authoritative one-kill objective, exact 1v1 admission, and two-client windowed/smoke commands |
+| Replace inconvenient game-type rule profiles with basic parameters and no shared defaults block | Implement now | Every game now directly declares `kills_to_win` or `capture_seconds`, plus its own match duration, countdown, and respawn seconds; resolved values travel in the worker manifest |
 
 No feedback item is deferred or rejected. The remaining feedback gate is a rerun of the hands-on
-2v2/3v3 and cancel-path playtest using the corrected canonical windowed commands.
+1v1/2v2/3v3 and cancel-path playtest using the corrected canonical windowed commands.
 
 ## Learn-from-errors review
 
@@ -274,6 +294,8 @@ No feedback item is deferred or rejected. The remaining feedback gate is a rerun
   replicated match state disappeared, exposing legacy HUD fallback copy.
 - The product allocation path reused an M01 automation tombstone that deliberately prevented the
   same Netcode identity from receiving a second allocation.
+- Exact formation trusted acknowledged queue tickets without a final live-session check at the
+  commit boundary.
 
 ### Causes
 
@@ -288,6 +310,8 @@ No feedback item is deferred or rejected. The remaining feedback gate is a rerun
 - The return-to-lobby test verified transport lifecycle but not continuous product presentation.
 - First-match smoke coverage exited at Active and never exercised an explicit second queue request
   by the same authenticated identities.
+- Disconnect cleanup was tested in isolation, but formation was not tested against a stale ticket
+  during the observer/deferred-removal window.
 
 ### Prevention and reusable lessons
 
@@ -305,6 +329,8 @@ No feedback item is deferred or rejected. The remaining feedback gate is a rerun
   not only the final authenticated generation.
 - Compatibility-only allocation guards must not silently govern explicit product queue behavior;
   repeat-player tests are required wherever process-lifetime identity memory is shared.
+- Cached queue membership may drive presentation, but exact formation must revalidate current live
+  session ownership immediately before reserving a roster.
 
 These lessons are already represented by the repository's no-over-engineering rules, so no new
 project skill or generalized framework is warranted.

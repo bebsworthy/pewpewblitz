@@ -218,6 +218,14 @@ network-product-match-smoke:
 network-product-match:
     BRAWLER_NETWORK_HEADLESS=0 BRAWLER_PRODUCT_PLAYERS_PER_TEAM=2 ./scripts/network-product-match.sh
 
+# Exercise the short First Blood 1v1 through authoritative Active.
+network-first-blood-smoke:
+    BRAWLER_PRODUCT_PLAYERS_PER_TEAM=1 ./scripts/network-product-match.sh
+
+# Launch two windowed clients for the short First Blood playtest.
+network-first-blood:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_PRODUCT_PLAYERS_PER_TEAM=1 ./scripts/network-product-match.sh
+
 # Exercise the M05 exact 3v3 product reservation through authoritative Active.
 network-product-match-3v3-smoke:
     BRAWLER_PRODUCT_PLAYERS_PER_TEAM=3 ./scripts/network-product-match.sh

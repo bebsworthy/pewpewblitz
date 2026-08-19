@@ -150,6 +150,14 @@ impl MatchRulesProfile {
             _ => None,
         }
     }
+
+    #[must_use]
+    pub const fn routing_id(self) -> u8 {
+        match self {
+            Self::Production => 1,
+            Self::ProcessVerification => 2,
+        }
+    }
 }
 
 /// Runtime configuration for the dedicated server.
@@ -164,6 +172,10 @@ pub struct ServerNetworkConfig {
     pub impairment_profile: NetworkImpairmentProfile,
     pub game_mode: GameMode,
     pub match_rules_profile: MatchRulesProfile,
+    pub match_objective_target: Option<u16>,
+    pub match_duration_ticks: Option<u64>,
+    pub match_countdown_ticks: Option<u64>,
+    pub match_respawn_ticks: Option<u64>,
 }
 
 impl Default for ServerNetworkConfig {
@@ -180,6 +192,10 @@ impl Default for ServerNetworkConfig {
             impairment_profile: NetworkImpairmentProfile::from_env(),
             game_mode: GameMode::Wipeout,
             match_rules_profile: MatchRulesProfile::Production,
+            match_objective_target: None,
+            match_duration_ticks: None,
+            match_countdown_ticks: None,
+            match_respawn_ticks: None,
         }
     }
 }
@@ -195,6 +211,24 @@ impl ServerNetworkConfig {
         }
         if self.client_timeout.is_zero() {
             return Err("client timeout must be greater than zero".to_string());
+        }
+        let match_overrides = [
+            self.match_objective_target.is_some(),
+            self.match_duration_ticks.is_some(),
+            self.match_countdown_ticks.is_some(),
+            self.match_respawn_ticks.is_some(),
+        ];
+        if match_overrides.iter().any(|present| *present)
+            && !match_overrides.iter().all(|present| *present)
+        {
+            return Err("resolved match rules must be supplied as one complete set".to_string());
+        }
+        if self.match_objective_target == Some(0)
+            || self.match_duration_ticks == Some(0)
+            || self.match_countdown_ticks == Some(0)
+            || self.match_respawn_ticks == Some(0)
+        {
+            return Err("resolved match rule values must be greater than zero".to_string());
         }
         Ok(())
     }
@@ -333,8 +367,8 @@ impl ClientNetworkConfig {
         if self.product_match_smoke && self.transport != NetworkTransport::RoutedUdp {
             return Err("--product-match-smoke requires --transport routed-udp".to_string());
         }
-        if self.product_match_smoke && !matches!(self.product_match_players_per_team, 2 | 3) {
-            return Err("product match smoke requires 2v2 or 3v3".to_string());
+        if self.product_match_smoke && !matches!(self.product_match_players_per_team, 1..=3) {
+            return Err("product match smoke requires 1v1, 2v2, or 3v3".to_string());
         }
         if self.product_match_smoke && self.product_queue_smoke {
             return Err("product queue and match smokes are mutually exclusive".to_string());
