@@ -374,10 +374,10 @@ pub(super) fn update_client_hud(
             ActiveInputDevice::KeyboardMouse => "keyboard/mouse",
             ActiveInputDevice::Gamepad(_) => "gamepad",
         };
-        let mode = if matches!(*context, ClientInputContext::Paused) {
-            "paused"
-        } else {
-            "gameplay"
+        let mode = match *context {
+            ClientInputContext::Gameplay => "gameplay",
+            ClientInputContext::Paused => "paused",
+            ClientInputContext::Shell => "shell",
         };
         let connection = connection
             .iter()

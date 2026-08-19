@@ -17,8 +17,8 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
 - Only the next milestone receives a detailed file. Later entries define outcomes, ordering,
   dependencies, and gates—not premature technical specifications.
 - By explicit user direction on 2026-08-18, M02 is the bounded exception: its specification was
-  prepared during M01 verification. M01 completed on 2026-08-19; M02 is now the current milestone
-  but cannot enter `Implementing` until the user validates its specification.
+  prepared during M01 verification. M01 completed on 2026-08-19, the user validated M02 on
+  2026-08-19, and the milestone returned to `Implementing` after its first implementation review.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,

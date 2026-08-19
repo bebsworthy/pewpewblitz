@@ -285,7 +285,19 @@ pub enum ClientInputContext {
     #[default]
     Gameplay,
     Paused,
+    /// The offline product shell owns local input and always emits neutral gameplay intent.
+    Shell,
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ClientSettingsUiSet {
+    Capture,
+    Shell,
+    Present,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct InputCaptureConsumed(pub bool);
 
 /// Local presentation/readiness gate. Headless automation has no asset requirement.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -437,6 +449,7 @@ fn apply_pause_request(
         *context = match *context {
             ClientInputContext::Gameplay => ClientInputContext::Paused,
             ClientInputContext::Paused => ClientInputContext::Gameplay,
+            ClientInputContext::Shell => ClientInputContext::Shell,
         };
         pending.latched_buttons = 0;
     }
@@ -531,7 +544,11 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     }
     if !headless {
         app.add_plugins(ClientPresentationPlugin);
-        if !app.world().resource::<ClientNetworkConfig>().auto_connect {
+        if app
+            .world()
+            .resource::<ClientNetworkConfig>()
+            .presents_product_shell()
+        {
             app.add_plugins(ClientShellPlugin);
         }
         if let Some(schedule) = screenshot_schedule {

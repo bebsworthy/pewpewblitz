@@ -7,7 +7,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -145,16 +145,30 @@ impl core::fmt::Display for SettingsLoadError {
 pub fn load_settings(
     path: &Path,
 ) -> Result<Option<(ClientInputSettings, ClientShellSettings)>, SettingsLoadError> {
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(SettingsLoadError::Read(error.to_string())),
     };
+    let metadata = file
+        .metadata()
+        .map_err(|error| SettingsLoadError::Read(error.to_string()))?;
     if metadata.len() > MAX_SETTINGS_BYTES {
         return Err(SettingsLoadError::TooLarge(metadata.len()));
     }
+    let mut bytes = Vec::with_capacity(
+        usize::try_from(metadata.len().min(MAX_SETTINGS_BYTES)).unwrap_or_default(),
+    );
+    file.take(MAX_SETTINGS_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| SettingsLoadError::Read(error.to_string()))?;
+    if bytes.len() > usize::try_from(MAX_SETTINGS_BYTES).unwrap_or(usize::MAX) {
+        return Err(SettingsLoadError::TooLarge(
+            u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        ));
+    }
     let source =
-        fs::read_to_string(path).map_err(|error| SettingsLoadError::Read(error.to_string()))?;
+        String::from_utf8(bytes).map_err(|error| SettingsLoadError::Rejected(error.to_string()))?;
     let file: SettingsFileV1 =
         ron::from_str(&source).map_err(|error| SettingsLoadError::Rejected(error.to_string()))?;
     file.into_active()
@@ -237,6 +251,33 @@ mod tests {
             Err(SettingsLoadError::Rejected(_))
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), "this is not ron");
+
+        let mut unsupported = SettingsFileV1::from_active(
+            ClientInputSettings::default(),
+            ClientShellSettings::default(),
+        );
+        unsupported.schema_version = 99;
+        let unsupported_source = ron::to_string(&unsupported).unwrap();
+        fs::write(&path, &unsupported_source).unwrap();
+        assert!(matches!(
+            load_settings(&path),
+            Err(SettingsLoadError::Rejected(_))
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), unsupported_source);
+
+        let mut invalid = SettingsFileV1::from_active(
+            ClientInputSettings::default(),
+            ClientShellSettings::default(),
+        );
+        invalid.ui_scale = MAX_UI_SCALE + 1.0;
+        let invalid_source = ron::to_string(&invalid).unwrap();
+        fs::write(&path, &invalid_source).unwrap();
+        assert!(matches!(
+            load_settings(&path),
+            Err(SettingsLoadError::Rejected(_))
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid_source);
+
         fs::write(
             &path,
             "x".repeat(usize::try_from(MAX_SETTINGS_BYTES + 1).unwrap()),

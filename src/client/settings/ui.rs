@@ -4,7 +4,7 @@
 
 use super::is_modifier_key;
 use super::{CalibrationField, ClientInputSettings, GamepadAction, KeyboardAction};
-use crate::client::{ClientInputContext, InputSettingsText};
+use crate::client::{ClientInputContext, InputCaptureConsumed, InputSettingsText};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 
@@ -236,7 +236,8 @@ pub fn compose_input_settings_lines(
 /// enter `FighterInput`: the authoritative match is unaffected by local settings.
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+    clippy::too_many_arguments,
+    reason = "the focused Bevy system receives the complete local capture boundary; input device resources remain independently optional"
 )]
 pub(crate) fn adjust_input_settings_from_pause_keys(
     context: Res<ClientInputContext>,
@@ -246,8 +247,13 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
     mut selection: ResMut<InputSettingsSelection>,
     mut settings: ResMut<ClientInputSettings>,
     draft: Option<ResMut<InputSettingsDraft>>,
+    capture_consumed: Option<ResMut<InputCaptureConsumed>>,
 ) {
-    if !matches!(*context, ClientInputContext::Paused) {
+    let mut capture_consumed = capture_consumed;
+    if let Some(consumed) = capture_consumed.as_deref_mut() {
+        consumed.0 = false;
+    }
+    if !settings_context_owns_input(*context) {
         return;
     }
     let Some(keyboard) = keyboard else {
@@ -261,9 +267,14 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
         .map_or(&mut *settings, |draft| &mut draft.0);
 
     if selection.listening {
-        // B (keyboard) and East (controller) cancel; every other accepted press commits.
-        if keyboard.just_pressed(KeyCode::KeyB) || pad_pressed(GamepadButton::East) {
+        // Escape/B and East cancel before any accepted binding press can commit.
+        if keyboard.any_just_pressed([KeyCode::Escape, KeyCode::KeyB])
+            || pad_pressed(GamepadButton::East)
+        {
             selection.listening = false;
+            if let Some(consumed) = capture_consumed.as_deref_mut() {
+                consumed.0 = true;
+            }
             return;
         }
         match selection.field {
@@ -345,6 +356,13 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
     }
 }
 
+const fn settings_context_owns_input(context: ClientInputContext) -> bool {
+    matches!(
+        context,
+        ClientInputContext::Paused | ClientInputContext::Shell
+    )
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
@@ -356,7 +374,7 @@ pub(crate) fn update_input_settings_overlay(
     selection: Res<InputSettingsSelection>,
     mut texts: Query<&mut Text, With<InputSettingsText>>,
 ) {
-    if !matches!(*context, ClientInputContext::Paused) {
+    if !settings_context_owns_input(*context) {
         return;
     }
     let editing_product_draft = draft.is_some();

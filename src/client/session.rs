@@ -17,6 +17,7 @@ impl Plugin for ClientNetworkPlugin {
         if app.world().resource::<ClientNetworkConfig>().transport == NetworkTransport::RoutedUdp {
             app.add_plugins(RoutedUdpPlugin);
         }
+        configure_client_settings_ui(app);
         app.insert_resource(FallbackErrorHandler(error))
             .add_plugins(ClientCombatPlugin)
             .add_plugins(crate::terrain::ClientTerrainPlugin)
@@ -77,8 +78,6 @@ impl Plugin for ClientNetworkPlugin {
                     process_match_command_outcomes,
                     send_match_command,
                     update_build_selection_overlay,
-                    adjust_input_settings_from_pause_keys,
-                    update_input_settings_overlay,
                     disconnect_rejected_client,
                     observe_client_lifecycle,
                     log_replicated_roster,
@@ -117,6 +116,26 @@ impl Plugin for ClientNetworkPlugin {
         );
         app.add_observer(add_controlled_input_marker);
     }
+}
+
+fn configure_client_settings_ui(app: &mut App) {
+    app.configure_sets(
+        Update,
+        (
+            ClientSettingsUiSet::Capture,
+            ClientSettingsUiSet::Shell,
+            ClientSettingsUiSet::Present,
+        )
+            .chain(),
+    )
+    .add_systems(
+        Update,
+        adjust_input_settings_from_pause_keys.in_set(ClientSettingsUiSet::Capture),
+    )
+    .add_systems(
+        Update,
+        update_input_settings_overlay.in_set(ClientSettingsUiSet::Present),
+    );
 }
 
 fn process_match_command_outcomes(

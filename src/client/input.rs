@@ -241,7 +241,11 @@ pub(super) fn sample_local_input(
     // While the pause overlay is capturing the next binding press, local-only keys must not
     // also unpause, cancel, or latch actions in the middle of a rebind.
     let capturing_rebind = selection.is_some_and(|selection| {
-        selection.listening && matches!(*context, ClientInputContext::Paused)
+        selection.listening
+            && matches!(
+                *context,
+                ClientInputContext::Paused | ClientInputContext::Shell
+            )
     });
     pending.cancel_pressed = !capturing_rebind
         && (gamepad_sample
@@ -590,7 +594,7 @@ pub(super) fn write_client_input(
         return;
     };
     let input = if !playable.0
-        || matches!(*context, ClientInputContext::Paused)
+        || !matches!(*context, ClientInputContext::Gameplay)
         || selecting.iter().next().is_some()
     {
         pending.latched_buttons = 0;

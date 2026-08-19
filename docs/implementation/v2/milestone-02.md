@@ -302,6 +302,14 @@ defer broader combat accessibility and final visual tuning to M07.
 
 ## Implementation evidence — 2026-08-19
 
+The first implementation review returned M02 to `Implementing`. It found that Escape could leak
+from shell Back into gameplay pause handling, Escape did not cancel keyboard rebinding as promised,
+navigation lacked horizontal inputs/edges, programmatic demo configurations could compose the shell
+while connecting, save-error copy misstated the active session values, the settings read was not
+strictly bounded to one opened file, and focused error-path tests did not prove every claimed case.
+The evidence immediately below is retained as the pre-correction baseline; corrective evidence
+follows it.
+
 - `cargo fmt --all -- --check` passed.
 - Client Clippy passed with warnings denied.
 - All 279 client tests passed, including versioned settings round-trip/rejection/save failure,
@@ -316,6 +324,37 @@ defer broader combat accessibility and final visual tuning to M07.
 - Rendered Title captures at 960x540, 1280x720, and 1680x1050 are readable. A first-pass missing
   em-dash glyph was found visually and fixed. The live macOS keyboard walkthrough reached every
   Settings action through focus-following scroll, returned focus on Cancel, and opened Credits.
+
+## Corrective implementation evidence — 2026-08-19
+
+- The product shell now owns a distinct local input context. Shell-owned fixed-tick writes are
+  neutral, Escape cannot toggle gameplay pause underneath the shell, and the underlying diagnostic
+  HUD reports `shell` instead of `gameplay`.
+- Settings capture, shell collection/action handling, and settings presentation use an explicit
+  ordered set chain. Escape/B/East cancels capture exactly once, and the South/click activation that
+  starts capture cannot become the captured binding in the same frame.
+- Keyboard arrows/WASD, all D-pad directions, and both left-stick axes navigate. The active layer's
+  cardinal edges are rebuilt after Bevy UI layout from computed control positions with stable
+  fallback ordering; disabled and covered-layer controls never enter the graph.
+- Shell presentation and initial connection now use complementary methods on the same startup
+  configuration. Normal windowed, explicit auto-connect, headless, combat-demo, and controller-demo
+  cases are covered.
+- Settings load opens one file and reads at most 64 KiB plus one rejection byte. Tests now cover
+  malformed RON, unsupported schema, invalid values, oversized content, missing files, and a valid
+  round trip without replacing rejected files.
+- Load, validation, and save failures now show distinct accurate outcomes. Shell-level tests prove
+  validation draft retention, active-session preservation after save failure, repeated Retry
+  failure, successful Retry after destination repair, and Continue Without Saving.
+- `cargo fmt --all -- --check`, strict client Clippy, `git diff --check`, the isolated server build,
+  and `scripts/check-server-features.sh` passed.
+- All 287 client/library tests and all 77 deterministic/UDP network integration tests passed.
+- `just network-direct-smoke` passed with both clients exiting cleanly.
+- `just network-routed-smoke` passed the two-client lobby-to-match-to-fresh-lobby transition and
+  orderly lobby/match-worker cleanup.
+- The correction did not change UI sizing or layout construction, so the accepted 960x540,
+  1280x720, and 1680x1050 visual captures remain applicable. The new post-layout spatial-edge test
+  covers the responsive relationship added by this correction. Physical-controller feel remains
+  the user-playtest item.
 
 ## User playtest handoff
 

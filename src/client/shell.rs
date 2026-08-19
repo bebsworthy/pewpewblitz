@@ -1,7 +1,8 @@
 //! Functional windowed product shell: title, one overlay, focus, settings draft, and errors.
 
 use super::{
-    ClientInputContext, InputSettingsField, InputSettingsSelection, InputSettingsText,
+    ClientInputContext, ClientSettingsUiSet, InputCaptureConsumed, InputSettingsField,
+    InputSettingsSelection, InputSettingsText,
     settings::{
         ClientInputSettings,
         persistence::{
@@ -42,12 +43,20 @@ enum ErrorReturn {
     Settings,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum LocalSettingsErrorKind {
+    #[default]
+    Load,
+    Validation,
+    Save,
+}
+
 #[derive(Resource, Debug)]
 struct ShellState {
     overlay: ShellOverlay,
     error_return: ErrorReturn,
+    error_kind: LocalSettingsErrorKind,
     error_message: String,
-    settings_applied_before_error: bool,
 }
 
 impl Default for ShellState {
@@ -55,8 +64,8 @@ impl Default for ShellState {
         Self {
             overlay: ShellOverlay::None,
             error_return: ErrorReturn::Title,
+            error_kind: LocalSettingsErrorKind::Load,
             error_message: String::new(),
-            settings_applied_before_error: false,
         }
     }
 }
@@ -69,6 +78,7 @@ struct PendingActions(Vec<ShellAction>);
 
 #[derive(Resource, Default)]
 struct NavigationLatch {
+    x_ready: bool,
     y_ready: bool,
 }
 
@@ -168,14 +178,10 @@ impl Plugin for ClientShellPlugin {
             .init_resource::<PendingActions>()
             .init_resource::<NavigationLatch>()
             .init_resource::<NavigationDirty>()
+            .init_resource::<InputCaptureConsumed>()
             .add_systems(
                 Startup,
-                (
-                    load_persistent_settings,
-                    spawn_initial_shell,
-                    rebuild_navigation,
-                )
-                    .chain(),
+                (load_persistent_settings, spawn_initial_shell).chain(),
             )
             .add_systems(
                 Update,
@@ -189,11 +195,14 @@ impl Plugin for ClientShellPlugin {
                     animate_shell_entrance,
                     scroll_shell_panels,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(ClientSettingsUiSet::Shell),
             )
             .add_systems(
                 PostUpdate,
-                keep_focused_control_visible.after(UiSystems::Layout),
+                (rebuild_navigation, keep_focused_control_visible)
+                    .chain()
+                    .after(UiSystems::Layout),
             );
     }
 }
@@ -217,6 +226,7 @@ fn load_persistent_settings(
         Err(error) => {
             state.overlay = ShellOverlay::LocalError;
             state.error_return = ErrorReturn::Title;
+            state.error_kind = LocalSettingsErrorKind::Load;
             state.error_message = error.to_string();
         }
     }
@@ -232,10 +242,10 @@ fn spawn_initial_shell(
     mut context: ResMut<ClientInputContext>,
     mut dirty: ResMut<NavigationDirty>,
 ) {
-    *context = ClientInputContext::Paused;
+    *context = ClientInputContext::Shell;
     spawn_title(&mut commands);
     if state.overlay == ShellOverlay::LocalError {
-        spawn_error(&mut commands, &state.error_message, false);
+        spawn_error(&mut commands, &state.error_message, state.error_kind);
         dirty.0 = Some(ShellControlId::ContinueWithoutSaving);
     } else {
         dirty.0 = Some(ShellControlId::Settings);
@@ -463,12 +473,21 @@ fn spawn_credits(commands: &mut Commands) {
     });
 }
 
-fn spawn_error(commands: &mut Commands, message: &str, retry: bool) {
+fn spawn_error(commands: &mut Commands, message: &str, kind: LocalSettingsErrorKind) {
     spawn_overlay(commands, "LOCAL SETTINGS ERROR", |panel| {
+        let outcome = match kind {
+            LocalSettingsErrorKind::Load => {
+                "Safe defaults remain active. The existing file was not changed."
+            }
+            LocalSettingsErrorKind::Validation => {
+                "The draft was retained and no values were applied."
+            }
+            LocalSettingsErrorKind::Save => {
+                "Your changes remain active for this session. The existing file was not changed."
+            }
+        };
         panel.spawn((
-            Text::new(format!(
-                "{message}\n\nSafe defaults remain active. The existing file was not changed."
-            )),
+            Text::new(format!("{message}\n\n{outcome}")),
             TextFont::from_font_size(16.0),
             TextColor(Color::srgb(1.0, 0.72, 0.48)),
             TextLayout::new(Justify::Center, LineBreak::WordBoundary),
@@ -477,7 +496,7 @@ fn spawn_error(commands: &mut Commands, message: &str, retry: bool) {
                 ..default()
             },
         ));
-        if retry {
+        if kind == LocalSettingsErrorKind::Save {
             spawn_button(
                 panel,
                 "RETRY SAVE",
@@ -548,6 +567,7 @@ fn collect_navigation_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     selection: Res<InputSettingsSelection>,
+    capture_consumed: Res<InputCaptureConsumed>,
     state: Res<ShellState>,
     mut latch: ResMut<NavigationLatch>,
     mut navigation: DirectionalNavigation,
@@ -571,20 +591,38 @@ fn collect_navigation_input(
     if stick.y.abs() < 0.35 {
         latch.y_ready = true;
     }
+    if stick.x.abs() < 0.35 {
+        latch.x_ready = true;
+    }
     let up = keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
         || pad_pressed(GamepadButton::DPadUp)
-        || (stick.y > 0.65 && latch.y_ready);
+        || (stick.y > 0.65 && stick.y.abs() >= stick.x.abs() && latch.y_ready);
     let down = keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
         || pad_pressed(GamepadButton::DPadDown)
-        || (stick.y < -0.65 && latch.y_ready);
+        || (stick.y < -0.65 && stick.y.abs() >= stick.x.abs() && latch.y_ready);
+    let left = keyboard.any_just_pressed([KeyCode::ArrowLeft, KeyCode::KeyA])
+        || pad_pressed(GamepadButton::DPadLeft)
+        || (stick.x < -0.65 && stick.x.abs() > stick.y.abs() && latch.x_ready);
+    let right = keyboard.any_just_pressed([KeyCode::ArrowRight, KeyCode::KeyD])
+        || pad_pressed(GamepadButton::DPadRight)
+        || (stick.x > 0.65 && stick.x.abs() > stick.y.abs() && latch.x_ready);
     if stick.y.abs() > 0.65 {
         latch.y_ready = false;
+    }
+    if stick.x.abs() > 0.65 {
+        latch.x_ready = false;
     }
     if up {
         let _ = navigation.navigate(CompassOctant::North);
     }
     if down {
         let _ = navigation.navigate(CompassOctant::South);
+    }
+    if left {
+        let _ = navigation.navigate(CompassOctant::West);
+    }
+    if right {
+        let _ = navigation.navigate(CompassOctant::East);
     }
 
     let activate = keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
@@ -598,7 +636,8 @@ fn collect_navigation_input(
     {
         pending.0.push(action);
     }
-    let back = keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East);
+    let back = !capture_consumed.0
+        && (keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East));
     if back && state.overlay != ShellOverlay::None && !pending.0.contains(&ShellAction::Back) {
         pending.0.push(ShellAction::Back);
     }
@@ -742,10 +781,10 @@ fn handle_shell_actions(
                 {
                     state.error_message = error;
                     state.error_return = ErrorReturn::Settings;
+                    state.error_kind = LocalSettingsErrorKind::Validation;
                     state.overlay = ShellOverlay::LocalError;
-                    state.settings_applied_before_error = false;
                     despawn_overlays(&mut commands, &roots);
-                    spawn_error(&mut commands, &state.error_message, false);
+                    spawn_error(&mut commands, &state.error_message, state.error_kind);
                     dirty.0 = Some(ShellControlId::ContinueWithoutSaving);
                     continue;
                 }
@@ -756,10 +795,10 @@ fn handle_shell_actions(
                 if let Err(error) = save_settings(&path.0, *active_input, *active_shell) {
                     state.error_message = error;
                     state.error_return = ErrorReturn::Settings;
+                    state.error_kind = LocalSettingsErrorKind::Save;
                     state.overlay = ShellOverlay::LocalError;
-                    state.settings_applied_before_error = true;
                     despawn_overlays(&mut commands, &roots);
-                    spawn_error(&mut commands, &state.error_message, true);
+                    spawn_error(&mut commands, &state.error_message, state.error_kind);
                     dirty.0 = Some(ShellControlId::Retry);
                 } else {
                     close_overlay(
@@ -771,20 +810,25 @@ fn handle_shell_actions(
                     );
                 }
             }
-            ShellAction::RetrySave => {
-                if save_settings(&path.0, *active_input, *active_shell).is_ok() {
-                    close_overlay(
-                        &mut commands,
-                        &mut state,
-                        &roots,
-                        &mut dirty,
-                        ShellControlId::Settings,
-                    );
+            ShellAction::RetrySave => match save_settings(&path.0, *active_input, *active_shell) {
+                Ok(()) => close_overlay(
+                    &mut commands,
+                    &mut state,
+                    &roots,
+                    &mut dirty,
+                    ShellControlId::Settings,
+                ),
+                Err(error) => {
+                    state.error_message = error;
+                    state.error_kind = LocalSettingsErrorKind::Save;
+                    despawn_overlays(&mut commands, &roots);
+                    spawn_error(&mut commands, &state.error_message, state.error_kind);
+                    dirty.0 = Some(ShellControlId::Retry);
                 }
-            }
+            },
             ShellAction::ContinueWithoutSaving => {
                 if state.error_return == ErrorReturn::Settings
-                    && !state.settings_applied_before_error
+                    && state.error_kind == LocalSettingsErrorKind::Validation
                 {
                     despawn_overlays(&mut commands, &roots);
                     state.overlay = ShellOverlay::Settings;
@@ -803,7 +847,7 @@ fn handle_shell_actions(
             ShellAction::Cancel | ShellAction::Back => {
                 if state.overlay == ShellOverlay::LocalError
                     && state.error_return == ErrorReturn::Settings
-                    && !state.settings_applied_before_error
+                    && state.error_kind == LocalSettingsErrorKind::Validation
                 {
                     despawn_overlays(&mut commands, &roots);
                     state.overlay = ShellOverlay::Settings;
@@ -839,7 +883,7 @@ fn close_overlay(
     commands.remove_resource::<InputSettingsDraft>();
     commands.remove_resource::<ShellSettingsDraft>();
     state.overlay = ShellOverlay::None;
-    state.settings_applied_before_error = false;
+    state.error_kind = LocalSettingsErrorKind::Load;
     dirty.0 = Some(focus);
 }
 
@@ -850,31 +894,94 @@ fn close_overlay(
 fn rebuild_navigation(
     state: Res<ShellState>,
     mut dirty: ResMut<NavigationDirty>,
-    buttons: Query<(Entity, &ShellButton)>,
+    buttons: Query<(Entity, &ShellButton, &UiGlobalTransform)>,
     mut map: ResMut<DirectionalNavigationMap>,
     mut focus: ResMut<InputFocus>,
 ) {
-    let Some(preferred) = dirty.0.take() else {
-        return;
-    };
+    let preferred = dirty.0.take();
     map.clear();
     let layer = active_layer(state.overlay);
-    let mut active: Vec<(Entity, ShellControlId)> = buttons
+    let mut active: Vec<(Entity, ShellControlId, Vec2)> = buttons
         .iter()
-        .filter_map(|(entity, button)| {
-            (button.layer == layer && button.action.is_some()).then_some((entity, button.id))
+        .filter_map(|(entity, button, transform)| {
+            let (_, _, center) = transform.to_scale_angle_translation();
+            (button.layer == layer && button.action.is_some())
+                .then_some((entity, button.id, center))
         })
         .collect();
-    active.sort_by_key(|(_, id)| *id as u8);
-    let entities: Vec<Entity> = active.iter().map(|(entity, _)| *entity).collect();
-    map.add_looping_edges(&entities, CompassOctant::South);
-    if let Some((entity, _)) = active
+    active.sort_by_key(|(_, id, _)| *id as u8);
+    add_spatial_navigation_edges(&mut map, &active);
+    let current = focus.get();
+    if let Some((entity, _, _)) = active
         .iter()
-        .find(|(_, id)| *id == preferred)
+        .find(|(_, id, _)| preferred == Some(*id))
+        .or_else(|| {
+            active
+                .iter()
+                .find(|(entity, _, _)| current == Some(*entity))
+        })
         .or_else(|| active.first())
+        && current != Some(*entity)
     {
         focus.set(*entity, FocusCause::Navigated);
     }
+}
+
+fn add_spatial_navigation_edges(
+    map: &mut DirectionalNavigationMap,
+    active: &[(Entity, ShellControlId, Vec2)],
+) {
+    for (index, (entity, _, center)) in active.iter().enumerate() {
+        for (direction, axis) in [
+            (CompassOctant::North, Vec2::NEG_Y),
+            (CompassOctant::South, Vec2::Y),
+            (CompassOctant::West, Vec2::NEG_X),
+            (CompassOctant::East, Vec2::X),
+        ] {
+            let candidate = active
+                .iter()
+                .enumerate()
+                .filter(|(candidate_index, _)| *candidate_index != index)
+                .filter_map(|(_, (candidate, id, candidate_center))| {
+                    let delta = *candidate_center - *center;
+                    let forward = delta.dot(axis);
+                    (forward > 1.0).then_some((
+                        *candidate,
+                        delta.perp_dot(axis).abs() / forward,
+                        delta.length_squared(),
+                        *id as u8,
+                    ))
+                })
+                .min_by(|left, right| {
+                    left.1
+                        .total_cmp(&right.1)
+                        .then_with(|| left.2.total_cmp(&right.2))
+                        .then_with(|| left.3.cmp(&right.3))
+                })
+                .map(|(candidate, _, _, _)| candidate)
+                .or_else(|| stable_navigation_fallback(active, index, direction));
+            if let Some(candidate) = candidate {
+                map.add_edge(*entity, candidate, direction);
+            }
+        }
+    }
+}
+
+fn stable_navigation_fallback(
+    active: &[(Entity, ShellControlId, Vec2)],
+    index: usize,
+    direction: CompassOctant,
+) -> Option<Entity> {
+    if active.len() < 2 {
+        return None;
+    }
+    let next = matches!(direction, CompassOctant::South | CompassOctant::East);
+    let target = if next {
+        (index + 1) % active.len()
+    } else {
+        (index + active.len() - 1) % active.len()
+    };
+    Some(active[target].0)
 }
 
 #[allow(
@@ -1010,6 +1117,8 @@ fn keep_focused_control_visible(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::settings::ui::adjust_input_settings_from_pause_keys;
+    use bevy::input_focus::directional_navigation::NavNeighbor;
 
     fn shell_test_app(path: std::path::PathBuf) -> App {
         let mut app = App::new();
@@ -1022,6 +1131,19 @@ mod tests {
             .init_resource::<ClientInputContext>()
             .init_resource::<ClientInputSettings>()
             .init_resource::<InputSettingsSelection>()
+            .configure_sets(
+                Update,
+                (
+                    ClientSettingsUiSet::Capture,
+                    ClientSettingsUiSet::Shell,
+                    ClientSettingsUiSet::Present,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                adjust_input_settings_from_pause_keys.in_set(ClientSettingsUiSet::Capture),
+            )
             .add_plugins(ClientShellPlugin);
         app
     }
@@ -1035,6 +1157,10 @@ mod tests {
         let mut app = shell_test_app(path);
 
         app.update();
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Shell
+        );
         let focus = app.world().resource::<InputFocus>().get().unwrap();
         assert_eq!(
             app.world().get::<ShellButton>(focus).unwrap().id,
@@ -1142,6 +1268,7 @@ mod tests {
             std::process::id()
         ));
         let mut app = shell_test_app(path);
+        app.update();
         let mut gamepad = Gamepad::default();
         gamepad.digital_mut().press(GamepadButton::DPadDown);
         gamepad.digital_mut().press(GamepadButton::South);
@@ -1158,6 +1285,323 @@ mod tests {
             query.iter(world).count()
         };
         assert_eq!(overlay_count, 1);
+    }
+
+    #[test]
+    fn spatial_navigation_uses_cardinal_layout_neighbors() {
+        let mut world = World::new();
+        let settings = world.spawn_empty().id();
+        let credits = world.spawn_empty().id();
+        let apply = world.spawn_empty().id();
+        let cancel = world.spawn_empty().id();
+        let active = [
+            (settings, ShellControlId::Settings, Vec2::new(0.0, 0.0)),
+            (credits, ShellControlId::Credits, Vec2::new(100.0, 0.0)),
+            (apply, ShellControlId::Apply, Vec2::new(0.0, 100.0)),
+            (cancel, ShellControlId::Cancel, Vec2::new(100.0, 100.0)),
+        ];
+        let mut map = DirectionalNavigationMap::default();
+        add_spatial_navigation_edges(&mut map, &active);
+        assert_eq!(
+            map.get_neighbor(settings, CompassOctant::East),
+            NavNeighbor::Set(credits)
+        );
+        assert_eq!(
+            map.get_neighbor(settings, CompassOctant::South),
+            NavNeighbor::Set(apply)
+        );
+        assert_eq!(
+            map.get_neighbor(cancel, CompassOctant::West),
+            NavNeighbor::Set(apply)
+        );
+        assert_eq!(
+            map.get_neighbor(cancel, CompassOctant::North),
+            NavNeighbor::Set(credits)
+        );
+    }
+
+    #[test]
+    fn horizontal_keyboard_and_left_stick_move_title_focus() {
+        let keyboard_path = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-horizontal-keyboard-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut keyboard_app = shell_test_app(keyboard_path);
+        keyboard_app.update();
+        keyboard_app
+            .world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowRight);
+        keyboard_app.update();
+        let focus = keyboard_app.world().resource::<InputFocus>().get().unwrap();
+        assert_eq!(
+            keyboard_app.world().get::<ShellButton>(focus).unwrap().id,
+            ShellControlId::Credits
+        );
+
+        let stick_path = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-horizontal-stick-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut stick_app = shell_test_app(stick_path);
+        stick_app.update();
+        let mut gamepad = Gamepad::default();
+        gamepad.analog_mut().set(GamepadAxis::LeftStickX, 1.0);
+        stick_app.world_mut().spawn(gamepad);
+        stick_app.update();
+        let focus = stick_app.world().resource::<InputFocus>().get().unwrap();
+        assert_eq!(
+            stick_app.world().get::<ShellButton>(focus).unwrap().id,
+            ShellControlId::Credits
+        );
+    }
+
+    #[test]
+    fn escape_cancels_product_rebind_without_changing_the_draft() {
+        let path = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-rebind-cancel-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut app = shell_test_app(path);
+        app.update();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::OpenSettings);
+        app.update();
+        app.world_mut()
+            .resource_mut::<InputSettingsSelection>()
+            .field = InputSettingsField::Keyboard(crate::client::KeyboardAction::Ultimate);
+        let original = app
+            .world()
+            .resource::<InputSettingsDraft>()
+            .0
+            .keyboard
+            .ultimate;
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::Rebind);
+        app.update();
+        assert!(app.world().resource::<InputSettingsSelection>().listening);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(!app.world().resource::<InputSettingsSelection>().listening);
+        assert_eq!(
+            app.world()
+                .resource::<InputSettingsDraft>()
+                .0
+                .keyboard
+                .ultimate,
+            original
+        );
+    }
+
+    #[test]
+    fn rebind_activation_press_is_not_captured_in_the_same_frame() {
+        let path = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-rebind-order-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut app = shell_test_app(path);
+        app.update();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::OpenSettings);
+        app.update();
+        app.world_mut()
+            .resource_mut::<InputSettingsSelection>()
+            .field = InputSettingsField::Gamepad(crate::client::GamepadAction::Ultimate);
+        let rebind = {
+            let world = app.world_mut();
+            let mut query = world.query::<(Entity, &ShellButton)>();
+            query
+                .iter(world)
+                .find_map(|(entity, button)| {
+                    (button.id == ShellControlId::Rebind).then_some(entity)
+                })
+                .unwrap()
+        };
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(rebind, FocusCause::Navigated);
+        let original = app
+            .world()
+            .resource::<InputSettingsDraft>()
+            .0
+            .gamepad
+            .ultimate;
+        let mut gamepad = Gamepad::default();
+        gamepad.digital_mut().press(GamepadButton::South);
+        app.world_mut().spawn(gamepad);
+        app.update();
+
+        assert!(app.world().resource::<InputSettingsSelection>().listening);
+        assert_eq!(
+            app.world()
+                .resource::<InputSettingsDraft>()
+                .0
+                .gamepad
+                .ultimate,
+            original
+        );
+    }
+
+    #[test]
+    fn save_failure_keeps_session_values_and_continue_closes_the_error() {
+        let dir = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-save-recovery-{}",
+            std::process::id()
+        ));
+        let blocker = dir.join("blocker");
+        let path = blocker.join("settings.ron");
+        let mut app = shell_test_app(path);
+        app.update();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::OpenSettings);
+        app.update();
+        app.world_mut()
+            .resource_mut::<InputSettingsDraft>()
+            .0
+            .invert_aim_y = true;
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&blocker, "blocks settings directory").unwrap();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::Apply);
+        app.update();
+
+        assert!(app.world().resource::<ClientInputSettings>().invert_aim_y);
+        assert_eq!(
+            app.world().resource::<ShellState>().error_kind,
+            LocalSettingsErrorKind::Save
+        );
+        assert_eq!(
+            app.world().resource::<ShellState>().overlay,
+            ShellOverlay::LocalError
+        );
+        let copy_is_accurate = {
+            let world = app.world_mut();
+            let mut query = world.query::<&Text>();
+            query
+                .iter(world)
+                .any(|text| text.0.contains("remain active for this session"))
+        };
+        assert!(copy_is_accurate);
+
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::RetrySave);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ShellState>().overlay,
+            ShellOverlay::LocalError
+        );
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::ContinueWithoutSaving);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ShellState>().overlay,
+            ShellOverlay::None
+        );
+        assert!(app.world().resource::<ClientInputSettings>().invert_aim_y);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn retry_save_closes_after_the_destination_is_repaired() {
+        let dir = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-retry-recovery-{}",
+            std::process::id()
+        ));
+        let blocker = dir.join("blocker");
+        let path = blocker.join("settings.ron");
+        let mut app = shell_test_app(path.clone());
+        app.update();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::OpenSettings);
+        app.update();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&blocker, "blocks settings directory").unwrap();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::Apply);
+        app.update();
+        std::fs::remove_file(&blocker).unwrap();
+        std::fs::create_dir_all(&blocker).unwrap();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::RetrySave);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ShellState>().overlay,
+            ShellOverlay::None
+        );
+        assert!(path.is_file());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validation_error_retains_the_unapplied_draft_and_returns_to_settings() {
+        let path = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-validation-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut app = shell_test_app(path);
+        app.update();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::OpenSettings);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ShellSettingsDraft>()
+            .0
+            .ui_scale = f32::NAN;
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::Apply);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ShellState>().error_kind,
+            LocalSettingsErrorKind::Validation
+        );
+        assert!(
+            (app.world().resource::<ClientShellSettings>().ui_scale - 1.0).abs() < f32::EPSILON
+        );
+        assert!(
+            app.world()
+                .resource::<ShellSettingsDraft>()
+                .0
+                .ui_scale
+                .is_nan()
+        );
+
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::ContinueWithoutSaving);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ShellState>().overlay,
+            ShellOverlay::Settings
+        );
+        assert!(app.world().contains_resource::<ShellSettingsDraft>());
     }
 
     #[test]

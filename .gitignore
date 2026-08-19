@@ -4,3 +4,5 @@
 # Isolated cargo cache for metrics-enabled measurement builds.
 /target-metrics/
 .DS_Store
+__pycache__/
+*.py[cod]

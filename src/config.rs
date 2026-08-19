@@ -367,6 +367,12 @@ impl ClientNetworkConfig {
             || self.windowed_combat_demo.is_some()
             || self.windowed_controller_demo.is_some()
     }
+
+    /// Whether the windowed process should present the offline product shell.
+    #[must_use]
+    pub const fn presents_product_shell(&self) -> bool {
+        !self.headless && !self.connects_on_startup()
+    }
 }
 
 #[cfg(test)]
@@ -461,5 +467,31 @@ mod tests {
                 .validate()
                 .is_err_and(|error| error.contains("windowed client"))
         );
+    }
+
+    #[test]
+    fn product_shell_and_startup_connection_are_mutually_exclusive() {
+        let mut config = ClientNetworkConfig::new(1);
+        assert!(config.presents_product_shell());
+        assert!(!config.connects_on_startup());
+
+        config.auto_connect = true;
+        assert!(!config.presents_product_shell());
+        assert!(config.connects_on_startup());
+
+        config.auto_connect = false;
+        config.windowed_combat_demo = Some(WindowedCombatDemo);
+        assert!(!config.presents_product_shell());
+        assert!(config.connects_on_startup());
+
+        config.windowed_combat_demo = None;
+        config.windowed_controller_demo = Some(WindowedControllerDemo);
+        assert!(!config.presents_product_shell());
+        assert!(config.connects_on_startup());
+
+        config.windowed_controller_demo = None;
+        config.headless = true;
+        assert!(!config.presents_product_shell());
+        assert!(config.connects_on_startup());
     }
 }

@@ -727,6 +727,12 @@ fn controller_cancel_does_not_toggle_pause() {
     apply_pause_request(&mut context, &mut pending, true);
     assert_eq!(context, ClientInputContext::Paused);
     assert_eq!(pending.latched_buttons, 0);
+
+    context = ClientInputContext::Shell;
+    pending.latched_buttons = FighterInput::INTERACT;
+    apply_pause_request(&mut context, &mut pending, true);
+    assert_eq!(context, ClientInputContext::Shell);
+    assert_eq!(pending.latched_buttons, 0);
 }
 
 #[test]
@@ -1054,7 +1060,7 @@ fn capturing_a_rebind_suppresses_pause_cancel_and_latched_actions() {
     app.world_mut().spawn((Window::default(), PrimaryWindow));
 
     // Escape is the default pause binding; while listening it must neither unpause nor
-    // register as cancel, so the capture can bind it if the user chooses.
+    // register as a gameplay cancel. The settings capture system consumes it as local cancel.
     let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
     keyboard.press(KeyCode::Escape);
     keyboard.press(KeyCode::Space);
