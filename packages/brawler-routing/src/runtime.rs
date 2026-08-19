@@ -19,7 +19,7 @@ use mio::{Events, Interest, Poll, Token, Waker, net::UdpSocket};
 
 use crate::{
     AllocateRequestBody, AllocationGrant, AllocationGrantedBody, AllocationId, AllocationPolicy,
-    AllocationRejectedBody, CONTROL_VERSION_V1, Capability, CapabilityBinding, ControlBody,
+    AllocationRejectedBody, CONTROL_VERSION_CURRENT, Capability, CapabilityBinding, ControlBody,
     ControlFrame, ControlSequenceTracker, CoreConfig, Generation, IpcChannel, IpcIoError,
     LifecycleEvent, ManifestBody, ManifestCommon, MatchId, MatchManifestParticipant,
     MatchManifestV1, MonotonicMillis, PACKET_VERSION_V1, PacketDirection, PacketRecord, PeerId,
@@ -522,7 +522,6 @@ impl SupervisorRuntime {
             return Ok(());
         };
         let generation = Generation::new(1).expect("constant generation is nonzero");
-        let mode_policy = policy.for_mode(request.mode);
         let seed = match policy.seed_policy {
             SeedPolicy::OsRandom => {
                 let Ok(seed) = random_u64() else {
@@ -558,6 +557,7 @@ impl SupervisorRuntime {
                 source_build_preset: source.source_build_preset,
                 recipe_fingerprint: source.recipe_fingerprint,
                 revision: source.build_revision,
+                build_snapshot: source.build_snapshot,
             });
             participants.push(AllocationParticipant {
                 source: *source,
@@ -568,7 +568,7 @@ impl SupervisorRuntime {
         }
         let manifest = MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 1,
+                manifest_version: 2,
                 role: WorkerRole::Match,
                 logical_server_id,
                 process_id,
@@ -579,15 +579,16 @@ impl SupervisorRuntime {
                 content_fingerprint,
                 route_version: ROUTE_VERSION_V1,
                 packet_version: PACKET_VERSION_V1,
-                control_version: CONTROL_VERSION_V1,
+                control_version: CONTROL_VERSION_CURRENT,
                 flags: 0,
             },
+            request_id: request.request_id,
             match_id,
             allocation_id,
             mode: request.mode,
-            map_preset: mode_policy.map_preset,
-            map_revision: mode_policy.map_revision,
-            rules_profile: mode_policy.rules_profile,
+            map_preset: request.map_preset,
+            map_revision: request.map_revision,
+            rules_profile: request.rules_profile,
             reserved: 0,
             seed,
             participants: manifest_participants,
@@ -1959,6 +1960,18 @@ impl SupervisorRuntime {
                             ControlBody::LobbyNetcodeAuthenticated(fact) => Some(*fact),
                             _ => None,
                         };
+                        let cancel_activation = match &frame.body {
+                            ControlBody::CancelActivation(fact) => Some(*fact),
+                            _ => None,
+                        };
+                        let activated = match &frame.body {
+                            ControlBody::Activated(fact) => Some(*fact),
+                            _ => None,
+                        };
+                        let start_failed = match &frame.body {
+                            ControlBody::StartFailed(fact) => Some(*fact),
+                            _ => None,
+                        };
                         if let Some(processes) = self.processes.as_mut() {
                             match processes.observe_control_frame(worker_id, &frame, Instant::now())
                             {
@@ -2056,6 +2069,86 @@ impl SupervisorRuntime {
                                 }
                             };
                             self.ingress.promote_authenticated(source, self.now());
+                        }
+                        if let Some(fact) = cancel_activation {
+                            let allocation =
+                                self.allocations.get(&fact.request_id).and_then(|record| {
+                                    (record.allocation_id == Some(fact.allocation_id)
+                                        && record.match_id == Some(fact.match_id)
+                                        && (record.lobby_worker_id == worker_id
+                                            || record.match_worker_id == Some(worker_id)))
+                                    .then(|| {
+                                        record.match_worker_id.map(|match_worker_id| {
+                                            (record.lobby_worker_id, match_worker_id)
+                                        })
+                                    })
+                                    .flatten()
+                                });
+                            let Some((lobby_worker_id, match_worker_id)) = allocation else {
+                                self.fail_worker_control(
+                                    worker_id,
+                                    RoutingErrorCategory::WorkerProtocolConflict,
+                                    report,
+                                )?;
+                                failed = true;
+                                break;
+                            };
+                            let dissolved = ControlBody::ActivationDissolved(fact);
+                            if !self.queue_control_body(lobby_worker_id, dissolved.clone())
+                                || !self.queue_control_body(match_worker_id, dissolved)
+                            {
+                                failed = true;
+                                break;
+                            }
+                        }
+                        if let Some(fact) = activated {
+                            let lobby_worker_id =
+                                self.allocations.get(&fact.request_id).and_then(|record| {
+                                    (record.match_worker_id == Some(worker_id)
+                                        && record.allocation_id == Some(fact.allocation_id)
+                                        && record.match_id == Some(fact.match_id))
+                                    .then_some(record.lobby_worker_id)
+                                });
+                            let Some(lobby_worker_id) = lobby_worker_id else {
+                                self.fail_worker_control(
+                                    worker_id,
+                                    RoutingErrorCategory::WorkerProtocolConflict,
+                                    report,
+                                )?;
+                                failed = true;
+                                break;
+                            };
+                            if !self
+                                .queue_control_body(lobby_worker_id, ControlBody::Activated(fact))
+                            {
+                                failed = true;
+                                break;
+                            }
+                        }
+                        if let Some(fact) = start_failed {
+                            let lobby_worker_id =
+                                self.allocations.get(&fact.request_id).and_then(|record| {
+                                    (record.match_worker_id == Some(worker_id)
+                                        && record.allocation_id == Some(fact.allocation_id)
+                                        && record.match_id == Some(fact.match_id))
+                                    .then_some(record.lobby_worker_id)
+                                });
+                            let Some(lobby_worker_id) = lobby_worker_id else {
+                                self.fail_worker_control(
+                                    worker_id,
+                                    RoutingErrorCategory::WorkerProtocolConflict,
+                                    report,
+                                )?;
+                                failed = true;
+                                break;
+                            };
+                            let dissolved = ControlBody::ActivationDissolved(fact);
+                            if !self.queue_control_body(lobby_worker_id, dissolved.clone())
+                                || !self.queue_control_body(worker_id, dissolved)
+                            {
+                                failed = true;
+                                break;
+                            }
                         }
                     }
                     // Keep the channels registered for one more owner turn after a valid Exit.
@@ -3013,6 +3106,11 @@ mod tests {
             request_id: RequestId::new(77).unwrap(),
             lobby_session_id: LobbySessionId::new(88).unwrap(),
             mode: GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            team_count: 2,
+            players_per_team: 2,
             participants: Vec::new(),
         };
         runtime.allocations.insert(
@@ -3112,6 +3210,11 @@ mod tests {
             request_id: RequestId::new(78).unwrap(),
             lobby_session_id: LobbySessionId::new(88).unwrap(),
             mode: GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            team_count: 2,
+            players_per_team: 2,
             participants: Vec::new(),
         };
         runtime.allocations.insert(

@@ -55,7 +55,7 @@ impl Default for MatchLifecycleRules {
         Self {
             team_count: 2,
             minimum_participants_per_team: 1,
-            maximum_participants_per_team: 2,
+            maximum_participants_per_team: 3,
             countdown_ticks: 180,
             active_limit_ticks: 10_800,
             respawn_delay_ticks: 180,
@@ -75,7 +75,7 @@ impl MatchLifecycleRules {
         }
         if self.minimum_participants_per_team == 0
             || self.minimum_participants_per_team > self.maximum_participants_per_team
-            || self.maximum_participants_per_team > 2
+            || self.maximum_participants_per_team > 3
         {
             return Err("invalid match team capacity");
         }

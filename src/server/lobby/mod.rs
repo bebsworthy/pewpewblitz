@@ -58,6 +58,7 @@ pub struct LobbyBuildIdentity {
     pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub build_revision: u16,
+    pub snapshot: brawler_routing::MatchBuildSnapshot,
 }
 
 /// Resolve the embedded default build without installing any gameplay authority.
@@ -73,10 +74,25 @@ pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
         .ok_or_else(|| "default build preset is missing".to_string())?;
     let resolved = resolve_build_recipe(&builds, &weapons, fighter, preset.recipe, Some(preset.id))
         .map_err(|error| format!("default build resolution failed: {error:?}"))?;
+    let accepted = crate::builds::AcceptedBuildSummary {
+        canonical_recipe: preset.recipe,
+        identity: resolved.identity,
+        total_points: resolved.total_points,
+    };
+    let snapshot = crate::builds::MatchBuildSnapshotV1 {
+        schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
+        candidate: crate::builds::BuildCandidate {
+            build_revision: builds.balance_revision,
+            selection: crate::builds::BuildSelection::Preset(preset.id),
+        },
+        accepted,
+    }
+    .encode()?;
     Ok(LobbyBuildIdentity {
         source_build_preset: resolved.identity.source_build_preset_id.map(|id| id.0),
         recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
         build_revision: resolved.identity.revision.0,
+        snapshot,
     })
 }
 
@@ -183,6 +199,7 @@ impl LobbySessionIdSource for OsLobbySessionIdSource {
 /// Pure, bounded lobby state.  All maps are ordered to make participant and request ordering
 /// deterministic across runs and test harnesses.
 #[derive(Resource)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct LobbyState {
     manifest: LobbyManifest,
     mode: GameMode,
@@ -200,6 +217,11 @@ pub struct LobbyState {
     allocated_clients: BTreeSet<NetcodeClientId>,
     pending: Option<PendingAllocation>,
     allocation_completed: bool,
+    active_allocation: Option<brawler_routing::ActivationBody>,
+    allocation_rejected: bool,
+    product_activated: bool,
+    product_dissolved: bool,
+    product_cancel_requested: bool,
     grants: BTreeMap<NetcodeClientId, MatchRouteGrant>,
 }
 
@@ -246,6 +268,11 @@ impl LobbyState {
             allocated_clients: BTreeSet::new(),
             pending: None,
             allocation_completed: false,
+            active_allocation: None,
+            allocation_rejected: false,
+            product_activated: false,
+            product_dissolved: false,
+            product_cancel_requested: false,
             grants: BTreeMap::new(),
         }
     }
@@ -461,6 +488,7 @@ impl LobbyState {
                 source_build_preset: session.build.source_build_preset,
                 recipe_fingerprint: session.build.recipe_fingerprint,
                 build_revision: session.build.build_revision,
+                build_snapshot: session.build.snapshot,
             })
             .collect();
         let body = AllocateRequestBody {
@@ -470,9 +498,96 @@ impl LobbyState {
                 GameMode::Wipeout => brawler_routing::GameMode::Wipeout,
                 GameMode::HotZone => brawler_routing::GameMode::HotZone,
             },
+            map_preset: match self.mode {
+                GameMode::Wipeout => crate::map::BUILT_IN_MAP_PRESET.0,
+                GameMode::HotZone => crate::map::HOT_ZONE_MAP_PRESET.0,
+            },
+            map_revision: 1,
+            rules_profile: 1,
+            team_count: 2,
+            players_per_team: 1,
             participants,
         };
         self.pending = Some(PendingAllocation { body, sent: false });
+        Ok(())
+    }
+
+    fn create_product_request(
+        &mut self,
+        reservation: &queue::QueueReservation,
+        queue: &QueueState,
+        catalog: &catalog::ResolvedLobbyCatalog,
+    ) -> Result<(), CodecError> {
+        if self.pending.is_some() || self.allocation_completed {
+            return Ok(());
+        }
+        let game = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id == reservation.game_type_id)
+            .ok_or(CodecError::InvalidValue)?;
+        let request_id = RequestId::new(self.next_request_id).ok_or(CodecError::ZeroId)?;
+        self.next_request_id = self
+            .next_request_id
+            .checked_add(1)
+            .ok_or(CodecError::Oversize)?;
+        let mut participants = Vec::with_capacity(reservation.participants.len());
+        for reserved in &reservation.participants {
+            let ticket = queue
+                .ticket(reserved.ticket_id)
+                .ok_or(CodecError::InvalidValue)?;
+            participants.push(AllocateParticipant {
+                lobby_session_id: ticket.lobby_session_id,
+                player_id: ticket.player_id,
+                netcode_client_id: ticket.netcode_client_id,
+                team: reserved.team,
+                source_build_preset: ticket
+                    .accepted_build
+                    .identity
+                    .source_build_preset_id
+                    .map(|id| id.0),
+                recipe_fingerprint: ticket.accepted_build.identity.recipe_fingerprint.0,
+                build_revision: ticket.accepted_build.identity.revision.0,
+                build_snapshot: crate::builds::MatchBuildSnapshotV1 {
+                    schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
+                    candidate: crate::builds::BuildCandidate {
+                        build_revision: ticket.accepted_build.identity.revision,
+                        selection: match ticket.accepted_build.identity.source_build_preset_id {
+                            Some(id) => crate::builds::BuildSelection::Preset(id),
+                            None => crate::builds::BuildSelection::Custom(
+                                ticket.accepted_build.canonical_recipe,
+                            ),
+                        },
+                    },
+                    accepted: ticket.accepted_build,
+                }
+                .encode()
+                .map_err(|_| CodecError::InvalidValue)?,
+            });
+        }
+        let lobby_session_id = participants
+            .first()
+            .ok_or(CodecError::InvalidValue)?
+            .lobby_session_id;
+        self.pending = Some(PendingAllocation {
+            body: AllocateRequestBody {
+                request_id,
+                lobby_session_id,
+                mode: if game.mode_definition_id == crate::map::WIPEOUT_MODE_DEFINITION {
+                    brawler_routing::GameMode::Wipeout
+                } else {
+                    brawler_routing::GameMode::HotZone
+                },
+                map_preset: reservation.map_preset_id.0,
+                map_revision: 1,
+                rules_profile: 1,
+                team_count: reservation.team_count,
+                players_per_team: reservation.players_per_team,
+                participants,
+            },
+            sent: false,
+        });
+        self.allocation_rejected = false;
         Ok(())
     }
 
@@ -491,6 +606,13 @@ impl LobbyState {
             .as_ref()
             .filter(|pending| !pending.sent)
             .map(|pending| pending.body.clone()))
+    }
+
+    fn unsent_existing_request(&self) -> Option<AllocateRequestBody> {
+        self.pending
+            .as_ref()
+            .filter(|pending| !pending.sent)
+            .map(|pending| pending.body.clone())
     }
 
     /// Mark the stable request as handed to the bounded worker outbox. A full outbox leaves it
@@ -523,7 +645,11 @@ impl LobbyState {
         if body.request_id != request_id {
             return Err(LobbyAllocationError::RequestMismatch);
         }
-        if body.grants.len() != M01_PARTICIPANT_COUNT {
+        let expected_participants = self
+            .pending
+            .as_ref()
+            .map_or(0, |pending| pending.body.participants.len());
+        if body.grants.len() != expected_participants {
             return Err(LobbyAllocationError::InvalidGrantCount);
         }
         let mut seen = BTreeSet::new();
@@ -560,11 +686,15 @@ impl LobbyState {
             let client_id = session.netcode_client_id;
             converted.push((client_id, route_grant));
         }
-        if converted
+        let new_identity_count = converted
             .iter()
-            .any(|(client_id, _)| self.allocated_clients.contains(client_id))
-            || self.allocated_clients.len().saturating_add(converted.len())
-                > MAX_ALLOCATED_LOBBY_CLIENT_IDS
+            .filter(|(client_id, _)| !self.allocated_clients.contains(client_id))
+            .count();
+        if self
+            .allocated_clients
+            .len()
+            .saturating_add(new_identity_count)
+            > MAX_ALLOCATED_LOBBY_CLIENT_IDS
         {
             return Err(LobbyAllocationError::AllocationIdentityMemoryFull);
         }
@@ -572,6 +702,11 @@ impl LobbyState {
             self.allocated_clients.insert(client_id);
             self.grants.insert(client_id, grant);
         }
+        self.active_allocation = Some(brawler_routing::ActivationBody {
+            request_id,
+            allocation_id: body.allocation_id,
+            match_id: body.match_id,
+        });
         self.pending = None;
         self.allocation_completed = true;
         Ok(())
@@ -590,6 +725,8 @@ impl LobbyState {
             return Err(LobbyAllocationError::RequestMismatch);
         }
         self.pending = None;
+        self.allocation_rejected = true;
+        self.product_cancel_requested = false;
         Ok(())
     }
 
@@ -599,6 +736,16 @@ impl LobbyState {
         match frame.body {
             ControlBody::AllocationGranted(body) => self.apply_allocation_granted(body),
             ControlBody::AllocationRejected(body) => self.apply_allocation_rejected(body),
+            ControlBody::Activated(body) if self.active_allocation == Some(body) => {
+                self.product_activated = true;
+                Ok(())
+            }
+            ControlBody::ActivationDissolved(body) if self.active_allocation == Some(body) => {
+                self.product_dissolved = true;
+                self.active_allocation = None;
+                self.allocation_completed = false;
+                Ok(())
+            }
             _ => Err(LobbyAllocationError::RequestMismatch),
         }
     }
@@ -607,6 +754,51 @@ impl LobbyState {
     /// most once.
     pub fn take_route_grant(&mut self, client_id: u64) -> Option<MatchRouteGrant> {
         NetcodeClientId::new(client_id).and_then(|id| self.grants.remove(&id))
+    }
+
+    fn cancel_product_allocation(&mut self) -> Option<brawler_routing::ActivationBody> {
+        if self.active_allocation.is_none()
+            && self.pending.as_ref().is_some_and(|pending| pending.sent)
+        {
+            self.product_cancel_requested = true;
+            self.grants.clear();
+            return None;
+        }
+        self.pending = None;
+        self.allocation_completed = false;
+        self.grants.clear();
+        self.active_allocation.take()
+    }
+
+    fn take_deferred_product_cancel(&mut self) -> Option<brawler_routing::ActivationBody> {
+        if !self.product_cancel_requested {
+            return None;
+        }
+        let fact = self.active_allocation.take()?;
+        self.product_cancel_requested = false;
+        self.allocation_completed = false;
+        self.grants.clear();
+        Some(fact)
+    }
+
+    fn detach_client(&mut self, client_id: u64) -> Option<LobbySession> {
+        let id = NetcodeClientId::new(client_id)?;
+        let session = self.sessions.remove(&id)?;
+        self.accepted_names.remove(&id);
+        self.welcomed_clients.remove(&id);
+        Some(session)
+    }
+
+    fn take_allocation_rejected(&mut self) -> bool {
+        core::mem::take(&mut self.allocation_rejected)
+    }
+
+    fn take_product_activated(&mut self) -> bool {
+        core::mem::take(&mut self.product_activated)
+    }
+
+    fn take_product_dissolved(&mut self) -> bool {
+        core::mem::take(&mut self.product_dissolved)
     }
 }
 
@@ -630,9 +822,37 @@ pub(crate) enum LobbyScheduleSet {
     BeginLobbyFrame,
     AuthenticateLobbyHellos,
     CollectQueueClientMessages,
-    ReconcileDisconnectedSessions,
+    CleanupDisconnectedSessions,
     ApplyQueueTransactions,
+    FormReservations,
     PublishQueueOutcomesAndSnapshot,
+}
+
+#[derive(Resource, Default)]
+struct ProductFormationState {
+    active: Option<crate::lobby::MatchReservationId>,
+    next_sequence: BTreeMap<LobbySessionId, u64>,
+    pending_grants: BTreeMap<LobbySessionId, MatchRouteGrant>,
+    begin_sent: BTreeSet<LobbySessionId>,
+    loading_deadline: Option<Duration>,
+    grant_deadline: Option<Duration>,
+    occupied: bool,
+}
+
+impl ProductFormationState {
+    fn next_sequence(&mut self, session_id: LobbySessionId) -> u64 {
+        let sequence = self.next_sequence.entry(session_id).or_insert(1);
+        let current = *sequence;
+        *sequence = sequence.saturating_add(1);
+        current
+    }
+
+    fn clear_handoff(&mut self) {
+        self.pending_grants.clear();
+        self.begin_sent.clear();
+        self.loading_deadline = None;
+        self.grant_deadline = None;
+    }
 }
 
 #[derive(Resource, Default)]
@@ -692,6 +912,7 @@ impl Plugin for LobbyPlugin {
             .init_resource::<LobbySessionLosses>()
             .init_resource::<QueueSnapshotPublication>()
             .init_resource::<QueueEvidenceSettings>()
+            .init_resource::<ProductFormationState>()
             .init_resource::<FighterDefinitions>()
             .add_systems(Startup, initialize_lobby_state)
             .configure_sets(
@@ -700,8 +921,9 @@ impl Plugin for LobbyPlugin {
                     LobbyScheduleSet::BeginLobbyFrame,
                     LobbyScheduleSet::AuthenticateLobbyHellos,
                     LobbyScheduleSet::CollectQueueClientMessages,
-                    LobbyScheduleSet::ReconcileDisconnectedSessions,
+                    LobbyScheduleSet::CleanupDisconnectedSessions,
                     LobbyScheduleSet::ApplyQueueTransactions,
+                    LobbyScheduleSet::FormReservations,
                     LobbyScheduleSet::PublishQueueOutcomesAndSnapshot,
                 )
                     .chain(),
@@ -713,9 +935,22 @@ impl Plugin for LobbyPlugin {
                     lobby_receive_hellos.in_set(LobbyScheduleSet::AuthenticateLobbyHellos),
                     collect_queue_client_messages
                         .in_set(LobbyScheduleSet::CollectQueueClientMessages),
-                    reconcile_disconnected_sessions
-                        .in_set(LobbyScheduleSet::ReconcileDisconnectedSessions),
+                    cleanup_disconnected_sessions
+                        .in_set(LobbyScheduleSet::CleanupDisconnectedSessions),
                     apply_queue_transactions.in_set(LobbyScheduleSet::ApplyQueueTransactions),
+                    (
+                        apply_matchmaking_client_messages,
+                        lobby_apply_control_frames,
+                        flush_deferred_product_cancel,
+                        apply_product_dissolution,
+                        apply_product_activation,
+                        expire_product_reservation,
+                        lobby_deliver_product_grants,
+                        form_product_reservation,
+                        lobby_enqueue_product_allocation,
+                    )
+                        .chain()
+                        .in_set(LobbyScheduleSet::FormReservations),
                     publish_queue_outcomes_and_snapshot
                         .in_set(LobbyScheduleSet::PublishQueueOutcomesAndSnapshot),
                     report_queue_telemetry_changes
@@ -1004,18 +1239,55 @@ fn collect_queue_client_messages(
     }
 }
 
-fn reconcile_disconnected_sessions(
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn cleanup_disconnected_sessions(
     mut state: ResMut<LobbyState>,
+    mut outbox: ResMut<LobbyControlOutbox>,
     mut queue: ResMut<QueueState>,
+    mut formation: ResMut<ProductFormationState>,
     mut frame: ResMut<LobbyQueueFrame>,
     mut losses: ResMut<LobbySessionLosses>,
     mut exit: MessageWriter<AppExit>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+    )>,
 ) {
     let losses = core::mem::take(&mut losses.0);
     for (session_id, client_id) in losses {
         frame.eligible.remove(&session_id);
+        let reserved = queue.ticket_for_session(session_id).and_then(|ticket| {
+            queue
+                .reservation_for_ticket(ticket.ticket_id)
+                .map(|reservation| reservation.reservation_id)
+        });
+        if let Some(reservation_id) = reserved {
+            let removed = queue.complete_reservation(reservation_id);
+            if let Some(fact) = state.cancel_product_allocation() {
+                let _ = outbox.push_activation_cancel(fact);
+            }
+            formation.active = None;
+            formation.clear_handoff();
+            frame.snapshot_changed = true;
+            for (client, mut sender) in &mut clients {
+                let Some(ticket) = removed
+                    .iter()
+                    .find(|ticket| ticket.lobby_session_id == client.lobby_session_id)
+                else {
+                    continue;
+                };
+                sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+                    sequence: formation.next_sequence(client.lobby_session_id),
+                    phase: crate::lobby::MatchmakingServerPhase::Removed {
+                        reservation_id,
+                        ticket_id: ticket.ticket_id,
+                        reason: crate::lobby::MatchStartFailure::ParticipantLost,
+                    },
+                });
+            }
+        }
         frame.snapshot_changed |= queue.remove_session(session_id);
-        state.remove_client(client_id.get());
+        state.detach_client(client_id.get());
     }
     if queue.revision_exhausted() {
         error!("lobby queue pool revision exhausted during disconnect cleanup");
@@ -1073,7 +1345,7 @@ fn apply_queue_transactions(
                     request_id,
                     command,
                 } => queue.command(
-                    session,
+                    &session,
                     request_id,
                     command,
                     monotonic_millis(),
@@ -1196,6 +1468,376 @@ fn lobby_enqueue_allocation(mut state: ResMut<LobbyState>, mut outbox: ResMut<Lo
     }
 }
 
+fn lobby_enqueue_product_allocation(
+    mut state: ResMut<LobbyState>,
+    mut outbox: ResMut<LobbyControlOutbox>,
+) {
+    let Some(body) = state.unsent_existing_request() else {
+        return;
+    };
+    if outbox.push(body) {
+        state.mark_allocate_request_queued();
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    clippy::type_complexity
+)]
+fn apply_matchmaking_client_messages(
+    mut state: ResMut<LobbyState>,
+    mut outbox: ResMut<LobbyControlOutbox>,
+    mut queue: ResMut<QueueState>,
+    mut formation: ResMut<ProductFormationState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut clients: Query<(
+        &LobbyClient,
+        Option<&mut MessageReceiver<crate::lobby::MatchmakingClientMessage>>,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+    )>,
+) {
+    let mut cancel = None;
+    for (_, receiver, _) in &mut clients {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for message in receiver.receive() {
+            let crate::lobby::MatchmakingClientAction::Cancel {
+                reservation_id,
+                generation: 1,
+            } = message.action
+            else {
+                continue;
+            };
+            if formation.active == Some(reservation_id) {
+                cancel = Some(reservation_id);
+            }
+        }
+    }
+    let Some(reservation_id) = cancel else {
+        return;
+    };
+    let removed = queue.complete_reservation(reservation_id);
+    if let Some(fact) = state.cancel_product_allocation() {
+        let _ = outbox.push_activation_cancel(fact);
+    }
+    formation.active = None;
+    formation.clear_handoff();
+    frame.snapshot_changed = true;
+    for (client, _, mut sender) in &mut clients {
+        let Some(ticket) = removed
+            .iter()
+            .find(|ticket| ticket.lobby_session_id == client.lobby_session_id)
+        else {
+            continue;
+        };
+        sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+            sequence: formation.next_sequence(client.lobby_session_id),
+            phase: crate::lobby::MatchmakingServerPhase::Removed {
+                reservation_id,
+                ticket_id: ticket.ticket_id,
+                reason: crate::lobby::MatchStartFailure::Cancelled,
+            },
+        });
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+fn form_product_reservation(
+    time: Res<Time<Real>>,
+    mut state: ResMut<LobbyState>,
+    mut queue: ResMut<QueueState>,
+    catalog: Res<catalog::ResolvedLobbyCatalog>,
+    mut formation: ResMut<ProductFormationState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+    )>,
+) {
+    if formation.occupied || formation.active.is_some() || queue.reservation_count() != 0 {
+        return;
+    }
+    let Ok(capability) = Capability::generate() else {
+        return;
+    };
+    let bytes = capability.into_bytes();
+    let Some(reservation_id) = crate::lobby::MatchReservationId::new(u128::from_le_bytes(
+        bytes[..16].try_into().expect("capability prefix width"),
+    )) else {
+        return;
+    };
+    let Some(reservation) = queue.reserve_oldest_exact(&catalog, reservation_id) else {
+        return;
+    };
+    if state
+        .create_product_request(&reservation, &queue, &catalog)
+        .is_err()
+    {
+        queue.complete_reservation(reservation_id);
+        return;
+    }
+    formation.active = Some(reservation_id);
+    formation.clear_handoff();
+    formation.loading_deadline = Some(time.elapsed().saturating_add(Duration::from_secs(30)));
+    formation.grant_deadline = Some(time.elapsed().saturating_add(Duration::from_secs(10)));
+    frame.snapshot_changed = true;
+    for (client, mut sender) in &mut clients {
+        let Some(ticket) = queue.ticket_for_session(client.lobby_session_id) else {
+            continue;
+        };
+        if queue.reservation_for_ticket(ticket.ticket_id).is_none() {
+            continue;
+        }
+        sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+            sequence: formation.next_sequence(client.lobby_session_id),
+            phase: crate::lobby::MatchmakingServerPhase::ReservationStarted(
+                crate::lobby::ReservationStarted {
+                    reservation_id,
+                    ticket_id: ticket.ticket_id,
+                    game_type_id: reservation.game_type_id.clone(),
+                    map_preset_id: reservation.map_preset_id,
+                    team_count: reservation.team_count,
+                    players_per_team: reservation.players_per_team,
+                    accepted_build: ticket.accepted_build,
+                    loading_deadline_millis: 30_000,
+                },
+            ),
+        });
+    }
+}
+
+fn flush_deferred_product_cancel(
+    mut state: ResMut<LobbyState>,
+    mut outbox: ResMut<LobbyControlOutbox>,
+) {
+    if let Some(fact) = state.take_deferred_product_cancel() {
+        let _ = outbox.push_activation_cancel(fact);
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+fn apply_product_dissolution(
+    mut state: ResMut<LobbyState>,
+    mut queue: ResMut<QueueState>,
+    mut formation: ResMut<ProductFormationState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+    )>,
+) {
+    if !state.take_product_dissolved() {
+        return;
+    }
+    let Some(reservation_id) = formation.active else {
+        return;
+    };
+    let removed = queue.complete_reservation(reservation_id);
+    formation.active = None;
+    formation.clear_handoff();
+    frame.snapshot_changed = true;
+    for (client, mut sender) in &mut clients {
+        let Some(ticket) = removed
+            .iter()
+            .find(|ticket| ticket.lobby_session_id == client.lobby_session_id)
+        else {
+            continue;
+        };
+        sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+            sequence: formation.next_sequence(client.lobby_session_id),
+            phase: crate::lobby::MatchmakingServerPhase::Removed {
+                reservation_id,
+                ticket_id: ticket.ticket_id,
+                reason: crate::lobby::MatchStartFailure::WorkerFailed,
+            },
+        });
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn apply_product_activation(
+    mut state: ResMut<LobbyState>,
+    mut queue: ResMut<QueueState>,
+    mut formation: ResMut<ProductFormationState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+    )>,
+) {
+    if !state.take_product_activated() {
+        return;
+    }
+    let Some(reservation_id) = formation.active else {
+        return;
+    };
+    let removed = queue.occupy_product_match();
+    let _active_tickets = queue.complete_reservation(reservation_id);
+    formation.active = None;
+    formation.occupied = true;
+    formation.clear_handoff();
+    frame.snapshot_changed = true;
+    for (client, mut sender) in &mut clients {
+        let Some(ticket) = removed
+            .iter()
+            .find(|ticket| ticket.lobby_session_id == client.lobby_session_id)
+        else {
+            continue;
+        };
+        sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+            sequence: formation.next_sequence(client.lobby_session_id),
+            phase: crate::lobby::MatchmakingServerPhase::Removed {
+                reservation_id,
+                ticket_id: ticket.ticket_id,
+                reason: crate::lobby::MatchStartFailure::CapacityOccupied,
+            },
+        });
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+fn expire_product_reservation(
+    time: Res<Time<Real>>,
+    mut state: ResMut<LobbyState>,
+    mut outbox: ResMut<LobbyControlOutbox>,
+    mut queue: ResMut<QueueState>,
+    mut formation: ResMut<ProductFormationState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+    )>,
+) {
+    let Some(reservation_id) = formation.active else {
+        return;
+    };
+    let now = time.elapsed();
+    let expected = queue
+        .reservation(reservation_id)
+        .map_or(0, |reservation| reservation.participants.len());
+    let grant_expired = formation.pending_grants.len() != expected
+        && formation
+            .grant_deadline
+            .is_some_and(|deadline| now >= deadline);
+    let loading_expired = formation
+        .loading_deadline
+        .is_some_and(|deadline| now >= deadline);
+    let allocation_rejected = state.take_allocation_rejected();
+    if !allocation_rejected && !grant_expired && !loading_expired {
+        return;
+    }
+
+    let reason = if allocation_rejected {
+        crate::lobby::MatchStartFailure::WorkerFailed
+    } else {
+        crate::lobby::MatchStartFailure::TimedOut
+    };
+    let removed = queue.complete_reservation(reservation_id);
+    if let Some(fact) = state.cancel_product_allocation() {
+        let _ = outbox.push_activation_cancel(fact);
+    }
+    formation.active = None;
+    formation.clear_handoff();
+    frame.snapshot_changed = true;
+    for (client, mut sender) in &mut clients {
+        let Some(ticket) = removed
+            .iter()
+            .find(|ticket| ticket.lobby_session_id == client.lobby_session_id)
+        else {
+            continue;
+        };
+        sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+            sequence: formation.next_sequence(client.lobby_session_id),
+            phase: crate::lobby::MatchmakingServerPhase::Removed {
+                reservation_id,
+                ticket_id: ticket.ticket_id,
+                reason,
+            },
+        });
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+fn lobby_deliver_product_grants(
+    mut state: ResMut<LobbyState>,
+    mut queue: ResMut<QueueState>,
+    mut formation: ResMut<ProductFormationState>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+        &mut MessageSender<MatchRouteGrant>,
+    )>,
+) {
+    let Some(reservation_id) = formation.active else {
+        return;
+    };
+    let participant_count = queue
+        .reservation(reservation_id)
+        .map_or(0, |reservation| reservation.participants.len());
+    if participant_count == 0 {
+        return;
+    }
+
+    // Collect the complete roster's grants before beginning any client migration.
+    for (client, _, _) in &mut clients {
+        let Some(ticket) = queue.ticket_for_session(client.lobby_session_id) else {
+            continue;
+        };
+        if queue.reservation_for_ticket(ticket.ticket_id).is_none()
+            || formation
+                .pending_grants
+                .contains_key(&client.lobby_session_id)
+        {
+            continue;
+        }
+        if let Some(grant) = state.take_route_grant(client.client_id.get()) {
+            formation
+                .pending_grants
+                .insert(client.lobby_session_id, grant);
+        }
+    }
+    if formation.pending_grants.len() != participant_count {
+        return;
+    }
+
+    queue.mark_reservation_handoff_ready(reservation_id);
+
+    for (client, mut phase_sender, mut compatibility_sender) in &mut clients {
+        if formation.begin_sent.contains(&client.lobby_session_id) {
+            continue;
+        }
+        let Some(grant) = formation
+            .pending_grants
+            .get(&client.lobby_session_id)
+            .copied()
+        else {
+            continue;
+        };
+        phase_sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+            sequence: formation.next_sequence(client.lobby_session_id),
+            phase: crate::lobby::MatchmakingServerPhase::BeginMatchConnect(
+                crate::lobby::BeginMatchConnect {
+                    reservation_id,
+                    generation: 1,
+                    grant,
+                },
+            ),
+        });
+        compatibility_sender.send::<SessionChannel>(grant);
+        formation.begin_sent.insert(client.lobby_session_id);
+    }
+}
+
 fn lobby_deliver_grants(
     mut state: ResMut<LobbyState>,
     mut clients: Query<(&LobbyClient, &mut MessageSender<MatchRouteGrant>)>,
@@ -1226,7 +1868,7 @@ mod tests {
                 content_fingerprint: 8,
                 route_version: brawler_routing::ROUTE_VERSION_V1,
                 packet_version: brawler_routing::PACKET_VERSION_V1,
-                control_version: brawler_routing::CONTROL_VERSION_V1,
+                control_version: brawler_routing::CONTROL_VERSION_CURRENT,
                 flags: 0,
             },
             default_route_id: RouteId::new(9).unwrap(),
@@ -1250,6 +1892,7 @@ mod tests {
             source_build_preset: Some(1),
             recipe_fingerprint: 123,
             build_revision: 4,
+            snapshot: default_build_identity().unwrap().snapshot,
         }
     }
 
@@ -1546,6 +2189,82 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![13, 14]
         );
+    }
+
+    #[test]
+    fn explicit_queue_can_allocate_returning_players_again() {
+        let mut state = state();
+        admit_two(&mut state);
+        let mut request = state.pending_allocate_request().unwrap().unwrap();
+        let first_grants = [1_u128, 2_u128]
+            .into_iter()
+            .map(|session| brawler_routing::AllocationGrant {
+                lobby_session_id: LobbySessionId::new(session).unwrap(),
+                route_id: RouteId::new(30 + session).unwrap(),
+                peer_id: PeerId::new(40 + session).unwrap(),
+                capability: Capability::from_bytes([u8::try_from(session).unwrap(); 32]).unwrap(),
+                activation_expiry_unix_ms: 100,
+                route_expiry_unix_ms: 200,
+            })
+            .collect();
+        state
+            .apply_allocation_granted(AllocationGrantedBody {
+                request_id: request.request_id,
+                allocation_id: AllocationId::new(5).unwrap(),
+                match_id: MatchId::new(6).unwrap(),
+                worker_id: WorkerId::new(7).unwrap(),
+                grants: first_grants,
+            })
+            .unwrap();
+        for (client, route, peer) in [(11, 50, 51), (12, 52, 53)] {
+            assert!(state.remove_client(client).is_some());
+            state
+                .accept_client(
+                    client,
+                    RouteId::new(route).unwrap(),
+                    PeerId::new(peer).unwrap(),
+                    &hello(),
+                )
+                .unwrap();
+        }
+
+        let mut sessions: Vec<_> = state.sessions.values().copied().collect();
+        sessions.sort_by_key(|session| session.lobby_session_id);
+        request.request_id = RequestId::new(2).unwrap();
+        request.lobby_session_id = sessions[0].lobby_session_id;
+        for (participant, session) in request.participants.iter_mut().zip(&sessions) {
+            participant.lobby_session_id = session.lobby_session_id;
+            participant.player_id = session.player_id;
+            participant.netcode_client_id = session.netcode_client_id;
+        }
+        state.pending = Some(PendingAllocation {
+            body: request,
+            sent: true,
+        });
+        let grants = sessions
+            .iter()
+            .enumerate()
+            .map(|(index, session)| brawler_routing::AllocationGrant {
+                lobby_session_id: session.lobby_session_id,
+                route_id: RouteId::new(70 + index as u128).unwrap(),
+                peer_id: PeerId::new(80 + index as u128).unwrap(),
+                capability: Capability::from_bytes([u8::try_from(index + 3).unwrap(); 32]).unwrap(),
+                activation_expiry_unix_ms: 100,
+                route_expiry_unix_ms: 200,
+            })
+            .collect();
+        state
+            .apply_allocation_granted(AllocationGrantedBody {
+                request_id: RequestId::new(2).unwrap(),
+                allocation_id: AllocationId::new(15).unwrap(),
+                match_id: MatchId::new(16).unwrap(),
+                worker_id: WorkerId::new(17).unwrap(),
+                grants,
+            })
+            .unwrap();
+        assert_eq!(state.allocated_clients.len(), M01_PARTICIPANT_COUNT);
+        assert!(state.take_route_grant(11).is_some());
+        assert!(state.take_route_grant(12).is_some());
     }
 
     #[test]

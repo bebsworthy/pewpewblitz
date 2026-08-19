@@ -20,6 +20,7 @@ pub(super) struct RoutedTransitionDeadline(pub(super) Duration);
 pub(super) struct PendingClientConnect;
 
 impl Plugin for ClientNetworkPlugin {
+    #[allow(clippy::too_many_lines)]
     fn build(&self, app: &mut App) {
         if app.world().resource::<ClientNetworkConfig>().transport == NetworkTransport::RoutedUdp {
             app.add_plugins(RoutedUdpPlugin);
@@ -39,6 +40,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<ClientPlayableGate>()
             .init_resource::<BuildSelectionState>()
             .init_resource::<MatchCommandState>()
+            .init_resource::<MatchLoadingCommandState>()
             .init_resource::<ClientInputSettings>()
             .init_resource::<InputSettingsSelection>()
             .init_resource::<RoutedClientLifecycle>()
@@ -85,8 +87,10 @@ impl Plugin for ClientNetworkPlugin {
                 (
                     process_build_selection_outcomes,
                     send_build_selection_request,
+                    drive_match_loading_check_in,
                     process_match_command_outcomes,
                     send_match_command,
+                    finish_product_match_smoke,
                     update_build_selection_overlay,
                     disconnect_rejected_client,
                     observe_client_lifecycle,
@@ -162,6 +166,107 @@ fn process_match_command_outcomes(
     }
 }
 
+#[derive(Resource, Default)]
+struct MatchLoadingCommandState {
+    ready_sent_for: Option<(u64, u128, u128)>,
+    cancel_sent_for: Option<(u64, u128, u128)>,
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+fn drive_match_loading_check_in(
+    config: Res<ClientNetworkConfig>,
+    mut routed: ResMut<RoutedClientLifecycle>,
+    playable: Res<ClientPlayableGate>,
+    mut loading: ResMut<ClientMatchLoadingModel>,
+    mut state: ResMut<MatchLoadingCommandState>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    controlled: Query<
+        &MatchParticipant,
+        (With<Fighter>, With<Controlled>, Without<SelectingBuild>),
+    >,
+    mut clients: Query<
+        (
+            &mut MessageSender<MatchLoadingClientMessage>,
+            Option<&mut MessageReceiver<MatchLoadingServerMessage>>,
+            Option<&mut MessageReceiver<MatchLoadingStatus>>,
+        ),
+        With<Client>,
+    >,
+) {
+    if config.transport != NetworkTransport::RoutedUdp
+        || (!config.presents_product_shell() && !config.product_match_smoke)
+        || routed.phase != RoutedClientPhase::Match
+    {
+        return;
+    }
+    let Some(grant) = routed.accepted_grant else {
+        return;
+    };
+    let correlation = (
+        grant.request_id.get(),
+        grant.allocation_id.get(),
+        grant.match_id.get(),
+    );
+    let cancel_requested = loading.take_match_cancel_requested();
+    for (mut sender, receiver, status_receiver) in &mut clients {
+        if let Some(mut status_receiver) = status_receiver {
+            for status in status_receiver.receive() {
+                if (status.request_id, status.allocation_id, status.match_id) == correlation {
+                    loading.observe_status(status);
+                }
+            }
+        }
+        if let Some(mut receiver) = receiver {
+            for outcome in receiver.receive() {
+                if (outcome.request_id, outcome.allocation_id, outcome.match_id) != correlation {
+                    continue;
+                }
+                match outcome.outcome {
+                    crate::protocol::MatchLoadingServerOutcome::CancellationAccepted
+                    | crate::protocol::MatchLoadingServerOutcome::TerminalFailure => {
+                        loading.observe_match_cancellation(true);
+                        let _ = routed.request_return_to_lobby();
+                    }
+                    crate::protocol::MatchLoadingServerOutcome::CancellationTooLate => {
+                        loading.observe_match_cancellation(false);
+                    }
+                }
+            }
+        }
+        if cancel_requested && state.cancel_sent_for != Some(correlation) {
+            sender.send::<SessionChannel>(MatchLoadingClientMessage {
+                request_id: correlation.0,
+                allocation_id: correlation.1,
+                match_id: correlation.2,
+                action: MatchLoadingClientAction::CancelMatchStart,
+            });
+            state.cancel_sent_for = Some(correlation);
+            continue;
+        }
+        if !playable.0
+            || loading.phase() == Some(crate::lobby::MatchLoadingPhase::Cancelling)
+            || state.ready_sent_for == Some(correlation)
+            || !roots
+                .single()
+                .is_ok_and(|root| root.match_id.0 == correlation.2)
+            || controlled.single().is_err()
+        {
+            continue;
+        }
+        sender.send::<SessionChannel>(MatchLoadingClientMessage {
+            request_id: correlation.0,
+            allocation_id: correlation.1,
+            match_id: correlation.2,
+            action: MatchLoadingClientAction::Ready,
+        });
+        state.ready_sent_for = Some(correlation);
+    }
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -171,6 +276,7 @@ fn process_match_command_outcomes(
 fn send_match_command(
     config: Res<ClientNetworkConfig>,
     routed: Res<RoutedClientLifecycle>,
+    playable: Res<ClientPlayableGate>,
     mut state: ResMut<MatchCommandState>,
     pending: Res<PendingLocalActions>,
     roots: Query<&MatchState, With<MatchRoot>>,
@@ -192,7 +298,16 @@ fn send_match_command(
         return;
     };
     let pressed = pending.action_indicator & ACTION_INTERACT != 0;
-    let automatic = automatic_match_command_enabled(&config, roster.iter().count());
+    let product_routed =
+        config.transport == NetworkTransport::RoutedUdp && config.presents_product_shell();
+    if product_routed {
+        return;
+    }
+    let automatic = if product_routed {
+        playable.0
+    } else {
+        automatic_match_command_enabled(&config, roster.iter().count())
+    };
     if should_rearm_headless_match_command(
         config.headless_simulation_ticks.is_some(),
         state.sent_for_phase,
@@ -204,13 +319,16 @@ fn send_match_command(
         state.sent_for_phase = None;
     }
     let command = match match_state.phase {
-        MatchPhase::Waiting if !participant.ready && (pressed || automatic) => {
+        MatchPhase::Waiting
+            if !participant.ready && ((!product_routed && pressed) || automatic) =>
+        {
             Some(MatchCommand::SetReady(true))
         }
         MatchPhase::Completed {
             restart_unlocked_at_tick,
             ..
-        } if !participant.restart_ready
+        } if !product_routed
+            && !participant.restart_ready
             && authoritative_ticks
                 .iter()
                 .next()
@@ -238,6 +356,21 @@ fn send_match_command(
         });
     }
     state.sent_for_phase = Some((match_state.match_id, match_state.phase));
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn finish_product_match_smoke(
+    config: Res<ClientNetworkConfig>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if config.product_match_smoke
+        && roots
+            .iter()
+            .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
+    {
+        exit.write(AppExit::Success);
+    }
 }
 
 pub(super) fn should_rearm_headless_match_command(
@@ -1328,7 +1461,7 @@ fn observe_routed_transition(
     lifecycle: Res<RoutedClientLifecycle>,
     query: Query<(Entity, Option<&Unlinked>), With<RoutedClientSession>>,
 ) {
-    if config.transport != NetworkTransport::RoutedUdp || config.presents_product_shell() {
+    if config.transport != NetworkTransport::RoutedUdp {
         return;
     }
     for (entity, unlinked) in &query {

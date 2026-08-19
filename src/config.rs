@@ -227,6 +227,9 @@ pub struct ClientNetworkConfig {
     /// Headless M04 evidence: join one advertised pool, observe the fresh count, cancel, observe
     /// the resulting fresh count, and exit without requesting worker allocation.
     pub product_queue_smoke: bool,
+    /// Headless M05 evidence: join an exact product pool and exit only after authoritative Active.
+    pub product_match_smoke: bool,
+    pub product_match_players_per_team: u8,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
     pub headless_aim_at_dummy: bool,
@@ -283,6 +286,8 @@ impl ClientNetworkConfig {
             exit_after_lobby_return: false,
             exit_after_lobby_welcome: false,
             product_queue_smoke: false,
+            product_match_smoke: false,
+            product_match_players_per_team: 2,
             headless_move: None,
             headless_aim: None,
             headless_aim_at_dummy: false,
@@ -321,6 +326,18 @@ impl ClientNetworkConfig {
             return Err(
                 "--product-queue-smoke conflicts with --exit-after-lobby-welcome".to_string(),
             );
+        }
+        if self.product_match_smoke && !self.headless {
+            return Err("--product-match-smoke requires --headless".to_string());
+        }
+        if self.product_match_smoke && self.transport != NetworkTransport::RoutedUdp {
+            return Err("--product-match-smoke requires --transport routed-udp".to_string());
+        }
+        if self.product_match_smoke && !matches!(self.product_match_players_per_team, 2 | 3) {
+            return Err("product match smoke requires 2v2 or 3v3".to_string());
+        }
+        if self.product_match_smoke && self.product_queue_smoke {
+            return Err("product queue and match smokes are mutually exclusive".to_string());
         }
         if self.exit_after_lobby_return && self.transport != NetworkTransport::RoutedUdp {
             return Err("--exit-after-lobby-return requires --transport routed-udp".to_string());

@@ -101,9 +101,9 @@ impl AllocationPolicy {
     }
 }
 
-/// Validate the M01 exact-two request without consulting runtime state.
+/// Validate one exact 2v2/3v3 request without consulting runtime state.
 pub fn validate_m01_request(request: &AllocateRequestBody) -> Result<(), CodecError> {
-    request.validate_m01()?;
+    request.validate_product()?;
     let mut sessions = HashSet::with_capacity(request.participants.len());
     let mut players = HashSet::with_capacity(request.participants.len());
     let mut clients = HashSet::with_capacity(request.participants.len());
@@ -118,6 +118,20 @@ pub fn validate_m01_request(request: &AllocateRequestBody) -> Result<(), CodecEr
         if !sessions.insert(participant.lobby_session_id)
             || !players.insert(participant.player_id)
             || !clients.insert(participant.netcode_client_id)
+        {
+            return Err(CodecError::InvalidValue);
+        }
+        if participant.team >= request.team_count {
+            return Err(CodecError::InvalidValue);
+        }
+    }
+    for team in 0..request.team_count {
+        if request
+            .participants
+            .iter()
+            .filter(|participant| participant.team == team)
+            .count()
+            != usize::from(request.players_per_team)
         {
             return Err(CodecError::InvalidValue);
         }
@@ -164,11 +178,17 @@ mod tests {
             source_build_preset: Some(1),
             recipe_fingerprint: 4,
             build_revision: 1,
+            build_snapshot: crate::MatchBuildSnapshot::new(&[1]).unwrap(),
         };
         let request = AllocateRequestBody {
             request_id: crate::RequestId::new(5).unwrap(),
             lobby_session_id: participant.lobby_session_id,
             mode: GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            team_count: 2,
+            players_per_team: 2,
             participants: vec![participant, participant],
         };
         assert_eq!(

@@ -12,7 +12,7 @@ use std::{
 };
 
 use brawler_routing::{
-    CAPABILITY_BYTES, CONTROL_VERSION_V1, Capability, CapabilityBinding, CoreConfig, GameMode,
+    CAPABILITY_BYTES, CONTROL_VERSION_CURRENT, Capability, CapabilityBinding, CoreConfig, GameMode,
     Generation, LifecycleEvent, LobbyManifest, LogicalServerId, ManifestBody, ManifestCommon,
     MatchManifestParticipant, MatchManifestV1, PACKET_VERSION_V1, PeerId, ProcessSupervisorConfig,
     PublicEnvelope, ROUTE_VERSION_V1, RouteId, RouteRegistration, RouteSelector, RuntimeConfig,
@@ -95,7 +95,7 @@ fn lobby_spec(mode: &str) -> WorkerLaunchSpec {
             content_fingerprint: CONTENT_FINGERPRINT,
             route_version: ROUTE_VERSION_V1,
             packet_version: PACKET_VERSION_V1,
-            control_version: CONTROL_VERSION_V1,
+            control_version: CONTROL_VERSION_CURRENT,
             flags: 0,
         },
         default_route_id: id128(100),
@@ -133,10 +133,11 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
         source_build_preset: Some(1),
         recipe_fingerprint: worker_u64,
         revision: 1,
+        build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[1]).unwrap(),
     };
     let manifest = MatchManifestV1 {
         common: ManifestCommon {
-            manifest_version: 1,
+            manifest_version: 2,
             role: WorkerRole::Match,
             logical_server_id: id128(LOGICAL_SERVER_ID),
             process_id: registration.process_id,
@@ -147,9 +148,10 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
             content_fingerprint: CONTENT_FINGERPRINT,
             route_version: ROUTE_VERSION_V1,
             packet_version: PACKET_VERSION_V1,
-            control_version: CONTROL_VERSION_V1,
+            control_version: CONTROL_VERSION_CURRENT,
             flags: 0,
         },
+        request_id: brawler_routing::RequestId::new(45_000 + worker_u64).unwrap(),
         match_id: id128(50_000 + worker),
         allocation_id: id128(60_000 + worker),
         mode: GameMode::Wipeout,

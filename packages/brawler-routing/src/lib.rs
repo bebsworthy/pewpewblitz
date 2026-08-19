@@ -26,12 +26,12 @@ pub use capability::{CAPABILITY_BYTES, Capability, CapabilityEntropyError};
 pub use control::RESULT_SCHEMA_VERSION_V1;
 pub use control::ResultBody as Result;
 pub use control::{
-    AllocateParticipant, AllocateRequest, AllocateRequestBody, AllocationGrant, AllocationGranted,
-    AllocationGrantedBody, AllocationRejected, AllocationRejectedBody, ControlBody, ControlFrame,
-    ControlSequenceTracker, ControlStreamDecoder, ControlType, Exit, ExitBody, Failure,
-    FailureBody, Heartbeat, HeartbeatBody, LobbyAuthenticated, LobbyAuthenticatedBody,
-    LobbyNetcodeAuthenticatedBody, Manifest, ManifestBody, PeerClose, PeerCloseBody, Ready,
-    ReadyBody, ResultBody, SequenceDisposition, Stop, StopBody,
+    ActivationBody, AllocateParticipant, AllocateRequest, AllocateRequestBody, AllocationGrant,
+    AllocationGranted, AllocationGrantedBody, AllocationRejected, AllocationRejectedBody,
+    ControlBody, ControlFrame, ControlSequenceTracker, ControlStreamDecoder, ControlType, Exit,
+    ExitBody, Failure, FailureBody, Heartbeat, HeartbeatBody, LobbyAuthenticated,
+    LobbyAuthenticatedBody, LobbyNetcodeAuthenticatedBody, Manifest, ManifestBody, PeerClose,
+    PeerCloseBody, Ready, ReadyBody, ResultBody, SequenceDisposition, Stop, StopBody,
 };
 pub use digest::{MANIFEST_DIGEST_DOMAIN, RESULT_DIGEST_DOMAIN, manifest_digest, result_digest};
 pub use error::{CodecError, RoutingErrorCategory};
@@ -46,8 +46,8 @@ pub use ipc::{
 };
 pub use limits::*;
 pub use manifest::{
-    GameMode, LobbyManifest, ManifestCommon, MatchManifest, MatchManifestParticipant,
-    MatchManifestV1, WorkerRole, raw_catalog_fingerprint,
+    GameMode, LobbyManifest, ManifestCommon, MatchBuildSnapshot, MatchManifest,
+    MatchManifestParticipant, MatchManifestV1, WorkerRole, raw_catalog_fingerprint,
 };
 pub use memory::{MemoryBackend, MemoryDuplex};
 pub use metrics::{LatencyHistogram, RoutingMetrics, TrafficCounters};

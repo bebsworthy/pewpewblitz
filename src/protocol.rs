@@ -48,10 +48,10 @@ use crate::matchplay::{
 use crate::timing::SIMULATION_TICK;
 
 /// Netcode protocol ID. Bump this for incompatible wire-level changes.
-pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
+pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 15;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 16;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -517,6 +517,50 @@ pub struct MatchCommandOutcome {
     pub decision: MatchCommandDecision,
 }
 
+/// Ordered product-routed loading intent. Correlation fields bind every request to the immutable
+/// allocation manifest rather than to a process-local entity.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchLoadingClientMessage {
+    pub request_id: u64,
+    pub allocation_id: u128,
+    pub match_id: u128,
+    pub action: MatchLoadingClientAction,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchLoadingClientAction {
+    Ready,
+    CancelMatchStart,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchLoadingServerMessage {
+    pub request_id: u64,
+    pub allocation_id: u128,
+    pub match_id: u128,
+    pub outcome: MatchLoadingServerOutcome,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchLoadingServerOutcome {
+    CancellationAccepted,
+    CancellationTooLate,
+    TerminalFailure,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchLoadingStatus {
+    pub generation: u32,
+    pub revision: u32,
+    pub request_id: u64,
+    pub allocation_id: u128,
+    pub match_id: u128,
+    pub phase: crate::lobby::MatchLoadingPhase,
+    pub expected: u8,
+    pub connected: u8,
+    pub checked_in: u8,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum MatchJoinOutcome {
     Accepted {
@@ -585,6 +629,10 @@ fn register_queue_protocol(app: &mut App) {
     app.register_message::<crate::lobby::QueueCommandOutcome>()
         .add_direction(NetworkDirection::ServerToClient);
     app.register_message::<crate::lobby::QueuePoolSnapshot>()
+        .add_direction(NetworkDirection::ServerToClient);
+    app.register_message::<crate::lobby::MatchmakingClientMessage>()
+        .add_direction(NetworkDirection::ClientToServer);
+    app.register_message::<crate::lobby::MatchmakingServerMessage>()
         .add_direction(NetworkDirection::ServerToClient);
     app.add_channel::<QueueSnapshotChannel>(ChannelSettings {
         mode: ChannelMode::SequencedUnreliable,
@@ -675,6 +723,12 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<MatchCommandRequest>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<MatchCommandOutcome>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<MatchLoadingClientMessage>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<MatchLoadingServerMessage>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<MatchLoadingStatus>()
             .add_direction(NetworkDirection::ServerToClient);
         app.add_plugins(InputPlugin::<FighterInput> {
             config: InputConfig {
@@ -775,9 +829,14 @@ mod tests {
         assert!(app.is_message_registered::<crate::lobby::QueueClientMessage>());
         assert!(app.is_message_registered::<crate::lobby::QueueCommandOutcome>());
         assert!(app.is_message_registered::<crate::lobby::QueuePoolSnapshot>());
+        assert!(app.is_message_registered::<crate::lobby::MatchmakingClientMessage>());
+        assert!(app.is_message_registered::<crate::lobby::MatchmakingServerMessage>());
         assert!(app.is_message_registered::<MatchRouteGrant>());
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());
+        assert!(app.is_message_registered::<MatchLoadingClientMessage>());
+        assert!(app.is_message_registered::<MatchLoadingServerMessage>());
+        assert!(app.is_message_registered::<MatchLoadingStatus>());
         assert!(app.is_message_registered::<CombatCue>());
         assert!(app.is_message_registered::<crate::terrain::TerrainDestructionEvent>());
         assert!(app.is_message_registered::<crate::terrain::TerrainResetEvent>());

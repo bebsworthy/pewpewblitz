@@ -8,6 +8,102 @@ use std::{collections::VecDeque, time::Duration};
 const SNAPSHOT_FRESHNESS: Duration = Duration::from_secs(3);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ClientMatchLoadingModel {
+    lobby_generation: Option<u64>,
+    expected_sequence: u64,
+    active: Option<crate::lobby::ReservationStarted>,
+    started_observation: Option<crate::lobby::ReservationStarted>,
+    phase: Option<crate::lobby::MatchLoadingPhase>,
+    protocol_failure: bool,
+    next_client_sequence: u64,
+    outbound: VecDeque<crate::lobby::MatchmakingClientMessage>,
+    returned_observation: bool,
+    match_cancel_requested: bool,
+    last_status_revision: u32,
+    loading_counts: Option<(u8, u8, u8)>,
+}
+
+impl ClientMatchLoadingModel {
+    fn reset_for_lobby_generation(&mut self, generation: u64) {
+        self.lobby_generation = Some(generation);
+        self.expected_sequence = 0;
+        self.active = None;
+        self.started_observation = None;
+        self.phase = None;
+        self.protocol_failure = false;
+        self.next_client_sequence = 0;
+        self.outbound.clear();
+        self.returned_observation = false;
+        self.match_cancel_requested = false;
+        self.last_status_revision = 0;
+        self.loading_counts = None;
+    }
+
+    pub fn take_started(&mut self) -> Option<crate::lobby::ReservationStarted> {
+        self.started_observation.take()
+    }
+
+    #[must_use]
+    pub fn active(&self) -> Option<&crate::lobby::ReservationStarted> {
+        self.active.as_ref()
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> Option<crate::lobby::MatchLoadingPhase> {
+        self.phase
+    }
+
+    pub(crate) fn observe_status(&mut self, status: crate::protocol::MatchLoadingStatus) {
+        if status.generation == 1
+            && status.revision > self.last_status_revision
+            && status.connected <= status.expected
+            && status.checked_in <= status.connected
+        {
+            self.last_status_revision = status.revision;
+            self.phase = Some(status.phase);
+            self.loading_counts = Some((status.expected, status.connected, status.checked_in));
+        }
+    }
+
+    pub fn request_cancel(&mut self) -> bool {
+        let Some(active) = self.active.as_ref() else {
+            return false;
+        };
+        self.next_client_sequence = self.next_client_sequence.saturating_add(1).max(1);
+        self.outbound
+            .push_back(crate::lobby::MatchmakingClientMessage {
+                sequence: self.next_client_sequence,
+                action: crate::lobby::MatchmakingClientAction::Cancel {
+                    reservation_id: active.reservation_id,
+                    generation: 1,
+                },
+            });
+        self.phase = Some(crate::lobby::MatchLoadingPhase::Cancelling);
+        self.match_cancel_requested = true;
+        true
+    }
+
+    pub fn take_returned(&mut self) -> bool {
+        core::mem::take(&mut self.returned_observation)
+    }
+
+    pub(crate) fn take_match_cancel_requested(&mut self) -> bool {
+        core::mem::take(&mut self.match_cancel_requested)
+    }
+
+    pub(crate) fn observe_match_cancellation(&mut self, accepted: bool) {
+        self.match_cancel_requested = false;
+        if accepted {
+            self.active = None;
+            self.phase = Some(crate::lobby::MatchLoadingPhase::ReturningToQueue);
+            self.returned_observation = true;
+        } else {
+            self.phase = Some(crate::lobby::MatchLoadingPhase::WaitingForPlayers);
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingQueueCommand {
     pub request_id: crate::lobby::QueueRequestId,
@@ -376,17 +472,105 @@ enum HeadlessQueueSmokeStage {
 impl Plugin for ClientQueuePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClientQueueModel>()
+            .init_resource::<ClientMatchLoadingModel>()
             .init_resource::<HeadlessQueueSmokeStage>()
             .add_systems(
                 Update,
                 (
                     observe_queue_messages,
+                    observe_matchmaking_messages,
                     update_queue_time,
                     drive_headless_queue_smoke,
                     send_queue_messages,
+                    send_matchmaking_messages,
                 )
                     .chain(),
             );
+    }
+}
+
+fn send_matchmaking_messages(
+    mut model: ResMut<ClientMatchLoadingModel>,
+    mut senders: Query<&mut MessageSender<crate::lobby::MatchmakingClientMessage>, With<Client>>,
+) {
+    let Ok(mut sender) = senders.single_mut() else {
+        return;
+    };
+    while let Some(message) = model.outbound.pop_front() {
+        sender.send::<crate::protocol::SessionChannel>(message);
+    }
+}
+
+#[allow(clippy::too_many_lines, clippy::type_complexity)]
+fn observe_matchmaking_messages(
+    mut model: ResMut<ClientMatchLoadingModel>,
+    mut lifecycle: ResMut<super::RoutedClientLifecycle>,
+    mut clients: Query<
+        (
+            &RoutedClientSession,
+            Option<&mut MessageReceiver<crate::lobby::MatchmakingServerMessage>>,
+        ),
+        With<Client>,
+    >,
+) {
+    for (session, receiver) in &mut clients {
+        if session.kind != super::RoutedClientSessionKind::Lobby
+            || session.generation != lifecycle.generation
+        {
+            continue;
+        }
+        if model.lobby_generation != Some(session.generation) {
+            model.reset_for_lobby_generation(session.generation);
+        }
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for message in receiver.receive() {
+            if message.sequence == 0 || message.sequence <= model.expected_sequence {
+                continue;
+            }
+            if message.sequence != model.expected_sequence.saturating_add(1) {
+                model.protocol_failure = true;
+                continue;
+            }
+            model.expected_sequence = message.sequence;
+            match message.phase {
+                crate::lobby::MatchmakingServerPhase::ReservationStarted(started) => {
+                    if model
+                        .active
+                        .as_ref()
+                        .is_some_and(|active| active != &started)
+                    {
+                        model.protocol_failure = true;
+                        continue;
+                    }
+                    model.phase = Some(crate::lobby::MatchLoadingPhase::Reserving);
+                    model.active = Some(started.clone());
+                    model.started_observation = Some(started);
+                }
+                crate::lobby::MatchmakingServerPhase::BeginMatchConnect(begin) => {
+                    if model
+                        .active
+                        .as_ref()
+                        .is_none_or(|active| active.reservation_id != begin.reservation_id)
+                        || !lifecycle.accept_grant(begin.grant)
+                    {
+                        model.protocol_failure = true;
+                    } else {
+                        model.phase = Some(crate::lobby::MatchLoadingPhase::Connecting);
+                    }
+                }
+                crate::lobby::MatchmakingServerPhase::Status { phase, .. } => {
+                    model.phase = Some(phase);
+                }
+                crate::lobby::MatchmakingServerPhase::Removed { .. } => {
+                    model.active = None;
+                    model.phase = Some(crate::lobby::MatchLoadingPhase::ReturningToQueue);
+                    model.returned_observation = true;
+                    model.match_cancel_requested = false;
+                }
+            }
+        }
     }
 }
 
@@ -485,7 +669,9 @@ fn drive_headless_queue_smoke(
     mut stage: ResMut<HeadlessQueueSmokeStage>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if !config.product_queue_smoke || *stage == HeadlessQueueSmokeStage::Complete {
+    if (!config.product_queue_smoke && !config.product_match_smoke)
+        || *stage == HeadlessQueueSmokeStage::Complete
+    {
         return;
     }
     if model.protocol_failure() {
@@ -507,7 +693,11 @@ fn drive_headless_queue_smoke(
     };
     match *stage {
         HeadlessQueueSmokeStage::AwaitingInitialSnapshot => {
-            let Some(game) = lobby.game_types.first() else {
+            let Some(game) = lobby
+                .game_types
+                .iter()
+                .find(|game| game.players_per_team == config.product_match_players_per_team)
+            else {
                 return;
             };
             if model.snapshot().is_none() {
@@ -538,6 +728,9 @@ fn drive_headless_queue_smoke(
             }
         }
         HeadlessQueueSmokeStage::AwaitingJoinedSnapshot => {
+            if config.product_match_smoke {
+                return;
+            }
             if model.required_snapshot_is_fresh() && model.start_cancel(time.elapsed()) {
                 *stage = HeadlessQueueSmokeStage::Cancelling;
             }
@@ -596,6 +789,7 @@ mod tests {
         crate::lobby::QueuePoolSnapshot {
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             state_revision: revision,
+            formation_availability: crate::lobby::FormationAvailability::Available,
             pools: vec![crate::lobby::QueuePoolRow {
                 game_type_id: crate::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
                 game_type_configuration_revision: 1,
@@ -627,6 +821,75 @@ mod tests {
             },
             admitted_at_pool_state_revision: 2,
         }
+    }
+
+    #[test]
+    fn cancelled_match_start_clears_loading_and_returns_to_game_select_observation() {
+        let joined = joined_membership("wipeout-2v2", 7);
+        let reservation_id = crate::lobby::MatchReservationId::new(11).unwrap();
+        let mut model = ClientMatchLoadingModel {
+            active: Some(crate::lobby::ReservationStarted {
+                reservation_id,
+                ticket_id: joined.ticket_id,
+                game_type_id: joined.game_type_id,
+                map_preset_id: crate::map::MapPresetId(1),
+                team_count: 2,
+                players_per_team: 2,
+                accepted_build: joined.accepted_build,
+                loading_deadline_millis: 30_000,
+            }),
+            ..default()
+        };
+
+        assert!(model.request_cancel());
+        let message = model.outbound.pop_front().expect("one cancel intent");
+        assert!(matches!(
+            message.action,
+            crate::lobby::MatchmakingClientAction::Cancel {
+                reservation_id: id,
+                generation: 1,
+            } if id == reservation_id
+        ));
+        assert!(model.take_match_cancel_requested());
+
+        model.observe_match_cancellation(true);
+        assert!(model.active().is_none());
+        assert_eq!(
+            model.phase(),
+            Some(crate::lobby::MatchLoadingPhase::ReturningToQueue)
+        );
+        assert!(model.take_returned());
+        assert!(!model.take_returned());
+    }
+
+    #[test]
+    fn fresh_lobby_generation_discards_completed_match_loading_state() {
+        let joined = joined_membership("wipeout-2v2", 7);
+        let mut model = ClientMatchLoadingModel {
+            lobby_generation: Some(1),
+            expected_sequence: 4,
+            active: Some(crate::lobby::ReservationStarted {
+                reservation_id: crate::lobby::MatchReservationId::new(11).unwrap(),
+                ticket_id: joined.ticket_id,
+                game_type_id: joined.game_type_id,
+                map_preset_id: crate::map::MapPresetId(1),
+                team_count: 2,
+                players_per_team: 2,
+                accepted_build: joined.accepted_build,
+                loading_deadline_millis: 30_000,
+            }),
+            phase: Some(crate::lobby::MatchLoadingPhase::WaitingForPlayers),
+            protocol_failure: true,
+            ..default()
+        };
+
+        model.reset_for_lobby_generation(3);
+
+        assert_eq!(model.lobby_generation, Some(3));
+        assert_eq!(model.expected_sequence, 0);
+        assert!(model.active().is_none());
+        assert_eq!(model.phase(), None);
+        assert!(!model.protocol_failure);
     }
 
     #[test]

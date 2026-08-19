@@ -20,7 +20,7 @@ fn production_rules_match_the_approved_contract() {
     {
         let lifecycle = MatchLifecycleRules::default().validate().unwrap();
         assert_eq!(lifecycle.minimum_participants_per_team, 1);
-        assert_eq!(lifecycle.maximum_participants_per_team, 2);
+        assert_eq!(lifecycle.maximum_participants_per_team, 3);
         assert_eq!(lifecycle.countdown_ticks, 180);
         assert_eq!(lifecycle.active_limit_ticks, 10_800);
         assert_eq!(lifecycle.respawn_delay_ticks, 180);

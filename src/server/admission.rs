@@ -7,7 +7,7 @@
 use super::build_app_with_config;
 use super::build_match_worker_graph;
 use crate::{
-    builds::{BuildCatalog, BuildCatalogResource, BuildPresetId, resolve_build_recipe},
+    builds::{BuildCatalog, BuildCatalogResource, resolve_build_recipe},
     combat::{FighterDefinitions, WeaponCatalogResource},
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
     content::gameplay_content_fingerprint,
@@ -195,22 +195,26 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
         .ok_or(MatchWorkerManifestError::BuildSelectionMismatch)?;
     for participant in &manifest.participants {
-        let Some(preset) = participant.source_build_preset else {
-            return Err(MatchWorkerManifestError::BuildSelectionMismatch);
+        let snapshot = crate::builds::MatchBuildSnapshotV1::decode(&participant.build_snapshot)
+            .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
+        let (recipe, source_preset) = match snapshot.candidate.selection {
+            crate::builds::BuildSelection::Preset(preset_id) => {
+                let definition = builds
+                    .preset(preset_id)
+                    .ok_or(MatchWorkerManifestError::BuildSelectionMismatch)?;
+                (definition.recipe, Some(preset_id))
+            }
+            crate::builds::BuildSelection::Custom(recipe) => (recipe, None),
         };
-        let preset_id = BuildPresetId(preset);
-        let definition = builds
-            .preset(preset_id)
-            .ok_or(MatchWorkerManifestError::BuildSelectionMismatch)?;
-        let resolved = resolve_build_recipe(
-            &builds,
-            &weapons,
-            fighter,
-            definition.recipe,
-            Some(preset_id),
-        )
-        .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
-        if resolved.identity.recipe_fingerprint.0 != participant.recipe_fingerprint
+        let resolved = resolve_build_recipe(&builds, &weapons, fighter, recipe, source_preset)
+            .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
+        if snapshot.candidate.build_revision != builds.balance_revision
+            || snapshot.accepted.canonical_recipe != recipe
+            || snapshot.accepted.identity != resolved.identity
+            || snapshot.accepted.total_points != resolved.total_points
+            || resolved.identity.source_build_preset_id.map(|id| id.0)
+                != participant.source_build_preset
+            || resolved.identity.recipe_fingerprint.0 != participant.recipe_fingerprint
             || resolved.identity.revision.0 != participant.revision
         {
             return Err(MatchWorkerManifestError::BuildSelectionMismatch);
@@ -269,9 +273,7 @@ pub fn validate_match_manifest(
         }
         teams[usize::from(participant.team)] += 1;
     }
-    let maximum_per_team =
-        usize::from(crate::matchplay::MatchLifecycleRules::default().maximum_participants_per_team);
-    if teams.iter().any(|count| *count > maximum_per_team) {
+    if !matches!(teams, [2, 2] | [3, 3]) {
         return Err(MatchWorkerManifestError::ParticipantCapacity);
     }
     validate_build_rows(manifest)?;
@@ -306,7 +308,9 @@ pub fn build_match_worker_app(
     manifest: MatchManifestV1,
 ) -> Result<App, MatchWorkerManifestError> {
     validate_match_manifest(&config, &manifest)?;
-    let mut app = build_match_worker_graph(config);
+    let players_per_team = u8::try_from(manifest.participants.len() / 2)
+        .map_err(|_| MatchWorkerManifestError::ParticipantCapacity)?;
+    let mut app = build_match_worker_graph(config, players_per_team);
     validate_runtime_identity(
         &mut app,
         manifest.common.protocol_registry_fingerprint,
@@ -373,6 +377,7 @@ pub fn authenticated_netcode_id(remote_id: &RemoteId) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builds::BuildPresetId;
     use brawler_routing::{
         AllocationId, Generation, LobbySessionId, LogicalServerId, ManifestCommon, MatchId, PeerId,
         ProcessId, RouteId, WorkerId, WorkerRole,
@@ -393,7 +398,7 @@ mod tests {
         let (_, map_preset, map_revision) = expected_mode_fields(config.game_mode);
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 1,
+                manifest_version: 2,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -404,9 +409,10 @@ mod tests {
                 content_fingerprint: 0,
                 route_version: brawler_routing::ROUTE_VERSION_V1,
                 packet_version: brawler_routing::PACKET_VERSION_V1,
-                control_version: brawler_routing::CONTROL_VERSION_V1,
+                control_version: brawler_routing::CONTROL_VERSION_CURRENT,
                 flags: 0,
             },
+            request_id: brawler_routing::RequestId::new(3).unwrap(),
             match_id: MatchId::new(4).unwrap(),
             allocation_id: AllocationId::new(5).unwrap(),
             mode: brawler_routing::GameMode::Wipeout,
@@ -415,16 +421,50 @@ mod tests {
             rules_profile: 1,
             reserved: 0,
             seed: 1,
-            participants: vec![MatchManifestParticipant {
-                lobby_session_id: LobbySessionId::new(6).unwrap(),
-                player_id: brawler_routing::PlayerId::new(7).unwrap(),
-                netcode_client_id: brawler_routing::NetcodeClientId::new(8).unwrap(),
-                peer_id: PeerId::new(8).unwrap(),
-                team: 0,
-                source_build_preset: Some(1),
-                recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
-                revision: resolved.identity.revision.0,
-            }],
+            participants: {
+                let base = MatchManifestParticipant {
+                    lobby_session_id: LobbySessionId::new(6).unwrap(),
+                    player_id: brawler_routing::PlayerId::new(7).unwrap(),
+                    netcode_client_id: brawler_routing::NetcodeClientId::new(8).unwrap(),
+                    peer_id: PeerId::new(8).unwrap(),
+                    team: 0,
+                    source_build_preset: Some(1),
+                    recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
+                    revision: resolved.identity.revision.0,
+                    build_snapshot: crate::builds::MatchBuildSnapshotV1 {
+                        schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
+                        candidate: crate::builds::BuildCandidate {
+                            build_revision: builds.balance_revision,
+                            selection: crate::builds::BuildSelection::Preset(preset.id),
+                        },
+                        accepted: crate::builds::AcceptedBuildSummary {
+                            canonical_recipe: preset.recipe,
+                            identity: resolved.identity,
+                            total_points: resolved.total_points,
+                        },
+                    }
+                    .encode()
+                    .unwrap(),
+                };
+                let mut second = base;
+                second.lobby_session_id = LobbySessionId::new(9).unwrap();
+                second.player_id = brawler_routing::PlayerId::new(10).unwrap();
+                second.netcode_client_id = brawler_routing::NetcodeClientId::new(11).unwrap();
+                second.peer_id = PeerId::new(11).unwrap();
+                second.team = 1;
+                let mut third = base;
+                third.lobby_session_id = LobbySessionId::new(12).unwrap();
+                third.player_id = brawler_routing::PlayerId::new(13).unwrap();
+                third.netcode_client_id = brawler_routing::NetcodeClientId::new(14).unwrap();
+                third.peer_id = PeerId::new(14).unwrap();
+                let mut fourth = base;
+                fourth.lobby_session_id = LobbySessionId::new(15).unwrap();
+                fourth.player_id = brawler_routing::PlayerId::new(16).unwrap();
+                fourth.netcode_client_id = brawler_routing::NetcodeClientId::new(17).unwrap();
+                fourth.peer_id = PeerId::new(17).unwrap();
+                fourth.team = 1;
+                vec![base, second, third, fourth]
+            },
             heartbeat_ms: 1_000,
             nonce: 9,
             digest: [0; 32],
@@ -584,7 +624,7 @@ mod tests {
                 content_fingerprint: content.0,
                 route_version: brawler_routing::ROUTE_VERSION_V1,
                 packet_version: brawler_routing::PACKET_VERSION_V1,
-                control_version: brawler_routing::CONTROL_VERSION_V1,
+                control_version: brawler_routing::CONTROL_VERSION_CURRENT,
                 flags: 0,
             },
             default_route_id: RouteId::new(13).unwrap(),

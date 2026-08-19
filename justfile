@@ -210,6 +210,22 @@ network-product-lobby:
 network-product-queue-smoke:
     ./scripts/network-product-queue.sh
 
+# Exercise the M05 exact 2v2 product reservation through authoritative Active.
+network-product-match-smoke:
+    BRAWLER_PRODUCT_PLAYERS_PER_TEAM=2 ./scripts/network-product-match.sh
+
+# Launch four windowed product clients for the M05 2v2 playtest.
+network-product-match:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_PRODUCT_PLAYERS_PER_TEAM=2 ./scripts/network-product-match.sh
+
+# Exercise the M05 exact 3v3 product reservation through authoritative Active.
+network-product-match-3v3-smoke:
+    BRAWLER_PRODUCT_PLAYERS_PER_TEAM=3 ./scripts/network-product-match.sh
+
+# Launch six windowed product clients for the M05 3v3 playtest.
+network-product-match-3v3:
+    BRAWLER_NETWORK_HEADLESS=0 BRAWLER_PRODUCT_PLAYERS_PER_TEAM=3 ./scripts/network-product-match.sh
+
 # Run the same production routed smoke over the IPv6 loopback address. The client derives an IPv6
 # local socket from the selected server address; this is a separate opt-in check because many
 # development hosts disable IPv6 loopback.

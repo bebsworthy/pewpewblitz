@@ -83,6 +83,34 @@ pub struct AcceptedBuildSummary {
     pub total_points: u8,
 }
 
+/// Versioned bounded application snapshot transported opaquely through routing manifests.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchBuildSnapshotV1 {
+    pub schema_version: u8,
+    pub candidate: BuildCandidate,
+    pub accepted: AcceptedBuildSummary,
+}
+
+impl MatchBuildSnapshotV1 {
+    pub const SCHEMA_VERSION: u8 = 1;
+
+    pub fn encode(self) -> Result<brawler_routing::MatchBuildSnapshot, String> {
+        let bytes = postcard::to_allocvec(&self)
+            .map_err(|error| format!("match build snapshot encode failed: {error}"))?;
+        brawler_routing::MatchBuildSnapshot::new(&bytes)
+            .map_err(|error| format!("match build snapshot exceeds bound: {error:?}"))
+    }
+
+    pub fn decode(snapshot: &brawler_routing::MatchBuildSnapshot) -> Result<Self, String> {
+        let value: Self = postcard::from_bytes(snapshot.as_bytes())
+            .map_err(|error| format!("match build snapshot decode failed: {error}"))?;
+        if value.schema_version != Self::SCHEMA_VERSION {
+            return Err("unsupported match build snapshot version".to_string());
+        }
+        Ok(value)
+    }
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SelectedBuild {
     pub source_build_preset_id: Option<BuildPresetId>,

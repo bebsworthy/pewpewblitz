@@ -6,7 +6,7 @@
 use std::{error::Error, fs, io::Read as _, net::SocketAddr, path::PathBuf};
 
 use brawler_routing::{
-    AllocationPolicy, CONTROL_VERSION_V1, CoreConfig, GameMode, Generation, LobbyManifest,
+    AllocationPolicy, CONTROL_VERSION_CURRENT, CoreConfig, GameMode, Generation, LobbyManifest,
     LogicalServerId, MAX_LOBBY_CATALOG_BYTES, ManifestBody, ManifestCommon, PACKET_VERSION_V1,
     ProcessId, ProcessSupervisorConfig, ROUTE_VERSION_V1, RuntimeConfig, SupervisorRuntime,
     WorkerKind, WorkerLaunchSpec, WorkerRegistration, WorkerRole, raw_catalog_fingerprint,
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             content_fingerprint,
             route_version: ROUTE_VERSION_V1,
             packet_version: PACKET_VERSION_V1,
-            control_version: CONTROL_VERSION_V1,
+            control_version: CONTROL_VERSION_CURRENT,
             flags: 0,
         },
         default_route_id,

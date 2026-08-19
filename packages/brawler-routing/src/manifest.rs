@@ -11,10 +11,10 @@ use sha2::{Digest as _, Sha256};
 use crate::{
     CodecError, Generation, LobbySessionId, LogicalServerId, MAX_LOBBY_CATALOG_BYTES,
     MAX_LOBBY_MANIFEST_BYTES, MAX_MANIFEST_BYTES, MAX_PARTICIPANTS, MatchId, PeerId, ProcessId,
-    WorkerId,
+    RequestId, WorkerId,
     codec::{Decoder, Encoder},
     digest::manifest_digest,
-    limits::{CONTROL_VERSION_V1, PACKET_VERSION_V1, ROUTE_VERSION_V1},
+    limits::{CONTROL_VERSION_CURRENT, PACKET_VERSION_V1, ROUTE_VERSION_V1},
 };
 
 /// Worker role carried by manifests and control bodies.
@@ -77,12 +77,16 @@ pub struct ManifestCommon {
 
 impl ManifestCommon {
     fn validate(self, expected_role: WorkerRole) -> Result<(), CodecError> {
-        if self.manifest_version != 1 || self.role != expected_role {
+        let expected_version = match expected_role {
+            WorkerRole::Lobby => 1,
+            WorkerRole::Match => 2,
+        };
+        if self.manifest_version != expected_version || self.role != expected_role {
             return Err(CodecError::InvalidValue);
         }
         if self.route_version != ROUTE_VERSION_V1
             || self.packet_version != PACKET_VERSION_V1
-            || self.control_version != CONTROL_VERSION_V1
+            || self.control_version != CONTROL_VERSION_CURRENT
         {
             return Err(CodecError::InvalidValue);
         }
@@ -287,6 +291,40 @@ pub fn raw_catalog_fingerprint(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
+/// Bounded application-owned build bytes. Routing transports these opaquely.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct MatchBuildSnapshot {
+    len: u8,
+    bytes: [u8; crate::MAX_MATCH_BUILD_SNAPSHOT_BYTES],
+}
+
+impl MatchBuildSnapshot {
+    pub fn new(bytes: &[u8]) -> Result<Self, CodecError> {
+        let len = u8::try_from(bytes.len()).map_err(|_| CodecError::Oversize)?;
+        if bytes.is_empty() || bytes.len() > crate::MAX_MATCH_BUILD_SNAPSHOT_BYTES {
+            return Err(CodecError::InvalidValue);
+        }
+        let mut stored = [0; crate::MAX_MATCH_BUILD_SNAPSHOT_BYTES];
+        stored[..bytes.len()].copy_from_slice(bytes);
+        Ok(Self { len, bytes: stored })
+    }
+
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len)]
+    }
+}
+
+impl fmt::Debug for MatchBuildSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatchBuildSnapshot")
+            .field("bytes", &"[REDACTED]")
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
 /// A participant entry in a match manifest.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct MatchManifestParticipant {
@@ -298,6 +336,7 @@ pub struct MatchManifestParticipant {
     pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub revision: u16,
+    pub build_snapshot: MatchBuildSnapshot,
 }
 
 impl fmt::Debug for MatchManifestParticipant {
@@ -312,7 +351,7 @@ impl fmt::Debug for MatchManifestParticipant {
     }
 }
 
-fn encode_match_participant(encoder: &mut Encoder, participant: MatchManifestParticipant) {
+fn encode_match_participant(encoder: &mut Encoder, participant: &MatchManifestParticipant) {
     encoder.put_u128(participant.lobby_session_id.get());
     encoder.put_u64(participant.player_id.get());
     encoder.put_u64(participant.netcode_client_id.get());
@@ -327,20 +366,33 @@ fn encode_match_participant(encoder: &mut Encoder, participant: MatchManifestPar
     }
     encoder.put_u64(participant.recipe_fingerprint);
     encoder.put_u16(participant.revision);
+    encoder.put_u8(u8::try_from(participant.build_snapshot.as_bytes().len()).expect("bounded"));
+    encoder.put_bytes(participant.build_snapshot.as_bytes());
 }
 
 fn decode_match_participant(
     decoder: &mut Decoder<'_>,
 ) -> Result<MatchManifestParticipant, CodecError> {
+    let lobby_session_id = LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
+    let player_id = crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
+    let netcode_client_id =
+        crate::NetcodeClientId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
+    let peer_id = PeerId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
+    let team = decoder.u8()?;
+    let source_build_preset = decoder.optional(Decoder::u16)?;
+    let recipe_fingerprint = decoder.u64()?;
+    let revision = decoder.u16()?;
+    let build_length = usize::from(decoder.u8()?);
     Ok(MatchManifestParticipant {
-        lobby_session_id: LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
-        player_id: crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
-        netcode_client_id: crate::NetcodeClientId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
-        peer_id: PeerId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
-        team: decoder.u8()?,
-        source_build_preset: decoder.optional(Decoder::u16)?,
-        recipe_fingerprint: decoder.u64()?,
-        revision: decoder.u16()?,
+        lobby_session_id,
+        player_id,
+        netcode_client_id,
+        peer_id,
+        team,
+        source_build_preset,
+        recipe_fingerprint,
+        revision,
+        build_snapshot: MatchBuildSnapshot::new(decoder.take(build_length)?)?,
     })
 }
 
@@ -348,6 +400,7 @@ fn decode_match_participant(
 #[derive(Clone, PartialEq, Eq)]
 pub struct MatchManifestV1 {
     pub common: ManifestCommon,
+    pub request_id: RequestId,
     pub match_id: MatchId,
     pub allocation_id: crate::AllocationId,
     pub mode: GameMode,
@@ -367,6 +420,7 @@ impl fmt::Debug for MatchManifestV1 {
         formatter
             .debug_struct("MatchManifestV1")
             .field("common", &self.common)
+            .field("request_id", &self.request_id)
             .field("match_id", &self.match_id)
             .field("allocation_id", &self.allocation_id)
             .field("mode", &self.mode)
@@ -399,6 +453,7 @@ impl MatchManifestV1 {
         self.validate()?;
         let mut encoder = Encoder::with_capacity(4_096);
         encode_common(&mut encoder, self.common);
+        encoder.put_u64(self.request_id.get());
         encoder.put_u128(self.match_id.get());
         encoder.put_u128(self.allocation_id.get());
         encoder.put_u16(self.mode as u16);
@@ -409,7 +464,7 @@ impl MatchManifestV1 {
         encoder.put_u64(self.seed);
         encoder.put_u8(u8::try_from(self.participants.len()).map_err(|_| CodecError::Oversize)?);
         for participant in &self.participants {
-            encode_match_participant(&mut encoder, *participant);
+            encode_match_participant(&mut encoder, participant);
         }
         encoder.put_u32(self.heartbeat_ms);
         encoder.put_u128(self.nonce);
@@ -442,6 +497,7 @@ impl MatchManifestV1 {
         let split = bytes.len() - 32;
         let mut decoder = Decoder::new(&bytes[..split]);
         let common = decode_common(&mut decoder, Self::ROLE)?;
+        let request_id = RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
         let match_id = MatchId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
         let allocation_id = crate::AllocationId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
         let mode = GameMode::try_from(decoder.u16()?)?;
@@ -460,6 +516,7 @@ impl MatchManifestV1 {
         }
         let value = Self {
             common,
+            request_id,
             match_id,
             allocation_id,
             mode,
@@ -526,13 +583,14 @@ mod tests {
             source_build_preset: Some(u16::try_from(index + 40).unwrap()),
             recipe_fingerprint: index + 50,
             revision: u16::try_from(index + 60).unwrap(),
+            build_snapshot: MatchBuildSnapshot::new(&[1, 2, 3]).unwrap(),
         }
     }
 
     fn match_manifest(participant_count: usize) -> MatchManifestV1 {
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 1,
+                manifest_version: 2,
                 role: WorkerRole::Match,
                 logical_server_id: id128(1),
                 process_id: id128(2),
@@ -543,9 +601,10 @@ mod tests {
                 content_fingerprint: 7,
                 route_version: ROUTE_VERSION_V1,
                 packet_version: PACKET_VERSION_V1,
-                control_version: CONTROL_VERSION_V1,
+                control_version: CONTROL_VERSION_CURRENT,
                 flags: 0,
             },
+            request_id: RequestId::new(15).unwrap(),
             match_id: id128(8),
             allocation_id: AllocationId::new(9).unwrap(),
             mode: GameMode::HotZone,
@@ -564,8 +623,8 @@ mod tests {
     }
 
     // Common fields through seed, before the participant count byte.
-    const PARTICIPANT_COUNT_OFFSET: usize = 87 + 16 + 16 + 2 + 2 + 2 + 1 + 1 + 8;
-    const ALLOCATION_ID_OFFSET: usize = 87 + 16;
+    const PARTICIPANT_COUNT_OFFSET: usize = 87 + 8 + 16 + 16 + 2 + 2 + 2 + 1 + 1 + 8;
+    const ALLOCATION_ID_OFFSET: usize = 87 + 8 + 16;
 
     #[test]
     fn match_manifest_exact_round_trip_and_digest_are_canonical() {
@@ -575,7 +634,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 312);
+        assert_eq!(encoded.len(), 328);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])

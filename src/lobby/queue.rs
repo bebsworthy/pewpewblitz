@@ -42,6 +42,90 @@ macro_rules! nonzero_id {
 
 nonzero_id!(QueueRequestId, u64, "queue request ID must be nonzero");
 nonzero_id!(QueueTicketId, u128, "queue ticket ID must be nonzero");
+nonzero_id!(
+    MatchReservationId,
+    u128,
+    "match reservation ID must be nonzero"
+);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchLoadingPhase {
+    Reserving,
+    StartingServer,
+    Connecting,
+    Synchronizing,
+    WaitingForPlayers,
+    Cancelling,
+    ReturningToQueue,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ReservationStarted {
+    pub reservation_id: MatchReservationId,
+    pub ticket_id: QueueTicketId,
+    pub game_type_id: GameTypeId,
+    pub map_preset_id: crate::map::MapPresetId,
+    pub team_count: u8,
+    pub players_per_team: u8,
+    pub accepted_build: AcceptedBuildSummary,
+    pub loading_deadline_millis: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct BeginMatchConnect {
+    pub reservation_id: MatchReservationId,
+    pub generation: u32,
+    pub grant: crate::protocol::MatchRouteGrant,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum MatchmakingServerPhase {
+    ReservationStarted(ReservationStarted),
+    BeginMatchConnect(BeginMatchConnect),
+    Status {
+        reservation_id: MatchReservationId,
+        generation: u32,
+        phase: MatchLoadingPhase,
+        connected: u8,
+        checked_in: u8,
+        participant_count: u8,
+    },
+    Removed {
+        reservation_id: MatchReservationId,
+        ticket_id: QueueTicketId,
+        reason: MatchStartFailure,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct MatchmakingServerMessage {
+    pub sequence: u64,
+    pub phase: MatchmakingServerPhase,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchmakingClientAction {
+    Cancel {
+        reservation_id: MatchReservationId,
+        generation: u32,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchmakingClientMessage {
+    pub sequence: u64,
+    pub action: MatchmakingClientAction,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchStartFailure {
+    Cancelled,
+    ParticipantLost,
+    WorkerFailed,
+    TimedOut,
+    CapacityOccupied,
+    Expired,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum QueueClientMessage {
@@ -187,6 +271,7 @@ pub enum QueueRejection {
     TicketMismatch,
     StaleRequest,
     TemporarilyUnavailable,
+    ServerMatchCapacityOccupied,
     InternalBuildResolution,
     RateLimited { retry_after_millis: u16 },
     ProtocolFailure,
@@ -196,7 +281,15 @@ pub enum QueueRejection {
 pub struct QueuePoolSnapshot {
     pub catalog_revision: CatalogRevision,
     pub state_revision: u64,
+    pub formation_availability: FormationAvailability,
     pub pools: Vec<QueuePoolRow>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FormationAvailability {
+    #[default]
+    Available,
+    ProductMatchOccupied,
 }
 
 impl<'de> Deserialize<'de> for QueuePoolSnapshot {
@@ -208,6 +301,7 @@ impl<'de> Deserialize<'de> for QueuePoolSnapshot {
         struct Wire {
             catalog_revision: CatalogRevision,
             state_revision: u64,
+            formation_availability: FormationAvailability,
             #[serde(deserialize_with = "deserialize_pool_rows")]
             pools: Vec<QueuePoolRow>,
         }
@@ -220,6 +314,7 @@ impl<'de> Deserialize<'de> for QueuePoolSnapshot {
         Ok(Self {
             catalog_revision: wire.catalog_revision,
             state_revision: wire.state_revision,
+            formation_availability: wire.formation_availability,
             pools: wire.pools,
         })
     }
@@ -333,16 +428,19 @@ mod tests {
             QueuePoolSnapshot {
                 catalog_revision: revision,
                 state_revision: 0,
+                formation_availability: FormationAvailability::Available,
                 pools: vec![row(0)],
             },
             QueuePoolSnapshot {
                 catalog_revision: revision,
                 state_revision: 1,
+                formation_availability: FormationAvailability::Available,
                 pools: Vec::new(),
             },
             QueuePoolSnapshot {
                 catalog_revision: revision,
                 state_revision: 1,
+                formation_availability: FormationAvailability::Available,
                 pools: (0..=8).map(row).collect(),
             },
         ] {

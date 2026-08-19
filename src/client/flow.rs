@@ -50,6 +50,14 @@ pub enum ClientFlow {
     Connecting,
     GameSelect,
     Queue,
+    MatchLoading,
+    Match,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CancelMatchStartConfirmation {
+    pub reservation_id: crate::lobby::MatchReservationId,
+    pub generation: u32,
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
@@ -59,6 +67,7 @@ pub enum ClientOverlay {
     Settings,
     Credits,
     BuildEditor,
+    Confirmation(CancelMatchStartConfirmation),
     Error(FlowError),
 }
 
@@ -141,6 +150,9 @@ enum FlowUiAction {
     CancelQueue,
     RetryQueue,
     TryAgainQueue,
+    RequestCancelMatchStart,
+    KeepLoading,
+    ConfirmCancelMatchStart,
 }
 
 #[derive(Clone, Debug)]
@@ -159,6 +171,10 @@ enum SessionObservation {
     QueueOutcome(crate::lobby::QueueCommandOutcome),
     QueueProtocolFailure,
     QueueTimedOut,
+    ReservationStarted,
+    MatchStartReturned,
+    CountdownObserved,
+    FreshLobbyReturn,
 }
 
 #[derive(Resource, Default)]
@@ -184,6 +200,7 @@ struct FlowCommit {
 enum OverlayCommit {
     Clear,
     BuildEditor,
+    Confirmation(CancelMatchStartConfirmation),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -336,6 +353,7 @@ struct BuildEditorRenderKey {
     game_type_id: Option<crate::lobby::GameTypeId>,
     game_name: String,
     joining: bool,
+    capacity_occupied: bool,
 }
 
 #[derive(Component)]
@@ -349,6 +367,15 @@ struct QueueCancelButton;
 
 #[derive(Component)]
 struct QueueCancelLabel;
+
+#[derive(Component)]
+struct MatchLoadingStatusLabel;
+
+#[derive(Component)]
+struct CancelConfirmationRoot;
+
+#[derive(Component)]
+struct MatchCompletionRoot;
 
 #[derive(Component, Clone, Copy)]
 enum FieldLabel {
@@ -374,6 +401,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<ClientLocalLoadFailures>()
             .init_resource::<super::BuildEditorState>()
             .init_resource::<super::ClientQueueModel>()
+            .init_resource::<super::ClientMatchLoadingModel>()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .init_resource::<crate::combat::WeaponCatalogResource>()
             .init_resource::<SelectedGameType>()
@@ -421,6 +449,15 @@ impl Plugin for ClientFlowPlugin {
                     present_flow_error_overlay
                         .in_set(ClientFlowSet::PresentFlow)
                         .before(present_flow),
+                    present_cancel_confirmation
+                        .in_set(ClientFlowSet::PresentFlow)
+                        .before(present_flow),
+                    present_match_completion
+                        .in_set(ClientFlowSet::PresentFlow)
+                        .before(present_flow),
+                    update_match_loading
+                        .in_set(ClientFlowSet::PresentFlow)
+                        .before(present_flow),
                     update_rate_limit_try_again
                         .in_set(ClientFlowSet::PresentFlow)
                         .after(present_flow_error_overlay)
@@ -444,9 +481,20 @@ impl Plugin for ClientFlowPlugin {
             )
             .add_systems(OnEnter(ClientFlow::ServerSelect), spawn_server_select)
             .add_systems(OnEnter(ClientFlow::Connecting), spawn_connecting)
-            .add_systems(OnEnter(ClientFlow::GameSelect), spawn_game_select);
+            .add_systems(OnEnter(ClientFlow::GameSelect), spawn_game_select)
+            .add_systems(OnEnter(ClientFlow::Match), enter_match_input)
+            .add_systems(OnExit(ClientFlow::Match), exit_match_input);
         app.add_systems(OnEnter(ClientFlow::Queue), spawn_queue);
+        app.add_systems(OnEnter(ClientFlow::MatchLoading), spawn_match_loading);
     }
+}
+
+fn enter_match_input(mut context: ResMut<super::ClientInputContext>) {
+    *context = super::ClientInputContext::Gameplay;
+}
+
+fn exit_match_input(mut context: ResMut<super::ClientInputContext>) {
+    *context = super::ClientInputContext::Shell;
 }
 
 #[allow(
@@ -539,8 +587,10 @@ fn observe_session(
     memberships: Query<(Entity, &ClientLobbyMembership), With<Client>>,
     failures: Query<&ClientLobbyFailure, With<Client>>,
     statuses: Query<&ClientJoinStatus, (With<Client>, With<RoutedClientSession>)>,
+    match_states: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
     mut actions: ResMut<PendingFlowActions>,
     mut queue: ResMut<super::ClientQueueModel>,
+    mut loading: ResMut<super::ClientMatchLoadingModel>,
 ) {
     if let Some(task) = resolver.task.as_mut()
         && let Some(result) = block_on(poll_once(&mut task.task))
@@ -556,6 +606,37 @@ fn observe_session(
     }
     if queue.protocol_failure() {
         actions.session = Some(SessionObservation::QueueProtocolFailure);
+        return;
+    }
+    if let Some(started) = loading.take_started() {
+        let _ = started;
+        actions.session = Some(SessionObservation::ReservationStarted);
+        return;
+    }
+    if loading.take_returned() {
+        actions.session = Some(SessionObservation::MatchStartReturned);
+        return;
+    }
+    if *flow.get() == ClientFlow::Match
+        && memberships.iter().next().is_some()
+        && statuses
+            .iter()
+            .any(|status| matches!(status.phase, ClientJoinPhase::LobbyActive { .. }))
+    {
+        actions.session = Some(SessionObservation::FreshLobbyReturn);
+        return;
+    }
+    if *flow.get() == ClientFlow::MatchLoading {
+        if match_states.iter().any(|state| {
+            matches!(
+                state.phase,
+                crate::matchplay::MatchPhase::Countdown { .. }
+                    | crate::matchplay::MatchPhase::Active { .. }
+                    | crate::matchplay::MatchPhase::Completed { .. }
+            )
+        }) {
+            actions.session = Some(SessionObservation::CountdownObserved);
+        }
         return;
     }
     if let Some(outcome) = queue.take_outcome() {
@@ -752,7 +833,10 @@ fn collect_flow_input(
         } else {
             match *flow.get() {
                 ClientFlow::Connecting => FlowUiAction::Cancel,
-                ClientFlow::GameSelect | ClientFlow::Queue => FlowUiAction::Disconnect,
+                ClientFlow::GameSelect
+                | ClientFlow::Queue
+                | ClientFlow::MatchLoading
+                | ClientFlow::Match => FlowUiAction::Disconnect,
                 ClientFlow::ServerSelect => FlowUiAction::Back,
                 ClientFlow::Title => return,
             }
@@ -763,7 +847,7 @@ fn collect_flow_input(
 
 fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
     match overlay {
-        ClientOverlay::Error(_) => button.error_action,
+        ClientOverlay::Error(_) | ClientOverlay::Confirmation(_) => button.error_action,
         ClientOverlay::BuildEditor => button.build_editor_action,
         _ => !button.error_action && !button.build_editor_action,
     }
@@ -798,12 +882,16 @@ fn resolve_flow_action(
     path: Res<ClientConnectionsPath>,
     overlay: Res<ClientOverlay>,
     mut selection: ResMut<SelectedGameType>,
-    mut queue: ResMut<super::ClientQueueModel>,
+    mut models: (
+        ResMut<super::ClientQueueModel>,
+        ResMut<super::ClientMatchLoadingModel>,
+    ),
     mut editor: ResMut<super::BuildEditorState>,
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
     build_path: Res<super::ClientBuildPath>,
 ) {
+    let (ref mut queue, ref mut loading) = models;
     if let Some(explicit) = actions.explicit.take() {
         match explicit {
             FlowUiAction::Cancel | FlowUiAction::Disconnect => {
@@ -961,6 +1049,18 @@ fn resolve_flow_action(
                     ],
                 });
             }
+            SessionObservation::ReservationStarted => {
+                commit.next_flow = Some(ClientFlow::MatchLoading);
+                commit.overlay = Some(OverlayCommit::Clear);
+            }
+            SessionObservation::MatchStartReturned | SessionObservation::FreshLobbyReturn => {
+                commit.next_flow = Some(ClientFlow::GameSelect);
+                commit.overlay = Some(OverlayCommit::Clear);
+            }
+            SessionObservation::CountdownObserved => {
+                commit.next_flow = Some(ClientFlow::Match);
+                commit.overlay = Some(OverlayCommit::Clear);
+            }
             SessionObservation::QueueOutcome(outcome) => match outcome.decision {
                 crate::lobby::QueueDecision::Joined(membership) => {
                     let selection_to_save = editor.submitted_selection.unwrap_or_else(|| {
@@ -1089,7 +1189,8 @@ fn resolve_flow_action(
                     crate::lobby::QueueRejection::TicketMismatch
                     | crate::lobby::QueueRejection::StaleRequest
                     | crate::lobby::QueueRejection::TemporarilyUnavailable
-                    | crate::lobby::QueueRejection::InternalBuildResolution => {
+                    | crate::lobby::QueueRejection::InternalBuildResolution
+                    | crate::lobby::QueueRejection::ServerMatchCapacityOccupied => {
                         commit.error = Some(FlowError {
                             kind: FlowErrorKind::Queue,
                             message: "The queue request could not be completed".to_string(),
@@ -1224,6 +1325,12 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::OpenBuildEditor => {
+            if queue.snapshot().is_some_and(|snapshot| {
+                snapshot.formation_availability
+                    == crate::lobby::FormationAvailability::ProductMatchOccupied
+            }) {
+                return;
+            }
             editor.open();
             commit.overlay = Some(OverlayCommit::BuildEditor);
         }
@@ -1279,6 +1386,24 @@ fn resolve_flow_action(
                 commit.overlay = queue
                     .pending()
                     .map(|pending| queue_recovery_overlay(&pending.command));
+            }
+        }
+        FlowUiAction::RequestCancelMatchStart => {
+            if let Some(active) = loading.active() {
+                commit.overlay = Some(OverlayCommit::Confirmation(CancelMatchStartConfirmation {
+                    reservation_id: active.reservation_id,
+                    generation: 1,
+                }));
+                commit.focus_index = Some(0);
+            }
+        }
+        FlowUiAction::KeepLoading => {
+            commit.overlay = Some(OverlayCommit::Clear);
+            commit.focus_index = Some(0);
+        }
+        FlowUiAction::ConfirmCancelMatchStart => {
+            if loading.request_cancel() {
+                commit.overlay = Some(OverlayCommit::Clear);
             }
         }
         FlowUiAction::CancelBuildEditor | FlowUiAction::Cancel | FlowUiAction::Disconnect => {}
@@ -1550,6 +1675,7 @@ fn commit_flow(
         *overlay = match overlay_commit {
             OverlayCommit::Clear => ClientOverlay::None,
             OverlayCommit::BuildEditor => ClientOverlay::BuildEditor,
+            OverlayCommit::Confirmation(value) => ClientOverlay::Confirmation(value),
         };
     }
     if let Some(index) = commit.focus_index {
@@ -1936,6 +2062,9 @@ fn present_build_editor_overlay(
     let joining = queue
         .pending()
         .is_some_and(|pending| matches!(pending.command, crate::lobby::QueueCommand::Join(_)));
+    let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
+        snapshot.formation_availability == crate::lobby::FormationAvailability::ProductMatchOccupied
+    });
     let game_name = selected_game_name(&selection, memberships.iter().next()).to_string();
     let render_key = BuildEditorRenderKey {
         selected_choice: editor.selected_choice,
@@ -1945,6 +2074,7 @@ fn present_build_editor_overlay(
         game_type_id: selection.game_type_id.clone(),
         game_name: game_name.clone(),
         joining,
+        capacity_occupied,
     };
     if !roots.is_empty() && rendered.as_ref() == Some(&render_key) {
         return;
@@ -2107,7 +2237,7 @@ fn present_build_editor_overlay(
                 BUILD_EDITOR_JOIN_INDEX,
                 FlowUiAction::JoinQueue,
                 if joining { "JOINING..." } else { "JOIN QUEUE" },
-                joining || preview.is_err(),
+                joining || preview.is_err() || capacity_occupied,
             );
             spawn_build_editor_button(
                 root,
@@ -2520,8 +2650,10 @@ fn spawn_game_select(
                     index,
                     FlowUiAction::SelectGame(index),
                     &format!(
-                        "{} | {mode_name} | 2v2 | {map_names} | {rules}",
-                        game_type.display_name
+                        "{} | {mode_name} | {}v{} | {map_names} | {rules}",
+                        game_type.display_name,
+                        game_type.players_per_team,
+                        game_type.players_per_team,
                     ),
                     None,
                 );
@@ -2533,11 +2665,19 @@ fn spawn_game_select(
                 ));
             }
             let offset = membership.game_types.len();
+            let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
+                snapshot.formation_availability
+                    == crate::lobby::FormationAvailability::ProductMatchOccupied
+            });
             spawn_flow_button(
                 root,
                 offset,
                 FlowUiAction::OpenBuildEditor,
-                "BUILD & JOIN",
+                if capacity_occupied {
+                    "MATCH IN PROGRESS"
+                } else {
+                    "BUILD & JOIN"
+                },
                 None,
             );
             spawn_flow_button(
@@ -2592,6 +2732,188 @@ fn spawn_queue(
             ));
             spawn_queue_cancel_button(root);
             spawn_flow_button(root, 1, FlowUiAction::Disconnect, "DISCONNECT", None);
+        });
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn spawn_match_loading(
+    mut commands: Commands,
+    loading: Res<super::ClientMatchLoadingModel>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    let Some(active) = loading.active() else {
+        return;
+    };
+    navigation.selected = 0;
+    commands
+        .spawn((
+            FlowRoot,
+            DespawnOnExit(ClientFlow::MatchLoading),
+            flow_root_node(),
+            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
+            GlobalZIndex(410),
+        ))
+        .with_children(|root| {
+            spawn_heading(root, "MATCH LOADING");
+            root.spawn((
+                MatchLoadingStatusLabel,
+                Text::new(match_loading_text(active, loading.phase())),
+                TextFont::from_font_size(20.0),
+                TextColor(Color::srgb(0.86, 0.94, 1.0)),
+                TextLayout::new(Justify::Center, LineBreak::WordBoundary),
+            ));
+            spawn_flow_button(
+                root,
+                0,
+                FlowUiAction::RequestCancelMatchStart,
+                "CANCEL MATCH START",
+                None,
+            );
+            spawn_flow_button(root, 1, FlowUiAction::Disconnect, "DISCONNECT", None);
+        });
+}
+
+fn match_loading_text(
+    active: &crate::lobby::ReservationStarted,
+    phase: Option<crate::lobby::MatchLoadingPhase>,
+) -> String {
+    let phase = match phase.unwrap_or(crate::lobby::MatchLoadingPhase::Reserving) {
+        crate::lobby::MatchLoadingPhase::Reserving => "Reserving roster",
+        crate::lobby::MatchLoadingPhase::StartingServer => "Starting server",
+        crate::lobby::MatchLoadingPhase::Connecting => "Connecting",
+        crate::lobby::MatchLoadingPhase::Synchronizing => "Synchronizing map and terrain",
+        crate::lobby::MatchLoadingPhase::WaitingForPlayers => "Waiting for players",
+        crate::lobby::MatchLoadingPhase::Cancelling => "Cancelling",
+        crate::lobby::MatchLoadingPhase::ReturningToQueue => "Returning to queue",
+    };
+    format!(
+        "{phase}\n{}v{} · Map {}\nYour accepted build: {}/12 points",
+        active.players_per_team,
+        active.players_per_team,
+        active.map_preset_id.0,
+        active.accepted_build.total_points
+    )
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn update_match_loading(
+    loading: Res<super::ClientMatchLoadingModel>,
+    mut labels: Query<&mut Text, With<MatchLoadingStatusLabel>>,
+) {
+    let Some(active) = loading.active() else {
+        return;
+    };
+    for mut label in &mut labels {
+        label.0 = match_loading_text(active, loading.phase());
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn present_cancel_confirmation(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    roots: Query<Entity, With<CancelConfirmationRoot>>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    let ClientOverlay::Confirmation(_) = overlay.as_ref() else {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    if roots.iter().next().is_some() || *flow.get() != ClientFlow::MatchLoading {
+        return;
+    }
+    navigation.selected = 0;
+    commands
+        .spawn((
+            CancelConfirmationRoot,
+            DespawnOnExit(ClientFlow::MatchLoading),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
+            GlobalZIndex(500),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: percent(88),
+                    max_width: px(640),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(12),
+                    padding: UiRect::all(px(24)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.055, 0.08, 0.12)),
+            ))
+            .with_children(|panel| {
+                spawn_heading(panel, "CANCEL MATCH START?");
+                spawn_flow_error_button(panel, 0, FlowUiAction::KeepLoading, "KEEP LOADING");
+                spawn_flow_error_button(
+                    panel,
+                    1,
+                    FlowUiAction::ConfirmCancelMatchStart,
+                    "CANCEL MATCH START",
+                );
+            });
+        });
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn present_match_completion(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    matches: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
+    roots: Query<Entity, With<MatchCompletionRoot>>,
+) {
+    if *flow.get() != ClientFlow::Match || roots.iter().next().is_some() {
+        return;
+    }
+    let Some(result) = matches.iter().find_map(|state| match state.phase {
+        crate::matchplay::MatchPhase::Completed { result, .. } => Some(result),
+        _ => None,
+    }) else {
+        return;
+    };
+    let result = match result {
+        crate::matchplay::MatchResult::TeamVictory { team } => {
+            format!("TEAM {} WINS", team.0 + 1)
+        }
+        crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
+        crate::matchplay::MatchResult::Forfeit { winner, .. } => {
+            format!("TEAM {} WINS BY FORFEIT", winner.0 + 1)
+        }
+    };
+    commands
+        .spawn((
+            MatchCompletionRoot,
+            DespawnOnExit(ClientFlow::Match),
+            flow_root_node(),
+            BackgroundColor(Color::srgba(0.025, 0.04, 0.07, 0.96)),
+            GlobalZIndex(450),
+        ))
+        .with_children(|root| {
+            spawn_heading(root, "MATCH COMPLETE");
+            root.spawn((
+                Text::new(result),
+                TextFont::from_font_size(28.0),
+                TextColor(Color::srgb(0.9, 0.95, 1.0)),
+            ));
+            root.spawn((
+                Text::new("RETURNING TO LOBBY…"),
+                TextFont::from_font_size(18.0),
+                TextColor(Color::srgb(0.58, 0.66, 0.74)),
+            ));
         });
 }
 
@@ -3102,6 +3424,103 @@ mod tests {
             ClientFlow::Queue,
         ];
         assert_eq!(states.len(), 5);
+    }
+
+    #[test]
+    fn match_flow_hands_input_to_gameplay_and_returns_it_to_the_shell() {
+        let mut app = flow_test_app();
+        app.world_mut()
+            .insert_resource(super::super::ClientInputContext::Shell);
+
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Match);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<super::super::ClientInputContext>(),
+            super::super::ClientInputContext::Gameplay
+        );
+
+        *app.world_mut()
+            .resource_mut::<super::super::ClientInputContext>() =
+            super::super::ClientInputContext::Paused;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<super::super::ClientInputContext>(),
+            super::super::ClientInputContext::Paused
+        );
+
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::GameSelect);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<super::super::ClientInputContext>(),
+            super::super::ClientInputContext::Shell
+        );
+    }
+
+    #[test]
+    fn completed_match_stays_covered_until_the_fresh_lobby_is_ready() {
+        let mut app = flow_test_app();
+        app.world_mut()
+            .insert_resource(super::super::ClientInputContext::Shell);
+        let match_root = app
+            .world_mut()
+            .spawn((
+                crate::matchplay::MatchRoot,
+                crate::matchplay::MatchState {
+                    match_id: crate::matchplay::MatchId(9),
+                    mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                    phase: crate::matchplay::MatchPhase::Completed {
+                        completed_at_tick: 12,
+                        restart_unlocked_at_tick: 72,
+                        result: crate::matchplay::MatchResult::Draw,
+                    },
+                    rules_revision: 1,
+                },
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Match);
+        app.update();
+
+        let completion_root = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<Entity, With<MatchCompletionRoot>>();
+            query.single(world).unwrap()
+        };
+        assert!(visible_text(&mut app).iter().any(|text| text == "DRAW"));
+
+        app.world_mut().entity_mut(match_root).despawn();
+        app.update();
+        assert!(app.world().get_entity(completion_root).is_ok());
+
+        app.world_mut().spawn((
+            Client,
+            lobby_membership(),
+            RoutedClientSession {
+                generation: 3,
+                kind: super::super::RoutedClientSessionKind::Lobby,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::LobbyActive {
+                    player_id: crate::protocol::PlayerId(1),
+                },
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ));
+        app.update();
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<State<ClientFlow>>().get(),
+            ClientFlow::GameSelect
+        );
+        assert!(app.world().get_entity(completion_root).is_err());
+        assert_eq!(count_flow_roots(&mut app), 1);
     }
 
     #[test]

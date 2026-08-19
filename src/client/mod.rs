@@ -15,8 +15,10 @@ use crate::{
     protocol::{
         BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
         Fighter, FighterInput, LobbyHello, LobbyJoinOutcome, MatchCommand, MatchCommandOutcome,
-        MatchCommandRequest, MatchHello, MatchJoinOutcome, MatchJoinRejection, MatchRouteGrant,
-        NetworkEntityId, PlayerId, ProtocolFingerprint, ProtocolPlugin, SessionChannel,
+        MatchCommandRequest, MatchHello, MatchJoinOutcome, MatchJoinRejection,
+        MatchLoadingClientAction, MatchLoadingClientMessage, MatchLoadingServerMessage,
+        MatchLoadingStatus, MatchRouteGrant, NetworkEntityId, PlayerId, ProtocolFingerprint,
+        ProtocolPlugin, SessionChannel,
     },
 };
 use avian2d::prelude::{AngularVelocity, LinearVelocity, PhysicsSystems, Position, Rotation};
@@ -73,8 +75,8 @@ pub use build_editor::{
 };
 pub use build_persistence::{BuildFileV1, ClientBuildPath, load_build, save_build};
 pub use flow::{
-    ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError, FlowErrorAction, FlowErrorKind,
-    SelectedGameType,
+    CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,
+    FlowErrorAction, FlowErrorKind, SelectedGameType,
 };
 #[allow(clippy::wildcard_imports)]
 use input::*;
@@ -83,7 +85,9 @@ pub use presentation::{ClientPresentationPlugin, MovementPresentationPlugin};
 use presentation::{
     clamp_camera_center, update_client_hud, write_interpolated_fighter_pose_to_transform,
 };
-pub use queue::{ClientQueueModel, ClientQueuePlugin, PendingQueueCommand};
+pub use queue::{
+    ClientMatchLoadingModel, ClientQueueModel, ClientQueuePlugin, PendingQueueCommand,
+};
 pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
 pub use server_select::{LogicalServerAddress, ServerAddressHost, parse_server_address};
 pub use session::ClientNetworkPlugin;

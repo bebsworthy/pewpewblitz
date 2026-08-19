@@ -22,5 +22,15 @@
       players_per_team: 2,
       rules_profile: "standard",
     ),
+    (
+      id: "hot-zone-3v3",
+      revision: 1,
+      name: "Hot Zone 3v3",
+      mode: "hot-zone",
+      maps: ["crossroads-facility-hot-zone"],
+      teams: 2,
+      players_per_team: 3,
+      rules_profile: "standard",
+    ),
   ],
 )

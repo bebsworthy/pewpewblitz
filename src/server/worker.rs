@@ -16,11 +16,11 @@ use crate::{
 };
 use bevy::{app::AppExit, prelude::*};
 use brawler_routing::{
-    AllocateRequestBody, CONTROL_VERSION_V1, CodecError, ControlBody, ControlFrame,
-    ControlSequenceTracker, FramedReader, IpcChannel, IpcIoError, LobbyAuthenticatedBody,
-    LobbyManifest, LobbyNetcodeAuthenticatedBody, MatchManifestV1, PACKET_VERSION_V1,
-    PeerCloseBody, ProcessId, ROUTE_VERSION_V1, ReadyBody, SequenceDisposition, StopBody,
-    UnixWorkerChannels, WorkerId, WorkerRole,
+    ActivationBody, AllocateRequestBody, CONTROL_VERSION_CURRENT, CodecError, ControlBody,
+    ControlFrame, ControlSequenceTracker, FramedReader, IpcChannel, IpcIoError,
+    LobbyAuthenticatedBody, LobbyManifest, LobbyNetcodeAuthenticatedBody, MatchManifestV1,
+    PACKET_VERSION_V1, PeerCloseBody, ProcessId, ROUTE_VERSION_V1, ReadyBody, SequenceDisposition,
+    StopBody, UnixWorkerChannels, WorkerId, WorkerRole,
 };
 use lightyear::prelude::Linked;
 use lightyear::prelude::server::Server as LightyearServer;
@@ -76,9 +76,39 @@ pub struct LobbyControlOutbox {
     authenticated: VecDeque<LobbyAuthenticatedBody>,
     netcode_authenticated: VecDeque<LobbyNetcodeAuthenticatedBody>,
     requests: VecDeque<AllocateRequestBody>,
+    activation_cancels: VecDeque<ActivationBody>,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct MatchControlOutbox {
+    cancel: Option<ActivationBody>,
+    activated: Option<ActivationBody>,
+    start_failed: Option<ActivationBody>,
+}
+
+impl MatchControlOutbox {
+    pub(crate) fn cancel(&mut self, body: ActivationBody) {
+        self.cancel.get_or_insert(body);
+    }
+
+    pub(crate) fn activated(&mut self, body: ActivationBody) {
+        self.activated.get_or_insert(body);
+    }
+
+    pub(crate) fn start_failed(&mut self, body: ActivationBody) {
+        self.start_failed.get_or_insert(body);
+        self.cancel = None;
+    }
 }
 
 impl LobbyControlOutbox {
+    pub(crate) fn push_activation_cancel(&mut self, fact: ActivationBody) -> bool {
+        if self.activation_cancels.len() >= LOBBY_CONTROL_OUTBOX_FRAMES {
+            return false;
+        }
+        self.activation_cancels.push_back(fact);
+        true
+    }
     pub(crate) fn push_authenticated(&mut self, fact: LobbyAuthenticatedBody) -> bool {
         if self.authenticated.len() >= LOBBY_CONTROL_OUTBOX_FRAMES * 8 {
             return false;
@@ -344,7 +374,7 @@ impl WorkerBootstrap {
                 generation: args.worker_generation,
                 route_version: ROUTE_VERSION_V1,
                 packet_version: PACKET_VERSION_V1,
-                control_version: CONTROL_VERSION_V1,
+                control_version: CONTROL_VERSION_CURRENT,
                 flags: 0,
             }),
         )?;
@@ -360,6 +390,9 @@ impl WorkerBootstrap {
             manifest_frame,
             result_identity,
         )?);
+        if args.role == WorkerEntrypointRole::Match {
+            app.init_resource::<MatchControlOutbox>();
+        }
         app.add_plugins(WorkerControlPlugin);
         app.world_mut().flush();
         let endpoint_ready = {
@@ -608,13 +641,14 @@ fn worker_control_emit_result(
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn worker_control_receive(
     mut commands: Commands,
     mut app_exit: MessageWriter<AppExit>,
     mut state: ResMut<WorkerControlState>,
     mut lobby_inbox: Option<ResMut<LobbyControlInbox>>,
     mut lobby_outbox: Option<ResMut<LobbyControlOutbox>>,
+    mut match_outbox: Option<ResMut<MatchControlOutbox>>,
     mut workers: Query<(Entity, &mut RoutedWorker), With<Linked>>,
 ) {
     let Ok((worker_entity, mut worker)) = workers.single_mut() else {
@@ -678,6 +712,14 @@ fn worker_control_receive(
                     break;
                 }
             }
+            ControlBody::ActivationDissolved(_) | ControlBody::Activated(_) => {
+                if let Some(inbox) = lobby_inbox.as_mut()
+                    && !inbox.push(frame.clone())
+                {
+                    failure = Some(FAILURE_DETAIL_MALFORMED);
+                    break;
+                }
+            }
             _ => {}
         }
     }
@@ -729,7 +771,98 @@ fn worker_control_receive(
     if !state.shutdown_requested {
         let mut outbox_failed = false;
         let mut outbox_blocked = false;
+        if let Some(outbox) = match_outbox.as_mut()
+            && let Some(body) = outbox.start_failed
+        {
+            let encoded = ControlFrame::from_raw_sequence(
+                state.next_sequence,
+                state.process_id,
+                state.worker_id,
+                ControlBody::StartFailed(body),
+            )
+            .and_then(|frame| frame.encode());
+            match encoded {
+                Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
+                    Ok(()) => {
+                        outbox.start_failed = None;
+                        state.next_sequence = state.next_sequence.saturating_add(1);
+                    }
+                    Err(IpcIoError::WouldBlock) => outbox_blocked = true,
+                    Err(_) => outbox_failed = true,
+                },
+                Err(_) => outbox_failed = true,
+            }
+        }
+        if let Some(outbox) = match_outbox.as_mut()
+            && !outbox_blocked
+            && let Some(body) = outbox.cancel
+        {
+            let encoded = ControlFrame::from_raw_sequence(
+                state.next_sequence,
+                state.process_id,
+                state.worker_id,
+                ControlBody::CancelActivation(body),
+            )
+            .and_then(|frame| frame.encode());
+            match encoded {
+                Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
+                    Ok(()) => {
+                        outbox.cancel = None;
+                        state.next_sequence = state.next_sequence.saturating_add(1);
+                    }
+                    Err(IpcIoError::WouldBlock) => outbox_blocked = true,
+                    Err(_) => outbox_failed = true,
+                },
+                Err(_) => outbox_failed = true,
+            }
+        }
+        if let Some(outbox) = match_outbox.as_mut()
+            && !outbox_blocked
+            && let Some(body) = outbox.activated
+        {
+            let encoded = ControlFrame::from_raw_sequence(
+                state.next_sequence,
+                state.process_id,
+                state.worker_id,
+                ControlBody::Activated(body),
+            )
+            .and_then(|frame| frame.encode());
+            match encoded {
+                Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
+                    Ok(()) => {
+                        outbox.activated = None;
+                        state.next_sequence = state.next_sequence.saturating_add(1);
+                    }
+                    Err(IpcIoError::WouldBlock) => outbox_blocked = true,
+                    Err(_) => outbox_failed = true,
+                },
+                Err(_) => outbox_failed = true,
+            }
+        }
         if let Some(outbox) = lobby_outbox.as_mut() {
+            while !outbox_blocked {
+                let Some(body) = outbox.activation_cancels.front().copied() else {
+                    break;
+                };
+                let encoded = ControlFrame::from_raw_sequence(
+                    state.next_sequence,
+                    state.process_id,
+                    state.worker_id,
+                    ControlBody::CancelActivation(body),
+                )
+                .and_then(|frame| frame.encode());
+                match encoded {
+                    Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
+                        Ok(()) => {
+                            outbox.activation_cancels.pop_front();
+                            state.next_sequence = state.next_sequence.saturating_add(1);
+                        }
+                        Err(IpcIoError::WouldBlock) => outbox_blocked = true,
+                        Err(_) => outbox_failed = true,
+                    },
+                    Err(_) => outbox_failed = true,
+                }
+            }
             while let Some(fact) = outbox.netcode_authenticated_front().copied() {
                 let Ok(frame) = ControlFrame::from_raw_sequence(
                     state.next_sequence,
@@ -1229,6 +1362,11 @@ mod tests {
             request_id: brawler_routing::RequestId::new(request_id).unwrap(),
             lobby_session_id: brawler_routing::LobbySessionId::new(1).unwrap(),
             mode: brawler_routing::GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            team_count: 2,
+            players_per_team: 2,
             participants: Vec::new(),
         }
     }

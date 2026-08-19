@@ -26,6 +26,61 @@ fn embedded_catalog_resolves_four_legal_named_builds() {
 }
 
 #[test]
+fn match_build_snapshots_round_trip_and_revalidate_preset_and_custom_candidates() {
+    let (builds, weapons, fighter) = catalogs();
+    let preset = builds.presets[0].clone();
+    let custom_recipe = BrawlerBuildRecipe {
+        weapon: WeaponChoice::CustomPulse {
+            power: PulsePower::Balanced,
+            reach: PulseReach::Standard,
+            magazine: PulseMagazine::Quick,
+        },
+        ultimate: preset.recipe.ultimate,
+        passives: preset.recipe.passives,
+    };
+
+    for (selection, recipe, source_preset) in [
+        (
+            BuildSelection::Preset(preset.id),
+            preset.recipe,
+            Some(preset.id),
+        ),
+        (BuildSelection::Custom(custom_recipe), custom_recipe, None),
+    ] {
+        let resolved =
+            resolve_build_recipe(&builds, &weapons, &fighter, recipe, source_preset).unwrap();
+        let snapshot = MatchBuildSnapshotV1 {
+            schema_version: MatchBuildSnapshotV1::SCHEMA_VERSION,
+            candidate: BuildCandidate {
+                build_revision: builds.balance_revision,
+                selection,
+            },
+            accepted: AcceptedBuildSummary {
+                canonical_recipe: recipe,
+                identity: resolved.identity,
+                total_points: resolved.total_points,
+            },
+        };
+
+        let encoded = snapshot.encode().unwrap();
+        assert!(encoded.as_bytes().len() <= brawler_routing::MAX_MATCH_BUILD_SNAPSHOT_BYTES);
+        let decoded = MatchBuildSnapshotV1::decode(&encoded).unwrap();
+        assert_eq!(decoded, snapshot);
+
+        let (decoded_recipe, decoded_preset) = match decoded.candidate.selection {
+            BuildSelection::Preset(id) => (builds.preset(id).unwrap().recipe, Some(id)),
+            BuildSelection::Custom(recipe) => (recipe, None),
+        };
+        let revalidated =
+            resolve_build_recipe(&builds, &weapons, &fighter, decoded_recipe, decoded_preset)
+                .unwrap();
+        assert_eq!(revalidated.identity, decoded.accepted.identity);
+        assert_eq!(revalidated.total_points, decoded.accepted.total_points);
+        assert_eq!(decoded_recipe, decoded.accepted.canonical_recipe);
+    }
+}
+
+#[test]
 fn duplicate_and_frame_family_passives_are_rejected() {
     let (builds, weapons, fighter) = catalogs();
     let mut recipe = builds.presets[0].recipe;

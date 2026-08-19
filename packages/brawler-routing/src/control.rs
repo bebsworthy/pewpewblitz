@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::{
     AllocationId, CONTROL_HEADER_BYTES, CONTROL_MAGIC, CONTROL_MAX_BODY_BYTES,
-    CONTROL_MAX_RECORD_BYTES, CONTROL_PREFIXED_MAX_BYTES, CONTROL_VERSION_V1, Capability,
+    CONTROL_MAX_RECORD_BYTES, CONTROL_PREFIXED_MAX_BYTES, CONTROL_VERSION_CURRENT, Capability,
     CodecError, Generation, LobbySessionId, MAX_LOBBY_MANIFEST_BYTES, MAX_MANIFEST_BYTES,
     MAX_PARTICIPANTS, MAX_RESULT_BYTES, MatchId, NetcodeClientId, PeerId, ProcessId, RequestId,
     RouteId, Sequence, StopId, WorkerId,
@@ -13,7 +13,7 @@ use crate::{
     manifest::{GameMode, LobbyManifest, MatchManifestV1, WorkerRole},
 };
 
-/// The thirteen control body kinds in BRCT v1.
+/// The nineteen control body kinds in the current BRCT contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ControlType {
@@ -34,6 +34,10 @@ pub enum ControlType {
     /// A lobby worker's Netcode-authenticated routed peer, emitted before Brawler hello/session
     /// admission. This promotes only the exact source already bound to the route.
     LobbyNetcodeAuthenticated = 13,
+    CancelActivation = 16,
+    ActivationDissolved = 17,
+    Activated = 18,
+    StartFailed = 19,
 }
 
 impl TryFrom<u8> for ControlType {
@@ -54,6 +58,10 @@ impl TryFrom<u8> for ControlType {
             11 => Ok(Self::Exit),
             12 => Ok(Self::LobbyAuthenticated),
             13 => Ok(Self::LobbyNetcodeAuthenticated),
+            16 => Ok(Self::CancelActivation),
+            17 => Ok(Self::ActivationDissolved),
+            18 => Ok(Self::Activated),
+            19 => Ok(Self::StartFailed),
             other => Err(CodecError::UnsupportedType(other)),
         }
     }
@@ -128,7 +136,7 @@ impl ReadyBody {
     fn validate(self) -> Result<(), CodecError> {
         if self.route_version != crate::ROUTE_VERSION_V1
             || self.packet_version != crate::PACKET_VERSION_V1
-            || self.control_version != CONTROL_VERSION_V1
+            || self.control_version != CONTROL_VERSION_CURRENT
         {
             return Err(CodecError::InvalidValue);
         }
@@ -153,6 +161,14 @@ pub struct HeartbeatBody {
     pub health_flags: u32,
 }
 
+/// Correlation shared by the match worker's prepare fact and the supervisor's one-shot commit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ActivationBody {
+    pub request_id: RequestId,
+    pub allocation_id: AllocationId,
+    pub match_id: MatchId,
+}
+
 /// Participant selection sent from the lobby to the supervisor.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct AllocateParticipant {
@@ -163,6 +179,7 @@ pub struct AllocateParticipant {
     pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub build_revision: u16,
+    pub build_snapshot: crate::MatchBuildSnapshot,
 }
 
 impl fmt::Debug for AllocateParticipant {
@@ -177,7 +194,7 @@ impl fmt::Debug for AllocateParticipant {
     }
 }
 
-fn encode_allocate_participant(encoder: &mut Encoder, participant: AllocateParticipant) {
+fn encode_allocate_participant(encoder: &mut Encoder, participant: &AllocateParticipant) {
     encoder.put_u128(participant.lobby_session_id.get());
     encoder.put_u64(participant.player_id.get());
     encoder.put_u64(participant.netcode_client_id.get());
@@ -191,19 +208,30 @@ fn encode_allocate_participant(encoder: &mut Encoder, participant: AllocateParti
     }
     encoder.put_u64(participant.recipe_fingerprint);
     encoder.put_u16(participant.build_revision);
+    encoder.put_u8(u8::try_from(participant.build_snapshot.as_bytes().len()).expect("bounded"));
+    encoder.put_bytes(participant.build_snapshot.as_bytes());
 }
 
 fn decode_allocate_participant(
     decoder: &mut Decoder<'_>,
 ) -> Result<AllocateParticipant, CodecError> {
+    let lobby_session_id = LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
+    let player_id = crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
+    let netcode_client_id = NetcodeClientId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
+    let team = decoder.u8()?;
+    let source_build_preset = decoder.optional(Decoder::u16)?;
+    let recipe_fingerprint = decoder.u64()?;
+    let build_revision = decoder.u16()?;
+    let build_length = usize::from(decoder.u8()?);
     Ok(AllocateParticipant {
-        lobby_session_id: LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
-        player_id: crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
-        netcode_client_id: NetcodeClientId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
-        team: decoder.u8()?,
-        source_build_preset: decoder.optional(Decoder::u16)?,
-        recipe_fingerprint: decoder.u64()?,
-        build_revision: decoder.u16()?,
+        lobby_session_id,
+        player_id,
+        netcode_client_id,
+        team,
+        source_build_preset,
+        recipe_fingerprint,
+        build_revision,
+        build_snapshot: crate::MatchBuildSnapshot::new(decoder.take(build_length)?)?,
     })
 }
 
@@ -213,6 +241,11 @@ pub struct AllocateRequestBody {
     pub request_id: RequestId,
     pub lobby_session_id: LobbySessionId,
     pub mode: GameMode,
+    pub map_preset: u16,
+    pub map_revision: u16,
+    pub rules_profile: u8,
+    pub team_count: u8,
+    pub players_per_team: u8,
     pub participants: Vec<AllocateParticipant>,
 }
 
@@ -222,6 +255,8 @@ impl fmt::Debug for AllocateRequestBody {
             .debug_struct("AllocateRequestBody")
             .field("request_id", &self.request_id)
             .field("mode", &self.mode)
+            .field("map_preset", &self.map_preset)
+            .field("topology", &(self.team_count, self.players_per_team))
             .field("participant_count", &self.participants.len())
             .finish_non_exhaustive()
     }
@@ -229,7 +264,28 @@ impl fmt::Debug for AllocateRequestBody {
 
 impl AllocateRequestBody {
     pub fn validate(&self) -> Result<(), CodecError> {
-        if self.participants.is_empty() || self.participants.len() > MAX_PARTICIPANTS {
+        if self.map_preset == 0
+            || self.map_revision == 0
+            || self.rules_profile == 0
+            || self.team_count == 0
+            || self.players_per_team == 0
+            || self.participants.is_empty()
+            || self.participants.len() > MAX_PARTICIPANTS
+        {
+            return Err(CodecError::InvalidValue);
+        }
+        Ok(())
+    }
+
+    pub fn validate_product(&self) -> Result<(), CodecError> {
+        self.validate()?;
+        let expected = usize::from(self.team_count)
+            .checked_mul(usize::from(self.players_per_team))
+            .ok_or(CodecError::InvalidValue)?;
+        if self.team_count != 2
+            || !matches!(self.players_per_team, 2 | 3)
+            || self.participants.len() != expected
+        {
             return Err(CodecError::InvalidValue);
         }
         Ok(())
@@ -516,7 +572,7 @@ impl ControlFrame {
         }
         let mut encoder = Encoder::with_capacity(CONTROL_HEADER_BYTES + body.len());
         encoder.put_bytes(&CONTROL_MAGIC);
-        encoder.put_u8(CONTROL_VERSION_V1);
+        encoder.put_u8(CONTROL_VERSION_CURRENT);
         encoder.put_u8(self.control_type() as u8);
         encoder.put_u16(0);
         encoder.put_u64(self.sequence.get());
@@ -573,7 +629,7 @@ impl ControlFrame {
         if body_length != decoder.remaining() {
             return Err(CodecError::LengthMismatch);
         }
-        if version != CONTROL_VERSION_V1 {
+        if version != CONTROL_VERSION_CURRENT {
             return Err(CodecError::UnsupportedVersion(version));
         }
         let kind = ControlType::try_from(kind_raw)?;
@@ -622,6 +678,10 @@ pub enum ControlBody {
     Exit(ExitBody),
     LobbyAuthenticated(LobbyAuthenticatedBody),
     LobbyNetcodeAuthenticated(LobbyNetcodeAuthenticatedBody),
+    CancelActivation(ActivationBody),
+    ActivationDissolved(ActivationBody),
+    Activated(ActivationBody),
+    StartFailed(ActivationBody),
 }
 
 impl fmt::Debug for ControlBody {
@@ -655,6 +715,16 @@ impl fmt::Debug for ControlBody {
                 .debug_tuple("LobbyNetcodeAuthenticated")
                 .field(value)
                 .finish(),
+            Self::CancelActivation(value) => formatter
+                .debug_tuple("CancelActivation")
+                .field(value)
+                .finish(),
+            Self::ActivationDissolved(value) => formatter
+                .debug_tuple("ActivationDissolved")
+                .field(value)
+                .finish(),
+            Self::Activated(value) => formatter.debug_tuple("Activated").field(value).finish(),
+            Self::StartFailed(value) => formatter.debug_tuple("StartFailed").field(value).finish(),
         }
     }
 }
@@ -688,6 +758,10 @@ impl ControlBody {
             Self::Exit(_) => ControlType::Exit,
             Self::LobbyAuthenticated(_) => ControlType::LobbyAuthenticated,
             Self::LobbyNetcodeAuthenticated(_) => ControlType::LobbyNetcodeAuthenticated,
+            Self::CancelActivation(_) => ControlType::CancelActivation,
+            Self::ActivationDissolved(_) => ControlType::ActivationDissolved,
+            Self::Activated(_) => ControlType::Activated,
+            Self::StartFailed(_) => ControlType::StartFailed,
         }
     }
 
@@ -752,6 +826,19 @@ impl ControlBody {
                     Ok(())
                 }
             }
+            Self::CancelActivation(value)
+            | Self::ActivationDissolved(value)
+            | Self::Activated(value)
+            | Self::StartFailed(value) => {
+                if value.request_id.get() == 0
+                    || value.allocation_id.get() == 0
+                    || value.match_id.get() == 0
+                {
+                    Err(CodecError::ZeroId)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -792,11 +879,16 @@ impl ControlBody {
                 encoder.put_u64(value.request_id.get());
                 encoder.put_u128(value.lobby_session_id.get());
                 encoder.put_u16(value.mode as u16);
+                encoder.put_u16(value.map_preset);
+                encoder.put_u16(value.map_revision);
+                encoder.put_u8(value.rules_profile);
+                encoder.put_u8(value.team_count);
+                encoder.put_u8(value.players_per_team);
                 encoder.put_u8(
                     u8::try_from(value.participants.len()).map_err(|_| CodecError::Oversize)?,
                 );
                 for participant in &value.participants {
-                    encode_allocate_participant(&mut encoder, *participant);
+                    encode_allocate_participant(&mut encoder, participant);
                 }
             }
             Self::AllocationGranted(value) => {
@@ -861,6 +953,14 @@ impl ControlBody {
                 encoder.put_u128(value.peer_id.get());
                 encoder.put_u64(value.netcode_client_id.get());
             }
+            Self::CancelActivation(value)
+            | Self::ActivationDissolved(value)
+            | Self::Activated(value)
+            | Self::StartFailed(value) => {
+                encoder.put_u64(value.request_id.get());
+                encoder.put_u128(value.allocation_id.get());
+                encoder.put_u128(value.match_id.get());
+            }
         }
         Ok(encoder.finish())
     }
@@ -883,7 +983,11 @@ impl ControlBody {
             ControlType::Failure => Some(16),
             ControlType::Exit => Some(10),
             ControlType::LobbyAuthenticated => Some(56),
-            ControlType::LobbyNetcodeAuthenticated => Some(40),
+            ControlType::LobbyNetcodeAuthenticated
+            | ControlType::CancelActivation
+            | ControlType::ActivationDissolved
+            | ControlType::Activated
+            | ControlType::StartFailed => Some(40),
         };
         if expected_length.is_some_and(|length| length != body_length) {
             return Err(CodecError::LengthMismatch);
@@ -925,6 +1029,11 @@ impl ControlBody {
                 let lobby_session_id =
                     LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
                 let mode = GameMode::try_from(decoder.u16()?)?;
+                let map_preset = decoder.u16()?;
+                let map_revision = decoder.u16()?;
+                let rules_profile = decoder.u8()?;
+                let team_count = decoder.u8()?;
+                let players_per_team = decoder.u8()?;
                 let count = usize::from(decoder.u8()?);
                 if count == 0 || count > MAX_PARTICIPANTS {
                     return Err(CodecError::InvalidValue);
@@ -937,6 +1046,11 @@ impl ControlBody {
                     request_id,
                     lobby_session_id,
                     mode,
+                    map_preset,
+                    map_revision,
+                    rules_profile,
+                    team_count,
+                    players_per_team,
                     participants,
                 })
             }
@@ -1036,6 +1150,23 @@ impl ControlBody {
                     netcode_client_id: NetcodeClientId::new(decoder.u64()?)
                         .ok_or(CodecError::ZeroId)?,
                 })
+            }
+            ControlType::CancelActivation
+            | ControlType::ActivationDissolved
+            | ControlType::Activated
+            | ControlType::StartFailed => {
+                let value = ActivationBody {
+                    request_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                    allocation_id: AllocationId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                    match_id: MatchId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                };
+                match kind {
+                    ControlType::CancelActivation => Self::CancelActivation(value),
+                    ControlType::ActivationDissolved => Self::ActivationDissolved(value),
+                    ControlType::Activated => Self::Activated(value),
+                    ControlType::StartFailed => Self::StartFailed(value),
+                    _ => unreachable!("activation kinds were matched above"),
+                }
             }
         };
         body.validate()?;
@@ -1192,7 +1323,7 @@ mod tests {
                 content_fingerprint: 7,
                 route_version: 1,
                 packet_version: 1,
-                control_version: 1,
+                control_version: CONTROL_VERSION_CURRENT,
                 flags: 0,
             },
             default_route_id: id128(8),
@@ -1218,6 +1349,7 @@ mod tests {
             source_build_preset: Some(small),
             recipe_fingerprint: wide + 30,
             build_revision: small,
+            build_snapshot: crate::MatchBuildSnapshot::new(&[1, 2, 3]).unwrap(),
         }
     }
 
@@ -1234,7 +1366,7 @@ mod tests {
                 generation: id64(1),
                 route_version: 1,
                 packet_version: 1,
-                control_version: 1,
+                control_version: CONTROL_VERSION_CURRENT,
                 flags: 0,
             }))
             .encode()
@@ -1364,7 +1496,7 @@ mod tests {
                 generation: id64(1),
                 route_version: 1,
                 packet_version: 1,
-                control_version: 1,
+                control_version: CONTROL_VERSION_CURRENT,
                 flags: 0,
             }),
             ControlBody::Heartbeat(HeartbeatBody {
@@ -1382,6 +1514,11 @@ mod tests {
                 request_id: id64(1),
                 lobby_session_id: id128(2),
                 mode: GameMode::Wipeout,
+                map_preset: 1,
+                map_revision: 1,
+                rules_profile: 1,
+                team_count: 2,
+                players_per_team: 1,
                 participants: vec![participant(1), participant(2)],
             }),
             ControlBody::AllocationGranted(AllocationGrantedBody {
@@ -1411,6 +1548,26 @@ mod tests {
                 route_id: id128(1),
                 peer_id: id128(2),
                 netcode_client_id: id64(4),
+            }),
+            ControlBody::CancelActivation(ActivationBody {
+                request_id: id64(1),
+                allocation_id: id128(2),
+                match_id: id128(3),
+            }),
+            ControlBody::ActivationDissolved(ActivationBody {
+                request_id: id64(1),
+                allocation_id: id128(2),
+                match_id: id128(3),
+            }),
+            ControlBody::Activated(ActivationBody {
+                request_id: id64(1),
+                allocation_id: id128(2),
+                match_id: id128(3),
+            }),
+            ControlBody::StartFailed(ActivationBody {
+                request_id: id64(1),
+                allocation_id: id128(2),
+                match_id: id128(3),
             }),
             ControlBody::Stop(StopBody {
                 stop_id: id64(1),
@@ -1447,6 +1604,11 @@ mod tests {
             request_id: id64(1),
             lobby_session_id: id128(2),
             mode: GameMode::HotZone,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            team_count: 2,
+            players_per_team: 4,
             participants: (1..=8).map(participant).collect(),
         };
         assert_eq!(
@@ -1454,7 +1616,7 @@ mod tests {
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 395
+            52 + 434
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),
@@ -1524,6 +1686,11 @@ mod tests {
             request_id: id64(1),
             lobby_session_id: id128(2),
             mode: GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            team_count: 1,
+            players_per_team: 1,
             participants: vec![participant(3)],
         };
         let debug = format!("{request:?} {:?}", request.participants[0]);

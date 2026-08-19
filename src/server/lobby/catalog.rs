@@ -88,11 +88,10 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         }
         if entry.teams != lifecycle.team_count
             || entry.teams != 2
-            || entry.players_per_team != lifecycle.maximum_participants_per_team
-            || entry.players_per_team != 2
+            || !matches!(entry.players_per_team, 2 | 3)
         {
             return Err(format!(
-                "game type {} exceeds the current exact 2v2 runtime capacity",
+                "game type {} must use the supported exact 2v2 or 3v3 topology",
                 id.as_str()
             ));
         }
@@ -145,10 +144,26 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     id.as_str()
                 ));
             }
-            maps.resolve_preset(preset.id, MapInstanceId(1), &requirements)
+            let snapshot = maps
+                .resolve_preset(preset.id, MapInstanceId(1), &requirements)
                 .map_err(|error| {
                     format!(
                         "game type {} map {key} is incompatible: {error}",
+                        id.as_str()
+                    )
+                })?;
+            let capacity =
+                crate::matchplay::ResolvedMatchCapacity::from_rules(&MatchLifecycleRules {
+                    minimum_participants_per_team: entry.players_per_team,
+                    maximum_participants_per_team: entry.players_per_team,
+                    ..lifecycle
+                })
+                .ok_or_else(|| format!("game type {} has invalid capacity", id.as_str()))?;
+            capacity
+                .validate_against_map(&snapshot.snapshot)
+                .map_err(|error| {
+                    format!(
+                        "game type {} map {key} lacks topology capacity: {error}",
                         id.as_str()
                     )
                 })?;
@@ -199,25 +214,25 @@ mod tests {
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local Brawler");
-        assert_eq!(catalog.game_types.len(), 2);
+        assert_eq!(catalog.game_types.len(), 3);
         assert_eq!(
             catalog.revision.0,
             [
-                0xd5, 0x4c, 0xc5, 0x84, 0x64, 0xa4, 0xe0, 0xbd, 0x2f, 0x06, 0x89, 0x5e, 0xfa, 0xd2,
-                0xfe, 0xe6, 0x67, 0x63, 0x23, 0x3d, 0xa7, 0x18, 0xa8, 0x6a, 0xf2, 0x56, 0xd6, 0x1c,
-                0x32, 0x26, 0x47, 0xec,
+                0x9f, 0x41, 0x9c, 0x04, 0xf4, 0x35, 0x26, 0x81, 0x0c, 0x4d, 0x0d, 0x04, 0x9f, 0xf5,
+                0x18, 0x07, 0xab, 0xe0, 0xae, 0xa8, 0x58, 0xed, 0xc4, 0x4e, 0xf3, 0x48, 0xff, 0x6d,
+                0xb3, 0x2a, 0x3b, 0x39,
             ]
         );
     }
 
     #[test]
-    fn catalog_rejects_unknown_fields_modes_maps_profiles_and_3v3() {
+    fn catalog_rejects_unknown_fields_modes_maps_profiles_and_unsupported_topology() {
         for invalid in [
             VALID.replace("schema_version: 1", "schema_version: 1, surprise: true"),
             VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
             VALID.replace("crossroads-facility\"", "missing-map\""),
             VALID.replace("rules_profile: \"standard\"", "rules_profile: \"fast\""),
-            VALID.replace("players_per_team: 2", "players_per_team: 3"),
+            VALID.replace("players_per_team: 2", "players_per_team: 4"),
         ] {
             assert!(resolve_operator_catalog(invalid.as_bytes()).is_err());
         }

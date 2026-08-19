@@ -196,7 +196,7 @@ impl Harness {
                 content_fingerprint: identity.content_fingerprint,
                 route_version: brawler_routing::ROUTE_VERSION_V1,
                 packet_version: brawler_routing::PACKET_VERSION_V1,
-                control_version: brawler_routing::CONTROL_VERSION_V1,
+                control_version: brawler_routing::CONTROL_VERSION_CURRENT,
                 flags: 0,
             },
             default_route_id: brawler_routing::RouteId::new(9).unwrap(),

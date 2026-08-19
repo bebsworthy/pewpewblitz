@@ -3,6 +3,7 @@
 pub const ROUTE_VERSION_V1: u8 = 1;
 pub const PACKET_VERSION_V1: u8 = 1;
 pub const CONTROL_VERSION_V1: u8 = 1;
+pub const CONTROL_VERSION_CURRENT: u8 = 2;
 
 pub const PUBLIC_MAGIC: [u8; 4] = *b"BRTE";
 pub const PACKET_MAGIC: [u8; 4] = *b"BRPK";
@@ -30,6 +31,7 @@ pub const MAX_LOBBY_CATALOG_BYTES: usize = 16 * 1_024;
 pub const MAX_LOBBY_MANIFEST_BYTES: usize = MAX_LOBBY_CATALOG_BYTES + 512;
 pub const MAX_RESULT_BYTES: usize = 4_096;
 pub const MAX_PARTICIPANTS: usize = 8;
+pub const MAX_MATCH_BUILD_SNAPSHOT_BYTES: usize = 255;
 
 pub const MAX_ACTIVE_ROUTES: usize = 64;
 pub const MAX_CAPABILITIES: usize = 128;

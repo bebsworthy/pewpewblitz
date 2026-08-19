@@ -23,12 +23,16 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
   playtest/review. The user subsequently accepted M02 and directed M03 implementation on
   2026-08-19; M02 is complete, and M03 completed after accepted playtest fixes on 2026-08-19.
 - By explicit user direction on 2026-08-19, M04 research and planning overlapped M03
-  implementation. M04 is now the current delivery milestone; its specification was reconciled
-  against M03's delivered seams and the user subsequently directed implementation on 2026-08-19.
-- By explicit user direction on 2026-08-19, M05 research and specification preparation overlap M04
-  implementation. M04 remains the current delivery milestone; M05 production implementation is
-  not authorized until M04's delivered seams are reconciled and the user validates the M05
-  specification.
+  implementation. Its specification was reconciled against M03's delivered seams, the user
+  subsequently directed implementation, and M04 completed on 2026-08-19 after five review passes
+  and explicit user closeout.
+- By explicit user direction on 2026-08-19, M05 research and specification preparation overlapped
+  M04 implementation. Its simplified implementation and automated verification are complete, so
+  M05 is now at `User playtest`.
+- By explicit user direction on 2026-08-19, M06 research and specification preparation overlap M05
+  implementation. M05 remains the current delivery milestone; M06 is at `Specification review` with
+  a simplified lobby-only queue/formation boundary. Production implementation is not authorized
+  until M05 verification completes and the user validates the M06 specification.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -45,7 +49,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | Field | Value |
 |---|---|
 | Status | User playtest |
-| Current milestone | M04 — Product build editor and authoritative queue admission |
+| Current milestone | M05 — Exact formation and match handoff |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
@@ -56,9 +60,9 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 01 | Complete | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
 | 03 | Complete | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
-| 04 | User playtest | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
-| 05 | Specification review | Exact formation, worker allocation, and match loading/handoff | [milestone-05.md](./milestone-05.md) |
-| 06 | Not started | Concurrent match lifecycle, results, and requeue | Create when next |
+| 04 | Complete | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
+| 05 | User playtest | Exact formation and match handoff | [milestone-05.md](./milestone-05.md) |
+| 06 | Specification review | Concurrent match lifecycle, results, and requeue | [milestone-06.md](./milestone-06.md) |
 | 07 | Not started | Combat HUD, menus, readability, and accessibility | Create when next |
 | 08 | Not started | Authoritative bot practice and local supervisor launch | Create when next |
 | 09 | Not started | Recovery, security, capacity, usability, and v2 closeout | Create when next |
@@ -115,7 +119,7 @@ older snapshots do not. Privacy-safe bounded diagnostics make admission, cleanup
 publication intent, and client freshness aging observable. M04 ends before
 ticket reservation exists, so it does not fabricate a formation-boundary race.
 
-### M05 — Exact formation, worker allocation, and match loading/handoff
+### M05 — Exact formation and match handoff
 
 Form exact 2v2/3v3 rosters, assign teams deterministically, select a compatible map, reserve
 tickets, admit host capacity, start/validate a worker, issue routing capabilities, establish fresh
@@ -124,16 +128,22 @@ M05 exposes one honest product match per logical-server process: after Active it
 capacity-removes queued overflow, suppresses legacy fixed-roster restart, and retains only minimal
 completed-match Disconnect presentation until M06 supplies reusable lifecycle.
 
-Gate: cancellation-versus-reservation races resolve idempotently before the complete roster reaches
-an existing Wipeout or Hot Zone worker through the public endpoint; failures dissolve or requeue
-reservations under an explicit bounded policy; no exact roster remains invisibly stranded behind the
-temporary one-match product slot.
+Gate: an exact 2v2 and exact 3v3 roster each reach an existing Wipeout or Hot Zone worker through
+the public endpoint and enter the server-owned Countdown. A failed pre-Active start discards its
+reservation and returns clients to a clean Game Select; no exact roster remains invisibly stranded
+behind the temporary one-match product slot.
 
 ### M06 — Concurrent match lifecycle, results, and requeue
 
 Replace M05's one-match admission pause with multiple heterogeneous workers and reusable completion.
 Complete leave/forfeit, worker result, route cleanup, return-to-lobby, Results, Queue Again, Change
 Game, worker crash, supervisor shutdown, and cross-match isolation behavior.
+
+M06 keeps the lobby limited to current sessions, queue tickets, and pre-handoff reservations. The
+supervisor owns worker capacity and cleanup; match workers own gameplay/results; clients retain their
+in-memory route grant and result presentation. There is no lobby active-match registry, result
+forwarding, terminal replay, returning-player recognition, or cross-generation reconciliation.
+Queue Again is an ordinary fresh queue Join.
 
 Gate: simultaneous Wipeout and Hot Zone matches cannot leak state or traffic, and repeated
 formation/completion/failure returns routes, processes, memory, and queues to bounds.
@@ -143,6 +153,9 @@ formation/completion/failure returns routes, processes, memory, and queues to bo
 Replace debug presentation with product combat HUD, score/objective display, scoreboard,
 non-pausing menu, results, non-color team identity, UI scaling, reduced effects, audio/display
 settings, and supported-layout validation.
+
+M07 polishes and extends M06's functional Results and minimal Leave surface; it does not replace
+M06's result, return-to-lobby, or Queue Again authority contracts.
 
 Gate: automated layout/state tests and supervised controller/keyboard playtests show readable
 combat and complete navigation at supported resolutions and accessibility settings.
@@ -210,6 +223,7 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 | V2-ROUTE-RESUMPTION | Resume an interrupted match connection | Deferred; v2 returns to a fresh lobby session |
 | V2-ROUTED-HARDENING | Complete routed latency, packet-only IPC overhead, correlated CPU, dual-stack MTU capture, 25/20-cycle campaigns, and optimize the latest recorded +12.31% directional egress delta | Deferred from M01 to M09 by the user-approved 2026-08-19 development-use scope decision; measurements retain their failed/unsupported labels until rerun |
 | V2-M03-MANUAL-MATRIX | Broader physical-controller feel and full aspect/UI-scale matrix for the direct-connect lobby | Deferred by explicit M03 closeout acceptance on 2026-08-19. Automated controller lifecycle regressions and representative native layouts passed, but separate physical-controller/full-matrix execution is not claimed; revisit in M07's supported-layout/controller validation |
+| V2-M04-MANUAL-MATRIX | Representative resolution/UI-scale inspection and separate physical-controller feel matrix for Game Select, Build Editor, Queue, and recovery overlays | Deferred by explicit M04 closeout direction on 2026-08-19. Automated input, focus, authority, recovery, and presentation regressions passed, but physical-controller/full-layout execution is not claimed; revisit with M03's matrix in M07's supported-layout/controller/accessibility validation |
 | V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | M01 makes the routed supervisor path the default for `network.sh`/`just network` after validating its minimum transition driver and retains direct UDP only as an explicitly named compatibility/baseline command; M09 removes the legacy executable/configuration after final comparison evidence unless a documented compatibility requirement remains |
 
 ## Explicitly deferred beyond v2

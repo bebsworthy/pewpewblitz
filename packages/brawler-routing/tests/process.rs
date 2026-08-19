@@ -5,9 +5,9 @@ use std::{
 };
 
 use brawler_routing::{
-    LifecycleEvent, LobbyManifest, ManifestBody, ManifestCommon, ProcessSupervisor,
-    ProcessSupervisorConfig, RoutingErrorCategory, StopId, WorkerKind, WorkerLaunchSpec,
-    WorkerRegistration, WorkerRole,
+    CONTROL_VERSION_CURRENT, LifecycleEvent, LobbyManifest, ManifestBody, ManifestCommon,
+    ProcessSupervisor, ProcessSupervisorConfig, RoutingErrorCategory, StopId, WorkerKind,
+    WorkerLaunchSpec, WorkerRegistration, WorkerRole,
 };
 
 fn id128<T: TryFrom<u128>>(value: u128) -> T
@@ -48,7 +48,7 @@ fn launch_spec(worker_id: u128) -> WorkerLaunchSpec {
             content_fingerprint: 4,
             route_version: 1,
             packet_version: 1,
-            control_version: 1,
+            control_version: CONTROL_VERSION_CURRENT,
             flags: 0,
         },
         default_route_id: id128(100),

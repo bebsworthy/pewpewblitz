@@ -6,10 +6,10 @@ use std::{
 };
 
 use brawler_routing::{
-    AllocateParticipant, AllocateRequestBody, AllocationPolicy, CONTROL_VERSION_V1, CoreConfig,
-    GameMode, LifecycleEvent, LobbyManifest, ManifestBody, ManifestCommon, PACKET_VERSION_V1,
-    ProcessSupervisorConfig, ROUTE_VERSION_V1, RouteSelector, RuntimeConfig, StopId,
-    SupervisorRuntime, WorkerKind, WorkerLaunchSpec, WorkerRegistration, WorkerRole,
+    AllocateParticipant, AllocateRequestBody, AllocationPolicy, CONTROL_VERSION_CURRENT,
+    CoreConfig, GameMode, LifecycleEvent, LobbyManifest, ManifestBody, ManifestCommon,
+    PACKET_VERSION_V1, ProcessSupervisorConfig, ROUTE_VERSION_V1, RouteSelector, RuntimeConfig,
+    StopId, SupervisorRuntime, WorkerKind, WorkerLaunchSpec, WorkerRegistration, WorkerRole,
 };
 
 fn id128<T: TryFrom<u128>>(value: u128) -> T
@@ -46,7 +46,7 @@ fn launch_lobby_spec() -> WorkerLaunchSpec {
             content_fingerprint: 4,
             route_version: ROUTE_VERSION_V1,
             packet_version: PACKET_VERSION_V1,
-            control_version: CONTROL_VERSION_V1,
+            control_version: CONTROL_VERSION_CURRENT,
             flags: 0,
         },
         default_route_id: id128(100),
@@ -80,6 +80,11 @@ fn allocation_request() -> AllocateRequestBody {
         request_id: id64(501),
         lobby_session_id,
         mode: GameMode::Wipeout,
+        map_preset: 1,
+        map_revision: 1,
+        rules_profile: 1,
+        team_count: 2,
+        players_per_team: 2,
         participants: vec![
             AllocateParticipant {
                 lobby_session_id,
@@ -89,6 +94,7 @@ fn allocation_request() -> AllocateRequestBody {
                 source_build_preset: Some(1),
                 recipe_fingerprint: 11,
                 build_revision: 1,
+                build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[1]).unwrap(),
             },
             AllocateParticipant {
                 lobby_session_id: id128(102),
@@ -98,6 +104,27 @@ fn allocation_request() -> AllocateRequestBody {
                 source_build_preset: Some(2),
                 recipe_fingerprint: 12,
                 build_revision: 1,
+                build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[2]).unwrap(),
+            },
+            AllocateParticipant {
+                lobby_session_id: id128(103),
+                player_id: id64(203),
+                netcode_client_id: id64(303),
+                team: 0,
+                source_build_preset: Some(3),
+                recipe_fingerprint: 13,
+                build_revision: 1,
+                build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[3]).unwrap(),
+            },
+            AllocateParticipant {
+                lobby_session_id: id128(104),
+                player_id: id64(204),
+                netcode_client_id: id64(304),
+                team: 1,
+                source_build_preset: Some(4),
+                recipe_fingerprint: 14,
+                build_revision: 1,
+                build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[4]).unwrap(),
             },
         ],
     }
@@ -341,7 +368,7 @@ fn runtime_allocates_match_after_ready_and_deduplicates_request() {
         match_ready |= report.lifecycle_events.iter().any(
             |event| matches!(event, LifecycleEvent::Ready { worker_id } if worker_id.get() != 7),
         );
-        if match_ready && runtime.core().capability_count() == 2 {
+        if match_ready && runtime.core().capability_count() == 4 {
             break;
         }
     }
@@ -352,8 +379,8 @@ fn runtime_allocates_match_after_ready_and_deduplicates_request() {
         runtime.core().route_count(),
         runtime.core().capability_count(),
     );
-    assert_eq!(runtime.core().capability_count(), 2);
-    assert_eq!(runtime.core().route_count(), 3);
+    assert_eq!(runtime.core().capability_count(), 4);
+    assert_eq!(runtime.core().route_count(), 5);
     assert_eq!(runtime.core().worker_count(), 2);
 
     let worker_count = runtime.core().worker_count();
@@ -361,7 +388,7 @@ fn runtime_allocates_match_after_ready_and_deduplicates_request() {
         .submit_allocation_request(id128(7), request)
         .unwrap();
     assert_eq!(runtime.core().worker_count(), worker_count);
-    assert_eq!(runtime.core().capability_count(), 2);
+    assert_eq!(runtime.core().capability_count(), 4);
 
     runtime.stop_handle().request().unwrap();
     runtime.run().unwrap();

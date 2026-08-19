@@ -59,6 +59,10 @@ just network-routed-smoke
 just network-product-lobby
 just network-product-lobby-smoke
 just network-product-queue-smoke
+just network-product-match
+just network-product-match-3v3
+just network-product-match-smoke
+just network-product-match-3v3-smoke
 just network-routed-ipv6-smoke
 just network-routed-evidence
 just network-routed-capture
@@ -97,6 +101,9 @@ Select, whose first-run address is `127.0.0.1:5000`; the client connects to a su
 product lobby and shows its advertised game types without allocating a match. Use
 `just network-product-lobby` for the windowed playtest or `just network-product-lobby-smoke` for the
 bounded two-client real-process check of that welcome boundary and the no-allocation guarantee.
+Use `just network-product-match` or `just network-product-match-3v3` to open four or six product
+windows against one local supervisor. Select Play in every window, then join the advertised game.
+The corresponding `-smoke` commands drive the same match path headlessly.
 
 `just network-routed-evidence` runs bounded cold routed-process cycles (five by default; use
 `just network-routed-evidence <cycles> <timeout-seconds> <wipeout|hot-zone|both|crash-restart>`).

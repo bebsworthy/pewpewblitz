@@ -15,12 +15,12 @@ use std::{
 
 use brawler::server::{default_build_identity, routing_identity};
 use brawler_routing::{
-    AllocateParticipant, AllocateRequestBody, AllocationPolicy, CONTROL_VERSION_V1, CoreConfig,
-    GameMode, Generation, LifecycleEvent, LobbyManifest, LobbySessionId, LogicalServerId,
-    ManifestBody, ManifestCommon, NetcodeClientId, PACKET_VERSION_V1, PlayerId, ProcessId,
-    ProcessSupervisorConfig, ROUTE_VERSION_V1, RequestId, RoutingErrorCategory, RuntimeConfig,
-    StderrPolicy, SupervisorRuntime, WorkerId, WorkerKind, WorkerLaunchSpec, WorkerRegistration,
-    WorkerRole,
+    AllocateParticipant, AllocateRequestBody, AllocationPolicy, CONTROL_VERSION_CURRENT,
+    CoreConfig, GameMode, Generation, LifecycleEvent, LobbyManifest, LobbySessionId,
+    LogicalServerId, ManifestBody, ManifestCommon, NetcodeClientId, PACKET_VERSION_V1, PlayerId,
+    ProcessId, ProcessSupervisorConfig, ROUTE_VERSION_V1, RequestId, RoutingErrorCategory,
+    RuntimeConfig, StderrPolicy, SupervisorRuntime, WorkerId, WorkerKind, WorkerLaunchSpec,
+    WorkerRegistration, WorkerRole,
 };
 
 const LOGICAL_SERVER_ID: u128 = 0x4d01;
@@ -85,7 +85,7 @@ fn lobby_spec() -> WorkerLaunchSpec {
             content_fingerprint: identity.content_fingerprint,
             route_version: ROUTE_VERSION_V1,
             packet_version: PACKET_VERSION_V1,
-            control_version: CONTROL_VERSION_V1,
+            control_version: CONTROL_VERSION_CURRENT,
             flags: 0,
         },
         default_route_id: brawler_routing::RouteId::new(0x200).unwrap(),
@@ -127,6 +127,7 @@ fn allocation_request(
             source_build_preset: build.source_build_preset,
             recipe_fingerprint: build.recipe_fingerprint,
             build_revision: build.build_revision,
+            build_snapshot: build.snapshot,
         },
         AllocateParticipant {
             lobby_session_id: LobbySessionId::new(base + 1).unwrap(),
@@ -136,12 +137,18 @@ fn allocation_request(
             source_build_preset: build.source_build_preset,
             recipe_fingerprint: build.recipe_fingerprint,
             build_revision: build.build_revision,
+            build_snapshot: build.snapshot,
         },
     ];
     AllocateRequestBody {
         request_id: RequestId::new(request_id).unwrap(),
         lobby_session_id,
         mode: GameMode::Wipeout,
+        map_preset: 1,
+        map_revision: 1,
+        rules_profile: 1,
+        team_count: 2,
+        players_per_team: 1,
         participants: participants.to_vec(),
     }
 }

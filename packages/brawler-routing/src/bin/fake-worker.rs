@@ -6,7 +6,7 @@
 use std::{env, io::Write, os::unix::net::UnixStream, thread, time::Duration};
 
 use brawler_routing::{
-    CONTROL_VERSION_V1, ControlBody, ControlFrame, ControlType, FramedReader, IpcChannel,
+    CONTROL_VERSION_CURRENT, ControlBody, ControlFrame, ControlType, FramedReader, IpcChannel,
     ManifestBody, PACKET_VERSION_V1, PacketDirection, PacketRecord, ProcessId, ROUTE_VERSION_V1,
     ReadyBody, StopBody, WorkerId, WorkerRole,
 };
@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generation: args.generation,
             route_version: ROUTE_VERSION_V1,
             packet_version: PACKET_VERSION_V1,
-            control_version: CONTROL_VERSION_V1,
+            control_version: CONTROL_VERSION_CURRENT,
             flags: 0,
         }),
     )?;

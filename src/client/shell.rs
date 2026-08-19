@@ -553,7 +553,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         ClientOverlay::Settings => ShellLayer::Settings,
         ClientOverlay::Credits => ShellLayer::Credits,
         ClientOverlay::Error(_) => ShellLayer::Error,
-        ClientOverlay::BuildEditor => ShellLayer::FlowOwned,
+        ClientOverlay::BuildEditor | ClientOverlay::Confirmation(_) => ShellLayer::FlowOwned,
     }
 }
 
@@ -882,7 +882,9 @@ fn handle_shell_actions(
                 let focus = match client_overlay.as_ref() {
                     ClientOverlay::Credits => ShellControlId::Credits,
                     ClientOverlay::Settings | ClientOverlay::Error(_) => ShellControlId::Settings,
-                    ClientOverlay::BuildEditor | ClientOverlay::None => continue,
+                    ClientOverlay::BuildEditor
+                    | ClientOverlay::Confirmation(_)
+                    | ClientOverlay::None => continue,
                 };
                 close_overlay(
                     &mut commands,

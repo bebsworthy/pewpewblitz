@@ -13,10 +13,12 @@ use unicode_segmentation::UnicodeSegmentation as _;
 mod queue;
 
 pub use queue::{
-    MAX_QUEUE_FORMATION_SIZE, MAX_QUEUE_OUTCOME_BYTES, MAX_QUEUE_RETRY_AFTER_MILLIS,
-    MAX_QUEUE_TICKETS, QueueCancelCommand, QueueClientMessage, QueueCommand, QueueCommandOutcome,
-    QueueDecision, QueueJoinCommand, QueueMembership, QueuePoolRow, QueuePoolSnapshot,
-    QueueRejection, QueueRequestId, QueueTicketId,
+    BeginMatchConnect, FormationAvailability, MAX_QUEUE_FORMATION_SIZE, MAX_QUEUE_OUTCOME_BYTES,
+    MAX_QUEUE_RETRY_AFTER_MILLIS, MAX_QUEUE_TICKETS, MatchLoadingPhase, MatchReservationId,
+    MatchStartFailure, MatchmakingClientAction, MatchmakingClientMessage, MatchmakingServerMessage,
+    MatchmakingServerPhase, QueueCancelCommand, QueueClientMessage, QueueCommand,
+    QueueCommandOutcome, QueueDecision, QueueJoinCommand, QueueMembership, QueuePoolRow,
+    QueuePoolSnapshot, QueueRejection, QueueRequestId, QueueTicketId, ReservationStarted,
 };
 
 pub const MAX_GAME_TYPES: usize = 8;
@@ -302,7 +304,7 @@ impl AdvertisedGameType {
         if maps.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(LobbyModelError::DuplicateMap);
         }
-        if self.team_count != 2 || self.players_per_team != 2 {
+        if self.team_count != 2 || !matches!(self.players_per_team, 2 | 3) {
             return Err(LobbyModelError::InvalidTopology);
         }
         match self.rules_summary {
@@ -522,7 +524,7 @@ mod tests {
         );
 
         let mut catalog = golden_catalog();
-        catalog[0].players_per_team = 3;
+        catalog[0].players_per_team = 4;
         assert_eq!(
             validate_catalog(&catalog),
             Err(LobbyModelError::InvalidTopology)

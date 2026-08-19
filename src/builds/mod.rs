@@ -16,9 +16,10 @@ pub use definitions::{
 pub use model::{
     AbilityPhase, AbilityState, AcceptedBuildSummary, BrawlerBuildRecipe, BuildCandidate,
     BuildPresetId, BuildRecipeFingerprint, BuildRevision, BuildSelection, DeployableId,
-    PassiveDefinitionId, PassiveKind, PassiveRuntimeState, PulseMagazine, PulsePower, PulseReach,
-    ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate, SelectedBuild,
-    SelectingBuild, UltimateDefinitionId, UltimateKind, WeaponChoice,
+    MatchBuildSnapshotV1, PassiveDefinitionId, PassiveKind, PassiveRuntimeState, PulseMagazine,
+    PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive,
+    ResolvedUltimate, SelectedBuild, SelectingBuild, UltimateDefinitionId, UltimateKind,
+    WeaponChoice,
 };
 #[cfg(feature = "server")]
 pub use telemetry::{BuildSelectionTelemetryRecord, BuildTelemetry};

@@ -29,8 +29,10 @@ use crate::{
     protocol::{
         BuildSelectionOutcome, BuildSelectionRequest, DEVELOPMENT_PRIVATE_KEY, Fighter,
         MatchCommand, MatchCommandDecision, MatchCommandOutcome, MatchCommandRequest, MatchHello,
-        MatchJoinOutcome, MatchJoinRejection, NetworkEntityId, PlaceholderState, PlayerId,
-        ProtocolFingerprint, ProtocolPlugin, SessionChannel,
+        MatchJoinOutcome, MatchJoinRejection, MatchLoadingClientAction, MatchLoadingClientMessage,
+        MatchLoadingServerMessage, MatchLoadingServerOutcome, MatchLoadingStatus, NetworkEntityId,
+        PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin, QueueSnapshotChannel,
+        SessionChannel,
     },
 };
 use avian2d::prelude::{
@@ -115,6 +117,30 @@ pub struct ServerSession {
     pub last_selection_response: Option<BuildSelectionOutcome>,
     pub last_match_request: Option<MatchCommandRequest>,
     pub last_match_outcome: Option<MatchCommandOutcome>,
+}
+
+#[derive(Resource, Default, Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "bounded one-shot delivery and shutdown flags keep the loading path direct"
+)]
+struct MatchLoadingGate {
+    checked_in: BTreeSet<u64>,
+    readiness_committed: bool,
+    cancelled: bool,
+    cancel_emitted: bool,
+    cancelling_client: Option<u64>,
+    cancellation_outcome: Option<MatchLoadingServerOutcome>,
+    activated_emitted: bool,
+    deadline: Option<Duration>,
+    terminal_failure: bool,
+    terminal_notified: BTreeSet<u64>,
+    last_status: Option<(u8, u8, crate::lobby::MatchLoadingPhase)>,
+    status_revision: u32,
+    countdown_observed: bool,
+    start_failure_emitted: bool,
+    terminal_exit_deadline: Option<Duration>,
+    terminal_exit_requested: bool,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -332,6 +358,7 @@ impl Plugin for ServerNetworkPlugin {
         app.insert_resource(FallbackErrorHandler(error))
             .init_resource::<ServerRoleResource>()
             .init_resource::<NextSessionIds>()
+            .init_resource::<MatchLoadingGate>()
             .init_resource::<ServerShutdown>()
             .init_resource::<ServerStartup>()
             .init_resource::<ProcessMovementCheck>()
@@ -355,6 +382,7 @@ impl Plugin for ServerNetworkPlugin {
                     crate::builds::server::process_build_selection,
                     crate::abilities::cleanup_requested_sentries,
                     ApplyDeferred,
+                    process_match_loading_messages,
                     process_match_commands,
                     ApplyDeferred,
                     enforce_session_deadlines,
@@ -366,6 +394,14 @@ impl Plugin for ServerNetworkPlugin {
                     exit_after_verification,
                 )
                     .chain(),
+            )
+            .add_systems(
+                FixedUpdate,
+                commit_product_match_activation.before(crate::matchplay::MatchSet::Lifecycle),
+            )
+            .add_systems(
+                FixedUpdate,
+                detect_product_countdown_departure.after(crate::matchplay::MatchSet::Lifecycle),
             )
             .add_systems(
                 Last,
@@ -440,6 +476,8 @@ fn spawn_server_endpoint_udp(commands: &mut Commands, config: &ServerNetworkConf
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::type_complexity,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
 )]
@@ -696,20 +734,28 @@ fn process_client_hellos(
                                     let fighter = fighters
                                         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
                                         .expect("validated standard fighter definition");
-                                    let preset_id = crate::builds::BuildPresetId(
-                                        participant
-                                            .source_build_preset
-                                            .expect("validated manifest preset"),
-                                    );
-                                    let preset = builds
-                                        .preset(preset_id)
-                                        .expect("validated manifest build preset");
+                                    let snapshot = crate::builds::MatchBuildSnapshotV1::decode(
+                                        &participant.build_snapshot,
+                                    )
+                                    .expect("validated manifest build snapshot");
+                                    let (recipe, preset_id) = match snapshot.candidate.selection {
+                                        crate::builds::BuildSelection::Preset(id) => (
+                                            builds
+                                                .preset(id)
+                                                .expect("validated manifest build preset")
+                                                .recipe,
+                                            Some(id),
+                                        ),
+                                        crate::builds::BuildSelection::Custom(recipe) => {
+                                            (recipe, None)
+                                        }
+                                    };
                                     let loadout = crate::builds::resolve_build_recipe(
                                         &builds,
                                         &weapons_catalog,
                                         fighter,
-                                        preset.recipe,
-                                        Some(preset_id),
+                                        recipe,
+                                        preset_id,
                                     )
                                     .expect("validated manifest build resolution");
                                     (team, Some(loadout))
@@ -858,9 +904,256 @@ fn process_client_hellos(
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::type_complexity,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
+fn process_match_loading_messages(
+    time: Res<Time<Real>>,
+    role: Res<ServerRoleResource>,
+    match_root: Query<&MatchState, With<MatchRoot>>,
+    mut gate: ResMut<MatchLoadingGate>,
+    mut control_outbox: Option<ResMut<worker::MatchControlOutbox>>,
+    mut exit: MessageWriter<AppExit>,
+    mut sessions: Query<(
+        &RemoteId,
+        &mut MessageReceiver<MatchLoadingClientMessage>,
+        &mut MessageSender<MatchLoadingServerMessage>,
+        &mut MessageSender<MatchLoadingStatus>,
+        &mut ServerSession,
+        Has<Disconnected>,
+    )>,
+) {
+    let Some(manifest) = role.manifest() else {
+        for (_, mut receiver, _, _, _, _) in &mut sessions {
+            receiver.receive().for_each(drop);
+        }
+        return;
+    };
+    let Ok(match_state) = match_root.single() else {
+        return;
+    };
+    let deadline = *gate
+        .deadline
+        .get_or_insert_with(|| time.elapsed().saturating_add(Duration::from_secs(20)));
+    if time.elapsed() >= deadline && !gate.readiness_committed {
+        gate.terminal_failure = true;
+        gate.cancelled = true;
+    }
+    if gate.terminal_failure && gate.terminal_exit_deadline.is_none() {
+        gate.terminal_exit_deadline = Some(time.elapsed().saturating_add(Duration::from_secs(2)));
+    }
+    let mut cancellation_delivered = false;
+    let mut connected = 0_u8;
+    for (remote_id, mut receiver, mut sender, _, session, disconnected) in &mut sessions {
+        if disconnected || !matches!(session.phase, ServerSessionPhase::Active { .. }) {
+            receiver.receive().for_each(drop);
+            continue;
+        }
+        let Some(client_id) = authenticated_netcode_id(remote_id) else {
+            receiver.receive().for_each(drop);
+            continue;
+        };
+        let is_participant = manifest
+            .participants
+            .iter()
+            .any(|participant| participant.netcode_client_id.get() == client_id);
+        if is_participant {
+            connected = connected.saturating_add(1);
+        }
+        if gate.terminal_failure && gate.terminal_notified.insert(client_id) {
+            let response = MatchLoadingServerMessage {
+                request_id: manifest.request_id.get(),
+                allocation_id: manifest.allocation_id.get(),
+                match_id: manifest.match_id.get(),
+                outcome: MatchLoadingServerOutcome::TerminalFailure,
+            };
+            sender.send::<SessionChannel>(response);
+        }
+        if gate.cancelling_client == Some(client_id)
+            && let Some(outcome) = gate.cancellation_outcome
+        {
+            let response = MatchLoadingServerMessage {
+                request_id: manifest.request_id.get(),
+                allocation_id: manifest.allocation_id.get(),
+                match_id: manifest.match_id.get(),
+                outcome,
+            };
+            sender.send::<SessionChannel>(response);
+            cancellation_delivered = true;
+        }
+        for message in receiver.receive() {
+            if message.request_id != manifest.request_id.get()
+                || message.allocation_id != manifest.allocation_id.get()
+                || message.match_id != manifest.match_id.get()
+                || !is_participant
+            {
+                continue;
+            }
+            let outcome = match message.action {
+                MatchLoadingClientAction::Ready
+                    if matches!(match_state.phase, MatchPhase::Waiting) && !gate.cancelled =>
+                {
+                    gate.checked_in.insert(client_id);
+                    continue;
+                }
+                MatchLoadingClientAction::CancelMatchStart
+                    if matches!(match_state.phase, MatchPhase::Waiting)
+                        && !gate.readiness_committed =>
+                {
+                    gate.cancelled = true;
+                    gate.checked_in.clear();
+                    gate.cancelling_client = Some(client_id);
+                    gate.cancellation_outcome =
+                        Some(MatchLoadingServerOutcome::CancellationAccepted);
+                    gate.terminal_failure = true;
+                    continue;
+                }
+                MatchLoadingClientAction::CancelMatchStart => {
+                    MatchLoadingServerOutcome::CancellationTooLate
+                }
+                MatchLoadingClientAction::Ready => continue,
+            };
+            let response = MatchLoadingServerMessage {
+                request_id: manifest.request_id.get(),
+                allocation_id: manifest.allocation_id.get(),
+                match_id: manifest.match_id.get(),
+                outcome,
+            };
+            sender.send::<SessionChannel>(response);
+        }
+    }
+    if cancellation_delivered {
+        gate.cancellation_outcome = None;
+    }
+    let expected = u8::try_from(manifest.participants.len()).unwrap_or(u8::MAX);
+    let checked_in = u8::try_from(gate.checked_in.len()).unwrap_or(u8::MAX);
+    let status_phase = if connected < expected {
+        crate::lobby::MatchLoadingPhase::Connecting
+    } else if checked_in < expected {
+        crate::lobby::MatchLoadingPhase::Synchronizing
+    } else {
+        crate::lobby::MatchLoadingPhase::WaitingForPlayers
+    };
+    let status_key = (connected, checked_in, status_phase);
+    if gate.last_status != Some(status_key) {
+        gate.last_status = Some(status_key);
+        gate.status_revision = gate.status_revision.saturating_add(1).max(1);
+        let status = MatchLoadingStatus {
+            generation: 1,
+            revision: gate.status_revision,
+            request_id: manifest.request_id.get(),
+            allocation_id: manifest.allocation_id.get(),
+            match_id: manifest.match_id.get(),
+            phase: status_phase,
+            expected,
+            connected,
+            checked_in,
+        };
+        for (_, _, _, mut status_sender, _, disconnected) in &mut sessions {
+            if !disconnected {
+                status_sender.send::<QueueSnapshotChannel>(status);
+            }
+        }
+    }
+    if gate.cancelled
+        && !gate.cancel_emitted
+        && let Some(outbox) = control_outbox.as_mut()
+    {
+        outbox.cancel(brawler_routing::ActivationBody {
+            request_id: manifest.request_id,
+            allocation_id: manifest.allocation_id,
+            match_id: manifest.match_id,
+        });
+        gate.cancel_emitted = true;
+    }
+    if matches!(match_state.phase, MatchPhase::Active { .. })
+        && !gate.activated_emitted
+        && let Some(outbox) = control_outbox.as_mut()
+    {
+        outbox.activated(brawler_routing::ActivationBody {
+            request_id: manifest.request_id,
+            allocation_id: manifest.allocation_id,
+            match_id: manifest.match_id,
+        });
+        gate.activated_emitted = true;
+    }
+    if gate.terminal_failure
+        && !gate.terminal_exit_requested
+        && gate
+            .terminal_exit_deadline
+            .is_some_and(|deadline| time.elapsed() >= deadline)
+    {
+        gate.terminal_exit_requested = true;
+        exit.write(AppExit::Success);
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn commit_product_match_activation(
+    role: Res<ServerRoleResource>,
+    mut gate: ResMut<MatchLoadingGate>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    mut fighters: Query<&mut MatchParticipant, With<Fighter>>,
+) {
+    if role.manifest().is_none()
+        || gate.cancelled
+        || gate.readiness_committed
+        || gate.checked_in.len()
+            != role
+                .manifest()
+                .map_or(0, |manifest| manifest.participants.len())
+    {
+        return;
+    }
+    let Ok(state) = roots.single() else {
+        return;
+    };
+    if !matches!(state.phase, MatchPhase::Waiting) {
+        return;
+    }
+    for mut participant in &mut fighters {
+        if participant.match_id == state.match_id {
+            participant.ready = true;
+        }
+    }
+    gate.readiness_committed = true;
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn detect_product_countdown_departure(
+    role: Res<ServerRoleResource>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    mut gate: ResMut<MatchLoadingGate>,
+    mut outbox: Option<ResMut<worker::MatchControlOutbox>>,
+) {
+    let Some(manifest) = role.manifest() else {
+        return;
+    };
+    let Ok(state) = roots.single() else {
+        return;
+    };
+    if matches!(state.phase, MatchPhase::Countdown { .. }) {
+        gate.countdown_observed = true;
+        return;
+    }
+    if gate.countdown_observed
+        && matches!(state.phase, MatchPhase::Waiting)
+        && !gate.start_failure_emitted
+        && let Some(outbox) = outbox.as_mut()
+    {
+        outbox.start_failed(brawler_routing::ActivationBody {
+            request_id: manifest.request_id,
+            allocation_id: manifest.allocation_id,
+            match_id: manifest.match_id,
+        });
+        gate.start_failure_emitted = true;
+        gate.terminal_failure = true;
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 fn process_match_commands(
     tick: Res<crate::timing::SimulationTick>,
     match_root: Query<&MatchState, With<MatchRoot>>,
@@ -1096,18 +1389,29 @@ fn finish_server_shutdown(
 
 /// Build the production headless dedicated server application.
 pub fn build_app_with_config(config: ServerNetworkConfig) -> App {
-    build_authoritative_app(config, true)
+    build_authoritative_app(config, true, None)
 }
 
 /// Build an authoritative worker whose shutdown is owned by supervisor control IPC rather than
 /// process-local terminal signal handling.
-fn build_match_worker_graph(config: ServerNetworkConfig) -> App {
-    build_authoritative_app(config, false)
+fn build_match_worker_graph(config: ServerNetworkConfig, players_per_team: u8) -> App {
+    build_authoritative_app(config, false, Some(players_per_team))
 }
 
-fn build_authoritative_app(config: ServerNetworkConfig, install_terminal_handler: bool) -> App {
+fn build_authoritative_app(
+    config: ServerNetworkConfig,
+    install_terminal_handler: bool,
+    exact_players_per_team: Option<u8>,
+) -> App {
     let mut app = App::new();
-    let lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
+    let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
+    if let Some(players) = exact_players_per_team {
+        lifecycle.minimum_participants_per_team = players;
+        lifecycle.maximum_participants_per_team = players;
+        lifecycle = lifecycle
+            .validate()
+            .expect("validated manifest topology fits lifecycle bounds");
+    }
     app.insert_resource(config)
         .insert_resource(lifecycle)
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(

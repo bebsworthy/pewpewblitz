@@ -59,6 +59,24 @@ pub struct QueueTicket {
     pub resolved_loadout: ResolvedMatchLoadout,
     pub admission_order: u64,
     pub admitted_at_pool_state_revision: u64,
+    pub formation_eligible: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReservedParticipant {
+    pub ticket_id: QueueTicketId,
+    pub team: u8,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueueReservation {
+    pub reservation_id: crate::lobby::MatchReservationId,
+    pub game_type_id: GameTypeId,
+    pub map_preset_id: crate::map::MapPresetId,
+    pub team_count: u8,
+    pub players_per_team: u8,
+    pub participants: Vec<ReservedParticipant>,
+    pub handoff_ready: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -223,10 +241,14 @@ pub struct QueueState {
     tickets: BTreeMap<QueueTicketId, QueueTicket>,
     tickets_by_session: BTreeMap<LobbySessionId, QueueTicketId>,
     tickets_by_client: BTreeMap<NetcodeClientId, QueueTicketId>,
+    reservations: BTreeMap<crate::lobby::MatchReservationId, QueueReservation>,
+    reservation_by_ticket: BTreeMap<QueueTicketId, crate::lobby::MatchReservationId>,
+    map_ordinals: BTreeMap<GameTypeId, u64>,
     memories: BTreeMap<LobbySessionId, QueueCommandMemory>,
     next_admission_order: u64,
     state_revision: u64,
     revision_exhausted: bool,
+    product_match_occupied: bool,
     ticket_namespace: Option<u64>,
     ticket_ids: Box<dyn QueueTicketIdSource>,
     telemetry: QueueTelemetry,
@@ -271,6 +293,10 @@ impl QueueState {
             .iter()
             .map(|row| (row.game_type_id.clone(), VecDeque::new()))
             .collect();
+        let map_ordinals = pool_rows
+            .iter()
+            .map(|row| (row.game_type_id.clone(), 0))
+            .collect();
         Self {
             catalog_revision: catalog.revision,
             pool_rows,
@@ -278,10 +304,14 @@ impl QueueState {
             tickets: BTreeMap::new(),
             tickets_by_session: BTreeMap::new(),
             tickets_by_client: BTreeMap::new(),
+            reservations: BTreeMap::new(),
+            reservation_by_ticket: BTreeMap::new(),
+            map_ordinals,
             memories: BTreeMap::new(),
             next_admission_order: 1,
             state_revision: 1,
             revision_exhausted: false,
+            product_match_occupied: false,
             ticket_namespace: None,
             ticket_ids: Box::new(ticket_ids),
             telemetry: QueueTelemetry::default(),
@@ -336,6 +366,69 @@ impl QueueState {
     }
 
     #[must_use]
+    pub fn reservation(&self, id: crate::lobby::MatchReservationId) -> Option<&QueueReservation> {
+        self.reservations.get(&id)
+    }
+
+    #[must_use]
+    pub fn reservation_count(&self) -> usize {
+        self.reservations.len()
+    }
+
+    /// Commit M05's deliberately single active-product-match occupancy and remove only tickets
+    /// that were not part of the activated reservation.
+    pub fn occupy_product_match(&mut self) -> Vec<QueueTicket> {
+        if self.product_match_occupied {
+            return Vec::new();
+        }
+        self.product_match_occupied = true;
+        let queued = self
+            .tickets
+            .values()
+            .filter(|ticket| !self.reservation_by_ticket.contains_key(&ticket.ticket_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for ticket in &queued {
+            self.remove_ticket(ticket.ticket_id);
+        }
+        self.refresh_pool_rows();
+        if let Some(revision) = self.state_revision.checked_add(1) {
+            self.state_revision = revision;
+        } else {
+            self.revision_exhausted = true;
+        }
+        self.observe_counts();
+        queued
+    }
+
+    pub fn complete_reservation(
+        &mut self,
+        reservation_id: crate::lobby::MatchReservationId,
+    ) -> Vec<QueueTicket> {
+        let Some(reservation) = self.reservations.get(&reservation_id).cloned() else {
+            return Vec::new();
+        };
+        let tickets = reservation
+            .participants
+            .iter()
+            .filter_map(|participant| self.tickets.get(&participant.ticket_id).cloned())
+            .collect::<Vec<_>>();
+        for ticket in &tickets {
+            self.remove_ticket(ticket.ticket_id);
+        }
+        self.refresh_pool_rows();
+        self.observe_counts();
+        tickets
+    }
+
+    #[must_use]
+    pub fn reservation_for_ticket(&self, ticket_id: QueueTicketId) -> Option<&QueueReservation> {
+        self.reservation_by_ticket
+            .get(&ticket_id)
+            .and_then(|id| self.reservations.get(id))
+    }
+
+    #[must_use]
     pub fn pending_outcome(&self, id: LobbySessionId) -> Option<&QueueCommandOutcome> {
         self.memories
             .get(&id)?
@@ -349,6 +442,11 @@ impl QueueState {
         QueuePoolSnapshot {
             catalog_revision: self.catalog_revision,
             state_revision: self.state_revision,
+            formation_availability: if self.product_match_occupied {
+                crate::lobby::FormationAvailability::ProductMatchOccupied
+            } else {
+                crate::lobby::FormationAvailability::Available
+            },
             pools: self.pool_rows.clone(),
         }
     }
@@ -384,10 +482,22 @@ impl QueueState {
             .as_ref()
             .is_some_and(|pending| pending.request_id == request_id)
         {
+            let joined_ticket = memory
+                .pending_outcome
+                .as_ref()
+                .and_then(|pending| match &pending.outcome.decision {
+                    QueueDecision::Joined(membership) => Some(membership.ticket_id),
+                    _ => None,
+                });
             memory.pending_outcome = None;
             memory.last_acknowledged_outcome_request_id = Some(request_id);
             memory.identical_retry_not_before = None;
             memory.early_identical_retry_count = 0;
+            if let Some(ticket_id) = joined_ticket
+                && let Some(ticket) = self.tickets.get_mut(&ticket_id)
+            {
+                ticket.formation_eligible = true;
+            }
             self.observe_counts();
             QueueCommandResult::default()
         } else if memory.last_acknowledged_outcome_request_id == Some(request_id) {
@@ -400,7 +510,7 @@ impl QueueState {
     #[allow(clippy::too_many_arguments)]
     pub fn command(
         &mut self,
-        session: LobbySession,
+        session: &LobbySession,
         request_id: QueueRequestId,
         command: QueueCommand,
         now_millis: u64,
@@ -534,14 +644,22 @@ impl QueueState {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn join(
         &mut self,
-        session: LobbySession,
+        session: &LobbySession,
         command: &QueueJoinCommand,
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
         fighters: &FighterDefinitions,
     ) -> (QueueDecision, bool) {
+        if self.product_match_occupied {
+            QueueTelemetry::increment(&mut self.telemetry.unavailable_rejections);
+            return (
+                QueueDecision::Rejected(QueueRejection::ServerMatchCapacityOccupied),
+                false,
+            );
+        }
         if let Err(rejection) = self.validate_join_target(command) {
             QueueTelemetry::increment(&mut self.telemetry.game_rejections);
             return (QueueDecision::Rejected(rejection), false);
@@ -620,6 +738,7 @@ impl QueueState {
             resolved_loadout: resolved.1,
             admission_order,
             admitted_at_pool_state_revision: revision,
+            formation_eligible: false,
         };
         self.next_admission_order = next_admission_order;
         self.state_revision = revision;
@@ -659,7 +778,7 @@ impl QueueState {
 
     fn cancel(
         &mut self,
-        session: LobbySession,
+        session: &LobbySession,
         command: QueueCancelCommand,
     ) -> (QueueDecision, bool) {
         let memory = self
@@ -783,6 +902,16 @@ impl QueueState {
         };
         self.tickets_by_session.remove(&ticket.lobby_session_id);
         self.tickets_by_client.remove(&ticket.netcode_client_id);
+        if let Some(reservation_id) = self.reservation_by_ticket.remove(&ticket_id)
+            && let Some(reservation) = self.reservations.get_mut(&reservation_id)
+        {
+            reservation
+                .participants
+                .retain(|participant| participant.ticket_id != ticket_id);
+            if reservation.participants.is_empty() {
+                self.reservations.remove(&reservation_id);
+            }
+        }
         if let Some(pool) = self.pools.get_mut(&ticket.game_type_id)
             && let Some(index) = pool.iter().position(|candidate| *candidate == ticket_id)
         {
@@ -839,13 +968,98 @@ impl QueueState {
             return false;
         }
         let pooled: BTreeSet<_> = self.pools.values().flatten().copied().collect();
-        pooled.len() == self.tickets.len()
-            && self.tickets.keys().all(|id| pooled.contains(id))
+        let reserved: BTreeSet<_> = self.reservation_by_ticket.keys().copied().collect();
+        pooled.is_disjoint(&reserved)
+            && pooled.len().saturating_add(reserved.len()) == self.tickets.len()
+            && self
+                .tickets
+                .keys()
+                .all(|id| pooled.contains(id) || reserved.contains(id))
             && self.tickets.values().all(|ticket| {
                 self.tickets_by_session.get(&ticket.lobby_session_id) == Some(&ticket.ticket_id)
                     && self.tickets_by_client.get(&ticket.netcode_client_id)
                         == Some(&ticket.ticket_id)
             })
+    }
+
+    /// Atomically reserve the catalog-first exact eligible roster. Queued overflow stays ordered.
+    pub(crate) fn reserve_oldest_exact(
+        &mut self,
+        catalog: &ResolvedLobbyCatalog,
+        reservation_id: crate::lobby::MatchReservationId,
+    ) -> Option<QueueReservation> {
+        if !self.reservations.is_empty() || self.reservations.contains_key(&reservation_id) {
+            return None;
+        }
+        for game in &catalog.game_types {
+            let formation_size = usize::from(game.team_count.checked_mul(game.players_per_team)?);
+            let pool = self.pools.get(&game.id)?;
+            let selected = pool
+                .iter()
+                .filter(|id| {
+                    self.tickets
+                        .get(id)
+                        .is_some_and(|ticket| ticket.formation_eligible)
+                })
+                .take(formation_size)
+                .copied()
+                .collect::<Vec<_>>();
+            if selected.len() != formation_size {
+                continue;
+            }
+            let next_revision = self.state_revision.checked_add(1)?;
+            let ordinal = *self.map_ordinals.get(&game.id).unwrap_or(&0);
+            let map_index = usize::try_from(ordinal).unwrap_or(0) % game.map_preset_ids.len();
+            let selected_set: BTreeSet<_> = selected.iter().copied().collect();
+            self.pools
+                .get_mut(&game.id)
+                .expect("catalog pool exists")
+                .retain(|id| !selected_set.contains(id));
+            let participants = selected
+                .iter()
+                .enumerate()
+                .map(|(index, ticket_id)| ReservedParticipant {
+                    ticket_id: *ticket_id,
+                    team: u8::try_from(index % usize::from(game.team_count)).expect("team bound"),
+                })
+                .collect::<Vec<_>>();
+            let reservation = QueueReservation {
+                reservation_id,
+                game_type_id: game.id.clone(),
+                map_preset_id: game.map_preset_ids[map_index],
+                team_count: game.team_count,
+                players_per_team: game.players_per_team,
+                participants,
+                handoff_ready: false,
+            };
+            for participant in &reservation.participants {
+                self.reservation_by_ticket
+                    .insert(participant.ticket_id, reservation_id);
+            }
+            self.reservations
+                .insert(reservation_id, reservation.clone());
+            self.state_revision = next_revision;
+            self.refresh_pool_rows();
+            return Some(reservation);
+        }
+        None
+    }
+
+    pub fn mark_reservation_handoff_ready(
+        &mut self,
+        reservation_id: crate::lobby::MatchReservationId,
+    ) -> bool {
+        let Some(reservation) = self.reservations.get_mut(&reservation_id) else {
+            return false;
+        };
+        if reservation.handoff_ready {
+            return false;
+        }
+        reservation.handoff_ready = true;
+        if let Some(ordinal) = self.map_ordinals.get_mut(&reservation.game_type_id) {
+            *ordinal = ordinal.saturating_add(1);
+        }
+        true
     }
 }
 
@@ -967,6 +1181,7 @@ mod tests {
                 source_build_preset: Some(1),
                 recipe_fingerprint: 1,
                 build_revision: 1,
+                snapshot: super::super::default_build_identity().unwrap().snapshot,
             },
         }
     }
@@ -996,6 +1211,7 @@ mod tests {
         )
     }
 
+    #[allow(clippy::large_types_passed_by_value)]
     fn submit(
         queue: &mut QueueState,
         session: LobbySession,
@@ -1005,7 +1221,7 @@ mod tests {
     ) -> QueueCommandResult {
         let (builds, weapons, fighters) = content();
         queue.command(
-            session,
+            &session,
             QueueRequestId::new(request).unwrap(),
             command,
             now,
@@ -1438,6 +1654,71 @@ mod tests {
         assert!(retained_bytes <= 32 * crate::lobby::MAX_QUEUE_OUTCOME_BYTES);
         assert!(queue.indexes_are_valid());
         assert_eq!(queue.telemetry().high_water_tickets, 32);
+    }
+
+    #[test]
+    fn exact_acknowledged_roster_reserves_oldest_and_leaves_overflow_queued() {
+        let catalog = catalog();
+        let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(1));
+        for value in 1..=5 {
+            let player = session(value);
+            submit(&mut queue, player, 1, join(&catalog, 1), 0);
+            if value <= 4 {
+                queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
+            }
+        }
+        let reservation_id = crate::lobby::MatchReservationId::new(9).unwrap();
+        let reservation = queue
+            .reserve_oldest_exact(&catalog, reservation_id)
+            .expect("four acknowledged 2v2 tickets form");
+        assert_eq!(reservation.participants.len(), 4);
+        assert_eq!(
+            reservation
+                .participants
+                .iter()
+                .map(|participant| participant.team)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 0, 1]
+        );
+        assert_eq!(queue.snapshot().pools[0].queued, 1);
+        assert!(queue.indexes_are_valid());
+
+        let removed = queue.complete_reservation(reservation_id);
+        assert_eq!(removed.len(), 4);
+        assert_eq!(queue.reservation_count(), 0);
+        assert_eq!(queue.snapshot().pools[0].queued, 1);
+        assert!(queue.indexes_are_valid());
+    }
+
+    #[test]
+    fn exact_six_player_catalog_entry_forms_balanced_3v3() {
+        let catalog = catalog();
+        let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(1));
+        for value in 1..=6 {
+            let player = session(value);
+            submit(&mut queue, player, 1, join_pool(&catalog, 2, 1), 0);
+            queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
+        }
+        let reservation = queue
+            .reserve_oldest_exact(&catalog, crate::lobby::MatchReservationId::new(20).unwrap())
+            .unwrap();
+        assert_eq!(reservation.players_per_team, 3);
+        assert_eq!(
+            reservation
+                .participants
+                .iter()
+                .filter(|participant| participant.team == 0)
+                .count(),
+            3
+        );
+        assert_eq!(
+            reservation
+                .participants
+                .iter()
+                .filter(|participant| participant.team == 1)
+                .count(),
+            3
+        );
     }
 
     #[test]
