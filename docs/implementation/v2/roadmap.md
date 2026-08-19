@@ -21,11 +21,11 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
   2026-08-19, and the milestone returned to `Implementing` after its first implementation review.
 - By explicit user direction on 2026-08-19, M03 specification research overlapped M02's user
   playtest/review. The user subsequently accepted M02 and directed M03 implementation on
-  2026-08-19; M02 is complete and M03 is the current delivery milestone.
+  2026-08-19; M02 is complete, and M03 completed after accepted playtest fixes on 2026-08-19.
 - By explicit user direction on 2026-08-19, M04 research and planning may overlap M03
-  implementation. M03 remains the current delivery milestone; the M04 research document does not
-  authorize M04 production implementation and must be reconciled against M03's delivered seams
-  before specification review.
+  implementation. M04 is now the current delivery milestone; its research document must be
+  reconciled against M03's delivered seams before specification review and does not authorize M04
+  production implementation until user validation.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -41,8 +41,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Feedback review |
-| Current milestone | M03 — Direct-connect lobby session and advertised game selection |
+| Status | Researching |
+| Current milestone | M04 — Product build editor and authoritative queue admission |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
@@ -52,7 +52,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 |---|---|---|---|
 | 01 | Complete | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
-| 03 | Feedback review | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
+| 03 | Complete | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
 | 04 | Researching | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
 | 05 | Not started | Exact formation, worker allocation, and match loading/handoff | Create when next |
 | 06 | Not started | Concurrent match lifecycle, results, and requeue | Create when next |
@@ -192,6 +192,7 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 | V2-WINDOWS-IPC | Production Windows named-pipe backend | Preserve the contract in M01; implement when Windows becomes an active target |
 | V2-ROUTE-RESUMPTION | Resume an interrupted match connection | Deferred; v2 returns to a fresh lobby session |
 | V2-ROUTED-HARDENING | Complete routed latency, packet-only IPC overhead, correlated CPU, dual-stack MTU capture, 25/20-cycle campaigns, and optimize the latest recorded +12.31% directional egress delta | Deferred from M01 to M09 by the user-approved 2026-08-19 development-use scope decision; measurements retain their failed/unsupported labels until rerun |
+| V2-M03-MANUAL-MATRIX | Broader physical-controller feel and full aspect/UI-scale matrix for the direct-connect lobby | Deferred by explicit M03 closeout acceptance on 2026-08-19. Automated controller lifecycle regressions and representative native layouts passed, but separate physical-controller/full-matrix execution is not claimed; revisit in M07's supported-layout/controller validation |
 | V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | M01 makes the routed supervisor path the default for `network.sh`/`just network` after validating its minimum transition driver and retains direct UDP only as an explicitly named compatibility/baseline command; M09 removes the legacy executable/configuration after final comparison evidence unless a documented compatibility requirement remains |
 
 ## Explicitly deferred beyond v2

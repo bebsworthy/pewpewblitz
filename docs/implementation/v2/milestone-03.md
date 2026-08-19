@@ -4,8 +4,9 @@
 
 | Field | Value |
 |---|---|
-| Status | Feedback review |
+| Status | Complete |
 | Prepared | 2026-08-19, while M02 remains in user playtest/review, by explicit user direction |
+| Completed | 2026-08-19, after user acceptance, feedback triage, and closeout review |
 | Objective | Let a windowed player choose a known server, establish a recoverable routed lobby session, receive an accepted session name and validated server-owned game catalog, and inspect/select an advertised game type without leaving the application |
 | Entry dependency | M02 must be complete and its final shell/session behavior reconciled before M03 enters `Implementing` |
 | Scope authority | Validated by the user's explicit implementation direction and M02 acceptance on 2026-08-19 |
@@ -869,7 +870,8 @@ validates this specification.
 - [x] Prove the supervisor remains Bevy/Lightyear/gameplay-free and every launch mode selects only
   its authority role's transport, message family, and terminal policy.
 - [x] Capture representative Server Select, Connecting/error, and Game Select layouts.
-- [ ] Provide keyboard/mouse and physical-controller playtest steps and record feedback.
+- [x] Provide keyboard/mouse and physical-controller playtest steps, record returned feedback, and
+  explicitly disposition unreported physical-controller/full-matrix coverage.
 
 ## Verification contract
 
@@ -992,9 +994,9 @@ Use deterministic Apps for lifecycle timing; do not sleep in ECS tests. Real DNS
   selection remain in one running application with exact cleanup.
 - [x] Headless/automation retain deterministic terminal outcomes; direct UDP and explicit M01
   transition evidence paths pass.
-- [ ] Focused/pure/ECS/network/process/role checks and the representative visual/controller matrix
-  pass.
-- [ ] User playtest feedback is recorded and triaged before M03 is marked `Complete`.
+- [x] Focused/pure/ECS/network/process/role checks and representative native/automated controller
+  checks pass; broader physical-controller/full-matrix coverage is explicitly deferred.
+- [x] User playtest feedback is recorded and triaged before M03 is marked `Complete`.
 
 ## Research record
 
@@ -1124,16 +1126,35 @@ Feedback received and triaged on 2026-08-19:
    bounded remaining time, a focused Cancel button, and explicit `ESC / PAD EAST` guidance. A
    native unavailable-server check confirmed the screen remains live for the owned attempt window
    and Escape returns immediately to usable Server Select without an error.
+3. **Final acceptance — accepted and closed.** After confirming the fixes worked, the user directed
+   M03 to be marked complete on 2026-08-19. No further M03 changes were requested. No separate
+   physical-controller report or full aspect/UI-scale matrix was supplied, so that coverage is
+   deferred to `V2-M03-MANUAL-MATRIX` and M07 rather than claimed as executed.
 
 Focused regressions cover connection start after complete entity materialization, interactive versus
 automatic timeout ownership, staged connection copy, and Cancel focus restoration. The post-change
 client suite passed all 312 tests, client Clippy passed with warnings denied, and the two-client real
 product-lobby smoke passed on an isolated endpoint.
 
-Physical-controller feedback and the remaining aspect/UI-scale matrix are still awaited; this keeps
-the final manual exit criterion open and M03 in `Feedback review`.
+## Learn-from-errors review
 
-## User playtest handoff
+- The first-attempt failure survived earlier process checks because the product client dynamically
+  spawned its connection entity while the comparison paths materialized connection state earlier.
+  Future transport slices must exercise the exact product spawn timing on their first attempt, not
+  only an equivalent protocol path.
+- The generic routed recovery timeout and the M03 attempt controller briefly competed for the same
+  interactive failure. A user-visible attempt must have one explicit timeout owner, selected by
+  launch mode and covered by an ownership regression.
+- The initial Connecting screen technically existed but did not make progress or cancellation
+  salient. Visual checks must assess the player's available action and perceived liveness, not only
+  the presence of required copy.
+- Native review caught both an unsupported font glyph and a controller text-edit focus trap. Keep
+  player-facing labels within verified font coverage and retain deterministic controller
+  enter/commit/cancel regressions for editable fields.
+- These lessons are specific to Brawler's routed connection and Bevy UI lifecycle, and are recorded
+  in the milestone and focused regressions; no standalone reusable skill was warranted.
+
+## Closed user playtest record
 
 Run `just network-product-lobby-smoke` once for the bounded terminal product-lobby check, then use
 `just network-product-lobby` for the normal windowed client against a product supervisor without the
@@ -1151,6 +1172,7 @@ transition driver. At 960×540 and again at the default window size:
 6. Stop the supervisor while in Game Select and confirm the client returns to usable Server Select
    with a recoverable error rather than terminating or retry-spinning.
 
-Record layout/readability, focus order/visibility, text-entry/paste behavior, controller feel, and
-recovery observations. M03 remains `Feedback review` until the remaining physical-controller and
-visual-matrix feedback is triaged and that final manual exit criterion is satisfied.
+The returned playtest feedback covered first-attempt connection behavior and Connecting-screen
+liveness/cancellation. Both items were implemented, reverified, and accepted. The broader
+physical-controller feel and full visual matrix were not separately reported; they remain visible
+as `V2-M03-MANUAL-MATRIX` for M07 instead of blocking the accepted M03 vertical slice.
