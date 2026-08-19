@@ -196,7 +196,7 @@ fn conflict_line(settings: &ClientInputSettings) -> String {
 fn hint_line(selection: InputSettingsSelection) -> String {
     if selection.listening {
         format!(
-            "Rebind {}: press a key, mouse button, or pad button (B or East cancels)",
+            "Rebind {}: press a key, mouse button, or pad button (Escape or pad East cancels)",
             selection.field.name()
         )
     } else {
@@ -267,10 +267,8 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
         .map_or(&mut *settings, |draft| &mut draft.0);
 
     if selection.listening {
-        // Escape/B and East cancel before any accepted binding press can commit.
-        if keyboard.any_just_pressed([KeyCode::Escape, KeyCode::KeyB])
-            || pad_pressed(GamepadButton::East)
-        {
+        // Escape and controller East cancel before any accepted binding press can commit.
+        if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
             selection.listening = false;
             if let Some(consumed) = capture_consumed.as_deref_mut() {
                 consumed.0 = true;

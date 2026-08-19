@@ -1357,7 +1357,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_cancels_product_rebind_without_changing_the_draft() {
+    fn escape_and_controller_east_cancel_product_rebind_without_changing_the_draft() {
         let path = std::env::temp_dir().join(format!(
             "brawler-m02-shell-rebind-cancel-{}-settings.ron",
             std::process::id()
@@ -1397,6 +1397,68 @@ mod tests {
                 .keyboard
                 .ultimate,
             original
+        );
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::Rebind);
+        app.update();
+        assert!(app.world().resource::<InputSettingsSelection>().listening);
+
+        let mut gamepad = Gamepad::default();
+        gamepad.digital_mut().press(GamepadButton::East);
+        app.world_mut().spawn(gamepad);
+        app.update();
+        assert!(!app.world().resource::<InputSettingsSelection>().listening);
+        assert_eq!(
+            app.world()
+                .resource::<InputSettingsDraft>()
+                .0
+                .keyboard
+                .ultimate,
+            original
+        );
+    }
+
+    #[test]
+    fn keyboard_b_is_a_valid_product_rebind() {
+        let path = std::env::temp_dir().join(format!(
+            "brawler-m02-shell-rebind-b-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut app = shell_test_app(path);
+        app.update();
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::OpenSettings);
+        app.update();
+        app.world_mut()
+            .resource_mut::<InputSettingsSelection>()
+            .field = InputSettingsField::Keyboard(crate::client::KeyboardAction::Ultimate);
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::Rebind);
+        app.update();
+        assert!(app.world().resource::<InputSettingsSelection>().listening);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyB);
+        app.update();
+        assert!(!app.world().resource::<InputSettingsSelection>().listening);
+        assert_eq!(
+            app.world()
+                .resource::<InputSettingsDraft>()
+                .0
+                .keyboard
+                .ultimate,
+            KeyCode::KeyB
         );
     }
 

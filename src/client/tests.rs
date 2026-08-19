@@ -959,7 +959,7 @@ fn pause_rebind_flow_captures_the_next_physical_key_press() {
     assert!(!app.world().resource::<InputSettingsSelection>().listening);
     assert_eq!(settings.revision, 1);
 
-    // While listening, B cancels instead of binding, and modifiers are refused.
+    // While listening, modifiers are refused and B remains a valid gameplay binding.
     let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
     keyboard.reset_all();
     keyboard.press(KeyCode::KeyB);
@@ -983,7 +983,7 @@ fn pause_rebind_flow_captures_the_next_physical_key_press() {
             .resource::<ClientInputSettings>()
             .keyboard
             .ultimate,
-        KeyCode::KeyP
+        KeyCode::KeyB
     );
 }
 
