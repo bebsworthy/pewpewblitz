@@ -23,9 +23,9 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
   playtest/review. The user subsequently accepted M02 and directed M03 implementation on
   2026-08-19; M02 is complete, and M03 completed after accepted playtest fixes on 2026-08-19.
 - By explicit user direction on 2026-08-19, M04 research and planning may overlap M03
-  implementation. M04 is now the current delivery milestone; its research document must be
-  reconciled against M03's delivered seams before specification review and does not authorize M04
-  production implementation until user validation.
+  implementation. M04 is now the current delivery milestone; its specification has been reconciled
+  against M03's delivered seams and remains unauthorized for production implementation until user
+  validation.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -41,7 +41,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Researching |
+| Status | Specification review |
 | Current milestone | M04 — Product build editor and authoritative queue admission |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
@@ -53,7 +53,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 01 | Complete | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
 | 03 | Complete | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
-| 04 | Researching | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
+| 04 | Specification review | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
 | 05 | Not started | Exact formation, worker allocation, and match loading/handoff | Create when next |
 | 06 | Not started | Concurrent match lifecycle, results, and requeue | Create when next |
 | 07 | Not started | Combat HUD, menus, readability, and accessibility | Create when next |
@@ -98,10 +98,17 @@ server without exiting the application.
 
 Turn the debug build overlay into a bounded editor with local last-used persistence. Add server
 validation at admission, immutable ticket build snapshots, exact game-type FIFO pools, honest
-aggregate state, cancellation, overflow, idempotency, and race handling.
+aggregate state, cancellation, overflow, idempotency, bounded command retry, and disconnect cleanup.
 
 Gate: players can edit, correct rejected builds, join/cancel queues, and remain safe under
-duplicates, disconnects, and formation-boundary races.
+duplicates, command retries, bounded reliable outcomes, stale snapshot delivery, and disconnects;
+the editor communicates each tradeoff with focused before/after changes, equivalent re-Join
+preserves the original ticket/admission revision, one ordered client envelope preserves
+acknowledgement/command order, pending identical recovery is token- and wire-copy-neutral, and the
+first over-rate new command fails softly before continued abuse disconnects. Privacy-safe bounded
+diagnostics make admission, cleanup, abuse, snapshot publication intent, and client freshness aging
+observable. M04 ends before
+ticket reservation exists, so it does not fabricate a formation-boundary race.
 
 ### M05 — Exact formation, worker allocation, and match loading/handoff
 
@@ -109,8 +116,9 @@ Form exact 2v2/3v3 rosters, assign teams deterministically, select a compatible 
 tickets, admit host capacity, start/validate a worker, issue routing capabilities, establish fresh
 worker connections, synchronize match state, and check in before the one authoritative countdown.
 
-Gate: a complete roster reaches an existing Wipeout or Hot Zone worker through the public endpoint;
-failures dissolve or requeue reservations under an explicit bounded policy.
+Gate: cancellation-versus-reservation races resolve idempotently before the complete roster reaches
+an existing Wipeout or Hot Zone worker through the public endpoint; failures dissolve or requeue
+reservations under an explicit bounded policy.
 
 ### M06 — Concurrent match lifecycle, results, and requeue
 

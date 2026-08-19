@@ -182,8 +182,10 @@ The windowed client connects immediately on launch and never shows a product men
 3. **One place for every choice.** Game type and build are selected before queue admission. The
    build is locked while queued; changing it means cancelling or completing an acknowledged ticket
    update before formation.
-4. **Queue state is honest and private.** Show game type, `queued/needed`, the player's accepted
-   build, and formation/loading progress. Do not publish every waiting player's name or build.
+4. **Queue state is honest and private.** Before reservation, show game type,
+   `N waiting · M players per match` and the player's accepted build, aging stale population to an
+   updating state rather than presenting it as current. Show reservation/loading progress only after
+   formation owns that state. Do not publish every waiting player's name or build.
 5. **Fail soft.** Rejection, timeout, mismatch, unavailable content, cancellation races, and
    disconnect lead to a clear recoverable state. Headless automation retains deterministic exit
    codes.
@@ -255,7 +257,7 @@ Overlays: BuildEditor, Settings, Credits, InMatchMenu, Scoreboard,
 | **Connecting** | Establish a lobby session | DNS/transport, handshake, compatibility, game-type catalog; Cancel | Partial `ClientJoinPhase`; currently also assumes match readiness |
 | **GameSelect** | Choose an advertised game type | Mode, map pool, topology, rules summary; M04 adds honest pool state and build editing | Missing advertisement/UI |
 | **BuildEditor** | Create the next queue build | Presets, bounded fields, budget, stats, confirm/cancel | Debug-only overlay; validation exists |
-| **Queue** | Wait for exact formation | Game type, `queued/needed`, accepted build, Cancel | Missing |
+| **Queue** | Wait for exact formation | Game type, fresh `N waiting · M players per match`, accepted build, Cancel; reservation/loading progress begins after M05 formation | Missing |
 | **MatchLoading** | Prepare one reserved match | Selected map/mode, map/assets/terrain sync, participant check-in, timeout | Existing readiness pieces, wrong lifecycle location |
 | **Match** | Countdown and active play | Product HUD, crosshair/range, objective, cues | Debug-heavy presentation |
 | **InMatchMenu** | Non-pausing overlay | Resume, Settings, Scoreboard, Leave Match, debug toggle | Debug pause overlay |
@@ -331,18 +333,22 @@ authority. The lifecycle changes:
 | Non-fatal windowed lifecycle | Debug-only → change | Transition to flow/error UI; retain headless exit contracts |
 | Lobby session identity/name | Missing | Server-sanitized session display name over stable numeric identity |
 | Game-type advertisement | Missing | Bounded stable IDs/revisions, modes, map pool, exact topology, and rules summary; revisioned queue counts begin with real M04 pools |
-| Queue commands and snapshots | Missing | Reliable in-band requests/acks with ticket identity, revisioned aggregate pool state, and explicit rejection reasons |
+| Queue commands and snapshots | Missing | One ordered-reliable in-band client envelope preserves request/ack order with ticket identity; equivalent re-Join preserves the ticket and original admission revision; pending identical recovery does not spend rate tokens or enqueue another copy; the first over-rate new command fails softly before continued abuse disconnects; complete revisioned aggregate snapshots use bounded sequenced delivery plus refresh, with explicit actionable rejection reasons, outcome-to-snapshot freshness barriers, and privacy-safe bounded diagnostics |
 | Match reservation/loading | Missing | Match allocation, targeted sync, check-in deadline, dissolution/requeue policy |
 | Leave/cancel/disconnect | Missing | Separate idempotent intents with distinct membership effects |
 | Address and local server lists | Missing | Validated hostname/address, explicit favorites, bounded recents |
 | Match recovery | Partial | Terrain/map recovery applies after reservation; no v2 session resumption |
 | Public registry | Deferred | Coordinate later with internet reachability and public-server policy |
 
-Lobby, build, and queue actions stay on dedicated reliable in-band Lightyear messages/channels on
-the lobby connection. Match loading and gameplay actions use the separately authenticated match
-worker connection. The routing envelope and IPC framing live below Lightyear and never become a
-second gameplay protocol. REST/HTTP becomes a new architecture decision only when a concrete
-external service—such as accounts, inventory, registry, or cross-server matchmaking—requires it.
+Lobby, build, and queue commands/outcomes stay on dedicated reliable in-band Lightyear messages on
+the lobby connection. When acknowledgement and command order affects authority, one typed client
+envelope preserves their channel order rather than reconstructing it across typed receivers.
+Replaceable complete aggregate snapshots may use a bounded sequenced channel
+with periodic refresh because membership transitions never depend on those snapshots. Match loading
+and gameplay actions use the separately authenticated match-worker connection. The routing envelope
+and IPC framing live below Lightyear and never become a second gameplay protocol. REST/HTTP becomes
+a new architecture decision only when a concrete external service—such as accounts, inventory,
+registry, or cross-server matchmaking—requires it.
 
 ## Multi-process architecture research contract
 
@@ -406,8 +412,10 @@ The error presentation maps structured categories to honest actions:
 - invalid address/name/local file → correct locally or restore defaults;
 - DNS/transport timeout → retry the same server or return to ServerSelect;
 - protocol/content mismatch → explain incompatibility; do not loop Retry automatically;
-- server full/game type unavailable/config revision changed → refresh GameSelect where the lobby
-  session remains valid;
+- server full/game type temporarily unavailable → retain the valid lobby session and offer the
+  context-valid retry/back action;
+- catalog or game-configuration disagreement that is impossible under the accepted immutable
+  advertisement → close the incompatible lobby session and offer a fresh connection or ServerSelect;
 - queue rejection/build rejection → remain in GameSelect/BuildEditor with the precise correctable
   reason;
 - formation failure/check-in timeout → return valid tickets according to the documented retry
@@ -429,7 +437,8 @@ match, map, terrain, focus, and presentation state exactly once.
   commands, malformed input, rate limits, and direction/target registration.
 - **Network tests:** connect → catalog → queue → reserve → load/check-in → countdown → match →
   results → requeue/change-game; rejection → correction → rejoin; queue overflow; cancellation at
-  formation; disconnect in every phase; fresh-session retry; and headless exit equivalence.
+  formation; disconnect in every phase; fresh-session retry; bounded reliable queue outcomes;
+  consecutive aggregate-snapshot loss/aging/recovery; and headless exit equivalence.
 - **Concurrency tests:** simultaneous Wipeout/Hot Zone worker processes, route/message/recovery
   isolation, host admission refusal, worker teardown/crash, and repeated formation/completion soak.
 - **Performance tests:** measured server fixed-tick, entity, terrain, memory, and bandwidth ceilings;
