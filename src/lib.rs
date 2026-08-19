@@ -7,6 +7,7 @@ pub mod config;
 pub mod content;
 pub mod diagnostics;
 pub mod gameplay;
+pub mod lobby;
 pub mod map;
 pub mod matchplay;
 pub mod movement;

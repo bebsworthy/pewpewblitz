@@ -1513,14 +1513,14 @@ fn mark_stop_sent(worker: &mut ManagedWorker) -> Option<StopId> {
 
 fn decode_manifest_common(manifest: &ManifestBody) -> Result<ManifestCommon, LifecycleError> {
     match manifest.role {
-        WorkerRole::Lobby => Ok(crate::LobbyManifestV1::decode(&manifest.manifest)?.common),
+        WorkerRole::Lobby => Ok(crate::LobbyManifest::decode(&manifest.manifest)?.common),
         WorkerRole::Match => Ok(MatchManifestV1::decode(&manifest.manifest)?.common),
     }
 }
 
 fn manifest_digest_from_decoded(manifest: &ManifestBody) -> Result<[u8; 32], LifecycleError> {
     match manifest.role {
-        WorkerRole::Lobby => Ok(crate::LobbyManifestV1::decode(&manifest.manifest)?.digest),
+        WorkerRole::Lobby => Ok(crate::LobbyManifest::decode(&manifest.manifest)?.digest),
         WorkerRole::Match => Ok(MatchManifestV1::decode(&manifest.manifest)?.digest),
     }
 }
@@ -1559,7 +1559,7 @@ fn refresh_spec(
     spec.registration.generation = generation;
     spec.manifest = match spec.manifest.role {
         WorkerRole::Lobby => {
-            let mut manifest = crate::LobbyManifestV1::decode(&spec.manifest.manifest)?;
+            let mut manifest = crate::LobbyManifest::decode(&spec.manifest.manifest)?;
             manifest.common.process_id = process_id;
             manifest.common.generation = generation;
             manifest.digest = [0; 32];

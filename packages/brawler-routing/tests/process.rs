@@ -5,7 +5,7 @@ use std::{
 };
 
 use brawler_routing::{
-    GameMode, LifecycleEvent, LobbyManifestV1, ManifestBody, ManifestCommon, ProcessSupervisor,
+    LifecycleEvent, LobbyManifest, ManifestBody, ManifestCommon, ProcessSupervisor,
     ProcessSupervisorConfig, RoutingErrorCategory, StopId, WorkerKind, WorkerLaunchSpec,
     WorkerRegistration, WorkerRole,
 };
@@ -35,7 +35,7 @@ fn launch_spec(worker_id: u128) -> WorkerLaunchSpec {
         generation: id64(1),
         kind: WorkerKind::Lobby,
     };
-    let manifest = LobbyManifestV1 {
+    let manifest = LobbyManifest {
         common: ManifestCommon {
             manifest_version: 1,
             role: WorkerRole::Lobby,
@@ -51,12 +51,13 @@ fn launch_spec(worker_id: u128) -> WorkerLaunchSpec {
             control_version: 1,
             flags: 0,
         },
-        mode: GameMode::Wipeout,
         default_route_id: id128(100),
         max_authenticated_sessions: 32,
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
+        raw_catalog: b"catalog".to_vec(),
+        raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(b"catalog"),
         nonce: 6,
         digest: [0; 32],
     };
@@ -142,7 +143,7 @@ fn manifest_identity_is_checked_before_spawn() {
     let mut supervisor = new_supervisor();
     let mut spec = launch_spec(8);
     let mut malformed = match spec.manifest.role {
-        WorkerRole::Lobby => LobbyManifestV1::decode(&spec.manifest.manifest).unwrap(),
+        WorkerRole::Lobby => LobbyManifest::decode(&spec.manifest.manifest).unwrap(),
         WorkerRole::Match => unreachable!(),
     };
     malformed.common.content_fingerprint = 999;

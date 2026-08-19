@@ -140,6 +140,13 @@ backend. Message/packet transports preserve one encoded frame per record; byte-s
 add an explicit fixed-endian frame-length prefix and must handle partial reads/writes. Backend
 record boundaries never replace validation of the frame's own lengths.
 
+Route-envelope, packet-frame, control-frame, and process-manifest versions are decoded by the
+supervisor and workers before or below the Lightyear application handshake. They therefore retain
+independent framing/schema versions and fail closed on unknown versions. This is distinct from
+application-message evolution: the enduring one-current-schema policy, global compatibility
+handshake, and no-per-message-version rule are defined in
+[Network architecture](./08-network-architecture.md#application-protocol-compatibility-and-evolution).
+
 M01 will compare:
 
 - Unix-domain socket on macOS/Linux, preferring packet/message semantics where reliable;

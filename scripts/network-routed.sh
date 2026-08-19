@@ -101,6 +101,8 @@ target/debug/brawler-supervisor $metrics_args \
     --protocol-registry-fingerprint "$registry_fingerprint" \
     --content-fingerprint "$content_fingerprint" \
     --worker-executable "$project_dir/target/debug/brawler-server" \
+    --game-types "$project_dir/config/server/game-types.ron" \
+    --automatic-transition-driver \
     --mode "$game_mode" \
     --match-rules "$match_rules" \
     --bind "$bind_addr" &

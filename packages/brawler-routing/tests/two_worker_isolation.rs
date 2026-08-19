@@ -13,7 +13,7 @@ use std::{
 
 use brawler_routing::{
     CAPABILITY_BYTES, CONTROL_VERSION_V1, Capability, CapabilityBinding, CoreConfig, GameMode,
-    Generation, LifecycleEvent, LobbyManifestV1, LogicalServerId, ManifestBody, ManifestCommon,
+    Generation, LifecycleEvent, LobbyManifest, LogicalServerId, ManifestBody, ManifestCommon,
     MatchManifestParticipant, MatchManifestV1, PACKET_VERSION_V1, PeerId, ProcessSupervisorConfig,
     PublicEnvelope, ROUTE_VERSION_V1, RouteId, RouteRegistration, RouteSelector, RuntimeConfig,
     RuntimePollReport, SupervisorRuntime, WorkerId, WorkerKind, WorkerLaunchSpec,
@@ -82,7 +82,7 @@ fn lobby_spec(mode: &str) -> WorkerLaunchSpec {
         generation: id64(1),
         kind: WorkerKind::Lobby,
     };
-    let manifest = LobbyManifestV1 {
+    let manifest = LobbyManifest {
         common: ManifestCommon {
             manifest_version: 1,
             role: WorkerRole::Lobby,
@@ -98,12 +98,13 @@ fn lobby_spec(mode: &str) -> WorkerLaunchSpec {
             control_version: CONTROL_VERSION_V1,
             flags: 0,
         },
-        mode: GameMode::Wipeout,
         default_route_id: id128(100),
         max_authenticated_sessions: 8,
         outstanding_allocations: 2,
         active_matches: 2,
         heartbeat_ms: 100,
+        raw_catalog: b"catalog".to_vec(),
+        raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(b"catalog"),
         nonce: 6,
         digest: [0; 32],
     };

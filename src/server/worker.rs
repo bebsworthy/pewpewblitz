@@ -18,7 +18,7 @@ use bevy::{app::AppExit, prelude::*};
 use brawler_routing::{
     AllocateRequestBody, CONTROL_VERSION_V1, CodecError, ControlBody, ControlFrame,
     ControlSequenceTracker, FramedReader, IpcChannel, IpcIoError, LobbyAuthenticatedBody,
-    LobbyManifestV1, LobbyNetcodeAuthenticatedBody, MatchManifestV1, PACKET_VERSION_V1,
+    LobbyManifest, LobbyNetcodeAuthenticatedBody, MatchManifestV1, PACKET_VERSION_V1,
     PeerCloseBody, ProcessId, ROUTE_VERSION_V1, ReadyBody, SequenceDisposition, StopBody,
     UnixWorkerChannels, WorkerId, WorkerRole,
 };
@@ -212,7 +212,7 @@ impl From<CodecError> for WorkerBootstrapError {
 }
 
 enum WorkerManifest {
-    Lobby(LobbyManifestV1),
+    Lobby(LobbyManifest),
     Match(MatchManifestV1),
 }
 
@@ -274,7 +274,7 @@ impl WorkerBootstrap {
             return Err(WorkerBootstrapError::Invalid("manifest role mismatch"));
         }
         let manifest = match body.role {
-            WorkerRole::Lobby => WorkerManifest::Lobby(LobbyManifestV1::decode(&body.manifest)?),
+            WorkerRole::Lobby => WorkerManifest::Lobby(LobbyManifest::decode(&body.manifest)?),
             WorkerRole::Match => WorkerManifest::Match(MatchManifestV1::decode(&body.manifest)?),
         };
         let common = manifest.common();
@@ -309,7 +309,20 @@ impl WorkerBootstrap {
             WorkerManifest::Lobby(_) => None,
             WorkerManifest::Match(manifest) => Some((manifest.match_id, manifest.allocation_id)),
         };
-        let config = config_from_manifest(&manifest)?;
+        let automatic_transition_driver = matches!(&manifest, WorkerManifest::Lobby(_))
+            && std::env::var("BRAWLER_LOBBY_TRANSITION_DRIVER").as_deref() == Ok("1");
+        let mut config = config_from_manifest(&manifest)?;
+        if automatic_transition_driver {
+            config.game_mode = match std::env::var("BRAWLER_LOBBY_TRANSITION_MODE").as_deref() {
+                Ok("wipeout") => GameMode::Wipeout,
+                Ok("hot-zone") => GameMode::HotZone,
+                _ => {
+                    return Err(WorkerBootstrapError::Invalid(
+                        "invalid automatic transition game mode",
+                    ));
+                }
+            };
+        }
         let heartbeat = manifest.heartbeat();
         let digest = manifest.digest();
         let mut app = match manifest {
@@ -318,6 +331,9 @@ impl WorkerBootstrap {
             WorkerManifest::Match(manifest) => build_match_worker_app(config, manifest)
                 .map_err(|_| WorkerBootstrapError::MatchAdmission)?,
         };
+        if automatic_transition_driver {
+            app.add_plugins(super::lobby::LobbyTransitionDriverPlugin);
+        }
 
         let ready = ControlFrame::from_raw_sequence(
             1,
@@ -1085,9 +1101,16 @@ fn config_from_manifest(
     };
     match manifest {
         WorkerManifest::Lobby(manifest) => {
-            config.game_mode = match manifest.mode {
-                brawler_routing::GameMode::Wipeout => GameMode::Wipeout,
-                brawler_routing::GameMode::HotZone => GameMode::HotZone,
+            let catalog = super::lobby::resolve_operator_catalog(&manifest.raw_catalog)
+                .map_err(|_| WorkerBootstrapError::Invalid("invalid lobby game-type catalog"))?;
+            config.game_mode = match catalog
+                .game_types
+                .first()
+                .map(|game_type| game_type.mode_definition_id)
+            {
+                Some(crate::map::WIPEOUT_MODE_DEFINITION) => GameMode::Wipeout,
+                Some(crate::map::HOT_ZONE_MODE_DEFINITION) => GameMode::HotZone,
+                _ => return Err(WorkerBootstrapError::Invalid("unsupported lobby game mode")),
             };
         }
         WorkerManifest::Match(manifest) => {

@@ -27,9 +27,9 @@ use crate::{
         MovementTuning,
     },
     protocol::{
-        BuildSelectionOutcome, BuildSelectionRequest, ClientHello, DEVELOPMENT_PRIVATE_KEY,
-        Fighter, JoinOutcome, JoinRejection, MatchCommand, MatchCommandDecision,
-        MatchCommandOutcome, MatchCommandRequest, NetworkEntityId, PlaceholderState, PlayerId,
+        BuildSelectionOutcome, BuildSelectionRequest, DEVELOPMENT_PRIVATE_KEY, Fighter,
+        MatchCommand, MatchCommandDecision, MatchCommandOutcome, MatchCommandRequest, MatchHello,
+        MatchJoinOutcome, MatchJoinRejection, NetworkEntityId, PlaceholderState, PlayerId,
         ProtocolFingerprint, ProtocolPlugin, SessionChannel,
     },
 };
@@ -107,7 +107,7 @@ pub enum ServerSessionPhase {
 pub struct ServerSession {
     pub phase: ServerSessionPhase,
     pub deadline: Duration,
-    pub last_outcome: Option<JoinOutcome>,
+    pub last_outcome: Option<MatchJoinOutcome>,
     pub disconnect_requested: bool,
     pub last_selection_request: Option<BuildSelectionRequest>,
     pub last_selection_outcome: Option<BuildSelectionOutcome>,
@@ -555,8 +555,8 @@ fn process_client_hellos(
     mut receivers: Query<(
         Entity,
         &RemoteId,
-        &mut MessageReceiver<ClientHello>,
-        &mut MessageSender<JoinOutcome>,
+        &mut MessageReceiver<MatchHello>,
+        &mut MessageSender<MatchJoinOutcome>,
         &mut ServerSession,
         Option<&RoutedPeer>,
         Has<Disconnected>,
@@ -602,7 +602,7 @@ fn process_client_hellos(
                     player_id,
                     network_entity_id,
                 } => {
-                    sender.send::<SessionChannel>(JoinOutcome::Accepted {
+                    sender.send::<SessionChannel>(MatchJoinOutcome::Accepted {
                         player_id: *player_id,
                         network_entity_id: *network_entity_id,
                     });
@@ -616,20 +616,20 @@ fn process_client_hellos(
                     let outcome = if hello.protocol_version
                         != crate::protocol::SUPPORTED_PROTOCOL_VERSION
                     {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::ProtocolVersionMismatch,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::ProtocolVersionMismatch,
                         }
                     } else if hello.build_version != VERSION {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::BuildVersionMismatch,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::BuildVersionMismatch,
                         }
                     } else if hello.registry_fingerprint != fingerprint.0 {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::RegistryMismatch,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::RegistryMismatch,
                         }
                     } else if hello.content_fingerprint != *content_fingerprint {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::ContentMismatch,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::ContentMismatch,
                         }
                     } else if matches!(role.0, ServerRole::MatchWorker(_))
                         && authenticated_netcode_id(remote_id).is_none_or(|client_id| {
@@ -642,23 +642,23 @@ fn process_client_hellos(
                             .is_err()
                         })
                     {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::MatchFull,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::MatchFull,
                         }
                     } else if !matches!(match_state.phase, MatchPhase::Waiting) {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::MatchInProgress,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::MatchInProgress,
                         }
                     } else if active_count >= config.max_clients {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::ServerFull,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::ServerFull,
                         }
                     } else if !matches!(role.0, ServerRole::MatchWorker(_))
                         && assigned_team(team_counts, lifecycle_rules.maximum_participants_per_team)
                             .is_none()
                     {
-                        JoinOutcome::Rejected {
-                            reason: JoinRejection::MatchFull,
+                        MatchJoinOutcome::Rejected {
+                            reason: MatchJoinRejection::MatchFull,
                         }
                     } else {
                         match ids.allocate() {
@@ -677,7 +677,7 @@ fn process_client_hellos(
                                         })
                                     })
                                     .copied();
-                                let accepted = JoinOutcome::Accepted {
+                                let accepted = MatchJoinOutcome::Accepted {
                                     player_id: worker_participant
                                         .map_or(baseline_player_id, |participant| {
                                             PlayerId(participant.player_id.get())
@@ -835,12 +835,12 @@ fn process_client_hellos(
                                 living_fighters.push((assigned_team, spawn_position));
                                 accepted
                             }
-                            None => JoinOutcome::Rejected {
-                                reason: JoinRejection::IdentifierExhausted,
+                            None => MatchJoinOutcome::Rejected {
+                                reason: MatchJoinRejection::IdentifierExhausted,
                             },
                         }
                     };
-                    let rejected = matches!(outcome, JoinOutcome::Rejected { .. });
+                    let rejected = matches!(outcome, MatchJoinOutcome::Rejected { .. });
                     sender.send::<SessionChannel>(outcome.clone());
                     session.last_outcome = Some(outcome);
                     if rejected {
@@ -973,8 +973,8 @@ fn enforce_session_deadlines(
             && now >= session.deadline
         {
             session.phase = ServerSessionPhase::Rejected;
-            session.last_outcome = Some(JoinOutcome::Rejected {
-                reason: JoinRejection::HandshakeTimeout,
+            session.last_outcome = Some(MatchJoinOutcome::Rejected {
+                reason: MatchJoinRejection::HandshakeTimeout,
             });
             if let Some(state) = diagnostics.as_deref_mut() {
                 state.record_rejected_connection();

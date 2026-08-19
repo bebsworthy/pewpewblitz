@@ -5,11 +5,12 @@ use std::{collections::BTreeMap, fmt};
 use crate::{
     AllocationId, CONTROL_HEADER_BYTES, CONTROL_MAGIC, CONTROL_MAX_BODY_BYTES,
     CONTROL_MAX_RECORD_BYTES, CONTROL_PREFIXED_MAX_BYTES, CONTROL_VERSION_V1, Capability,
-    CodecError, Generation, LobbySessionId, MAX_MANIFEST_BYTES, MAX_PARTICIPANTS, MAX_RESULT_BYTES,
-    MatchId, NetcodeClientId, PeerId, ProcessId, RequestId, RouteId, Sequence, StopId, WorkerId,
+    CodecError, Generation, LobbySessionId, MAX_LOBBY_MANIFEST_BYTES, MAX_MANIFEST_BYTES,
+    MAX_PARTICIPANTS, MAX_RESULT_BYTES, MatchId, NetcodeClientId, PeerId, ProcessId, RequestId,
+    RouteId, Sequence, StopId, WorkerId,
     codec::{Decoder, Encoder, FramedDecoder, frame_record},
     digest::result_digest,
-    manifest::{GameMode, LobbyManifestV1, MatchManifestV1, WorkerRole},
+    manifest::{GameMode, LobbyManifest, MatchManifestV1, WorkerRole},
 };
 
 /// The thirteen control body kinds in BRCT v1.
@@ -82,7 +83,7 @@ impl ManifestBody {
         Ok(body)
     }
 
-    pub fn from_lobby(manifest: &LobbyManifestV1) -> Result<Self, CodecError> {
+    pub fn from_lobby(manifest: &LobbyManifest) -> Result<Self, CodecError> {
         Self::new(WorkerRole::Lobby, manifest.encode()?)
     }
 
@@ -94,14 +95,17 @@ impl ManifestBody {
         if self.manifest.is_empty() {
             return Err(CodecError::InvalidValue);
         }
-        if self.manifest.len() > MAX_MANIFEST_BYTES {
-            return Err(CodecError::Oversize);
-        }
         match self.role {
             WorkerRole::Lobby => {
-                LobbyManifestV1::decode(&self.manifest)?;
+                if self.manifest.len() > MAX_LOBBY_MANIFEST_BYTES {
+                    return Err(CodecError::Oversize);
+                }
+                LobbyManifest::decode(&self.manifest)?;
             }
             WorkerRole::Match => {
+                if self.manifest.len() > MAX_MANIFEST_BYTES {
+                    return Err(CodecError::Oversize);
+                }
                 MatchManifestV1::decode(&self.manifest)?;
             }
         }
@@ -888,7 +892,11 @@ impl ControlBody {
             ControlType::Manifest => {
                 let role = WorkerRole::try_from(decoder.u8()?)?;
                 let length = usize::try_from(decoder.u32()?).map_err(|_| CodecError::Oversize)?;
-                if length == 0 || length > MAX_MANIFEST_BYTES || 5 + length != body_length {
+                let maximum = match role {
+                    WorkerRole::Lobby => MAX_LOBBY_MANIFEST_BYTES,
+                    WorkerRole::Match => MAX_MANIFEST_BYTES,
+                };
+                if length == 0 || length > maximum || 5 + length != body_length {
                     return Err(CodecError::LengthMismatch);
                 }
                 Self::Manifest(ManifestBody::new(role, decoder.take(length)?.to_vec())?)
@@ -1152,8 +1160,8 @@ pub type Exit = ExitBody;
 mod tests {
     use super::*;
     use crate::{
-        CONTROL_HEADER_BYTES, CONTROL_MAX_RECORD_BYTES, CONTROL_PREFIXED_MAX_BYTES,
-        LobbyManifestV1, ManifestCommon, WorkerRole,
+        CONTROL_HEADER_BYTES, CONTROL_MAX_RECORD_BYTES, CONTROL_PREFIXED_MAX_BYTES, LobbyManifest,
+        ManifestCommon, WorkerRole,
     };
 
     fn id128<T: TryFrom<u128>>(value: u128) -> T
@@ -1170,8 +1178,8 @@ mod tests {
         T::try_from(value).unwrap()
     }
 
-    fn lobby_manifest() -> LobbyManifestV1 {
-        LobbyManifestV1 {
+    fn lobby_manifest() -> LobbyManifest {
+        LobbyManifest {
             common: ManifestCommon {
                 manifest_version: 1,
                 role: WorkerRole::Lobby,
@@ -1187,12 +1195,13 @@ mod tests {
                 control_version: 1,
                 flags: 0,
             },
-            mode: GameMode::Wipeout,
             default_route_id: id128(8),
             max_authenticated_sessions: 32,
             outstanding_allocations: 2,
             active_matches: 4,
             heartbeat_ms: 1_000,
+            raw_catalog: b"catalog".to_vec(),
+            raw_catalog_fingerprint: crate::raw_catalog_fingerprint(b"catalog"),
             nonce: 9,
             digest: [0; 32],
         }

@@ -1,8 +1,10 @@
 //! Functional windowed product shell: title, one overlay, focus, settings draft, and errors.
 
+use super::flow::ClientFlowSet;
+use super::flow::{ClientLocalLoadFailures, local_load_error};
 use super::{
-    ClientInputContext, ClientSettingsUiSet, InputCaptureConsumed, InputSettingsField,
-    InputSettingsSelection, InputSettingsText,
+    ClientFlow, ClientInputContext, ClientOverlay, FlowError, FlowErrorAction,
+    InputCaptureConsumed, InputSettingsField, InputSettingsSelection, InputSettingsText,
     settings::{
         ClientInputSettings,
         persistence::{
@@ -28,15 +30,6 @@ use bevy::{
 const ENTRANCE_SECONDS: f32 = 0.16;
 const CREDITS: &str = "Brawler 0.1.0\n\nBuilt with Bevy 0.19 (MIT OR Apache-2.0).\nDefault Fira Mono font: Mozilla Foundation / Telefonica, SIL OFL 1.1.\nFighters and sounds: Kenney, CC0 1.0.\nFacility tiles: Murphy's Dad / HaywardMorihara, CC0 1.0.\n\nFull license texts ship in assets/licenses/.";
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ShellOverlay {
-    #[default]
-    None,
-    Settings,
-    Credits,
-    LocalError,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ErrorReturn {
     Title,
@@ -53,19 +46,17 @@ enum LocalSettingsErrorKind {
 
 #[derive(Resource, Debug)]
 struct ShellState {
-    overlay: ShellOverlay,
-    error_return: ErrorReturn,
-    error_kind: LocalSettingsErrorKind,
-    error_message: String,
+    return_target: ErrorReturn,
+    kind: LocalSettingsErrorKind,
+    message: String,
 }
 
 impl Default for ShellState {
     fn default() -> Self {
         Self {
-            overlay: ShellOverlay::None,
-            error_return: ErrorReturn::Title,
-            error_kind: LocalSettingsErrorKind::Load,
-            error_message: String::new(),
+            return_target: ErrorReturn::Title,
+            kind: LocalSettingsErrorKind::Load,
+            message: String::new(),
         }
     }
 }
@@ -134,6 +125,7 @@ enum ShellControlId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellAction {
+    Play,
     OpenSettings,
     OpenCredits,
     Quit,
@@ -179,24 +171,21 @@ impl Plugin for ClientShellPlugin {
             .init_resource::<NavigationLatch>()
             .init_resource::<NavigationDirty>()
             .init_resource::<InputCaptureConsumed>()
-            .add_systems(
-                Startup,
-                (load_persistent_settings, spawn_initial_shell).chain(),
-            )
+            .add_systems(Startup, load_persistent_settings)
+            .add_systems(OnEnter(ClientFlow::Title), spawn_initial_shell)
             .add_systems(
                 Update,
                 (
-                    collect_navigation_input,
-                    collect_pointer_actions,
-                    handle_shell_actions,
-                    rebuild_navigation,
-                    style_shell_buttons,
-                    preview_shell_preferences,
-                    animate_shell_entrance,
-                    scroll_shell_panels,
+                    collect_navigation_input.in_set(ClientFlowSet::CollectFlowInput),
+                    collect_pointer_actions.in_set(ClientFlowSet::CollectFlowInput),
+                    handle_shell_actions.in_set(ClientFlowSet::ResolveFlowAction),
+                    rebuild_navigation.in_set(ClientFlowSet::PresentFlow),
+                    style_shell_buttons.in_set(ClientFlowSet::PresentFlow),
+                    preview_shell_preferences.in_set(ClientFlowSet::PresentFlow),
+                    animate_shell_entrance.in_set(ClientFlowSet::PresentFlow),
+                    scroll_shell_panels.in_set(ClientFlowSet::PresentFlow),
                 )
-                    .chain()
-                    .in_set(ClientSettingsUiSet::Shell),
+                    .chain(),
             )
             .add_systems(
                 PostUpdate,
@@ -216,6 +205,8 @@ fn load_persistent_settings(
     mut input: ResMut<ClientInputSettings>,
     mut shell: ResMut<ClientShellSettings>,
     mut state: ResMut<ShellState>,
+    mut overlay: ResMut<ClientOverlay>,
+    mut failures: ResMut<ClientLocalLoadFailures>,
 ) {
     match load_settings(&path.0) {
         Ok(Some((loaded_input, loaded_shell))) => {
@@ -224,11 +215,15 @@ fn load_persistent_settings(
         }
         Ok(None) => {}
         Err(error) => {
-            state.overlay = ShellOverlay::LocalError;
-            state.error_return = ErrorReturn::Title;
-            state.error_kind = LocalSettingsErrorKind::Load;
-            state.error_message = error.to_string();
+            failures.settings_failed = true;
+            state.return_target = ErrorReturn::Title;
+            state.kind = LocalSettingsErrorKind::Load;
+            state.message = error.to_string();
         }
+    }
+    if let Some(error) = local_load_error(*failures) {
+        state.message.clone_from(&error.message);
+        *overlay = ClientOverlay::Error(error);
     }
 }
 
@@ -239,16 +234,17 @@ fn load_persistent_settings(
 fn spawn_initial_shell(
     mut commands: Commands,
     state: Res<ShellState>,
+    overlay: Res<ClientOverlay>,
     mut context: ResMut<ClientInputContext>,
     mut dirty: ResMut<NavigationDirty>,
 ) {
     *context = ClientInputContext::Shell;
     spawn_title(&mut commands);
-    if state.overlay == ShellOverlay::LocalError {
-        spawn_error(&mut commands, &state.error_message, state.error_kind);
+    if matches!(overlay.as_ref(), ClientOverlay::Error(_)) {
+        spawn_error(&mut commands, &state.message, state.kind);
         dirty.0 = Some(ShellControlId::ContinueWithoutSaving);
     } else {
-        dirty.0 = Some(ShellControlId::Settings);
+        dirty.0 = Some(ShellControlId::Play);
     }
 }
 
@@ -288,6 +284,7 @@ fn spawn_title(commands: &mut Commands) {
     commands
         .spawn((
             TitleRoot,
+            DespawnOnExit(ClientFlow::Title),
             root_node(),
             BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
             GlobalZIndex(400),
@@ -311,14 +308,14 @@ fn spawn_title(commands: &mut Commands) {
             ));
             spawn_button(
                 root,
-                "PLAY - COMING IN M03",
+                "PLAY",
                 ShellControlId::Play,
-                None,
+                Some(ShellAction::Play),
                 ShellLayer::Title,
             );
             spawn_button(
                 root,
-                "PRACTICE - COMING IN M08",
+                "PRACTICE - COMING SOON",
                 ShellControlId::Practice,
                 None,
                 ShellLayer::Title,
@@ -549,12 +546,12 @@ fn spawn_button(
         ));
 }
 
-fn active_layer(overlay: ShellOverlay) -> ShellLayer {
+fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
     match overlay {
-        ShellOverlay::None => ShellLayer::Title,
-        ShellOverlay::Settings => ShellLayer::Settings,
-        ShellOverlay::Credits => ShellLayer::Credits,
-        ShellOverlay::LocalError => ShellLayer::Error,
+        ClientOverlay::None => ShellLayer::Title,
+        ClientOverlay::Settings => ShellLayer::Settings,
+        ClientOverlay::Credits => ShellLayer::Credits,
+        ClientOverlay::Error(_) => ShellLayer::Error,
     }
 }
 
@@ -568,7 +565,7 @@ fn collect_navigation_input(
     gamepads: Query<&Gamepad>,
     selection: Res<InputSettingsSelection>,
     capture_consumed: Res<InputCaptureConsumed>,
-    state: Res<ShellState>,
+    overlay: Res<ClientOverlay>,
     mut latch: ResMut<NavigationLatch>,
     mut navigation: DirectionalNavigation,
     buttons: Query<&ShellButton>,
@@ -630,7 +627,7 @@ fn collect_navigation_input(
     if activate
         && let Some(entity) = navigation.focus.get()
         && let Ok(button) = buttons.get(entity)
-        && button.layer == active_layer(state.overlay)
+        && button.layer == active_layer(&overlay)
         && let Some(action) = button.action
         && !pending.0.contains(&action)
     {
@@ -638,7 +635,10 @@ fn collect_navigation_input(
     }
     let back = !capture_consumed.0
         && (keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East));
-    if back && state.overlay != ShellOverlay::None && !pending.0.contains(&ShellAction::Back) {
+    if back
+        && !matches!(overlay.as_ref(), ClientOverlay::None)
+        && !pending.0.contains(&ShellAction::Back)
+    {
         pending.0.push(ShellAction::Back);
     }
 }
@@ -649,12 +649,12 @@ fn collect_navigation_input(
 )]
 fn collect_pointer_actions(
     interactions: Query<(Entity, &Interaction, &ShellButton), Changed<Interaction>>,
-    state: Res<ShellState>,
+    overlay: Res<ClientOverlay>,
     mut focus: ResMut<InputFocus>,
     mut pending: ResMut<PendingActions>,
 ) {
     for (entity, interaction, button) in &interactions {
-        if button.layer != active_layer(state.overlay) {
+        if button.layer != active_layer(&overlay) {
             continue;
         }
         if matches!(interaction, Interaction::Hovered | Interaction::Pressed)
@@ -689,13 +689,19 @@ fn handle_shell_actions(
     mut active_input: ResMut<ClientInputSettings>,
     mut active_shell: ResMut<ClientShellSettings>,
     mut dirty: ResMut<NavigationDirty>,
+    mut next_flow: ResMut<NextState<ClientFlow>>,
+    mut client_overlay: ResMut<ClientOverlay>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let actions = core::mem::take(&mut pending.0);
     for action in actions {
         match action {
+            ShellAction::Play => {
+                *client_overlay = ClientOverlay::None;
+                next_flow.set(ClientFlow::ServerSelect);
+            }
             ShellAction::OpenSettings => {
-                state.overlay = ShellOverlay::Settings;
+                *client_overlay = ClientOverlay::Settings;
                 commands.insert_resource(InputSettingsDraft(*active_input));
                 commands.insert_resource(ShellSettingsDraft(*active_shell));
                 selection.listening = false;
@@ -704,7 +710,7 @@ fn handle_shell_actions(
                 dirty.0 = Some(ShellControlId::PreviousField);
             }
             ShellAction::OpenCredits => {
-                state.overlay = ShellOverlay::Credits;
+                *client_overlay = ClientOverlay::Credits;
                 despawn_overlays(&mut commands, &roots);
                 spawn_credits(&mut commands);
                 dirty.0 = Some(ShellControlId::CreditsBack);
@@ -779,12 +785,16 @@ fn handle_shell_actions(
                     .validate()
                     .and_then(|()| draft_shell.0.validate())
                 {
-                    state.error_message = error;
-                    state.error_return = ErrorReturn::Settings;
-                    state.error_kind = LocalSettingsErrorKind::Validation;
-                    state.overlay = ShellOverlay::LocalError;
+                    state.message = error;
+                    state.return_target = ErrorReturn::Settings;
+                    state.kind = LocalSettingsErrorKind::Validation;
+                    *client_overlay = ClientOverlay::Error(FlowError {
+                        message: state.message.clone(),
+                        return_flow: ClientFlow::Title,
+                        actions: [Some(FlowErrorAction::ContinueWithoutSaving), None],
+                    });
                     despawn_overlays(&mut commands, &roots);
-                    spawn_error(&mut commands, &state.error_message, state.error_kind);
+                    spawn_error(&mut commands, &state.message, state.kind);
                     dirty.0 = Some(ShellControlId::ContinueWithoutSaving);
                     continue;
                 }
@@ -793,17 +803,25 @@ fn handle_shell_actions(
                 *active_input = applied;
                 *active_shell = draft_shell.0;
                 if let Err(error) = save_settings(&path.0, *active_input, *active_shell) {
-                    state.error_message = error;
-                    state.error_return = ErrorReturn::Settings;
-                    state.error_kind = LocalSettingsErrorKind::Save;
-                    state.overlay = ShellOverlay::LocalError;
+                    state.message = error;
+                    state.return_target = ErrorReturn::Settings;
+                    state.kind = LocalSettingsErrorKind::Save;
+                    *client_overlay = ClientOverlay::Error(FlowError {
+                        message: state.message.clone(),
+                        return_flow: ClientFlow::Title,
+                        actions: [
+                            Some(FlowErrorAction::RetrySave),
+                            Some(FlowErrorAction::ContinueWithoutSaving),
+                        ],
+                    });
                     despawn_overlays(&mut commands, &roots);
-                    spawn_error(&mut commands, &state.error_message, state.error_kind);
+                    spawn_error(&mut commands, &state.message, state.kind);
                     dirty.0 = Some(ShellControlId::Retry);
                 } else {
                     close_overlay(
                         &mut commands,
                         &mut state,
+                        &mut client_overlay,
                         &roots,
                         &mut dirty,
                         ShellControlId::Settings,
@@ -814,30 +832,32 @@ fn handle_shell_actions(
                 Ok(()) => close_overlay(
                     &mut commands,
                     &mut state,
+                    &mut client_overlay,
                     &roots,
                     &mut dirty,
                     ShellControlId::Settings,
                 ),
                 Err(error) => {
-                    state.error_message = error;
-                    state.error_kind = LocalSettingsErrorKind::Save;
+                    state.message = error;
+                    state.kind = LocalSettingsErrorKind::Save;
                     despawn_overlays(&mut commands, &roots);
-                    spawn_error(&mut commands, &state.error_message, state.error_kind);
+                    spawn_error(&mut commands, &state.message, state.kind);
                     dirty.0 = Some(ShellControlId::Retry);
                 }
             },
             ShellAction::ContinueWithoutSaving => {
-                if state.error_return == ErrorReturn::Settings
-                    && state.error_kind == LocalSettingsErrorKind::Validation
+                if state.return_target == ErrorReturn::Settings
+                    && state.kind == LocalSettingsErrorKind::Validation
                 {
                     despawn_overlays(&mut commands, &roots);
-                    state.overlay = ShellOverlay::Settings;
+                    *client_overlay = ClientOverlay::Settings;
                     spawn_settings(&mut commands);
                     dirty.0 = Some(ShellControlId::Apply);
                 } else {
                     close_overlay(
                         &mut commands,
                         &mut state,
+                        &mut client_overlay,
                         &roots,
                         &mut dirty,
                         ShellControlId::Settings,
@@ -845,22 +865,29 @@ fn handle_shell_actions(
                 }
             }
             ShellAction::Cancel | ShellAction::Back => {
-                if state.overlay == ShellOverlay::LocalError
-                    && state.error_return == ErrorReturn::Settings
-                    && state.error_kind == LocalSettingsErrorKind::Validation
+                if matches!(client_overlay.as_ref(), ClientOverlay::Error(_))
+                    && state.return_target == ErrorReturn::Settings
+                    && state.kind == LocalSettingsErrorKind::Validation
                 {
                     despawn_overlays(&mut commands, &roots);
-                    state.overlay = ShellOverlay::Settings;
+                    *client_overlay = ClientOverlay::Settings;
                     spawn_settings(&mut commands);
                     dirty.0 = Some(ShellControlId::Apply);
                     continue;
                 }
-                let focus = match state.overlay {
-                    ShellOverlay::Credits => ShellControlId::Credits,
-                    ShellOverlay::Settings | ShellOverlay::LocalError => ShellControlId::Settings,
-                    ShellOverlay::None => continue,
+                let focus = match client_overlay.as_ref() {
+                    ClientOverlay::Credits => ShellControlId::Credits,
+                    ClientOverlay::Settings | ClientOverlay::Error(_) => ShellControlId::Settings,
+                    ClientOverlay::None => continue,
                 };
-                close_overlay(&mut commands, &mut state, &roots, &mut dirty, focus);
+                close_overlay(
+                    &mut commands,
+                    &mut state,
+                    &mut client_overlay,
+                    &roots,
+                    &mut dirty,
+                    focus,
+                );
             }
         }
     }
@@ -875,6 +902,7 @@ fn despawn_overlays(commands: &mut Commands, roots: &Query<Entity, With<OverlayR
 fn close_overlay(
     commands: &mut Commands,
     state: &mut ShellState,
+    overlay: &mut ClientOverlay,
     roots: &Query<Entity, With<OverlayRoot>>,
     dirty: &mut NavigationDirty,
     focus: ShellControlId,
@@ -882,8 +910,8 @@ fn close_overlay(
     despawn_overlays(commands, roots);
     commands.remove_resource::<InputSettingsDraft>();
     commands.remove_resource::<ShellSettingsDraft>();
-    state.overlay = ShellOverlay::None;
-    state.error_kind = LocalSettingsErrorKind::Load;
+    *overlay = ClientOverlay::None;
+    state.kind = LocalSettingsErrorKind::Load;
     dirty.0 = Some(focus);
 }
 
@@ -892,7 +920,7 @@ fn close_overlay(
     reason = "Bevy system parameters are runtime-owned"
 )]
 fn rebuild_navigation(
-    state: Res<ShellState>,
+    overlay: Res<ClientOverlay>,
     mut dirty: ResMut<NavigationDirty>,
     buttons: Query<(Entity, &ShellButton, &UiGlobalTransform)>,
     mut map: ResMut<DirectionalNavigationMap>,
@@ -900,7 +928,7 @@ fn rebuild_navigation(
 ) {
     let preferred = dirty.0.take();
     map.clear();
-    let layer = active_layer(state.overlay);
+    let layer = active_layer(&overlay);
     let mut active: Vec<(Entity, ShellControlId, Vec2)> = buttons
         .iter()
         .filter_map(|(entity, button, transform)| {
@@ -1117,12 +1145,14 @@ fn keep_focused_control_visible(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::ClientSettingsUiSet;
     use crate::client::settings::ui::adjust_input_settings_from_pause_keys;
     use bevy::input_focus::directional_navigation::NavNeighbor;
 
     fn shell_test_app(path: std::path::PathBuf) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::state::app::StatesPlugin)
             .add_message::<MouseWheel>()
             .add_message::<AppExit>()
             .insert_resource(ClientSettingsPath(path))
@@ -1131,6 +1161,9 @@ mod tests {
             .init_resource::<ClientInputContext>()
             .init_resource::<ClientInputSettings>()
             .init_resource::<InputSettingsSelection>()
+            .init_state::<ClientFlow>()
+            .init_resource::<ClientOverlay>()
+            .init_resource::<ClientLocalLoadFailures>()
             .configure_sets(
                 Update,
                 (
@@ -1164,7 +1197,7 @@ mod tests {
         let focus = app.world().resource::<InputFocus>().get().unwrap();
         assert_eq!(
             app.world().get::<ShellButton>(focus).unwrap().id,
-            ShellControlId::Settings
+            ShellControlId::Play
         );
         let enabled_title_buttons_skip_disabled = {
             let world = app.world_mut();
@@ -1172,7 +1205,7 @@ mod tests {
             query
                 .iter(world)
                 .filter(|button| button.layer == ShellLayer::Title && button.action.is_some())
-                .all(|button| !matches!(button.id, ShellControlId::Play | ShellControlId::Practice))
+                .all(|button| !matches!(button.id, ShellControlId::Practice))
         };
         assert!(enabled_title_buttons_skip_disabled);
 
@@ -1182,8 +1215,8 @@ mod tests {
             .push(ShellAction::OpenSettings);
         app.update();
         assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::Settings
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::Settings
         );
         let focus = app.world().resource::<InputFocus>().get().unwrap();
         assert_eq!(
@@ -1254,8 +1287,8 @@ mod tests {
         assert!(app.world().resource::<ClientInputSettings>().invert_aim_y);
         assert!(app.world().resource::<ClientShellSettings>().reduced_motion);
         assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::None
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
         );
         assert!(path.is_file());
         std::fs::remove_dir_all(dir).unwrap();
@@ -1276,8 +1309,8 @@ mod tests {
 
         app.update();
         assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::Credits
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::Settings
         );
         let overlay_count = {
             let world = app.world_mut();
@@ -1336,7 +1369,7 @@ mod tests {
         let focus = keyboard_app.world().resource::<InputFocus>().get().unwrap();
         assert_eq!(
             keyboard_app.world().get::<ShellButton>(focus).unwrap().id,
-            ShellControlId::Credits
+            ShellControlId::Settings
         );
 
         let stick_path = std::env::temp_dir().join(format!(
@@ -1352,7 +1385,7 @@ mod tests {
         let focus = stick_app.world().resource::<InputFocus>().get().unwrap();
         assert_eq!(
             stick_app.world().get::<ShellButton>(focus).unwrap().id,
-            ShellControlId::Credits
+            ShellControlId::Settings
         );
     }
 
@@ -1542,13 +1575,13 @@ mod tests {
 
         assert!(app.world().resource::<ClientInputSettings>().invert_aim_y);
         assert_eq!(
-            app.world().resource::<ShellState>().error_kind,
+            app.world().resource::<ShellState>().kind,
             LocalSettingsErrorKind::Save
         );
-        assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::LocalError
-        );
+        assert!(matches!(
+            app.world().resource::<ClientOverlay>(),
+            ClientOverlay::Error(_)
+        ));
         let copy_is_accurate = {
             let world = app.world_mut();
             let mut query = world.query::<&Text>();
@@ -1563,18 +1596,18 @@ mod tests {
             .0
             .push(ShellAction::RetrySave);
         app.update();
-        assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::LocalError
-        );
+        assert!(matches!(
+            app.world().resource::<ClientOverlay>(),
+            ClientOverlay::Error(_)
+        ));
         app.world_mut()
             .resource_mut::<PendingActions>()
             .0
             .push(ShellAction::ContinueWithoutSaving);
         app.update();
         assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::None
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
         );
         assert!(app.world().resource::<ClientInputSettings>().invert_aim_y);
         std::fs::remove_dir_all(dir).unwrap();
@@ -1610,8 +1643,8 @@ mod tests {
             .push(ShellAction::RetrySave);
         app.update();
         assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::None
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
         );
         assert!(path.is_file());
         std::fs::remove_dir_all(dir).unwrap();
@@ -1640,7 +1673,7 @@ mod tests {
             .push(ShellAction::Apply);
         app.update();
         assert_eq!(
-            app.world().resource::<ShellState>().error_kind,
+            app.world().resource::<ShellState>().kind,
             LocalSettingsErrorKind::Validation
         );
         assert!(
@@ -1660,18 +1693,25 @@ mod tests {
             .push(ShellAction::ContinueWithoutSaving);
         app.update();
         assert_eq!(
-            app.world().resource::<ShellState>().overlay,
-            ShellOverlay::Settings
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::Settings
         );
         assert!(app.world().contains_resource::<ShellSettingsDraft>());
     }
 
     #[test]
     fn active_layer_traps_focus_to_the_visible_overlay() {
-        assert_eq!(active_layer(ShellOverlay::None), ShellLayer::Title);
-        assert_eq!(active_layer(ShellOverlay::Settings), ShellLayer::Settings);
-        assert_eq!(active_layer(ShellOverlay::Credits), ShellLayer::Credits);
-        assert_eq!(active_layer(ShellOverlay::LocalError), ShellLayer::Error);
+        assert_eq!(active_layer(&ClientOverlay::None), ShellLayer::Title);
+        assert_eq!(active_layer(&ClientOverlay::Settings), ShellLayer::Settings);
+        assert_eq!(active_layer(&ClientOverlay::Credits), ShellLayer::Credits);
+        assert_eq!(
+            active_layer(&ClientOverlay::Error(FlowError {
+                message: String::new(),
+                return_flow: ClientFlow::Title,
+                actions: [Some(FlowErrorAction::Back), None],
+            })),
+            ShellLayer::Error
+        );
     }
 
     #[test]

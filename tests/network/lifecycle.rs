@@ -17,7 +17,7 @@ fn protocol_version_mismatch_is_rejected_without_a_placeholder() {
             matches!(
                 status.phase,
                 ClientJoinPhase::Rejected(
-                    brawler::protocol::JoinRejection::ProtocolVersionMismatch
+                    brawler::protocol::MatchJoinRejection::ProtocolVersionMismatch
                 )
             )
         })
@@ -100,7 +100,7 @@ fn lightyear_registry_mismatch_disconnects_before_brawler_acceptance() {
         query.iter(world).any(|status| {
             matches!(
                 status.phase,
-                ClientJoinPhase::Rejected(brawler::protocol::JoinRejection::RegistryMismatch)
+                ClientJoinPhase::Rejected(brawler::protocol::MatchJoinRejection::RegistryMismatch)
             )
         })
     });

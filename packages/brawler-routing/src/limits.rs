@@ -23,7 +23,11 @@ pub const CONTROL_MAX_RECORD_BYTES: usize = 65_536;
 pub const CONTROL_PREFIXED_MAX_BYTES: usize = 65_540;
 
 pub const MAX_STRING_BYTES: usize = 255;
+/// Match manifests retain the original M01 semantic bound.
 pub const MAX_MANIFEST_BYTES: usize = 4_096;
+pub const MAX_LOBBY_CATALOG_BYTES: usize = 16 * 1_024;
+/// Fixed lobby fields, the bounded raw catalog, raw digest, and manifest digest.
+pub const MAX_LOBBY_MANIFEST_BYTES: usize = MAX_LOBBY_CATALOG_BYTES + 512;
 pub const MAX_RESULT_BYTES: usize = 4_096;
 pub const MAX_PARTICIPANTS: usize = 8;
 

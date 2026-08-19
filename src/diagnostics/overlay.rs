@@ -235,6 +235,7 @@ fn join_phase_name(phase: &ClientJoinPhase) -> &str {
         ClientJoinPhase::Connecting => "connecting",
         ClientJoinPhase::AwaitingOutcome => "awaiting-outcome",
         ClientJoinPhase::Active { .. } => "active",
+        ClientJoinPhase::LobbyActive { .. } => "lobby",
         ClientJoinPhase::Rejected(_) => "rejected",
         ClientJoinPhase::Disconnected => "disconnected",
     }

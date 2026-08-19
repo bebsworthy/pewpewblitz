@@ -6,9 +6,12 @@
 
 use std::fmt;
 
+use sha2::{Digest as _, Sha256};
+
 use crate::{
-    CodecError, Generation, LobbySessionId, LogicalServerId, MAX_MANIFEST_BYTES, MAX_PARTICIPANTS,
-    MatchId, PeerId, ProcessId, WorkerId,
+    CodecError, Generation, LobbySessionId, LogicalServerId, MAX_LOBBY_CATALOG_BYTES,
+    MAX_LOBBY_MANIFEST_BYTES, MAX_MANIFEST_BYTES, MAX_PARTICIPANTS, MatchId, PeerId, ProcessId,
+    WorkerId,
     codec::{Decoder, Encoder},
     digest::manifest_digest,
     limits::{CONTROL_VERSION_V1, PACKET_VERSION_V1, ROUTE_VERSION_V1},
@@ -136,29 +139,27 @@ fn validate_digest(bytes: &[u8], digest: [u8; 32]) -> Result<(), CodecError> {
     Ok(())
 }
 
-/// A lobby worker's canonical v1 manifest.
+/// The one current lobby-worker manifest.
 #[derive(Clone, PartialEq, Eq)]
-pub struct LobbyManifestV1 {
+pub struct LobbyManifest {
     pub common: ManifestCommon,
-    /// The lobby's authoritative allocation mode. Keeping this in the signed manifest makes
-    /// supervisor/operator mode selection explicit and prevents a worker from silently falling
-    /// back to its compiled default.
-    pub mode: GameMode,
     pub default_route_id: crate::RouteId,
     pub max_authenticated_sessions: u16,
     pub outstanding_allocations: u16,
     pub active_matches: u16,
     pub heartbeat_ms: u32,
+    /// Opaque operator configuration. Only the lobby worker parses these bytes.
+    pub raw_catalog: Vec<u8>,
+    pub raw_catalog_fingerprint: [u8; 32],
     pub nonce: u128,
     pub digest: [u8; 32],
 }
 
-impl fmt::Debug for LobbyManifestV1 {
+impl fmt::Debug for LobbyManifest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("LobbyManifestV1")
+            .debug_struct("LobbyManifest")
             .field("common", &self.common)
-            .field("mode", &self.mode)
             .field("default_route_id", &self.default_route_id)
             .field(
                 "max_authenticated_sessions",
@@ -167,13 +168,15 @@ impl fmt::Debug for LobbyManifestV1 {
             .field("outstanding_allocations", &self.outstanding_allocations)
             .field("active_matches", &self.active_matches)
             .field("heartbeat_ms", &self.heartbeat_ms)
+            .field("raw_catalog_bytes", &self.raw_catalog.len())
+            .field("raw_catalog_fingerprint", &"[REDACTED]")
             .field("nonce", &"[REDACTED]")
             .field("digest", &"[REDACTED]")
             .finish()
     }
 }
 
-impl LobbyManifestV1 {
+impl LobbyManifest {
     pub const ROLE: WorkerRole = WorkerRole::Lobby;
 
     /// Return a manifest with its digest populated from canonical fields.
@@ -188,14 +191,16 @@ impl LobbyManifestV1 {
 
     fn encode_prefix(&self) -> Result<Vec<u8>, CodecError> {
         self.validate()?;
-        let mut encoder = Encoder::with_capacity(256);
+        let mut encoder = Encoder::with_capacity(256 + self.raw_catalog.len());
         encode_common(&mut encoder, self.common);
-        encoder.put_u16(self.mode as u16);
         encoder.put_u128(self.default_route_id.get());
         encoder.put_u16(self.max_authenticated_sessions);
         encoder.put_u16(self.outstanding_allocations);
         encoder.put_u16(self.active_matches);
         encoder.put_u32(self.heartbeat_ms);
+        encoder.put_u32(u32::try_from(self.raw_catalog.len()).map_err(|_| CodecError::Oversize)?);
+        encoder.put_bytes(&self.raw_catalog);
+        encoder.put_bytes(&self.raw_catalog_fingerprint);
         encoder.put_u128(self.nonce);
         Ok(encoder.finish())
     }
@@ -213,14 +218,14 @@ impl LobbyManifestV1 {
         };
         let mut bytes = prefix;
         bytes.extend_from_slice(&digest);
-        if bytes.len() > MAX_MANIFEST_BYTES {
+        if bytes.len() > MAX_LOBBY_MANIFEST_BYTES {
             return Err(CodecError::Oversize);
         }
         Ok(bytes)
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, CodecError> {
-        if bytes.len() > MAX_MANIFEST_BYTES {
+        if bytes.len() > MAX_LOBBY_MANIFEST_BYTES {
             return Err(CodecError::Oversize);
         }
         if bytes.len() < 32 {
@@ -229,14 +234,28 @@ impl LobbyManifestV1 {
         let split = bytes.len() - 32;
         let mut decoder = Decoder::new(&bytes[..split]);
         let common = decode_common(&mut decoder, Self::ROLE)?;
+        let default_route_id = crate::RouteId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
+        let max_authenticated_sessions = decoder.u16()?;
+        let outstanding_allocations = decoder.u16()?;
+        let active_matches = decoder.u16()?;
+        let heartbeat_ms = decoder.u32()?;
+        let catalog_length = usize::try_from(decoder.u32()?).map_err(|_| CodecError::Oversize)?;
+        if catalog_length == 0 || catalog_length > MAX_LOBBY_CATALOG_BYTES {
+            return Err(CodecError::Oversize);
+        }
+        let raw_catalog = decoder.take(catalog_length)?.to_vec();
         let value = Self {
             common,
-            mode: GameMode::try_from(decoder.u16()?)?,
-            default_route_id: crate::RouteId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
-            max_authenticated_sessions: decoder.u16()?,
-            outstanding_allocations: decoder.u16()?,
-            active_matches: decoder.u16()?,
-            heartbeat_ms: decoder.u32()?,
+            default_route_id,
+            max_authenticated_sessions,
+            outstanding_allocations,
+            active_matches,
+            heartbeat_ms,
+            raw_catalog,
+            raw_catalog_fingerprint: decoder
+                .take(32)?
+                .try_into()
+                .expect("exact catalog digest width"),
             nonce: decoder.u128()?,
             digest: bytes[split..].try_into().expect("exact digest width"),
         };
@@ -253,11 +272,19 @@ impl LobbyManifestV1 {
             || self.outstanding_allocations == 0
             || self.active_matches == 0
             || self.heartbeat_ms == 0
+            || self.raw_catalog.is_empty()
+            || self.raw_catalog.len() > MAX_LOBBY_CATALOG_BYTES
+            || raw_catalog_fingerprint(&self.raw_catalog) != self.raw_catalog_fingerprint
         {
             return Err(CodecError::InvalidValue);
         }
         Ok(())
     }
+}
+
+#[must_use]
+pub fn raw_catalog_fingerprint(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
 }
 
 /// A participant entry in a match manifest.
@@ -467,8 +494,6 @@ impl MatchManifestV1 {
     }
 }
 
-/// Compatibility alias used by callers that do not need the v1 suffix.
-pub type LobbyManifest = LobbyManifestV1;
 /// Compatibility alias used by callers that do not need the v1 suffix.
 pub type MatchManifest = MatchManifestV1;
 

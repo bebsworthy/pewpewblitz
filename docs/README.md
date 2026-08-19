@@ -16,7 +16,7 @@ The project is intentionally starting with the gameplay loop. Production matchma
 - [Gameplay MVP](./05-gameplay-mvp.md) — the smallest playable slice, milestones, and acceptance criteria.
 - [Research sources](./06-research-sources.md) — external references used for the baseline.
 - [MVP asset shortlist](./07-mvp-asset-shortlist.md) — open/licensed stand-in tilemaps, characters, props, and icons.
-- [Network architecture](./08-network-architecture.md) — authority model, Lightyear replication, Bevy server/client world composition, and local network testing.
+- [Network architecture](./08-network-architecture.md) — authority model, global application-protocol evolution, Lightyear replication, Bevy server/client world composition, and local network testing.
 - [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) — future-facing environment catalog, composable region properties, concealment, and network interest management.
 - [Bots](./10-bots.md) — decision record for player-filling bots as external headless clients, first-version scope, and open questions.
 - [Art and presentation direction](./11-art-and-presentation-direction.md) — validated visual style, owned blob-template terrain contract, skeleton character rig and skins, VFX architecture, and rendering decisions.

@@ -765,7 +765,7 @@ fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
         query.iter(world).any(|status| {
             matches!(
                 status.phase,
-                ClientJoinPhase::Rejected(brawler::protocol::JoinRejection::MatchInProgress)
+                ClientJoinPhase::Rejected(brawler::protocol::MatchJoinRejection::MatchInProgress)
             )
         })
     });

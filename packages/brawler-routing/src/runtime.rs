@@ -179,10 +179,6 @@ enum ReadyTarget {
 
 struct RuntimeWorker {
     registration: WorkerRegistration,
-    /// The mode admitted by the digest-validated lobby manifest.  Allocation requests are
-    /// accepted only when their mode remains bound to this value; a lobby must not be able to
-    /// turn a match request into a different mode after supervisor admission.
-    lobby_mode: Option<crate::GameMode>,
     listeners: Option<UnixWorkerListeners>,
     pending_packet: Option<mio::net::UnixStream>,
     pending_control: Option<mio::net::UnixStream>,
@@ -238,7 +234,6 @@ impl RuntimeWorker {
     fn new(registration: WorkerRegistration) -> Self {
         Self {
             registration,
-            lobby_mode: None,
             listeners: None,
             pending_packet: None,
             pending_control: None,
@@ -453,20 +448,6 @@ impl SupervisorRuntime {
             .is_none_or(|worker| worker.registration.kind != WorkerKind::Lobby)
         {
             return Ok(());
-        }
-        let Some(lobby_mode) = self
-            .workers
-            .get(&lobby_worker_id)
-            .and_then(|worker| worker.lobby_mode)
-        else {
-            return Err(RuntimeError::Routing(
-                RoutingErrorCategory::ManifestIncompatible,
-            ));
-        };
-        if request.mode != lobby_mode {
-            return Err(RuntimeError::Routing(
-                RoutingErrorCategory::WorkerProtocolConflict,
-            ));
         }
         if self.allocations.len() >= MAX_TRACKED_ALLOCATIONS {
             self.queue_control_body(
@@ -1059,22 +1040,19 @@ impl SupervisorRuntime {
         let worker_id = spec.registration.worker_id;
         let registration = spec.registration;
         let manifest_body = spec.manifest.clone();
-        let (pending_default_route, lobby_mode) = if registration.kind == WorkerKind::Lobby {
-            let manifest = crate::LobbyManifestV1::decode(&manifest_body.manifest)
+        let pending_default_route = if registration.kind == WorkerKind::Lobby {
+            let manifest = crate::LobbyManifest::decode(&manifest_body.manifest)
                 .map_err(|_| RuntimeError::Routing(RoutingErrorCategory::ManifestMalformed))?;
-            (
-                Some(RouteRegistration {
-                    route_id: manifest.default_route_id,
-                    worker_id,
-                    peer_id: PeerId::new(manifest.default_route_id.get()).ok_or(
-                        RuntimeError::Routing(RoutingErrorCategory::ManifestIdentity),
-                    )?,
-                    is_default_lobby: true,
-                }),
-                Some(manifest.mode),
-            )
+            Some(RouteRegistration {
+                route_id: manifest.default_route_id,
+                worker_id,
+                peer_id: PeerId::new(manifest.default_route_id.get()).ok_or(
+                    RuntimeError::Routing(RoutingErrorCategory::ManifestIdentity),
+                )?,
+                is_default_lobby: true,
+            })
         } else {
-            (None, None)
+            None
         };
         let runtime = self.runtime_dir.as_ref().ok_or(RuntimeError::Routing(
             RoutingErrorCategory::SupervisorShutdown,
@@ -1092,7 +1070,6 @@ impl SupervisorRuntime {
         self.register_worker_listener(registration, listeners)?;
         if let Some(worker) = self.workers.get_mut(&worker_id) {
             worker.pending_default_route = pending_default_route;
-            worker.lobby_mode = lobby_mode;
         }
         Ok(events)
     }

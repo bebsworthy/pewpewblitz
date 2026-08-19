@@ -14,9 +14,9 @@ use crate::{
     movement::{AvianNetworkPlugin, CAMERA_VERTICAL_SPAN},
     protocol::{
         BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
-        ClientHello, Fighter, FighterInput, JoinOutcome, JoinRejection, MatchCommand,
-        MatchCommandOutcome, MatchCommandRequest, MatchRouteGrantV1, NetworkEntityId, PlayerId,
-        ProtocolFingerprint, ProtocolPlugin, SessionChannel,
+        Fighter, FighterInput, LobbyHello, LobbyJoinOutcome, MatchCommand, MatchCommandOutcome,
+        MatchCommandRequest, MatchHello, MatchJoinOutcome, MatchJoinRejection, MatchRouteGrant,
+        NetworkEntityId, PlayerId, ProtocolFingerprint, ProtocolPlugin, SessionChannel,
     },
 };
 use avian2d::prelude::{AngularVelocity, LinearVelocity, PhysicsSystems, Position, Rotation};
@@ -51,16 +51,20 @@ use std::env;
 
 mod assets;
 mod audio;
+mod connection_persistence;
+mod flow;
 mod hud;
 mod input;
 #[cfg(feature = "owner-prediction")]
 pub mod prediction;
 mod presentation;
 mod routed_udp;
+mod server_select;
 mod session;
 mod settings;
 mod shell;
 pub(crate) use assets::ClientAssetHandles;
+pub use flow::{ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError, FlowErrorAction};
 #[allow(clippy::wildcard_imports)]
 use input::*;
 pub use presentation::{ClientPresentationPlugin, MovementPresentationPlugin};
@@ -69,6 +73,7 @@ use presentation::{
     clamp_camera_center, update_client_hud, write_interpolated_fighter_pose_to_transform,
 };
 pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
+pub use server_select::{LogicalServerAddress, ServerAddressHost, parse_server_address};
 pub use session::ClientNetworkPlugin;
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
@@ -79,7 +84,7 @@ pub use settings::{
     CalibrationField, ClientInputSettings, GamepadAction, GamepadBindings, KeyboardAction,
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
-pub use shell::{ClientShellPlugin, ShellOverlay};
+pub use shell::ClientShellPlugin;
 
 /// Explicit client-side state for the sequential routed transport lifecycle.
 ///
@@ -107,7 +112,7 @@ pub struct RoutedClientLifecycle {
     pub current_request_id: Option<RequestId>,
     /// The one grant accepted for the current lobby request. Its capability is redacted by the
     /// protocol and routing types when this resource is logged or formatted for diagnostics.
-    pub accepted_grant: Option<MatchRouteGrantV1>,
+    pub accepted_grant: Option<MatchRouteGrant>,
     /// Monotonic local generation. Every fresh lobby or match Netcode entity gets a new value.
     pub generation: u64,
 }
@@ -125,7 +130,7 @@ impl RoutedClientLifecycle {
     }
 
     /// Accept exactly one authenticated grant for the current lobby request.
-    pub fn accept_grant(&mut self, grant: MatchRouteGrantV1) -> bool {
+    pub fn accept_grant(&mut self, grant: MatchRouteGrant) -> bool {
         if self.phase != RoutedClientPhase::Lobby || self.accepted_grant.is_some() {
             return false;
         }
@@ -145,7 +150,7 @@ impl RoutedClientLifecycle {
         true
     }
 
-    fn begin_match(&mut self) -> Option<MatchRouteGrantV1> {
+    fn begin_match(&mut self) -> Option<MatchRouteGrant> {
         if self.phase != RoutedClientPhase::AwaitingLobbyUnlink {
             return None;
         }
@@ -180,8 +185,32 @@ pub enum ClientJoinPhase {
         player_id: PlayerId,
         network_entity_id: NetworkEntityId,
     },
-    Rejected(JoinRejection),
+    LobbyActive {
+        player_id: PlayerId,
+    },
+    Rejected(MatchJoinRejection),
     Disconnected,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ClientLobbyMembership {
+    pub player_id: PlayerId,
+    pub accepted_display_name: String,
+    pub server_name: String,
+    pub catalog_revision: crate::lobby::CatalogRevision,
+    pub game_types: Vec<crate::lobby::AdvertisedGameType>,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub enum ClientLobbyFailure {
+    Rejected(crate::protocol::LobbyJoinRejection),
+    InvalidWelcome,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeLobbyTarget {
+    pub logical_address: String,
+    pub proposed_display_name: String,
 }
 
 #[derive(Component, Debug)]
@@ -549,7 +578,7 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
             .resource::<ClientNetworkConfig>()
             .presents_product_shell()
         {
-            app.add_plugins(ClientShellPlugin);
+            app.add_plugins((ClientFlowPlugin, ClientShellPlugin));
         }
         if let Some(schedule) = screenshot_schedule {
             std::fs::create_dir_all(&schedule.dir).expect("screenshot directory is creatable");

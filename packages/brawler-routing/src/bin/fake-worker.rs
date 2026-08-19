@@ -218,9 +218,7 @@ fn parse_args(
 
 fn manifest_digest(manifest: &ManifestBody) -> Result<[u8; 32], Box<dyn std::error::Error>> {
     match manifest.role {
-        WorkerRole::Lobby => {
-            Ok(brawler_routing::LobbyManifestV1::decode(&manifest.manifest)?.digest)
-        }
+        WorkerRole::Lobby => Ok(brawler_routing::LobbyManifest::decode(&manifest.manifest)?.digest),
         WorkerRole::Match => {
             Ok(brawler_routing::MatchManifestV1::decode(&manifest.manifest)?.digest)
         }

@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <IP:PORT>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> [--exit-after-lobby-return] --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
     );
 }
 
@@ -61,11 +61,12 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut client_id = None;
     let mut server = None;
     let mut local_addr = None;
-    let mut transport = NetworkTransport::Udp;
+    let mut transport = None;
     let mut headless = false;
     let mut auto_connect = false;
     let mut exit_after_roster = None;
     let mut exit_after_lobby_return = false;
+    let mut exit_after_lobby_welcome = false;
     let mut headless_move = None;
     let mut headless_aim = None;
     let mut headless_aim_at_dummy = false;
@@ -83,15 +84,16 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--client-id" => client_id = Some(parse_value(&flag, args.next())?),
-            "--server" => server = Some(parse_value::<SocketAddr>(&flag, args.next())?),
+            "--server" => server = Some(args.next().ok_or("--server requires a value")?),
             "--local-addr" => local_addr = Some(parse_value::<SocketAddr>(&flag, args.next())?),
-            "--transport" => transport = parse_transport(&flag, args.next())?,
+            "--transport" => transport = Some(parse_transport(&flag, args.next())?),
             "--headless" => headless = true,
             "--auto-connect" => auto_connect = true,
             "--exit-after-roster" => {
                 exit_after_roster = Some(parse_value(&flag, args.next())?);
             }
             "--exit-after-lobby-return" => exit_after_lobby_return = true,
+            "--exit-after-lobby-welcome" => exit_after_lobby_welcome = true,
             "--move-axis" => headless_move = Some(parse_axis(&flag, args.next())?),
             "--aim-axis" => headless_aim = Some(parse_axis(&flag, args.next())?),
             "--aim-dummy" => headless_aim_at_dummy = true,
@@ -125,14 +127,19 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let noninteractive =
         auto_connect || headless || windowed_combat_demo || windowed_controller_demo;
     let client_id = match (client_id, noninteractive) {
-        (Some(client_id), _) => client_id,
+        (Some(_), false) => {
+            return Err("--client-id is not accepted by the interactive product shell".to_string());
+        }
+        (Some(client_id), true) => client_id,
         (None, true) => {
             return Err("--client-id is required with auto-connect or automation".to_string());
         }
-        (None, false) => 1,
+        (None, false) => random_nonzero_client_id()?,
     };
-    if headless && exit_after_roster.is_none() {
-        return Err("--headless requires --exit-after-roster".to_string());
+    if headless && exit_after_roster.is_none() && !exit_after_lobby_welcome {
+        return Err(
+            "--headless requires --exit-after-lobby-welcome or --exit-after-roster".to_string(),
+        );
     }
     if !headless && exit_after_roster.is_some() {
         return Err("--exit-after-roster requires --headless".to_string());
@@ -141,7 +148,19 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
         return Err("--controller-demo requires a windowed client".to_string());
     }
     let mut config = ClientNetworkConfig::new(client_id);
-    config.server_addr = server.unwrap_or(config.server_addr);
+    if noninteractive {
+        config.server_addr = server
+            .as_deref()
+            .map(str::parse::<SocketAddr>)
+            .transpose()
+            .map_err(|_| "--server must be a numeric socket address in automation".to_string())?
+            .unwrap_or(config.server_addr);
+    } else {
+        config.product_server_prefill = server;
+    }
+    if !noninteractive && local_addr.is_some() {
+        return Err("--local-addr is not accepted by the interactive product shell".to_string());
+    }
     // A routed IPv6 supervisor must be reached from an IPv6 client socket. Preserve the
     // historical loopback defaults for IPv4 while deriving the local family from an explicitly
     // selected server address. `--local-addr` remains available for a concrete interface or
@@ -154,12 +173,20 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             .parse()
             .expect("default IPv6 local address is valid"),
     });
-    config.transport = transport;
+    config.transport = transport.unwrap_or(if noninteractive {
+        NetworkTransport::Udp
+    } else {
+        NetworkTransport::RoutedUdp
+    });
+    if !noninteractive && config.transport != NetworkTransport::RoutedUdp {
+        return Err("the interactive product shell requires --transport routed-udp".to_string());
+    }
     config.headless = headless;
     config.auto_connect =
         auto_connect || headless || windowed_combat_demo || windowed_controller_demo;
     config.exit_after_roster = exit_after_roster;
     config.exit_after_lobby_return = exit_after_lobby_return;
+    config.exit_after_lobby_welcome = exit_after_lobby_welcome;
     config.headless_move = headless_move;
     config.headless_aim = headless_aim;
     config.headless_aim_at_dummy = headless_aim_at_dummy;
@@ -186,6 +213,19 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
         .validate()
         .map_err(|error| format!("invalid client configuration: {error}"))?;
     Ok(config)
+}
+
+fn random_nonzero_client_id() -> Result<u64, String> {
+    for _ in 0..4 {
+        let mut bytes = [0_u8; 8];
+        getrandom::fill(&mut bytes)
+            .map_err(|error| format!("OS entropy unavailable for client identity: {error}"))?;
+        let id = u64::from_ne_bytes(bytes);
+        if id != 0 {
+            return Ok(id);
+        }
+    }
+    Err("OS entropy repeatedly produced a zero client identity".to_string())
 }
 
 fn parse_window_size(flag: &str, value: Option<String>) -> Result<(u16, u16), String> {

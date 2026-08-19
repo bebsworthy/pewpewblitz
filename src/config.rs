@@ -209,6 +209,8 @@ pub struct ClientNetworkConfig {
     pub transport: NetworkTransport,
     pub network_protocol_id: u64,
     pub client_id: u64,
+    /// Editable logical address prefill for the interactive product shell.
+    pub product_server_prefill: Option<String>,
     pub expected_protocol_version: u16,
     pub expected_build_version: String,
     pub connect_timeout: Duration,
@@ -220,6 +222,8 @@ pub struct ClientNetworkConfig {
     /// In routed headless automation, wait for the completed match to tear down and a fresh
     /// lobby session to be accepted before exiting successfully.
     pub exit_after_lobby_return: bool,
+    /// Headless M03 boundary: exit successfully after one authenticated lobby welcome.
+    pub exit_after_lobby_welcome: bool,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
     pub headless_aim_at_dummy: bool,
@@ -265,6 +269,7 @@ impl ClientNetworkConfig {
             transport: NetworkTransport::Udp,
             network_protocol_id: crate::protocol::NETWORK_PROTOCOL_ID,
             client_id,
+            product_server_prefill: None,
             expected_protocol_version: crate::protocol::SUPPORTED_PROTOCOL_VERSION,
             expected_build_version: crate::VERSION.to_string(),
             connect_timeout: Duration::from_secs(5),
@@ -273,6 +278,7 @@ impl ClientNetworkConfig {
             auto_connect: false,
             exit_after_roster: None,
             exit_after_lobby_return: false,
+            exit_after_lobby_welcome: false,
             headless_move: None,
             headless_aim: None,
             headless_aim_at_dummy: false,
@@ -294,6 +300,12 @@ impl ClientNetworkConfig {
         }
         if self.exit_after_lobby_return && !self.headless {
             return Err("--exit-after-lobby-return requires --headless".to_string());
+        }
+        if self.exit_after_lobby_welcome && !self.headless {
+            return Err("--exit-after-lobby-welcome requires --headless".to_string());
+        }
+        if self.exit_after_lobby_welcome && self.transport != NetworkTransport::RoutedUdp {
+            return Err("--exit-after-lobby-welcome requires --transport routed-udp".to_string());
         }
         if self.exit_after_lobby_return && self.transport != NetworkTransport::RoutedUdp {
             return Err("--exit-after-lobby-return requires --transport routed-udp".to_string());

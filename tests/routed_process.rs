@@ -16,7 +16,7 @@ use std::{
 use brawler::server::{default_build_identity, routing_identity};
 use brawler_routing::{
     AllocateParticipant, AllocateRequestBody, AllocationPolicy, CONTROL_VERSION_V1, CoreConfig,
-    GameMode, Generation, LifecycleEvent, LobbyManifestV1, LobbySessionId, LogicalServerId,
+    GameMode, Generation, LifecycleEvent, LobbyManifest, LobbySessionId, LogicalServerId,
     ManifestBody, ManifestCommon, NetcodeClientId, PACKET_VERSION_V1, PlayerId, ProcessId,
     ProcessSupervisorConfig, ROUTE_VERSION_V1, RequestId, RoutingErrorCategory, RuntimeConfig,
     StderrPolicy, SupervisorRuntime, WorkerId, WorkerKind, WorkerLaunchSpec, WorkerRegistration,
@@ -72,7 +72,7 @@ fn lobby_spec() -> WorkerLaunchSpec {
     let identity = routing_identity().expect("production routing identity is computable");
     let worker_id = WorkerId::new(LOBBY_WORKER_ID).unwrap();
     let process_id = ProcessId::new(LOBBY_PROCESS_ID).unwrap();
-    let manifest = LobbyManifestV1 {
+    let manifest = LobbyManifest {
         common: ManifestCommon {
             manifest_version: 1,
             role: WorkerRole::Lobby,
@@ -88,12 +88,15 @@ fn lobby_spec() -> WorkerLaunchSpec {
             control_version: CONTROL_VERSION_V1,
             flags: 0,
         },
-        mode: GameMode::Wipeout,
         default_route_id: brawler_routing::RouteId::new(0x200).unwrap(),
         max_authenticated_sessions: 32,
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
+        raw_catalog: include_bytes!("../config/server/game-types.ron").to_vec(),
+        raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(include_bytes!(
+            "../config/server/game-types.ron"
+        )),
         nonce: 0x1234,
         digest: [0; 32],
     };

@@ -5,6 +5,10 @@
 //! machine is kept separate from the Bevy adapters so deterministic codec and idempotency tests do
 //! not need a running network endpoint.
 
+mod catalog;
+
+pub(crate) use catalog::resolve_operator_catalog;
+
 use super::{LobbyControlInbox, LobbyControlOutbox, RoutedPeer, ServerRoleResource};
 use crate::{
     VERSION,
@@ -12,15 +16,16 @@ use crate::{
     combat::{FighterDefinitions, STANDARD_FIGHTER_DEFINITION, WeaponCatalog},
     config::GameMode,
     content::GameplayContentFingerprint,
+    lobby::{duplicate_display_name, normalize_proposed_display_name},
     protocol::{
-        ClientHello, JoinOutcome, JoinRejection, MatchRouteGrantV1, RouteCapability,
+        LobbyHello, LobbyJoinOutcome, LobbyJoinRejection, MatchRouteGrant, RouteCapability,
         SUPPORTED_PROTOCOL_VERSION, SessionChannel,
     },
 };
 use bevy::prelude::*;
 use brawler_routing::{
     AllocateParticipant, AllocateRequestBody, AllocationGrantedBody, AllocationRejectedBody,
-    Capability, CodecError, ControlBody, ControlFrame, LobbyAuthenticatedBody, LobbyManifestV1,
+    Capability, CodecError, ControlBody, ControlFrame, LobbyAuthenticatedBody, LobbyManifest,
     LobbyNetcodeAuthenticatedBody, LobbySessionId, NetcodeClientId, PeerId, PlayerId, RequestId,
     RouteId,
 };
@@ -76,20 +81,22 @@ pub enum LobbySessionError {
     BuildVersionMismatch,
     RegistryMismatch,
     ContentMismatch,
+    InvalidName,
     IdentifierExhausted,
 }
 
 impl LobbySessionError {
-    const fn rejection(self) -> JoinRejection {
+    const fn rejection(self) -> LobbyJoinRejection {
         match self {
-            Self::ProtocolVersionMismatch => JoinRejection::ProtocolVersionMismatch,
-            Self::BuildVersionMismatch => JoinRejection::BuildVersionMismatch,
-            Self::RegistryMismatch => JoinRejection::RegistryMismatch,
-            Self::ContentMismatch => JoinRejection::ContentMismatch,
-            Self::InvalidClientId
-            | Self::NotRouted
-            | Self::ServerFull
-            | Self::IdentifierExhausted => JoinRejection::ServerFull,
+            Self::ProtocolVersionMismatch => LobbyJoinRejection::ProtocolVersionMismatch,
+            Self::BuildVersionMismatch => LobbyJoinRejection::BuildVersionMismatch,
+            Self::RegistryMismatch => LobbyJoinRejection::RegistryMismatch,
+            Self::ContentMismatch => LobbyJoinRejection::ContentMismatch,
+            Self::InvalidName => LobbyJoinRejection::InvalidName,
+            Self::IdentifierExhausted => LobbyJoinRejection::IdentifierExhausted,
+            Self::InvalidClientId | Self::NotRouted | Self::ServerFull => {
+                LobbyJoinRejection::ServerFull
+            }
         }
     }
 }
@@ -168,7 +175,7 @@ impl LobbySessionIdSource for OsLobbySessionIdSource {
 /// deterministic across runs and test harnesses.
 #[derive(Resource)]
 pub struct LobbyState {
-    manifest: LobbyManifestV1,
+    manifest: LobbyManifest,
     mode: GameMode,
     build: LobbyBuildIdentity,
     next_player_id: u64,
@@ -176,13 +183,15 @@ pub struct LobbyState {
     next_request_id: u64,
     session_ids: Box<dyn LobbySessionIdSource>,
     sessions: BTreeMap<NetcodeClientId, LobbySession>,
+    accepted_names: BTreeMap<NetcodeClientId, String>,
+    welcomed_clients: BTreeSet<NetcodeClientId>,
     /// These tombstones intentionally survive lobby-session teardown. Route, peer, and lobby
     /// session IDs are all fresh on handoff; the authenticated Netcode ID is the stable identity
     /// that prevents M01 from approximating M06 requeue.
     allocated_clients: BTreeSet<NetcodeClientId>,
     pending: Option<PendingAllocation>,
     allocation_completed: bool,
-    grants: BTreeMap<NetcodeClientId, MatchRouteGrantV1>,
+    grants: BTreeMap<NetcodeClientId, MatchRouteGrant>,
 }
 
 impl core::fmt::Debug for LobbyState {
@@ -200,13 +209,13 @@ impl core::fmt::Debug for LobbyState {
 
 impl LobbyState {
     #[must_use]
-    pub fn new(manifest: LobbyManifestV1, mode: GameMode, build: LobbyBuildIdentity) -> Self {
+    pub fn new(manifest: LobbyManifest, mode: GameMode, build: LobbyBuildIdentity) -> Self {
         Self::with_id_source(manifest, mode, build, OsLobbySessionIdSource)
     }
 
     #[must_use]
     pub fn with_id_source<S>(
-        manifest: LobbyManifestV1,
+        manifest: LobbyManifest,
         mode: GameMode,
         build: LobbyBuildIdentity,
         session_ids: S,
@@ -223,6 +232,8 @@ impl LobbyState {
             next_request_id: 1,
             session_ids: Box::new(session_ids),
             sessions: BTreeMap::new(),
+            accepted_names: BTreeMap::new(),
+            welcomed_clients: BTreeSet::new(),
             allocated_clients: BTreeSet::new(),
             pending: None,
             allocation_completed: false,
@@ -231,7 +242,7 @@ impl LobbyState {
     }
 
     #[must_use]
-    pub fn manifest(&self) -> &LobbyManifestV1 {
+    pub fn manifest(&self) -> &LobbyManifest {
         &self.manifest
     }
 
@@ -250,7 +261,7 @@ impl LobbyState {
         NetcodeClientId::new(client_id).and_then(|id| self.sessions.get(&id))
     }
 
-    fn validate_hello(&self, hello: &ClientHello) -> Result<(), LobbySessionError> {
+    fn validate_hello(&self, hello: &LobbyHello) -> Result<String, LobbySessionError> {
         if hello.protocol_version != SUPPORTED_PROTOCOL_VERSION {
             return Err(LobbySessionError::ProtocolVersionMismatch);
         }
@@ -265,7 +276,8 @@ impl LobbyState {
         {
             return Err(LobbySessionError::ContentMismatch);
         }
-        Ok(())
+        normalize_proposed_display_name(&hello.proposed_display_name)
+            .map_err(|_| LobbySessionError::InvalidName)
     }
 
     fn fresh_lobby_session_id(&mut self) -> Option<LobbySessionId> {
@@ -304,9 +316,9 @@ impl LobbyState {
         client_id: u64,
         route_id: RouteId,
         peer_id: PeerId,
-        hello: &ClientHello,
+        hello: &LobbyHello,
     ) -> Result<LobbySession, LobbySessionError> {
-        self.validate_hello(hello)?;
+        let proposed_name = self.validate_hello(hello)?;
         let client_id =
             NetcodeClientId::new(client_id).ok_or(LobbySessionError::InvalidClientId)?;
         if let Some(session) = self.sessions.get(&client_id) {
@@ -334,8 +346,35 @@ impl LobbyState {
                 .map_err(|_| LobbySessionError::IdentifierExhausted)?,
             build: self.build,
         };
+        let accepted_name = self.fresh_accepted_name(&proposed_name)?;
         self.sessions.insert(client_id, session);
+        self.accepted_names.insert(client_id, accepted_name);
         Ok(session)
+    }
+
+    fn fresh_accepted_name(&self, base: &str) -> Result<String, LobbySessionError> {
+        for suffix in
+            1..=u32::try_from(MAX_AUTHENTICATED_LOBBY_SESSIONS + 1).expect("session bound fits u32")
+        {
+            let candidate = if suffix == 1 {
+                base.to_string()
+            } else {
+                duplicate_display_name(base, suffix).map_err(|_| LobbySessionError::InvalidName)?
+            };
+            if !self.accepted_names.values().any(|name| name == &candidate) {
+                return Ok(candidate);
+            }
+        }
+        Err(LobbySessionError::IdentifierExhausted)
+    }
+
+    #[must_use]
+    pub fn accepted_name(&self, client_id: NetcodeClientId) -> Option<&str> {
+        self.accepted_names.get(&client_id).map(String::as_str)
+    }
+
+    fn mark_welcome_sent(&mut self, client_id: NetcodeClientId) -> bool {
+        self.welcomed_clients.insert(client_id)
     }
 
     /// Remove a disconnected client and revoke any local grant. BRCT v1 has no cancellation body,
@@ -343,6 +382,8 @@ impl LobbyState {
     pub fn remove_client(&mut self, client_id: u64) -> Option<LobbySession> {
         let id = NetcodeClientId::new(client_id)?;
         let session = self.sessions.remove(&id)?;
+        self.accepted_names.remove(&id);
+        self.welcomed_clients.remove(&id);
         self.grants.remove(&id);
         self.pending = None;
         self.allocation_completed = false;
@@ -480,7 +521,7 @@ impl LobbyState {
             if grant.activation_expiry_unix_ms > grant.route_expiry_unix_ms {
                 return Err(LobbyAllocationError::InvalidExpiry);
             }
-            let route_grant = MatchRouteGrantV1 {
+            let route_grant = MatchRouteGrant {
                 request_id,
                 allocation_id: body.allocation_id,
                 match_id: body.match_id,
@@ -539,7 +580,7 @@ impl LobbyState {
 
     /// Take one grant for the authenticated client.  A grant is never logged and is delivered at
     /// most once.
-    pub fn take_route_grant(&mut self, client_id: u64) -> Option<MatchRouteGrantV1> {
+    pub fn take_route_grant(&mut self, client_id: u64) -> Option<MatchRouteGrant> {
         NetcodeClientId::new(client_id).and_then(|id| self.grants.remove(&id))
     }
 }
@@ -568,7 +609,7 @@ impl core::fmt::Debug for LobbyClient {
     }
 }
 
-/// Installs only lobby session, allocation, and grant-delivery systems.
+/// Installs product lobby session ownership. Product sessions remain idle after authentication.
 pub struct LobbyPlugin;
 
 impl Plugin for LobbyPlugin {
@@ -578,17 +619,28 @@ impl Plugin for LobbyPlugin {
             .add_systems(Startup, initialize_lobby_state)
             .add_systems(
                 Update,
-                (
-                    lobby_cleanup_disconnected,
-                    lobby_receive_hellos,
-                    lobby_apply_control_frames,
-                    lobby_enqueue_allocation,
-                    lobby_deliver_grants,
-                )
-                    .chain(),
+                (lobby_cleanup_disconnected, lobby_receive_hellos).chain(),
             )
             .add_observer(lobby_client_removed)
             .add_observer(lobby_netcode_authenticated);
+    }
+}
+
+/// Explicit M01 evidence composition. Production lobby workers never install this plugin.
+pub(crate) struct LobbyTransitionDriverPlugin;
+
+impl Plugin for LobbyTransitionDriverPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                lobby_apply_control_frames,
+                lobby_enqueue_allocation,
+                lobby_deliver_grants,
+            )
+                .chain()
+                .after(lobby_receive_hellos),
+        );
     }
 }
 
@@ -669,17 +721,19 @@ fn initialize_lobby_state(
 
 #[allow(
     clippy::type_complexity,
+    clippy::needless_pass_by_value,
     reason = "the query is the one bounded lobby authentication transaction"
 )]
 fn lobby_receive_hellos(
     mut commands: Commands,
     mut state: ResMut<LobbyState>,
     mut outbox: ResMut<LobbyControlOutbox>,
+    catalog: Res<catalog::ResolvedLobbyCatalog>,
     mut receivers: Query<(
         Entity,
         &RemoteId,
-        &mut MessageReceiver<ClientHello>,
-        &mut MessageSender<JoinOutcome>,
+        &mut MessageReceiver<LobbyHello>,
+        &mut MessageSender<LobbyJoinOutcome>,
         Option<&RoutedPeer>,
         Option<&LobbyClient>,
         Has<Connected>,
@@ -710,7 +764,7 @@ fn lobby_receive_hellos(
                 (Some(client_id), Some(peer)) => state
                     .accept_client(client_id, peer.route_id, peer.peer_id, &hello)
                     .map_or_else(
-                        |error| JoinOutcome::Rejected {
+                        |error| LobbyJoinOutcome::Rejected {
                             reason: error.rejection(),
                         },
                         |session| {
@@ -726,20 +780,34 @@ fn lobby_receive_hellos(
                                     netcode_client_id: session.netcode_client_id,
                                 });
                             }
-                            JoinOutcome::Accepted {
+                            LobbyJoinOutcome::Accepted {
                                 player_id: crate::protocol::PlayerId(session.player_id.get()),
-                                network_entity_id: session.network_entity_id,
+                                accepted_display_name: state
+                                    .accepted_name(session.netcode_client_id)
+                                    .expect("accepted session owns a name")
+                                    .to_string(),
+                                server_name: catalog.server_name.clone(),
+                                catalog_revision: catalog.revision,
+                                game_types: catalog.game_types.clone(),
                             }
                         },
                     ),
-                (Some(_), None) => JoinOutcome::Rejected {
+                (Some(_), None) => LobbyJoinOutcome::Rejected {
                     reason: LobbySessionError::NotRouted.rejection(),
                 },
-                (None, _) => JoinOutcome::Rejected {
+                (None, _) => LobbyJoinOutcome::Rejected {
                     reason: LobbySessionError::InvalidClientId.rejection(),
                 },
             };
-            sender.send::<SessionChannel>(outcome);
+            let should_send = match &outcome {
+                LobbyJoinOutcome::Accepted { .. } => {
+                    netcode_client_id.is_some_and(|client_id| state.mark_welcome_sent(client_id))
+                }
+                LobbyJoinOutcome::Rejected { .. } => true,
+            };
+            if should_send {
+                sender.send::<SessionChannel>(outcome);
+            }
         }
     }
 }
@@ -768,7 +836,7 @@ fn lobby_enqueue_allocation(mut state: ResMut<LobbyState>, mut outbox: ResMut<Lo
 
 fn lobby_deliver_grants(
     mut state: ResMut<LobbyState>,
-    mut clients: Query<(&LobbyClient, &mut MessageSender<MatchRouteGrantV1>)>,
+    mut clients: Query<(&LobbyClient, &mut MessageSender<MatchRouteGrant>)>,
 ) {
     for (client, mut sender) in &mut clients {
         if let Some(grant) = state.take_route_grant(client.client_id.get()) {
@@ -782,8 +850,8 @@ mod tests {
     use super::*;
     use brawler_routing::{AllocationId, LogicalServerId, ManifestCommon, MatchId, WorkerRole};
 
-    fn manifest() -> LobbyManifestV1 {
-        LobbyManifestV1 {
+    fn manifest() -> LobbyManifest {
+        LobbyManifest {
             common: ManifestCommon {
                 manifest_version: 1,
                 role: WorkerRole::Lobby,
@@ -799,12 +867,15 @@ mod tests {
                 control_version: brawler_routing::CONTROL_VERSION_V1,
                 flags: 0,
             },
-            mode: brawler_routing::GameMode::Wipeout,
             default_route_id: RouteId::new(9).unwrap(),
             max_authenticated_sessions: 32,
             outstanding_allocations: 2,
             active_matches: 2,
             heartbeat_ms: 100,
+            raw_catalog: include_bytes!("../../../config/server/game-types.ron").to_vec(),
+            raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(include_bytes!(
+                "../../../config/server/game-types.ron"
+            )),
             nonce: 11,
             digest: [0; 32],
         }
@@ -820,12 +891,13 @@ mod tests {
         }
     }
 
-    fn hello() -> ClientHello {
-        ClientHello {
+    fn hello() -> LobbyHello {
+        LobbyHello {
             protocol_version: SUPPORTED_PROTOCOL_VERSION,
             build_version: VERSION.to_string(),
             registry_fingerprint: 7,
             content_fingerprint: GameplayContentFingerprint(8),
+            proposed_display_name: "Brawler-Test".to_string(),
         }
     }
 
@@ -959,6 +1031,35 @@ mod tests {
         assert_eq!(body.request_id.get(), 1);
         assert_eq!(body.participants[0].lobby_session_id.get(), 1);
         assert_eq!(body.participants[1].lobby_session_id.get(), 2);
+    }
+
+    #[test]
+    fn accepted_names_suffix_deterministically_and_welcome_is_once_per_session() {
+        let mut state = state();
+        for client_id in [11, 12, 13] {
+            state
+                .accept_client(
+                    client_id,
+                    RouteId::new(u128::from(client_id) + 10).unwrap(),
+                    PeerId::new(u128::from(client_id) + 20).unwrap(),
+                    &hello(),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            state.accepted_name(NetcodeClientId::new(11).unwrap()),
+            Some("Brawler-Test")
+        );
+        assert_eq!(
+            state.accepted_name(NetcodeClientId::new(12).unwrap()),
+            Some("Brawler-Test #2")
+        );
+        let third = NetcodeClientId::new(13).unwrap();
+        assert_eq!(state.accepted_name(third), Some("Brawler-Test #3"));
+        assert!(state.mark_welcome_sent(third));
+        assert!(!state.mark_welcome_sent(third));
+        assert!(state.remove_client(13).is_some());
+        assert!(state.mark_welcome_sent(third));
     }
 
     #[test]

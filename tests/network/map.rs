@@ -166,7 +166,7 @@ fn map_content_mismatch_rejects_before_fighter_spawn() {
         query.iter(world).next().is_some_and(|status| {
             matches!(
                 status.phase,
-                ClientJoinPhase::Rejected(brawler::protocol::JoinRejection::ContentMismatch)
+                ClientJoinPhase::Rejected(brawler::protocol::MatchJoinRejection::ContentMismatch)
             )
         })
     });

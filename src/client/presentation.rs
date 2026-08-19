@@ -386,6 +386,7 @@ pub(super) fn update_client_hud(
                 ClientJoinPhase::Connecting => "connecting",
                 ClientJoinPhase::AwaitingOutcome => "handshaking",
                 ClientJoinPhase::Active { .. } => "connected",
+                ClientJoinPhase::LobbyActive { .. } => "lobby",
                 ClientJoinPhase::Rejected(_) => "rejected",
                 ClientJoinPhase::Disconnected => "disconnected",
             });

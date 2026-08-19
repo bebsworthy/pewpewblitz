@@ -86,6 +86,45 @@ become gameplay truth.
 
 Use a shared gameplay plugin or module only for systems that genuinely execute on both server and client, primarily when prediction requires identical fixed-step behavior. Server-only match, validation, damage, score, terrain, and lifecycle rules remain server-only. Package and folder boundaries are implementation decisions made from feature and dependency evidence, not part of the network contract.
 
+## Application protocol compatibility and evolution
+
+Brawler uses one current Lightyear application-protocol schema guarded by one global compatibility
+handshake. Before a lobby or match authority admits the session, it validates exact agreement on:
+
+- `SUPPORTED_PROTOCOL_VERSION`;
+- the application build version;
+- the protocol-registry fingerprint covering registered inputs, replicated components, messages,
+  channels, directions, and delivery configuration; and
+- the gameplay-content fingerprint covering the shared authored definitions required by that
+  authority.
+
+Application messages use responsibility-based names such as `LobbyHello`, `LobbyJoinOutcome`,
+`MatchHello`, and `MatchJoinOutcome`; they do not carry `V1`/`V2` suffixes or negotiate independent
+message versions. There is one decoder for the current global protocol. An incompatible change to a
+registered message/component/input/channel shape, enum meaning, direction, delivery contract, or
+canonical application encoding increments `SUPPORTED_PROTOCOL_VERSION` and updates every client,
+server role, automation path, fixture, and protocol-fingerprint expectation atomically. A peer with
+a different global protocol, build, registry, or required content fingerprint is rejected rather
+than partially supported or retried with another message dialect.
+
+The compatibility hello remains small and decode-time bounded. A bounded hello that can be decoded
+but carries mismatched compatibility fields receives the relevant structured rejection; malformed
+or undecodable input is closed and classified as an incompatible handshake. All later variable
+collections and strings remain independently bounded at decode time even after compatibility has
+succeeded.
+
+Brawler does not maintain parallel application-message decoders, fallback hellos, or compatibility
+shims for unreleased schemas. A future need for rolling deployments, public-server/client skew, or a
+released migration window must return to architecture review and define the supported-version
+matrix, lifetime, negotiation boundary, and removal gate before adding such machinery.
+
+Independent schema/version fields remain appropriate when the artifact is decoded outside this
+Lightyear handshake or survives a connection: local persistence files, operator configuration,
+public route envelopes, packet/control IPC frames, and process manifests. Those versions protect
+their own storage or pre-handshake framing boundaries; they do not create per-message application
+compatibility. Each boundary still keeps only its current decoder unless a concrete deployment or
+migration requirement explicitly justifies more.
+
 ## Input and replication
 
 The client sends intent, not results. The exact Lightyear input type is selected during the relevant milestone; conceptually it contains:

@@ -19,6 +19,13 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
 - By explicit user direction on 2026-08-18, M02 is the bounded exception: its specification was
   prepared during M01 verification. M01 completed on 2026-08-19, the user validated M02 on
   2026-08-19, and the milestone returned to `Implementing` after its first implementation review.
+- By explicit user direction on 2026-08-19, M03 specification research overlapped M02's user
+  playtest/review. The user subsequently accepted M02 and directed M03 implementation on
+  2026-08-19; M02 is complete and M03 is the current delivery milestone.
+- By explicit user direction on 2026-08-19, M04 research and planning may overlap M03
+  implementation. M03 remains the current delivery milestone; the M04 research document does not
+  authorize M04 production implementation and must be reconciled against M03's delivered seams
+  before specification review.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -34,8 +41,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M02 — Product client shell, navigation, settings, and persistence |
+| Status | Feedback review |
+| Current milestone | M03 — Direct-connect lobby session and advertised game selection |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
@@ -44,9 +51,9 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | Milestone | Status | Deliverable | Plan |
 |---|---|---|---|
 | 01 | Complete | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
-| 02 | User playtest | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
-| 03 | Not started | Direct-connect lobby session and advertised game selection | Create when next |
-| 04 | Not started | Product build editor and authoritative queue admission | Create when next |
+| 02 | Complete | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
+| 03 | Feedback review | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
+| 04 | Researching | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
 | 05 | Not started | Exact formation, worker allocation, and match loading/handoff | Create when next |
 | 06 | Not started | Concurrent match lifecycle, results, and requeue | Create when next |
 | 07 | Not started | Combat HUD, menus, readability, and accessibility | Create when next |

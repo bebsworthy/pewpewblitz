@@ -3,13 +3,13 @@
 //! This binary owns one public UDP endpoint, a Mio owner loop, and one validated lobby-worker
 //! bootstrap through the control-plane manifest contract.
 
-use std::{error::Error, fs, net::SocketAddr, path::PathBuf};
+use std::{error::Error, fs, io::Read as _, net::SocketAddr, path::PathBuf};
 
 use brawler_routing::{
-    AllocationPolicy, CONTROL_VERSION_V1, CoreConfig, GameMode, Generation, LobbyManifestV1,
-    LogicalServerId, ManifestBody, ManifestCommon, PACKET_VERSION_V1, ProcessId,
-    ProcessSupervisorConfig, ROUTE_VERSION_V1, RuntimeConfig, SupervisorRuntime, WorkerKind,
-    WorkerLaunchSpec, WorkerRegistration, WorkerRole,
+    AllocationPolicy, CONTROL_VERSION_V1, CoreConfig, GameMode, Generation, LobbyManifest,
+    LogicalServerId, MAX_LOBBY_CATALOG_BYTES, ManifestBody, ManifestCommon, PACKET_VERSION_V1,
+    ProcessId, ProcessSupervisorConfig, ROUTE_VERSION_V1, RuntimeConfig, SupervisorRuntime,
+    WorkerKind, WorkerLaunchSpec, WorkerRegistration, WorkerRole, raw_catalog_fingerprint,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -26,6 +26,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let worker_executable = args
         .worker_executable
         .ok_or("--worker-executable is required")?;
+    let catalog_path = args.game_types.ok_or("--game-types is required")?;
+    let raw_catalog = read_catalog_file(&catalog_path)?;
     let logical_server_id = LogicalServerId::new(random_u128()?).ok_or("zero logical server ID")?;
     let generation = Generation::new(random_u64()?).ok_or("zero supervisor generation")?;
     let mut runtime = SupervisorRuntime::new(RuntimeConfig {
@@ -54,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let worker_generation = Generation::new(1).expect("constant generation is nonzero");
     let default_route_id =
         brawler_routing::RouteId::new(random_u128()?).ok_or("zero lobby route ID")?;
-    let manifest = LobbyManifestV1 {
+    let manifest = LobbyManifest {
         common: ManifestCommon {
             manifest_version: 1,
             role: WorkerRole::Lobby,
@@ -70,16 +72,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             control_version: CONTROL_VERSION_V1,
             flags: 0,
         },
-        mode: args.mode,
         default_route_id,
         max_authenticated_sessions: 32,
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
+        raw_catalog_fingerprint: raw_catalog_fingerprint(&raw_catalog),
+        raw_catalog,
         nonce: random_u128()?,
         digest: [0; 32],
     };
-    runtime.spawn_worker(WorkerLaunchSpec::new(
+    let mut lobby_spec = WorkerLaunchSpec::new(
         worker_executable,
         WorkerRegistration {
             worker_id,
@@ -88,7 +91,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             kind: WorkerKind::Lobby,
         },
         ManifestBody::from_lobby(&manifest)?,
-    ))?;
+    );
+    if args.automatic_transition_driver {
+        let transition_mode = match args.mode {
+            GameMode::Wipeout => "wipeout",
+            GameMode::HotZone => "hot-zone",
+        };
+        lobby_spec = lobby_spec
+            .with_environment("BRAWLER_LOBBY_TRANSITION_DRIVER", "1")
+            .with_environment("BRAWLER_LOBBY_TRANSITION_MODE", transition_mode);
+    }
+    runtime.spawn_worker(lobby_spec)?;
     let stop = runtime.stop_handle();
     ctrlc::set_handler(move || {
         let _ = stop.request();
@@ -99,6 +112,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         write_metrics(&runtime, &path)?;
     }
     Ok(())
+}
+
+fn read_catalog_file(path: &PathBuf) -> Result<Vec<u8>, Box<dyn Error>> {
+    let file = fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(u64::try_from(MAX_LOBBY_CATALOG_BYTES + 1)?)
+        .read_to_end(&mut bytes)?;
+    if bytes.is_empty() || bytes.len() > MAX_LOBBY_CATALOG_BYTES {
+        return Err("game-type catalog must contain 1..=16384 bytes".into());
+    }
+    Ok(bytes)
 }
 
 /// Write a deliberately small, stable, machine-readable snapshot for local evidence runs.
@@ -269,8 +293,10 @@ struct Arguments {
     content_fingerprint: Option<u64>,
     worker_executable: Option<PathBuf>,
     metrics_file: Option<PathBuf>,
+    game_types: Option<PathBuf>,
     rules_profile: u8,
     mode: GameMode,
+    automatic_transition_driver: bool,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<dyn Error>> {
@@ -281,8 +307,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
         content_fingerprint: None,
         worker_executable: None,
         metrics_file: None,
+        game_types: None,
         rules_profile: 1,
         mode: GameMode::Wipeout,
+        automatic_transition_driver: false,
     };
     while let Some(argument) = args.next() {
         if argument == "--bind" {
@@ -314,6 +342,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
             parsed.metrics_file = Some(PathBuf::from(
                 args.next().ok_or("--metrics-file requires a path")?,
             ));
+        } else if argument == "--game-types" {
+            parsed.game_types = Some(PathBuf::from(
+                args.next().ok_or("--game-types requires a path")?,
+            ));
         } else if argument == "--match-rules" {
             parsed.rules_profile = match args
                 .next()
@@ -334,9 +366,11 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
                 "hot-zone" => GameMode::HotZone,
                 _ => return Err("--mode requires wipeout or hot-zone".into()),
             };
+        } else if argument == "--automatic-transition-driver" {
+            parsed.automatic_transition_driver = true;
         } else if argument == "--help" || argument == "-h" {
             println!(
-                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH [--bind IP:PORT] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>] [--metrics-file PATH]"
+                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--automatic-transition-driver] [--bind IP:PORT] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>] [--metrics-file PATH]"
             );
             std::process::exit(0);
         } else {

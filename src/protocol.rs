@@ -51,7 +51,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 13;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 14;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -231,11 +231,51 @@ impl MapEntities for FighterInput {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ClientHello {
+pub struct MatchHello {
     pub protocol_version: u16,
     pub build_version: String,
     pub registry_fingerprint: u64,
     pub content_fingerprint: GameplayContentFingerprint,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct LobbyHello {
+    pub protocol_version: u16,
+    pub build_version: String,
+    pub registry_fingerprint: u64,
+    pub content_fingerprint: GameplayContentFingerprint,
+    #[serde(deserialize_with = "crate::lobby::deserialize_player_name")]
+    pub proposed_display_name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum LobbyJoinOutcome {
+    Accepted {
+        player_id: PlayerId,
+        #[serde(deserialize_with = "crate::lobby::deserialize_accepted_player_name")]
+        accepted_display_name: String,
+        #[serde(deserialize_with = "crate::lobby::deserialize_presentation_name")]
+        server_name: String,
+        catalog_revision: crate::lobby::CatalogRevision,
+        #[serde(deserialize_with = "crate::lobby::deserialize_game_types")]
+        game_types: Vec<crate::lobby::AdvertisedGameType>,
+    },
+    Rejected {
+        reason: LobbyJoinRejection,
+    },
+}
+
+pub const MAX_LOBBY_WELCOME_BYTES: usize = 12 * 1024;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum LobbyJoinRejection {
+    ProtocolVersionMismatch,
+    BuildVersionMismatch,
+    RegistryMismatch,
+    ContentMismatch,
+    ServerFull,
+    InvalidName,
+    IdentifierExhausted,
 }
 
 /// A route selector capability delivered over the authenticated lobby session.
@@ -295,7 +335,7 @@ impl core::fmt::Display for RouteCapability {
 /// Netcode credential; the match worker still authenticates the fresh session and checks the
 /// immutable participant manifest.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct MatchRouteGrantV1 {
+pub struct MatchRouteGrant {
     pub request_id: RequestId,
     pub allocation_id: AllocationId,
     pub match_id: MatchId,
@@ -307,7 +347,7 @@ pub struct MatchRouteGrantV1 {
     pub route_expiry_unix_ms: u64,
 }
 
-impl MatchRouteGrantV1 {
+impl MatchRouteGrant {
     fn validate(&self) -> Result<(), &'static str> {
         if self.activation_expiry_unix_ms > self.route_expiry_unix_ms {
             return Err("activation expiry must not exceed route expiry");
@@ -316,10 +356,10 @@ impl MatchRouteGrantV1 {
     }
 }
 
-impl core::fmt::Debug for MatchRouteGrantV1 {
+impl core::fmt::Debug for MatchRouteGrant {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
-            .debug_struct("MatchRouteGrantV1")
+            .debug_struct("MatchRouteGrant")
             .field("request_id", &self.request_id)
             .field("allocation_id", &self.allocation_id)
             .field("match_id", &self.match_id)
@@ -334,7 +374,7 @@ impl core::fmt::Debug for MatchRouteGrantV1 {
 }
 
 #[derive(Serialize, Deserialize)]
-struct MatchRouteGrantV1Wire {
+struct MatchRouteGrantWire {
     request_id: u64,
     allocation_id: u128,
     match_id: u128,
@@ -346,13 +386,13 @@ struct MatchRouteGrantV1Wire {
     route_expiry_unix_ms: u64,
 }
 
-impl Serialize for MatchRouteGrantV1 {
+impl Serialize for MatchRouteGrant {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         self.validate().map_err(serde::ser::Error::custom)?;
-        MatchRouteGrantV1Wire {
+        MatchRouteGrantWire {
             request_id: self.request_id.get(),
             allocation_id: self.allocation_id.get(),
             match_id: self.match_id.get(),
@@ -370,12 +410,12 @@ impl Serialize for MatchRouteGrantV1 {
     }
 }
 
-impl<'de> Deserialize<'de> for MatchRouteGrantV1 {
+impl<'de> Deserialize<'de> for MatchRouteGrant {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let wire = MatchRouteGrantV1Wire::deserialize(deserializer)?;
+        let wire = MatchRouteGrantWire::deserialize(deserializer)?;
         let request_id = RequestId::new(wire.request_id)
             .ok_or_else(|| serde::de::Error::custom("request ID must be nonzero"))?;
         let allocation_id = AllocationId::new(wire.allocation_id)
@@ -479,18 +519,18 @@ pub struct MatchCommandOutcome {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub enum JoinOutcome {
+pub enum MatchJoinOutcome {
     Accepted {
         player_id: PlayerId,
         network_entity_id: NetworkEntityId,
     },
     Rejected {
-        reason: JoinRejection,
+        reason: MatchJoinRejection,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub enum JoinRejection {
+pub enum MatchJoinRejection {
     ProtocolVersionMismatch,
     BuildVersionMismatch,
     RegistryMismatch,
@@ -546,11 +586,15 @@ impl Plugin for ProtocolPlugin {
             .add_plugins(crate::builds::BuildContentPlugin)
             .add_plugins(crate::map::MapContentPlugin)
             .add_systems(Startup, initialize_content_fingerprint);
-        app.register_message::<ClientHello>()
+        app.register_message::<MatchHello>()
             .add_direction(NetworkDirection::ClientToServer);
-        app.register_message::<JoinOutcome>()
+        app.register_message::<MatchJoinOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<MatchRouteGrantV1>()
+        app.register_message::<LobbyHello>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<LobbyJoinOutcome>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<MatchRouteGrant>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<BuildSelectionRequest>()
             .add_direction(NetworkDirection::ClientToServer);
@@ -706,9 +750,11 @@ mod tests {
         });
         app.add_plugins(ProtocolPlugin);
 
-        assert!(app.is_message_registered::<ClientHello>());
-        assert!(app.is_message_registered::<JoinOutcome>());
-        assert!(app.is_message_registered::<MatchRouteGrantV1>());
+        assert!(app.is_message_registered::<MatchHello>());
+        assert!(app.is_message_registered::<MatchJoinOutcome>());
+        assert!(app.is_message_registered::<LobbyHello>());
+        assert!(app.is_message_registered::<LobbyJoinOutcome>());
+        assert!(app.is_message_registered::<MatchRouteGrant>());
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());
         assert!(app.is_message_registered::<CombatCue>());
@@ -807,13 +853,49 @@ mod tests {
 
     #[test]
     fn session_messages_round_trip_with_serde() {
-        let message = JoinOutcome::Accepted {
+        let message = MatchJoinOutcome::Accepted {
             player_id: PlayerId(4),
             network_entity_id: NetworkEntityId(9),
         };
         let bytes = postcard::to_allocvec(&message).expect("message serializes");
-        let decoded: JoinOutcome = postcard::from_bytes(&bytes).expect("message deserializes");
+        let decoded: MatchJoinOutcome = postcard::from_bytes(&bytes).expect("message deserializes");
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn lobby_welcome_decoder_rejects_collection_and_normalization_overruns() {
+        let game_type = crate::lobby::AdvertisedGameType {
+            id: crate::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
+            configuration_revision: 1,
+            display_name: "Wipeout 2v2".to_string(),
+            mode_definition_id: crate::map::ModeDefinitionId(2),
+            map_preset_ids: vec![crate::map::MapPresetId(1)],
+            team_count: 2,
+            players_per_team: 2,
+            rules_summary: crate::lobby::AdvertisedRulesSummary::Wipeout {
+                target_score: 10,
+                active_limit_ticks: 10_800,
+            },
+        };
+        let oversized = LobbyJoinOutcome::Accepted {
+            player_id: PlayerId(1),
+            accepted_display_name: "Player One".to_string(),
+            server_name: "Local Brawler".to_string(),
+            catalog_revision: crate::lobby::CatalogRevision([1; 32]),
+            game_types: vec![game_type.clone(); crate::lobby::MAX_GAME_TYPES + 1],
+        };
+        let bytes = postcard::to_allocvec(&oversized).unwrap();
+        assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
+
+        let invalid_name = LobbyJoinOutcome::Accepted {
+            player_id: PlayerId(1),
+            accepted_display_name: "Cafe\u{301}".to_string(),
+            server_name: "Local Brawler".to_string(),
+            catalog_revision: crate::lobby::CatalogRevision([1; 32]),
+            game_types: vec![game_type],
+        };
+        let bytes = postcard::to_allocvec(&invalid_name).unwrap();
+        assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
     }
 
     #[test]
@@ -831,7 +913,7 @@ mod tests {
 
     #[test]
     fn match_route_grant_round_trips_and_rejects_zero_identity() {
-        let message = MatchRouteGrantV1 {
+        let message = MatchRouteGrant {
             request_id: RequestId::new(1).expect("nonzero request ID"),
             allocation_id: AllocationId::new(2).expect("nonzero allocation ID"),
             match_id: MatchId::new(3).expect("nonzero match ID"),
@@ -844,17 +926,17 @@ mod tests {
             route_expiry_unix_ms: 1_700_000_600_000,
         };
         let bytes = postcard::to_allocvec(&message).expect("grant serializes");
-        let decoded: MatchRouteGrantV1 = postcard::from_bytes(&bytes).expect("grant deserializes");
+        let decoded: MatchRouteGrant = postcard::from_bytes(&bytes).expect("grant deserializes");
         assert_eq!(decoded, message);
 
         let mut zero_request = bytes;
         zero_request[0] = 0;
-        assert!(postcard::from_bytes::<MatchRouteGrantV1>(&zero_request).is_err());
+        assert!(postcard::from_bytes::<MatchRouteGrant>(&zero_request).is_err());
     }
 
     #[test]
     fn match_route_grant_rejects_activation_after_route_expiry() {
-        let message = MatchRouteGrantV1 {
+        let message = MatchRouteGrant {
             request_id: RequestId::new(1).unwrap(),
             allocation_id: AllocationId::new(2).unwrap(),
             match_id: MatchId::new(3).unwrap(),
@@ -867,7 +949,7 @@ mod tests {
         };
         assert!(postcard::to_allocvec(&message).is_err());
 
-        let wire = MatchRouteGrantV1Wire {
+        let wire = MatchRouteGrantWire {
             request_id: 1,
             allocation_id: 2,
             match_id: 3,
@@ -879,12 +961,12 @@ mod tests {
             route_expiry_unix_ms: 2,
         };
         let bytes = postcard::to_allocvec(&wire).unwrap();
-        assert!(postcard::from_bytes::<MatchRouteGrantV1>(&bytes).is_err());
+        assert!(postcard::from_bytes::<MatchRouteGrant>(&bytes).is_err());
     }
 
     #[test]
     fn match_route_grant_debug_redacts_capability_bytes() {
-        let message = MatchRouteGrantV1 {
+        let message = MatchRouteGrant {
             request_id: RequestId::new(11).expect("nonzero request ID"),
             allocation_id: AllocationId::new(12).expect("nonzero allocation ID"),
             match_id: MatchId::new(13).expect("nonzero match ID"),
@@ -943,7 +1025,7 @@ mod tests {
             );
             assert!(
                 world
-                    .get::<MessageSender<MatchRouteGrantV1>>(client_link)
+                    .get::<MessageSender<MatchRouteGrant>>(client_link)
                     .is_none()
             );
             assert!(
@@ -994,7 +1076,7 @@ mod tests {
             );
             assert!(
                 world
-                    .get::<MessageSender<MatchRouteGrantV1>>(server_link)
+                    .get::<MessageSender<MatchRouteGrant>>(server_link)
                     .is_some()
             );
         }

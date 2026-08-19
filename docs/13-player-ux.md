@@ -253,7 +253,7 @@ Overlays: BuildEditor, Settings, Credits, InMatchMenu, Scoreboard,
 | **Title** | Product hub | Play, Practice, Settings, Credits, Quit; logo/version | Missing |
 | **ServerSelect** | Choose a known server | Direct address, explicit favorites, recent servers, Back | `--server` only |
 | **Connecting** | Establish a lobby session | DNS/transport, handshake, compatibility, game-type catalog; Cancel | Partial `ClientJoinPhase`; currently also assumes match readiness |
-| **GameSelect** | Choose an advertised game type | Mode, map pool, topology, rules summary, pool count; edit build | Missing advertisement/UI |
+| **GameSelect** | Choose an advertised game type | Mode, map pool, topology, rules summary; M04 adds honest pool state and build editing | Missing advertisement/UI |
 | **BuildEditor** | Create the next queue build | Presets, bounded fields, budget, stats, confirm/cancel | Debug-only overlay; validation exists |
 | **Queue** | Wait for exact formation | Game type, `queued/needed`, accepted build, Cancel | Missing |
 | **MatchLoading** | Prepare one reserved match | Selected map/mode, map/assets/terrain sync, participant check-in, timeout | Existing readiness pieces, wrong lifecycle location |
@@ -330,7 +330,7 @@ authority. The lifecycle changes:
 |---|---|---|
 | Non-fatal windowed lifecycle | Debug-only → change | Transition to flow/error UI; retain headless exit contracts |
 | Lobby session identity/name | Missing | Server-sanitized session display name over stable numeric identity |
-| Game-type advertisement | Missing | Bounded stable IDs/revisions, modes, map pool, exact topology, rules summary, and queue count |
+| Game-type advertisement | Missing | Bounded stable IDs/revisions, modes, map pool, exact topology, and rules summary; revisioned queue counts begin with real M04 pools |
 | Queue commands and snapshots | Missing | Reliable in-band requests/acks with ticket identity, revisioned aggregate pool state, and explicit rejection reasons |
 | Match reservation/loading | Missing | Match allocation, targeted sync, check-in deadline, dissolution/requeue policy |
 | Leave/cancel/disconnect | Missing | Separate idempotent intents with distinct membership effects |

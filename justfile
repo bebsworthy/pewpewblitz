@@ -198,6 +198,14 @@ network:
 network-routed-smoke:
     BRAWLER_NETWORK_HEADLESS=1 ./scripts/network-routed.sh
 
+# Reach the M03 authenticated product-lobby boundary without installing the M01 transition driver.
+network-product-lobby-smoke:
+    BRAWLER_NETWORK_HEADLESS=1 ./scripts/network-product-lobby.sh
+
+# Launch the normal product Title/Server Select flow against an idle production lobby.
+network-product-lobby:
+    BRAWLER_NETWORK_HEADLESS=0 ./scripts/network-product-lobby.sh
+
 # Run the same production routed smoke over the IPv6 loopback address. The client derives an IPv6
 # local socket from the selected server address; this is a separate opt-in check because many
 # development hosts disable IPv6 loopback.

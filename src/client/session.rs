@@ -12,6 +12,13 @@ pub struct ClientNetworkPlugin;
 #[derive(Component, Clone, Copy, Debug)]
 pub(super) struct RoutedTransitionDeadline(pub(super) Duration);
 
+/// Defers `Connect` until the freshly spawned client entity and all transport components are
+/// materialized in the `World`. Product-shell connections are created from an `Update` system;
+/// triggering `Connect` in that same deferred spawn boundary can run transport observers before
+/// their query can see the new `RoutedUdpIo`, leaving the first attempt without a bound socket.
+#[derive(Component)]
+pub(super) struct PendingClientConnect;
+
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
         if app.world().resource::<ClientNetworkConfig>().transport == NetworkTransport::RoutedUdp {
@@ -60,6 +67,8 @@ impl Plugin for ClientNetworkPlugin {
             .add_systems(
                 Update,
                 (
+                    connect_spawned_clients,
+                    finish_spawned_client_connect,
                     send_client_hello,
                     process_join_outcome,
                     process_match_route_grant,
@@ -352,6 +361,7 @@ fn spawn_client_entity(
                 LocalAddr(config.local_addr),
                 PeerAddr(config.server_addr),
                 io,
+                PendingClientConnect,
                 Name::new(format!("Brawler routed client {}", config.client_id)),
             ))
             .id()
@@ -366,11 +376,81 @@ fn spawn_client_entity(
                 LocalAddr(config.local_addr),
                 PeerAddr(config.server_addr),
                 UdpIo::default(),
+                PendingClientConnect,
                 Name::new(format!("Brawler client {}", config.client_id)),
             ))
             .id()
     };
-    commands.trigger(Connect { entity });
+    Ok(entity)
+}
+
+/// Start a client only after its deferred spawn has reached the world. This system is first in
+/// the session chain, so connection observers complete before later session observation while
+/// preserving the normal Lightyear receive/send schedules.
+#[allow(clippy::needless_pass_by_value)]
+fn connect_spawned_clients(
+    mut commands: Commands,
+    clients: Query<Entity, Added<PendingClientConnect>>,
+) {
+    for entity in &clients {
+        // NetcodeClient's required initial lifecycle markers are useful for a statically spawned
+        // endpoint, but a product-shell entity lives for one deferred boundary before this
+        // system runs. Clear those initial markers first so they cannot be observed as a real
+        // failed attempt before `Connect` installs `Connecting` and the routed socket's `Linked`.
+        commands.entity(entity).remove::<(Unlinked, Disconnected)>();
+        commands.trigger(Connect { entity });
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn finish_spawned_client_connect(
+    mut commands: Commands,
+    clients: Query<Entity, (With<PendingClientConnect>, With<Connecting>)>,
+) {
+    for entity in &clients {
+        commands.entity(entity).remove::<PendingClientConnect>();
+    }
+}
+
+pub(super) struct ProductLobbyAttempt {
+    pub started_at: Duration,
+    pub server_addr: std::net::SocketAddr,
+    pub logical_address: String,
+    pub proposed_display_name: String,
+    pub netcode_timeout: Duration,
+}
+
+pub(super) fn spawn_product_lobby_connection(
+    commands: &mut Commands,
+    config: &ClientNetworkConfig,
+    routed: &mut RoutedClientLifecycle,
+    attempt: ProductLobbyAttempt,
+) -> Result<Entity> {
+    let mut attempt_config = config.clone();
+    attempt_config.server_addr = attempt.server_addr;
+    attempt_config.local_addr = match attempt.server_addr {
+        std::net::SocketAddr::V4(_) => "0.0.0.0:0".parse().expect("wildcard IPv4 address is valid"),
+        std::net::SocketAddr::V6(_) => "[::]:0".parse().expect("wildcard IPv6 address is valid"),
+    };
+    attempt_config.connect_timeout = attempt.netcode_timeout;
+    routed.start_lobby();
+    let generation = routed.generation;
+    let entity = spawn_client_entity(
+        commands,
+        &attempt_config,
+        attempt.started_at,
+        Some((
+            RoutedUdpIo::lobby(attempt.server_addr),
+            RoutedClientSession {
+                generation,
+                kind: RoutedClientSessionKind::Lobby,
+            },
+        )),
+    )?;
+    commands.entity(entity).insert(RuntimeLobbyTarget {
+        logical_address: attempt.logical_address,
+        proposed_display_name: attempt.proposed_display_name,
+    });
     Ok(entity)
 }
 
@@ -438,20 +518,43 @@ pub(super) fn send_client_hello(
     mut query: Query<
         (
             &mut ClientJoinStatus,
-            &mut MessageSender<ClientHello>,
+            Option<&mut MessageSender<MatchHello>>,
+            Option<&mut MessageSender<LobbyHello>>,
             Option<&RoutedClientSession>,
+            Option<&RuntimeLobbyTarget>,
         ),
         (With<Client>, With<Connected>),
     >,
 ) {
-    for (mut status, mut sender, routed_session) in query.iter_mut() {
+    for (mut status, match_sender, lobby_sender, routed_session, runtime_target) in query.iter_mut()
+    {
         if matches!(status.phase, ClientJoinPhase::Connecting) {
-            sender.send::<SessionChannel>(ClientHello {
-                protocol_version: config.expected_protocol_version,
-                build_version: config.expected_build_version.clone(),
-                registry_fingerprint: fingerprint.0,
-                content_fingerprint: *content_fingerprint,
-            });
+            if routed_session.is_some_and(|session| session.kind == RoutedClientSessionKind::Lobby)
+            {
+                let Some(mut sender) = lobby_sender else {
+                    continue;
+                };
+                sender.send::<SessionChannel>(LobbyHello {
+                    protocol_version: config.expected_protocol_version,
+                    build_version: config.expected_build_version.clone(),
+                    registry_fingerprint: fingerprint.0,
+                    content_fingerprint: *content_fingerprint,
+                    proposed_display_name: runtime_target.map_or_else(
+                        || crate::lobby::generated_display_name(config.client_id),
+                        |target| target.proposed_display_name.clone(),
+                    ),
+                });
+            } else {
+                let Some(mut sender) = match_sender else {
+                    continue;
+                };
+                sender.send::<SessionChannel>(MatchHello {
+                    protocol_version: config.expected_protocol_version,
+                    build_version: config.expected_build_version.clone(),
+                    registry_fingerprint: fingerprint.0,
+                    content_fingerprint: *content_fingerprint,
+                });
+            }
             status.phase = ClientJoinPhase::AwaitingOutcome;
             status.started_at = time.elapsed();
             info!("brawler client connected; awaiting compatibility outcome");
@@ -874,18 +977,20 @@ pub(super) fn update_build_selection_overlay(
 
 /// Map one server join rejection to the stable failure category its evidence belongs to.
 pub(super) fn join_rejection_category(
-    reason: &JoinRejection,
+    reason: &MatchJoinRejection,
 ) -> crate::diagnostics::FailureCategory {
     match reason {
-        JoinRejection::ProtocolVersionMismatch
-        | JoinRejection::BuildVersionMismatch
-        | JoinRejection::RegistryMismatch => crate::diagnostics::FailureCategory::ProtocolMismatch,
-        JoinRejection::ContentMismatch => crate::diagnostics::FailureCategory::ContentMismatch,
-        JoinRejection::HandshakeTimeout => crate::diagnostics::FailureCategory::Timeout,
-        JoinRejection::ServerFull
-        | JoinRejection::MatchFull
-        | JoinRejection::MatchInProgress
-        | JoinRejection::IdentifierExhausted => {
+        MatchJoinRejection::ProtocolVersionMismatch
+        | MatchJoinRejection::BuildVersionMismatch
+        | MatchJoinRejection::RegistryMismatch => {
+            crate::diagnostics::FailureCategory::ProtocolMismatch
+        }
+        MatchJoinRejection::ContentMismatch => crate::diagnostics::FailureCategory::ContentMismatch,
+        MatchJoinRejection::HandshakeTimeout => crate::diagnostics::FailureCategory::Timeout,
+        MatchJoinRejection::ServerFull
+        | MatchJoinRejection::MatchFull
+        | MatchJoinRejection::MatchInProgress
+        | MatchJoinRejection::IdentifierExhausted => {
             crate::diagnostics::FailureCategory::ShutdownIncomplete
         }
     }
@@ -913,15 +1018,22 @@ fn record_client_failure(
 
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+    clippy::type_complexity,
+    clippy::too_many_lines,
+    reason = "the role-specific ordered outcome decoder keeps conflict and terminal policy visible"
 )]
 pub(super) fn process_join_outcome(
+    mut commands: Commands,
     mut query: Query<
         (
+            Entity,
             &mut ClientJoinStatus,
-            Option<&mut MessageReceiver<JoinOutcome>>,
+            Option<&mut MessageReceiver<MatchJoinOutcome>>,
+            Option<&mut MessageReceiver<LobbyJoinOutcome>>,
+            Option<&RoutedClientSession>,
+            Option<&ClientLobbyMembership>,
         ),
-        With<Client>,
+        (With<Client>, Without<PendingClientConnect>),
     >,
     config: Res<ClientNetworkConfig>,
     routed: Res<RoutedClientLifecycle>,
@@ -929,50 +1041,144 @@ pub(super) fn process_join_outcome(
     mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
-    for (mut status, receiver) in query.iter_mut() {
-        let Some(mut receiver) = receiver else {
-            continue;
-        };
-        for outcome in receiver.receive() {
-            match outcome {
-                JoinOutcome::Accepted {
-                    player_id,
-                    network_entity_id,
-                } => {
-                    info!(
-                        player_id = player_id.0,
-                        network_entity_id = network_entity_id.0,
-                        "brawler client accepted"
-                    );
-                    status.phase = ClientJoinPhase::Active {
+    for (entity, mut status, match_receiver, lobby_receiver, routed_session, membership) in
+        query.iter_mut()
+    {
+        if let Some(mut receiver) = match_receiver {
+            for outcome in receiver.receive() {
+                match outcome {
+                    MatchJoinOutcome::Accepted {
                         player_id,
                         network_entity_id,
-                    };
-                }
-                JoinOutcome::Rejected { reason } => {
-                    if config.transport == NetworkTransport::RoutedUdp
-                        && matches!(
-                            routed.phase,
-                            RoutedClientPhase::AwaitingLobbyUnlink
-                                | RoutedClientPhase::AwaitingLobbyRetryUnlink
-                                | RoutedClientPhase::AwaitingMatchUnlink
-                        )
-                    {
-                        warn!(
-                            ?reason,
-                            "ignoring join rejection during routed session teardown"
+                    } => {
+                        info!(
+                            player_id = player_id.0,
+                            network_entity_id = network_entity_id.0,
+                            "brawler client accepted"
                         );
+                        status.phase = ClientJoinPhase::Active {
+                            player_id,
+                            network_entity_id,
+                        };
+                    }
+                    MatchJoinOutcome::Rejected { reason } => {
+                        if config.transport == NetworkTransport::RoutedUdp
+                            && matches!(
+                                routed.phase,
+                                RoutedClientPhase::AwaitingLobbyUnlink
+                                    | RoutedClientPhase::AwaitingLobbyRetryUnlink
+                                    | RoutedClientPhase::AwaitingMatchUnlink
+                            )
+                        {
+                            warn!(
+                                ?reason,
+                                "ignoring join rejection during routed session teardown"
+                            );
+                            continue;
+                        }
+                        warn!(?reason, "brawler client rejected");
+                        record_client_failure(
+                            diagnostics.as_ref(),
+                            &mut classification,
+                            join_rejection_category(&reason),
+                            format!("join rejected: {reason:?}"),
+                        );
+                        status.phase = ClientJoinPhase::Rejected(reason);
+                        app_exit.write(AppExit::error());
+                    }
+                }
+            }
+        }
+        if !routed_session.is_some_and(|session| session.kind == RoutedClientSessionKind::Lobby) {
+            continue;
+        }
+        let Some(mut receiver) = lobby_receiver else {
+            continue;
+        };
+        let mut accepted_this_batch: Option<ClientLobbyMembership> = None;
+        let mut rejected_this_batch = false;
+        for outcome in receiver.receive() {
+            match outcome {
+                LobbyJoinOutcome::Accepted {
+                    player_id,
+                    accepted_display_name,
+                    server_name,
+                    catalog_revision,
+                    game_types,
+                } => {
+                    let accepted = ClientLobbyMembership {
+                        player_id,
+                        accepted_display_name,
+                        server_name,
+                        catalog_revision,
+                        game_types,
+                    };
+                    if crate::lobby::validate_catalog(&accepted.game_types).is_err()
+                        || crate::lobby::catalog_revision(&accepted.game_types).ok()
+                            != Some(catalog_revision)
+                        || rejected_this_batch
+                        || membership.is_some_and(|previous| previous != &accepted)
+                        || accepted_this_batch
+                            .as_ref()
+                            .is_some_and(|previous| previous != &accepted)
+                    {
+                        if config.presents_product_shell() {
+                            commands
+                                .entity(entity)
+                                .insert(ClientLobbyFailure::InvalidWelcome);
+                            status.phase = ClientJoinPhase::Disconnected;
+                        } else {
+                            record_client_failure(
+                                diagnostics.as_ref(),
+                                &mut classification,
+                                crate::diagnostics::FailureCategory::ProtocolMismatch,
+                                "lobby advertised an invalid or conflicting welcome".to_string(),
+                            );
+                            app_exit.write(AppExit::error());
+                        }
                         continue;
                     }
-                    warn!(?reason, "brawler client rejected");
-                    record_client_failure(
-                        diagnostics.as_ref(),
-                        &mut classification,
-                        join_rejection_category(&reason),
-                        format!("join rejected: {reason:?}"),
-                    );
-                    status.phase = ClientJoinPhase::Rejected(reason);
-                    app_exit.write(AppExit::error());
+                    if membership == Some(&accepted)
+                        || accepted_this_batch.as_ref() == Some(&accepted)
+                    {
+                        continue;
+                    }
+                    commands.entity(entity).insert(accepted.clone());
+                    accepted_this_batch = Some(accepted);
+                    status.phase = ClientJoinPhase::LobbyActive { player_id };
+                    info!(player_id = player_id.0, "brawler lobby client accepted");
+                    if config.exit_after_lobby_welcome {
+                        app_exit.write(AppExit::Success);
+                    }
+                }
+                LobbyJoinOutcome::Rejected { reason } => {
+                    if membership.is_some() || accepted_this_batch.is_some() {
+                        if config.presents_product_shell() {
+                            commands
+                                .entity(entity)
+                                .insert(ClientLobbyFailure::InvalidWelcome);
+                            status.phase = ClientJoinPhase::Disconnected;
+                        } else {
+                            app_exit.write(AppExit::error());
+                        }
+                        continue;
+                    }
+                    rejected_this_batch = true;
+                    warn!(?reason, "brawler lobby client rejected");
+                    if config.presents_product_shell() {
+                        commands
+                            .entity(entity)
+                            .insert(ClientLobbyFailure::Rejected(reason));
+                        status.phase = ClientJoinPhase::Disconnected;
+                    } else {
+                        record_client_failure(
+                            diagnostics.as_ref(),
+                            &mut classification,
+                            crate::diagnostics::FailureCategory::ProtocolMismatch,
+                            format!("lobby join rejected: {reason:?}"),
+                        );
+                        app_exit.write(AppExit::error());
+                    }
                 }
             }
         }
@@ -995,7 +1201,7 @@ pub(super) fn observe_fresh_lobby_return(
     if query.iter().any(|(session, status)| {
         session.kind == RoutedClientSessionKind::Lobby
             && session.generation >= 3
-            && matches!(status.phase, ClientJoinPhase::Active { .. })
+            && matches!(status.phase, ClientJoinPhase::LobbyActive { .. })
     }) {
         info!("brawler client authenticated a fresh lobby after match completion");
         app_exit.write(AppExit::Success);
@@ -1010,7 +1216,7 @@ fn process_match_route_grant(
     mut receivers: Query<
         (
             &RoutedClientSession,
-            Option<&mut MessageReceiver<MatchRouteGrantV1>>,
+            Option<&mut MessageReceiver<MatchRouteGrant>>,
         ),
         With<Client>,
     >,
@@ -1121,7 +1327,7 @@ fn observe_routed_transition(
     lifecycle: Res<RoutedClientLifecycle>,
     query: Query<(Entity, Option<&Unlinked>), With<RoutedClientSession>>,
 ) {
-    if config.transport != NetworkTransport::RoutedUdp {
+    if config.transport != NetworkTransport::RoutedUdp || config.presents_product_shell() {
         return;
     }
     for (entity, unlinked) in &query {
@@ -1222,7 +1428,7 @@ pub(super) fn enforce_routed_timeout(
         With<Client>,
     >,
 ) {
-    if config.transport != NetworkTransport::RoutedUdp {
+    if !owns_automatic_routed_recovery(&config) {
         return;
     }
     let now = time.elapsed();
@@ -1280,6 +1486,10 @@ pub(super) fn enforce_routed_timeout(
     }
 }
 
+fn owns_automatic_routed_recovery(config: &ClientNetworkConfig) -> bool {
+    config.transport == NetworkTransport::RoutedUdp && !config.presents_product_shell()
+}
+
 pub(super) fn disconnect_rejected_client(
     mut commands: Commands,
     mut query: Query<(Entity, &mut ClientJoinStatus), With<Client>>,
@@ -1306,7 +1516,7 @@ pub(super) fn observe_client_lifecycle(
             Option<&Disconnected>,
             Has<Connecting>,
         ),
-        With<Client>,
+        (With<Client>, Without<PendingClientConnect>),
     >,
     diagnostics: Option<Res<crate::diagnostics::ProcessDiagnosticsSettings>>,
     mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
@@ -1342,7 +1552,9 @@ pub(super) fn observe_client_lifecycle(
                 format!("client disconnected: {reason:?}"),
             );
             status.phase = ClientJoinPhase::Disconnected;
-            app_exit.write(AppExit::error());
+            if !config.presents_product_shell() {
+                app_exit.write(AppExit::error());
+            }
         }
     }
 }
@@ -1478,5 +1690,69 @@ pub(super) fn finish_client_shutdown(
         && let Some(exit) = shutdown.requested_exit.take()
     {
         app_exits.write(exit);
+    }
+}
+
+#[cfg(test)]
+mod connection_start_tests {
+    use super::*;
+
+    #[derive(Component)]
+    struct CompleteConnectionFixture;
+
+    #[derive(Resource, Default)]
+    struct ObservedConnect(bool);
+
+    #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+    fn observe_connect_after_materialization(
+        trigger: On<Connect>,
+        fixtures: Query<
+            (),
+            (
+                With<CompleteConnectionFixture>,
+                Without<Unlinked>,
+                Without<Disconnected>,
+            ),
+        >,
+        mut commands: Commands,
+        mut observed: ResMut<ObservedConnect>,
+    ) {
+        observed.0 = fixtures.get(trigger.entity).is_ok();
+        commands.entity(trigger.entity).insert(Connecting);
+    }
+
+    #[test]
+    fn deferred_client_connect_runs_after_the_complete_entity_is_materialized() {
+        let mut app = App::new();
+        app.init_resource::<ObservedConnect>()
+            .add_observer(observe_connect_after_materialization)
+            .add_systems(
+                Update,
+                (connect_spawned_clients, finish_spawned_client_connect).chain(),
+            );
+        let entity = app
+            .world_mut()
+            .spawn((
+                PendingClientConnect,
+                CompleteConnectionFixture,
+                Unlinked::default(),
+                Disconnected::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().resource::<ObservedConnect>().0);
+        assert!(app.world().get::<PendingClientConnect>(entity).is_none());
+    }
+
+    #[test]
+    fn product_flow_is_the_only_owner_of_its_attempt_timeout() {
+        let mut config = ClientNetworkConfig::new(1);
+        config.transport = NetworkTransport::RoutedUdp;
+        assert!(!owns_automatic_routed_recovery(&config));
+
+        config.auto_connect = true;
+        assert!(owns_automatic_routed_recovery(&config));
     }
 }

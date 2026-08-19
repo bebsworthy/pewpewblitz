@@ -20,7 +20,7 @@ use crate::{
 #[cfg(test)]
 use bevy::app::TerminalCtrlCHandlerPlugin;
 use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, state::app::StatesPlugin};
-use brawler_routing::{LobbyManifestV1, MatchManifestParticipant, MatchManifestV1};
+use brawler_routing::{LobbyManifest, MatchManifestParticipant, MatchManifestV1};
 use lightyear::prelude::server::ServerPlugins;
 use lightyear::prelude::{PeerId, RemoteId};
 use std::collections::BTreeSet;
@@ -32,7 +32,7 @@ pub enum ServerRole {
     DirectBaseline,
     /// The isolated minimum lobby worker.  The lobby manifest is immutable for the process
     /// lifetime and arrives through the worker control stream before app construction.
-    LobbyWorker(LobbyManifestV1),
+    LobbyWorker(LobbyManifest),
     /// An isolated match worker with one immutable, validated participant manifest.
     MatchWorker(MatchManifestV1),
 }
@@ -59,7 +59,7 @@ impl ServerRoleResource {
     }
 
     #[must_use]
-    pub fn lobby_worker(manifest: LobbyManifestV1) -> Self {
+    pub fn lobby_worker(manifest: LobbyManifest) -> Self {
         Self(ServerRole::LobbyWorker(manifest))
     }
 
@@ -72,7 +72,7 @@ impl ServerRoleResource {
     }
 
     #[must_use]
-    pub fn lobby_manifest(&self) -> Option<&LobbyManifestV1> {
+    pub fn lobby_manifest(&self) -> Option<&LobbyManifest> {
         match &self.0 {
             ServerRole::LobbyWorker(manifest) => Some(manifest),
             ServerRole::DirectBaseline | ServerRole::MatchWorker(_) => None,
@@ -322,7 +322,7 @@ pub fn build_match_worker_app(
 /// identity and protocol before the first schedule runs.
 pub fn build_lobby_worker_app(
     config: ServerNetworkConfig,
-    manifest: LobbyManifestV1,
+    manifest: LobbyManifest,
 ) -> Result<App, MatchWorkerManifestError> {
     config
         .validate()
@@ -333,6 +333,8 @@ pub fn build_lobby_worker_app(
     if manifest.common.network_protocol != config.network_protocol_id {
         return Err(MatchWorkerManifestError::NetworkProtocolMismatch);
     }
+    let catalog = super::lobby::resolve_operator_catalog(&manifest.raw_catalog)
+        .map_err(MatchWorkerManifestError::Configuration)?;
     let mut app = App::new();
     app.insert_resource(config)
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
@@ -354,6 +356,7 @@ pub fn build_lobby_worker_app(
         manifest.common.content_fingerprint,
     )?;
     app.insert_resource(ServerRoleResource::lobby_worker(manifest));
+    app.insert_resource(catalog);
     Ok(app)
 }
 
@@ -568,7 +571,7 @@ mod tests {
             &identity_app.world().resource::<BuildCatalogResource>().0,
         )
         .unwrap();
-        let mut lobby = LobbyManifestV1 {
+        let mut lobby = LobbyManifest {
             common: ManifestCommon {
                 manifest_version: 1,
                 role: WorkerRole::Lobby,
@@ -584,12 +587,15 @@ mod tests {
                 control_version: brawler_routing::CONTROL_VERSION_V1,
                 flags: 0,
             },
-            mode: brawler_routing::GameMode::Wipeout,
             default_route_id: RouteId::new(13).unwrap(),
             max_authenticated_sessions: 32,
             outstanding_allocations: 2,
             active_matches: 4,
             heartbeat_ms: 1_000,
+            raw_catalog: include_bytes!("../../config/server/game-types.ron").to_vec(),
+            raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(include_bytes!(
+                "../../config/server/game-types.ron"
+            )),
             nonce: 14,
             digest: [0; 32],
         };

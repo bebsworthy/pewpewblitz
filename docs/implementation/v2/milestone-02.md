@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
+| Status | Complete |
 | Prepared | 2026-08-18, while M01 remains the current delivery milestone, by explicit user direction |
 | Objective | Replace the windowed auto-connect/debug entry with a functional controller-friendly shell and persistent local settings |
 | Entry dependency | M01 must complete before M02 enters `Implementing` |
@@ -256,8 +256,9 @@ Implementation starts only after M01 completes and the user validates this reduc
 
 - [x] Update canonical commands and README startup instructions.
 - [x] Run the focused automated checks below plus existing role/network regressions.
-- [ ] Perform the user's physical-controller walkthrough. The live keyboard walkthrough and a
-  real-`Gamepad` D-pad/South runtime test pass; physical feel remains the user-playtest item.
+- [x] Perform the user's physical-controller walkthrough. The live keyboard walkthrough and a
+  real-`Gamepad` D-pad/South runtime test pass; the user accepted M02 without further changes on
+  2026-08-19.
 - [x] Deliver the normal shell and explicit auto-connect playtest paths.
 
 ## Focused verification
@@ -298,7 +299,7 @@ defer broader combat accessibility and final visual tuning to M07.
 - [x] The three representative layouts remain readable and all controls are reachable.
 - [x] Headless, direct auto-connect, routed auto-connect, and server-only composition retain accepted
   behavior.
-- [ ] User playtest feedback is recorded and triaged before M02 is marked `Complete`.
+- [x] User playtest feedback is recorded and triaged before M02 is marked `Complete`.
 
 ## Implementation evidence — 2026-08-19
 
@@ -373,6 +374,18 @@ understandable at 960x540.
 Explicit network compatibility paths remain `just network-direct` and `just network`; both launch
 windowed clients with `--auto-connect`. The headless gates are `just network-direct-smoke` and
 `just network-routed-smoke`.
+
+## User feedback and learning review — 2026-08-19
+
+The user reported that M02 is fine and directed M03 implementation. No corrective feedback was
+requested, so the physical-controller feel item is accepted and no work is deferred from this
+review.
+
+The implementation review found schedule/input ownership, bounded file reads, and failure-copy
+accuracy issues before playtest. The corrective pass fixed those issues and added focused coverage.
+The reusable lesson for M03 is to make input ownership, schedule ordering, terminal policy, and
+bounded external input explicit at the composition boundary before expanding presentation. The
+existing repository guidance already captures those rules, so no new project skill is warranted.
 
 ## Explicit non-goals for implementation review
 

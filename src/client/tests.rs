@@ -159,6 +159,7 @@ fn routed_unexpected_disconnect_is_terminal_but_expected_handoff_is_not() {
     fn app_for(phase: RoutedClientPhase) -> App {
         let mut config = ClientNetworkConfig::new(1);
         config.transport = NetworkTransport::RoutedUdp;
+        config.auto_connect = true;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AppExit>()
@@ -177,9 +178,8 @@ fn routed_unexpected_disconnect_is_terminal_but_expected_handoff_is_not() {
                 kind: RoutedClientSessionKind::Lobby,
             },
             ClientJoinStatus {
-                phase: ClientJoinPhase::Active {
+                phase: ClientJoinPhase::LobbyActive {
                     player_id: PlayerId(1),
-                    network_entity_id: NetworkEntityId(1),
                 },
                 started_at: Duration::ZERO,
                 disconnect_requested: false,
@@ -230,9 +230,8 @@ fn routed_handoff_disconnects_netcode_before_unlinking_transport() {
                 kind: RoutedClientSessionKind::Lobby,
             },
             ClientJoinStatus {
-                phase: ClientJoinPhase::Active {
+                phase: ClientJoinPhase::LobbyActive {
                     player_id: PlayerId(1),
-                    network_entity_id: NetworkEntityId(1),
                 },
                 started_at: Duration::ZERO,
                 disconnect_requested: false,
@@ -253,6 +252,7 @@ fn routed_handoff_disconnects_netcode_before_unlinking_transport() {
 fn routed_connect_timeout_never_expires_an_active_lobby_or_match_session() {
     let mut config = ClientNetworkConfig::new(1);
     config.transport = NetworkTransport::RoutedUdp;
+    config.auto_connect = true;
     config.connect_timeout = Duration::from_secs(1);
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -313,6 +313,7 @@ fn routed_connect_timeout_never_expires_an_active_lobby_or_match_session() {
 fn routed_teardown_deadline_forces_stale_session_recovery() {
     let mut config = ClientNetworkConfig::new(1);
     config.transport = NetworkTransport::RoutedUdp;
+    config.auto_connect = true;
     config.connect_timeout = Duration::from_secs(1);
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -1171,40 +1172,43 @@ fn settings_overlay_reports_calibration_bindings_and_conflicts() {
 #[test]
 fn join_rejections_map_to_stable_failure_categories() {
     use crate::diagnostics::FailureCategory;
-    use crate::protocol::JoinRejection;
+    use crate::protocol::MatchJoinRejection;
 
     let cases = [
         (
-            JoinRejection::ProtocolVersionMismatch,
+            MatchJoinRejection::ProtocolVersionMismatch,
             FailureCategory::ProtocolMismatch,
         ),
         (
-            JoinRejection::BuildVersionMismatch,
+            MatchJoinRejection::BuildVersionMismatch,
             FailureCategory::ProtocolMismatch,
         ),
         (
-            JoinRejection::RegistryMismatch,
+            MatchJoinRejection::RegistryMismatch,
             FailureCategory::ProtocolMismatch,
         ),
         (
-            JoinRejection::ContentMismatch,
+            MatchJoinRejection::ContentMismatch,
             FailureCategory::ContentMismatch,
         ),
-        (JoinRejection::HandshakeTimeout, FailureCategory::Timeout),
         (
-            JoinRejection::ServerFull,
+            MatchJoinRejection::HandshakeTimeout,
+            FailureCategory::Timeout,
+        ),
+        (
+            MatchJoinRejection::ServerFull,
             FailureCategory::ShutdownIncomplete,
         ),
         (
-            JoinRejection::MatchFull,
+            MatchJoinRejection::MatchFull,
             FailureCategory::ShutdownIncomplete,
         ),
         (
-            JoinRejection::MatchInProgress,
+            MatchJoinRejection::MatchInProgress,
             FailureCategory::ShutdownIncomplete,
         ),
         (
-            JoinRejection::IdentifierExhausted,
+            MatchJoinRejection::IdentifierExhausted,
             FailureCategory::ShutdownIncomplete,
         ),
     ];
@@ -1221,7 +1225,7 @@ fn routed_grant_is_bound_to_the_current_session_and_accepted_once() {
     let mut lifecycle = RoutedClientLifecycle::default();
     lifecycle.start_lobby();
     let request_id = RequestId::new(41).expect("non-zero request ID");
-    let grant = MatchRouteGrantV1 {
+    let grant = MatchRouteGrant {
         request_id,
         allocation_id: AllocationId::new(2).expect("non-zero allocation ID"),
         match_id: MatchId::new(3).expect("non-zero match ID"),
@@ -1310,9 +1314,8 @@ fn routed_headless_return_exit_requires_a_fresh_lobby_generation() {
                 kind: RoutedClientSessionKind::Lobby,
             },
             ClientJoinStatus {
-                phase: ClientJoinPhase::Active {
+                phase: ClientJoinPhase::LobbyActive {
                     player_id: PlayerId(1),
-                    network_entity_id: NetworkEntityId(1),
                 },
                 started_at: Duration::ZERO,
                 disconnect_requested: false,

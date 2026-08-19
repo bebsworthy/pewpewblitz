@@ -46,8 +46,8 @@ pub use ipc::{
 };
 pub use limits::*;
 pub use manifest::{
-    GameMode, LobbyManifest, LobbyManifestV1, ManifestCommon, MatchManifest,
-    MatchManifestParticipant, MatchManifestV1, WorkerRole,
+    GameMode, LobbyManifest, ManifestCommon, MatchManifest, MatchManifestParticipant,
+    MatchManifestV1, WorkerRole, raw_catalog_fingerprint,
 };
 pub use memory::{MemoryBackend, MemoryDuplex};
 pub use metrics::{LatencyHistogram, RoutingMetrics, TrafficCounters};

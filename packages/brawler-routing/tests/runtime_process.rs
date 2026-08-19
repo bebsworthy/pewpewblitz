@@ -7,7 +7,7 @@ use std::{
 
 use brawler_routing::{
     AllocateParticipant, AllocateRequestBody, AllocationPolicy, CONTROL_VERSION_V1, CoreConfig,
-    GameMode, LifecycleEvent, LobbyManifestV1, ManifestBody, ManifestCommon, PACKET_VERSION_V1,
+    GameMode, LifecycleEvent, LobbyManifest, ManifestBody, ManifestCommon, PACKET_VERSION_V1,
     ProcessSupervisorConfig, ROUTE_VERSION_V1, RouteSelector, RuntimeConfig, StopId,
     SupervisorRuntime, WorkerKind, WorkerLaunchSpec, WorkerRegistration, WorkerRole,
 };
@@ -26,14 +26,14 @@ where
     T::try_from(value).unwrap()
 }
 
-fn launch_spec_for_mode(mode: GameMode) -> WorkerLaunchSpec {
+fn launch_lobby_spec() -> WorkerLaunchSpec {
     let registration = WorkerRegistration {
         worker_id: id128(7),
         process_id: id128(17),
         generation: id64(1),
         kind: WorkerKind::Lobby,
     };
-    let manifest = LobbyManifestV1 {
+    let manifest = LobbyManifest {
         common: ManifestCommon {
             manifest_version: 1,
             role: WorkerRole::Lobby,
@@ -49,12 +49,13 @@ fn launch_spec_for_mode(mode: GameMode) -> WorkerLaunchSpec {
             control_version: CONTROL_VERSION_V1,
             flags: 0,
         },
-        mode,
         default_route_id: id128(100),
         max_authenticated_sessions: 8,
         outstanding_allocations: 2,
         active_matches: 1,
         heartbeat_ms: 100,
+        raw_catalog: b"catalog".to_vec(),
+        raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(b"catalog"),
         nonce: 6,
         digest: [0; 32],
     };
@@ -66,7 +67,7 @@ fn launch_spec_for_mode(mode: GameMode) -> WorkerLaunchSpec {
 }
 
 fn launch_spec() -> WorkerLaunchSpec {
-    launch_spec_for_mode(GameMode::Wipeout)
+    launch_lobby_spec()
 }
 
 fn launch_spec_mode(mode: &str) -> WorkerLaunchSpec {
@@ -367,7 +368,7 @@ fn runtime_allocates_match_after_ready_and_deduplicates_request() {
 }
 
 #[test]
-fn runtime_rejects_allocation_mode_mismatch_and_isolates_lobby() {
+fn runtime_keeps_catalog_opaque_and_accepts_policy_supported_allocation_mode() {
     let logical_server_id = id128(1);
     let supervisor_generation = id64(2);
     let executable = PathBuf::from(env!("CARGO_BIN_EXE_brawler-routing-fake-worker"));
@@ -386,9 +387,7 @@ fn runtime_rejects_allocation_mode_mismatch_and_isolates_lobby() {
         ..RuntimeConfig::default()
     })
     .unwrap();
-    runtime
-        .spawn_worker(launch_spec_for_mode(GameMode::HotZone))
-        .unwrap();
+    runtime.spawn_worker(launch_lobby_spec()).unwrap();
 
     let lobby_started = Instant::now();
     let mut lobby_ready = false;
@@ -403,23 +402,17 @@ fn runtime_rejects_allocation_mode_mismatch_and_isolates_lobby() {
     }
     assert!(lobby_ready, "lobby worker did not become ready");
 
-    let error = runtime
+    let events = runtime
         .submit_allocation_request(id128(7), allocation_request())
-        .expect_err("a lobby cannot allocate a different manifest mode");
-    assert!(matches!(
-        error,
-        brawler_routing::RuntimeError::Routing(
-            brawler_routing::RoutingErrorCategory::WorkerProtocolConflict
-        )
-    ));
-    assert_eq!(runtime.core().worker_count(), 0);
-    assert_eq!(runtime.core().route_count(), 0);
-    assert_eq!(runtime.core().capability_count(), 0);
-    assert_eq!(
-        runtime.core().metrics().error_counts
-            [&brawler_routing::RoutingErrorCategory::WorkerProtocolConflict],
-        1
+        .expect("the supervisor admits a policy-supported request without parsing the catalog");
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, LifecycleEvent::Spawned { .. }))
     );
+    assert_eq!(runtime.core().worker_count(), 2);
+    assert_eq!(runtime.core().route_count(), 1);
+    assert_eq!(runtime.core().capability_count(), 0);
 
     runtime.stop_handle().request().unwrap();
     runtime.run().unwrap();

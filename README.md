@@ -56,6 +56,8 @@ just network-combat-60
 just network-combat-high
 just network-smoke
 just network-routed-smoke
+just network-product-lobby
+just network-product-lobby-smoke
 just network-routed-ipv6-smoke
 just network-routed-evidence
 just network-routed-capture
@@ -88,6 +90,12 @@ an isolated lobby worker, a match worker after allocation, and two clients. Use
 `just network-routed-smoke` for the bounded headless lobby-to-match check. The completed v1 direct
 UDP topology remains available as `just network-direct` and `just network-direct-smoke` until the
 roadmap's M09 retirement gate.
+
+Normal `brawler-client` startup now opens the product Title without connecting. Play opens Server
+Select, whose first-run address is `127.0.0.1:5000`; the client connects to a supervisor-backed
+product lobby and shows its advertised game types without allocating a match. Use
+`just network-product-lobby` for the windowed playtest or `just network-product-lobby-smoke` for the
+bounded two-client real-process check of that welcome boundary and the no-allocation guarantee.
 
 `just network-routed-evidence` runs bounded cold routed-process cycles (five by default; use
 `just network-routed-evidence <cycles> <timeout-seconds> <wipeout|hot-zone|both|crash-restart>`).

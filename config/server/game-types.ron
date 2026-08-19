@@ -1,0 +1,26 @@
+(
+  schema_version: 1,
+  server_name: "Local Brawler",
+  game_types: [
+    (
+      id: "wipeout-2v2",
+      revision: 1,
+      name: "Wipeout 2v2",
+      mode: "wipeout",
+      maps: ["crossroads-facility"],
+      teams: 2,
+      players_per_team: 2,
+      rules_profile: "standard",
+    ),
+    (
+      id: "hot-zone-2v2",
+      revision: 1,
+      name: "Hot Zone 2v2",
+      mode: "hot-zone",
+      maps: ["crossroads-facility-hot-zone"],
+      teams: 2,
+      players_per_team: 2,
+      rules_profile: "standard",
+    ),
+  ],
+)
