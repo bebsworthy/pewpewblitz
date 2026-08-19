@@ -358,7 +358,7 @@ while [[ ! -s "$ready_file" ]]; do
     sleep 0.1
 done
 
-client_args=(--server "$network_addr")
+client_args=(--server "$network_addr" --auto-connect)
 if [[ "$headless" == "1" ]]; then
     if [[ -n "$simulation_ticks" ]]; then
         client_args+=(--headless --exit-after-roster 2 --simulation-ticks "$simulation_ticks")
@@ -456,7 +456,7 @@ for index in $(seq 1 "$client_count"); do
             args=("${client_two_args[@]}")
             ;;
         *)
-            args=(--server "$network_addr" --client-id "$index")
+            args=(--server "$network_addr" --client-id "$index" --auto-connect)
             if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
                 args+=(--build-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
             fi

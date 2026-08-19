@@ -242,6 +242,13 @@ pub(super) fn spawn_client_connection(
     time: Res<Time<Real>>,
     mut routed: ResMut<RoutedClientLifecycle>,
 ) -> Result {
+    if !config.connects_on_startup() {
+        info!(
+            mode = "client",
+            "brawler client awaiting product-shell action"
+        );
+        return Ok(());
+    }
     if config.transport == NetworkTransport::RoutedUdp {
         routed.start_lobby();
         let generation = routed.generation;

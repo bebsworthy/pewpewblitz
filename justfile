@@ -160,7 +160,7 @@ run:
     # the executable location instead of assuming target/debug in the repo.
     (trap - INT TERM; exec cargo run --locked --no-default-features --features server --bin brawler-server) &
     server_pid=$!
-    (trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- --client-id 1) &
+    (trap - INT TERM; exec cargo run --locked --no-default-features --features client --bin brawler-client -- --client-id 1 --auto-connect) &
     client_pid=$!
 
     while :; do

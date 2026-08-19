@@ -7,10 +7,12 @@
 //! authoritative aim thresholds so default facing behavior is unchanged. The pause-overlay
 //! presentation of these settings lives in the `ui` submodule.
 
+pub mod persistence;
 pub mod ui;
 
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::{GamepadButton, MouseButton, Resource, Vec2};
+use serde::{Deserialize, Serialize};
 
 /// Upper bound for adjustable analog calibration values.
 pub const MAX_CALIBRATION: f32 = 0.5;
@@ -83,7 +85,7 @@ pub fn is_modifier_key(code: KeyCode) -> bool {
 }
 
 /// Keyboard bindings for the implemented gameplay actions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyboardBindings {
     pub move_up: KeyCode,
     pub move_down: KeyCode,
@@ -190,7 +192,7 @@ pub fn key_code_letter(code: KeyCode) -> Option<char> {
 
 /// Controller button bindings for the implemented gameplay actions. The primary action is
 /// read as an analog value with hysteresis, so digital buttons report 0.0/1.0 uniformly.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GamepadBindings {
     pub primary: GamepadButton,
     pub active_item: GamepadButton,

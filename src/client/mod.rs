@@ -59,6 +59,7 @@ mod presentation;
 mod routed_udp;
 mod session;
 mod settings;
+mod shell;
 pub(crate) use assets::ClientAssetHandles;
 #[allow(clippy::wildcard_imports)]
 use input::*;
@@ -78,6 +79,7 @@ pub use settings::{
     CalibrationField, ClientInputSettings, GamepadAction, GamepadBindings, KeyboardAction,
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
+pub use shell::{ClientShellPlugin, ShellOverlay};
 
 /// Explicit client-side state for the sequential routed transport lifecycle.
 ///
@@ -529,6 +531,9 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     }
     if !headless {
         app.add_plugins(ClientPresentationPlugin);
+        if !app.world().resource::<ClientNetworkConfig>().auto_connect {
+            app.add_plugins(ClientShellPlugin);
+        }
         if let Some(schedule) = screenshot_schedule {
             std::fs::create_dir_all(&schedule.dir).expect("screenshot directory is creatable");
             app.insert_resource(ScheduledScreenshots {

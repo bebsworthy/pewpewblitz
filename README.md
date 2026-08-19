@@ -45,7 +45,7 @@ cargo test --locked --no-default-features --features network-test --test network
 cargo test --locked --no-default-features --features network-test --test performance -- --nocapture
 cargo build --locked --no-default-features --features client --bin brawler-client
 cargo build --locked --no-default-features --features server --bin brawler-server
-cargo run --locked --no-default-features --features client --bin brawler-client -- --client-id 1
+cargo run --locked --no-default-features --features client --bin brawler-client
 cargo run --locked --no-default-features --features server --bin brawler-server -- --bind 127.0.0.1:5000
 ./scripts/check-server-features.sh
 just network
@@ -122,8 +122,10 @@ reported as overhead diagnostics and are never compared with direct gameplay byt
 comparable samples or common-window checkpoints produce an explicit `unsupported` result. Run `just test-paired-evidence` for
 the parser and threshold-gate tests without starting processes.
 
-The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. The client accepts
-`--server`, `--local-addr`, required `--client-id`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
+The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. A normal windowed client
+starts at the controller-friendly Title screen and does not connect; `--client-id` defaults to 1 in
+that offline shell. `--auto-connect` selects the established development/network path and requires
+an explicit `--client-id`. The client also accepts `--server`, `--local-addr`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
 `4` Duelist, `5` the default legal custom Pulse), plus bounded automation flags `--headless --exit-after-roster 2
 --move-axis X,Y --aim-axis X,Y --aim-dummy --fire --ultimate --simulation-ticks N`. `--combat-demo` enables the
 same authoritative aim-at-dummy/fire loop in a windowed client for a reproducible visual smoke run.
@@ -180,8 +182,8 @@ block fighters and weapon delivery, while client sprites, audio, and HUD state r
 For a reproducible single-shooter visual combat pass, run `just network-combat`; it starts two
 windowed clients, with client 1 using `--combat-demo` and client 2 idle. The demo uses the same native
 input buffer while continuously aiming at and firing on the neutral dummy. To launch the processes
-manually, start `brawler-server`, then run one client with `--client-id 1 --combat-demo` and the
-second without `--combat-demo`; enabling the flag on both clients intentionally produces one
+manually, start `brawler-server`, then run one client with `--client-id 1 --auto-connect --combat-demo` and the
+second with `--client-id 2 --auto-connect`; enabling the demo flag on both clients intentionally produces one
 projectile stream from each player toward the neutral dummy.
 
 Repeat the same scenario at the milestone's render conditions with `just network-combat-30`,

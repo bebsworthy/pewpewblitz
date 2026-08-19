@@ -214,6 +214,8 @@ pub struct ClientNetworkConfig {
     pub connect_timeout: Duration,
     pub impairment_profile: NetworkImpairmentProfile,
     pub headless: bool,
+    /// Connect immediately instead of presenting the windowed product shell.
+    pub auto_connect: bool,
     pub exit_after_roster: Option<usize>,
     /// In routed headless automation, wait for the completed match to tear down and a fresh
     /// lobby session to be accepted before exiting successfully.
@@ -268,6 +270,7 @@ impl ClientNetworkConfig {
             connect_timeout: Duration::from_secs(5),
             impairment_profile: NetworkImpairmentProfile::from_env(),
             headless: false,
+            auto_connect: false,
             exit_after_roster: None,
             exit_after_lobby_return: false,
             headless_move: None,
@@ -354,6 +357,15 @@ impl ClientNetworkConfig {
             }
         }
         Ok(())
+    }
+
+    /// Whether startup must create a Lightyear client entity immediately.
+    #[must_use]
+    pub const fn connects_on_startup(&self) -> bool {
+        self.headless
+            || self.auto_connect
+            || self.windowed_combat_demo.is_some()
+            || self.windowed_controller_demo.is_some()
     }
 }
 

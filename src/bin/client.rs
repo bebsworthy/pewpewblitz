@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client --client-id <u64> [--server <IP:PORT>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> [--exit-after-lobby-return] --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <IP:PORT>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless --exit-after-roster <N> [--exit-after-lobby-return] --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
     );
 }
 
@@ -63,6 +63,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut local_addr = None;
     let mut transport = NetworkTransport::Udp;
     let mut headless = false;
+    let mut auto_connect = false;
     let mut exit_after_roster = None;
     let mut exit_after_lobby_return = false;
     let mut headless_move = None;
@@ -86,6 +87,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--local-addr" => local_addr = Some(parse_value::<SocketAddr>(&flag, args.next())?),
             "--transport" => transport = parse_transport(&flag, args.next())?,
             "--headless" => headless = true,
+            "--auto-connect" => auto_connect = true,
             "--exit-after-roster" => {
                 exit_after_roster = Some(parse_value(&flag, args.next())?);
             }
@@ -120,7 +122,15 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             _ => return Err(format!("unknown flag: {flag}")),
         }
     }
-    let client_id = client_id.ok_or_else(|| "--client-id is required".to_string())?;
+    let noninteractive =
+        auto_connect || headless || windowed_combat_demo || windowed_controller_demo;
+    let client_id = match (client_id, noninteractive) {
+        (Some(client_id), _) => client_id,
+        (None, true) => {
+            return Err("--client-id is required with auto-connect or automation".to_string());
+        }
+        (None, false) => 1,
+    };
     if headless && exit_after_roster.is_none() {
         return Err("--headless requires --exit-after-roster".to_string());
     }
@@ -146,6 +156,8 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     });
     config.transport = transport;
     config.headless = headless;
+    config.auto_connect =
+        auto_connect || headless || windowed_combat_demo || windowed_controller_demo;
     config.exit_after_roster = exit_after_roster;
     config.exit_after_lobby_return = exit_after_lobby_return;
     config.headless_move = headless_move;

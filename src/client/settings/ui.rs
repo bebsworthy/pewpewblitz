@@ -73,7 +73,7 @@ impl InputSettingsField {
         Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
-    const fn is_rebindable(self) -> bool {
+    pub(crate) const fn is_rebindable(self) -> bool {
         !matches!(self, Self::Calibration(_))
     }
 }
@@ -86,6 +86,11 @@ pub struct InputSettingsSelection {
     pub field: InputSettingsField,
     pub listening: bool,
 }
+
+/// Product-shell draft. Its presence redirects the existing calibration and rebind controls away
+/// from active gameplay settings until Apply is accepted.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct InputSettingsDraft(pub ClientInputSettings);
 
 impl Default for InputSettingsSelection {
     fn default() -> Self {
@@ -240,6 +245,7 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
     gamepads: Query<&Gamepad>,
     mut selection: ResMut<InputSettingsSelection>,
     mut settings: ResMut<ClientInputSettings>,
+    draft: Option<ResMut<InputSettingsDraft>>,
 ) {
     if !matches!(*context, ClientInputContext::Paused) {
         return;
@@ -248,6 +254,11 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
         return;
     };
     let pad_pressed = |button: GamepadButton| gamepads.iter().any(|pad| pad.just_pressed(button));
+    let editing_draft = draft.is_some();
+    let mut draft = draft;
+    let settings = draft
+        .as_deref_mut()
+        .map_or(&mut *settings, |draft| &mut draft.0);
 
     if selection.listening {
         // B (keyboard) and East (controller) cancel; every other accepted press commits.
@@ -291,6 +302,13 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
         return;
     }
 
+    // Product-shell editing is driven by focusable buttons so every operation is reachable from
+    // controller, keyboard, and pointer. Only rebind capture itself remains in this shared input
+    // system while a draft exists.
+    if editing_draft {
+        return;
+    }
+
     if keyboard.just_pressed(KeyCode::Tab) || pad_pressed(GamepadButton::DPadDown) {
         selection.field = selection.field.next();
     }
@@ -303,10 +321,10 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
         }
     };
     if keyboard.just_pressed(KeyCode::BracketLeft) || pad_pressed(GamepadButton::DPadLeft) {
-        adjust(&mut settings, -0.05);
+        adjust(settings, -0.05);
     }
     if keyboard.just_pressed(KeyCode::BracketRight) || pad_pressed(GamepadButton::DPadRight) {
-        adjust(&mut settings, 0.05);
+        adjust(settings, 0.05);
     }
     if keyboard.just_pressed(KeyCode::KeyI) {
         settings.toggle_inversion(false);
@@ -334,14 +352,23 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
 pub(crate) fn update_input_settings_overlay(
     context: Res<ClientInputContext>,
     settings: Res<ClientInputSettings>,
+    draft: Option<Res<InputSettingsDraft>>,
     selection: Res<InputSettingsSelection>,
     mut texts: Query<&mut Text, With<InputSettingsText>>,
 ) {
     if !matches!(*context, ClientInputContext::Paused) {
         return;
     }
-    let lines = compose_input_settings_lines(&settings, *selection);
-    if let Ok(mut text) = texts.single_mut() {
+    let editing_product_draft = draft.is_some();
+    let settings = draft.as_deref().map_or(&*settings, |draft| &draft.0);
+    let mut lines = compose_input_settings_lines(settings, *selection);
+    if editing_product_draft
+        && !selection.listening
+        && let Some(hint) = lines.last_mut()
+    {
+        *hint = "Use the focused controls below to select, adjust, rebind, or reset.".to_string();
+    }
+    for mut text in &mut texts {
         text.0 = lines.join("\n");
     }
 }

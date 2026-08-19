@@ -111,11 +111,11 @@ if [ "$headless" = 1 ]; then
     if [ -n "$window_dir" ]; then
         BRAWLER_DIAGNOSTICS_WINDOW_FILE="$window_dir/client-1.window" \
         BRAWLER_DIAGNOSTICS_ROLE=client \
-        target/debug/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
+        target/debug/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp --auto-connect \
             --headless --exit-after-roster 2 --exit-after-lobby-return --simulation-ticks "$simulation_ticks" \
             --move-axis 1,0 --aim-axis 0,1 &
     else
-        target/debug/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
+        target/debug/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp --auto-connect \
             --headless --exit-after-roster 2 --exit-after-lobby-return --simulation-ticks "$simulation_ticks" \
             --move-axis 1,0 --aim-axis 0,1 &
     fi
@@ -123,11 +123,11 @@ if [ "$headless" = 1 ]; then
     if [ -n "$window_dir" ]; then
         BRAWLER_DIAGNOSTICS_WINDOW_FILE="$window_dir/client-2.window" \
         BRAWLER_DIAGNOSTICS_ROLE=client \
-        target/debug/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
+        target/debug/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp --auto-connect \
             --headless --exit-after-roster 2 --exit-after-lobby-return --simulation-ticks "$simulation_ticks" \
             --move-axis -1,0 --aim-axis 0,-1 &
     else
-        target/debug/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
+        target/debug/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp --auto-connect \
             --headless --exit-after-roster 2 --exit-after-lobby-return --simulation-ticks "$simulation_ticks" \
             --move-axis -1,0 --aim-axis 0,-1 &
     fi
@@ -139,9 +139,9 @@ if [ "$headless" = 1 ]; then
     ) &
     watchdog_pid=$!
 else
-    target/debug/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp &
+    target/debug/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp --auto-connect &
     client_one_pid=$!
-    target/debug/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp &
+    target/debug/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp --auto-connect &
     client_two_pid=$!
 fi
 

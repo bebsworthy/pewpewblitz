@@ -34,7 +34,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Specification review |
+| Status | User playtest |
 | Current milestone | M02 — Product client shell, navigation, settings, and persistence |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
@@ -44,7 +44,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | Milestone | Status | Deliverable | Plan |
 |---|---|---|---|
 | 01 | Complete | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
-| 02 | Specification review | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
+| 02 | User playtest | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
 | 03 | Not started | Direct-connect lobby session and advertised game selection | Create when next |
 | 04 | Not started | Product build editor and authoritative queue admission | Create when next |
 | 05 | Not started | Exact formation, worker allocation, and match loading/handoff | Create when next |
