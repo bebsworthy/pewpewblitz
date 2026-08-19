@@ -60,6 +60,29 @@ pub struct BrawlerBuildRecipe {
     pub passives: [PassiveDefinitionId; 2],
 }
 
+/// One bounded authored build choice. This shape is shared by direct-match selection and
+/// lobby queue admission; resolving it remains server-owned at each authority boundary.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildSelection {
+    Preset(BuildPresetId),
+    Custom(BrawlerBuildRecipe),
+}
+
+/// Complete build input submitted to lobby admission.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BuildCandidate {
+    pub build_revision: BuildRevision,
+    pub selection: BuildSelection,
+}
+
+/// Public, reproducible result of authoritative build resolution.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AcceptedBuildSummary {
+    pub canonical_recipe: BrawlerBuildRecipe,
+    pub identity: SelectedBuild,
+    pub total_points: u8,
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SelectedBuild {
     pub source_build_preset_id: Option<BuildPresetId>,

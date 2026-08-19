@@ -6,6 +6,12 @@
 //! not need a running network endpoint.
 
 mod catalog;
+mod queue;
+
+pub use queue::{
+    QueueCommandResult, QueueState, QueueTelemetry, QueueTicket, QueueTicketIdSource,
+    SnapshotPublication,
+};
 
 pub(crate) use catalog::resolve_operator_catalog;
 
@@ -18,8 +24,8 @@ use crate::{
     content::GameplayContentFingerprint,
     lobby::{duplicate_display_name, normalize_proposed_display_name},
     protocol::{
-        LobbyHello, LobbyJoinOutcome, LobbyJoinRejection, MatchRouteGrant, RouteCapability,
-        SUPPORTED_PROTOCOL_VERSION, SessionChannel,
+        LobbyHello, LobbyJoinOutcome, LobbyJoinRejection, MatchRouteGrant, QueueSnapshotChannel,
+        RouteCapability, SUPPORTED_PROTOCOL_VERSION, SessionChannel,
     },
 };
 use bevy::prelude::*;
@@ -32,7 +38,10 @@ use brawler_routing::{
 #[cfg(test)]
 use brawler_routing::{ProcessId, WorkerId};
 use lightyear::prelude::{Connected, Disconnected, MessageReceiver, MessageSender, RemoteId};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 /// M01's hard upper bound for authenticated lobby sessions.
 pub const MAX_AUTHENTICATED_LOBBY_SESSIONS: usize = 32;
@@ -259,6 +268,22 @@ impl LobbyState {
     #[must_use]
     pub fn session_for_client(&self, client_id: u64) -> Option<&LobbySession> {
         NetcodeClientId::new(client_id).and_then(|id| self.sessions.get(&id))
+    }
+
+    #[must_use]
+    fn authenticated_session_ids(&self) -> BTreeSet<LobbySessionId> {
+        self.sessions
+            .values()
+            .map(|session| session.lobby_session_id)
+            .collect()
+    }
+
+    #[must_use]
+    fn session_by_lobby_id(&self, id: LobbySessionId) -> Option<LobbySession> {
+        self.sessions
+            .values()
+            .find(|session| session.lobby_session_id == id)
+            .copied()
     }
 
     fn validate_hello(&self, hello: &LobbyHello) -> Result<String, LobbySessionError> {
@@ -600,6 +625,40 @@ pub struct LobbyClient {
     pub lobby_session_id: LobbySessionId,
 }
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum LobbyScheduleSet {
+    BeginLobbyFrame,
+    AuthenticateLobbyHellos,
+    CollectQueueClientMessages,
+    ReconcileDisconnectedSessions,
+    ApplyQueueTransactions,
+    PublishQueueOutcomesAndSnapshot,
+}
+
+#[derive(Resource, Default)]
+struct LobbyQueueFrame {
+    eligible: BTreeSet<LobbySessionId>,
+    collected: Vec<CollectedQueueMessages>,
+    pending_deliveries: BTreeSet<LobbySessionId>,
+    snapshot_changed: bool,
+}
+
+struct CollectedQueueMessages {
+    entity: Entity,
+    session_id: LobbySessionId,
+    messages: Vec<crate::lobby::QueueClientMessage>,
+}
+
+#[derive(Resource, Default)]
+struct LobbySessionLosses(BTreeMap<LobbySessionId, NetcodeClientId>);
+
+#[derive(Resource, Default)]
+struct QueueSnapshotPublication {
+    initial_pending: bool,
+    mutation_pending: bool,
+    last_refresh: Duration,
+}
+
 impl core::fmt::Debug for LobbyClient {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -616,10 +675,38 @@ impl Plugin for LobbyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LobbyControlInbox>()
             .init_resource::<LobbyControlOutbox>()
+            .init_resource::<LobbyQueueFrame>()
+            .init_resource::<LobbySessionLosses>()
+            .init_resource::<QueueSnapshotPublication>()
+            .init_resource::<FighterDefinitions>()
             .add_systems(Startup, initialize_lobby_state)
+            .configure_sets(
+                Update,
+                (
+                    LobbyScheduleSet::BeginLobbyFrame,
+                    LobbyScheduleSet::AuthenticateLobbyHellos,
+                    LobbyScheduleSet::CollectQueueClientMessages,
+                    LobbyScheduleSet::ReconcileDisconnectedSessions,
+                    LobbyScheduleSet::ApplyQueueTransactions,
+                    LobbyScheduleSet::PublishQueueOutcomesAndSnapshot,
+                )
+                    .chain(),
+            )
             .add_systems(
                 Update,
-                (lobby_cleanup_disconnected, lobby_receive_hellos).chain(),
+                (
+                    begin_lobby_frame.in_set(LobbyScheduleSet::BeginLobbyFrame),
+                    lobby_receive_hellos.in_set(LobbyScheduleSet::AuthenticateLobbyHellos),
+                    collect_queue_client_messages
+                        .in_set(LobbyScheduleSet::CollectQueueClientMessages),
+                    reconcile_disconnected_sessions
+                        .in_set(LobbyScheduleSet::ReconcileDisconnectedSessions),
+                    apply_queue_transactions.in_set(LobbyScheduleSet::ApplyQueueTransactions),
+                    publish_queue_outcomes_and_snapshot
+                        .in_set(LobbyScheduleSet::PublishQueueOutcomesAndSnapshot),
+                    report_queue_telemetry_changes
+                        .after(LobbyScheduleSet::PublishQueueOutcomesAndSnapshot),
+                ),
             )
             .add_observer(lobby_client_removed)
             .add_observer(lobby_netcode_authenticated);
@@ -639,9 +726,28 @@ impl Plugin for LobbyTransitionDriverPlugin {
                 lobby_deliver_grants,
             )
                 .chain()
-                .after(lobby_receive_hellos),
+                .after(LobbyScheduleSet::PublishQueueOutcomesAndSnapshot),
         );
     }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy evidence publication reads a runtime-owned resource parameter"
+)]
+fn report_queue_telemetry_changes(
+    queue: Res<QueueState>,
+    mut previous: Local<Option<QueueTelemetry>>,
+) {
+    let current = queue.telemetry();
+    if previous.as_ref() == Some(current) {
+        return;
+    }
+    let marker = format!("brawler-queue aggregate {current:?}\n");
+    // The product smoke inherits the worker's stderr. Emit one bounded write so the final
+    // privacy-safe aggregate is process evidence without exposing queue identities.
+    let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
+    *previous = Some(current.clone());
 }
 
 /// Netcode may despawn its connection entity in the same deferred boundary that adds
@@ -655,10 +761,16 @@ impl Plugin for LobbyTransitionDriverPlugin {
 fn lobby_client_removed(
     trigger: On<Remove, LobbyClient>,
     clients: Query<&LobbyClient>,
-    mut state: ResMut<LobbyState>,
+    losses: Option<ResMut<LobbySessionLosses>>,
+    state: Option<ResMut<LobbyState>>,
 ) {
     if let Ok(client) = clients.get(trigger.entity) {
-        state.remove_client(client.client_id.get());
+        if let Some(mut losses) = losses {
+            losses.0.insert(client.lobby_session_id, client.client_id);
+        } else if let Some(mut state) = state {
+            // Minimal queue-less compositions still need the pre-M04 session cleanup behavior.
+            state.remove_client(client.client_id.get());
+        }
     }
 }
 
@@ -692,15 +804,6 @@ fn lobby_netcode_authenticated(
     });
 }
 
-fn lobby_cleanup_disconnected(
-    mut state: ResMut<LobbyState>,
-    query: Query<&LobbyClient, With<Disconnected>>,
-) {
-    for client in &query {
-        state.remove_client(client.client_id.get());
-    }
-}
-
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy resources are schedule-owned system parameters"
@@ -709,6 +812,7 @@ fn initialize_lobby_state(
     mut commands: Commands,
     role: Res<ServerRoleResource>,
     config: Res<crate::config::ServerNetworkConfig>,
+    catalog: Res<catalog::ResolvedLobbyCatalog>,
 ) {
     let Some(manifest) = role.lobby_manifest().cloned() else {
         return;
@@ -717,6 +821,7 @@ fn initialize_lobby_state(
         return;
     };
     commands.insert_resource(LobbyState::new(manifest, config.game_mode, build));
+    commands.insert_resource(QueueState::new(&catalog));
 }
 
 #[allow(
@@ -729,6 +834,7 @@ fn lobby_receive_hellos(
     mut state: ResMut<LobbyState>,
     mut outbox: ResMut<LobbyControlOutbox>,
     catalog: Res<catalog::ResolvedLobbyCatalog>,
+    mut publications: ResMut<QueueSnapshotPublication>,
     mut receivers: Query<(
         Entity,
         &RemoteId,
@@ -805,11 +911,250 @@ fn lobby_receive_hellos(
                 }
                 LobbyJoinOutcome::Rejected { .. } => true,
             };
+            let accepted = matches!(&outcome, LobbyJoinOutcome::Accepted { .. });
             if should_send {
                 sender.send::<SessionChannel>(outcome);
+                if accepted {
+                    publications.initial_pending = true;
+                }
             }
         }
     }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+fn begin_lobby_frame(
+    state: Res<LobbyState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut losses: ResMut<LobbySessionLosses>,
+    disconnected: Query<&LobbyClient, With<Disconnected>>,
+) {
+    frame.eligible = state.authenticated_session_ids();
+    frame.collected.clear();
+    frame.snapshot_changed = false;
+    for client in &disconnected {
+        losses.0.insert(client.lobby_session_id, client.client_id);
+    }
+}
+
+#[allow(
+    clippy::type_complexity,
+    reason = "one bounded queue receiver query owns the authentication and per-update envelope cap"
+)]
+fn collect_queue_client_messages(
+    mut commands: Commands,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut losses: ResMut<LobbySessionLosses>,
+    mut queue: ResMut<QueueState>,
+    mut receivers: Query<(
+        Entity,
+        Option<&LobbyClient>,
+        &mut MessageReceiver<crate::lobby::QueueClientMessage>,
+        Has<Disconnected>,
+    )>,
+) {
+    for (entity, client, mut receiver, disconnected) in &mut receivers {
+        // Taking five is enough to distinguish the allowed four-envelope frame from abuse.
+        // Dropping Lightyear's draining iterator discards the rest without interpreting them.
+        let messages: Vec<_> = receiver.receive().take(5).collect();
+        if messages.is_empty() {
+            continue;
+        }
+        let Some(client) = client else {
+            queue.record_protocol_abuse();
+            commands.entity(entity).insert(Disconnected::default());
+            continue;
+        };
+        if disconnected {
+            losses.0.insert(client.lobby_session_id, client.client_id);
+            commands.entity(entity).insert(Disconnected::default());
+            continue;
+        }
+        if !frame.eligible.contains(&client.lobby_session_id) || messages.len() == 5 {
+            queue.record_protocol_abuse();
+            losses.0.insert(client.lobby_session_id, client.client_id);
+            commands.entity(entity).insert(Disconnected::default());
+            continue;
+        }
+        frame.collected.push(CollectedQueueMessages {
+            entity,
+            session_id: client.lobby_session_id,
+            messages,
+        });
+    }
+}
+
+fn reconcile_disconnected_sessions(
+    mut state: ResMut<LobbyState>,
+    mut queue: ResMut<QueueState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut losses: ResMut<LobbySessionLosses>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let losses = core::mem::take(&mut losses.0);
+    for (session_id, client_id) in losses {
+        frame.eligible.remove(&session_id);
+        frame.snapshot_changed |= queue.remove_session(session_id);
+        state.remove_client(client_id.get());
+    }
+    if queue.revision_exhausted() {
+        error!("lobby queue pool revision exhausted during disconnect cleanup");
+        exit.write(AppExit::error());
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    reason = "the Bevy system adapts one ordered bounded queue transaction across immutable catalogs and connection ownership"
+)]
+fn apply_queue_transactions(
+    mut commands: Commands,
+    mut state: ResMut<LobbyState>,
+    mut queue: ResMut<QueueState>,
+    builds: Res<crate::builds::BuildCatalogResource>,
+    weapons: Res<crate::combat::WeaponCatalogResource>,
+    fighters: Res<FighterDefinitions>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    frame.collected.sort_by_key(|collected| {
+        state
+            .session_by_lobby_id(collected.session_id)
+            .map_or((u64::MAX, u64::MAX), |session| {
+                let request =
+                    collected
+                        .messages
+                        .first()
+                        .map_or(u64::MAX, |message| match message {
+                            crate::lobby::QueueClientMessage::Command { request_id, .. }
+                            | crate::lobby::QueueClientMessage::OutcomeAck { request_id } => {
+                                request_id.get()
+                            }
+                        });
+                (session.player_id.get(), request)
+            })
+    });
+    let collected = core::mem::take(&mut frame.collected);
+    for collected in collected {
+        if !frame.eligible.contains(&collected.session_id) {
+            continue;
+        }
+        let Some(session) = state.session_by_lobby_id(collected.session_id) else {
+            continue;
+        };
+        let mut disconnect = false;
+        for message in collected.messages {
+            let result = match message {
+                crate::lobby::QueueClientMessage::OutcomeAck { request_id } => {
+                    queue.acknowledge(session.lobby_session_id, request_id)
+                }
+                crate::lobby::QueueClientMessage::Command {
+                    request_id,
+                    command,
+                } => queue.command(
+                    session,
+                    request_id,
+                    command,
+                    monotonic_millis(),
+                    &builds.0,
+                    &weapons.0,
+                    &fighters,
+                ),
+            };
+            if result.outcome_ready() {
+                frame.pending_deliveries.insert(session.lobby_session_id);
+            }
+            frame.snapshot_changed |= result.snapshot_changed();
+            if result.disconnect() {
+                disconnect = true;
+                break;
+            }
+        }
+        if disconnect {
+            frame.pending_deliveries.remove(&session.lobby_session_id);
+            frame.snapshot_changed |= queue.remove_session(session.lobby_session_id);
+            state.remove_client(session.netcode_client_id.get());
+            frame.eligible.remove(&session.lobby_session_id);
+            commands
+                .entity(collected.entity)
+                .insert(Disconnected::default());
+            if queue.revision_exhausted() {
+                error!("lobby queue pool revision exhausted during protocol cleanup");
+                exit.write(AppExit::error());
+            }
+        }
+    }
+}
+
+#[allow(
+    clippy::type_complexity,
+    clippy::needless_pass_by_value,
+    reason = "one Bevy system publishes both queue wire types to the same bounded client set"
+)]
+fn publish_queue_outcomes_and_snapshot(
+    time: Res<Time>,
+    mut queue: ResMut<QueueState>,
+    mut frame: ResMut<LobbyQueueFrame>,
+    mut publication: ResMut<QueueSnapshotPublication>,
+    mut clients: Query<
+        (
+            &LobbyClient,
+            &mut MessageSender<crate::lobby::QueueCommandOutcome>,
+            &mut MessageSender<crate::lobby::QueuePoolSnapshot>,
+        ),
+        Without<Disconnected>,
+    >,
+) {
+    if queue.revision_exhausted() {
+        return;
+    }
+    for (client, mut outcome_sender, _) in &mut clients {
+        if frame.pending_deliveries.remove(&client.lobby_session_id)
+            && let Some(outcome) = queue.pending_outcome(client.lobby_session_id)
+        {
+            outcome_sender.send::<SessionChannel>(outcome.clone());
+        }
+    }
+
+    publication.mutation_pending |= frame.snapshot_changed;
+    let now = time.elapsed();
+    let refresh_due = !clients.is_empty()
+        && now.saturating_sub(publication.last_refresh) >= Duration::from_secs(1);
+    let kind = if publication.mutation_pending {
+        Some(SnapshotPublication::Mutation)
+    } else if publication.initial_pending {
+        Some(SnapshotPublication::Initial)
+    } else if refresh_due {
+        Some(SnapshotPublication::Refresh)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
+        let snapshot = queue.snapshot();
+        for (_, _, mut snapshot_sender) in &mut clients {
+            snapshot_sender.send::<QueueSnapshotChannel>(snapshot.clone());
+        }
+        queue.record_snapshot_publication(kind);
+        publication.initial_pending = false;
+        publication.mutation_pending = false;
+        publication.last_refresh = now;
+    }
+}
+
+fn monotonic_millis() -> u64 {
+    use std::sync::OnceLock;
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    u64::try_from(
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX)
 }
 
 fn authenticated_netcode_id(remote_id: &RemoteId) -> Option<u64> {

@@ -51,6 +51,8 @@ use std::env;
 
 mod assets;
 mod audio;
+mod build_editor;
+mod build_persistence;
 mod connection_persistence;
 mod flow;
 mod hud;
@@ -58,12 +60,18 @@ mod input;
 #[cfg(feature = "owner-prediction")]
 pub mod prediction;
 mod presentation;
+mod queue;
 mod routed_udp;
 mod server_select;
 mod session;
 mod settings;
 mod shell;
 pub(crate) use assets::ClientAssetHandles;
+pub use build_editor::{
+    BuildEditorField, BuildEditorState, BuildPreview, compare_build_alternative,
+    resolve_build_preview,
+};
+pub use build_persistence::{BuildFileV1, ClientBuildPath, load_build, save_build};
 pub use flow::{ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError, FlowErrorAction};
 #[allow(clippy::wildcard_imports)]
 use input::*;
@@ -72,6 +80,7 @@ pub use presentation::{ClientPresentationPlugin, MovementPresentationPlugin};
 use presentation::{
     clamp_camera_center, update_client_hud, write_interpolated_fighter_pose_to_transform,
 };
+pub use queue::{ClientQueueModel, ClientQueuePlugin, PendingQueueCommand};
 pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
 pub use server_select::{LogicalServerAddress, ServerAddressHost, parse_server_address};
 pub use session::ClientNetworkPlugin;

@@ -75,7 +75,8 @@ pub use admission::{
 };
 pub use lobby::{
     LobbyBuildIdentity, LobbyClient, LobbyControlFrame, LobbyPlugin, LobbySessionIdSource,
-    LobbyState, default_build_identity,
+    LobbyState, QueueCommandResult, QueueState, QueueTelemetry, QueueTicket, QueueTicketIdSource,
+    SnapshotPublication, default_build_identity,
 };
 pub use routed_worker::{
     RoutedPeer, RoutedPeerClose, RoutedWorker, RoutedWorkerFailure, RoutedWorkerPlugin,

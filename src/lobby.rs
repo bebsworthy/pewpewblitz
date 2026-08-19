@@ -10,6 +10,14 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization as _;
 use unicode_segmentation::UnicodeSegmentation as _;
 
+mod queue;
+
+pub use queue::{
+    MAX_QUEUE_OUTCOME_BYTES, QueueCancelCommand, QueueClientMessage, QueueCommand,
+    QueueCommandOutcome, QueueDecision, QueueJoinCommand, QueueMembership, QueuePoolRow,
+    QueuePoolSnapshot, QueueRejection, QueueRequestId, QueueTicketId,
+};
+
 pub const MAX_GAME_TYPES: usize = 8;
 pub const MAX_MAPS_PER_GAME_TYPE: usize = 8;
 pub const MAX_GAME_TYPE_ID_BYTES: usize = 32;

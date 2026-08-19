@@ -58,6 +58,7 @@ just network-smoke
 just network-routed-smoke
 just network-product-lobby
 just network-product-lobby-smoke
+just network-product-queue-smoke
 just network-routed-ipv6-smoke
 just network-routed-evidence
 just network-routed-capture

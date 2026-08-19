@@ -96,6 +96,7 @@ enum ShellLayer {
     Settings,
     Credits,
     Error,
+    FlowOwned,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -552,6 +553,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         ClientOverlay::Settings => ShellLayer::Settings,
         ClientOverlay::Credits => ShellLayer::Credits,
         ClientOverlay::Error(_) => ShellLayer::Error,
+        ClientOverlay::BuildEditor => ShellLayer::FlowOwned,
     }
 }
 
@@ -878,7 +880,7 @@ fn handle_shell_actions(
                 let focus = match client_overlay.as_ref() {
                     ClientOverlay::Credits => ShellControlId::Credits,
                     ClientOverlay::Settings | ClientOverlay::Error(_) => ShellControlId::Settings,
-                    ClientOverlay::None => continue,
+                    ClientOverlay::BuildEditor | ClientOverlay::None => continue,
                 };
                 close_overlay(
                     &mut commands,

@@ -4,15 +4,14 @@
 
 | Field | Value |
 |---|---|
-| Status | Specification review |
+| Status | User playtest |
 | Prepared | 2026-08-19; reconciled after M03 completion and user-approved review fixes |
 | Objective | Let an authenticated lobby player compose a bounded build, submit it with one selected advertised game type, receive an authoritative immutable queue ticket, inspect honest aggregate pool state, and cancel without leaving the lobby |
 | Entry dependency | Satisfied 2026-08-19: M03 is complete; its delivered lobby catalog, client flow, overlay, persistence-error, and session-loss seams are reconciled below |
-| Scope authority | Specification review only; production implementation remains unauthorized until the user validates this specification |
+| Scope authority | User validated the specification and directed implementation on 2026-08-19 |
 
-M04 research began while M03 was implementing. M03 is now complete and M04 is the current
-specification-review milestone. The decisions below incorporate the user-approved plan review, but
-they do not authorize production code changes until the user validates implementation.
+M04 research began while M03 was implementing. M03 is now complete and the user validated this
+specification by directing implementation on 2026-08-19.
 
 ## Player-visible outcome
 
@@ -27,6 +26,9 @@ then chooses **Join Queue**. The lobby validates the selected game and complete 
 transaction. Acceptance closes the editor and enters Queue with the player's server-accepted build,
 ticket identity, game type, and an honest population that is either current through the ticket's
 required admission revision or visibly `Updating queue`.
+
+An identical periodic refresh of the current snapshot renews its freshness even though it does not
+replace the client's pool data. Only an older revision is ignored without renewing freshness.
 
 A correctable rejection stays in Build Editor with the draft intact and the exact problem shown.
 Cancel Queue is acknowledged by the lobby, returns to Game Select, and keeps the lobby connection
@@ -96,13 +98,16 @@ grants. Those are M05 responsibilities.
    reliable sender. Outcomes remain lossless; snapshots use sequenced-unreliable delivery with local
    retry disabled and repeat the newest complete state once per second. Consecutive loss has no
    delivery deadline, so clients age a snapshot out after three seconds instead of presenting stale
-   counts as current.
+   counts as current. A byte-equivalent refresh at the current revision renews receipt freshness;
+   otherwise healthy unchanged pools would age out despite receiving every refresh.
 8. Ordered-reliable transport retains an outcome until transport acknowledgement and exposes no
    application queue-cap setting. M04 therefore allows only one application-unacknowledged queue
    outcome per session, requires a small client acknowledgement after consuming it, suppresses a
-   second wire copy for an unacknowledged identical retry, and rate-limits accepted commands. The
-   first over-rate command receives one bounded fail-soft notice; continued commands inside that
-   notice window are the protocol-abuse boundary.
+   second wire copy for an unacknowledged identical retry, and rate-limits accepted commands.
+   Identical application retries remain token-neutral but are admitted no more often than the
+   product's ten-second Retry deadline; repeated early duplicates cross a separate bounded abuse
+   threshold. The first over-rate new command receives one bounded fail-soft notice; continued new
+   commands inside that notice window are the protocol-abuse boundary.
 
 ## Decisions for specification review
 
@@ -121,8 +126,9 @@ authority, until the user validates the milestone.
 | FIFO | Server monotonic `admission_order`; requests first observed in one update are tied by stable authenticated `PlayerId`, then request ID |
 | Pool state | Complete revisioned aggregate snapshot for all advertised pools: stable game identity, queued count, and exact formation size; no names, builds, or wait estimate |
 | Capacity | At most 32 tickets process-wide and therefore at most 32 in one pool, derived from one ticket per authenticated session; M04 has no smaller arbitrary per-pool limit or unreachable `Queue Full` state |
-| Delivery | One client-to-server `QueueClientMessage` envelope carries commands and outcome acknowledgements in their actual ordered-reliable `SessionChannel` order; outcomes use the same channel server-to-client. Each session may have at most one application-unacknowledged queue outcome and at most 512 encoded outcome bytes retained for it. Complete snapshots use one server-to-client `QueueSnapshotChannel` with sequenced-unreliable delivery, local unsent retry disabled, immediate publication after visible mutation, and a one-second refresh; no polling or HTTP side path |
-| Command abuse bound | Per authenticated session, a token bucket admits a burst of four new semantic queue commands and refills one token per second. An identical same-ID retry while its outcome remains application-unacknowledged is idempotent recovery: it consumes no token, causes no second wire copy, and leaves the retained outcome unchanged. The first new semantic command beyond the bucket, when no outcome is pending, receives one bounded `RateLimited` outcome with a retry delay and starts one notice window; the client retains its context, disables **Try Again** until that delay expires, then uses a new request ID. Any further command during that notice window, or any different command while an outcome remains application-unacknowledged, is protocol abuse: emit no additional reliable outcome, disconnect, and use normal queue-aware teardown |
+| Delivery | One client-to-server `QueueClientMessage` envelope carries commands and outcome acknowledgements in their actual ordered-reliable `SessionChannel` order; outcomes use the same channel server-to-client. Each session may have at most one application-unacknowledged queue outcome and at most 512 encoded outcome bytes retained for it. Complete snapshots use one server-to-client `QueueSnapshotChannel` with sequenced-unreliable delivery, local unsent retry disabled, immediate publication after visible mutation, and a one-second refresh; a byte-equivalent current-revision refresh renews client freshness without replacing pool data; no polling or HTTP side path |
+| Command abuse bound | Per authenticated session, a token bucket admits a burst of four new semantic queue commands and refills one token per second. An identical same-ID retry while its outcome remains application-unacknowledged is idempotent recovery: it consumes no semantic-command token, causes no second wire copy, and leaves the retained outcome unchanged. It is accepted at most once per ten-second pending-command retry window. Earlier identical duplicates are dropped without an outcome and counted; the fourth early duplicate in one window is protocol abuse and disconnects. The first new semantic command beyond the semantic token bucket, when no outcome is pending, receives one bounded `RateLimited` outcome with a retry delay and starts one notice window; the client retains its context, disables **Try Again** until that delay expires, then uses a new request ID. Any further new command during that notice window, or any different command while an outcome remains application-unacknowledged, is protocol abuse: emit no additional reliable outcome, disconnect, and use normal queue-aware teardown |
+| Authentication eligibility | Capture the stable IDs of sessions authenticated at the start of the lobby application update before processing new Hellos. Only that captured set may issue queue envelopes in the update. Queue input before authentication or in the same update as the accepting Hello is a protocol failure and cannot gain membership; the product client additionally waits until it has observed Welcome before sending queue intent |
 | Disconnect | Both M03 disconnect paths call one queue-aware teardown operation that removes the ticket before session identity; a same-frame disconnect prevents admission |
 | Cancel | Cancel carries request and ticket identity, is idempotent, and returns to Game Select only after an authoritative acknowledgement |
 | Pending command recovery | Join and Cancel expose secondary `Disconnect` immediately and wait ten seconds before replacing the primary pending presentation with `Retry`; Retry uses the identical request ID and frozen command, and the server does not enqueue a second reliable copy while that outcome is unacknowledged. Late exact outcomes still win over the timeout overlay while the session generation remains active |
@@ -145,8 +151,8 @@ authority, until the user validates the milestone.
 - immutable server-owned tickets, FIFO admission order, one-ticket-per-session enforcement, and
   bounded pools;
 - exact acceptance/rejection/cancellation outcomes, duplicate and stale handling, ticket cleanup
-  on disconnect, one application-unacknowledged outcome per session, bounded command rate, and no
-  hidden auto-requeue;
+  on disconnect, one application-unacknowledged outcome per session, bounded semantic-command and
+  identical-retry rates, pre-authentication rejection, and no hidden auto-requeue;
 - bounded privacy-safe queue diagnostics for active/high-water tickets, mutations, rejection
   classes, pending outcomes, rate/protocol abuse, cleanup, snapshot publication intent, and client
   freshness aging/restoration;
@@ -285,7 +291,6 @@ QueueMembership
   ticket_id
   catalog/game-type identity and revisions
   accepted_build: AcceptedBuildSummary
-  admission_order (not displayed as a global rank)
   admitted_at_pool_state_revision
 
 QueuePoolSnapshot
@@ -309,15 +314,24 @@ Each refresh is another recovery opportunity, but consecutive loss has no delive
 locally bandwidth-rejected refresh is dropped and replaced by a later complete refresh. The global
 registry fingerprint and compatibility version cover the additional channel and registrations.
 
-The adapter decodes at most four `QueueClientMessage` inputs—commands plus acknowledgements—per
-authenticated session in one application update, or 128 across the 32-session lobby. A per-session
-token bucket also admits a burst of four new semantic commands and refills one token per elapsed
-real second. After structural/request-identity validation, an identical same-ID retry for the
-application-unacknowledged outcome is recognized before token consumption: it consumes no token,
-does not enqueue another wire copy, and relies on Lightyear's retained reliable send. Every other
-command consumes a token before admission/idempotency mutation. Exceeding
-the per-update decode bound is a protocol-abuse failure and disconnects the sender without generating
-one reliable outcome per excess input. The first over-token command, when no outcome is pending,
+Lightyear deserializes network messages into each typed receiver during its receive phase. The M04
+adapter therefore does not claim to impose a pre-deserialization decode cap. Routed datagram size and
+the existing per-peer transport/router packet budgets remain the lower-layer bounds. At the
+application boundary, the adapter drains and interprets at most four `QueueClientMessage`
+envelopes—commands plus acknowledgements—per authenticated session in one update, or 128 across the
+32-session lobby. Observing a fifth ready envelope is a protocol-abuse failure: drop the remaining
+ready envelopes without interpreting them, emit no per-input outcome, and disconnect the sender.
+
+A per-session token bucket admits a burst of four new semantic commands and refills one token per
+elapsed real second. After structural/request-identity validation, an identical same-ID retry for
+the application-unacknowledged outcome is recognized before semantic-token consumption: it consumes
+no semantic-command token, does not enqueue another wire copy, and relies on Lightyear's retained
+reliable send. The initial command sets `identical_retry_not_before` to ten seconds later. One retry
+at or after that deadline is accepted as suppressed recovery and advances the deadline by another
+ten seconds. Earlier identical duplicates are dropped without an outcome and increment a saturating
+per-session early-duplicate count; the fourth early duplicate before the deadline is protocol abuse
+and disconnects. A deadline advance resets that count. Every other command consumes a semantic token
+before admission/idempotency mutation. The first over-token new command, when no outcome is pending,
 returns one bounded `RateLimited { retry_after_millis: u16 }` outcome and starts a notice window
 through that delay. The delay is the remaining time until the next whole-token refill, clamped to
 `1..=1000` milliseconds. A further command during that window, including one sent after
@@ -338,7 +352,8 @@ is idempotent for the last acknowledged outcome; an impossible future/mismatched
 is a protocol failure. A different command while an outcome is unacknowledged is also a protocol failure. An
 identical same-ID Retry returns the cached semantic outcome but does not enqueue another wire copy;
 Lightyear already retransmits the pending reliable message. Normal product UI therefore has exactly
-one semantic command in flight, while same-update identical duplicates remain testable.
+one semantic command in flight, while same-update identical duplicates remain testable through the
+explicit early-duplicate threshold.
 
 Rejection vocabulary and player behavior are closed and typed:
 
@@ -381,6 +396,8 @@ QueueCommandMemory
   command_tokens: 0..=4
   command_token_refill_at: monotonic real time
   rate_limit_notice_until: monotonic real time (optional)
+  identical_retry_not_before: monotonic real time (optional)
+  early_identical_retry_count: 0..=3
   active_ticket_id (optional)
   exact last-cancelled outcome (optional bounded tombstone)
 ```
@@ -418,9 +435,10 @@ source pattern already used for lobby session IDs.
 
 For one application update, server systems:
 
-1. observe authenticated session loss and drain each session's ordered `QueueClientMessage` stream
-   after Lightyear receive;
-2. discard all queue inputs for sessions lost in that same update and remove their existing tickets;
+1. capture the stable IDs of sessions authenticated at frame start, observe authenticated session
+   loss, and drain each session's ordered `QueueClientMessage` stream after Lightyear receive;
+2. reject queue input from sessions outside that captured set, discard all inputs for sessions lost
+   in that same update, and remove their existing tickets;
 3. preserve the envelope order directly, apply a matching acknowledgement before a following
    command, recognize a pending identical retry before token consumption, enforce the per-update and
    token bounds, then group admitted commands by stable authenticated player ID instead of Bevy
@@ -431,9 +449,10 @@ For one application update, server systems:
 6. queue at most one exact reliable outcome per session, then publish the newest complete sequenced
    snapshot if aggregate state changed.
 
-Equal request ID plus identical command returns the cached semantic outcome without mutation; the
-adapter emits it only when no copy for that request remains application-unacknowledged. Equal ID plus
-different command is a protocol violation. Lower IDs are stale. A newer Join while already queued
+Equal request ID plus identical command returns the cached semantic outcome without mutation; while
+that outcome remains application-unacknowledged, the bounded identical-retry cadence above suppresses
+another wire copy. Equal ID plus different command is a protocol violation. Lower IDs are stale. A
+newer Join while already queued
 returns the current membership without changing FIFO order only if it describes that exact active
 membership; it reuses the ticket's original `admitted_at_pool_state_revision`, consumes no public
 revision, and therefore requires only a snapshot at or above that original admission revision. A
@@ -460,13 +479,15 @@ exact roster into a reservation, overflow tickets remain included in the queued 
 promise which four players will form first.
 
 The client accepts only the active session generation and current catalog revision. A higher
-`state_revision` replaces the complete snapshot. An older snapshot is ignored; an identical replay
-is ignored; the same revision with different content is a protocol failure. Revision gaps and loss
-are safe because every message is complete and refreshes repeat the newest state. The client records
-local monotonic receipt time for the newest valid snapshot. If none has arrived or that receipt is
-more than three seconds old, Game Select and Queue show `Updating queue` rather than zero or an old
-count. The next valid current-generation snapshot restores counts immediately. The three-second age
-is presentation freshness only and never changes membership or authority.
+`state_revision` replaces the complete snapshot and records local monotonic receipt time. A lower
+revision is ignored without renewing freshness. The same revision with byte-equivalent canonical
+content leaves pool data unchanged but renews receipt time; the same revision with different content
+is a protocol failure. Revision gaps and loss are safe because every message is complete and
+refreshes repeat the newest state. If no valid snapshot has arrived or the last accepted/renewed
+receipt is more than three seconds old, Game Select and Queue show `Updating queue` rather than zero
+or an old count. The next higher or byte-equivalent current-revision snapshot restores counts
+immediately. The three-second age is presentation freshness only and never changes membership or
+authority.
 
 Membership outcomes carry the public revision required to present their state honestly: Joined
 membership carries the ticket's `admitted_at_pool_state_revision`, while Cancelled carries the
@@ -483,7 +504,8 @@ until the required revision is present.
 The lobby owns one bounded, privacy-safe `QueueTelemetry` resource. It records current and high-water
 active tickets and pending outcomes plus saturating counters for successful admissions,
 cancellations, disconnect removals, each bounded rejection class, rate-limit notices, protocol-abuse
-disconnects, and initial/mutation/refresh snapshot publications requested. It
+disconnects, suppressed identical retries, early identical retries, and
+initial/mutation/refresh snapshot publications requested. It
 contains no display name, player/session/ticket/request identity, build recipe, capability, address,
 or unbounded per-event history.
 
@@ -627,14 +649,24 @@ custom candidate. It bypasses presentation, not authority.
 Lobby `Update` order:
 
 ```text
-ObserveLobbyLifecycle
+BeginLobbyFrame
+  -> AuthenticateLobbyHellos
   -> CollectQueueClientMessages
   -> ReconcileDisconnectedSessions
   -> ApplyQueueTransactions
   -> PublishQueueOutcomesAndSnapshot
 ```
 
-This runs after Lightyear's pinned `PreUpdate` receive work. Replace M03's direct session mutation in
+This runs after Lightyear's pinned `PreUpdate` receive work. `BeginLobbyFrame` first captures the
+stable lobby-session IDs that were authenticated before this application update and observes known
+losses. `AuthenticateLobbyHellos` then runs M03's existing Hello transaction. Any session accepted
+there is deliberately ineligible for queue commands until the next update; client-side observation
+of Welcome is the ordinary product gate. Queue input from a session absent from the frame-start
+eligibility set is a protocol failure and cannot be reordered into post-authentication intent merely
+because its Hello was accepted from a separate typed receiver in the same update. The eligibility
+snapshot is stable-ID data, not a retained Bevy `Entity` handle, and is cleared/rebuilt every update.
+
+Replace M03's direct session mutation in
 both `lobby_cleanup_disconnected` and `On<Remove, LobbyClient>` with emission of one bounded,
 deduplicated `LobbySessionLost` record carrying the stable lobby session and authenticated Netcode
 identity. `ReconcileDisconnectedSessions` consumes those records, removes each owned ticket first,
@@ -644,11 +676,11 @@ cannot recreate membership. Observer timing, deferred entity removal, system reg
 order therefore cannot bypass queue cleanup. Tests exercise both the polled marker and component-
 removal observer paths.
 
-Outcome acknowledgements clear only the matching per-session pending-output marker and never mutate
-queue membership. The unified receiver is drained in order, so an acknowledgement followed by the
-next command on ordered-reliable `SessionChannel` is valid in one update while the reverse order is
-not silently rearranged. Queue mutation is immediate
-resource mutation inside one pure transaction; deferred entity commands
+Outcome acknowledgements clear only the matching per-session pending-output marker, identical-retry
+deadline, and early-duplicate count; they never mutate queue membership. The unified receiver is
+drained in order, so an acknowledgement followed by the next command on ordered-reliable
+`SessionChannel` is valid in one update while the reverse order is not silently rearranged. Queue
+mutation is immediate resource mutation inside one pure transaction; deferred entity commands
 are not used as the ticket commit boundary. Snapshot refresh timing uses elapsed real time for
 presentation delivery only and never affects FIFO or authority.
 
@@ -659,7 +691,7 @@ gameplay-, build-, and queue-free in M04.
 
 ## Planning slices
 
-Implementation remains blocked on user validation of this specification.
+Implementation was authorized by the user on 2026-08-19.
 
 ### Slice 1 — Establish queue/build contracts on the reconciled M03 seams
 
@@ -678,9 +710,11 @@ Implementation remains blocked on user validation of this specification.
 - [ ] Add the pure bounded lobby queue model with one ticket per session, deterministic FIFO,
   immutable resolved loadout, exact indexes, pre-reserved public revisions, idempotent Join/Cancel,
   admission-revision ownership, one pending outcome per session, the four-token/one-per-second
-  limiter with one fail-soft notice window, and queue-aware disconnect cleanup.
+  semantic limiter with one fail-soft notice window, the ten-second identical-retry cadence and
+  early-duplicate abuse threshold, and queue-aware disconnect cleanup.
 - [ ] Add explicit lobby schedule sets and one deduplicated session-loss seam over real
-  authenticated M03 sessions and both existing teardown paths.
+  authenticated M03 sessions and both existing teardown paths; capture frame-start authentication
+  eligibility before processing new Hellos.
 - [ ] Publish initial, post-mutation, and one-second refresh snapshots with bounded sequenced
   delivery, three-second client freshness aging, and required-revision barriers on membership
   outcomes.
@@ -689,7 +723,8 @@ Implementation remains blocked on user validation of this specification.
 - [ ] Add an in-memory authenticated flow proving welcome → snapshot → join accepted → queued →
   cancel accepted → Game Select state data, with no allocation request.
 - [ ] Prove duplicate, stale, malformed, ID/revision exhaustion, maximum-capacity, outcome-ack,
-  rate-abuse, stalled-client, and same-frame disconnect cases before UI work.
+  semantic-rate abuse, early-identical-retry abuse, pre-/same-frame authentication, stalled-client,
+  and same-frame disconnect cases before UI work.
 
 ### Slice 3 — Replace the debug editor in the product lobby flow
 
@@ -750,15 +785,20 @@ Implementation remains blocked on user validation of this specification.
   disconnects without another reliable outcome;
 - a burst of four acknowledged new semantic commands is admitted and tokens refill one per supplied
   elapsed second; an identical same-ID retry while its outcome is pending consumes no token and
-  enqueues no second copy, including five or more duplicates across bounded receive batches without
-  advancing refill time; more than four total client envelopes in one update still crosses the
-  independent decode-abuse bound; the first over-rate new semantic command with no pending outcome
-  returns one bounded `RateLimited` notice without queue mutation or disconnect,
+  enqueues no second copy; one retry at each supplied ten-second deadline remains token-neutral and
+  advances its deadline, early identical retries are silently dropped and counted, and the fourth
+  early retry in one window disconnects without another outcome; more than four total client
+  envelopes in one update crosses the independent application-processing abuse bound even though
+  Lightyear has already deserialized them; the first over-rate new semantic command with no pending
+  outcome returns one bounded `RateLimited` notice without queue mutation or disconnect,
   same-ID replay remains the same rejection, a compliant new-ID attempt after its delay succeeds,
   and another command during the notice window disconnects without an outcome flood;
 - polled `Disconnected` and `On<Remove, LobbyClient>` each pass through the same loss record and
   remove one ticket before its session; duplicate observation removes nothing else; disconnect plus
   Join in one update creates none;
+- a queue envelope before Hello, in the same update as an accepted Hello, or before the authenticated
+  session is frame-start eligible creates no ticket and closes as a protocol failure; an ordinary
+  queue command on the update after authentication uses the captured stable session identity;
 - every mutation leaves pool/session/ticket indexes bijective and within the 32-session/eight-pool
   bounds; all 32 sessions may queue in one pool and no unreachable `QueueFull` outcome exists;
 - complete snapshot revision increments only for public count changes and preserves catalog order,
@@ -766,8 +806,11 @@ Implementation remains blocked on user validation of this specification.
   equivalent re-Join reuses that revision, and Cancelled names the revision created by removal;
 - every queue outcome encodes within 512 bytes; at most one unacknowledged outcome per session and
   32/16 KiB process-wide queue outcomes/payload can be retained by the application adapter;
+- client-visible `QueueMembership` omits server-only `admission_order`; only the authoritative ticket
+  and pool indexes retain FIFO order;
 - queue diagnostics saturate safely, current/high-water ticket and pending-outcome values converge
-  through admission/cancellation/disconnect, rejection/snapshot counters follow exact typed facts,
+  through admission/cancellation/disconnect, rejection/snapshot and suppressed/early-identical-retry
+  counters follow exact typed facts,
   and the aggregate schema contains no identity, recipe, capability, address, or unbounded history;
 - accepted summaries have one preset-origin field through `SelectedBuild`; canonical recipe,
   fingerprint, revision, preset origin, and total points agree for presets and custom builds.
@@ -820,10 +863,12 @@ Implementation remains blocked on user validation of this specification.
   in one update, rejects a different/new `Command -> Ack` while an outcome is pending without
   reordering it, and snapshots remain only server-to-client on sequenced-unreliable
   `QueueSnapshotChannel` with local unsent retry disabled, and every variable field rejects
-  over-bound input during decode;
+  over-bound input during decode; the membership wire shape contains no admission order or global
+  queue position;
 - compatible welcome schedules one valid full snapshot; several consecutive dropped refreshes age
-  counts to `Updating queue`, the next delivered full refresh restores them, older/duplicate
-  snapshots are ignored, and conflicting same-revision content fails;
+  counts to `Updating queue`, the next delivered full refresh restores them, a byte-equivalent
+  current-revision refresh renews freshness without replacing pool data, an older snapshot does not
+  renew freshness, and conflicting same-revision content fails;
 - outcome and snapshot may arrive in either order; Joined/Cancelled transitions use only the
   outcome, and affected counts remain `Updating queue` until a snapshot at or above the outcome's
   required revision arrives;
@@ -832,7 +877,8 @@ Implementation remains blocked on user validation of this specification.
 - clients in different pools never receive each other's membership/build details but observe the
   same aggregate rows;
 - 32-session/ticket bounds, malicious duplicate commands, missing outcome acknowledgement, a
-  fail-soft first rate-limit notice, continued rate abuse, a stalled client, sustained queue churn,
+  fail-soft first rate-limit notice, continued semantic-rate abuse, early identical-retry abuse, a
+  stalled client, sustained queue churn,
   and disconnect cleanup remain within the explicit 32-outcome/16-KiB application payload bound
   without reliable snapshot accumulation or allocation;
 - `just network-product-queue-smoke` connects a headless product client, selects an advertised game,
@@ -862,30 +908,34 @@ Implementation remains blocked on user validation of this specification.
 ## Exit criteria
 
 - [x] M03 is complete and its final delivered seams are reconciled here.
-- [ ] The user validates the final M04 specification before implementation begins.
+- [x] The user validated the final M04 specification by directing implementation on 2026-08-19.
 - [ ] Build Editor supports every current preset/custom choice with honest budget, preview, precise
   invalid feedback, visible option costs and meaningful tradeoffs, and controller/keyboard/mouse
   operation.
 - [ ] Last server-accepted build survives restart when valid and missing/malformed/stale/save-failed
   local data fails safely without altering queue authority.
-- [ ] The lobby atomically validates selected game/catalog/build identity and creates at most one
-  immutable ticket per authenticated session.
+- [ ] The lobby admits queue intent only from sessions authenticated at frame start, atomically
+  validates selected game/catalog/build identity, and creates at most one immutable ticket per
+  authenticated session.
 - [ ] Queue requests/cancellation are idempotent and safe under duplicates, stale IDs, overflow,
   same-frame disconnect, timeout/retry, and ID/order/revision exhaustion; reservation races remain
   explicitly owned by M05. A newer equivalent Join reuses the existing ticket and admission revision
   without consuming another public revision.
 - [ ] Game Select and Queue show revisioned real aggregate counts and exact formation size without
   revealing private membership or inventing an estimate; membership-changing outcomes provide an
-  explicit freshness barrier, stale snapshots age out after three seconds, and any later delivered
-  current snapshot restores the display.
+  explicit freshness barrier, stale snapshots age out after three seconds, a byte-equivalent
+  current-revision refresh renews freshness, and any later delivered current snapshot restores the
+  display.
 - [ ] Cancel Queue returns to Game Select without disconnecting; unexpected loss removes server
   membership and follows fresh-session recovery; Disconnect remains immediately reachable while
   either Join or Cancel is pending.
 - [ ] Command and snapshot delivery remain bounded under a stalled client and sustained churn;
   at most one application queue outcome of at most 512 bytes is unacknowledged per session, abuse
   cannot create an outcome flood, the first over-rate new semantic command fails softly with one
-  bounded notice, stale snapshots age out, and complete snapshots never accumulate in an ordered-
-  reliable history.
+  bounded notice, identical recovery is token- and wire-copy-neutral only at the bounded ten-second
+  cadence, repeated early duplicates disconnect, unchanged current-revision refreshes renew
+  freshness, stale snapshots age out, and complete snapshots never accumulate in an ordered-reliable
+  history.
 - [ ] Privacy-safe bounded diagnostics expose queue current/high-water state and typed aggregate
   outcomes needed to diagnose admission, cleanup, abuse, and snapshot publication without retaining
   player, ticket, request, build, capability, or address identity.
@@ -978,7 +1028,11 @@ Corrections applied 2026-08-19 after M03 approval:
 - unified acknowledgements and commands in one ordered client envelope so typed receivers cannot
   silently reconstruct a different application order;
 - made pending identical retries token-neutral and wire-copy-neutral, closing the duplicate-burst
-  state while retaining the limiter for new semantic commands;
+  state while retaining the limiter for new semantic commands; the final review bounded those
+  retries to the product's ten-second cadence with an early-duplicate abuse threshold and corrected
+  the application processing cap so it no longer claims to precede Lightyear deserialization;
+- made authentication eligibility a frame-start stable-ID snapshot so separately typed Hello and
+  queue receivers cannot reorder pre-authentication intent into an accepted command;
 - replaced the nonexistent in-session catalog refresh with explicit incompatible-session recovery;
 - added bounded privacy-safe queue diagnostics and headless process evidence;
 - made Disconnect immediately reachable during Join as well as Cancel;
@@ -986,4 +1040,114 @@ Corrections applied 2026-08-19 after M03 approval:
   through focused before/after changes without misleading aggregate DPS;
 - removed duplicate preset-origin identity from the accepted summary, defined admission-revision
   reuse for a newer equivalent Join, and mapped correctable build rejections to deterministic product
-  copy and focus behavior.
+  copy and focus behavior;
+- kept FIFO admission order solely in the authoritative ticket instead of exposing an unnecessary
+  approximation of queue position in client membership.
+
+## Implementation and verification evidence
+
+Completed 2026-08-19 before the user-playtest handoff:
+
+- the product flow now owns one Build Editor overlay and Queue state, all four presets, every value
+  for the six custom fields, authored option costs, exact budget/invalid feedback, focused resolved
+  deltas, explicit **Build & Join**, authoritative acceptance/cancellation, pending Retry and
+  Disconnect actions, and a visibly disabled rate-limit retry with a live remaining delay;
+- `BuildFileV1` loads and atomically saves only the last server-accepted preset/custom selection;
+  focused tests cover valid round trips, missing/default, malformed, stale, invalid, oversized, and
+  save-failure behavior;
+- the lobby owns immutable bounded tickets, FIFO pools and indexes, atomic build/game validation,
+  one acknowledged outcome per session, sequenced-unreliable complete snapshots, revision/freshness
+  barriers, semantic-command and identical-retry abuse bounds, and cleanup before session removal;
+- queue wire registration advanced the one global protocol version and keeps the unified command/ack
+  envelope and outcome on `SessionChannel`, with snapshots server-to-client only on
+  `QueueSnapshotChannel` and local unsent retry disabled;
+- final `just verify` passed: 329 client tests, 289 server tests, 78 serial separate-App/UDP network
+  tests, 14 performance gates, 79 routing unit tests plus its process/runtime/isolation suites,
+  formatting, all role Clippy checks with warnings denied, server feature isolation, and the routed
+  lobby → match → fresh-lobby transition smoke;
+- `just network-product-queue-smoke` passed welcome → initial snapshot → admission → admission
+  snapshot → cancellation → cancellation snapshot → exit against the production lobby composition.
+  The final privacy-safe server aggregate reported one admission, one cancellation, zero current
+  tickets/outcomes, ticket/outcome high-water marks of one, and two mutation publications; client
+  evidence reported one freshness restoration and no aging. No match worker or allocation request
+  was emitted;
+- `just network-direct-smoke` passed for both clients, preserving the direct-UDP match build-selection
+  baseline on the current global protocol;
+- the first full verification run exposed an existing queue-less lobby-observer test that no longer
+  had the new loss resource. The observer now records the shared queue-aware loss when that resource
+  exists and preserves immediate session cleanup for minimal queue-less compositions; the focused
+  regression and final canonical run pass;
+- a final bounds audit changed queue-envelope collection from an unbounded ready-message `Vec` to a
+  five-item drain: four are the allowed application budget, the fifth proves abuse, and dropping the
+  draining iterator discards the remainder without interpreting or retaining it.
+
+Native visual captures and a physical-controller pass are not claimed. The windowed Bevy process
+launched successfully, but it was not exposed as an addressable macOS accessibility application in
+this environment, so the required layout/controller observations remain the user-playtest gate.
+
+### Implementation review remediation — 2026-08-19
+
+The first post-implementation review found that the ten-second Retry action was continually
+preempted by a level-triggered timeout observation, the Build Editor rebuilt its complete UI tree
+every update and therefore could not retain scroll/focus state, Queue copy did not identify the
+advertised game or accepted build clearly, disconnect cleanup at pool-revision exhaustion could
+leave stale public rows, the queue-smoke watchdog did not exit after handling its timeout signal,
+and the new queue contract had no separate-App network scenario.
+
+Remediation:
+
+- timeout presentation is now edge-triggered once per pending attempt; Retry keeps the exact frozen
+  request and late matching authority still wins;
+- the editor keeps one bounded render key, retains an unchanged entity tree, preserves
+  `ScrollPosition` across meaningful content rebuilds, scrolls from mouse-wheel input, and keeps the
+  controller-selected control visible; invalid/active Join and Back actions are disabled while the
+  frozen admission is pending, with Disconnect remaining active;
+- Queue resolves the accepted advertised display name and build name, shows the accepted ultimate
+  and passives, and exposes a disabled `CANCELLING…` state without hiding Disconnect;
+- disconnect cleanup always removes internal membership, but revision exhaustion marks the lobby
+  authority generation terminal, suppresses publication under the exhausted revision, and requests
+  process failure/restart;
+- protocol tests now assert all queue message registrations, the snapshot channel, and exact sender
+  directions; focused client/authority tests cover timeout/late-outcome behavior, retained editor
+  scroll, accepted copy, cancellation copy, cross-pool aggregates, middle-cancellation FIFO, and
+  disconnect exhaustion; a separate-App Crossbeam scenario proves the unified `Ack -> Command`
+  envelope order over the real registered `SessionChannel`;
+- the smoke watchdog now captures the parent PID, stops the child blocked under the parent's
+  `wait`, and lets the parent signal handler exit with status 124 after bounded cleanup instead of
+  returning to the interrupted wait. A forced one-second timeout asserted status 124, and the
+  subsequent normal `just network-product-queue-smoke` completed admission, fresh snapshot,
+  cancellation, and cleanup successfully;
+- post-remediation verification passed `just check`, `just lint`, `just test`,
+  `just server-features`, shell syntax validation, the forced watchdog assertion, and the normal
+  product queue smoke. The test totals are the updated counts recorded above.
+
+The remaining open gate is still representative visual inspection and physical-controller playtest;
+those observations are not inferred from automated coverage.
+
+## Open user playtest record
+
+Run `just network-product-queue-smoke` once for the bounded terminal authority check, then run
+`just network-product-lobby` for the normal windowed product client. At 960×540, the default window
+size, and one 16:10 or ultrawide size:
+
+1. From Title, choose Play, connect to `127.0.0.1:5000`, select each advertised game card, and
+   confirm its population reads `N waiting · M players per match` rather than a wait estimate.
+2. Open **Build & Join**. With mouse/keyboard, inspect all four presets, then Custom; open each of
+   Power, Reach, Magazine, Ultimate, Passive 1, and Passive 2, and verify every option shows a cost
+   plus understandable changed lines. Create one incompatible and one over-budget draft, then
+   correct each without losing the draft.
+3. Join with a preset. Confirm Queue shows the accepted point total and a fresh aggregate count,
+   Cancel Queue returns to Game Select without disconnecting, and a second Build Editor opening
+   starts from the accepted build. Close and relaunch once to confirm that accepted build persists.
+4. Repeat the ordinary select → edit → join → cancel flow using only a physical controller: D-pad
+   navigates, South activates, and East backs out. Confirm visible focus remains on every transition
+   and after disconnecting/reconnecting the controller.
+5. While Join or Cancel is pending, confirm Disconnect remains immediately reachable. If a ten-second
+   timeout or rate-limit response is exercised, confirm Retry preserves the frozen request while
+   **Try Again** remains disabled until its visible countdown expires.
+6. Check that no opponent names/builds, global queue position, ratio-like progress, or wait estimate
+   appears anywhere.
+
+Please record any clipped/unclear layout, lost focus, unexpected draft reset, misleading tradeoff,
+or recovery failure. Each item will be triaged as implemented now, deferred, rejected with rationale,
+or awaiting evidence before M04 is marked `Complete`.

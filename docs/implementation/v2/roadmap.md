@@ -22,10 +22,13 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
 - By explicit user direction on 2026-08-19, M03 specification research overlapped M02's user
   playtest/review. The user subsequently accepted M02 and directed M03 implementation on
   2026-08-19; M02 is complete, and M03 completed after accepted playtest fixes on 2026-08-19.
-- By explicit user direction on 2026-08-19, M04 research and planning may overlap M03
-  implementation. M04 is now the current delivery milestone; its specification has been reconciled
-  against M03's delivered seams and remains unauthorized for production implementation until user
-  validation.
+- By explicit user direction on 2026-08-19, M04 research and planning overlapped M03
+  implementation. M04 is now the current delivery milestone; its specification was reconciled
+  against M03's delivered seams and the user subsequently directed implementation on 2026-08-19.
+- By explicit user direction on 2026-08-19, M05 research and specification preparation overlap M04
+  implementation. M04 remains the current delivery milestone; M05 production implementation is
+  not authorized until M04's delivered seams are reconciled and the user validates the M05
+  specification.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -41,7 +44,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Specification review |
+| Status | User playtest |
 | Current milestone | M04 — Product build editor and authoritative queue admission |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
@@ -53,8 +56,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 01 | Complete | Reusable routed multi-process server foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
 | 03 | Complete | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
-| 04 | Specification review | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
-| 05 | Not started | Exact formation, worker allocation, and match loading/handoff | Create when next |
+| 04 | User playtest | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
+| 05 | Specification review | Exact formation, worker allocation, and match loading/handoff | [milestone-05.md](./milestone-05.md) |
 | 06 | Not started | Concurrent match lifecycle, results, and requeue | Create when next |
 | 07 | Not started | Combat HUD, menus, readability, and accessibility | Create when next |
 | 08 | Not started | Authoritative bot practice and local supervisor launch | Create when next |
@@ -104,10 +107,12 @@ Gate: players can edit, correct rejected builds, join/cancel queues, and remain 
 duplicates, command retries, bounded reliable outcomes, stale snapshot delivery, and disconnects;
 the editor communicates each tradeoff with focused before/after changes, equivalent re-Join
 preserves the original ticket/admission revision, one ordered client envelope preserves
-acknowledgement/command order, pending identical recovery is token- and wire-copy-neutral, and the
-first over-rate new command fails softly before continued abuse disconnects. Privacy-safe bounded
-diagnostics make admission, cleanup, abuse, snapshot publication intent, and client freshness aging
-observable. M04 ends before
+acknowledgement/command order, pending identical recovery is token- and wire-copy-neutral at the
+bounded ten-second Retry cadence, repeated early duplicates disconnect, and the first over-rate new
+command fails softly before continued abuse disconnects. Only sessions authenticated at frame start
+may issue queue commands, and byte-equivalent current-revision refreshes renew client freshness while
+older snapshots do not. Privacy-safe bounded diagnostics make admission, cleanup, abuse, snapshot
+publication intent, and client freshness aging observable. M04 ends before
 ticket reservation exists, so it does not fabricate a formation-boundary race.
 
 ### M05 — Exact formation, worker allocation, and match loading/handoff

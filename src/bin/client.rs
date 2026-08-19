@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --product-queue-smoke | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
     );
 }
 
@@ -67,6 +67,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut exit_after_roster = None;
     let mut exit_after_lobby_return = false;
     let mut exit_after_lobby_welcome = false;
+    let mut product_queue_smoke = false;
     let mut headless_move = None;
     let mut headless_aim = None;
     let mut headless_aim_at_dummy = false;
@@ -94,6 +95,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             }
             "--exit-after-lobby-return" => exit_after_lobby_return = true,
             "--exit-after-lobby-welcome" => exit_after_lobby_welcome = true,
+            "--product-queue-smoke" => product_queue_smoke = true,
             "--move-axis" => headless_move = Some(parse_axis(&flag, args.next())?),
             "--aim-axis" => headless_aim = Some(parse_axis(&flag, args.next())?),
             "--aim-dummy" => headless_aim_at_dummy = true,
@@ -136,9 +138,10 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
         }
         (None, false) => random_nonzero_client_id()?,
     };
-    if headless && exit_after_roster.is_none() && !exit_after_lobby_welcome {
+    if headless && exit_after_roster.is_none() && !exit_after_lobby_welcome && !product_queue_smoke
+    {
         return Err(
-            "--headless requires --exit-after-lobby-welcome or --exit-after-roster".to_string(),
+            "--headless requires --exit-after-lobby-welcome, --product-queue-smoke, or --exit-after-roster".to_string(),
         );
     }
     if !headless && exit_after_roster.is_some() {
@@ -187,6 +190,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.exit_after_roster = exit_after_roster;
     config.exit_after_lobby_return = exit_after_lobby_return;
     config.exit_after_lobby_welcome = exit_after_lobby_welcome;
+    config.product_queue_smoke = product_queue_smoke;
     config.headless_move = headless_move;
     config.headless_aim = headless_aim;
     config.headless_aim_at_dummy = headless_aim_at_dummy;

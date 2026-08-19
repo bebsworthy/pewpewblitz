@@ -180,6 +180,9 @@ and provide M01's comparison baseline.
   appropriate shared model/cue/definition module. Never expose process-local `Entity` identity on
   the wire. Preserve public module paths and wire contracts during organization-only changes unless
   the active milestone explicitly approves and tests a protocol change.
+- Follow `docs/08-network-architecture.md` for application protocol evolution: use the one global
+  compatibility handshake and current schema, and do not introduce per-message versions or
+  compatibility decoders without a new validated architecture decision.
 - Default new items and submodules to private. Use `pub(crate)` for demonstrated cross-module use
   and public re-exports only for the crate API consumed by another role, integration tests, or a
   genuine external boundary. Avoid wildcard re-exports that accidentally turn implementation
@@ -198,6 +201,40 @@ and provide M01's comparison baseline.
 - When a file is already large but cohesive, add new code only if it shares that exact ownership and
   lifecycle. A new concern should get a named submodule; recurring growth inside one system should
   be decomposed into testable helpers. Do not use a hard line limit as a substitute for this review.
+
+## Value, maintainability, and no-over-engineering rules
+
+- Deliver a complete player-visible vertical slice before building general infrastructure. A
+  milestone should end with functional value a player can exercise, not only reusable machinery.
+- Build for current demonstrated requirements. Do not model future screens, states, protocol
+  variants, settings migrations, widget variants, or extension points before an owned use exists.
+- Start with local, direct code. Extract a helper, module, plugin, crate, or public API only after
+  duplication, distinct ownership, platform separation, testing needs, or another concrete cost
+  demonstrates the boundary. A second real use is evidence; an imagined future use is not.
+- Prefer Bevy-native components, resources, systems, states, events/messages, assets, and UI before
+  adding a custom framework or dependency. Add another abstraction only when the native approach
+  creates a specific observed problem.
+- Optimize for obvious ownership and readable execution flow, not the number of layers. A small
+  action enum and coordinating system are preferable to reducers, command buses, callbacks, or
+  multi-stage state machines when the feature does not require those mechanisms.
+- Preserve the boundaries that protect the product: server authority, execution-role isolation,
+  stable wire identity, recoverable persistence, bounded state, and accepted automation paths.
+  Avoid generalizing behavior outside those boundaries without evidence.
+- Keep presentation optional around behavior. Animation, audio, effects, and transitions must not
+  become the authority for navigation, saving, networking, shutdown, or gameplay state.
+- Organize by responsibility and lifecycle rather than line count. A cohesive file may remain
+  moderately large; split it when responsibilities or owners diverge and the resulting boundary is
+  easier to understand and verify.
+- Test costly risks and important contracts, not every combination. Use focused pure/ECS tests,
+  representative integration cases, and a small visual/manual matrix. Do not multiply every state,
+  input, resolution, scale, timing sample, and failure into a Cartesian suite without evidence.
+- Reuse production components, canonical commands, and existing harnesses. Do not create a general
+  abstraction solely to make one test possible unless production code also benefits from the seam.
+- Record deferred polish and known limitations in the owning milestone or backlog. Do not expand the
+  current slice incidentally to solve future work.
+- Prefer the smallest clear implementation that owns today's behavior and is easy to change when a
+  new requirement becomes real. Maintainability means clear ownership, limited scope, and safe
+  change—not maximum abstraction.
 
 ## Local implementation references
 

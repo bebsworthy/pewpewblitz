@@ -61,8 +61,8 @@ use lightyear::prelude::client::{Client, Connected, Disconnect, Disconnected, Re
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Stopped};
 use lightyear::prelude::{
     AppMessageExt, ConfirmedHistory, Controlled, Interpolated, InterpolationTimeline, Link,
-    LinkSystems, LocalAddr, MessageSender, MessageSystems, NetworkDirection, NetworkTimeline,
-    Predicted,
+    LinkSystems, LocalAddr, MessageReceiver, MessageSender, MessageSystems, NetworkDirection,
+    NetworkTimeline, Predicted,
 };
 use lightyear::transport::plugin::TransportSystems;
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,8 @@ mod movement_input;
 #[cfg(feature = "owner-prediction")]
 #[path = "network/prediction.rs"]
 mod prediction;
+#[path = "network/queue.rs"]
+mod queue;
 #[path = "network/selection.rs"]
 mod selection;
 #[path = "network/soaks.rs"]

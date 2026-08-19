@@ -333,7 +333,7 @@ authority. The lifecycle changes:
 | Non-fatal windowed lifecycle | Debug-only → change | Transition to flow/error UI; retain headless exit contracts |
 | Lobby session identity/name | Missing | Server-sanitized session display name over stable numeric identity |
 | Game-type advertisement | Missing | Bounded stable IDs/revisions, modes, map pool, exact topology, and rules summary; revisioned queue counts begin with real M04 pools |
-| Queue commands and snapshots | Missing | One ordered-reliable in-band client envelope preserves request/ack order with ticket identity; equivalent re-Join preserves the ticket and original admission revision; pending identical recovery does not spend rate tokens or enqueue another copy; the first over-rate new command fails softly before continued abuse disconnects; complete revisioned aggregate snapshots use bounded sequenced delivery plus refresh, with explicit actionable rejection reasons, outcome-to-snapshot freshness barriers, and privacy-safe bounded diagnostics |
+| Queue commands and snapshots | Missing | One ordered-reliable in-band client envelope preserves request/ack order with ticket identity; only sessions authenticated at frame start may issue queue commands; equivalent re-Join preserves the ticket and original admission revision; pending identical recovery does not spend semantic-command tokens or enqueue another copy at the bounded ten-second Retry cadence, while repeated early duplicates disconnect; the first over-rate new command fails softly before continued abuse disconnects; complete revisioned aggregate snapshots use bounded sequenced delivery plus refresh, byte-equivalent current-revision refreshes renew freshness while older snapshots do not, and explicit actionable rejection reasons, outcome-to-snapshot freshness barriers, and privacy-safe bounded diagnostics remain required |
 | Match reservation/loading | Missing | Match allocation, targeted sync, check-in deadline, dissolution/requeue policy |
 | Leave/cancel/disconnect | Missing | Separate idempotent intents with distinct membership effects |
 | Address and local server lists | Missing | Validated hostname/address, explicit favorites, bounded recents |
@@ -433,12 +433,14 @@ match, map, terrain, focus, and presentation state exactly once.
   controller/KBM parity, build budget display, local-file migration/fallback, and error mapping.
 - **Schedule/ECS tests:** presentation cannot mutate authoritative simulation; match-scoped queries,
   mode routing, deferred boundaries, and exact cleanup remain explicit.
-- **Protocol tests:** bounded advertisements, names, recipes, ticket IDs/revisions, duplicates, stale
-  commands, malformed input, rate limits, and direction/target registration.
+- **Protocol tests:** bounded advertisements, names, recipes, ticket IDs/revisions, frame-start
+  authentication eligibility, duplicates and bounded identical-retry cadence, stale commands,
+  malformed input, semantic rate limits, and direction/target registration.
 - **Network tests:** connect → catalog → queue → reserve → load/check-in → countdown → match →
   results → requeue/change-game; rejection → correction → rejoin; queue overflow; cancellation at
   formation; disconnect in every phase; fresh-session retry; bounded reliable queue outcomes;
-  consecutive aggregate-snapshot loss/aging/recovery; and headless exit equivalence.
+  consecutive aggregate-snapshot loss/aging/recovery, byte-equivalent current-revision freshness
+  renewal, older-snapshot rejection; and headless exit equivalence.
 - **Concurrency tests:** simultaneous Wipeout/Hot Zone worker processes, route/message/recovery
   isolation, host admission refusal, worker teardown/crash, and repeated formation/completion soak.
 - **Performance tests:** measured server fixed-tick, entity, terrain, memory, and bandwidth ceilings;

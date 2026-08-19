@@ -206,6 +206,10 @@ network-product-lobby-smoke:
 network-product-lobby:
     BRAWLER_NETWORK_HEADLESS=0 ./scripts/network-product-lobby.sh
 
+# Exercise the M04 production lobby queue without installing the M01 allocation driver.
+network-product-queue-smoke:
+    ./scripts/network-product-queue.sh
+
 # Run the same production routed smoke over the IPv6 loopback address. The client derives an IPv6
 # local socket from the selected server address; this is a separate opt-in check because many
 # development hosts disable IPv6 loopback.

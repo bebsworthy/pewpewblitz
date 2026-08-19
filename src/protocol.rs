@@ -51,13 +51,16 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5240;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 14;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 15;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
 
 /// Ordered reliable channel for the compatibility handshake and join outcome.
 pub struct SessionChannel;
+
+/// Sequenced-unreliable server-to-client stream for replaceable complete queue snapshots.
+pub struct QueueSnapshotChannel;
 
 /// Ordered reliable server-to-client stream for presentation-only combat facts.
 pub struct CombatChannel;
@@ -456,11 +459,7 @@ pub struct BuildSelectionRequest {
     pub selection: BuildSelection,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BuildSelection {
-    Preset(crate::builds::BuildPresetId),
-    Custom(crate::builds::BrawlerBuildRecipe),
-}
+pub use crate::builds::BuildSelection;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BuildSelectionDecision {
@@ -580,6 +579,78 @@ fn register_terrain_protocol(app: &mut App) {
     .add_direction(NetworkDirection::Bidirectional);
 }
 
+fn register_queue_protocol(app: &mut App) {
+    app.register_message::<crate::lobby::QueueClientMessage>()
+        .add_direction(NetworkDirection::ClientToServer);
+    app.register_message::<crate::lobby::QueueCommandOutcome>()
+        .add_direction(NetworkDirection::ServerToClient);
+    app.register_message::<crate::lobby::QueuePoolSnapshot>()
+        .add_direction(NetworkDirection::ServerToClient);
+    app.add_channel::<QueueSnapshotChannel>(ChannelSettings {
+        mode: ChannelMode::SequencedUnreliable,
+        retry_unsent_messages: false,
+        ..default()
+    })
+    .add_direction(NetworkDirection::ServerToClient);
+}
+
+fn register_replicated_components(app: &mut App) {
+    app.component::<Fighter>().replicate_once();
+    app.component::<MatchRootMarker>().replicate_once();
+    app.component::<MatchState>().replicate();
+    app.component::<MatchClock>().replicate();
+    app.component::<WipeoutState>().replicate();
+    app.component::<HotZoneState>().replicate();
+    app.component::<MatchParticipant>().replicate();
+    app.component::<RespawnState>().replicate();
+    app.component::<SpawnProtection>().replicate();
+    app.component::<MapRoot>().replicate_once();
+    app.component::<MapInstanceId>().replicate_once();
+    app.component::<ResolvedMapIdentity>().replicate_once();
+    app.component::<ResolvedMapSnapshot>().replicate_once();
+    app.component::<SpawnAssignment>().replicate();
+    app.component::<PlayerId>().replicate_once();
+    app.component::<NetworkEntityId>().replicate_once();
+    app.component::<PlaceholderState>().replicate();
+    app.component::<FighterDefinitionId>().replicate_once();
+    app.component::<WeaponDefinitionId>().replicate_once();
+    app.component::<crate::builds::SelectedBuild>().replicate();
+    app.component::<ResolvedMatchLoadout>().replicate();
+    app.component::<AbilityState>().replicate();
+    app.component::<PassiveRuntimeState>().replicate();
+    app.component::<crate::abilities::Sentry>().replicate_once();
+    app.component::<crate::abilities::SentryIdentity>()
+        .replicate_once();
+    app.component::<crate::abilities::SentryDeadline>()
+        .replicate_once();
+    app.component::<SelectingBuild>().replicate();
+    app.component::<ActiveEffects>().replicate();
+    app.component::<KnockbackFeedback>().replicate();
+    app.component::<AttackDelivery>().replicate_once();
+    app.component::<LobbedFlight>().replicate_once();
+    app.component::<ProjectileDeadline>().replicate_once();
+    app.component::<StraightFlight>().replicate_once();
+    app.component::<TeamId>().replicate();
+    app.component::<CurrentHealth>().replicate();
+    app.component::<WeaponState>().replicate();
+    app.component::<AuthoritativeTick>().replicate();
+    app.component::<AuthoritativePose>().replicate();
+    app.component::<Defeated>().replicate();
+    app.component::<Projectile>().replicate_once();
+    app.component::<ProjectileSource>().replicate_once();
+    app.component::<ReplicatedAttackSource>().replicate_once();
+    app.component::<Position>()
+        .replicate()
+        .add_linear_interpolation();
+    app.component::<Rotation>()
+        .replicate()
+        .add_linear_interpolation();
+    app.interpolate_bundle_with_priority::<(Position, Rotation)>(
+        5,
+        InterpolationFns::interpolate(interpolate_network_pose),
+    );
+}
+
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::combat::WeaponCatalogResource>()
@@ -594,6 +665,7 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<LobbyJoinOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
+        register_queue_protocol(app);
         app.register_message::<MatchRouteGrant>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<BuildSelectionRequest>()
@@ -617,7 +689,6 @@ impl Plugin for ProtocolPlugin {
             ..default()
         })
         .add_direction(NetworkDirection::Bidirectional);
-
         app.register_message::<CombatCue>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<CombatEvidenceCheckpoint>()
@@ -630,60 +701,7 @@ impl Plugin for ProtocolPlugin {
 
         register_terrain_protocol(app);
 
-        app.component::<Fighter>().replicate_once();
-        app.component::<MatchRootMarker>().replicate_once();
-        app.component::<MatchState>().replicate();
-        app.component::<MatchClock>().replicate();
-        app.component::<WipeoutState>().replicate();
-        app.component::<HotZoneState>().replicate();
-        app.component::<MatchParticipant>().replicate();
-        app.component::<RespawnState>().replicate();
-        app.component::<SpawnProtection>().replicate();
-        app.component::<MapRoot>().replicate_once();
-        app.component::<MapInstanceId>().replicate_once();
-        app.component::<ResolvedMapIdentity>().replicate_once();
-        app.component::<ResolvedMapSnapshot>().replicate_once();
-        app.component::<SpawnAssignment>().replicate();
-        app.component::<PlayerId>().replicate_once();
-        app.component::<NetworkEntityId>().replicate_once();
-        app.component::<PlaceholderState>().replicate();
-        app.component::<FighterDefinitionId>().replicate_once();
-        app.component::<WeaponDefinitionId>().replicate_once();
-        app.component::<crate::builds::SelectedBuild>().replicate();
-        app.component::<ResolvedMatchLoadout>().replicate();
-        app.component::<AbilityState>().replicate();
-        app.component::<PassiveRuntimeState>().replicate();
-        app.component::<crate::abilities::Sentry>().replicate_once();
-        app.component::<crate::abilities::SentryIdentity>()
-            .replicate_once();
-        app.component::<crate::abilities::SentryDeadline>()
-            .replicate_once();
-        app.component::<SelectingBuild>().replicate();
-        app.component::<ActiveEffects>().replicate();
-        app.component::<KnockbackFeedback>().replicate();
-        app.component::<AttackDelivery>().replicate_once();
-        app.component::<LobbedFlight>().replicate_once();
-        app.component::<ProjectileDeadline>().replicate_once();
-        app.component::<StraightFlight>().replicate_once();
-        app.component::<TeamId>().replicate();
-        app.component::<CurrentHealth>().replicate();
-        app.component::<WeaponState>().replicate();
-        app.component::<AuthoritativeTick>().replicate();
-        app.component::<AuthoritativePose>().replicate();
-        app.component::<Defeated>().replicate();
-        app.component::<Projectile>().replicate_once();
-        app.component::<ProjectileSource>().replicate_once();
-        app.component::<ReplicatedAttackSource>().replicate_once();
-        app.component::<Position>()
-            .replicate()
-            .add_linear_interpolation();
-        app.component::<Rotation>()
-            .replicate()
-            .add_linear_interpolation();
-        app.interpolate_bundle_with_priority::<(Position, Rotation)>(
-            5,
-            InterpolationFns::interpolate(interpolate_network_pose),
-        );
+        register_replicated_components(app);
         app.add_systems(Startup, initialize_protocol_fingerprint);
     }
 }
@@ -754,6 +772,9 @@ mod tests {
         assert!(app.is_message_registered::<MatchJoinOutcome>());
         assert!(app.is_message_registered::<LobbyHello>());
         assert!(app.is_message_registered::<LobbyJoinOutcome>());
+        assert!(app.is_message_registered::<crate::lobby::QueueClientMessage>());
+        assert!(app.is_message_registered::<crate::lobby::QueueCommandOutcome>());
+        assert!(app.is_message_registered::<crate::lobby::QueuePoolSnapshot>());
         assert!(app.is_message_registered::<MatchRouteGrant>());
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());
@@ -767,6 +788,9 @@ mod tests {
         let channels = app.world().resource::<ChannelRegistry>();
         assert!((0..32).any(|id| {
             channels.get_name_from_net_id(id) == core::any::type_name::<SessionChannel>()
+        }));
+        assert!((0..32).any(|id| {
+            channels.get_name_from_net_id(id) == core::any::type_name::<QueueSnapshotChannel>()
         }));
         assert!((0..32).any(|id| {
             channels.get_name_from_net_id(id) == core::any::type_name::<TerrainChannel>()
@@ -1080,6 +1104,76 @@ mod tests {
                     .is_some()
             );
         }
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn queue_messages_install_only_the_client_command_sender() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::state::app::StatesPlugin,
+            lightyear::prelude::client::ClientPlugins {
+                tick_duration: SIMULATION_TICK,
+            },
+            ProtocolPlugin,
+        ));
+        let link = app
+            .world_mut()
+            .spawn(lightyear::prelude::client::Client)
+            .id();
+        app.world_mut().flush();
+        let world = app.world();
+        assert!(
+            world
+                .get::<MessageSender<crate::lobby::QueueClientMessage>>(link)
+                .is_some()
+        );
+        assert!(
+            world
+                .get::<MessageSender<crate::lobby::QueueCommandOutcome>>(link)
+                .is_none()
+        );
+        assert!(
+            world
+                .get::<MessageSender<crate::lobby::QueuePoolSnapshot>>(link)
+                .is_none()
+        );
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn queue_messages_install_only_the_server_outcome_senders() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::state::app::StatesPlugin,
+            lightyear::prelude::server::ServerPlugins {
+                tick_duration: SIMULATION_TICK,
+            },
+            ProtocolPlugin,
+        ));
+        let link = app
+            .world_mut()
+            .spawn(lightyear::prelude::server::ClientOf)
+            .id();
+        app.world_mut().flush();
+        let world = app.world();
+        assert!(
+            world
+                .get::<MessageSender<crate::lobby::QueueClientMessage>>(link)
+                .is_none()
+        );
+        assert!(
+            world
+                .get::<MessageSender<crate::lobby::QueueCommandOutcome>>(link)
+                .is_some()
+        );
+        assert!(
+            world
+                .get::<MessageSender<crate::lobby::QueuePoolSnapshot>>(link)
+                .is_some()
+        );
     }
 
     #[test]

@@ -28,6 +28,7 @@ impl Plugin for ClientNetworkPlugin {
         app.insert_resource(FallbackErrorHandler(error))
             .add_plugins(ClientCombatPlugin)
             .add_plugins(crate::terrain::ClientTerrainPlugin)
+            .add_plugins(ClientQueuePlugin)
             .init_resource::<RosterLogState>()
             .init_resource::<ClientShutdown>()
             .init_resource::<PendingLocalActions>()

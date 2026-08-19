@@ -224,6 +224,9 @@ pub struct ClientNetworkConfig {
     pub exit_after_lobby_return: bool,
     /// Headless M03 boundary: exit successfully after one authenticated lobby welcome.
     pub exit_after_lobby_welcome: bool,
+    /// Headless M04 evidence: join one advertised pool, observe the fresh count, cancel, observe
+    /// the resulting fresh count, and exit without requesting worker allocation.
+    pub product_queue_smoke: bool,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
     pub headless_aim_at_dummy: bool,
@@ -279,6 +282,7 @@ impl ClientNetworkConfig {
             exit_after_roster: None,
             exit_after_lobby_return: false,
             exit_after_lobby_welcome: false,
+            product_queue_smoke: false,
             headless_move: None,
             headless_aim: None,
             headless_aim_at_dummy: false,
@@ -306,6 +310,17 @@ impl ClientNetworkConfig {
         }
         if self.exit_after_lobby_welcome && self.transport != NetworkTransport::RoutedUdp {
             return Err("--exit-after-lobby-welcome requires --transport routed-udp".to_string());
+        }
+        if self.product_queue_smoke && !self.headless {
+            return Err("--product-queue-smoke requires --headless".to_string());
+        }
+        if self.product_queue_smoke && self.transport != NetworkTransport::RoutedUdp {
+            return Err("--product-queue-smoke requires --transport routed-udp".to_string());
+        }
+        if self.product_queue_smoke && self.exit_after_lobby_welcome {
+            return Err(
+                "--product-queue-smoke conflicts with --exit-after-lobby-welcome".to_string(),
+            );
         }
         if self.exit_after_lobby_return && self.transport != NetworkTransport::RoutedUdp {
             return Err("--exit-after-lobby-return requires --transport routed-udp".to_string());
