@@ -698,69 +698,71 @@ Implementation was authorized by the user on 2026-08-19.
 - [x] Record M03's delivered catalog, selected-game, flow-action, session-generation, error,
   persistence, and dual session-loss seams in this specification.
 - [x] Keep M04 queue-only and move reservation plus cancellation-versus-reservation races to M05.
-- [ ] Define bounded shared build candidate/accepted summary and queue IDs/messages without
+- [x] Define bounded shared build candidate/accepted summary and queue IDs/messages without
   duplicating authored definitions or moving authority client-side.
-- [ ] Increment the one global compatibility version and register current messages in exact
+- [x] Increment the one global compatibility version and register current messages in exact
   directions on ordered-reliable `SessionChannel` and sequenced-unreliable
   `QueueSnapshotChannel`; retain no old decoder.
-- [ ] Add pure serialization, decode-bound, identity, revision, and resolver-agreement tests.
+- [x] Add pure serialization, decode-bound, identity, revision, and resolver-agreement tests.
 
 ### Slice 2 — Deliver authoritative admission before product UI expansion
 
-- [ ] Add the pure bounded lobby queue model with one ticket per session, deterministic FIFO,
+- [x] Add the pure bounded lobby queue model with one ticket per session, deterministic FIFO,
   immutable resolved loadout, exact indexes, pre-reserved public revisions, idempotent Join/Cancel,
   admission-revision ownership, one pending outcome per session, the four-token/one-per-second
   semantic limiter with one fail-soft notice window, the ten-second identical-retry cadence and
   early-duplicate abuse threshold, and queue-aware disconnect cleanup.
-- [ ] Add explicit lobby schedule sets and one deduplicated session-loss seam over real
+- [x] Add explicit lobby schedule sets and one deduplicated session-loss seam over real
   authenticated M03 sessions and both existing teardown paths; capture frame-start authentication
   eligibility before processing new Hellos.
-- [ ] Publish initial, post-mutation, and one-second refresh snapshots with bounded sequenced
+- [x] Publish initial, post-mutation, and one-second refresh snapshots with bounded sequenced
   delivery, three-second client freshness aging, and required-revision barriers on membership
   outcomes.
-- [ ] Record bounded privacy-safe queue counters/high-water marks and include their final aggregate
+- [x] Record bounded privacy-safe queue counters/high-water marks and include their final aggregate
   in headless process evidence without identity-bearing history.
-- [ ] Add an in-memory authenticated flow proving welcome → snapshot → join accepted → queued →
+- [x] Add an in-memory authenticated flow proving welcome → snapshot → join accepted → queued →
   cancel accepted → Game Select state data, with no allocation request.
-- [ ] Prove duplicate, stale, malformed, ID/revision exhaustion, maximum-capacity, outcome-ack,
+- [x] Prove through focused pure, ECS-adapter, and separate-App scenarios that duplicate, stale,
+  malformed, ID/revision exhaustion, maximum-capacity, outcome-ack,
   semantic-rate abuse, early-identical-retry abuse, pre-/same-frame authentication, stalled-client,
   and same-frame disconnect cases before UI work.
 
 ### Slice 3 — Replace the debug editor in the product lobby flow
 
-- [ ] Add BuildEditor as the one overlay over Game Select and Queue as the one new flow state.
-- [ ] Reuse M02/M03 focus, pointer, controller, scrolling, style, and action-arbitration seams.
-- [ ] Present all four presets, six custom fields, per-choice costs, used/remaining budget, invalid
+- [x] Add BuildEditor as the one overlay over Game Select and Queue as the one new flow state.
+- [x] Reuse M02/M03 focus, pointer, controller, scrolling, style, and action-arbitration seams.
+- [x] Present all four presets, six custom fields, per-choice costs, used/remaining budget, invalid
   reason, focused before/after changed lines, and meaningful family-specific resolved preview
   through the specified pure presentation/comparison helpers without raw debug formatting or
   aggregate DPS.
-- [ ] Submit one frozen draft with selected catalog/game identity and map exact server rejection
+- [x] Submit one frozen draft with selected catalog/game identity and map exact server rejection
   reasons to deterministic product copy and focus behavior in retained editor state.
-- [ ] Preserve card Confirm as selection, add explicit **Build & Join**, and present aggregate pool
+- [x] Preserve card Confirm as selection, add explicit **Build & Join**, and present aggregate pool
   state as `N waiting · M players per match` plus exact accepted membership on Queue.
-- [ ] Add immediately reachable Join/Cancel Disconnect, ten-second pending deadlines, same-request
+- [x] Add immediately reachable Join/Cancel Disconnect, ten-second pending deadlines, same-request
   Retry without duplicate wire outcomes, outcome acknowledgement, and late-outcome precedence.
 
 ### Slice 4 — Add last-used persistence and recovery
 
-- [ ] Add bounded `BuildFileV1`, missing/default/stale/malformed handling, atomic save, and focused
+- [x] Add bounded `BuildFileV1`, missing/default/stale/malformed handling, atomic save, and focused
   temporary-directory tests.
-- [ ] Load valid last-used state into a fresh editor and save only an authoritative acceptance.
-- [ ] Reconcile the single Error overlay with three local persistence sources and one dirty build
+- [x] Load valid last-used state into a fresh editor and save only an authoritative acceptance.
+- [x] Reconcile the single Error overlay with three local persistence sources and one dirty build
   save context.
-- [ ] Prove save failure cannot cancel or alter an accepted ticket and Retry Save is repeatable.
+- [x] Prove save failure cannot cancel or alter an accepted ticket and Retry Save is repeatable.
 
 ### Slice 5 — Verify and hand off
 
-- [ ] Run focused pure/ECS/client/server/protocol/network/process tests, role-feature checks,
+- [x] Run focused pure/ECS/client/server/protocol/network/process tests, role-feature checks,
   formatting, and Clippy through canonical `justfile` commands.
-- [ ] Preserve the M01 transition smoke and direct-UDP match build-selection baseline on the current
+- [x] Preserve the M01 transition smoke and direct-UDP match build-selection baseline on the current
   global protocol.
-- [ ] Add `just network-product-queue-smoke` as the canonical bounded headless product path for
+- [x] Add `just network-product-queue-smoke` as the canonical bounded headless product path for
   welcome → snapshot → admission → refreshed count → cancellation → refreshed count → exit.
 - [ ] Capture representative Game Select population, Build Editor, rejection, Queue, and save-error
   layouts.
-- [ ] Provide keyboard/mouse and physical-controller playtest steps and record feedback.
+- [x] Provide keyboard/mouse and physical-controller playtest steps; feedback remains the explicit
+  user-playtest exit gate below.
 
 ## Verification contract
 
@@ -912,34 +914,35 @@ Implementation was authorized by the user on 2026-08-19.
 - [ ] Build Editor supports every current preset/custom choice with honest budget, preview, precise
   invalid feedback, visible option costs and meaningful tradeoffs, and controller/keyboard/mouse
   operation.
-- [ ] Last server-accepted build survives restart when valid and missing/malformed/stale/save-failed
+- [x] Last server-accepted build survives restart when valid and missing/malformed/stale/save-failed
   local data fails safely without altering queue authority.
-- [ ] The lobby admits queue intent only from sessions authenticated at frame start, atomically
+- [x] The lobby admits queue intent only from sessions authenticated at frame start, atomically
   validates selected game/catalog/build identity, and creates at most one immutable ticket per
   authenticated session.
-- [ ] Queue requests/cancellation are idempotent and safe under duplicates, stale IDs, overflow,
+- [x] Queue requests/cancellation are idempotent and safe under duplicates, stale IDs, overflow,
   same-frame disconnect, timeout/retry, and ID/order/revision exhaustion; reservation races remain
   explicitly owned by M05. A newer equivalent Join reuses the existing ticket and admission revision
   without consuming another public revision.
-- [ ] Game Select and Queue show revisioned real aggregate counts and exact formation size without
+- [x] Game Select and Queue show revisioned real aggregate counts and exact formation size without
   revealing private membership or inventing an estimate; membership-changing outcomes provide an
   explicit freshness barrier, stale snapshots age out after three seconds, a byte-equivalent
   current-revision refresh renews freshness, and any later delivered current snapshot restores the
   display.
-- [ ] Cancel Queue returns to Game Select without disconnecting; unexpected loss removes server
+- [x] Cancel Queue returns to Game Select without disconnecting and preserves a still-advertised
+  selected game; unexpected loss removes server
   membership and follows fresh-session recovery; Disconnect remains immediately reachable while
   either Join or Cancel is pending.
-- [ ] Command and snapshot delivery remain bounded under a stalled client and sustained churn;
+- [x] Command and snapshot delivery remain bounded under a stalled client and sustained churn;
   at most one application queue outcome of at most 512 bytes is unacknowledged per session, abuse
   cannot create an outcome flood, the first over-rate new semantic command fails softly with one
   bounded notice, identical recovery is token- and wire-copy-neutral only at the bounded ten-second
   cadence, repeated early duplicates disconnect, unchanged current-revision refreshes renew
   freshness, stale snapshots age out, and complete snapshots never accumulate in an ordered-reliable
   history.
-- [ ] Privacy-safe bounded diagnostics expose queue current/high-water state and typed aggregate
+- [x] Privacy-safe bounded diagnostics expose queue current/high-water state and typed aggregate
   outcomes needed to diagnose admission, cleanup, abuse, and snapshot publication without retaining
   player, ticket, request, build, capability, or address identity.
-- [ ] M04 product composition never allocates a worker; M01 transition and direct-match behavioral
+- [x] M04 product composition never allocates a worker; M01 transition and direct-match behavioral
   baselines remain explicit and green.
 - [ ] Focused pure/ECS/protocol/network/process/role and representative visual/controller evidence
   pass.
@@ -1123,6 +1126,140 @@ Remediation:
 
 The remaining open gate is still representative visual inspection and physical-controller playtest;
 those observations are not inferred from automated coverage.
+
+### Implementation review remediation — 2026-08-19, second pass
+
+A second correctness and UX review found five remaining gaps: cancellation could expose an older
+snapshot as current before the authoritative cancellation revision arrived; Retry/Try Again always
+removed the overlay that owned the pending command; over-budget editor copy omitted the exact used
+and excess points; the editor exposed the internal game ID instead of the advertised display name;
+and privacy-safe queue aggregates were written on every ordinary lobby refresh instead of only in
+an explicit evidence run.
+
+Remediation:
+
+- the client snapshot accessor now enforces both freshness age and the required authoritative
+  revision, so Game Select and Queue consumers cannot render a pre-cancellation aggregate as
+  current while waiting for the replacement snapshot;
+- Retry and rate-limit Try Again restore the pending command's owning context: Join returns to the
+  Build Editor and Cancel returns to Queue, while preserving the frozen request semantics;
+- one shared pure build-point rule now owns editor accounting and authoritative rejection details;
+  invalid over-budget drafts remain editable and show exact copy such as
+  `14 used · 2 over the 12-point budget`;
+- Build Editor resolves the selected game's advertised display name from lobby membership and
+  includes that name in its retained render key, so a membership/catalog presentation change
+  refreshes the copy without leaking internal identifiers;
+- queue aggregate stderr output is disabled by default and enabled only by
+  `BRAWLER_QUEUE_EVIDENCE=1`; the canonical queue smoke sets that gate explicitly, while the normal
+  lobby smoke remains quiet.
+
+Post-remediation verification passed `just check`, `just lint`, `just test`,
+`just server-features`, `just network-product-queue-smoke`, and
+`just network-product-lobby-smoke`. The full matrix contained 332 client tests, 289 server tests,
+78 serial separate-App/UDP network tests, 14 performance gates, and 79 routing unit tests plus its
+process/runtime/isolation suites. Focused regressions cover the cancellation revision barrier,
+Join/Cancel recovery context, advertised game copy, exact over-budget feedback, and the existing
+authoritative exact-budget rejection. The remaining gate is still representative visual inspection
+and physical-controller playtest.
+
+### Implementation review remediation — 2026-08-19, third pass
+
+A third correctness, completeness, defect, and UX review found that closing Build Editor left
+keyboard/controller navigation on an editor-only index, correctable authoritative rejections updated
+the editor's logical field but not the actual focused control, several semantically impossible queue
+wire values could deserialize, the separate-App queue coverage did not exercise real lobby authority
+with multiple clients, and every error overlay was titled `CONNECTION ERROR` regardless of cause.
+
+Remediation:
+
+- cancelling Build Editor now restores navigation to the visible **Build & Join** control, while
+  incompatible-passive and over-budget rejections focus the exact field button selected for
+  correction; full ECS/input regressions cover both transitions;
+- queue membership, outcomes, and pool rows reject zero authoritative revisions, noncanonical or
+  unexceeded over-budget details, retry delays outside `1..=1000 ms`, more than 32 queued tickets,
+  and formation sizes outside `1..=8` during deserialization;
+- the separate-App harness can now compose the production lobby worker with routed authenticated
+  peers. Two authoritative scenarios prove stable-ID FIFO ordering, two-client aggregate
+  convergence, cancellation, cross-pool public snapshots, private membership, and disconnect
+  cleanup; the existing registered-channel scenario continues to prove `Ack -> Command` ordering;
+- error overlays now use typed `CONNECTION ERROR`, `QUEUE ERROR`, `SAVE ERROR`, or `CONTENT ERROR`
+  headings, including content mismatch paths that disconnect and require a fresh catalog;
+- the first lint pass caught one redundant match arm in the new decoder validation. It was removed
+  rather than suppressed, and the full warnings-denied matrix was rerun.
+
+Post-remediation verification passed `just check`, `just lint`, `just test`,
+`just server-features`, `just network-product-queue-smoke`,
+`just network-product-lobby-smoke`, `just network-routed-smoke`, and
+`just network-direct-smoke`. The final matrix contained 337 client tests, 291 server tests,
+80 serial separate-App/UDP network tests, 14 performance gates, and 79 routing unit tests plus its
+process/runtime/isolation suites. The remaining gate is still representative visual inspection and
+physical-controller playtest; automated focus regressions reduce that risk but do not replace the
+hands-on observation.
+
+### Implementation review remediation — 2026-08-19, fourth pass
+
+A fourth correctness, completeness, and UX review found that an exact-request outcome was not
+correlated with its frozen command, ticket identities were checked only against active tickets,
+returning from Queue reset the selected game to the first advertisement, and the implementation
+checklist still represented pre-implementation planning rather than delivered evidence.
+
+Remediation:
+
+- the client now validates the decision kind plus the frozen catalog, game, configuration, build
+  revision, build origin, and cancellation ticket before acknowledging or mutating membership;
+  mismatched authority becomes a content/protocol failure and cannot synthesize or replace queue
+  membership;
+- each lobby generation now creates one unpredictable 64-bit ticket namespace and combines it with
+  the never-reused admission order, guaranteeing lifetime-unique 128-bit ticket IDs within that
+  worker generation without an unbounded issued-ID history; focused churn tests prove retired
+  identities are not reused and do not collide with idempotent cancellation memory;
+- Game Select preserves and focuses the prior game when it is still advertised, falling back to the
+  first card only when the selection is absent from the accepted catalog;
+- the planning slices and exit criteria now distinguish delivered automated evidence from the two
+  remaining manual gates. Added regressions cover wrong-game Join, Joined-during-Cancel, retained
+  game selection, 32 stalled outcomes within the byte ceiling, 128 join/cancel churn cycles, and a
+  queue command sent before lobby Welcome.
+
+Post-remediation verification passed `just check`, `just lint`, `just server-features`, and
+`just test`, followed by `just network-product-queue-smoke`,
+`just network-product-lobby-smoke`, `just network-routed-smoke`, and
+`just network-direct-smoke`. The final matrix contained 340 client tests, 293 server tests,
+81 serial separate-App/UDP network tests, 14 performance gates, and 79 routing unit tests plus its
+process/runtime/isolation suites. The routed smoke completed the two-client
+lobby-to-match-to-fresh-lobby transition, while the direct-UDP baseline completed with both clients
+exiting successfully.
+
+The remaining open gates are unchanged: representative visual inspection, physical-controller
+playtest, and feedback triage. M04 remains `User playtest` until those observations are recorded.
+
+### Implementation review remediation — 2026-08-19, fifth pass
+
+A fifth correctness, completeness, quality, and UX review found three remaining client-side
+presentation gaps: an existing error overlay was retained when a late authority response replaced
+the error in the same flow, reopening Build Editor could overwrite the authority-selected
+corrective field, and an invalid current custom draft prevented legal alternatives from explaining
+the tradeoff that would repair it.
+
+Remediation:
+
+- the error UI root now retains the complete rendered `FlowError` as its presentation key and is
+  rebuilt whenever that value changes, so a timeout followed by a late rate-limit outcome replaces
+  stale Retry copy with the authoritative countdown and **Try Again** action;
+- Build Editor initializes focus to the choice row only when navigation does not already name an
+  editor control, preserving the corrective weapon, ultimate, or passive field selected while
+  committing an authoritative rejection;
+- alternative comparison now evaluates the legal candidate independently from the current draft,
+  computes the invalid draft's exact point total with the canonical build rule, and prioritizes the
+  changed category within the bounded eight-line explanation;
+- focused regressions cover in-place error replacement, corrective focus across editor
+  reconstruction, and a legal ultimate correction from an over-budget current draft.
+
+Post-remediation verification passed `just check`, `just lint`, `just server-features`, and
+`just test`, followed by `just network-product-queue-smoke`. The resulting matrix contains 343
+client tests, 293 server tests, 81 serial separate-App/UDP network tests, 14 performance gates, and
+79 routing unit tests plus its process/runtime/isolation suites. The remaining open gates are
+unchanged: representative visual inspection, physical-controller playtest, and feedback triage.
+M04 remains `User playtest` until those observations are recorded.
 
 ## Open user playtest record
 

@@ -4,7 +4,8 @@ use super::{LobbySession, MAX_AUTHENTICATED_LOBBY_SESSIONS, catalog::ResolvedLob
 use crate::{
     builds::{
         AcceptedBuildSummary, BUILD_POINT_BUDGET, BuildCandidate, BuildCatalog,
-        BuildResolutionError, BuildSelection, ResolvedMatchLoadout, resolve_build_recipe,
+        BuildResolutionError, BuildSelection, ResolvedMatchLoadout, build_point_total,
+        resolve_build_recipe,
     },
     combat::{FighterDefinitions, STANDARD_FIGHTER_DEFINITION, WeaponCatalog},
     lobby::{
@@ -226,6 +227,7 @@ pub struct QueueState {
     next_admission_order: u64,
     state_revision: u64,
     revision_exhausted: bool,
+    ticket_namespace: Option<u64>,
     ticket_ids: Box<dyn QueueTicketIdSource>,
     telemetry: QueueTelemetry,
 }
@@ -280,6 +282,7 @@ impl QueueState {
             next_admission_order: 1,
             state_revision: 1,
             revision_exhausted: false,
+            ticket_namespace: None,
             ticket_ids: Box::new(ticket_ids),
             telemetry: QueueTelemetry::default(),
         }
@@ -321,6 +324,13 @@ impl QueueState {
     #[must_use]
     pub fn ticket_for_session(&self, id: LobbySessionId) -> Option<&QueueTicket> {
         self.tickets_by_session
+            .get(&id)
+            .and_then(|ticket| self.tickets.get(ticket))
+    }
+
+    #[must_use]
+    pub fn ticket_for_client(&self, id: NetcodeClientId) -> Option<&QueueTicket> {
+        self.tickets_by_client
             .get(&id)
             .and_then(|ticket| self.tickets.get(ticket))
     }
@@ -579,7 +589,7 @@ impl QueueState {
                 false,
             );
         };
-        let Some(ticket_id) = self.fresh_ticket_id() else {
+        let Some(ticket_id) = self.fresh_ticket_id(admission_order) else {
             QueueTelemetry::increment(&mut self.telemetry.unavailable_rejections);
             return (
                 QueueDecision::Rejected(QueueRejection::TemporarilyUnavailable),
@@ -783,14 +793,18 @@ impl QueueState {
         }
     }
 
-    fn fresh_ticket_id(&mut self) -> Option<QueueTicketId> {
-        for _ in 0..(MAX_AUTHENTICATED_LOBBY_SESSIONS * 2) {
-            let id = self.ticket_ids.next()?;
-            if !self.tickets.contains_key(&id) {
-                return Some(id);
-            }
-        }
-        None
+    fn fresh_ticket_id(&mut self, admission_order: u64) -> Option<QueueTicketId> {
+        let namespace = if let Some(namespace) = self.ticket_namespace {
+            namespace
+        } else {
+            let seed = self.ticket_ids.next()?.get();
+            let high = u64::try_from(seed >> 64).ok()?;
+            let low = u64::try_from(seed & u128::from(u64::MAX)).ok()?;
+            let namespace = (high ^ low).max(1);
+            self.ticket_namespace = Some(namespace);
+            namespace
+        };
+        QueueTicketId::new((u128::from(namespace) << 64) | u128::from(admission_order))
     }
 
     fn refresh_pool_rows(&mut self) {
@@ -894,7 +908,7 @@ fn resolve_candidate(
         ),
         BuildSelection::Custom(recipe) => (recipe, None),
     };
-    let used_points = candidate_point_total(recipe, builds).ok();
+    let used_points = build_point_total(builds, recipe).ok();
     resolve_build_recipe(builds, weapons, fighter, recipe, preset)
         .map(|resolved| (recipe, resolved))
         .map_err(|error| match error {
@@ -910,61 +924,6 @@ fn resolve_candidate(
         })
 }
 
-fn candidate_point_total(
-    recipe: crate::builds::BrawlerBuildRecipe,
-    builds: &BuildCatalog,
-) -> Result<u8, ()> {
-    let weapon = match recipe.weapon {
-        crate::builds::WeaponChoice::Preset(id) => builds
-            .weapon_costs
-            .iter()
-            .find(|definition| definition.weapon_id == id)
-            .map(|definition| definition.point_cost)
-            .ok_or(())?,
-        crate::builds::WeaponChoice::CustomPulse {
-            power,
-            reach,
-            magazine,
-        } => {
-            let base = builds
-                .weapon_costs
-                .iter()
-                .find(|definition| definition.weapon_id == crate::combat::WeaponPresetId(1))
-                .map(|definition| definition.point_cost)
-                .ok_or(())?;
-            base.checked_add(u8::from(matches!(power, crate::builds::PulsePower::Heavy)))
-                .and_then(|points| {
-                    points.checked_add(u8::from(matches!(reach, crate::builds::PulseReach::Long)))
-                })
-                .and_then(|points| {
-                    points.checked_add(u8::from(matches!(
-                        magazine,
-                        crate::builds::PulseMagazine::Expanded
-                    )))
-                })
-                .ok_or(())?
-        }
-    };
-    let ultimate = builds
-        .ultimates
-        .iter()
-        .find(|definition| definition.id == recipe.ultimate)
-        .map(|definition| definition.point_cost)
-        .ok_or(())?;
-    recipe
-        .passives
-        .iter()
-        .try_fold(weapon.checked_add(ultimate).ok_or(())?, |total, passive| {
-            let cost = builds
-                .passives
-                .iter()
-                .find(|definition| definition.id == *passive)
-                .map(|definition| definition.point_cost)
-                .ok_or(())?;
-            total.checked_add(cost).ok_or(())
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -977,6 +936,14 @@ mod tests {
             let id = QueueTicketId::new(self.0)?;
             self.0 = self.0.checked_add(1)?;
             Some(id)
+        }
+    }
+
+    struct FixedTicketSeed(u128);
+
+    impl QueueTicketIdSource for FixedTicketSeed {
+        fn next(&mut self) -> Option<QueueTicketId> {
+            QueueTicketId::new(self.0)
         }
     }
 
@@ -1115,6 +1082,88 @@ mod tests {
         assert_eq!(second.ticket_id, first_id);
         assert_eq!(second.admitted_at_pool_state_revision, first_revision);
         assert_eq!(queue.state_revision(), first_revision);
+    }
+
+    #[test]
+    fn retired_ticket_identity_is_not_reused_within_one_worker_generation() {
+        let catalog = catalog();
+        let mut queue = QueueState::with_id_source(&catalog, FixedTicketSeed(10));
+        let player = session(1);
+        submit(&mut queue, player, 1, join(&catalog, 1), 0);
+        let first = queue
+            .ticket_for_session(player.lobby_session_id)
+            .unwrap()
+            .ticket_id;
+        queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
+        submit(
+            &mut queue,
+            player,
+            2,
+            QueueCommand::Cancel(QueueCancelCommand { ticket_id: first }),
+            1_000,
+        );
+        queue.acknowledge(player.lobby_session_id, QueueRequestId::new(2).unwrap());
+
+        submit(&mut queue, player, 3, join(&catalog, 1), 2_000);
+        let second = queue
+            .ticket_for_session(player.lobby_session_id)
+            .unwrap()
+            .ticket_id;
+        assert_ne!(second, first);
+        queue.acknowledge(player.lobby_session_id, QueueRequestId::new(3).unwrap());
+        let result = submit(
+            &mut queue,
+            player,
+            4,
+            QueueCommand::Cancel(QueueCancelCommand { ticket_id: second }),
+            3_000,
+        );
+        assert!(result.outcome_ready() && result.snapshot_changed());
+        assert_eq!(queue.ticket_count(), 0);
+    }
+
+    #[test]
+    fn sustained_join_cancel_churn_keeps_unique_ids_and_bounded_state() {
+        let catalog = catalog();
+        let mut queue = QueueState::with_id_source(&catalog, FixedTicketSeed(10));
+        let player = session(1);
+        let mut issued = BTreeSet::new();
+        let mut request = 1_u64;
+        for cycle in 0..128_u64 {
+            submit(
+                &mut queue,
+                player,
+                request,
+                join(&catalog, 1),
+                cycle.saturating_mul(2_000),
+            );
+            let ticket = queue
+                .ticket_for_session(player.lobby_session_id)
+                .unwrap()
+                .ticket_id;
+            assert!(issued.insert(ticket));
+            queue.acknowledge(
+                player.lobby_session_id,
+                QueueRequestId::new(request).unwrap(),
+            );
+            request += 1;
+            submit(
+                &mut queue,
+                player,
+                request,
+                QueueCommand::Cancel(QueueCancelCommand { ticket_id: ticket }),
+                cycle.saturating_mul(2_000).saturating_add(1_000),
+            );
+            queue.acknowledge(
+                player.lobby_session_id,
+                QueueRequestId::new(request).unwrap(),
+            );
+            request += 1;
+            assert_eq!(queue.ticket_count(), 0);
+            assert_eq!(queue.pending_outcome_count(), 0);
+            assert!(queue.indexes_are_valid());
+        }
+        assert_eq!(issued.len(), 128);
     }
 
     #[test]
@@ -1379,6 +1428,14 @@ mod tests {
         }
         assert_eq!(queue.ticket_count(), MAX_AUTHENTICATED_LOBBY_SESSIONS);
         assert_eq!(queue.snapshot().pools[0].queued, 32);
+        assert_eq!(queue.pending_outcome_count(), 32);
+        let retained_bytes = queue
+            .memories
+            .values()
+            .filter_map(|memory| memory.pending_outcome.as_ref())
+            .map(|pending| postcard::to_allocvec(&pending.outcome).unwrap().len())
+            .sum::<usize>();
+        assert!(retained_bytes <= 32 * crate::lobby::MAX_QUEUE_OUTCOME_BYTES);
         assert!(queue.indexes_are_valid());
         assert_eq!(queue.telemetry().high_water_tickets, 32);
     }

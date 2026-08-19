@@ -13,9 +13,10 @@ use unicode_segmentation::UnicodeSegmentation as _;
 mod queue;
 
 pub use queue::{
-    MAX_QUEUE_OUTCOME_BYTES, QueueCancelCommand, QueueClientMessage, QueueCommand,
-    QueueCommandOutcome, QueueDecision, QueueJoinCommand, QueueMembership, QueuePoolRow,
-    QueuePoolSnapshot, QueueRejection, QueueRequestId, QueueTicketId,
+    MAX_QUEUE_FORMATION_SIZE, MAX_QUEUE_OUTCOME_BYTES, MAX_QUEUE_RETRY_AFTER_MILLIS,
+    MAX_QUEUE_TICKETS, QueueCancelCommand, QueueClientMessage, QueueCommand, QueueCommandOutcome,
+    QueueDecision, QueueJoinCommand, QueueMembership, QueuePoolRow, QueuePoolSnapshot,
+    QueueRejection, QueueRequestId, QueueTicketId,
 };
 
 pub const MAX_GAME_TYPES: usize = 8;

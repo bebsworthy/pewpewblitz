@@ -3,7 +3,7 @@
 use super::flow::ClientFlowSet;
 use super::flow::{ClientLocalLoadFailures, local_load_error};
 use super::{
-    ClientFlow, ClientInputContext, ClientOverlay, FlowError, FlowErrorAction,
+    ClientFlow, ClientInputContext, ClientOverlay, FlowError, FlowErrorAction, FlowErrorKind,
     InputCaptureConsumed, InputSettingsField, InputSettingsSelection, InputSettingsText,
     settings::{
         ClientInputSettings,
@@ -791,6 +791,7 @@ fn handle_shell_actions(
                     state.return_target = ErrorReturn::Settings;
                     state.kind = LocalSettingsErrorKind::Validation;
                     *client_overlay = ClientOverlay::Error(FlowError {
+                        kind: FlowErrorKind::Content,
                         message: state.message.clone(),
                         return_flow: ClientFlow::Title,
                         actions: [Some(FlowErrorAction::ContinueWithoutSaving), None],
@@ -809,6 +810,7 @@ fn handle_shell_actions(
                     state.return_target = ErrorReturn::Settings;
                     state.kind = LocalSettingsErrorKind::Save;
                     *client_overlay = ClientOverlay::Error(FlowError {
+                        kind: FlowErrorKind::Persistence,
                         message: state.message.clone(),
                         return_flow: ClientFlow::Title,
                         actions: [
@@ -1708,6 +1710,7 @@ mod tests {
         assert_eq!(active_layer(&ClientOverlay::Credits), ShellLayer::Credits);
         assert_eq!(
             active_layer(&ClientOverlay::Error(FlowError {
+                kind: FlowErrorKind::Connection,
                 message: String::new(),
                 return_flow: ClientFlow::Title,
                 actions: [Some(FlowErrorAction::Back), None],

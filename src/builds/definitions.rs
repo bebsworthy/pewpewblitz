@@ -279,13 +279,9 @@ pub fn resolve_build_recipe(
         kind: ultimate_definition.kind,
         point_cost: ultimate_definition.point_cost,
     };
-    let (primary_weapon, weapon_points) =
+    let (primary_weapon, _weapon_points) =
         resolve_weapon_choice(catalog, weapons, fighter, recipe.weapon)?;
-    let total_points = weapon_points
-        .checked_add(ultimate.point_cost)
-        .and_then(|points| points.checked_add(passives[0].point_cost))
-        .and_then(|points| points.checked_add(passives[1].point_cost))
-        .ok_or(BuildResolutionError::OverBudget)?;
+    let total_points = build_point_total(catalog, recipe)?;
     if total_points > BUILD_POINT_BUDGET {
         return Err(BuildResolutionError::OverBudget);
     }
@@ -335,6 +331,50 @@ pub fn resolve_build_recipe(
         return Err(BuildResolutionError::ResolutionFailed);
     }
     Ok(resolved)
+}
+
+/// Return the exact authored point total without requiring a complete runtime loadout resolution.
+/// This keeps editor budget feedback and authoritative rejection copy on the same pure rule.
+pub fn build_point_total(
+    catalog: &BuildCatalog,
+    recipe: BrawlerBuildRecipe,
+) -> Result<u8, BuildResolutionError> {
+    let weapon = match recipe.weapon {
+        WeaponChoice::Preset(id) => weapon_point_cost(catalog, id)?,
+        WeaponChoice::CustomPulse {
+            power,
+            reach,
+            magazine,
+        } => weapon_point_cost(catalog, WeaponPresetId(1))?
+            .checked_add(u8::from(matches!(power, PulsePower::Heavy)))
+            .and_then(|points| points.checked_add(u8::from(matches!(reach, PulseReach::Long))))
+            .and_then(|points| {
+                points.checked_add(u8::from(matches!(magazine, PulseMagazine::Expanded)))
+            })
+            .ok_or(BuildResolutionError::OverBudget)?,
+    };
+    let ultimate = catalog
+        .ultimates
+        .iter()
+        .find(|definition| definition.id == recipe.ultimate)
+        .map(|definition| definition.point_cost)
+        .ok_or(BuildResolutionError::UnknownId)?;
+    recipe.passives.iter().try_fold(
+        weapon
+            .checked_add(ultimate)
+            .ok_or(BuildResolutionError::OverBudget)?,
+        |total, passive| {
+            let cost = catalog
+                .passives
+                .iter()
+                .find(|definition| definition.id == *passive)
+                .map(|definition| definition.point_cost)
+                .ok_or(BuildResolutionError::UnknownId)?;
+            total
+                .checked_add(cost)
+                .ok_or(BuildResolutionError::OverBudget)
+        },
+    )
 }
 
 fn resolve_weapon_choice(

@@ -44,7 +44,7 @@ use std::{
 };
 
 /// M01's hard upper bound for authenticated lobby sessions.
-pub const MAX_AUTHENTICATED_LOBBY_SESSIONS: usize = 32;
+pub const MAX_AUTHENTICATED_LOBBY_SESSIONS: usize = crate::lobby::MAX_QUEUE_TICKETS as usize;
 /// M01 allocates one match only when exactly two authenticated sessions are present.
 pub const M01_PARTICIPANT_COUNT: usize = 2;
 /// Bounded process-lifetime memory for identities that already participated in an allocation.
@@ -659,6 +659,19 @@ struct QueueSnapshotPublication {
     last_refresh: Duration,
 }
 
+#[derive(Resource)]
+struct QueueEvidenceSettings {
+    report_aggregates: bool,
+}
+
+impl FromWorld for QueueEvidenceSettings {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            report_aggregates: std::env::var("BRAWLER_QUEUE_EVIDENCE").as_deref() == Ok("1"),
+        }
+    }
+}
+
 impl core::fmt::Debug for LobbyClient {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -678,6 +691,7 @@ impl Plugin for LobbyPlugin {
             .init_resource::<LobbyQueueFrame>()
             .init_resource::<LobbySessionLosses>()
             .init_resource::<QueueSnapshotPublication>()
+            .init_resource::<QueueEvidenceSettings>()
             .init_resource::<FighterDefinitions>()
             .add_systems(Startup, initialize_lobby_state)
             .configure_sets(
@@ -736,16 +750,19 @@ impl Plugin for LobbyTransitionDriverPlugin {
     reason = "Bevy evidence publication reads a runtime-owned resource parameter"
 )]
 fn report_queue_telemetry_changes(
+    settings: Res<QueueEvidenceSettings>,
     queue: Res<QueueState>,
     mut previous: Local<Option<QueueTelemetry>>,
 ) {
+    if !settings.report_aggregates {
+        return;
+    }
     let current = queue.telemetry();
     if previous.as_ref() == Some(current) {
         return;
     }
     let marker = format!("brawler-queue aggregate {current:?}\n");
-    // The product smoke inherits the worker's stderr. Emit one bounded write so the final
-    // privacy-safe aggregate is process evidence without exposing queue identities.
+    // Explicit evidence runs inherit the worker's stderr. Production lobby refreshes stay quiet.
     let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
     *previous = Some(current.clone());
 }

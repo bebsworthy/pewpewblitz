@@ -72,7 +72,10 @@ pub use build_editor::{
     resolve_build_preview,
 };
 pub use build_persistence::{BuildFileV1, ClientBuildPath, load_build, save_build};
-pub use flow::{ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError, FlowErrorAction};
+pub use flow::{
+    ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError, FlowErrorAction, FlowErrorKind,
+    SelectedGameType,
+};
 #[allow(clippy::wildcard_imports)]
 use input::*;
 pub use presentation::{ClientPresentationPlugin, MovementPresentationPlugin};

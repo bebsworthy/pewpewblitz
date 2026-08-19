@@ -175,6 +175,78 @@ impl Harness {
         harness
     }
 
+    pub(super) fn new_product_lobby(client_count: usize) -> Self {
+        let server_config = ServerNetworkConfig {
+            transport: NetworkTransport::Crossbeam,
+            handshake_timeout: std::time::Duration::from_millis(250),
+            ..Default::default()
+        };
+        let identity = brawler::server::routing_identity().expect("routing identity resolves");
+        let raw_catalog = include_bytes!("../../config/server/game-types.ron").to_vec();
+        let manifest = brawler_routing::LobbyManifest {
+            common: brawler_routing::ManifestCommon {
+                manifest_version: 1,
+                role: brawler_routing::WorkerRole::Lobby,
+                logical_server_id: brawler_routing::LogicalServerId::new(1).unwrap(),
+                process_id: brawler_routing::ProcessId::new(2).unwrap(),
+                worker_id: brawler_routing::WorkerId::new(3).unwrap(),
+                generation: brawler_routing::Generation::new(1).unwrap(),
+                network_protocol: server_config.network_protocol_id,
+                protocol_registry_fingerprint: identity.protocol_registry_fingerprint,
+                content_fingerprint: identity.content_fingerprint,
+                route_version: brawler_routing::ROUTE_VERSION_V1,
+                packet_version: brawler_routing::PACKET_VERSION_V1,
+                control_version: brawler_routing::CONTROL_VERSION_V1,
+                flags: 0,
+            },
+            default_route_id: brawler_routing::RouteId::new(9).unwrap(),
+            max_authenticated_sessions: brawler::lobby::MAX_QUEUE_TICKETS,
+            outstanding_allocations: 2,
+            active_matches: 2,
+            heartbeat_ms: 100,
+            raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(&raw_catalog),
+            raw_catalog,
+            nonce: 11,
+            digest: [0; 32],
+        }
+        .with_digest()
+        .unwrap();
+        let mut server = brawler::server::build_lobby_worker_app(server_config.clone(), manifest)
+            .expect("product lobby app builds");
+        server.finish();
+        server.cleanup();
+        let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
+        let mut harness = Self {
+            server,
+            server_entity,
+            server_links: Vec::with_capacity(client_count),
+            clients: Vec::with_capacity(client_count),
+            client_entities: Vec::with_capacity(client_count),
+            client_cues: Vec::with_capacity(client_count),
+            now: Instant::now(),
+        };
+        for client_id in 1..=client_count as u64 {
+            harness.add_client(client_id);
+            let client_entity = harness.client_entities[client_id as usize - 1];
+            harness.clients[client_id as usize - 1]
+                .world_mut()
+                .entity_mut(client_entity)
+                .insert(brawler::client::RoutedClientSession {
+                    generation: 1,
+                    kind: brawler::client::RoutedClientSessionKind::Lobby,
+                });
+            let server_link = harness.server_links[client_id as usize - 1];
+            harness.server.world_mut().entity_mut(server_link).insert(
+                brawler::server::RoutedPeer {
+                    worker: server_entity,
+                    route_id: brawler_routing::RouteId::new(100 + u128::from(client_id)).unwrap(),
+                    peer_id: brawler_routing::PeerId::new(200 + u128::from(client_id)).unwrap(),
+                },
+            );
+        }
+        harness
+    }
+
     pub(super) fn new_with_protocol(client_count: usize, client_protocol_id: Option<u64>) -> Self {
         Self::new_with_options(client_count, client_protocol_id, false)
     }

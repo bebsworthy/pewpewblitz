@@ -35,6 +35,12 @@ use unicode_segmentation::UnicodeSegmentation as _;
 const DNS_DEADLINE: Duration = Duration::from_secs(5);
 const ATTEMPT_DEADLINE: Duration = Duration::from_secs(10);
 const ERROR_BUTTON_BASE: usize = 1_000;
+const BUILD_EDITOR_CHOICE_BASE: usize = 2_000;
+const BUILD_EDITOR_FIELD_BASE: usize = 2_010;
+const BUILD_EDITOR_OPTION_BASE: usize = 2_030;
+const BUILD_EDITOR_JOIN_INDEX: usize = 2_100;
+const BUILD_EDITOR_BACK_INDEX: usize = 2_101;
+const BUILD_EDITOR_DISCONNECT_INDEX: usize = 2_102;
 
 #[derive(States, Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum ClientFlow {
@@ -58,9 +64,29 @@ pub enum ClientOverlay {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlowError {
+    pub kind: FlowErrorKind,
     pub message: String,
     pub return_flow: ClientFlow,
     pub actions: [Option<FlowErrorAction>; 2],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlowErrorKind {
+    Connection,
+    Queue,
+    Persistence,
+    Content,
+}
+
+impl FlowErrorKind {
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Connection => "CONNECTION ERROR",
+            Self::Queue => "QUEUE ERROR",
+            Self::Persistence => "SAVE ERROR",
+            Self::Content => "CONTENT ERROR",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,6 +177,7 @@ struct FlowCommit {
     error: Option<FlowError>,
     overlay: Option<OverlayCommit>,
     refresh_server_select: Option<usize>,
+    focus_index: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,6 +285,7 @@ pub(super) fn local_load_error(failures: ClientLocalLoadFailures) -> Option<Flow
         }
     );
     Some(FlowError {
+        kind: FlowErrorKind::Persistence,
         message,
         return_flow: ClientFlow::Title,
         actions: [Some(FlowErrorAction::ContinueWithDefaults), None],
@@ -288,7 +316,7 @@ struct FlowButton {
 }
 
 #[derive(Component)]
-struct FlowErrorRoot;
+struct FlowErrorRoot(FlowError);
 
 #[derive(Component)]
 struct RateLimitTryAgain;
@@ -306,6 +334,7 @@ struct BuildEditorRenderKey {
     focused_field: super::BuildEditorField,
     inline_error: Option<String>,
     game_type_id: Option<crate::lobby::GameTypeId>,
+    game_name: String,
     joining: bool,
 }
 
@@ -786,6 +815,10 @@ fn resolve_flow_action(
             FlowUiAction::CancelBuildEditor => {
                 editor.close_without_acceptance();
                 commit.overlay = Some(OverlayCommit::Clear);
+                commit.focus_index = membership
+                    .iter()
+                    .next()
+                    .map(|(membership, _)| membership.game_types.len());
             }
             _ => {}
         }
@@ -802,6 +835,7 @@ fn resolve_flow_action(
                     if let Err(error) = save_connections(&path.0, &persistence.state) {
                         persistence.dirty_error = Some(error.clone());
                         commit.error = Some(FlowError {
+                            kind: FlowErrorKind::Persistence,
                             message: format!("Could not save connection data: {error}"),
                             return_flow: ClientFlow::GameSelect,
                             actions: [
@@ -902,8 +936,9 @@ fn resolve_flow_action(
                 commit.teardown = true;
                 editor.close_without_acceptance();
                 *selection = SelectedGameType::default();
-                fail_to_server_select(
+                fail_to_server_select_with_kind(
                     &mut commit,
+                    FlowErrorKind::Content,
                     "The lobby queue state was incompatible with this client".to_string(),
                     true,
                 );
@@ -917,6 +952,7 @@ fn resolve_flow_action(
                             crate::lobby::QueueCommand::Cancel(_) => "queue cancellation",
                         });
                 commit.error = Some(FlowError {
+                    kind: FlowErrorKind::Queue,
                     message: format!("The {label} acknowledgement is taking longer than expected"),
                     return_flow: *flow.get(),
                     actions: [
@@ -954,8 +990,9 @@ fn resolve_flow_action(
                         })
                     {
                         commit.teardown = true;
-                        fail_to_server_select(
+                        fail_to_server_select_with_kind(
                             &mut commit,
+                            FlowErrorKind::Content,
                             "The accepted build disagreed with local authenticated content"
                                 .to_string(),
                             true,
@@ -973,6 +1010,7 @@ fn resolve_flow_action(
                         super::save_build(&build_path.0, file, &builds.0, &weapons.0)
                     {
                         commit.error = Some(FlowError {
+                            kind: FlowErrorKind::Persistence,
                             message: format!(
                                 "Queued successfully, but the build could not be saved: {error}"
                             ),
@@ -994,6 +1032,9 @@ fn resolve_flow_action(
                             "Lightweight Frame and Reinforced Frame cannot be combined".to_string(),
                         );
                         editor.focused_field = super::BuildEditorField::PassiveTwo;
+                        commit.focus_index = Some(build_editor_field_focus_index(
+                            super::BuildEditorField::PassiveTwo,
+                        ));
                         if !editor.is_open {
                             editor.is_open = true;
                         }
@@ -1004,6 +1045,8 @@ fn resolve_flow_action(
                         editor.focused_field = editor
                             .last_edited_field
                             .unwrap_or(super::BuildEditorField::Power);
+                        commit.focus_index =
+                            Some(build_editor_field_focus_index(editor.focused_field));
                         editor.is_open = true;
                         commit.overlay = Some(OverlayCommit::BuildEditor);
                     }
@@ -1012,8 +1055,9 @@ fn resolve_flow_action(
                     | crate::lobby::QueueRejection::UnknownGameType
                     | crate::lobby::QueueRejection::ProtocolFailure => {
                         commit.teardown = true;
-                        fail_to_server_select(
+                        fail_to_server_select_with_kind(
                             &mut commit,
+                            FlowErrorKind::Content,
                             "The lobby content changed incompatibly; reconnect to obtain a fresh game list"
                                 .to_string(),
                             true,
@@ -1021,6 +1065,7 @@ fn resolve_flow_action(
                     }
                     crate::lobby::QueueRejection::RateLimited { retry_after_millis } => {
                         commit.error = Some(FlowError {
+                            kind: FlowErrorKind::Queue,
                             message: format!(
                                 "Queue commands are temporarily limited; try again in {retry_after_millis} ms",
                             ),
@@ -1033,6 +1078,7 @@ fn resolve_flow_action(
                     }
                     crate::lobby::QueueRejection::MustCancelFirst => {
                         commit.error = Some(FlowError {
+                            kind: FlowErrorKind::Queue,
                             message:
                                 "Cancel the current queue ticket before changing game or build"
                                     .to_string(),
@@ -1045,6 +1091,7 @@ fn resolve_flow_action(
                     | crate::lobby::QueueRejection::TemporarilyUnavailable
                     | crate::lobby::QueueRejection::InternalBuildResolution => {
                         commit.error = Some(FlowError {
+                            kind: FlowErrorKind::Queue,
                             message: "The queue request could not be completed".to_string(),
                             return_flow: *flow.get(),
                             actions: [Some(FlowErrorAction::Disconnect), None],
@@ -1222,12 +1269,16 @@ fn resolve_flow_action(
         }
         FlowUiAction::RetryQueue => {
             if queue.retry_pending(time.elapsed()) {
-                commit.overlay = Some(OverlayCommit::Clear);
+                commit.overlay = queue
+                    .pending()
+                    .map(|pending| queue_recovery_overlay(&pending.command));
             }
         }
         FlowUiAction::TryAgainQueue => {
             if queue.try_again_after_rate_limit(time.elapsed()) {
-                commit.overlay = Some(OverlayCommit::Clear);
+                commit.overlay = queue
+                    .pending()
+                    .map(|pending| queue_recovery_overlay(&pending.command));
             }
         }
         FlowUiAction::CancelBuildEditor | FlowUiAction::Cancel | FlowUiAction::Disconnect => {}
@@ -1235,9 +1286,30 @@ fn resolve_flow_action(
     let _ = flow;
 }
 
+fn queue_recovery_overlay(command: &crate::lobby::QueueCommand) -> OverlayCommit {
+    match command {
+        crate::lobby::QueueCommand::Join(_) => OverlayCommit::BuildEditor,
+        crate::lobby::QueueCommand::Cancel(_) => OverlayCommit::Clear,
+    }
+}
+
+const fn build_editor_field_focus_index(field: super::BuildEditorField) -> usize {
+    BUILD_EDITOR_FIELD_BASE + field.index()
+}
+
 fn fail_to_server_select(commit: &mut FlowCommit, message: String, retryable: bool) {
+    fail_to_server_select_with_kind(commit, FlowErrorKind::Connection, message, retryable);
+}
+
+fn fail_to_server_select_with_kind(
+    commit: &mut FlowCommit,
+    kind: FlowErrorKind,
+    message: String,
+    retryable: bool,
+) {
     commit.next_flow = Some(ClientFlow::ServerSelect);
     commit.error = Some(FlowError {
+        kind,
         message,
         return_flow: ClientFlow::ServerSelect,
         actions: if retryable {
@@ -1274,6 +1346,7 @@ fn rejection_flow_error(reason: ClientLobbyFailure) -> FlowError {
         ),
     };
     FlowError {
+        kind: FlowErrorKind::Connection,
         message,
         return_flow: ClientFlow::ServerSelect,
         actions,
@@ -1469,6 +1542,7 @@ fn commit_flow(
     commit: Res<FlowCommit>,
     mut next_flow: ResMut<NextState<ClientFlow>>,
     mut overlay: ResMut<ClientOverlay>,
+    mut navigation: ResMut<FlowNavigation>,
 ) {
     if let Some(error) = &commit.error {
         *overlay = ClientOverlay::Error(error.clone());
@@ -1477,6 +1551,9 @@ fn commit_flow(
             OverlayCommit::Clear => ClientOverlay::None,
             OverlayCommit::BuildEditor => ClientOverlay::BuildEditor,
         };
+    }
+    if let Some(index) = commit.focus_index {
+        navigation.selected = index;
     }
     if let Some(target) = commit.start_target.clone() {
         generation.0 = generation.0.saturating_add(1).max(1);
@@ -1501,6 +1578,7 @@ fn commit_flow(
             spawn_current_candidate(&mut commands, &config, now, &mut routed, &mut connection);
         } else if resolver.task.is_some() {
             *overlay = ClientOverlay::Error(FlowError {
+                kind: FlowErrorKind::Connection,
                 message: "A previous operating-system address lookup is still busy".to_string(),
                 return_flow: ClientFlow::ServerSelect,
                 actions: [
@@ -1707,11 +1785,11 @@ fn present_flow_error_overlay(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
-    roots: Query<Entity, With<FlowErrorRoot>>,
+    roots: Query<(Entity, &FlowErrorRoot)>,
     mut navigation: ResMut<FlowNavigation>,
 ) {
     let ClientOverlay::Error(error) = overlay.as_ref() else {
-        for entity in &roots {
+        for (entity, _) in &roots {
             commands.entity(entity).despawn();
         }
         return;
@@ -1719,13 +1797,20 @@ fn present_flow_error_overlay(
     if *flow.get() == ClientFlow::Title {
         return;
     }
-    if error.return_flow != *flow.get() || !roots.is_empty() {
+    if error.return_flow != *flow.get() {
         return;
+    }
+    let matches_current = roots.iter().any(|(_, rendered)| rendered.0 == *error);
+    if matches_current && roots.iter().count() == 1 {
+        return;
+    }
+    for (entity, _) in &roots {
+        commands.entity(entity).despawn();
     }
     navigation.selected = ERROR_BUTTON_BASE;
     commands
         .spawn((
-            FlowErrorRoot,
+            FlowErrorRoot(error.clone()),
             DespawnOnExit(error.return_flow),
             Node {
                 position_type: PositionType::Absolute,
@@ -1759,7 +1844,7 @@ fn present_flow_error_overlay(
                 BorderColor::all(Color::srgb(0.85, 0.3, 0.25)),
             ))
             .with_children(|panel| {
-                spawn_heading(panel, "CONNECTION ERROR");
+                spawn_heading(panel, error.kind.title());
                 panel.spawn((
                     Text::new(error.message.clone()),
                     TextColor(Color::srgb(1.0, 0.72, 0.65)),
@@ -1834,6 +1919,7 @@ fn present_build_editor_overlay(
     weapons: Res<crate::combat::WeaponCatalogResource>,
     selection: Res<SelectedGameType>,
     queue: Res<super::ClientQueueModel>,
+    memberships: Query<&ClientLobbyMembership, With<Client>>,
     roots: Query<(Entity, &ScrollPosition), With<BuildEditorRoot>>,
     mut navigation: ResMut<FlowNavigation>,
     mut rendered: Local<Option<BuildEditorRenderKey>>,
@@ -1850,12 +1936,14 @@ fn present_build_editor_overlay(
     let joining = queue
         .pending()
         .is_some_and(|pending| matches!(pending.command, crate::lobby::QueueCommand::Join(_)));
+    let game_name = selected_game_name(&selection, memberships.iter().next()).to_string();
     let render_key = BuildEditorRenderKey {
         selected_choice: editor.selected_choice,
         custom_recipe: editor.custom_recipe,
         focused_field: editor.focused_field,
         inline_error: editor.inline_error.clone(),
         game_type_id: selection.game_type_id.clone(),
+        game_name: game_name.clone(),
         joining,
     };
     if !roots.is_empty() && rendered.as_ref() == Some(&render_key) {
@@ -1869,11 +1957,12 @@ fn present_build_editor_overlay(
     for (entity, _) in &roots {
         commands.entity(entity).despawn();
     }
-    if first_spawn {
-        navigation.selected = 2_000 + editor.selected_choice;
+    if first_spawn && !is_build_editor_focus_index(navigation.selected) {
+        navigation.selected = BUILD_EDITOR_CHOICE_BASE + editor.selected_choice;
     }
     let draft = editor.selection(&builds.0);
     let preview = super::resolve_build_preview(draft, &builds.0, &weapons.0);
+    let budget_summary = super::build_editor::build_budget_summary(draft, &builds.0).ok();
     commands
         .spawn((
             BuildEditorRoot,
@@ -1898,13 +1987,7 @@ fn present_build_editor_overlay(
         .with_children(|root| {
             spawn_heading(root, "BUILD EDITOR");
             root.spawn((
-                Text::new(format!(
-                    "Game: {}",
-                    selection
-                        .game_type_id
-                        .as_ref()
-                        .map_or("No game selected", |id| id.as_str())
-                )),
+                Text::new(format!("Game: {game_name}")),
                 TextColor(Color::srgb(0.75, 0.85, 0.92)),
             ));
             for (index, preset) in builds.0.presets.iter().enumerate() {
@@ -1916,7 +1999,7 @@ fn present_build_editor_overlay(
                 .map_or(0, |preview| preview.total_points);
                 spawn_build_editor_button(
                     root,
-                    2_000 + index,
+                    BUILD_EDITOR_CHOICE_BASE + index,
                     FlowUiAction::ChooseBuild(index),
                     &format!("{} — {points} points", preset.display_name),
                     false,
@@ -1924,7 +2007,7 @@ fn present_build_editor_overlay(
             }
             spawn_build_editor_button(
                 root,
-                2_004,
+                BUILD_EDITOR_CHOICE_BASE + 4,
                 FlowUiAction::ChooseBuild(4),
                 "CUSTOM — edit all six fields below",
                 false,
@@ -1933,7 +2016,7 @@ fn present_build_editor_overlay(
                 for index in 0..6 {
                     spawn_build_editor_button(
                         root,
-                        2_010 + index,
+                        BUILD_EDITOR_FIELD_BASE + index,
                         FlowUiAction::FocusBuildField(index),
                         &custom_field_label(
                             super::BuildEditorField::from_index(index),
@@ -1972,7 +2055,7 @@ fn present_build_editor_overlay(
                         );
                     spawn_build_editor_button(
                         root,
-                        2_030 + value_index,
+                        BUILD_EDITOR_OPTION_BASE + value_index,
                         FlowUiAction::ChooseBuildFieldValue {
                             field_index: field.index(),
                             value_index,
@@ -1986,10 +2069,8 @@ fn present_build_editor_overlay(
                 Ok(preview) => {
                     root.spawn((
                         Text::new(format!(
-                            "{} used · {} remaining of {}\n\n{}",
-                            preview.total_points,
-                            preview.remaining_points,
-                            crate::builds::BUILD_POINT_BUDGET,
+                            "{}\n\n{}",
+                            budget_summary.as_deref().unwrap_or("Budget unavailable"),
                             preview.lines.join("\n"),
                         )),
                         TextFont::from_font_size(16.0),
@@ -2003,10 +2084,16 @@ fn present_build_editor_overlay(
                     ));
                 }
                 Err(error) => {
-                    root.spawn((
-                        Text::new(super::build_editor::build_error_copy(error)),
-                        TextColor(Color::srgb(1.0, 0.55, 0.45)),
-                    ));
+                    let copy = budget_summary.as_ref().map_or_else(
+                        || super::build_editor::build_error_copy(error),
+                        |budget| {
+                            format!(
+                                "{budget}\n\n{}",
+                                super::build_editor::build_error_copy(error)
+                            )
+                        },
+                    );
+                    root.spawn((Text::new(copy), TextColor(Color::srgb(1.0, 0.55, 0.45))));
                 }
             }
             if let Some(error) = &editor.inline_error {
@@ -2017,21 +2104,46 @@ fn present_build_editor_overlay(
             }
             spawn_build_editor_button(
                 root,
-                2_100,
+                BUILD_EDITOR_JOIN_INDEX,
                 FlowUiAction::JoinQueue,
                 if joining { "JOINING..." } else { "JOIN QUEUE" },
                 joining || preview.is_err(),
             );
             spawn_build_editor_button(
                 root,
-                2_101,
+                BUILD_EDITOR_BACK_INDEX,
                 FlowUiAction::CancelBuildEditor,
                 "BACK",
                 joining,
             );
-            spawn_build_editor_button(root, 2_102, FlowUiAction::Disconnect, "DISCONNECT", false);
+            spawn_build_editor_button(
+                root,
+                BUILD_EDITOR_DISCONNECT_INDEX,
+                FlowUiAction::Disconnect,
+                "DISCONNECT",
+                false,
+            );
         });
     *rendered = Some(render_key);
+}
+
+fn selected_game_name<'a>(
+    selection: &SelectedGameType,
+    membership: Option<&'a ClientLobbyMembership>,
+) -> &'a str {
+    let Some(selected) = selection.game_type_id.as_ref() else {
+        return "No game selected";
+    };
+    membership
+        .and_then(|membership| {
+            membership
+                .game_types
+                .iter()
+                .find(|game| game.id == *selected)
+        })
+        .map_or("Selected game unavailable", |game| {
+            game.display_name.as_str()
+        })
 }
 
 fn scroll_build_editor(
@@ -2118,6 +2230,10 @@ const fn custom_field_name(field: super::BuildEditorField) -> &'static str {
         super::BuildEditorField::PassiveOne => "PASSIVE 1",
         super::BuildEditorField::PassiveTwo => "PASSIVE 2",
     }
+}
+
+const fn is_build_editor_focus_index(index: usize) -> bool {
+    index >= BUILD_EDITOR_CHOICE_BASE && index <= BUILD_EDITOR_DISCONNECT_INDEX
 }
 
 fn spawn_build_editor_button(
@@ -2326,11 +2442,21 @@ fn spawn_game_select(
     let Some(membership) = memberships.iter().next() else {
         return;
     };
-    navigation.selected = 0;
-    if let Some(first) = membership.game_types.first() {
+    let selected_index = selection
+        .game_type_id
+        .as_ref()
+        .and_then(|selected| {
+            membership
+                .game_types
+                .iter()
+                .position(|game| game.id == *selected)
+        })
+        .unwrap_or(0);
+    navigation.selected = selected_index;
+    if let Some(selected) = membership.game_types.get(selected_index) {
         selection.catalog_revision = Some(membership.catalog_revision);
-        selection.game_type_id = Some(first.id.clone());
-        selection.configuration_revision = Some(first.configuration_revision);
+        selection.game_type_id = Some(selected.id.clone());
+        selection.configuration_revision = Some(selected.configuration_revision);
     }
     let map_catalog = crate::map::MapContentCatalog::embedded().ok();
     commands
@@ -2931,6 +3057,12 @@ mod tests {
         query.iter(world).count()
     }
 
+    fn visible_text(app: &mut App) -> Vec<String> {
+        let world = app.world_mut();
+        let mut query = world.query::<&Text>();
+        query.iter(world).map(|text| text.0.clone()).collect()
+    }
+
     fn lobby_membership() -> ClientLobbyMembership {
         ClientLobbyMembership {
             player_id: crate::protocol::PlayerId(1),
@@ -3025,6 +3157,140 @@ mod tests {
     }
 
     #[test]
+    fn cancelling_build_editor_restores_visible_build_and_join_focus() {
+        let mut app = flow_test_app();
+        app.world_mut().spawn((
+            Client,
+            lobby_membership(),
+            RuntimeLobbyTarget {
+                logical_address: "localhost:5000".to_string(),
+                proposed_display_name: "Player".to_string(),
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::GameSelect);
+        app.update();
+        app.world_mut()
+            .resource_mut::<super::super::BuildEditorState>()
+            .open();
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BuildEditor;
+        app.update();
+        assert!(app.world().resource::<FlowNavigation>().selected >= BUILD_EDITOR_CHOICE_BASE);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
+        );
+        assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
+        let focused_action = {
+            let world = app.world_mut();
+            let mut query = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
+            query
+                .iter(world)
+                .find(|(button, _)| button.index == 1)
+                .map(|(button, disabled)| (button.action.clone(), disabled))
+        };
+        assert_eq!(focused_action, Some((FlowUiAction::OpenBuildEditor, false)));
+    }
+
+    #[test]
+    fn returning_to_game_select_preserves_a_still_advertised_game() {
+        let mut app = flow_test_app();
+        let mut lobby = lobby_membership();
+        let mut second = lobby.game_types[0].clone();
+        second.id = crate::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
+        second.configuration_revision = 2;
+        second.display_name = "Hot Zone 2v2".to_string();
+        second.mode_definition_id = crate::map::HOT_ZONE_MODE_DEFINITION;
+        lobby.game_types.push(second.clone());
+        app.world_mut().spawn((Client, lobby.clone()));
+        *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType {
+            catalog_revision: Some(lobby.catalog_revision),
+            game_type_id: Some(second.id.clone()),
+            configuration_revision: Some(second.configuration_revision),
+        };
+
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::GameSelect);
+        app.update();
+
+        assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
+        assert_eq!(
+            app.world()
+                .resource::<SelectedGameType>()
+                .game_type_id
+                .as_ref(),
+            Some(&second.id)
+        );
+    }
+
+    #[test]
+    fn correctable_rejection_focus_indices_name_the_actual_field_controls() {
+        assert_eq!(
+            build_editor_field_focus_index(super::super::BuildEditorField::Power),
+            BUILD_EDITOR_FIELD_BASE
+        );
+        assert_eq!(
+            build_editor_field_focus_index(super::super::BuildEditorField::PassiveTwo),
+            BUILD_EDITOR_FIELD_BASE + 5
+        );
+    }
+
+    #[test]
+    fn reopening_editor_preserves_authoritative_corrective_focus() {
+        let mut app = flow_test_app();
+        app.world_mut().spawn((Client, lobby_membership()));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::GameSelect);
+        app.update();
+
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Queue,
+            message: "Queue admission is taking longer than expected".to_string(),
+            return_flow: ClientFlow::GameSelect,
+            actions: [
+                Some(FlowErrorAction::RetryQueue),
+                Some(FlowErrorAction::Disconnect),
+            ],
+        });
+        app.update();
+        assert_eq!(count_error_roots(&mut app), 1);
+
+        let corrective_index =
+            build_editor_field_focus_index(super::super::BuildEditorField::PassiveTwo);
+        {
+            let mut editor = app
+                .world_mut()
+                .resource_mut::<super::super::BuildEditorState>();
+            editor.selected_choice = 4;
+            editor.focused_field = super::super::BuildEditorField::PassiveTwo;
+            editor.is_open = true;
+        }
+        app.world_mut().resource_mut::<FlowNavigation>().selected = corrective_index;
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BuildEditor;
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<FlowNavigation>().selected,
+            corrective_index
+        );
+        let world = app.world_mut();
+        let mut query = world.query::<&FlowButton>();
+        assert!(query.iter(world).any(|button| {
+            button.index == corrective_index
+                && matches!(button.action, FlowUiAction::FocusBuildField(5))
+        }));
+    }
+
+    #[test]
     fn queue_copy_uses_advertised_game_and_accepted_build_names() {
         let builds = crate::builds::BuildCatalog::embedded().unwrap();
         let preset = builds.preset(crate::builds::BuildPresetId(1)).unwrap();
@@ -3053,6 +3319,31 @@ mod tests {
         assert!(copy.contains("Wipeout 2v2"));
         assert!(copy.contains(&preset.display_name));
         assert!(copy.contains("Updating queue"));
+    }
+
+    #[test]
+    fn queue_recovery_restores_the_command_owner_and_editor_uses_advertised_name() {
+        let lobby = lobby_membership();
+        let selection = SelectedGameType {
+            catalog_revision: Some(lobby.catalog_revision),
+            game_type_id: Some(lobby.game_types[0].id.clone()),
+            configuration_revision: Some(1),
+        };
+        assert_eq!(selected_game_name(&selection, Some(&lobby)), "Wipeout 2v2");
+        let join = crate::lobby::QueueCommand::Join(crate::lobby::QueueJoinCommand {
+            catalog_revision: lobby.catalog_revision,
+            game_type_id: lobby.game_types[0].id.clone(),
+            game_type_configuration_revision: 1,
+            build: crate::builds::BuildCandidate {
+                build_revision: crate::builds::BuildRevision(1),
+                selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
+            },
+        });
+        let cancel = crate::lobby::QueueCommand::Cancel(crate::lobby::QueueCancelCommand {
+            ticket_id: crate::lobby::QueueTicketId::new(1).unwrap(),
+        });
+        assert_eq!(queue_recovery_overlay(&join), OverlayCommit::BuildEditor);
+        assert_eq!(queue_recovery_overlay(&cancel), OverlayCommit::Clear);
     }
 
     #[test]
@@ -3085,6 +3376,7 @@ mod tests {
         assert_eq!(app.world().resource::<FlowNavigation>().selected, 0);
 
         *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Connection,
             message: "recoverable".to_string(),
             return_flow: ClientFlow::ServerSelect,
             actions: [Some(FlowErrorAction::Back), None],
@@ -3103,6 +3395,45 @@ mod tests {
         *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
         app.update();
         assert_eq!(count_error_roots(&mut app), 0);
+    }
+
+    #[test]
+    fn replacing_error_in_place_rebuilds_message_and_actions() {
+        let mut app = flow_test_app();
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::ServerSelect);
+        app.update();
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Queue,
+            message: "The queue acknowledgement is taking longer than expected".to_string(),
+            return_flow: ClientFlow::ServerSelect,
+            actions: [
+                Some(FlowErrorAction::RetryQueue),
+                Some(FlowErrorAction::Disconnect),
+            ],
+        });
+        app.update();
+        assert_eq!(count_error_roots(&mut app), 1);
+
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Queue,
+            message: "Queue commands are temporarily limited".to_string(),
+            return_flow: ClientFlow::ServerSelect,
+            actions: [
+                Some(FlowErrorAction::TryAgainQueue),
+                Some(FlowErrorAction::Disconnect),
+            ],
+        });
+        app.update();
+
+        assert_eq!(count_error_roots(&mut app), 1);
+        let text = visible_text(&mut app);
+        assert!(text.iter().any(|line| line.contains("temporarily limited")));
+        assert!(!text.iter().any(|line| line.contains("taking longer")));
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<Entity, With<RateLimitTryAgain>>();
+        assert_eq!(query.iter(world).count(), 1);
     }
 
     #[test]
@@ -3287,6 +3618,7 @@ mod tests {
         assert!(matches!(actions.ordinary, Some(FlowUiAction::Connect)));
 
         let overlay = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Connection,
             message: "blocked".to_string(),
             return_flow: ClientFlow::ServerSelect,
             actions: [Some(FlowErrorAction::Back), None],
@@ -3305,6 +3637,14 @@ mod tests {
         };
         assert!(!overlay_allows_button(&overlay, &underlying));
         assert!(overlay_allows_button(&overlay, &error));
+    }
+
+    #[test]
+    fn error_kinds_have_specific_user_facing_titles() {
+        assert_eq!(FlowErrorKind::Connection.title(), "CONNECTION ERROR");
+        assert_eq!(FlowErrorKind::Queue.title(), "QUEUE ERROR");
+        assert_eq!(FlowErrorKind::Persistence.title(), "SAVE ERROR");
+        assert_eq!(FlowErrorKind::Content.title(), "CONTENT ERROR");
     }
 
     #[test]

@@ -11,7 +11,7 @@ pub use definitions::{
     BUILD_CATALOG_SCHEMA_VERSION, BUILD_FINGERPRINT_FORMAT_VERSION, BUILD_POINT_BUDGET,
     BuildCatalog, BuildCatalogResource, BuildContentPlugin, BuildPresetDefinition,
     BuildResolutionError, MAX_BUILD_CANDIDATE_BYTES, MAX_RESOLVED_LOADOUT_BYTES, PassiveDefinition,
-    UltimateDefinition, WeaponPointCost, resolve_build_recipe,
+    UltimateDefinition, WeaponPointCost, build_point_total, resolve_build_recipe,
 };
 pub use model::{
     AbilityPhase, AbilityState, AcceptedBuildSummary, BrawlerBuildRecipe, BuildCandidate,

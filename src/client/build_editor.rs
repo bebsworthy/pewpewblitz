@@ -342,22 +342,76 @@ pub fn resolve_build_preview(
     })
 }
 
+pub(crate) fn build_budget_summary(
+    selection: crate::builds::BuildSelection,
+    builds: &crate::builds::BuildCatalog,
+) -> Result<String, crate::builds::BuildResolutionError> {
+    let recipe = selection_recipe(selection, builds)?;
+    let used = crate::builds::build_point_total(builds, recipe)?;
+    if used > crate::builds::BUILD_POINT_BUDGET {
+        Ok(format!(
+            "{used} used · {} over the {}-point budget",
+            used - crate::builds::BUILD_POINT_BUDGET,
+            crate::builds::BUILD_POINT_BUDGET,
+        ))
+    } else {
+        Ok(format!(
+            "{used} used · {} remaining of {}",
+            crate::builds::BUILD_POINT_BUDGET - used,
+            crate::builds::BUILD_POINT_BUDGET,
+        ))
+    }
+}
+
+fn selection_recipe(
+    selection: crate::builds::BuildSelection,
+    builds: &crate::builds::BuildCatalog,
+) -> Result<crate::builds::BrawlerBuildRecipe, crate::builds::BuildResolutionError> {
+    Ok(match selection {
+        crate::builds::BuildSelection::Preset(id) => {
+            builds
+                .preset(id)
+                .ok_or(crate::builds::BuildResolutionError::UnknownId)?
+                .recipe
+        }
+        crate::builds::BuildSelection::Custom(recipe) => recipe,
+    })
+}
+
 pub fn compare_build_alternative(
     current: crate::builds::BuildSelection,
     alternative: crate::builds::BuildSelection,
     builds: &crate::builds::BuildCatalog,
     weapons: &crate::combat::WeaponCatalog,
 ) -> Result<Vec<String>, String> {
-    let current = resolve_build_preview(current, builds, weapons)
-        .map_err(|error| build_error_copy(&error))?;
+    let current_recipe =
+        selection_recipe(current, builds).map_err(|error| build_error_copy(&error))?;
+    let alternative_recipe =
+        selection_recipe(alternative, builds).map_err(|error| build_error_copy(&error))?;
     let alternative = resolve_build_preview(alternative, builds, weapons)
         .map_err(|error| build_error_copy(&error))?;
+    let current_preview = resolve_build_preview(current, builds, weapons);
+    let current_points = match &current_preview {
+        Ok(preview) => preview.total_points,
+        Err(_) => crate::builds::build_point_total(builds, current_recipe)
+            .map_err(|error| build_error_copy(&error))?,
+    };
     let mut changed = vec![format!(
         "Points: {} -> {} ({:+})",
-        current.total_points,
+        current_points,
         alternative.total_points,
-        i16::from(alternative.total_points) - i16::from(current.total_points)
+        i16::from(alternative.total_points) - i16::from(current_points)
     )];
+    let Ok(current) = current_preview else {
+        append_invalid_draft_alternative_lines(
+            &mut changed,
+            current_recipe,
+            alternative_recipe,
+            &alternative.lines,
+        );
+        changed.truncate(8);
+        return Ok(changed);
+    };
     for line in &alternative.lines {
         let label = line
             .split_once(':')
@@ -373,6 +427,45 @@ pub fn compare_build_alternative(
     }
     changed.truncate(8);
     Ok(changed)
+}
+
+fn append_invalid_draft_alternative_lines(
+    changed: &mut Vec<String>,
+    current: crate::builds::BrawlerBuildRecipe,
+    alternative: crate::builds::BrawlerBuildRecipe,
+    alternative_lines: &[String],
+) {
+    let weapon_changed = current.weapon != alternative.weapon;
+    let ultimate_changed = current.ultimate != alternative.ultimate;
+    let passive_one_changed = current.passives[0] != alternative.passives[0];
+    let passive_two_changed = current.passives[1] != alternative.passives[1];
+    changed.extend(
+        alternative_lines
+            .iter()
+            .filter(|line| {
+                (weapon_changed
+                    && [
+                        "Weapon:",
+                        "Delivery:",
+                        "Range:",
+                        "Projectile speed:",
+                        "Magazine:",
+                        "Fire interval:",
+                        "Refill:",
+                        "Impact area:",
+                        "Damage:",
+                        "Effect:",
+                    ]
+                    .iter()
+                    .any(|prefix| line.starts_with(prefix)))
+                    || (ultimate_changed && line.starts_with("Ultimate:"))
+                    || ((passive_one_changed || passive_two_changed)
+                        && (line.starts_with("Health:") || line.starts_with("Movement:")))
+                    || (passive_one_changed && line.starts_with("Passive 1:"))
+                    || (passive_two_changed && line.starts_with("Passive 2:"))
+            })
+            .cloned(),
+    );
 }
 
 fn format_loadout_lines(
@@ -652,6 +745,45 @@ mod tests {
     }
 
     #[test]
+    fn legal_alternative_remains_explained_when_current_draft_is_invalid() {
+        let builds = crate::builds::BuildCatalog::embedded().unwrap();
+        let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+        let mut invalid = default_custom_recipe();
+        invalid.weapon = crate::builds::WeaponChoice::CustomPulse {
+            power: crate::builds::PulsePower::Heavy,
+            reach: crate::builds::PulseReach::Long,
+            magazine: crate::builds::PulseMagazine::Standard,
+        };
+        invalid.ultimate = crate::builds::UltimateDefinitionId(2);
+        assert_eq!(
+            resolve_build_preview(
+                crate::builds::BuildSelection::Custom(invalid),
+                &builds,
+                &weapons,
+            ),
+            Err(crate::builds::BuildResolutionError::OverBudget)
+        );
+
+        let mut legal = invalid;
+        legal.ultimate = crate::builds::UltimateDefinitionId(1);
+        let lines = compare_build_alternative(
+            crate::builds::BuildSelection::Custom(invalid),
+            crate::builds::BuildSelection::Custom(legal),
+            &builds,
+            &weapons,
+        )
+        .unwrap();
+
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("Points: 13 -> 12 (-1)")
+        );
+        assert!(lines.iter().any(|line| line.starts_with("Ultimate: Dash")));
+        assert!(!lines.iter().any(|line| line.contains("exceeds")));
+        assert!(lines.len() <= 8);
+    }
+
+    #[test]
     fn every_custom_value_has_a_cost_label_and_exact_selectable_recipe() {
         let builds = crate::builds::BuildCatalog::embedded().unwrap();
         let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
@@ -678,6 +810,22 @@ mod tests {
         assert_eq!(
             resolve_build_preview(editor.selection(&builds), &builds, &weapons),
             Err(crate::builds::BuildResolutionError::InvalidCombination)
+        );
+    }
+
+    #[test]
+    fn over_budget_summary_reports_exact_used_and_excess_points() {
+        let builds = crate::builds::BuildCatalog::embedded().unwrap();
+        let mut recipe = default_custom_recipe();
+        recipe.weapon = crate::builds::WeaponChoice::CustomPulse {
+            power: crate::builds::PulsePower::Heavy,
+            reach: crate::builds::PulseReach::Long,
+            magazine: crate::builds::PulseMagazine::Expanded,
+        };
+        recipe.ultimate = crate::builds::UltimateDefinitionId(2);
+        assert_eq!(
+            build_budget_summary(crate::builds::BuildSelection::Custom(recipe), &builds).unwrap(),
+            "14 used · 2 over the 12-point budget"
         );
     }
 }

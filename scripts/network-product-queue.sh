@@ -45,7 +45,7 @@ network_protocol=$(printf '%s\n' "$identity" | awk -F= '$1 == "network_protocol"
 registry_fingerprint=$(printf '%s\n' "$identity" | awk -F= '$1 == "protocol_registry_fingerprint" { print $2 }')
 content_fingerprint=$(printf '%s\n' "$identity" | awk -F= '$1 == "content_fingerprint" { print $2 }')
 
-target/debug/brawler-supervisor \
+BRAWLER_QUEUE_EVIDENCE=1 target/debug/brawler-supervisor \
     --network-protocol "$network_protocol" \
     --protocol-registry-fingerprint "$registry_fingerprint" \
     --content-fingerprint "$content_fingerprint" \

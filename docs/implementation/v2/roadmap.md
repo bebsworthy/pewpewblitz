@@ -120,16 +120,20 @@ ticket reservation exists, so it does not fabricate a formation-boundary race.
 Form exact 2v2/3v3 rosters, assign teams deterministically, select a compatible map, reserve
 tickets, admit host capacity, start/validate a worker, issue routing capabilities, establish fresh
 worker connections, synchronize match state, and check in before the one authoritative countdown.
+M05 exposes one honest product match per logical-server process: after Active it pauses admission,
+capacity-removes queued overflow, suppresses legacy fixed-roster restart, and retains only minimal
+completed-match Disconnect presentation until M06 supplies reusable lifecycle.
 
 Gate: cancellation-versus-reservation races resolve idempotently before the complete roster reaches
 an existing Wipeout or Hot Zone worker through the public endpoint; failures dissolve or requeue
-reservations under an explicit bounded policy.
+reservations under an explicit bounded policy; no exact roster remains invisibly stranded behind the
+temporary one-match product slot.
 
 ### M06 — Concurrent match lifecycle, results, and requeue
 
-Run multiple heterogeneous workers concurrently. Complete leave/forfeit, worker result, route
-cleanup, return-to-lobby, Queue Again, Change Game, worker crash, supervisor shutdown, and
-cross-match isolation behavior.
+Replace M05's one-match admission pause with multiple heterogeneous workers and reusable completion.
+Complete leave/forfeit, worker result, route cleanup, return-to-lobby, Results, Queue Again, Change
+Game, worker crash, supervisor shutdown, and cross-match isolation behavior.
 
 Gate: simultaneous Wipeout and Hot Zone matches cannot leak state or traffic, and repeated
 formation/completion/failure returns routes, processes, memory, and queues to bounds.

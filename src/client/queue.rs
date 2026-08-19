@@ -39,7 +39,9 @@ pub struct ClientQueueModel {
 impl ClientQueueModel {
     #[must_use]
     pub fn snapshot(&self) -> Option<&crate::lobby::QueuePoolSnapshot> {
-        self.snapshot.as_ref().filter(|_| self.snapshot_fresh)
+        self.snapshot
+            .as_ref()
+            .filter(|_| self.required_snapshot_is_fresh())
     }
 
     #[must_use]
@@ -251,6 +253,10 @@ impl ClientQueueModel {
         if outcome.request_id != pending.request_id {
             return;
         }
+        if !outcome_matches_pending(pending, &outcome.decision, self.membership.as_ref()) {
+            self.protocol_failure = true;
+            return;
+        }
         self.outbound
             .push_back(crate::lobby::QueueClientMessage::OutcomeAck {
                 request_id: outcome.request_id,
@@ -309,6 +315,48 @@ impl ClientQueueModel {
             pending.timed_out = true;
             pending.timeout_presented = false;
         }
+    }
+}
+
+fn outcome_matches_pending(
+    pending: &PendingQueueCommand,
+    decision: &crate::lobby::QueueDecision,
+    current_membership: Option<&crate::lobby::QueueMembership>,
+) -> bool {
+    match (&pending.command, decision) {
+        (
+            crate::lobby::QueueCommand::Join(command),
+            crate::lobby::QueueDecision::Joined(membership),
+        ) => {
+            membership.catalog_revision == command.catalog_revision
+                && membership.game_type_id == command.game_type_id
+                && membership.game_type_configuration_revision
+                    == command.game_type_configuration_revision
+                && membership.accepted_build.identity.revision == command.build.build_revision
+                && match command.build.selection {
+                    crate::builds::BuildSelection::Preset(id) => {
+                        membership.accepted_build.identity.source_build_preset_id == Some(id)
+                    }
+                    crate::builds::BuildSelection::Custom(recipe) => {
+                        membership
+                            .accepted_build
+                            .identity
+                            .source_build_preset_id
+                            .is_none()
+                            && membership.accepted_build.canonical_recipe == recipe
+                    }
+                }
+        }
+        (
+            crate::lobby::QueueCommand::Cancel(command),
+            crate::lobby::QueueDecision::Cancelled { ticket_id, .. },
+        ) => {
+            command.ticket_id == *ticket_id
+                && current_membership
+                    .is_some_and(|membership| membership.ticket_id == command.ticket_id)
+        }
+        (_, crate::lobby::QueueDecision::Rejected(_)) => true,
+        _ => false,
     }
 }
 
@@ -557,6 +605,30 @@ mod tests {
         }
     }
 
+    fn joined_membership(game_type_id: &str, ticket_id: u128) -> crate::lobby::QueueMembership {
+        let builds = crate::builds::BuildCatalog::embedded().unwrap();
+        let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+        let preset = builds.preset(crate::builds::BuildPresetId(1)).unwrap();
+        let preview = super::super::build_editor::resolve_build_preview(
+            crate::builds::BuildSelection::Preset(preset.id),
+            &builds,
+            &weapons,
+        )
+        .unwrap();
+        crate::lobby::QueueMembership {
+            ticket_id: crate::lobby::QueueTicketId::new(ticket_id).unwrap(),
+            catalog_revision: crate::lobby::CatalogRevision([1; 32]),
+            game_type_id: crate::lobby::GameTypeId::new(game_type_id).unwrap(),
+            game_type_configuration_revision: 1,
+            accepted_build: crate::builds::AcceptedBuildSummary {
+                canonical_recipe: preset.recipe,
+                identity: preview.identity,
+                total_points: preview.total_points,
+            },
+            admitted_at_pool_state_revision: 2,
+        }
+    }
+
     #[test]
     fn equal_snapshot_refreshes_freshness_older_does_not_and_conflict_fails() {
         let membership = membership();
@@ -617,6 +689,50 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_revision_hides_an_older_fresh_snapshot_until_replacement_arrives() {
+        let lobby = membership();
+        let ticket_id = crate::lobby::QueueTicketId::new(9).unwrap();
+        let mut model = ClientQueueModel {
+            generation: Some(1),
+            membership: Some(crate::lobby::QueueMembership {
+                ticket_id,
+                catalog_revision: lobby.catalog_revision,
+                game_type_id: lobby.game_types[0].id.clone(),
+                game_type_configuration_revision: 1,
+                accepted_build: crate::builds::AcceptedBuildSummary {
+                    canonical_recipe: super::super::build_editor::default_custom_recipe(),
+                    identity: crate::builds::SelectedBuild {
+                        source_build_preset_id: None,
+                        recipe_fingerprint: crate::builds::BuildRecipeFingerprint(1),
+                        revision: crate::builds::BuildRevision(1),
+                    },
+                    total_points: 10,
+                },
+                admitted_at_pool_state_revision: 2,
+            }),
+            ..default()
+        };
+        model.accept_snapshot(snapshot(2, 1), &lobby, Duration::ZERO);
+        assert!(model.start_cancel(Duration::ZERO));
+        let request_id = model.pending().unwrap().request_id;
+        model.accept_outcome(
+            crate::lobby::QueueCommandOutcome {
+                request_id,
+                decision: crate::lobby::QueueDecision::Cancelled {
+                    ticket_id,
+                    resulting_pool_state_revision: 3,
+                },
+            },
+            Duration::ZERO,
+        );
+
+        assert!(model.snapshot().is_none());
+        assert!(model.raw_snapshot().is_some());
+        model.accept_snapshot(snapshot(3, 0), &lobby, Duration::from_millis(1));
+        assert!(model.snapshot().is_some());
+    }
+
+    #[test]
     fn late_outcome_remains_authoritative_after_timeout_notice() {
         let mut model = ClientQueueModel {
             generation: Some(1),
@@ -638,22 +754,7 @@ mod tests {
         model.accept_outcome(
             crate::lobby::QueueCommandOutcome {
                 request_id,
-                decision: crate::lobby::QueueDecision::Joined(crate::lobby::QueueMembership {
-                    ticket_id: crate::lobby::QueueTicketId::new(9).unwrap(),
-                    catalog_revision: crate::lobby::CatalogRevision([1; 32]),
-                    game_type_id: crate::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
-                    game_type_configuration_revision: 1,
-                    accepted_build: crate::builds::AcceptedBuildSummary {
-                        canonical_recipe: super::super::build_editor::default_custom_recipe(),
-                        identity: crate::builds::SelectedBuild {
-                            source_build_preset_id: None,
-                            recipe_fingerprint: crate::builds::BuildRecipeFingerprint(1),
-                            revision: crate::builds::BuildRevision(1),
-                        },
-                        total_points: 10,
-                    },
-                    admitted_at_pool_state_revision: 2,
-                }),
+                decision: crate::lobby::QueueDecision::Joined(joined_membership("wipeout-2v2", 9)),
             },
             Duration::from_secs(11),
         );
@@ -663,5 +764,65 @@ mod tests {
             model.take_outcome().unwrap().decision,
             crate::lobby::QueueDecision::Joined(_)
         ));
+    }
+
+    #[test]
+    fn joined_outcome_must_match_the_frozen_join_target() {
+        let mut model = ClientQueueModel {
+            generation: Some(1),
+            ..default()
+        };
+        let selected = super::super::flow::SelectedGameType {
+            catalog_revision: Some(crate::lobby::CatalogRevision([1; 32])),
+            game_type_id: Some(crate::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
+            configuration_revision: Some(1),
+        };
+        let candidate = crate::builds::BuildCandidate {
+            build_revision: crate::builds::BuildRevision(1),
+            selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
+        };
+        assert!(model.start_join(&selected, candidate, Duration::ZERO));
+        let request_id = model.pending().unwrap().request_id;
+
+        model.accept_outcome(
+            crate::lobby::QueueCommandOutcome {
+                request_id,
+                decision: crate::lobby::QueueDecision::Joined(joined_membership("hot-zone-2v2", 9)),
+            },
+            Duration::ZERO,
+        );
+
+        assert!(model.protocol_failure());
+        assert!(model.membership().is_none());
+        assert!(model.pending().is_some());
+        assert_eq!(
+            model.outbound.len(),
+            1,
+            "invalid outcome is not acknowledged"
+        );
+    }
+
+    #[test]
+    fn joined_outcome_cannot_replace_membership_while_cancel_is_pending() {
+        let current = joined_membership("wipeout-2v2", 8);
+        let mut model = ClientQueueModel {
+            generation: Some(1),
+            membership: Some(current.clone()),
+            ..default()
+        };
+        assert!(model.start_cancel(Duration::ZERO));
+        let request_id = model.pending().unwrap().request_id;
+
+        model.accept_outcome(
+            crate::lobby::QueueCommandOutcome {
+                request_id,
+                decision: crate::lobby::QueueDecision::Joined(joined_membership("wipeout-2v2", 9)),
+            },
+            Duration::ZERO,
+        );
+
+        assert!(model.protocol_failure());
+        assert_eq!(model.membership(), Some(&current));
+        assert!(model.pending().is_some());
     }
 }
