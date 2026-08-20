@@ -6,9 +6,9 @@ abilities, and equipment rather than selecting a fixed hero with a fixed kit.
 
 The project is intentionally starting with the gameplay loop. Production matchmaking, account services, monetization, cosmetics, live operations, and release engineering are out of scope initially. Core networking and the server-authoritative simulation are in scope from the beginning.
 
-V3 is the active version. It is migrating the client gameplay world from 2D sprites/meshes to a
-fixed orthographic 3D presentation while retaining the completed V2 product flow and routed server
-architecture and the existing 2D authoritative simulation.
+V3 completed on 2026-08-20. The client gameplay world now uses a fixed orthographic 3D presentation
+while retaining the completed V2 product flow/routed architecture and the planar authoritative
+simulation. No V4 implementation roadmap is active.
 
 ## Documents
 
@@ -19,19 +19,21 @@ architecture and the existing 2D authoritative simulation.
 - [Maps and game modes](./04-maps-and-game-modes.md) — map grammar and the five planned mode families.
 - [Gameplay MVP](./05-gameplay-mvp.md) — the smallest playable slice, milestones, and acceptance criteria.
 - [Research sources](./06-research-sources.md) — external references used for the baseline.
-- [MVP asset shortlist](./07-mvp-asset-shortlist.md) — open/licensed stand-in tilemaps, characters, props, and icons.
+- [Runtime asset selection and provenance](./07-mvp-asset-shortlist.md) — current GLB, primitive/generated-mesh, provenance, and promotion policy.
 - [Network architecture](./08-network-architecture.md) — authority model, global application-protocol evolution, Lightyear replication, Bevy server/client world composition, and local network testing.
 - [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) — future-facing environment catalog, composable region properties, concealment, and network interest management.
 - [Bots](./10-bots.md) — decision record for player-filling bots as external headless clients, first-version scope, and open questions.
-- [Art and presentation direction](./11-art-and-presentation-direction.md) — superseded 2D art proposal whose enduring readability and authority boundaries carry into V3.
-- [Sprite inventory](./12-sprite-inventory.md) — historical inventory for the superseded 2D proposal.
+- [Art and presentation direction](./11-art-and-presentation-direction.md) — current fixed-camera 3D style, readability, UI, asset, and rendering contract.
+- [V3 presentation asset inventory](./12-sprite-inventory.md) — current imported, primitive, generated-mesh, material, audio, and UI families; historical filename retained for link stability.
 - [Player UX and server-local matchmaking](./13-player-ux.md) — completed V2 player flow, queues, build selection, settings, accessibility, and verification decisions.
 - [Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md) — completed V2 supervisor, routed transport, isolated match-worker, and connection-handoff decisions.
 - [Version 1 implementation roadmap](./implementation/v1/roadmap.md) — completed gameplay MVP milestones and closeout.
 - [Version 2 implementation roadmap](./implementation/v2/roadmap.md) — completed product UX, routed transport, matchmaking, concurrent workers, and closeout.
-- [Version 3 implementation roadmap](./implementation/v3/roadmap.md) — active 3D gameplay-world presentation migration.
+- [Version 3 implementation roadmap](./implementation/v3/roadmap.md) — completed 3D gameplay-world presentation migration and deferred art/render backlog.
 - [V3 M01 — 3D presentation feasibility and foundation](./implementation/v3/milestone-01.md) — completed feasibility foundation and accepted learning review.
-- [V3 M02 — default 3D arena, map, terrain, camera, and input cutover](./implementation/v3/milestone-02.md) — current user-playtest contract.
+- [V3 M02 — default 3D arena, map, terrain, camera, and input cutover](./implementation/v3/milestone-02.md) — completed world-cutover record.
+- [V3 M03 — complete 3D combat presentation](./implementation/v3/milestone-03.md) — completed fighter/combat/world-HUD replacement record.
+- [V3 M04 — renderer retirement and closeout](./implementation/v3/milestone-04.md) — completed retirement, readability, lifecycle, feedback, and learning record.
 
 ## Working vocabulary
 

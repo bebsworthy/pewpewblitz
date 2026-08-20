@@ -1,11 +1,9 @@
-# Post-v1 gap backlog
+# Cross-version product and technical backlog
 
-This file records the output of a documentation review completed on 2026-08-15. It itemizes
-features that are described in the design documents (`docs/00`–`09`) but are **not** delivered by
-the v1 roadmap (Milestones 01–11, see `implementation/v1/roadmap.md`), plus capabilities identified
-as missing from the original research. It is a standalone record: the roadmap, design documents,
-and milestone files are intentionally unchanged. When a future version is scoped, these items
-should be triaged into that version's roadmap and removed from here.
+This file began as the 2026-08-15 post-V1 documentation review and now carries unresolved work
+across the completed V1–V3 roadmaps. A completed version may resolve a row without erasing the
+historical finding; the triage table records that disposition. Future work becomes active only when
+promoted into a researched, user-reviewed version milestone.
 
 Deliberate, well-tracked deferrals already recorded in the roadmap's future-version candidate
 backlog, the `FUT-*` rows, or "Explicitly outside v1" are **not** repeated here. Everything below
@@ -29,9 +27,9 @@ is either absent from all of those lists or present only as an unstated assumpti
 | GAP-COMBAT-SUPPORT | Support/Controller payload family | Healing, healing-reduction, shields, shield-break, stun/root/silence, pull, mark/reveal, damage-over-time, buff/debuff payloads are specified in doc 03 but have no home in M01–11, the future backlog, or outside-v1. Doc 02 names Support as an emergent role. | `03-weapons-and-abilities.md` payloads/effects; `02-fighter-model.md` roles |
 | GAP-ABILITY-ULTIMATES | Remaining ultimate candidates | Temporary personal shield, healing/repair field, area pull/knockback, and short-lived wall placement ultimates are undispositioned (v1 implements only dash + sentry). | `03-weapons-and-abilities.md` ultimate abilities |
 | GAP-ITEM-EQUIPMENT | Collectible equippable items | Add account-owned item instances referencing authored equipment definitions, legal equipment slots, inventory/entitlement validation, and deterministic resolution of stat modifiers, passive effects, and capabilities into the immutable match loadout. Scope must also decide stacking/conflicts/caps, revisions and migrations, acquisition/drops/crafting, rarity/levels/affixes, and inventory UI. Mid-match loot/equipping is a separate feature. | Product direction, 2026-08-15; `02-fighter-model.md` collectible equipment direction; `03-weapons-and-abilities.md` collectible equipment model |
-| GAP-UI-SETTINGS | Settings screen and local persistence | M11 schedules input remapping/deadzone/controller settings but no settings UI, controls-help display, or saving settings to disk across runs. Required by M11's own scope. | Roadmap M11 |
+| GAP-UI-SETTINGS | Settings screen and local persistence | Resolved by V2: product settings overlay, calibration/remapping, validation, and versioned local persistence. | V2 roadmap and closeout |
 | GAP-AUDIO-SETTINGS | Audio settings and music | No music/menu audio is ever named (only placeholder SFX cues in M06/M07) and no master/SFX/music volume controls exist. | Roadmap M06/M11 |
-| GAP-PERF-CLIENT | Client performance targets | No client FPS target, frame-time budget, or minimum-spec Mac definition; M11 measures only server tick/bandwidth. | Roadmap M11 |
+| GAP-PERF-CLIENT | Client performance targets | Partially resolved by V3: bounded native render-report schema, Apple M3 reference profile, and explicit frame thresholds exist; broader minimum-spec/device coverage remains deferred. | V3 M04 |
 
 ## P2 — Traceability gaps (deferred by design docs, never backlogged)
 
@@ -44,7 +42,7 @@ is either absent from all of those lists or present only as an unstated assumpti
 | GAP-MAPS-BUILTIN | Additional built-in maps | Doc 04 describes four map-grammar archetypes (lane arena, cover maze, central-objective, chokepoint); v1 has one arena plus a Hot Zone variant, with no backlog item for more built-in maps. | `04-maps-and-game-modes.md` map grammar |
 | GAP-COMBAT-DEBRIS | Deferred destruction cosmetics | Terrain deformation animation and falling debris were deferred by doc 04 but omitted from M10's deferral list. | `04-maps-and-game-modes.md` MVP destruction scope |
 | GAP-TERRAIN-BEAM | Terrain-carving laser | Add a beam/laser world effect that erases destructible terrain along a server-resolved, quantized segment/capsule rather than one circular impact brush. Permanent geometry should stop the beam and remain indestructible. Scope deterministic rasterization, endpoint/radius wire data, maximum beam length/cells/chunks, simultaneous-beam budgets, collider batching, recovery compatibility, and matching client carve feedback. | Product idea, 2026-08-16; build on M10 terrain world effects |
-| GAP-FX-PRESENTATION | Richer combat presentation | Muzzle flash, explosion animation, debris/particles, screen shake, material-specific impact effects are specified in doc 03 but not in M06's feedback scope. | `03-weapons-and-abilities.md` presentation effects |
+| GAP-FX-PRESENTATION | Richer combat presentation | V3 added bounded 3D muzzle/impact/damage/reset effects, trails, statuses, and debris. Rich authored animation, material-specific impact, and broader VFX remain deferred. | `03-weapons-and-abilities.md`; V3 M03/M04 |
 
 ## P3 — Environment catalog items never dispositioned
 
@@ -72,7 +70,7 @@ concealment, spell-created concealment, speedway/slow surfaces, and one readable
 | GAP-LEGAL-CREDITS | CC-BY attribution credits | Game-icons.net assets require attribution; M06 records a manifest but no user-facing credits file/screen. | `07-mvp-asset-shortlist.md` license checklist |
 | GAP-UI-COLORBLIND | Colorblind/team-readability mode | Team color is a core readability pillar; accessibility deferral exists only in milestone notes, not the roadmap's outside-v1 list. | `05-gameplay-mvp.md` controller usability |
 | GAP-BUILD-NOTARIZE | macOS build handoff | Notarization, app icon, DMG/zip packaging for non-developer playtesters. | Review finding |
-| GAP-MODE-TRAINING | Offline training mode | Doc 08 explicitly permits a bot practice mode on the authoritative server; M07 has only match-filler bots. | `08-network-architecture.md` local development modes |
+| GAP-MODE-TRAINING | Authoritative practice mode | Resolved by V2 as server-hosted practice through the routed topology with inert bot fillers; autonomous player bots remain a separate future item. | V2 M08; `10-bots.md` |
 | GAP-INPUT-AIMASSIST | Aim assist | Doc 05 allows it "only as an explicit, tunable gameplay rule"; never dispositioned. | `05-gameplay-mvp.md` controller usability |
 | GAP-UI-WINDOW | Window/resolution/vsync settings | User-facing window mode, resolution, frame-limit/vsync options (vsync exists only as an internal dev flag); also mouse cursor capture for KBM borderless play. | Review finding |
 | GAP-AUDIO-FOCUS | Mute/pause on focus loss | Standard macOS app-switching behavior; unaddressed. | Review finding |
@@ -81,7 +79,7 @@ concealment, spell-created concealment, speedway/slow surfaces, and one readable
 | GAP-TOOL-SPECTATE | Spectator/observer client | M11 replay/event logs are debug tools; an observer client would help 2v2 playtest verification and is cheap. | Review finding |
 | GAP-PLATFORM-BATTERY | Battery/thermal considerations | Power draw and background-work capping for laptop play sessions. | Review finding |
 | GAP-LEGAL-FONTS | Font licensing | Asset manifest covers game assets; fonts have no license check. | Review finding |
-| GAP-UI-PAUSE-RENAME | Rename "Pause" to in-match menu overlay | "Pause" is implemented (local toggle only; the authoritative match never stops): `ClientInputContext::Paused`, the pause action bit, pause overlay, M03 "client-side pause-menu behavior while the authoritative server continues running", the doc 05 provisional "Pause / menu" control label, and M11 "pause settings UI" wording. A multiplayer match cannot pause, so the concept is a menu overlay while the server keeps ticking; the UX design already specifies the `Menu` screen ("There is no pause in multiplayer", `13-player-ux.md`). Removing the term requires renaming the client input context, action, overlay components, doc 05 control label, and M11 wording; the wire action bits stay unchanged. | Player UX review, 2026-08-17; `13-player-ux.md` |
+| GAP-UI-PAUSE-RENAME | Rename "Pause" to in-match menu overlay | Resolved by V2: `ClientInputContext::Menu` and the product overlay communicate that the authoritative match continues; the physical pause/menu action name remains an input label only. | V2 client shell; `13-player-ux.md` |
 | GAP-ORG-TERRAIN-SPLITS | Terrain module decomposition continues past M10 remediation | The 2026-08-16 M10 implementation review noted that `terrain/network.rs` (recovery serving plus wire records) and `terrain/client.rs` (wire driving, presentation, debris, readiness) each mix independently changing lifecycles. M10 remediation extracted `terrain/lifecycle.rs` and fixed the lifecycle defects in place; the remaining splits were deferred to avoid invalidating recorded evidence mid-remediation. | M10 feedback review, 2026-08-16 |
 | GAP-TOOL-COMBATPROFILES | `network-combat-profiles` gate broken | The repeated combat convergence profiles time out with no defeat/reset evidence and zero payload effects landing on the neutral dummy; reproduced identically at the pre-M10 baseline (rebuilt binaries), so it predates M10 terrain. M10's terrain profiles (`just network-terrain`) cover real-process terrain convergence; the defeat-evidence path needs its own fix. | M10 verification, 2026-08-16 |
 | GAP-TOOL-NETTEST-LINT | No Clippy gate for the `network-test` configuration | The 2026-08-17 M10 review round found 11 `unused_qualifications` warnings under `cargo clippy --features network-test --tests`, a configuration the role Clippy gates do not cover; the warnings were fixed, but roughly 30 further pre-existing cast/`too_many_lines` findings remain across the network/performance test files, so a `-D warnings` gate needs a test-code lint policy decision (fix, narrowly allow per item, or scope the gate) rather than a mechanical sweep. | M10 feedback review round 2, 2026-08-17 |
@@ -92,7 +90,9 @@ concealment, spell-created concealment, speedway/slow surfaces, and one readable
 | ID group | Status | Intended review point |
 |---|---|---|
 | GAP-NET-ROOMS | Resolved 2026-08-17 — superseded by process-per-match routing; no implementation scheduled | Reopen only if one authority later hosts multiple matches or measured within-match visibility requires it |
-| All other items | Unreviewed — recorded 2026-08-15, not yet accepted into any roadmap | Future-version scoping after v1 closeout (M11) |
+| GAP-UI-SETTINGS, GAP-MODE-TRAINING, GAP-UI-PAUSE-RENAME | Resolved by V2 | Reopen only for a new concrete product requirement |
+| GAP-PERF-CLIENT, GAP-FX-PRESENTATION | Partially resolved by V3; remaining scope is stated in each row | Future release/art milestone |
+| All other items | Unscheduled after V3 closeout | Future-version scoping |
 
 `GAP-ITEM-EQUIPMENT` elaborates the equipment part of `FUT-ARSENAL`; scope and schedule them
 together, while preserving the distinction between saved brawler/build identity and owned item

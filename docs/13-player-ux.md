@@ -2,12 +2,12 @@
 
 ## Purpose and scope
 
-This document defines the proposed v2 product direction, pending user validation through the v2
-roadmap and per-milestone specification reviews. It connects the current prototype to a
-product-quality client shell, direct-connect multiplayer, server-local game queues, automatic match
-formation, concurrent authoritative match workers, and a dependable bot-practice path. It is a
-feature and architecture boundary, not a milestone specification: every v2 milestone still begins
-with its own research and user-validated technical specification.
+This document is the accepted V2 product-direction record. V2 completed the product client shell,
+direct-connect flow, server-local queues, automatic match formation, isolated authoritative match
+workers, HUD/settings/accessibility baseline, and server-hosted practice on 2026-08-20. Future-tense
+language below records the design as reviewed; the V2 roadmap and milestones contain exact
+implementation evidence. V3 subsequently replaced gameplay-world presentation without changing
+this player-flow boundary.
 
 In this document, **matchmaking** means direct-connect, server-local, skill-free queueing: the
 player first joins a known server, selects one of its game types, and the server forms matches from
@@ -23,7 +23,7 @@ Status triage used below:
   research and validate the technical architecture before implementation.
 - **Deferred** — explicitly outside v2.
 
-## V2 feature boundary (proposed)
+## V2 feature boundary (completed)
 
 V2 includes:
 
@@ -158,7 +158,7 @@ Shared immutable catalogs remain build inputs in every worker; mutable match sta
 owning worker world. Host-wide capacity belongs to the supervisor; queue and reservation state
 belong to the lobby worker.
 
-## Current prototype state
+## Pre-V2 prototype state (historical)
 
 The windowed client connects immediately on launch and never shows a product menu:
 

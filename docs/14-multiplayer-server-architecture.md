@@ -2,9 +2,9 @@
 
 ## Decision status
 
-Accepted for v2 implementation on 2026-08-18 when the user directed implementation of
-[v2 Milestone 01](./implementation/v2/milestone-01.md). That milestone owns the exact IPC
-primitives, framing, limits, implementation evidence, and any evidence-backed return to review.
+Accepted for V2 implementation on 2026-08-18 and completed on 2026-08-20. The V2 roadmap and
+milestones own the exact IPC primitives, framing, limits, process evidence, and closeout record.
+V3 retained this topology unchanged while replacing client gameplay-world presentation.
 
 ## Context
 

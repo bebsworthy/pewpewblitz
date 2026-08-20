@@ -33,7 +33,7 @@ of developer-defined heroes.
 ## Creator direction
 
 An eventual player-facing map builder lets users author arena layouts from server-known content:
-visual tiles and decorations, terrain, bounded geometry, placeable entities, gameplay regions,
+visual themes/models/decorations, terrain, bounded geometry, placeable entities, gameplay regions,
 spawn points, and mode-required anchors. Users choose a supported game mode for a map; they do not
 author scoring, victory, respawn, shrinking-boundary, objective, or other executable mode rules.
 

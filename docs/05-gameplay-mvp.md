@@ -1,5 +1,9 @@
 # Gameplay MVP
 
+This is the completed V1 gameplay-scope record. V2 later delivered 1v1/2v2/3v3 routed product play,
+and V3 replaced placeholder world rendering with the fixed-camera 3D presentation. Future-tense
+milestone language below is historical rather than current implementation status.
+
 ## MVP statement
 
 Two teams of two or three fighters fight on one small map. The combat slice begins with four
@@ -8,10 +12,9 @@ build and two ultimates. Players move, aim, fire, take damage, die, respawn, and
 eliminations. The first team to the target score wins.
 
 This two-team MVP profile is not an engine-wide team or participant cap. Team count and participants
-per team are resolved from compatible game-mode and map definitions. The current M07 implementation
-stops at 2v2, while the MVP product target includes 3v3 and the broader architecture must remain
-compatible with large-group profiles; subsystem capacity may not silently use the temporary 2v2
-guard as its maximum.
+per team are resolved from compatible game-mode and map definitions. V2 completed exact 1v1, 2v2,
+and 3v3 product paths; the broader architecture remains compatible with larger bounded profiles and
+subsystem capacity may not silently use one advertised topology as its engine-wide maximum.
 
 This is a Wipeout-style networked prototype because it exercises the important loop with minimal mode-specific machinery. The first test may run locally, but it uses a server-authoritative simulation.
 

@@ -7,6 +7,8 @@ peer_report_path=${report_path}.peer
 bind_addr=${BRAWLER_RENDER_BIND:-127.0.0.1:5024}
 game_mode=${BRAWLER_RENDER_MODE:-wipeout}
 timeout_seconds=${BRAWLER_RENDER_TIMEOUT_SECONDS:-75}
+warmup_seconds=${BRAWLER_RENDER_WARMUP_SECONDS:-10}
+measure_seconds=${BRAWLER_RENDER_MEASURE_SECONDS:-30}
 client_one_log=${report_path}.client-1.log
 client_two_log=${report_path}.client-2.log
 
@@ -23,6 +25,14 @@ case "$timeout_seconds" in
         exit 2
         ;;
 esac
+for duration in "$warmup_seconds" "$measure_seconds"; do
+    case "$duration" in
+        '' | *[!0-9]* | 0)
+            printf '%s\n' 'brawler render evidence: durations must be positive integers' >&2
+            exit 2
+            ;;
+    esac
+done
 
 cd "$project_dir"
 if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e "$client_two_log" ]]; then
@@ -86,13 +96,20 @@ target/debug/brawler-supervisor \
 supervisor_pid=$!
 
 target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
-    --auto-connect --product-match-smoke-1v1 --controller-demo --window-size 1280x720 \
-    --render-report "$report_path" \
+    --auto-connect --product-match-smoke-1v1 --move-axis 1,0 \
+    --window-size 1280x720 \
+    --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
+    --render-measure-seconds "$measure_seconds" \
     >"$client_one_log" 2>&1 &
 measured_pid=$!
+# Match the canonical routed-product smoke: do not turn a two-client evidence run into a burst
+# against the deliberately small unauthenticated lobby ingress budget.
+sleep 2
 target/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
-    --auto-connect --product-match-smoke-1v1 --controller-demo --window-size 1280x720 \
-    --render-report "$peer_report_path" \
+    --auto-connect --product-match-smoke-1v1 --move-axis '-1,0' \
+    --window-size 1280x720 \
+    --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
+    --render-measure-seconds "$measure_seconds" \
     >"$client_two_log" 2>&1 &
 peer_pid=$!
 

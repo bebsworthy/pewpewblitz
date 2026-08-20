@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-V3 replaces Brawler's sprite- and `Mesh2d`-based **world presentation** with a fully 3D Bevy
+V3 replaced Brawler's sprite- and `Mesh2d`-based **world presentation** with a fully 3D Bevy
 scene viewed through a fixed, tilted orthographic camera. The authoritative game remains a 2D
 arena shooter: movement, collision, targeting, map containment, terrain occupancy, combat, and
 network replication continue to use the existing server-owned 2D simulation.
@@ -103,10 +103,10 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Verifying |
-| Current milestone | M04 — 2D world-renderer retirement, readability, performance, and V3 closeout |
+| Status | Complete |
+| Current milestone | None — V3 completed on 2026-08-20 |
 | Entry gate | Satisfied — the user accepted the M01 feasibility result and directed M01 closeout and M02 start on 2026-08-20 |
-| Completion gate | Every gameplay-world visual uses the 3D scene, no sprite/`Mesh2d` world fallback remains, the server and protocol stay 2D and authoritative, and representative networked play passes the accepted visual, performance, and lifecycle gates |
+| Completion gate | Satisfied — every gameplay-world visual uses the 3D scene, no sprite/`Mesh2d` world fallback remains, the server and protocol stay 2D and authoritative, and representative networked play passed the accepted visual, performance, and lifecycle gates |
 
 ## Milestone overview
 
@@ -115,7 +115,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 01 | Complete | 3D presentation feasibility and reusable foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Default 3D arena, map, terrain, camera, and input cutover | [milestone-02.md](./milestone-02.md) |
 | 03 | Complete | Complete 3D combat, fighter, cue, preview, and world-HUD replacement | [milestone-03.md](./milestone-03.md) |
-| 04 | Verifying | 2D world-renderer retirement, readability, performance, and V3 closeout | [milestone-04.md](./milestone-04.md) |
+| 04 | Complete | 2D world-renderer retirement, readability, performance, and V3 closeout | [milestone-04.md](./milestone-04.md) |
 
 ## Ordering rationale and milestone gates
 
@@ -199,6 +199,20 @@ accepted native performance; server feature isolation passes; a targeted source 
 gameplay-world renderer, permanent migration toggle, or planar XY encoding in gameplay-world
 `Transform`; feedback and learning review are complete.
 
+## Closeout summary — 2026-08-20
+
+V3 completed the renderer replacement without changing gameplay authority. The supported client
+now uses one fixed orthographic 3D world renderer, imported Kenney GLBs where selected, cached
+primitive/generated meshes for exact or fallback geometry, projected Bevy UI for fighter overhead
+information, and screen-space Bevy UI for the product shell. The dedicated server, protocol,
+collision, targeting, map shapes, and terrain occupancy remain planar and authoritative.
+
+M04 removed the residual 2D world assets and feature paths, closed presentation asset leaks,
+validated teardown through the native report's high-water/terminal counts, passed the locked
+routed release frame thresholds on the recorded Apple M3 reference machine, and incorporated the
+user's fighter, marker, animation, and overhead-readability feedback. No V4 scope is active; future
+art, theme, advanced-rendering, and vertical-gameplay decisions remain explicit backlog items.
+
 ## Cross-version technical policies
 
 ### Coordinate and authority boundary
@@ -249,11 +263,11 @@ gameplay-world renderer, permanent migration toggle, or planar XY encoding in ga
 | V3-PERSPECTIVE-CAMERA | Perspective or custom projection | Rejected for the initial migration; revisit only if orthographic playtests fail a recorded product need |
 | V3-3D-PHYSICS | Avian 3D gameplay, vertical collision, elevation, jumping, or walkable wall tops | Explicitly outside V3; requires a separate product and authority decision |
 | V3-ADVANCED-RENDERING | LOD, GPU particles, environment maps, deferred rendering, dynamic time of day, or a custom render pipeline | Add only for a measured performance or art-direction requirement |
-| V3-M01-FALLBACK-PROOF | Forced missing character, weapon, wall, and colormap dependencies with deterministic primitive fallback | Promoted to M02 because the default renderer must prove degraded play before removing the 2D map path |
-| V3-M01-CAMERA-RAY-CORNERS | Focused non-16:9 ground-ray corner and projected camera-footprint tests | Promoted to M02 camera/input cutover verification |
-| V3-M01-TERRAIN-LIFECYCLE | Live terrain mutation, seam rebuild, reset, map replacement, and disconnect cleanup in 3D | Promoted to M02, which becomes the sole map/terrain presentation owner |
-| V3-M01-ANIMATION-POLISH | Full locomotion/holding/shoot transition, grip, clipping, and scale matrix | Deferred to M03 combat/fighter replacement |
-| V3-M01-RENDER-PERFORMANCE | Native release-profile frame-time distribution and teardown asset counts | Deferred to the representative complete renderer gate in M04; M01 debug/native play showed no feasibility blocker but is not performance evidence |
+| V3-M01-FALLBACK-PROOF | Forced missing character, weapon, wall, and colormap dependencies with deterministic primitive fallback | Resolved in M02 |
+| V3-M01-CAMERA-RAY-CORNERS | Focused non-16:9 ground-ray corner and projected camera-footprint tests | Resolved in M02 |
+| V3-M01-TERRAIN-LIFECYCLE | Live terrain mutation, seam rebuild, reset, map replacement, and disconnect cleanup in 3D | Resolved in M02 and extended by M04 churn checks |
+| V3-M01-ANIMATION-POLISH | Full locomotion/holding/shoot transition, grip, clipping, and scale matrix | Resolved to the M03/M04 first-release animation contract; further clip polish belongs to future art work |
+| V3-M01-RENDER-PERFORMANCE | Native release-profile frame-time distribution and teardown asset counts | Resolved in M04 with routed release reports and lifecycle high-water/terminal counts |
 
 ## Explicitly outside V3
 

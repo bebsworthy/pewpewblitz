@@ -7,9 +7,10 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v3/roadmap.md` for the active 3D-presentation migration, milestone order,
-   and enduring V3 decisions.
-3. `docs/implementation/v3/milestone-04.md` for the current implementation contract.
+2. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
+   V3 decisions.
+3. `docs/11-art-and-presentation-direction.md` and `docs/12-sprite-inventory.md` for the current
+   renderer, readability, and asset-family contracts.
 4. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
 5. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
    player-flow and routed-process decisions that V3 preserves.
@@ -21,14 +22,14 @@ Start with:
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
 playtest. It is not a release-ready claim: controller feel, audio, HUD/readability, balance, pacing,
 and related tuning remain tracked as `POST-V1-RELEASE-POLISH`. V2 completed and was accepted on
-2026-08-20. V3 is the active version. M01 completed on 2026-08-20 after the user accepted the 3D
+2026-08-20. V3 completed and was accepted on 2026-08-20. M01 completed after the user accepted the 3D
 feasibility result and its projectile-origin corrections. M02 completed on 2026-08-20 after its
 default 3D arena/map/terrain/camera/input cutover, projectile-placement feedback fix, removal of the
 obsolete projectile sprite/XY writer, affected verification, and user acceptance. M03 completed on
 2026-08-20 after its independent fighter/combat visual implementation, canonical verification,
-native smoke, and accepted playtest handoff. M04 is now `Verifying` final renderer retirement,
-readability, native performance, lifecycle evidence, and V3 closeout under
-`docs/implementation/v3/milestone-04.md`.
+native smoke, and accepted playtest handoff. M04 completed after renderer retirement, lifecycle and
+readability verification, iterative fighter-presentation feedback, documentation reconciliation,
+and its learning review. No V4 milestone is active.
 
 ## Technical stack
 
@@ -78,7 +79,7 @@ src/
     server.rs              waiting-phase authoritative build transaction
     telemetry.rs           bounded selection/build records and aggregates
     tests.rs               focused build rule and composition tests
-  combat/
+    combat/
     mod.rs                 combat composition root, public re-exports, shared sets/plugins
     model.rs               stable identities and shared/runtime combat state shapes
     cues.rs                gameplay-to-presentation combat facts
@@ -91,14 +92,14 @@ src/
     telemetry.rs           bounded records, trackers, aggregates, summaries
     evidence.rs            bounded process/checkpoint evidence and convergence schemas
     server.rs              server combat plugin and schedule registration
-    client/                previews, cues, world visuals, transient effects, HUD, and tests
+    client/                previews, cues, transient observations, HUD, and tests
     tests.rs               shared combat model/composition tests
   map/
     mod.rs                 map composition root, stable IDs/profiles, public re-exports
     model.rs               recipe/resolved snapshot/runtime map shapes and indexes
     definitions/           catalog parsing, validation, resolution, fingerprints, tests
     server.rs              authoritative map generation install/teardown and colliders
-    client.rs              replicated map reconstruction and client presentation
+    client.rs              replicated map reconstruction and presentation acceptance state
     tests.rs               shared map composition and lifecycle tests
   matchplay/
     mod.rs                 common match schedule/restart composition and mode plugins
@@ -122,9 +123,9 @@ src/
     audio.rs               bounded cue-to-audio presentation
     hud.rs                 session, combat, build, match, and mode HUD
     input.rs               keyboard, mouse, gamepad, and native-input sampling
-    presentation.rs        camera, arena, effects, and replicated-pose presentation
-    presentation_3d/       accepted V3 camera/coordinate/GLB/mesh feasibility foundation; M02
-                           decomposes map and terrain lifecycle into their owning modules
+    presentation.rs        screen-space HUD and pause-overlay UI
+    presentation_3d/       sole gameplay-world renderer: camera, coordinates, GLB/animation,
+                           map/combat meshes, projected fighter UI, and render diagnostics
     session.rs             connection, selection, shutdown, and headless automation lifecycle
     settings/              local calibration/rebinding state and pause-overlay UI
     tests.rs               client composition and behavior tests
@@ -146,7 +147,7 @@ src/
     lifecycle.rs           install, reset, teardown, and generation transitions
     authority.rs           authoritative brush transaction
     network/               server publication and client convergence rules
-    client/                presentation and recovery ownership
+    client/                generated 3D chunk-mesh presentation and recovery ownership
     telemetry.rs           bounded mutation/convergence evidence
     tests.rs               terrain rule, lifecycle, and schedule tests
 tests/
@@ -163,8 +164,8 @@ material and is not part of Brawler's production module layout.
 The routed supervisor, route envelope, IPC transport, and isolated lobby/match-worker composition
 are completed V2 production paths. `just server`, `just client`, `just run`, and `just e2e` exercise
 that routed topology; `scripts/network.sh` remains only the explicitly named legacy direct-UDP
-diagnostic baseline. M02 is replacing the development-selected M01 renderer with the default 3D
-arena/map/terrain/camera/input composition.
+diagnostic baseline. V3's `WorldPresentationPlugin` is the sole gameplay-world renderer; the
+primitive override validates 3D degradation and is not a renderer selector.
 
 ## Code organization rules
 
@@ -319,6 +320,6 @@ For the next non-complete milestone:
 - Preserve unrelated user changes and keep deferred work visible in the active version backlog.
 
 Canonical build, test, process, closeout, and playtest commands already live in `justfile` and the
-root `README.md`; use those rather than inventing substitutes. V3 M01 may add only a bounded
-development selector for its 3D feasibility composition; it must not replace the supported 2D path
-before acceptance or turn the migration into a permanent renderer setting.
+root `README.md`; use those rather than inventing substitutes. The completed V3 renderer has no 2D
+gameplay-world fallback or user-facing renderer choice. `BRAWLER_FORCE_PRIMITIVE_WORLD` selects
+deterministic meshes inside the same 3D composition and must not become a permanent content mode.

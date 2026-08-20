@@ -91,6 +91,7 @@ struct RenderMeasurementState {
     samples: Vec<f64>,
     high: HighWater,
     current: HighWater,
+    measured_map: Option<(u64, crate::map::ModeDefinitionId)>,
     written: bool,
 }
 
@@ -124,6 +125,7 @@ impl Plugin for RenderMeasurementPlugin {
             samples: Vec::with_capacity(SAMPLE_CAPACITY),
             high: HighWater::default(),
             current: HighWater::default(),
+            measured_map: None,
             written: false,
         })
         .add_systems(Last, sample_and_finalize_render_measurement);
@@ -158,12 +160,17 @@ fn sample_and_finalize_render_measurement(
         .is_some_and(|value| !matches!(*value, assets::ClientAssetReadiness::Loading))
         && map_readiness
             .is_some_and(|value| matches!(*value, crate::map::ClientMapReadiness::Ready));
-    if !ready {
-        state.ready_at = None;
+    // Readiness starts the bounded window; later match teardown must not restart it. Keeping the
+    // original anchor makes the report cover the product match and its routed return-to-lobby
+    // lifecycle instead of waiting forever once the measured match completes.
+    if state.ready_at.is_none() && !ready {
         return;
     }
     let now = time.elapsed();
     let ready_at = *state.ready_at.get_or_insert(now);
+    if let Some(map) = maps.iter().max_by_key(|map| map.identity.instance_id) {
+        state.measured_map = Some((map.identity.instance_id.0, map.mode_definition_id));
+    }
     if now.saturating_sub(ready_at) < state.config.warmup {
         return;
     }
@@ -287,11 +294,12 @@ fn compose_report(
     );
     let cpu = system.map_or("unknown", |value| value.cpu.as_str());
     let os = system.map_or("unknown", |value| value.os.as_str());
-    let map_id = map.map_or(0, |value| value.identity.instance_id.0);
-    let mode_id = map.map_or_else(
-        || "unknown".to_string(),
-        |value| format!("{:?}", value.mode_definition_id),
-    );
+    let measured_map = map
+        .map(|value| (value.identity.instance_id.0, value.mode_definition_id))
+        .or(state.measured_map);
+    let map_id = measured_map.map_or(0, |value| value.0);
+    let mode_id =
+        measured_map.map_or_else(|| "unknown".to_string(), |value| format!("{:?}", value.1));
     format!(
         "schema=1\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nterrain_chunk_high_water={}\nterrain_chunk_terminal={}\ndebris_high_water={}\ndebris_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nmap_instance_id={}\nmode_definition_id={}\nresult={}\nfirst_failure={}\n",
         VERSION,

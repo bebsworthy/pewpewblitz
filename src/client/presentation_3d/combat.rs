@@ -1226,9 +1226,9 @@ mod tests {
 
     #[test]
     fn compact_overhead_reserves_ammunition_height_only_for_the_local_player() {
-        assert_eq!(HEALTH_BAR_WIDTH, 76.8);
-        assert_eq!(PLAYER_NAME_FONT_SIZE, 12.8);
-        assert_eq!(overhead_height(false), OVERHEAD_HEALTH_HEIGHT);
+        assert!((HEALTH_BAR_WIDTH - 76.8).abs() < f32::EPSILON);
+        assert!((PLAYER_NAME_FONT_SIZE - 12.8).abs() < f32::EPSILON);
+        assert!((overhead_height(false) - OVERHEAD_HEALTH_HEIGHT).abs() < f32::EPSILON);
         assert!(overhead_height(false) < overhead_height(true));
     }
 
@@ -1251,6 +1251,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::assertions_on_constants,
+        reason = "the regression locks the marker's deliberate separation from the floor plane"
+    )]
     fn ground_marker_is_lifted_above_the_floor_plane() {
         assert!(GROUND_MARKER_HEIGHT > 0.0);
     }

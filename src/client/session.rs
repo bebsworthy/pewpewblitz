@@ -170,6 +170,7 @@ fn process_match_command_outcomes(
 #[derive(Resource, Default)]
 struct MatchLoadingCommandState {
     ready_sent_for: Option<(u64, u128, u128)>,
+    ready_last_sent_at: Option<Duration>,
     cancel_sent_for: Option<(u64, u128, u128)>,
 }
 
@@ -180,6 +181,7 @@ struct MatchLoadingCommandState {
 )]
 fn drive_match_loading_check_in(
     config: Res<ClientNetworkConfig>,
+    time: Res<Time<Real>>,
     mut routed: ResMut<RoutedClientLifecycle>,
     playable: Res<ClientPlayableGate>,
     mut loading: ResMut<ClientMatchLoadingModel>,
@@ -248,12 +250,16 @@ fn drive_match_loading_check_in(
             state.cancel_sent_for = Some(correlation);
             continue;
         }
+        let retry_due = state.ready_sent_for != Some(correlation)
+            || state.ready_last_sent_at.is_none_or(|sent_at| {
+                time.elapsed().saturating_sub(sent_at) >= Duration::from_millis(500)
+            });
         if !playable.0
             || loading.phase() == Some(crate::lobby::MatchLoadingPhase::Cancelling)
-            || state.ready_sent_for == Some(correlation)
-            || !roots
-                .single()
-                .is_ok_and(|root| root.match_id.0 == correlation.2)
+            || !retry_due
+            || !roots.single().is_ok_and(|root| {
+                root.match_id.0 == correlation.2 && matches!(root.phase, MatchPhase::Waiting)
+            })
             || controlled.single().is_err()
         {
             continue;
@@ -264,7 +270,16 @@ fn drive_match_loading_check_in(
             match_id: correlation.2,
             action: MatchLoadingClientAction::Ready,
         });
+        if config.render_measurement.is_some() && state.ready_sent_for != Some(correlation) {
+            eprintln!(
+                "brawler-client timing match-ready client_id={} request_id={} ts_ms={}",
+                config.client_id,
+                correlation.0,
+                crate::diagnostics::unix_micros_now() / 1_000
+            );
+        }
         state.ready_sent_for = Some(correlation);
+        state.ready_last_sent_at = Some(time.elapsed());
     }
 }
 
@@ -1197,6 +1212,14 @@ pub(super) fn process_join_outcome(
                             network_entity_id = network_entity_id.0,
                             "brawler client accepted"
                         );
+                        if config.render_measurement.is_some() {
+                            eprintln!(
+                                "brawler-client timing match-accepted client_id={} player_id={} ts_ms={}",
+                                config.client_id,
+                                player_id.0,
+                                crate::diagnostics::unix_micros_now() / 1_000
+                            );
+                        }
                         status.phase = ClientJoinPhase::Active {
                             player_id,
                             network_entity_id,
@@ -1574,7 +1597,10 @@ fn advance_routed_transition(
                 )),
             )?;
             lifecycle.generation = generation;
-            debug_assert_eq!(lifecycle.begin_match(), Some(grant));
+            // This transition is required in release builds too. Never hide the mutating call
+            // inside `debug_assert_eq!`, whose expression is compiled out without debug checks.
+            let accepted_grant = lifecycle.begin_match();
+            debug_assert_eq!(accepted_grant, Some(grant));
         }
         RoutedClientPhase::AwaitingLobbyRetryUnlink | RoutedClientPhase::AwaitingMatchUnlink => {
             lifecycle.begin_lobby_after_match();

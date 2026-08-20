@@ -2,10 +2,10 @@
 
 ## Status
 
-Player bots are a **v2-or-later candidate**. This document records the architectural direction and
-the contracts that a future milestone must validate; it does not assign bots to a milestone or
-authorize production implementation in the current v1 scope. Milestone placement, detailed balance
-values, and delivery planning wait until a future version is scoped.
+Autonomous player bots remain a **future-version candidate**. V2 implemented server-hosted practice
+matches with inert `Bot N` roster fillers; those deterministic fixtures do not implement the policy,
+perception, navigation, or external-client architecture specified below. V3 changed only client
+presentation. A future milestone must explicitly validate and authorize playable bots.
 
 ## Decision
 

@@ -8,7 +8,9 @@ Bevy is a free, open-source Rust engine under dual MIT/Apache-2.0 licensing. It 
 
 The networking baseline is **Lightyear**, not Bevy core. Lightyear currently provides Bevy-native client/server plugins, tick-buffered input networking, replication, client prediction, rollback, interpolation, interest management, lag compensation, and multiple transport options. [Lightyear repository](https://github.com/cBournhonesque/lightyear) · [Lightyear 0.29 documentation](https://docs.rs/lightyear/0.29.0/lightyear/)
 
-Use **Avian 2D** for physics if the prototype needs a physics library beyond simple custom collision. Lightyear provides an Avian integration. [Avian](https://github.com/avianphysics/avian)
+Brawler uses **Avian 2D** for authoritative planar collision and generated terrain colliders.
+The V3 client renders that simulation in 3D; it does not replace Avian with 3D physics.
+[Avian](https://github.com/avianphysics/avian)
 
 ## Why this fits Brawler
 
@@ -38,11 +40,14 @@ Prototype this stack first:
 ```text
 Bevy 0.19
   + Lightyear 0.29
-  + Avian 2D 0.7, if needed
+  + Avian 2D 0.7
+  + client-only Camera3d / Mesh3d / PBR / GLB animation presentation
   + evidence-based Cargo targets/features for a client and dedicated server
 ```
 
-The first practical validation spans v1 Milestones 01–03: Bevy client/server application composition, a two-client connection/replication sandbox, and server-authoritative movement in a greybox arena. If Lightyear cannot meet the required behavior, integration, or maintenance standard at that gate, evaluate `bevy_replicon + Renet` as the modular fallback before combat content expands.
+V1–V3 validated this stack through independently buildable roles, routed multi-process networking,
+server-authoritative movement/combat/terrain, and a fixed-camera 3D client. `bevy_replicon + Renet`
+remains only a historical fallback option if a future dependency review finds a concrete blocker.
 
 `bevy_replicon` provides server-authoritative replication but no I/O; it must be paired with a transport such as Renet, Renet2, or Quinnet. This is more flexible but leaves prediction and rollback more application-owned. [bevy_replicon](https://docs.rs/bevy_replicon/latest/bevy_replicon/) · [Renet](https://docs.rs/renet/latest/renet/)
 
@@ -97,5 +102,10 @@ Client World and presentation
 ```
 
 Client and server entry points compose the appropriate Bevy base plugins, Brawler plugins, Cargo features, and process-level configuration. Runtime gameplay state lives in the authoritative server `World`; client worlds contain replicated or predicted copies plus local presentation state. A serializable gameplay component may also be a Lightyear-replicated component when that is the simplest correct representation—do not create a duplicate transport DTO solely to satisfy layering.
+
+The supported client maps planar simulation coordinates to the X/Z ground plane through one tested
+adapter and renders dedicated owner-linked entities with `Camera3d`, `Mesh3d`, shared materials,
+generated terrain/map meshes, and selected GLB scenes. Menus/HUD and projected fighter overhead
+information remain Bevy UI. The server feature graph excludes all of those presentation families.
 
 The diagram describes responsibilities, not folders or crates. Milestone 01 must compare single-package and small-workspace options using the actual Cargo feature graph. Another package, library target, or public API is justified only by a demonstrated platform, feature-isolation, compile-time, testing, or reuse boundary.

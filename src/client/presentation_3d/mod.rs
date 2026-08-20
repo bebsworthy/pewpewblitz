@@ -1132,12 +1132,16 @@ mod tests {
     #[test]
     fn fighter_facing_indicator_is_a_small_arrow_with_a_ring_matched_back_arc() {
         let mesh = fighter_facing_mesh();
-        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
-            bevy::mesh::VertexAttributeValues::Float32x3(positions) => positions,
-            _ => panic!("fighter facing positions use three-dimensional coordinates"),
+        let bevy::mesh::VertexAttributeValues::Float32x3(positions) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
+        else {
+            panic!("fighter facing positions use three-dimensional coordinates");
         };
 
-        assert_eq!(positions[0], [FIGHTER_FACING_TIP_RADIUS, 0.0, 0.0]);
+        assert!(
+            Vec3::from_array(positions[0])
+                .abs_diff_eq(Vec3::new(FIGHTER_FACING_TIP_RADIUS, 0.0, 0.0), f32::EPSILON)
+        );
         assert_eq!(positions.len(), FIGHTER_FACING_ARC_SEGMENTS as usize + 2);
         assert_eq!(
             mesh.indices().map(Indices::len),

@@ -1223,6 +1223,8 @@ fn routed_grant_is_bound_to_the_current_session_and_accepted_once() {
         !lifecycle.accept_grant(grant),
         "duplicate grants must not replace a route"
     );
+    assert_eq!(lifecycle.begin_match(), Some(grant));
+    assert_eq!(lifecycle.phase, RoutedClientPhase::Match);
 }
 
 #[test]

@@ -1,88 +1,78 @@
-# MVP stand-in asset shortlist
+# Runtime asset selection and provenance
 
-This is a visual shortlist for the first Brawler prototype. The goal is to test movement, aiming, combat readability, cover, objectives, and map flow—not to establish the final art direction.
+## Status
 
-The shortlist prioritizes CC0 assets. CC0 generally avoids attribution obligations, but keep the original download page and license information in the repository's asset manifest. OpenGameArt is a catalogue with pack-specific licenses, so never assume that one asset's license applies to another.
+V3 replaced the original 2D stand-in shortlist with a small shipped 3D selection. This document
+records the current asset policy and the packs already proven in the client. It is not permission to
+bulk-copy `external_assets/` into the runtime tree.
 
-## Recommended first pass
+## Current shipped selection
 
-### Provisional visual baseline
+The supported client loads three optional CC0 Kenney model families:
 
-For the first draft, use **Sci-Fi Facility + Kenney Shape Characters**. This is a temporary art decision and should be replaced later without changing gameplay systems.
+| Runtime asset | Source pack | Use | Deterministic fallback |
+|---|---|---|---|
+| `character-male-a.glb` plus its colormap | Mini Characters | Fighter model and named idle, walk, hold, shoot, and defeat animation clips | Team-colored sphere and facing marker |
+| `blaster-a.glb` plus its colormap | Blaster Kit | Weapon attached to the imported character hierarchy | Small cuboid weapon |
+| `block.glb` plus its colormap | Mini Arena | Repeated permanent-cover presentation where the authored footprint matches | Exact 64×64 cuboid cover |
 
-- Sci-Fi Facility supplies the arena's floors, walls, objects, and sci-fi context.
-- Shape Characters supply readable fighter silhouettes and team-color variants.
-- Colored circles or capsules remain an acceptable fallback for early combat tests.
-- Final sprites must remain separate from fighter logic, collision shapes, health bars, team markers, and effects.
+These assets live under `assets/brawler/models/kenney/<pack>/`. Their exact original paths,
+source URLs, authors, licenses, import dates, and fallbacks are recorded in
+`assets/manifest.ron`. Runtime audio remains under `assets/brawler/audio/` and follows the same
+manifest policy.
 
-For the broader asset shortlist, start with:
+GLB is the runtime model format. Each selected model keeps the relative texture layout expected by
+the file, including pack-local `Textures/colormap.png`; common filenames must not be flattened
+across packs. FBX, OBJ, preview renders, source archives, and unused GLBs remain source material in
+`external_assets/` and never enter the shipped asset scan merely because they are available.
 
-1. [Kenney Top-down Shooter](https://kenney.nl/assets/top-down-shooter) for the arena, cover, furniture, placeholder enemies, and general props.
-2. [OpenGameArt Sci-Fi Facility](https://opengameart.org/content/sci-fi-facility-asset-pack) for a more arena-appropriate facility theme and interactive objects.
-3. [Kenney Shape Characters](https://kenney.nl/assets/shape-characters) or simple colored circles for fighters while combat is being tuned.
-4. [Game-icons.net GUI icons](https://game-icons.net/tags/gui.html) for temporary ability, weapon, and HUD icons, with attribution.
+## Asset roles
 
-Do not combine all packs in the same visible scene. Use one primary visual language per prototype scene; otherwise asset style differences can distract from gameplay evaluation.
+Not every visible object should become an authored model:
 
-## Pack comparison
+- imported GLB scenes own recognizable static props, animated characters, and weapons;
+- cached Bevy primitive meshes own exact or highly dynamic shapes such as floors, arbitrary cover,
+  projectiles, sentries, debris, fallback fighters, and transient combat effects;
+- generated meshes own resolved circular/perimeter geometry and terrain chunks whose topology is
+  derived from authoritative state;
+- procedural planar meshes own Hot Zone fill/boundary and fighter ground markers;
+- camera-projected Bevy UI owns fighter names, health values/bars, and local ammunition;
+- normal screen-space Bevy UI owns menus, product flow, HUD, overlays, and settings.
 
-| Pack | Best use | License | Formats / technical notes | Fit for Brawler |
-|---|---|---|---|---|
-| [Kenney Top-down Shooter](https://kenney.nl/assets/top-down-shooter) | Complete modern top-down test scene: floors, walls, furniture, characters, enemies, and props | CC0 | 2D; the OpenGameArt mirror lists separate PNGs, tile/sprite sheets, and vector files; 580 files | **Best overall starting point**. Coherent and immediately usable, though its zombie/police theme is only a placeholder. |
-| [Sci-Fi Facility Asset Pack](https://opengameart.org/content/sci-fi-facility-asset-pack) | Facility arena, walls, floors, computers, gates, buttons, glowing objects, and doodads | CC0 | Pixel art; 4-direction spy and hazmat sprites; downloadable ZIP | **Best thematic fit** for an original arena shooter. Small pack, so expect to supplement it with primitives. |
-| [OpenGameArt Top-Down Tileset](https://opengameart.org/content/top-down-tileset-1) | Sci-fi floor and wall test map | CC0 / public domain | 64×64 tile size; PNG tilesheet | Useful for large readable arena geometry. It is an environment sheet, not a complete kit. |
-| [Devolution Topdown Tilesets and Sprites](https://opengameart.org/content/devolution-topdown-tilesets-and-sprites) | Fantasy test map, characters, enemies, effects, objects, and UI | CC0 | 16×16 pixel art; overworld, cave, and indoor sets | Broad coverage for a complete prototype, but its fantasy/Zelda-like look is far from the eventual shooter identity. |
-| [Versatile 255-Tile Pixel Art Pack](https://opengameart.org/content/versatile-255-tile-pixel-art-pack) | Minimal tilemap, objects, characters, and experimental markers | CC0 | 16×16; includes PNG and Godot-oriented 3×3 minimal tilesheets | **Best utility pack** for testing map logic. Intentionally generic and visually inconsistent in places. |
-| [Yohal’s Top Down Tileset Template](https://yohal.itch.io/yohals-guide) | Temporary walls, paths, stairs, trees, and a basic fighter sprite | CC0 | 16×16 pixel art; ZIP; four-direction sprite sheet | Excellent for drawing over or replacing later. It is a template, not a finished art kit. |
-| [Good and Evil](https://chromoxi.itch.io/good-and-evil) | Animated placeholder fighters, weapon/no-weapon states, and two biome tilemaps | CC0 1.0 | PNG sprites, Aseprite source files; 35×35 characters; 32×32 tile grid | Good if we want readable animated characters immediately. Fantasy theme and platformer orientation make it a secondary choice. |
-| [Kenney Shape Characters](https://kenney.nl/assets/shape-characters) | Temporary fighter bodies, team-color silhouettes, and hitbox readability | CC0 | 2D; 100 files | **Best pure gameplay placeholder**. Shapes make team color, status, and collision easy to read. |
-| [Kenney Top-down Shooter on OpenGameArt](https://opengameart.org/content/topdown-shooter) | Alternate download page and asset inventory | CC0 | Lists 580 files, tiles, players, enemies, objects, separate sheets, and vector source | Useful as a mirror and for checking the contents before importing the official pack. |
-| [Game-icons.net GUI icons](https://game-icons.net/tags/gui.html) | Temporary ability, weapon, status, and objective icons | CC BY 3.0 | SVG and PNG downloads | Very useful for HUD prototyping. Keep author attribution in a credits file or accessible credits screen. |
+The server loads none of these client assets. Gameplay definitions carry stable presentation IDs
+or authoritative shapes, never GLB paths, mesh handles, materials, scene-node names, or textures.
 
-## Selection by gameplay need
+## Import acceptance checklist
 
-### Tilemaps and arena geometry
+A runtime model is accepted only when all of the following are true:
 
-- **Modern / readable:** Kenney Top-down Shooter.
-- **Sci-fi:** Sci-Fi Facility Asset Pack or the listed OpenGameArt 64×64 Top-Down Tileset.
-- **Pixel-art sandbox:** Devolution Topdown or Versatile 255-Tile Pack.
-- **Pure layout testing:** Yohal’s template, supplemented with colored rectangles.
+1. A current map, fighter, weapon, or presentation profile owns the model.
+2. Its license permits redistribution and its provenance is entered in `assets/manifest.ron`.
+3. The GLB and every relative texture dependency are copied under one pack namespace.
+4. Orientation, scale, pivot, footprint, material response, and animation names are verified in
+   Bevy 0.19.1 rather than inferred from an isometric preview.
+5. An exact primitive/generated fallback exists when the asset is optional or shape-critical.
+6. Readiness degradation is bounded and cannot block authority or crash the client.
+7. Repeated spawn, map replacement, restart, and reconnect release owned entities and generated
+   mesh assets.
+8. The dedicated-server feature graph remains free of render, image, scene, animation, and asset
+   dependencies.
 
-### Fighter sprites
+## External pack disposition
 
-- **Fastest and clearest:** Kenney Shape Characters.
-- **Animated 4-direction characters:** Sci-Fi Facility Asset Pack.
-- **Broader animated character set:** Good and Evil.
-- **Fantasy character and enemy coverage:** Devolution Topdown.
+`external_assets/` contains broader Kenney packs for future evaluation, including Mini Dungeon,
+Mini Forest, Pirate, Graveyard, and additional Mini Arena/Character/Blaster variants. They are not
+runtime content and are not all visually compatible with one another. Promote a new family only
+when a real theme or gameplay object owns it; choose one coherent visual language per map rather
+than mixing packs as a catalog demonstration.
 
-### Object and interaction sprites
+The supplied 512×512 isometric renders and 128×64 tile guidance are preview/Tiled-authoring
+metadata. Brawler renders the GLBs through its fixed orthographic `Camera3d`; those PNG dimensions,
+drawing offsets, and tile sizes do not define runtime scale, collision, or camera projection.
 
-- **Furniture and general props:** Kenney Top-down Shooter.
-- **Interactive sci-fi objects:** Sci-Fi Facility Asset Pack.
-- **Generic pickups and markers:** Versatile 255-Tile Pack.
-- **HUD and ability symbols:** Game-icons.net, with attribution.
+## Original-art direction
 
-## Practical Bevy import notes
-
-- Keep pixel-art packs at native resolution and use nearest-neighbor texture filtering.
-- Pick one world pixel scale per scene; do not mix 16×16, 32×32, and 64×64 tiles without an explicit scale plan.
-- Load runtime visuals through Bevy's asset system, retain the handles for as long as the assets are needed, and gate entry into playable states until required assets finish loading.
-- Keep authoritative map definitions separate from client-only sprite sheets, atlases, textures, and audio handles. The headless server must be able to load map geometry and rules without visual assets.
-- Make the first built-in map a preset recipe that references stable presentation-catalog IDs. A
-  future user map builder may arrange approved visuals, but arbitrary texture paths or asset handles
-  must never become authoritative gameplay data.
-- Represent floors and indestructible walls through authored map data plus replaceable client
-  visuals. Keep quantized destruction in separate occupancy-grid terrain chunks, and keep objectives,
-  pickups, hazards, and props as distinct gameplay entities.
-- Keep decorative tiles distinct from the gameplay regions cataloged in [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md); grass art, speed markings, water, or hazard decals have no authoritative effect by themselves.
-- Treat the visual sprite and collision shape as separate concerns. A temporary fighter can be a colored circle or capsule while the final sprite is undecided.
-- Add team color, health bar, selection ring, and hit flash independently of the sprite. Those signals matter more than character detail during combat testing.
-- Keep source ZIPs outside the runtime asset directory or in a clearly labelled `third_party/` folder, and record pack name, URL, author, license, and import date in an asset manifest.
-
-## License checklist
-
-- **CC0:** attribution is not required, but retaining provenance is still good practice.
-- **CC BY 3.0:** attribution is required; Game-icons.net is the main item in this shortlist with that requirement.
-- **CC BY-SA / GPL / OGA-BY:** defer for now unless we deliberately want to manage share-alike or copyleft obligations.
-- Do not use packs marked only “free,” “royalty-free,” or “commercial use” without reading the actual license.
-- Do not use ripped game assets or packs containing third-party game characters.
+Kenney assets are a first-release foundation, not Brawler's permanent identity. Original models,
+materials, animation, VFX, and UI art remain a later product-art slice. Replacements must preserve
+the stable gameplay/presentation boundary and current readability language, so art iteration does
+not alter hitboxes, objective geometry, team relation colors, or authoritative timing.

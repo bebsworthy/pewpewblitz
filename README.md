@@ -14,14 +14,12 @@ the [completed v2 roadmap](docs/implementation/v2/roadmap.md),
 [v2 closeout milestone](docs/implementation/v2/milestone-09.md), and
 [completed v1 roadmap](docs/implementation/v1/roadmap.md).
 
-V3 is now in progress. Its goal is to replace the client gameplay-world sprites and `Mesh2d`
-presentation with a fixed-camera orthographic 3D scene while preserving the existing planar
-authority, Avian 2D collision, protocol, routed server topology, and Bevy UI shell. M01's 3D
-feasibility foundation, M02 world cutover, and M03 complete combat replacement were accepted on
-2026-08-20. The active scope is
-[V3 M04 — renderer retirement, readability, performance, and closeout](docs/implementation/v3/milestone-04.md),
-within the [V3 roadmap](docs/implementation/v3/roadmap.md). M04 implementation is now verifying;
-the deterministic gates pass and routed native release evidence remains the current closeout gate.
+V3 completed on 2026-08-20. The supported client now presents the gameplay world as a fixed-camera
+orthographic 3D scene while preserving planar authority, Avian 2D collision, the existing protocol,
+the routed server topology, and the Bevy UI shell. Imported Kenney GLBs provide the first fighter,
+weapon, and cover families; cached primitives and generated meshes retain exact dynamic geometry
+and deterministic fallbacks. See the [completed V3 roadmap](docs/implementation/v3/roadmap.md) and
+[V3 closeout milestone](docs/implementation/v3/milestone-04.md).
 
 ## Toolchain
 
@@ -170,7 +168,8 @@ next key, mouse-button, or controller-button press, I/O toggle Y-axis inversion,
 the validated defaults; session-local settings shape device input before quantization and never
 reach the server. The HUD shows match phase, score/time/result,
 roster/loadout/readiness, respawn and protection state, health, ammo, ultimate meter/phase, passive
-state, sentry health/lifetime, and cooldown/reload; fighters also show 3D world-health bars.
+state, sentry health/lifetime, and cooldown/reload. Camera-projected fighter UI shows relation-colored
+names, rounded relation-aware health, a white health value, and local-only segmented ammunition.
 The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
 block fighters and weapon delivery, while 3D visuals, audio, and HUD state remain presentation-only.
 The legacy direct-UDP diagnostic script still accepts `BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1`,
@@ -190,5 +189,6 @@ Do not use `--all-features` as a supported application build: client and server 
 Authoritative authored gameplay data lives under `content/v1/` and is compiled into both roles.
 Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
 recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.
-The active implementation scope is always the current milestone file; deferred release polish must
-remain visible in the roadmap rather than being folded into unrelated V3 presentation work.
+The active implementation scope is always the next validated milestone file. With V3 complete and
+no V4 started, deferred presentation and release polish remains visible in the V3 roadmap and root
+backlog rather than being inferred as active work.

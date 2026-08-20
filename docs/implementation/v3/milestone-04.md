@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Verifying |
+| Status | Complete |
 | Depends on | M01–M03 complete |
 | Outcome | Retire residual 2D world-renderer assumptions, validate readability and native performance, and close V3 without changing planar authority |
 
@@ -289,22 +289,31 @@ Passing evidence:
 ```text
 just check       pass
 just lint        pass
-just test        pass (routing, 359 client, 302 server, 82 network, 14 performance tests)
+just test        pass (83 routing, 371 client, 302 server, 82 network, 14 performance tests)
 just e2e 2/4/6  pass (exact 1v1, 2v2, and 3v3 rosters reached Active)
 git diff --check pass
 ```
 
-The fixed-tick performance suite remained green; representative M04-adjacent results include
-3.910 ms combined combat p95, 10.718 ms 24-fighter/24-seam-brush p95, and 1.782 ms
+The fixed-tick performance suite remained green; the final closeout run recorded 2.944 ms combined
+combat p95, 7.556 ms 24-fighter/24-seam-brush p95, and 1.299 ms
 100-fighter/200-projectile p95 on the Apple M3 reference machine.
 
-Native release evidence is currently blocked before sampling. In repeated routed runs, both
-optimized clients connected to the lobby and received the same authenticated match grant, but
-neither completed its match connection; the empty match worker exited after its bounded admission
-window and no report was written. The equivalent debug client completed the handoff and accepted
-the authoritative map/terrain snapshot. The locked routed-release requirement is intentionally not
-weakened to accept debug or legacy direct-UDP evidence. Diagnose and correct this release-only
-handoff before M04 advances to `User playtest`.
+The canonical routed release evidence now passes with two optimized native clients, a 10-second
+warm-up, and a 30-second measurement window on the recorded Apple M3/Metal machine. The first
+report collected 1,801 samples with 17.022 ms p95, 17.258 ms p99, a 27.640 ms maximum, one frame
+above 25 ms, and none above 50 or 100 ms. Its peer collected 1,801 samples with 17.036 ms p95,
+17.314 ms p99, a 27.180 ms maximum, one frame above 25 ms, and none above 50 or 100 ms. Both passed
+the locked thresholds. High-water/terminal counts also demonstrated teardown: 574/24 mesh
+entities, 4/0 visual roots, 4/0 terrain chunks, 2/0 fighters, and 31/23 mesh assets.
+
+The blocked release-only handoff was resolved rather than bypassed. A required
+`RoutedClientLifecycle::begin_match` mutation had been placed inside `debug_assert_eq!`, so it was
+compiled out in optimized clients. After that correction, the optimized schedule exposed an
+early one-shot match-loading check-in race; check-in is now idempotently retried while the
+authoritative root remains in `Waiting`. The measurement anchor also intentionally survives the
+measured match's routed teardown, allowing the bounded report to cover lifecycle cleanup instead
+of restarting indefinitely. The gate remained routed, optimized, and native; debug or direct UDP
+was not substituted.
 
 ## Research sources
 
@@ -330,7 +339,7 @@ context only.
 - [Bevy shadow caster/receiver](https://bevy.org/examples/3d-rendering/shadow-caster-receiver/)
 - [Bevy anti-aliasing](https://bevy.org/examples/3d-rendering/anti-aliasing/)
 
-## Feedback and closeout placeholders
+## Feedback and closeout
 
 | Feedback | Decision | Verification |
 |---|---|---|
@@ -340,9 +349,42 @@ context only.
 | Fighter ground circles appeared broken and did not distinguish the local player from allies | Implemented during verification: markers are lifted off the floor to prevent depth fighting, use dedicated unlit/non-shadow-receiving materials, and resolve green/blue/red relative to the controlled fighter | Focused relation and floor-separation regression tests plus supervised visual recheck |
 | Fighter facing used a cuboid protruding from the character | Implemented during verification: fighter facing is now a small flat arrowhead integrated into the team ring, with a segmented concave rear edge matching the ring circumference; sentries retain their separate body-direction primitive | Mesh geometry regression test plus supervised visual recheck |
 | Fighter overhead information needed relation-colored names, rounded relation-aware health, a white overlapping health amount, and local-only segmented ammunition | Implemented during verification as camera-projected Bevy UI attached to each fighter: local/ally/enemy names are green/blue/red, local and ally health is green while enemy health is red, rounded clipping preserves readable fill, and only the controlled fighter receives one live segment per authoritative weapon-capacity shot. The first playtest exposed overlapping mutable `Visibility` query access between ammunition rows and weapon previews; explicit disjoint filters now encode that ownership. Follow-up tightened the layout with structurally centered text, 20% narrower bars and name text, and a shorter non-local projection box that reserves no ammunition-row gap. | Focused color/ammunition/layout tests, runtime schedule-initialization regression, client compilation/lint, and supervised visual recheck |
-| Awaiting supervised playtest after verification | — | — |
+| Overall V3 presentation accepted for closeout | The user accepted the iterative M04 visual corrections and directed the documentation review and V3 closeout on 2026-08-20 | Affected focused checks, the complete automated gates, and the final routed native reports passed |
 
 ### Learn-from-errors review
 
-Complete after feedback. Revisit UI/world dependency distinction, evidence validity, asset churn,
-occlusion scope control, and whether a recurring lesson merits a repository/Codex skill change.
+The closeout review produced these reusable lessons:
+
+- A debug assertion must never own a state transition or any other side effect. The optimized
+  routed handoff failed because `begin_match()` existed only inside `debug_assert_eq!`; execute the
+  mutation first and assert its returned value separately.
+- Product lifecycle messages sent at a fresh optimized connection boundary need an idempotent,
+  state-bounded retry or an explicit correlated acknowledgement. A single send happened to work
+  in slower debug runs and was not release evidence.
+- Measurement readiness is a start condition, not necessarily a continuously true condition.
+  Retaining the first ready anchor allows one bounded report to observe both the representative
+  world and its teardown without turning lifecycle churn into a timeout.
+- Imported animation clips may omit channels changed by another clip. Restoring a captured bind
+  pose before leaving the defeated state is more reliable than assuming a live loop overwrites
+  every transform.
+- Coplanar ground markers need explicit height/material/shadow roles. The lifted unlit fighter
+  ring fixed the broken-looking circle without changing its authoritative footprint.
+- Projected overhead UI remains screen-space Bevy UI even though its anchor is a 3D fighter. Its
+  centering, relation colors, local-only ammunition row, and query ownership require UI tests plus
+  an actual schedule-initialization regression; compilation alone did not catch Bevy B0001.
+- Generated `Mesh` handles require explicit lifecycle ownership. The forty-generation churn test
+  found a real asset leak that entity cleanup alone could not reveal.
+- A blocked performance report remains blocked until the exact optimized topology passes. Debug
+  rendering or legacy direct UDP is useful diagnosis but is not substitute evidence.
+
+These lessons were incorporated into the maintained art/presentation, asset-inventory, repository
+guide, and M04 documentation. They are specific to Brawler's renderer and routed lifecycle, so no
+new general Codex skill was justified.
+
+## Closeout
+
+All exit criteria are satisfied as of 2026-08-20: the 3D renderer is the sole gameplay-world
+presentation, planar server/protocol authority is unchanged, source/feature retirement audits and
+canonical automated gates pass, native routed performance and teardown pass, user feedback is
+classified and accepted, the backlog is reconciled, and the learning review is complete. M04 and
+V3 are `Complete`.

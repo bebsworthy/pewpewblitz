@@ -8,7 +8,7 @@ A map recipe should contain:
 - static walls and cover;
 - destructible geometry;
 - walkable and blocked surfaces;
-- visual tile/decal layers and decorative entity placements through stable presentation IDs;
+- visual surface/model layers and decorative entity placements through stable presentation IDs;
 - spawn points;
 - mode-required objective points, anchors, or volumes;
 - pickup spawn rules;
@@ -67,11 +67,11 @@ requirements and a stable place for mode layouts; Milestone 07 adds Wipeout's co
 Milestone 09 adds Hot Zone's, and later modes add their own schemas without making map recipes
 executable or requiring a universal mode trait in advance.
 
-## Visual tiles and gameplay regions
+## Visual presentation and gameplay regions
 
-Visual tiles are replaceable client presentation. Authoritative gameplay should be composed from
+Visual surfaces, models, and procedural meshes are replaceable client presentation. Authoritative gameplay should be composed from
 geometry, authored regions, runtime environment entities, and destructible-terrain data instead of
-giving every floor or wall sprite a bespoke rule.
+giving every floor tile or wall model a bespoke rule.
 
 - ordinary ground is a walkable surface without a modifier;
 - permanent walls and cover are blocking geometry;
@@ -83,7 +83,9 @@ giving every floor or wall sprite a bespoke rule.
 
 A user-authored recipe may arrange both visual and gameplay layers, but presentation never implies
 collision or an effect. The recipe must reference each gameplay shape/region explicitly, and the
-headless server resolves those references without loading textures or other client assets.
+headless server resolves those references without loading models, textures, materials, or other
+client assets. The V3 client resolves exact shapes to cached/generated 3D meshes and validated
+presentation profiles; visual height never changes collision or occupancy.
 
 See [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) for the future-facing
 catalog, property model, and promotion rules. That catalog is research, not automatic v1 scope.

@@ -6,7 +6,7 @@ The following sources informed the initial design baseline. They describe the re
 
 The repository contains local upstream material so implementation research can inspect real examples instead of guessing APIs. The snapshots are not all version-aligned:
 
-- `references/bevy/examples/` — Bevy 0.20-dev example index and Rust source across application setup, headless apps, plugins, 2D rendering, assets, input, states, UI, and other engine features. Use these as architectural examples and verify every transferred API against Bevy 0.19.
+- `references/bevy/examples/` — Bevy 0.20-dev example index and Rust source across application setup, headless apps, plugins, 3D/orthographic rendering, glTF/animation, assets, input, states, UI, and other engine features. Use these as architectural examples and verify every transferred API against Bevy 0.19.
 - `references/lightyear/examples/` — Lightyear 0.29 example packages/workspace, Rust source, READMEs, and feature declarations. This snapshot targets Bevy 0.19; `simple_setup`, `simple_box`, and `avian_2d` are the primary starting points for early milestones, while `network_visibility` demonstrates future interest management and visibility lifetimes.
 - `references/lightyear/book/` — the local Lightyear book; begin with `src/SUMMARY.md` and follow the relevant tutorial and concept chapters, including `concepts/advanced_replication/interest_management.md` for future concealment work.
 - `references/lightyear/crates/replication/replication/src/visibility/` — exact Lightyear 0.29 immediate and room-based network visibility implementation. Use this resolved source when older book terminology differs.
@@ -20,6 +20,7 @@ Architecture research follows this priority: Brawler's gameplay and authority re
 - [Bevy 0.19](https://bevy.org/news/bevy-0-19/) — selected engine baseline, code-first scenes, ECS, and engine development status.
 - [Bevy 0.19 ECS API](https://docs.rs/bevy/0.19.0/bevy/ecs/index.html) — version-pinned entities, components, systems, queries, schedules, and resources.
 - [Bevy 0.19 plugin API](https://docs.rs/bevy/0.19.0/bevy/app/trait.Plugin.html) and [headless example](https://docs.rs/crate/bevy/0.19.0/source/examples/app/headless.rs) — version-pinned plugin composition and omission of rendering/window features for headless applications.
+- [Bevy orthographic camera](https://bevy.org/examples/3d-rendering/orthographic/) and [glTF loading](https://bevy.org/examples/3d-rendering/load-gltf/) — V3 camera/model foundations; exact APIs remain pinned to the repository's Bevy 0.19.1 source.
 - [Lightyear 0.29](https://docs.rs/lightyear/0.29.0/lightyear/) — version-pinned selected networking stack with server/client plugins, replication, input buffering, prediction, rollback, interpolation, and transport options.
 - [Lightyear repository](https://github.com/cBournhonesque/lightyear) — supported Bevy versions, examples, transports, lag compensation, and project license.
 - [Lightyear book Markdown source](https://github.com/cBournhonesque/lightyear/tree/main/book/src) — official guide to Lightyear concepts, setup, replication, prediction, rollback, and networking architecture.

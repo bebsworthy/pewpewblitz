@@ -414,24 +414,26 @@ impl ClientNetworkConfig {
         }
         let automation_enabled = self.headless
             || self.windowed_combat_demo.is_some()
-            || self.windowed_controller_demo.is_some();
+            || self.windowed_controller_demo.is_some()
+            || self.render_measurement.is_some();
+        let automation_requirement = "requires --headless, --combat-demo, or --render-report";
         if self.headless_move.is_some() && !automation_enabled {
-            return Err("--move-axis requires --headless or --combat-demo".to_string());
+            return Err(format!("--move-axis {automation_requirement}"));
         }
         if self.headless_aim.is_some() && !automation_enabled {
-            return Err("--aim-axis requires --headless or --combat-demo".to_string());
+            return Err(format!("--aim-axis {automation_requirement}"));
         }
         if self.headless_fire && !automation_enabled {
-            return Err("--fire requires --headless or --combat-demo".to_string());
+            return Err(format!("--fire {automation_requirement}"));
         }
         if self.headless_ultimate && !automation_enabled {
-            return Err("--ultimate requires --headless or --combat-demo".to_string());
+            return Err(format!("--ultimate {automation_requirement}"));
         }
         if self.headless_aim_at_dummy && !automation_enabled {
-            return Err("--aim-dummy requires --headless or --combat-demo".to_string());
+            return Err(format!("--aim-dummy {automation_requirement}"));
         }
         if self.headless_simulation_ticks.is_some() && !automation_enabled {
-            return Err("--simulation-ticks requires --headless or --combat-demo".to_string());
+            return Err(format!("--simulation-ticks {automation_requirement}"));
         }
         if self.connect_timeout.is_zero() {
             return Err("client connect timeout must be greater than zero".to_string());
@@ -582,6 +584,7 @@ mod tests {
             warmup: Duration::from_secs(10),
             measurement: Duration::from_secs(30),
         });
+        config.headless_move = Some((1, 0));
         assert!(config.validate().is_ok());
         config.headless = true;
         assert!(

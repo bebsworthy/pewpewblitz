@@ -1,4 +1,4 @@
-# Environment, surface, and tile ideas
+# Environment, surface, and region ideas
 
 ## Purpose and scope
 
@@ -6,6 +6,11 @@ This document is a research catalog for environmental gameplay across future Bra
 records useful map primitives, composable properties, concealment rules, and networking constraints
 without committing every idea to v1 or assigning implementation order. A version roadmap and its
 milestone specifications remain the authority for scheduled scope.
+
+V3 changed the presentation vocabulary: gameplay-world art now uses imported GLB scenes, cached
+primitives, generated meshes, procedural indicators, and Bevy UI rather than sprite tiles. The
+server-owned region/property model below remains valid because it was intentionally independent of
+the renderer. A tile now means an authoring-grid/layout unit, not a runtime sprite requirement.
 
 Brawler should use original names, values, art, layouts, and combinations. Genre examples are input
 to the vocabulary, not content to copy.
@@ -15,7 +20,7 @@ to the vocabulary, not content to copy.
 The word **tile** can describe how client art is assembled, but a visible tile is not automatically
 an authoritative gameplay object.
 
-- **Visual tile:** replaceable client-only floor, wall, vegetation, edge, or decoration art.
+- **Visual placement:** replaceable client-only surface, model, vegetation, edge, or decoration.
 - **Map recipe:** a user-authorable bounded arrangement of presentation layers, geometry, terrain,
   entities, regions, spawn points, and mode-required anchors.
 - **Map preset:** a developer-authored legal map recipe used as built-in content or a test fixture.
@@ -235,9 +240,9 @@ A milestone that implements concealment should include at least:
 Visual tests should additionally cover readable grass/smoke boundaries, reveal feedback, pop-in,
 audio policy, and whether a player can understand why an opponent became visible.
 
-## Relationship to version scope
+## Relationship to completed versions
 
-The current v1 implementation remains intentionally smaller:
+The completed V1 implementation established the smaller gameplay foundation:
 
 - Milestone 03 proves neutral ground, permanent bounds/cover, and authoritative collision.
 - Milestone 06 resolves the first readable built-in map recipe, proves recipe/preset/resolved/runtime
@@ -247,9 +252,10 @@ The current v1 implementation remains intentionally smaller:
   supported map-size range; its built-in map retains one visible playtest region, while scale and
   multi-region coverage come from bounded fixtures and process scenarios.
 
-Concealment, speedways, slow/slippery surfaces, environment hazards, traversal devices, and
-interactive geometry remain future-version candidates until intentionally promoted into a version
-roadmap and researched in a milestone specification.
+V2 preserved those rules through routed match workers. V3 replaced their client presentation with
+3D meshes/scenes while leaving region authority planar. Concealment, speedways, slow/slippery
+surfaces, environment hazards, traversal devices, and interactive geometry remain future-version
+candidates until intentionally promoted into a roadmap and researched in a milestone specification.
 
 ## Research references
 
