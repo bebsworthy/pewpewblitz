@@ -7,7 +7,7 @@
 | Status | Specification review |
 | Prepared | 2026-08-19, by explicit user direction while M06 remains under development |
 | Objective | Replace development-heavy match presentation with the smallest readable gameplay HUD, mode score display, scoreboard, non-pausing menu, polished Results, and bounded accessibility/audio/display settings |
-| Entry dependency | M06 must finish or expose its final accepted Match/Results/Leave seams before M07 enters `Implementing` |
+| Entry dependency | Satisfied 2026-08-20: M06 is complete and its accepted Match/Results/Leave seams are recorded; implementation still requires user validation of this specification |
 | Scope authority | Research and specification only; production implementation requires user validation |
 
 ## MVP outcome
@@ -315,8 +315,8 @@ oversized files retain the existing safe-default/error behavior and are not over
 
 ## Implementation plan
 
-Implementation begins only after the user validates this specification and M06's final seams are
-reconciled.
+M06's final seams are reconciled. Implementation begins only after the user validates this
+specification.
 
 ### Slice 1 — Product HUD and diagnostics separation
 
@@ -434,7 +434,7 @@ Menu, diagnostics mode, and Settings, and a short checklist:
 ## Exit criteria
 
 - [ ] The user validates this specification before implementation.
-- [ ] M06's final Match, Results, Leave, and fresh-lobby seams are reconciled without duplicating
+- [x] M06's final Match, Results, Leave, and fresh-lobby seams are reconciled without duplicating
   lifecycle ownership.
 - [ ] Product combat HUD contains only gameplay-relevant information; development facts are hidden
   in diagnostics mode.

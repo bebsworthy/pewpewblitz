@@ -4,8 +4,9 @@
 
 | Field | Value |
 |---|---|
-| Status | Implementing |
+| Status | Complete |
 | Prepared | 2026-08-19; rewritten against the simplified M05 delivered at User playtest |
+| Closed | 2026-08-20 by explicit user direction after the Queue Again defect was fixed and exercised through the real routed process path |
 | Objective | Repeat M05's exact handoff whenever a supervisor-owned match slot is free, while earlier matches continue in isolation, then show the replicated result and let each player join the lobby queue again as a fresh request |
 | Entry dependency | Satisfied 2026-08-19: the user validated the simplified specification by directing implementation while M05 remains at User playtest |
 
@@ -179,8 +180,8 @@ M09 work, not M06.
 - [x] Prove Result, packet drain, Stop/Exit, reap, and later capacity publication clean each worker.
 - [ ] Prove repeated Results -> Queue Again creates fresh tickets without growing lobby, route,
   allocation, worker, or client-session state.
-- [ ] Run role checks, full tests, direct baseline, real-process concurrency smoke, and focused
-  Results/Leave controller checks.
+- [x] Run role checks, full tests, direct baseline, and real-process concurrency/requeue smoke.
+- [ ] Run focused physical-controller Results/Leave checks.
 
 ## Implementation and verification evidence
 
@@ -203,8 +204,8 @@ M09 work, not M06.
 - Focused tests cover idempotent capacity publication, capacity decrease while workers exist,
   cross-pool oldest-complete selection, overflow survival, concurrent worker route isolation,
   completion capture, fresh lobby return, and intentional return-to-lobby lifecycle.
-- Pending user evidence: Results/Queue Again/Change Game/Disconnect and controller Leave
-  confirmation, plus a mixed-mode simultaneous First Blood/Wipeout/Hot Zone playtest.
+- Closeout does not claim the unexecuted mixed-mode simultaneous playtest, repeated lifecycle soak,
+  or physical-controller Results/Leave matrix. They are explicitly deferred below.
 
 ## Playtest feedback
 
@@ -219,6 +220,35 @@ M09 work, not M06.
   UI/result game identity, overlaps retiring match and fresh lobby entities, and mismatches lifecycle
   generation. A real two-client process smoke now covers the complete match-to-requeue path and only
   succeeds after both clients receive the fresh `Joined` outcome.
+
+## Feedback disposition and closeout
+
+- **Implemented now:** the reported Draw-screen Queue Again no-op, premature "lobby is still getting
+  ready" retry, and `The queue connection is unavailable` failures were treated as one player-path
+  defect series. The final fix and its production-shaped regression are recorded above.
+- **Accepted evidence:** the user directed M06 closeout on 2026-08-20 after the real routed
+  match-to-fresh-Join smoke passed. Automated Results/Change Game/Disconnect/Leave coverage and the
+  real Queue Again process path are the functional closeout evidence.
+- **Deferred to M07:** physical-controller execution and the broader Results/Leave presentation
+  matrix (`V2-M06-MANUAL-FLOW`).
+- **Deferred to M09:** simultaneous heterogeneous-mode process execution and repeated
+  completion/requeue growth soak (`V2-M06-LIFECYCLE-SOAK`). Existing deterministic isolation,
+  bounded-state, serial multi-worker, cleanup, and real requeue evidence remains accepted; the
+  deferred campaign is not represented as having passed.
+
+## Learn-from-errors review
+
+- **Mistake:** the first Queue Again regression used `RuntimeLobbyTarget`, although the production
+  fresh-lobby entity created after a match does not have that server-select-only component. The test
+  therefore passed while the real action query rejected the valid lobby.
+- **Cause:** the test fixture modeled a convenient generic lobby rather than the exact post-match
+  spawn path, and a synthetic pass was reported before a complete process scenario existed.
+- **Correction:** make server-select metadata optional for lobby actions, retain the authoritative
+  accepted game identity across generations, and select the authenticated routed lobby session.
+- **Prevention:** post-handoff regressions must omit origin-only components and include overlapping
+  retiring/fresh entities. A user-visible routed lifecycle fix is not considered verified until a
+  real process smoke reaches its final authoritative outcome; synthetic ECS coverage remains
+  complementary evidence.
 
 ## Verification contract
 
@@ -241,20 +271,26 @@ M09 work, not M06.
 
 ## Exit criteria
 
-- [ ] M05 playtest feedback is triaged and the user validates this specification.
+- [x] M05 simplification/playtest feedback is incorporated and the user validated M06 by directing
+  implementation.
 - [x] Multiple isolated matches can be Active while the lobby keeps queueing and serially handing off
   later exact rosters.
 - [x] The lobby stores no active-match or returning-player records.
 - [x] Worker reap publishes reusable capacity; no result/replay protocol reaches the lobby.
-- [ ] Results, Queue Again, Change Game, Disconnect, and confirmed Leave work through one current
-  connection at a time.
+- [x] Results, Queue Again, Change Game, Disconnect, and confirmed Leave use one current connection
+  at a time; Queue Again additionally passed the real routed process smoke.
 - [x] No M05 discarded recovery or activation-arbitration machinery is reintroduced.
-- [ ] Required automated, process, direct-baseline, and focused manual evidence passes.
-- [ ] User playtest feedback and closeout learning are recorded before completion.
+- [x] Required automated, process, and direct-baseline evidence passes; the unexecuted manual and
+  soak campaigns are explicitly deferred with no passing claim.
+- [x] User feedback disposition and closeout learning are recorded.
 
 ## Deferred
 
 - lobby/supervisor restart recovery and reconnect-to-active-match hardening (M09);
 - final Results styling, scoreboard, combat menus, and accessibility polish (M07);
+- physical-controller Results/Leave execution and presentation matrix (M07,
+  `V2-M06-MANUAL-FLOW`);
+- heterogeneous-mode simultaneous process run and repeated completion/requeue growth soak (M09,
+  `V2-M06-LIFECYCLE-SOAK`);
 - rewards, accounts, durable match history, rematch, parties, spectators, join-in-progress, and global
   matchmaking (outside v2).
