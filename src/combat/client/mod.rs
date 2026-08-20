@@ -3,18 +3,16 @@
 
 use super::*;
 use bevy::prelude::*;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
 
 mod cues;
-mod effects;
 mod hud;
 mod preview;
 #[cfg(test)]
 mod tests;
-mod world;
 
 pub use cues::CaptureCombatCues;
 pub use cues::ClientCombatEvidenceStatus;
@@ -22,6 +20,7 @@ pub use cues::ClientCombatObservation;
 pub(crate) use cues::RecentCombatEvents;
 pub use hud::{BuildSelectionText, CombatAbilityHudText, CombatHudText};
 pub use preview::MAX_PREVIEW_SEGMENTS;
+pub(crate) use preview::preview_segments;
 
 pub struct ClientCombatPlugin;
 
@@ -77,15 +76,7 @@ impl Plugin for ClientCombatPlugin {
                 (
                     cues::receive_combat_cues.in_set(CombatClientSet::Ingest),
                     receive_combat_evidence_checkpoints.in_set(CombatClientSet::Ingest),
-                    world::ensure_sentry_visuals.in_set(CombatClientSet::Ensure),
-                    world::ensure_dash_trails.in_set(CombatClientSet::Ensure),
-                    world::sync_sentry_visuals.in_set(CombatClientSet::Sync),
-                    world::sync_dash_trails.in_set(CombatClientSet::Sync),
-                    preview::update_weapon_preview.in_set(CombatClientSet::Sync),
-                    hud::update_health_bars.in_set(CombatClientSet::HudAndStatus),
-                    effects::update_durable_effect_markers.in_set(CombatClientSet::HudAndStatus),
                     hud::update_combat_hud.in_set(CombatClientSet::HudAndStatus),
-                    effects::update_combat_effects.in_set(CombatClientSet::Effects),
                     capture_client_combat_checkpoints.in_set(CombatClientSet::Evidence),
                     record_headless_combat_observation.in_set(CombatClientSet::Evidence),
                 )

@@ -11,6 +11,7 @@ pub(crate) fn ground_position(position: Vec2) -> Vec3 {
 
 /// Map a simulation direction without introducing render height.
 #[must_use]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn ground_direction(direction: Vec2) -> Vec3 {
     Vec3::new(direction.x, 0.0, -direction.y)
 }

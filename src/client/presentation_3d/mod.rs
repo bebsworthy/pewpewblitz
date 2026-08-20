@@ -15,6 +15,7 @@ use bevy::{
 use core::time::Duration;
 
 mod camera;
+mod combat;
 pub(crate) mod coordinates;
 
 #[cfg(test)]
@@ -23,9 +24,7 @@ pub(super) use camera::cursor_ground_point;
 use camera::{
     CAMERA_DISTANCE, CAMERA_ELEVATION_RADIANS, CAMERA_VERTICAL_SPAN_3D, follow_3d_camera,
 };
-use coordinates::{
-    ground_direction, ground_extents, ground_point, ground_position, ground_rotation,
-};
+use coordinates::{ground_extents, ground_point, ground_position, ground_rotation};
 
 const WALL_HEIGHT: f32 = 72.0;
 const GROUND_OFFSET: f32 = 1.0;
@@ -50,6 +49,11 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) direction: Handle<Mesh>,
     pub(crate) projectile: Handle<Mesh>,
     pub(crate) lobbed_projectile: Handle<Mesh>,
+    pub(crate) unit_cuboid: Handle<Mesh>,
+    pub(crate) sentry_base: Handle<Mesh>,
+    pub(crate) sentry_body: Handle<Mesh>,
+    pub(crate) ground_ring: Handle<Mesh>,
+    pub(crate) effect_sphere: Handle<Mesh>,
 }
 
 #[derive(Resource)]
@@ -63,13 +67,30 @@ pub(crate) struct Material3dAssets {
     pub(crate) zone_fill: Handle<StandardMaterial>,
     pub(crate) zone_boundary: Handle<StandardMaterial>,
     pub(crate) terrain: Handle<StandardMaterial>,
+    pub(crate) health_back: Handle<StandardMaterial>,
+    pub(crate) health_fill: Handle<StandardMaterial>,
+    pub(crate) preview: Handle<StandardMaterial>,
+    pub(crate) preview_blocked: Handle<StandardMaterial>,
+    pub(crate) status_slow: Handle<StandardMaterial>,
+    pub(crate) status_knockback: Handle<StandardMaterial>,
+    pub(crate) effect_muzzle: Handle<StandardMaterial>,
+    pub(crate) effect_impact: Handle<StandardMaterial>,
+    pub(crate) effect_damage: Handle<StandardMaterial>,
+    pub(crate) dash: Handle<StandardMaterial>,
 }
 
 #[derive(Component)]
 struct V3WorldMember;
 
 #[derive(Component)]
-struct V3FighterVisual;
+struct V3FighterVisual {
+    last_position: Vec2,
+    moving: bool,
+    shoot_seconds: f32,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CombatVisualOwner(pub(crate) Entity);
 
 #[derive(Component)]
 struct V3FallbackVisual {
@@ -79,11 +100,13 @@ struct V3FallbackVisual {
 #[derive(Component)]
 struct V3CharacterScene {
     owner: Entity,
+    visual_root: Entity,
 }
 
 #[derive(Component)]
 struct V3CharacterRuntime {
     owner: Entity,
+    visual_root: Entity,
     player: Entity,
     current: CharacterMotion,
 }
@@ -94,6 +117,7 @@ enum CharacterMotion {
     Holding,
     Walk,
     Shoot,
+    Defeated,
 }
 
 #[derive(Resource)]
@@ -105,6 +129,7 @@ struct Imported3dAssets {
     walk: AnimationNodeIndex,
     holding: AnimationNodeIndex,
     shoot: AnimationNodeIndex,
+    defeated: AnimationNodeIndex,
 }
 
 #[derive(Resource)]
@@ -163,10 +188,12 @@ impl Plugin for WorldPresentationPlugin {
                 (
                     prepare_imported_assets,
                     reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
-                    ensure_3d_fighters,
+                    combat::reconcile_combat_visuals,
                     upgrade_fighters_to_imported_models,
-                    ensure_3d_projectiles,
+                    combat::consume_combat_cues,
+                    combat::update_combat_visual_state,
                     update_character_animation,
+                    combat::cleanup_combat_effects,
                     tint_3d_zone,
                 )
                     .chain()
@@ -174,11 +201,7 @@ impl Plugin for WorldPresentationPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (
-                    write_3d_fighter_poses,
-                    write_3d_projectile_poses,
-                    follow_3d_camera,
-                )
+                (combat::write_combat_visual_poses, follow_3d_camera)
                     .chain()
                     .after(InterpolationSystems::Interpolate)
                     .after(PhysicsSystems::Writeback)
@@ -188,6 +211,10 @@ impl Plugin for WorldPresentationPlugin {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "startup constructs one bounded shared mesh/material palette and the two cameras"
+)]
 fn setup_3d_foundation(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -202,6 +229,11 @@ fn setup_3d_foundation(
         direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
         projectile: meshes.add(Cylinder::new(4.0, 28.0)),
         lobbed_projectile: meshes.add(Sphere::new(9.0)),
+        unit_cuboid: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+        sentry_base: meshes.add(Cylinder::new(22.0, 8.0)),
+        sentry_body: meshes.add(Cylinder::new(15.0, 24.0)),
+        ground_ring: meshes.add(Annulus::new(18.0, 22.0)),
+        effect_sphere: meshes.add(Sphere::new(1.0)),
     };
     let matte = |color: Color| StandardMaterial {
         base_color: color,
@@ -232,6 +264,56 @@ fn setup_3d_foundation(
             double_sided: true,
             cull_mode: None,
             ..matte(Color::srgb(0.44, 0.38, 0.29))
+        }),
+        health_back: materials.add(matte(Color::srgb(0.025, 0.03, 0.04))),
+        health_fill: materials.add(matte(Color::srgb(0.2, 0.95, 0.35))),
+        preview: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        preview_blocked: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.16, 0.16, 0.55),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        status_slow: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.25, 0.75, 1.0, 0.82),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        status_knockback: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.55, 0.18, 0.82),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        effect_muzzle: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.8, 0.2),
+            emissive: LinearRgba::new(2.0, 1.2, 0.1, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        effect_impact: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.3, 0.08),
+            emissive: LinearRgba::new(1.5, 0.2, 0.02, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        effect_damage: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 0.08, 0.12),
+            emissive: LinearRgba::new(1.2, 0.02, 0.02, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        dash: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.25, 0.9, 1.0, 0.48),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
         }),
     };
     commands.insert_resource(primitives);
@@ -464,46 +546,6 @@ fn team_material(
 
 #[allow(
     clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "Bevy system parameters declare the complete fighter presentation view"
-)]
-fn ensure_3d_fighters(
-    mut commands: Commands,
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
-    fighters: Query<
-        (Entity, &crate::combat::TeamId, Has<Controlled>),
-        (With<Fighter>, With<Remote>, Without<V3FighterVisual>),
-    >,
-) {
-    for (entity, team, controlled) in &fighters {
-        commands
-            .entity(entity)
-            .insert((V3FighterVisual, Transform::default(), Visibility::default()))
-            .with_children(|parent| {
-                parent.spawn((
-                    V3FallbackVisual { owner: entity },
-                    Mesh3d(primitives.fighter.clone()),
-                    MeshMaterial3d(team_material(*team, &materials)),
-                    Transform::from_xyz(0.0, 24.0, 0.0),
-                    Name::new("V3 fighter fallback"),
-                ));
-                parent.spawn((
-                    Mesh3d(primitives.direction.clone()),
-                    MeshMaterial3d(if controlled {
-                        materials.neutral.clone()
-                    } else {
-                        team_material(*team, &materials)
-                    }),
-                    Transform::from_xyz(27.0, 6.0, 0.0),
-                    Name::new("V3 fighter facing"),
-                ));
-            });
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
     clippy::too_many_arguments,
     reason = "Bevy system parameters own asynchronous asset readiness for independent families"
 )]
@@ -557,7 +599,13 @@ fn prepare_imported_assets(
     else {
         return;
     };
-    let required = ["idle", "walk", "holding-right", "holding-right-shoot"];
+    let required = [
+        "idle",
+        "walk",
+        "holding-right",
+        "holding-right-shoot",
+        "die",
+    ];
     let Some(clips) = required
         .iter()
         .map(|name| character.named_animations.get(*name).cloned())
@@ -567,7 +615,7 @@ fn prepare_imported_assets(
         return;
     };
     let (graph, nodes) = AnimationGraph::from_clips(clips);
-    let [idle, walk_node, holding, shoot] = nodes.as_slice() else {
+    let [idle, walk_node, holding, shoot, defeated] = nodes.as_slice() else {
         return;
     };
     let (Some(character_scene), Some(blaster_scene)) = (
@@ -585,23 +633,34 @@ fn prepare_imported_assets(
         walk: *walk_node,
         holding: *holding,
         shoot: *shoot,
+        defeated: *defeated,
     });
     commands.remove_resource::<Presented3dMap>();
     info!("curated V3 GLB dependencies and named clips are ready");
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query declares imported-scene promotion eligibility on fighter visual roots"
+)]
 fn upgrade_fighters_to_imported_models(
     mut commands: Commands,
     imported: Option<Res<Imported3dAssets>>,
-    fighters: Query<Entity, (With<V3FighterVisual>, Without<V3CharacterScene>)>,
+    fighters: Query<
+        (Entity, &CombatVisualOwner),
+        (With<V3FighterVisual>, Without<V3CharacterScene>),
+    >,
 ) {
     let Some(imported) = imported else {
         return;
     };
-    for owner in &fighters {
-        commands.entity(owner).with_children(|parent| {
+    for (visual_root, owner) in &fighters {
+        commands.entity(visual_root).with_children(|parent| {
             parent.spawn((
-                V3CharacterScene { owner },
+                V3CharacterScene {
+                    owner: owner.0,
+                    visual_root,
+                },
                 WorldAssetRoot(imported.character_scene.clone()),
                 Transform {
                     rotation: Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION),
@@ -611,7 +670,10 @@ fn upgrade_fighters_to_imported_models(
                 Name::new("V3 imported fighter"),
             ));
         });
-        commands.entity(owner).insert(V3CharacterScene { owner });
+        commands.entity(visual_root).insert(V3CharacterScene {
+            owner: owner.0,
+            visual_root,
+        });
     }
 }
 
@@ -670,6 +732,7 @@ fn setup_imported_character(
     }
     commands.entity(ready.entity).insert(V3CharacterRuntime {
         owner: scene.owner,
+        visual_root: scene.visual_root,
         player,
         current: CharacterMotion::Idle,
     });
@@ -686,26 +749,31 @@ fn setup_imported_character(
 )]
 fn update_character_animation(
     imported: Option<Res<Imported3dAssets>>,
-    pending: Res<PendingLocalActions>,
+    time: Res<Time>,
     mut runtimes: Query<&mut V3CharacterRuntime>,
-    owners: Query<(&LinearVelocity, Has<Controlled>), With<Fighter>>,
+    owners: Query<Option<&crate::combat::Defeated>, With<Fighter>>,
+    mut visuals: Query<&mut V3FighterVisual>,
     mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
     let Some(imported) = imported else {
         return;
     };
     for mut runtime in &mut runtimes {
-        let Ok((velocity, controlled)) = owners.get(runtime.owner) else {
+        let Ok(defeated) = owners.get(runtime.owner) else {
             continue;
         };
-        let next = if controlled && pending.held_buttons & FighterInput::PRIMARY_FIRE != 0 {
+        let Ok(mut visual) = visuals.get_mut(runtime.visual_root) else {
+            continue;
+        };
+        visual.shoot_seconds = (visual.shoot_seconds - time.delta_secs()).max(0.0);
+        let next = if defeated.is_some() {
+            CharacterMotion::Defeated
+        } else if visual.shoot_seconds > 0.0 {
             CharacterMotion::Shoot
-        } else if velocity.0.length_squared() > 1.0 {
+        } else if visual.moving {
             CharacterMotion::Walk
-        } else if controlled && pending.aim_axis.is_some() {
-            CharacterMotion::Holding
         } else {
-            CharacterMotion::Idle
+            CharacterMotion::Holding
         };
         if next == runtime.current {
             continue;
@@ -718,10 +786,12 @@ fn update_character_animation(
             CharacterMotion::Holding => imported.holding,
             CharacterMotion::Walk => imported.walk,
             CharacterMotion::Shoot => imported.shoot,
+            CharacterMotion::Defeated => imported.defeated,
         };
-        transitions
-            .play(&mut player, node, Duration::from_millis(100))
-            .repeat();
+        let animation = transitions.play(&mut player, node, Duration::from_millis(100));
+        if !matches!(next, CharacterMotion::Shoot | CharacterMotion::Defeated) {
+            animation.repeat();
+        }
         runtime.current = next;
     }
 }
@@ -826,127 +896,6 @@ fn spawn_fallback_wall_modules(
     }
 }
 
-#[allow(
-    clippy::type_complexity,
-    reason = "the query declares the replicated fighter pose boundary"
-)]
-fn write_3d_fighter_poses(
-    fighters: Query<(&Position, &Rotation, &mut Transform), (With<Fighter>, With<Remote>)>,
-) {
-    for (position, rotation, mut transform) in fighters {
-        transform.translation = ground_position(position.0);
-        transform.rotation = ground_rotation(*rotation);
-    }
-}
-
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "bounded tick spans become presentation-only interpolation fractions"
-)]
-fn ensure_3d_projectiles(
-    mut commands: Commands,
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
-    projectiles: Query<
-        (
-            Entity,
-            &Position,
-            &crate::combat::ProjectileSource,
-            Option<&crate::combat::StraightFlight>,
-            Option<&crate::combat::LobbedFlight>,
-            Option<&V3ProjectileVisual>,
-        ),
-        With<crate::combat::Projectile>,
-    >,
-) {
-    for (entity, position, source, straight, lobbed, visual) in &projectiles {
-        let material = team_material(source.team_id, &materials);
-        if visual.is_none() {
-            let (mesh, local_rotation) = if lobbed.is_some() {
-                (primitives.lobbed_projectile.clone(), Quat::IDENTITY)
-            } else {
-                (
-                    primitives.projectile.clone(),
-                    Quat::from_rotation_z(core::f32::consts::FRAC_PI_2),
-                )
-            };
-            commands
-                .entity(entity)
-                .insert(V3ProjectileVisual {
-                    planar_position: straight.map_or(position.0, |flight| flight.origin.as_vec2()),
-                })
-                .with_children(|parent| {
-                    parent.spawn((
-                        Mesh3d(mesh),
-                        MeshMaterial3d(material),
-                        Transform::from_rotation(local_rotation),
-                        Name::new("V3 projectile"),
-                    ));
-                });
-        }
-    }
-}
-
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "bounded tick spans become presentation-only interpolation fractions"
-)]
-fn write_3d_projectile_poses(
-    time: Res<Time>,
-    tick: Query<&AuthoritativeTick>,
-    mut projectiles: Query<
-        (
-            &Position,
-            &Rotation,
-            Option<&crate::combat::StraightFlight>,
-            Option<&crate::combat::LobbedFlight>,
-            &mut V3ProjectileVisual,
-            &mut Transform,
-        ),
-        With<crate::combat::Projectile>,
-    >,
-) {
-    let current_tick = tick.iter().next().map_or(0, |tick| tick.0);
-    for (position, rotation, straight, lobbed, mut visual, mut transform) in &mut projectiles {
-        let planar_position = if lobbed.is_some() {
-            position.0
-        } else if let Some(straight) = straight {
-            visual.planar_position = catch_up_projectile_position(
-                visual.planar_position,
-                position.0,
-                straight.speed,
-                time.delta_secs(),
-            );
-            visual.planar_position
-        } else {
-            position.0
-        };
-        transform.translation = ground_position(planar_position);
-        if let Some(lobbed) = lobbed {
-            transform.translation.y = LOBBED_PROJECTILE_LAUNCH_HEIGHT;
-            let duration = lobbed
-                .lands_at_tick
-                .saturating_sub(lobbed.launched_at_tick)
-                .max(1);
-            let progress =
-                current_tick.saturating_sub(lobbed.launched_at_tick) as f32 / duration as f32;
-            transform.translation.y +=
-                crate::combat::delivery::lob_height(progress, lobbed.visual_arc_height);
-            transform.rotation = Quat::IDENTITY;
-        } else {
-            transform.translation.y = STRAIGHT_PROJECTILE_HEIGHT;
-            transform.rotation = Quat::from_rotation_arc(
-                Vec3::X,
-                ground_direction(Vec2::from_angle(rotation.as_radians())),
-            );
-        }
-    }
-}
-
 fn catch_up_projectile_position(
     presented: Vec2,
     authoritative: Vec2,
@@ -1044,6 +993,11 @@ mod tests {
             direction: Handle::default(),
             projectile: Handle::default(),
             lobbed_projectile: Handle::default(),
+            unit_cuboid: Handle::default(),
+            sentry_base: Handle::default(),
+            sentry_body: Handle::default(),
+            ground_ring: Handle::default(),
+            effect_sphere: Handle::default(),
         })
         .insert_resource(Material3dAssets {
             floor: material.clone(),
@@ -1054,7 +1008,17 @@ mod tests {
             neutral: material.clone(),
             zone_fill: material.clone(),
             zone_boundary: material.clone(),
-            terrain: material,
+            terrain: material.clone(),
+            health_back: material.clone(),
+            health_fill: material.clone(),
+            preview: material.clone(),
+            preview_blocked: material.clone(),
+            status_slow: material.clone(),
+            status_knockback: material.clone(),
+            effect_muzzle: material.clone(),
+            effect_impact: material.clone(),
+            effect_damage: material.clone(),
+            dash: material,
         });
         app.world_mut().spawn((
             crate::map::MapRoot,
@@ -1118,41 +1082,6 @@ mod tests {
         assert_eq!(
             catch_up_projectile_position(authoritative, authoritative, 900.0, 1.0 / 60.0),
             authoritative
-        );
-    }
-
-    #[test]
-    fn projectile_pose_rewrites_legacy_xy_transform_after_interpolation_at_nonzero_y() {
-        let mut app = App::new();
-        app.insert_resource(Time::<()>::default())
-            .add_systems(PostUpdate, write_3d_projectile_poses);
-        let projectile = app
-            .world_mut()
-            .spawn((
-                crate::combat::Projectile,
-                Position(Vec2::new(125.0, 310.0)),
-                Rotation::default(),
-                V3ProjectileVisual {
-                    planar_position: Vec2::new(125.0, 310.0),
-                },
-                // This is the legacy/interpolated XY transform that caused the
-                // displacement to grow with simulation Y.
-                Transform::from_xyz(125.0, 310.0, 20.0),
-            ))
-            .id();
-
-        app.update();
-
-        let transform = app
-            .world()
-            .get::<Transform>(projectile)
-            .expect("projectile transform");
-        assert!(
-            transform
-                .translation
-                .abs_diff_eq(Vec3::new(125.0, STRAIGHT_PROJECTILE_HEIGHT, -310.0), 0.0001),
-            "unexpected converted projectile position: {:?}",
-            transform.translation
         );
     }
 

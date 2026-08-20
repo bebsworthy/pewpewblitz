@@ -1,7 +1,6 @@
 //! Combat cue ingestion and deduplication.
 
 #![allow(clippy::wildcard_imports)]
-use super::effects::CombatEffect;
 use super::*;
 #[derive(Resource, Debug)]
 pub struct ClientCombatEvidenceStatus {
@@ -106,68 +105,9 @@ impl FromWorld for ClientCombatObservation {
 }
 
 #[cfg(feature = "client")]
-fn combat_cue_profile_id(cue: &CombatCue) -> u16 {
-    match cue {
-        CombatCue::AttackAccepted {
-            presentation_profile_id,
-            ..
-        }
-        | CombatCue::DeliveryImpact {
-            presentation_profile_id,
-            ..
-        }
-        | CombatCue::LobLanded {
-            presentation_profile_id,
-            ..
-        }
-        | CombatCue::MeleeContact {
-            presentation_profile_id,
-            ..
-        }
-        | CombatCue::DamageApplied {
-            presentation_profile_id,
-            ..
-        }
-        | CombatCue::EffectApplied {
-            presentation_profile_id,
-            ..
-        }
-        | CombatCue::SentryFired {
-            presentation_profile_id,
-            ..
-        } => presentation_profile_id.0,
-        CombatCue::FighterDefeated {
-            presentation_profile_id,
-            ..
-        } => presentation_profile_id.map_or(1, |profile| profile.0),
-        _ => 1,
-    }
-}
-
-#[cfg(feature = "client")]
-fn combat_profile_color(profile_id: u16, fallback: Color) -> Color {
-    match profile_id {
-        2 => Color::srgb(1.0, 0.45, 0.12),
-        3 => Color::srgb(0.25, 0.7, 1.0),
-        4 => Color::srgb(0.85, 0.25, 1.0),
-        _ => fallback,
-    }
-}
-
-#[cfg(feature = "client")]
-fn combat_profile_size(profile_id: u16, fallback: Vec2) -> Vec2 {
-    match profile_id {
-        2 => fallback * 0.8,
-        3 => fallback * 1.25,
-        4 => fallback * 1.1,
-        _ => fallback,
-    }
-}
-
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn receive_combat_cues(
-    mut commands: Commands,
     mut recent: ResMut<RecentCombatEvents>,
     mut observation: ResMut<ClientCombatObservation>,
     mut capture: Option<ResMut<CaptureCombatCues>>,
@@ -176,12 +116,7 @@ pub(crate) fn receive_combat_cues(
         Option<&mut lightyear::prelude::MessageReceiver<CombatCue>>,
         With<lightyear::prelude::client::Client>,
     >,
-    local_fighter: Query<&PlayerId, (With<Fighter>, With<lightyear::prelude::Controlled>)>,
-    presentation_settings: Option<Res<crate::client::ClientShellSettings>>,
 ) {
-    let reduced_effects =
-        presentation_settings.is_some_and(|settings| settings.reduced_combat_effects);
-    let local_player = local_fighter.iter().next().copied();
     for receiver in &mut receivers {
         let Some(mut receiver) = receiver else {
             continue;
@@ -217,7 +152,6 @@ pub(crate) fn receive_combat_cues(
             if !remember_combat_event(&mut recent, event_id) {
                 continue;
             }
-            let profile_id = combat_cue_profile_id(&cue);
             if let Some(capture) = capture.as_mut() {
                 if capture.cues.len() < MAX_COMBAT_EVIDENCE_EVENTS {
                     capture.cues.push(cue.clone());
@@ -259,100 +193,6 @@ pub(crate) fn receive_combat_cues(
                 continue;
             }
             presented_cues.write(DeduplicatedCombatCue(cue.clone()));
-            let local_hit = match &cue {
-                CombatCue::Damage {
-                    source: DamageSource::PlayerWeapon { player_id, .. },
-                    ..
-                }
-                | CombatCue::DamageApplied {
-                    source: DamageSource::PlayerWeapon { player_id, .. },
-                    ..
-                }
-                | CombatCue::DamageApplied {
-                    source:
-                        DamageSource::Ultimate { player_id, .. }
-                        | DamageSource::Deployable { player_id, .. },
-                    ..
-                } => local_player == Some(*player_id),
-                _ => false,
-            };
-            let (position, color, size) = match cue {
-                CombatCue::AttackAccepted { position, .. } => (
-                    position.as_vec2(),
-                    combat_profile_color(profile_id, Color::srgb(1.0, 0.8, 0.2)),
-                    combat_profile_size(profile_id, Vec2::splat(16.0)),
-                ),
-                CombatCue::DeliveryImpact { position, .. }
-                | CombatCue::LobLanded { position, .. }
-                | CombatCue::MeleeContact { position, .. }
-                | CombatCue::Impact { position, .. } => (
-                    position.as_vec2(),
-                    combat_profile_color(profile_id, Color::srgb(1.0, 0.35, 0.1)),
-                    combat_profile_size(profile_id, Vec2::splat(28.0)),
-                ),
-                CombatCue::DamageApplied { position, .. } => (
-                    position.as_vec2(),
-                    combat_profile_color(
-                        profile_id,
-                        if local_hit {
-                            Color::srgb(1.0, 0.9, 0.2)
-                        } else {
-                            Color::srgb(1.0, 0.1, 0.1)
-                        },
-                    ),
-                    combat_profile_size(profile_id, Vec2::splat(18.0)),
-                ),
-                CombatCue::EffectApplied { position, .. } => (
-                    position.as_vec2(),
-                    combat_profile_color(profile_id, Color::srgb(0.3, 0.8, 1.0)),
-                    combat_profile_size(profile_id, Vec2::splat(24.0)),
-                ),
-                CombatCue::FighterDefeated { position, .. } => (
-                    position.as_vec2(),
-                    combat_profile_color(profile_id, Color::srgb(0.9, 0.05, 0.05)),
-                    combat_profile_size(profile_id, Vec2::splat(64.0)),
-                ),
-                CombatCue::FighterReset { position, .. } | CombatCue::Reset { position, .. } => (
-                    position.as_vec2(),
-                    Color::srgb(0.2, 1.0, 0.4),
-                    Vec2::splat(42.0),
-                ),
-                CombatCue::Muzzle { position, .. } => (
-                    position.as_vec2(),
-                    Color::srgb(1.0, 0.8, 0.2),
-                    Vec2::splat(22.0),
-                ),
-                CombatCue::SentryFired { position, .. } => (
-                    position.as_vec2(),
-                    Color::srgb(0.25, 0.8, 1.0),
-                    Vec2::new(20.0, 10.0),
-                ),
-                CombatCue::DeployableRemoved {
-                    position, reason, ..
-                } => (
-                    position.as_vec2(),
-                    if matches!(reason, crate::abilities::SentryCleanupReason::Destroyed) {
-                        Color::srgb(1.0, 0.25, 0.1)
-                    } else {
-                        Color::srgb(0.35, 0.75, 1.0)
-                    },
-                    Vec2::splat(46.0),
-                ),
-                CombatCue::Damage { .. } | CombatCue::Defeat { .. } => {
-                    continue;
-                }
-            };
-            let size = if reduced_effects { size * 0.65 } else { size };
-            commands.spawn((
-                CombatEffect {
-                    timer: Timer::from_seconds(
-                        if reduced_effects { 0.1 } else { 0.18 },
-                        TimerMode::Once,
-                    ),
-                },
-                Sprite::from_color(color, size),
-                Transform::from_translation(position.extend(30.0)),
-            ));
         }
     }
 }

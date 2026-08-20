@@ -641,31 +641,6 @@ fn controller_sample_reaches_native_fighter_action_buffer() {
 }
 
 #[test]
-fn interpolated_fighter_pose_is_written_to_render_transform() {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .add_systems(Update, write_interpolated_fighter_pose_to_transform);
-    let entity = app
-        .world_mut()
-        .spawn((
-            Fighter,
-            Remote,
-            Position::from_xy(120.0, -45.0),
-            Rotation::radians(core::f32::consts::FRAC_PI_2),
-            Transform::from_xyz(0.0, 0.0, -10.0),
-        ))
-        .id();
-
-    app.update();
-
-    let transform = app.world().get::<Transform>(entity).expect("transform");
-    assert_eq!(transform.translation, Vec3::new(120.0, -45.0, -10.0));
-    assert!(
-        (transform.rotation.to_euler(EulerRot::ZYX).0 - core::f32::consts::FRAC_PI_2).abs() < 0.001
-    );
-}
-
-#[test]
 fn disconnected_gamepad_falls_back_to_most_recent_connected_device() {
     let first = Entity::from_raw_u32(1).expect("valid test entity index");
     let second = Entity::from_raw_u32(2).expect("valid test entity index");

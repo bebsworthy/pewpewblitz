@@ -4,13 +4,6 @@
 use super::*;
 #[cfg(feature = "client")]
 #[derive(Component)]
-pub(crate) struct CombatHealthBar {
-    target: Entity,
-    fill: bool,
-}
-
-#[cfg(feature = "client")]
-#[derive(Component)]
 pub struct CombatHudText;
 
 #[cfg(feature = "client")]
@@ -20,92 +13,6 @@ pub struct CombatAbilityHudText;
 #[cfg(feature = "client")]
 #[derive(Component)]
 pub struct BuildSelectionText;
-
-#[cfg(feature = "client")]
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
-)]
-pub(crate) fn update_health_bars(
-    mut commands: Commands,
-    fighters: Query<
-        (
-            Entity,
-            &Position,
-            &CurrentHealth,
-            &FighterDefinitionId,
-            Option<&Defeated>,
-            Option<&crate::builds::ResolvedMatchLoadout>,
-        ),
-        With<Fighter>,
-    >,
-    definitions: Res<FighterDefinitions>,
-    mut bars: Query<(Entity, &CombatHealthBar, &mut Transform, &mut Sprite)>,
-) {
-    let fighter_data: HashMap<_, _> = fighters
-        .iter()
-        .map(
-            |(entity, position, health, definition_id, defeated, loadout)| {
-                let maximum = loadout.map_or_else(
-                    || {
-                        definitions
-                            .get(*definition_id)
-                            .map_or(0, |definition| definition.maximum_health)
-                    },
-                    |loadout| loadout.fighter_stats.maximum_health,
-                );
-                (entity, (position.0, health.0, maximum, defeated.is_some()))
-            },
-        )
-        .collect();
-    let existing: HashSet<_> = bars
-        .iter()
-        .map(|(_, bar, _, _)| (bar.target, bar.fill))
-        .collect();
-    for entity in fighter_data.keys().copied() {
-        if !existing.contains(&(entity, false)) {
-            commands.spawn((
-                CombatHealthBar {
-                    target: entity,
-                    fill: false,
-                },
-                Sprite::from_color(Color::srgb(0.04, 0.05, 0.07), Vec2::new(56.0, 7.0)),
-                Transform::from_xyz(0.0, 0.0, 35.0),
-            ));
-        }
-        if !existing.contains(&(entity, true)) {
-            commands.spawn((
-                CombatHealthBar {
-                    target: entity,
-                    fill: true,
-                },
-                Sprite::from_color(Color::srgb(0.2, 0.95, 0.35), Vec2::new(52.0, 5.0)),
-                Transform::from_xyz(0.0, 0.0, 36.0),
-            ));
-        }
-    }
-    for (bar_entity, bar, mut transform, mut sprite) in &mut bars {
-        let Some((position, health, maximum, defeated)) = fighter_data.get(&bar.target) else {
-            commands.entity(bar_entity).despawn();
-            continue;
-        };
-        let ratio = f32::from(*health) / f32::from((*maximum).max(1));
-        transform.translation.x = position.x;
-        transform.translation.y = position.y + 34.0;
-        if bar.fill {
-            transform.translation.x -= 26.0 * (1.0 - ratio);
-            transform.scale.x = ratio;
-            sprite.color = if *defeated {
-                Color::srgb(0.75, 0.08, 0.08)
-            } else {
-                Color::srgb(0.2, 0.95, 0.35)
-            };
-        } else {
-            transform.scale.x = 1.0;
-        }
-    }
-}
 
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]

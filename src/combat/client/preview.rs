@@ -6,7 +6,7 @@ pub const MAX_PREVIEW_SEGMENTS: usize = 24;
 
 #[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]
-pub(super) fn preview_segments(
+pub(crate) fn preview_segments(
     origin: Vec2,
     facing: f32,
     aim_distance: Option<f32>,
@@ -199,103 +199,6 @@ fn circle_overlaps_map_shape(
             let local = Vec2::from_angle(-rotation).rotate(center - shape_center);
             let closest = local.clamp(-half_extents, half_extents);
             local.distance_squared(closest) < radius * radius
-        }
-    }
-}
-
-#[cfg(feature = "client")]
-#[derive(Component)]
-pub(crate) struct WeaponPreviewVisual {
-    slot: u8,
-}
-
-#[cfg(feature = "client")]
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
-)]
-pub(crate) fn update_weapon_preview(
-    mut commands: Commands,
-    maps: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
-    pending: Res<crate::client::PendingLocalActions>,
-    convergence: Option<Res<crate::terrain::ClientTerrainConvergence>>,
-    fighters: Query<
-        (
-            &Position,
-            &Rotation,
-            Option<&crate::builds::ResolvedMatchLoadout>,
-        ),
-        (With<Fighter>, With<lightyear::prelude::Controlled>),
-    >,
-    mut visuals: Query<(
-        &WeaponPreviewVisual,
-        &mut Transform,
-        &mut Sprite,
-        &mut Visibility,
-    )>,
-) {
-    let Some(map) = maps.iter().max_by_key(|map| map.identity.instance_id) else {
-        for (_, _, _, mut visibility) in &mut visuals {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    };
-    // The replicated loadout is the wire shape: the preview reads the loadout's primary
-    // weapon, because a standalone `ResolvedWeapon` is never replicated to clients.
-    let Some((position, rotation, loadout)) = fighters.iter().next() else {
-        for (_, _, _, mut visibility) in &mut visuals {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    };
-    let Some(loadout) = loadout else {
-        for (_, _, _, mut visibility) in &mut visuals {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    };
-    let resolved = &loadout.primary_weapon;
-    let origin = position.0;
-    let facing = rotation.as_radians();
-    // The preview repairs against the committed destructible occupancy exactly like the
-    // server's collider clearance, so the marker never promises a landing the
-    // authoritative resolution will pull back to a face.
-    let no_terrain = BTreeMap::new();
-    let terrain_chunks = convergence
-        .as_deref()
-        .map_or(&no_terrain, |convergence| convergence.chunks());
-    let segments = preview_segments(
-        origin,
-        facing,
-        pending.aim_distance,
-        resolved,
-        map,
-        terrain_chunks,
-    );
-    for (visual, mut transform, mut sprite, mut visibility) in &mut visuals {
-        let Some((center, angle, size, color)) = segments.get(usize::from(visual.slot)) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        *visibility = Visibility::Inherited;
-        transform.translation = center.extend(11.0);
-        transform.rotation = Quat::from_rotation_z(*angle);
-        sprite.color = *color;
-        sprite.custom_size = Some(*size);
-    }
-    let existing_slots: HashSet<_> = visuals
-        .iter()
-        .map(|(visual, _, _, _)| visual.slot)
-        .collect();
-    for slot in 0..MAX_PREVIEW_SEGMENTS as u8 {
-        if !existing_slots.contains(&slot) {
-            commands.spawn((
-                WeaponPreviewVisual { slot },
-                Sprite::from_color(Color::srgba(1.0, 1.0, 1.0, 0.0), Vec2::splat(1.0)),
-                Transform::default(),
-                Visibility::Hidden,
-            ));
         }
     }
 }

@@ -1,15 +1,10 @@
 use super::*;
-use crate::combat::TeamId;
 use crate::combat::WeaponDefinitions;
 use crate::combat::client::cues::{
     ClientCombatEvidenceStatus, RecentCombatEvents, remember_combat_event,
 };
-use crate::combat::client::effects::{CombatEffect, update_combat_effects};
 use crate::combat::client::hud::{CombatHudText, update_combat_hud};
-use crate::combat::client::preview::{
-    MAX_PREVIEW_SEGMENTS, WeaponPreviewVisual, preview_segments, update_weapon_preview,
-};
-use crate::combat::client::world::ensure_sentry_visuals;
+use crate::combat::client::preview::{MAX_PREVIEW_SEGMENTS, preview_segments};
 use crate::combat::{
     AuthoritativeTick, CombatEventId, CurrentHealth, Defeated, WeaponPhase, WeaponState,
     fighter_color, projectile_color,
@@ -18,10 +13,8 @@ use crate::combat::{FighterDefinitions, WeaponCatalog, WeaponPresetId};
 use crate::map::{
     MapContentCatalog, MapInstanceId, MapLayoutRequirements, MapPresetId as ArenaPresetId,
 };
-use crate::protocol::{Fighter, NetworkEntityId, PlayerId};
+use crate::protocol::{Fighter, PlayerId};
 use crate::timing::SimulationTick;
-use avian2d::prelude::{Position, Rotation};
-use core::time::Duration;
 use std::collections::BTreeMap;
 
 fn preview_for(id: u16) -> Vec<(Vec2, f32, Vec2, Color)> {
@@ -149,81 +142,6 @@ fn launcher_preview_repairs_landings_against_committed_terrain() {
 
 /// Resolve a loadout through the real build pipeline, so presentation tests observe the
 /// same `ResolvedMatchLoadout` a joined client receives by replication.
-fn resolved_loadout(preset: u16) -> crate::builds::ResolvedMatchLoadout {
-    let build_catalog = crate::builds::BuildCatalog::embedded().unwrap();
-    let weapons = WeaponCatalog::embedded().unwrap();
-    let fighter = FighterDefinitions::default().entries[0];
-    crate::builds::resolve_build_recipe(
-        &build_catalog,
-        &weapons,
-        &fighter,
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(WeaponPresetId(preset)),
-            ultimate: crate::builds::UltimateDefinitionId(1),
-            passives: [
-                crate::builds::PassiveDefinitionId(1),
-                crate::builds::PassiveDefinitionId(6),
-            ],
-        },
-        None,
-    )
-    .unwrap()
-}
-
-/// The preview must read the replicated `ResolvedMatchLoadout`: a standalone
-/// `ResolvedWeapon` is not replicated, so previews keyed on it stay hidden in real
-/// network play. This schedule test fails if the system queries the un-replicated shape.
-#[test]
-fn weapon_preview_reads_the_replicated_match_loadout() {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .init_resource::<crate::client::PendingLocalActions>()
-        .add_systems(Update, update_weapon_preview);
-    let map_catalog = MapContentCatalog::embedded().unwrap();
-    let map = map_catalog
-        .resolve_preset(
-            ArenaPresetId(1),
-            MapInstanceId(1),
-            &MapLayoutRequirements::wipeout(),
-        )
-        .unwrap();
-    app.world_mut().spawn((crate::map::MapRoot, map.snapshot));
-    let weapons = WeaponCatalog::embedded().unwrap();
-    let fighter = FighterDefinitions::default().entries[0];
-    let pulse = weapons.resolve_preset(WeaponPresetId(1), &fighter).unwrap();
-    let controlled = app
-        .world_mut()
-        .spawn((
-            Fighter,
-            lightyear::prelude::Controlled,
-            Position::from_xy(0.0, 0.0),
-            Rotation::radians(0.0),
-            pulse,
-        ))
-        .id();
-
-    // A standalone ResolvedWeapon is not the wire shape: previews must stay hidden.
-    app.update();
-    app.update();
-    assert_eq!(visible_previews(app.world_mut()), 0);
-
-    // The replicated loadout is: the pulse preview shows its two segments.
-    app.world_mut()
-        .entity_mut(controlled)
-        .insert(resolved_loadout(1));
-    app.update();
-    app.update();
-    assert_eq!(visible_previews(app.world_mut()), 2);
-}
-
-fn visible_previews(world: &mut World) -> usize {
-    world
-        .query_filtered::<&Visibility, With<WeaponPreviewVisual>>()
-        .iter(world)
-        .filter(|visibility| **visibility == Visibility::Inherited)
-        .count()
-}
-
 #[test]
 fn combat_cue_event_ids_are_deduplicated_with_a_bounded_history() {
     let mut recent = RecentCombatEvents::default();
@@ -253,29 +171,6 @@ fn headless_exit_waits_for_required_combat_evidence() {
         }
         .permits_exit()
     );
-}
-
-#[test]
-fn combat_effects_expire_after_the_bounded_presentation_lifetime() {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            Duration::from_millis(100),
-        ))
-        .add_systems(Update, update_combat_effects);
-    let effect = app
-        .world_mut()
-        .spawn(CombatEffect {
-            timer: Timer::from_seconds(0.18, TimerMode::Once),
-        })
-        .id();
-
-    app.update();
-    assert!(app.world().get_entity(effect).is_ok());
-    app.update();
-    app.update();
-
-    assert!(app.world().get_entity(effect).is_err());
 }
 
 #[test]
@@ -348,40 +243,6 @@ fn fighter_and_projectile_palettes_distinguish_replicated_sources() {
     assert_ne!(fighter_color(PlayerId(1)), fighter_color(PlayerId(2)));
     assert_ne!(projectile_color(PlayerId(1)), projectile_color(PlayerId(2)));
     assert_ne!(fighter_color(PlayerId(1)), Color::srgb(0.95, 0.25, 0.1));
-}
-
-#[test]
-fn replicated_sentry_visual_waits_for_an_authoritative_pose() {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .add_systems(Update, ensure_sentry_visuals);
-    let sentry = app
-        .world_mut()
-        .spawn((
-            crate::abilities::Sentry,
-            crate::abilities::SentryIdentity {
-                deployable_id: crate::builds::DeployableId(1),
-                owner_player_id: PlayerId(1),
-                owner_network_id: NetworkEntityId(1),
-                team_id: TeamId(0),
-                ultimate_id: crate::builds::UltimateDefinitionId(2),
-                match_id: crate::matchplay::MatchId(1),
-            },
-        ))
-        .id();
-
-    app.update();
-    assert!(app.world().get::<Transform>(sentry).is_none());
-
-    app.world_mut()
-        .entity_mut(sentry)
-        .insert((Position::from_xy(-90.0, 75.0), Rotation::radians(-0.25)));
-    app.update();
-
-    assert_eq!(
-        app.world().get::<Transform>(sentry).unwrap().translation,
-        Vec3::new(-90.0, 75.0, 12.0)
-    );
 }
 
 #[test]

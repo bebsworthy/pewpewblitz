@@ -1977,6 +1977,11 @@ mod client_presentation_tests {
             direction: Handle::default(),
             projectile: Handle::default(),
             lobbed_projectile: Handle::default(),
+            unit_cuboid: Handle::default(),
+            sentry_base: Handle::default(),
+            sentry_body: Handle::default(),
+            ground_ring: Handle::default(),
+            effect_sphere: Handle::default(),
         })
         .insert_resource(crate::client::presentation_3d::Material3dAssets {
             floor: Handle::default(),
@@ -1988,6 +1993,16 @@ mod client_presentation_tests {
             zone_fill: Handle::default(),
             zone_boundary: Handle::default(),
             terrain,
+            health_back: Handle::default(),
+            health_fill: Handle::default(),
+            preview: Handle::default(),
+            preview_blocked: Handle::default(),
+            status_slow: Handle::default(),
+            status_knockback: Handle::default(),
+            effect_muzzle: Handle::default(),
+            effect_impact: Handle::default(),
+            effect_damage: Handle::default(),
+            dash: Handle::default(),
         });
     }
 

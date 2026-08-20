@@ -17,11 +17,12 @@ the [completed v2 roadmap](docs/implementation/v2/roadmap.md),
 V3 is now in progress. Its goal is to replace the client gameplay-world sprites and `Mesh2d`
 presentation with a fixed-camera orthographic 3D scene while preserving the existing planar
 authority, Avian 2D collision, protocol, routed server topology, and Bevy UI shell. M01's 3D
-feasibility foundation was accepted on 2026-08-20. The active scope is
-[V3 M02 — default 3D arena, map, terrain, camera, and input cutover](docs/implementation/v3/milestone-02.md),
-within the [V3 roadmap](docs/implementation/v3/roadmap.md). M02's production cutover and repository
-verification are complete and awaiting user playtest feedback: every windowed client uses the 3D
-world composition by default, while the server-authoritative simulation and protocol remain planar.
+feasibility foundation and M02 world cutover were accepted on 2026-08-20. The active scope is
+[V3 M03 — complete 3D combat and fighter replacement](docs/implementation/v3/milestone-03.md),
+within the [V3 roadmap](docs/implementation/v3/roadmap.md). M03 implementation and automated
+verification are complete and awaiting user playtest feedback: fighters, projectiles, sentries,
+previews, combat cues, status feedback, dash trails, and world health use independent 3D visual
+entities, while the server-authoritative simulation and protocol remain planar.
 
 ## Toolchain
 
@@ -164,9 +165,9 @@ next key, mouse-button, or controller-button press, I/O toggle Y-axis inversion,
 the validated defaults; session-local settings shape device input before quantization and never
 reach the server. The HUD shows match phase, score/time/result,
 roster/loadout/readiness, respawn and protection state, health, ammo, ultimate meter/phase, passive
-state, sentry health/lifetime, and cooldown/reload; fighters also show debug health bars.
+state, sentry health/lifetime, and cooldown/reload; fighters also show 3D world-health bars.
 The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
-block fighters and weapon delivery, while client sprites, audio, and HUD state remain presentation-only.
+block fighters and weapon delivery, while 3D visuals, audio, and HUD state remain presentation-only.
 The legacy direct-UDP diagnostic script still accepts `BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1`,
 weapon presets, controller-demo selection, and `BRAWLER_RENDER_PROFILE=30|60|high` when a focused
 v1 comparison is needed. These are diagnostic parameters rather than everyday development recipes;

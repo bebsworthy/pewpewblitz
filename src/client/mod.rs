@@ -11,7 +11,7 @@ use crate::{
     matchplay::{
         MatchParticipant, MatchPhase, MatchRoot, MatchState, RespawnState, SpawnProtection,
     },
-    movement::{AvianNetworkPlugin, CAMERA_VERTICAL_SPAN},
+    movement::AvianNetworkPlugin,
     protocol::{
         BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
         Fighter, FighterInput, LobbyHello, LobbyJoinOutcome, MatchCommand, MatchCommandOutcome,
@@ -22,7 +22,6 @@ use crate::{
     },
 };
 use avian2d::prelude::{AngularVelocity, LinearVelocity, PhysicsSystems, Position, Rotation};
-use bevy::camera::{ScalingMode, visibility::RenderLayers};
 use bevy::{
     app::{RunFixedMainLoop, RunFixedMainLoopSystems, ScheduleRunnerPlugin},
     ecs::error::{FallbackErrorHandler, error},
@@ -81,11 +80,9 @@ pub use flow::{
 };
 #[allow(clippy::wildcard_imports)]
 use input::*;
-pub use presentation::{ClientPresentationPlugin, MovementPresentationPlugin};
+pub use presentation::ClientPresentationPlugin;
 #[cfg(test)]
-use presentation::{
-    clamp_camera_center, update_client_hud, write_interpolated_fighter_pose_to_transform,
-};
+use presentation::{clamp_camera_center, update_client_hud};
 pub use queue::{
     ClientMatchLoadingModel, ClientPracticeModel, ClientQueueModel, ClientQueuePlugin,
     PendingQueueCommand,
@@ -411,7 +408,6 @@ struct LiveInputTrace {
     last_sample: Option<(bool, [bool; 4], Vec2, ActiveInputDevice)>,
     last_aim: Option<Vec2>,
     last_write: Option<(Vec2, u8, usize)>,
-    last_presented: Vec<(Entity, Vec2)>,
     last_history: Vec<(Entity, Vec2)>,
     last_sync: Option<bool>,
 }
@@ -423,7 +419,6 @@ impl FromWorld for LiveInputTrace {
             last_sample: None,
             last_aim: None,
             last_write: None,
-            last_presented: Vec::new(),
             last_history: Vec::new(),
             last_sync: None,
         }
@@ -539,9 +534,6 @@ struct InputSettingsText;
 
 #[derive(Component)]
 struct ScoreboardOverlay;
-
-#[derive(Component)]
-struct FighterVisual;
 
 /// Build the windowed or headless client application.
 pub fn build_app_with_config(config: ClientNetworkConfig) -> App {

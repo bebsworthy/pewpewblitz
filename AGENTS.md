@@ -9,7 +9,7 @@ Start with:
 1. `docs/00-product-direction.md` for product intent and non-goals.
 2. `docs/implementation/v3/roadmap.md` for the active 3D-presentation migration, milestone order,
    and enduring V3 decisions.
-3. `docs/implementation/v3/milestone-02.md` for the current implementation contract.
+3. `docs/implementation/v3/milestone-03.md` for the current implementation and playtest contract.
 4. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
 5. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
    player-flow and routed-process decisions that V3 preserves.
@@ -24,9 +24,10 @@ and related tuning remain tracked as `POST-V1-RELEASE-POLISH`. V2 completed and 
 2026-08-20. V3 is the active version. M01 completed on 2026-08-20 after the user accepted the 3D
 feasibility result and its projectile-origin corrections. M02 completed on 2026-08-20 after its
 default 3D arena/map/terrain/camera/input cutover, projectile-placement feedback fix, removal of the
-obsolete projectile sprite/XY writer, affected verification, and user acceptance. M03 is next and
-not started; it moves remaining world visuals to dedicated 3D presentation entities. M04 audits
-complete retirement of the legacy XY presentation convention.
+obsolete projectile sprite/XY writer, affected verification, and user acceptance. M03 implementation
+is complete and in `User playtest`: remaining fighter, projectile, sentry, preview, cue, status,
+trail, and world-health visuals now use independent 3D presentation entities. M04 audits final
+readability, performance, occlusion, and dependency retirement after M03 feedback closes.
 
 ## Technical stack
 
