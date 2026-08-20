@@ -5,11 +5,14 @@ use super::presentation::{spawn_client_hud, spawn_pause_overlay};
 use super::*;
 use crate::combat::client::CombatClientSet;
 use bevy::{
+    asset::RenderAssetUsages,
     camera::{ScalingMode, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
     gltf::Gltf,
     light::{GlobalAmbientLight, NotShadowCaster, NotShadowReceiver},
     math::primitives::Annulus,
+    mesh::Indices,
+    render::render_resource::PrimitiveTopology,
     world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady},
 };
 use core::time::Duration;
@@ -39,6 +42,11 @@ const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
 const LOBBED_PROJECTILE_LAUNCH_HEIGHT: f32 = 20.0;
 const STRAIGHT_PROJECTILE_CATCH_UP_MULTIPLIER: f32 = 3.0;
+const FIGHTER_RING_INNER_RADIUS: f32 = 18.0;
+const FIGHTER_RING_OUTER_RADIUS: f32 = 22.0;
+const FIGHTER_FACING_TIP_RADIUS: f32 = 28.0;
+const FIGHTER_FACING_HALF_ANGLE: f32 = 0.22;
+const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
 
 #[derive(Resource)]
 pub(crate) struct Primitive3dAssets {
@@ -47,7 +55,8 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) map_entity: Handle<Mesh>,
     pub(crate) debris: Handle<Mesh>,
     pub(crate) fighter: Handle<Mesh>,
-    pub(crate) direction: Handle<Mesh>,
+    pub(crate) sentry_direction: Handle<Mesh>,
+    pub(crate) fighter_facing: Handle<Mesh>,
     pub(crate) projectile: Handle<Mesh>,
     pub(crate) lobbed_projectile: Handle<Mesh>,
     pub(crate) unit_cuboid: Handle<Mesh>,
@@ -71,8 +80,6 @@ pub(crate) struct Material3dAssets {
     pub(crate) zone_fill: Handle<StandardMaterial>,
     pub(crate) zone_boundary: Handle<StandardMaterial>,
     pub(crate) terrain: Handle<StandardMaterial>,
-    pub(crate) health_back: Handle<StandardMaterial>,
-    pub(crate) health_fill: Handle<StandardMaterial>,
     pub(crate) preview: Handle<StandardMaterial>,
     pub(crate) preview_blocked: Handle<StandardMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
@@ -113,6 +120,7 @@ struct V3CharacterRuntime {
     visual_root: Entity,
     player: Entity,
     current: CharacterMotion,
+    bind_pose: Vec<(Entity, Transform)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -222,6 +230,10 @@ impl Plugin for WorldPresentationPlugin {
                     .after(PhysicsSystems::Writeback)
                     .before(TransformSystems::Propagate),
             )
+            .add_systems(
+                PostUpdate,
+                combat::project_fighter_overhead_ui.after(TransformSystems::Propagate),
+            )
             .add_observer(setup_imported_character);
     }
 }
@@ -241,13 +253,17 @@ fn setup_3d_foundation(
         map_entity: meshes.add(Cuboid::new(24.0, 24.0, 24.0)),
         debris: meshes.add(Cuboid::new(12.0, 8.0, 12.0)),
         fighter: meshes.add(Sphere::new(24.0)),
-        direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
+        sentry_direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
+        fighter_facing: meshes.add(fighter_facing_mesh()),
         projectile: meshes.add(Cylinder::new(4.0, 28.0)),
         lobbed_projectile: meshes.add(Sphere::new(9.0)),
         unit_cuboid: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
         sentry_base: meshes.add(Cylinder::new(22.0, 8.0)),
         sentry_body: meshes.add(Cylinder::new(15.0, 24.0)),
-        ground_ring: meshes.add(Annulus::new(18.0, 22.0)),
+        ground_ring: meshes.add(Annulus::new(
+            FIGHTER_RING_INNER_RADIUS,
+            FIGHTER_RING_OUTER_RADIUS,
+        )),
         effect_sphere: meshes.add(Sphere::new(1.0)),
     };
     let matte = |color: Color| StandardMaterial {
@@ -294,16 +310,6 @@ fn setup_3d_foundation(
             double_sided: true,
             cull_mode: None,
             ..matte(Color::srgb(0.44, 0.38, 0.29))
-        }),
-        health_back: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.025, 0.03, 0.04),
-            unlit: true,
-            ..default()
-        }),
-        health_fill: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.2, 0.95, 0.35),
-            unlit: true,
-            ..default()
         }),
         preview: materials.add(StandardMaterial {
             base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
@@ -400,6 +406,43 @@ fn setup_3d_foundation(
     ));
     spawn_pause_overlay(commands.reborrow());
     spawn_client_hud(commands);
+}
+
+fn fighter_facing_mesh() -> Mesh {
+    let mut positions = vec![[FIGHTER_FACING_TIP_RADIUS, 0.0, 0.0]];
+    for step in 0..=FIGHTER_FACING_ARC_SEGMENTS {
+        let progress = f32::from(step) / f32::from(FIGHTER_FACING_ARC_SEGMENTS);
+        let angle = FIGHTER_FACING_HALF_ANGLE * (1.0 - 2.0 * progress);
+        positions.push([
+            FIGHTER_RING_OUTER_RADIUS * angle.cos(),
+            FIGHTER_RING_OUTER_RADIUS * angle.sin(),
+            0.0,
+        ]);
+    }
+    let normals = vec![[0.0, 0.0, 1.0]; positions.len()];
+    let uvs = positions
+        .iter()
+        .map(|position| {
+            [
+                position[0] / (FIGHTER_FACING_TIP_RADIUS * 2.0) + 0.5,
+                position[1] / (FIGHTER_FACING_TIP_RADIUS * 2.0) + 0.5,
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut indices = Vec::with_capacity(FIGHTER_FACING_ARC_SEGMENTS as usize * 3);
+    for segment in 0..FIGHTER_FACING_ARC_SEGMENTS {
+        indices.extend([0, segment + 1, segment + 2]);
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U16(indices));
+    mesh
 }
 
 #[allow(
@@ -752,6 +795,7 @@ fn setup_imported_character(
     scene_roots: Query<&V3CharacterScene>,
     children: Query<&Children>,
     names: Query<&Name>,
+    transforms: Query<&Transform>,
     mut players: Query<&mut AnimationPlayer>,
     mut fallbacks: Query<(&V3FallbackVisual, &mut Visibility)>,
 ) {
@@ -772,6 +816,15 @@ fn setup_imported_character(
         warn!(owner = ?scene.owner, "imported fighter hierarchy misses arm-right or AnimationPlayer; retaining fallback");
         return;
     };
+    let bind_pose = descendants
+        .iter()
+        .filter_map(|entity| {
+            transforms
+                .get(*entity)
+                .ok()
+                .map(|transform| (*entity, *transform))
+        })
+        .collect();
     commands.entity(arm).with_children(|parent| {
         parent.spawn((
             WorldAssetRoot(imported.blaster_scene.clone()),
@@ -798,6 +851,7 @@ fn setup_imported_character(
         visual_root: scene.visual_root,
         player,
         current: CharacterMotion::Idle,
+        bind_pose,
     });
     for (fallback, mut visibility) in &mut fallbacks {
         if fallback.owner == scene.owner {
@@ -814,22 +868,29 @@ fn update_character_animation(
     imported: Option<Res<Imported3dAssets>>,
     time: Res<Time>,
     mut runtimes: Query<&mut V3CharacterRuntime>,
-    owners: Query<Option<&crate::combat::Defeated>, With<Fighter>>,
+    owners: Query<
+        (
+            &crate::combat::CurrentHealth,
+            Option<&crate::combat::Defeated>,
+        ),
+        With<Fighter>,
+    >,
     mut visuals: Query<&mut V3FighterVisual>,
     mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+    mut transforms: Query<&mut Transform>,
 ) {
     let Some(imported) = imported else {
         return;
     };
     for mut runtime in &mut runtimes {
-        let Ok(defeated) = owners.get(runtime.owner) else {
+        let Ok((health, defeated)) = owners.get(runtime.owner) else {
             continue;
         };
         let Ok(mut visual) = visuals.get_mut(runtime.visual_root) else {
             continue;
         };
         visual.shoot_seconds = (visual.shoot_seconds - time.delta_secs()).max(0.0);
-        let next = if defeated.is_some() {
+        let next = if character_is_visually_defeated(health.0, defeated.is_some()) {
             CharacterMotion::Defeated
         } else if visual.shoot_seconds > 0.0 {
             CharacterMotion::Shoot
@@ -840,6 +901,13 @@ fn update_character_animation(
         };
         if next == runtime.current {
             continue;
+        }
+        if runtime.current == CharacterMotion::Defeated && next != CharacterMotion::Defeated {
+            for (entity, bind_transform) in &runtime.bind_pose {
+                if let Ok(mut transform) = transforms.get_mut(*entity) {
+                    restore_bind_transform(&mut transform, bind_transform);
+                }
+            }
         }
         let Ok((mut player, mut transitions)) = players.get_mut(runtime.player) else {
             continue;
@@ -854,6 +922,14 @@ fn update_character_animation(
         play_character_motion(&mut player, &mut transitions, node, runtime.current, next);
         runtime.current = next;
     }
+}
+
+fn restore_bind_transform(transform: &mut Transform, bind_transform: &Transform) {
+    transform.clone_from(bind_transform);
+}
+
+fn character_is_visually_defeated(current_health: u16, has_defeated_marker: bool) -> bool {
+    has_defeated_marker && current_health == 0
 }
 
 fn play_character_motion(
@@ -1054,6 +1130,29 @@ mod tests {
     }
 
     #[test]
+    fn fighter_facing_indicator_is_a_small_arrow_with_a_ring_matched_back_arc() {
+        let mesh = fighter_facing_mesh();
+        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
+            bevy::mesh::VertexAttributeValues::Float32x3(positions) => positions,
+            _ => panic!("fighter facing positions use three-dimensional coordinates"),
+        };
+
+        assert_eq!(positions[0], [FIGHTER_FACING_TIP_RADIUS, 0.0, 0.0]);
+        assert_eq!(positions.len(), FIGHTER_FACING_ARC_SEGMENTS as usize + 2);
+        assert_eq!(
+            mesh.indices().map(Indices::len),
+            Some(FIGHTER_FACING_ARC_SEGMENTS as usize * 3)
+        );
+        for point in &positions[1..] {
+            assert!(
+                (Vec2::new(point[0], point[1]).length() - FIGHTER_RING_OUTER_RADIUS).abs() < 1e-4
+            );
+            assert!(point[0] < FIGHTER_FACING_TIP_RADIUS);
+        }
+        assert!((positions[1][1] + positions.last().unwrap()[1]).abs() < 1e-4);
+    }
+
+    #[test]
     fn attached_blaster_remains_aligned_with_fighter_root_facing() {
         let corrected_barrel = Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION)
             * Quat::from_rotation_y(KENNEY_BLASTER_GRIP_ROTATION)
@@ -1082,6 +1181,27 @@ mod tests {
         assert!(player.is_playing_animation(holding));
         assert_eq!(transitions.get_main_animation(), Some(holding));
         assert!(!player.animation(holding).unwrap().is_finished());
+    }
+
+    #[test]
+    fn respawn_restores_bind_channels_missing_from_the_live_clip() {
+        let bind_transform = Transform::from_translation(Vec3::new(0.0, 1.0, 0.0));
+        let mut transform = Transform {
+            translation: Vec3::new(0.0, -0.5, 0.4),
+            rotation: Quat::from_rotation_x(core::f32::consts::FRAC_PI_2),
+            ..default()
+        };
+
+        restore_bind_transform(&mut transform, &bind_transform);
+
+        assert_eq!(transform, bind_transform);
+    }
+
+    #[test]
+    fn restored_health_is_a_recovery_signal_if_marker_removal_arrives_late() {
+        assert!(character_is_visually_defeated(0, true));
+        assert!(!character_is_visually_defeated(100, true));
+        assert!(!character_is_visually_defeated(0, false));
     }
 
     fn map_app(snapshot: crate::map::ResolvedMapSnapshot) -> App {
@@ -1114,7 +1234,8 @@ mod tests {
             map_entity: Handle::default(),
             debris: Handle::default(),
             fighter: Handle::default(),
-            direction: Handle::default(),
+            sentry_direction: Handle::default(),
+            fighter_facing: Handle::default(),
             projectile: Handle::default(),
             lobbed_projectile: Handle::default(),
             unit_cuboid: Handle::default(),
@@ -1136,8 +1257,6 @@ mod tests {
             zone_fill: material.clone(),
             zone_boundary: material.clone(),
             terrain: material.clone(),
-            health_back: material.clone(),
-            health_fill: material.clone(),
             preview: material.clone(),
             preview_blocked: material.clone(),
             status_slow: material.clone(),

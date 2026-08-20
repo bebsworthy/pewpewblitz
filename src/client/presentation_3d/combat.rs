@@ -5,10 +5,12 @@ use crate::combat::client::{DeduplicatedCombatCue, MAX_PREVIEW_SEGMENTS, preview
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const PREVIEW_HEIGHT: f32 = 2.5;
-const HEALTH_HEIGHT: f32 = 72.0;
-const HEALTH_BACKGROUND_THICKNESS: f32 = 6.0;
-const HEALTH_FILL_THICKNESS: f32 = 4.0;
-const HEALTH_FILL_Y: f32 = HEALTH_BACKGROUND_THICKNESS / 2.0 + HEALTH_FILL_THICKNESS / 2.0 + 0.1;
+const OVERHEAD_WORLD_HEIGHT: f32 = 86.0;
+const OVERHEAD_WIDTH: f32 = 104.0;
+const OVERHEAD_HEALTH_HEIGHT: f32 = 37.0;
+const OVERHEAD_AMMO_HEIGHT: f32 = 50.0;
+const HEALTH_BAR_WIDTH: f32 = 76.8;
+const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const MAX_EFFECTS: usize = 96;
 
@@ -30,7 +32,6 @@ enum GroundMarkerRelation {
 #[derive(Clone, Copy)]
 struct FighterVisualIdentity {
     team: crate::combat::TeamId,
-    controlled: bool,
     marker_relation: GroundMarkerRelation,
 }
 
@@ -56,12 +57,25 @@ type GroundMarkerQuery<'w, 's> = Query<
 >;
 
 #[derive(Component)]
-pub(super) struct WorldHealthVisual3d {
+pub(super) struct FighterOverheadUi {
+    player_name: Entity,
+    health_amount: Entity,
     fill: Entity,
+    ammo_row: Entity,
+    ammo_segments: Vec<Entity>,
 }
 
 #[derive(Component)]
-pub(super) struct HealthFill3d;
+pub(super) struct FighterHealthFillUi;
+
+#[derive(Component)]
+pub(super) struct FighterOverheadTextUi;
+
+#[derive(Component)]
+pub(super) struct FighterAmmoRowUi;
+
+#[derive(Component)]
+pub(super) struct FighterAmmoSegmentUi;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct StatusVisual3d(StatusKind);
@@ -120,7 +134,7 @@ pub(super) fn reconcile_combat_visuals(
     fighter_visuals: Query<(Entity, &CombatVisualOwner), With<V3FighterVisual>>,
     projectile_visuals: Query<(Entity, &CombatVisualOwner), With<V3ProjectileVisual>>,
     sentry_visuals: Query<(Entity, &CombatVisualOwner), With<SentryVisual3d>>,
-    health_visuals: Query<(Entity, &CombatVisualOwner), With<WorldHealthVisual3d>>,
+    overhead_visuals: Query<(Entity, &CombatVisualOwner), With<FighterOverheadUi>>,
     trails: Query<(Entity, &CombatVisualOwner), With<DashTrailVisual3d>>,
     statuses: Query<(Entity, &CombatVisualOwner), With<StatusVisual3d>>,
     previews: Query<&WeaponPreviewVisual3d>,
@@ -129,7 +143,7 @@ pub(super) fn reconcile_combat_visuals(
     let fighter_roots = unique_roots(&mut commands, &fighter_visuals);
     let projectile_roots = unique_roots(&mut commands, &projectile_visuals);
     let sentry_roots = unique_roots(&mut commands, &sentry_visuals);
-    let health_roots = unique_roots(&mut commands, &health_visuals);
+    let overhead_roots = unique_roots(&mut commands, &overhead_visuals);
     let controlled_team = fighters
         .iter()
         .find_map(|(_, _, team, controlled)| controlled.then_some(*team));
@@ -146,13 +160,12 @@ pub(super) fn reconcile_combat_visuals(
                 position.0,
                 FighterVisualIdentity {
                     team: *team,
-                    controlled,
                     marker_relation: ground_marker_relation(*team, controlled, controlled_team),
                 },
             );
         }
-        if !health_roots.contains_key(&owner) {
-            spawn_health(&mut commands, &primitives, &materials, owner, position.0);
+        if !overhead_roots.contains_key(&owner) {
+            spawn_fighter_overhead(&mut commands, owner);
         }
     }
     for (owner, position, source, straight, lobbed) in &projectiles {
@@ -197,7 +210,7 @@ pub(super) fn reconcile_combat_visuals(
             commands.entity(root).despawn();
         }
     }
-    for (root, owner) in &health_visuals {
+    for (root, owner) in &overhead_visuals {
         if fighters.get(owner.0).is_err() {
             commands.entity(root).despawn();
         }
@@ -302,15 +315,14 @@ fn spawn_fighter(
             Name::new("V3 fighter team ring"),
         ));
         parent.spawn((
-            Mesh3d(primitives.direction.clone()),
-            MeshMaterial3d(if identity.controlled {
-                materials.neutral.clone()
-            } else {
-                team_material(identity.team, materials)
-            }),
+            FighterGroundMarker3d { owner },
+            Mesh3d(primitives.fighter_facing.clone()),
+            MeshMaterial3d(ground_marker_material(identity.marker_relation, materials)),
             NotShadowCaster,
-            Transform::from_xyz(27.0, 6.0, 0.0),
-            Name::new("V3 fighter facing"),
+            NotShadowReceiver,
+            Transform::from_xyz(0.0, GROUND_MARKER_HEIGHT, 0.0)
+                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
+            Name::new("V3 fighter ring facing indicator"),
         ));
     });
 }
@@ -413,7 +425,7 @@ fn spawn_sentry(
             Transform::from_xyz(0.0, 18.0, 0.0),
         ));
         parent.spawn((
-            Mesh3d(primitives.direction.clone()),
+            Mesh3d(primitives.sentry_direction.clone()),
             MeshMaterial3d(team_material(team, materials)),
             NotShadowCaster,
             Transform::from_xyz(25.0, 23.0, 0.0).with_scale(Vec3::new(0.8, 0.7, 0.7)),
@@ -421,48 +433,231 @@ fn spawn_sentry(
     });
 }
 
-fn spawn_health(
-    commands: &mut Commands,
-    primitives: &Primitive3dAssets,
-    materials: &Material3dAssets,
-    owner: Entity,
-    position: Vec2,
-) {
+fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity) {
+    let (player_name_container, player_name) = spawn_overhead_text(
+        commands,
+        0.0,
+        19.0,
+        PLAYER_NAME_FONT_SIZE,
+        "V3 fighter overhead player name",
+    );
+    let (health_amount_container, health_amount) = spawn_overhead_text(
+        commands,
+        14.0,
+        18.0,
+        15.0,
+        "V3 fighter overhead health amount",
+    );
     let fill = commands
         .spawn((
-            HealthFill3d,
-            Mesh3d(primitives.unit_cuboid.clone()),
-            MeshMaterial3d(materials.health_fill.clone()),
-            NotShadowCaster,
-            Transform::from_xyz(0.0, HEALTH_FILL_Y, 0.0).with_scale(Vec3::new(
-                52.0,
-                HEALTH_FILL_THICKNESS,
-                3.0,
-            )),
-            Name::new("V3 health fill"),
+            FighterHealthFillUi,
+            Node {
+                width: percent(100.0),
+                height: percent(100.0),
+                border_radius: BorderRadius::all(px(5.0)),
+                ..default()
+            },
+            BackgroundColor(Color::WHITE),
+            Name::new("V3 fighter overhead health fill"),
         ))
         .id();
-    let root = commands
+    let health_bar = commands
         .spawn((
-            CombatVisualOwner(owner),
-            WorldHealthVisual3d { fill },
-            Transform::from_translation(ground_position(position) + Vec3::Y * HEALTH_HEIGHT),
-            Visibility::default(),
-            Name::new("V3 world health visual root"),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px((OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5),
+                top: px(24.0),
+                width: px(HEALTH_BAR_WIDTH),
+                height: px(11.0),
+                padding: UiRect::all(px(2.0)),
+                overflow: Overflow::clip(),
+                border_radius: BorderRadius::all(px(6.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.025, 0.03, 0.04)),
+            Name::new("V3 fighter overhead rounded health bar"),
+        ))
+        .add_child(fill)
+        .id();
+    let ammo_row = commands
+        .spawn((
+            FighterAmmoRowUi,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px((OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5),
+                top: px(39.0),
+                width: px(HEALTH_BAR_WIDTH),
+                height: px(7.0),
+                column_gap: px(2.0),
+                ..default()
+            },
+            Visibility::Hidden,
+            Name::new("V3 fighter overhead ammunition row"),
         ))
         .id();
     commands
-        .entity(root)
-        .add_child(fill)
-        .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(primitives.unit_cuboid.clone()),
-                MeshMaterial3d(materials.health_back.clone()),
-                NotShadowCaster,
-                Transform::default().with_scale(Vec3::new(56.0, HEALTH_BACKGROUND_THICKNESS, 4.0)),
-                Name::new("V3 health background"),
-            ));
-        });
+        .spawn((
+            CombatVisualOwner(owner),
+            FighterOverheadUi {
+                player_name,
+                health_amount,
+                fill,
+                ammo_row,
+                ammo_segments: Vec::new(),
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(OVERHEAD_WIDTH),
+                height: px(OVERHEAD_HEALTH_HEIGHT),
+                ..default()
+            },
+            GlobalZIndex(120),
+            Visibility::Hidden,
+            Name::new("V3 fighter projected overhead UI"),
+        ))
+        .add_children(&[
+            player_name_container,
+            health_amount_container,
+            health_bar,
+            ammo_row,
+        ]);
+}
+
+fn spawn_overhead_text(
+    commands: &mut Commands,
+    top: f32,
+    height: f32,
+    font_size: f32,
+    name: &'static str,
+) -> (Entity, Entity) {
+    let text = commands
+        .spawn((
+            FighterOverheadTextUi,
+            Text::new(""),
+            TextFont::from_font_size(font_size),
+            TextColor(Color::WHITE),
+            TextShadow {
+                offset: Vec2::splat(1.5),
+                color: Color::BLACK,
+            },
+            TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            Name::new(name),
+        ))
+        .id();
+    let container = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(top),
+                left: px(0.0),
+                right: px(0.0),
+                width: percent(100.0),
+                height: px(height),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            GlobalZIndex(122),
+            Name::new(format!("{name} centered container")),
+        ))
+        .add_child(text)
+        .id();
+    (container, text)
+}
+
+fn overhead_name_color(relation: GroundMarkerRelation) -> Color {
+    match relation {
+        GroundMarkerRelation::Local => Color::srgb(0.18, 0.95, 0.36),
+        GroundMarkerRelation::Ally => Color::srgb(0.12, 0.72, 0.96),
+        GroundMarkerRelation::Enemy => Color::srgb(1.0, 0.18, 0.14),
+    }
+}
+
+fn overhead_health_color(relation: GroundMarkerRelation) -> Color {
+    match relation {
+        GroundMarkerRelation::Local | GroundMarkerRelation::Ally => Color::srgb(0.18, 0.92, 0.34),
+        GroundMarkerRelation::Enemy => Color::srgb(0.95, 0.14, 0.12),
+    }
+}
+
+fn ammo_segment_color(available: bool) -> Color {
+    if available {
+        Color::srgb(1.0, 0.55, 0.16)
+    } else {
+        Color::srgb(0.10, 0.14, 0.22)
+    }
+}
+
+fn overhead_height(has_ammunition: bool) -> f32 {
+    if has_ammunition {
+        OVERHEAD_AMMO_HEIGHT
+    } else {
+        OVERHEAD_HEALTH_HEIGHT
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the projection phase reads the propagated world camera and writes absolute UI nodes"
+)]
+pub(super) fn project_fighter_overhead_ui(
+    cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
+    fighters: Query<
+        (
+            &Position,
+            &crate::combat::CurrentHealth,
+            Option<&crate::combat::Defeated>,
+        ),
+        With<Fighter>,
+    >,
+    mut overheads: Query<
+        (
+            &CombatVisualOwner,
+            &FighterOverheadUi,
+            &mut Node,
+            &mut Visibility,
+        ),
+        With<FighterOverheadUi>,
+    >,
+) {
+    let Ok((camera, camera_transform)) = cameras.single() else {
+        for (_, _, _, mut visibility) in &mut overheads {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let Some(viewport_size) = camera.logical_viewport_size() else {
+        return;
+    };
+    for (owner, overhead, mut node, mut visibility) in &mut overheads {
+        let Ok((position, health, defeated)) = fighters.get(owner.0) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        if character_is_visually_defeated(health.0, defeated.is_some()) {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        let world_position = ground_position(position.0) + Vec3::Y * OVERHEAD_WORLD_HEIGHT;
+        let Ok(viewport) = camera.world_to_viewport(camera_transform, world_position) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let height = overhead_height(!overhead.ammo_segments.is_empty());
+        let top_left = viewport - Vec2::new(OVERHEAD_WIDTH * 0.5, height);
+        if top_left.x + OVERHEAD_WIDTH < 0.0
+            || top_left.x > viewport_size.x
+            || top_left.y + height < 0.0
+            || top_left.y > viewport_size.y
+        {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        node.left = px(top_left.x);
+        node.top = px(top_left.y);
+        node.height = px(height);
+        *visibility = Visibility::Inherited;
+    }
 }
 
 #[allow(
@@ -493,22 +688,24 @@ pub(super) fn update_combat_visual_state(
             Option<&crate::combat::KnockbackFeedback>,
             Option<&crate::builds::AbilityState>,
             Option<&crate::builds::ResolvedMatchLoadout>,
+            &crate::combat::TeamId,
+            Option<&crate::matchplay::FighterDisplayName>,
+            Option<&crate::combat::WeaponState>,
             Has<Controlled>,
         ),
         With<Fighter>,
     >,
-    mut health_roots: Query<
-        (&CombatVisualOwner, &WorldHealthVisual3d, &mut Visibility),
+    mut overhead_roots: Query<
+        (&CombatVisualOwner, &mut FighterOverheadUi, &mut Visibility),
         Without<WeaponPreviewVisual3d>,
     >,
-    mut fill_transforms: Query<
-        &mut Transform,
-        (
-            With<HealthFill3d>,
-            Without<DashTrailVisual3d>,
-            Without<WeaponPreviewVisual3d>,
-        ),
+    mut fill_nodes: Query<&mut Node, With<FighterHealthFillUi>>,
+    mut overhead_texts: Query<(&mut Text, &mut TextColor), With<FighterOverheadTextUi>>,
+    mut overhead_colors: Query<
+        &mut BackgroundColor,
+        Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentUi>)>,
     >,
+    mut ammo_rows: Query<&mut Visibility, (With<FighterAmmoRowUi>, Without<FighterOverheadUi>)>,
     mut statuses: Query<(Entity, &CombatVisualOwner, &StatusVisual3d)>,
     mut trails: Query<
         (
@@ -517,7 +714,7 @@ pub(super) fn update_combat_visual_state(
             &mut DashTrailVisual3d,
             &mut Transform,
         ),
-        (Without<HealthFill3d>, Without<WeaponPreviewVisual3d>),
+        (Without<FighterHealthFillUi>, Without<WeaponPreviewVisual3d>),
     >,
     mut previews: Query<
         (
@@ -527,15 +724,21 @@ pub(super) fn update_combat_visual_state(
             &mut MeshMaterial3d<StandardMaterial>,
         ),
         (
-            Without<HealthFill3d>,
+            Without<FighterHealthFillUi>,
             Without<DashTrailVisual3d>,
-            Without<WorldHealthVisual3d>,
+            Without<FighterOverheadUi>,
+            Without<FighterAmmoRowUi>,
         ),
     >,
 ) {
     let mut desired_status = HashSet::new();
     let mut fighter_data = HashMap::new();
     let mut controlled = None;
+    let controlled_team = fighters.iter().find_map(
+        |(_, _, _, _, _, _, _, _, _, _, _, team, _, _, is_controlled)| {
+            is_controlled.then_some(*team)
+        },
+    );
     for (
         entity,
         position,
@@ -548,6 +751,9 @@ pub(super) fn update_combat_visual_state(
         knockback,
         ability,
         loadout,
+        team,
+        display_name,
+        weapon,
         is_controlled,
     ) in &fighters
     {
@@ -559,7 +765,19 @@ pub(super) fn update_combat_visual_state(
             },
             |value| value.fighter_stats.maximum_health,
         );
-        fighter_data.insert(entity, (position.0, health.0, maximum, defeated.is_some()));
+        fighter_data.insert(
+            entity,
+            (
+                position.0,
+                health.0,
+                maximum,
+                defeated.is_some(),
+                ground_marker_relation(*team, is_controlled, controlled_team),
+                display_name.map_or("Player", |name| name.0.as_str()),
+                weapon.map_or(0, |state| state.ammo),
+                loadout.map_or(0, |value| value.primary_weapon.recipe.economy.capacity()),
+            ),
+        );
         if defeated.is_none() {
             if effects.is_some_and(|value| {
                 value.slow.is_some_and(|slow| {
@@ -608,8 +826,10 @@ pub(super) fn update_combat_visual_state(
         }
     }
 
-    for (owner, health, mut visibility) in &mut health_roots {
-        let Some((_, current, maximum, defeated)) = fighter_data.get(&owner.0) else {
+    for (owner, mut overhead, mut visibility) in &mut overhead_roots {
+        let Some((_, current, maximum, defeated, relation, name, ammo, capacity)) =
+            fighter_data.get(&owner.0)
+        else {
             *visibility = Visibility::Hidden;
             continue;
         };
@@ -619,9 +839,61 @@ pub(super) fn update_combat_visual_state(
             Visibility::Inherited
         };
         let ratio = (f32::from(*current) / f32::from((*maximum).max(1))).clamp(0.0, 1.0);
-        if let Ok(mut fill) = fill_transforms.get_mut(health.fill) {
-            fill.scale.x = 52.0 * ratio;
-            fill.translation.x = -26.0 * (1.0 - ratio);
+        if let Ok(mut fill) = fill_nodes.get_mut(overhead.fill) {
+            fill.width = percent(ratio * 100.0);
+        }
+        if let Ok(mut color) = overhead_colors.get_mut(overhead.fill) {
+            color.0 = overhead_health_color(*relation);
+        }
+        if let Ok((mut text, mut color)) = overhead_texts.get_mut(overhead.player_name) {
+            if text.0 != *name {
+                text.0 = (*name).to_string();
+            }
+            color.0 = overhead_name_color(*relation);
+        }
+        if let Ok((mut text, _)) = overhead_texts.get_mut(overhead.health_amount) {
+            let amount = current.to_string();
+            if text.0 != amount {
+                text.0 = amount;
+            }
+        }
+
+        let show_ammo = *relation == GroundMarkerRelation::Local && *capacity > 0;
+        if let Ok(mut ammo_visibility) = ammo_rows.get_mut(overhead.ammo_row) {
+            *ammo_visibility = if show_ammo {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+        let desired_segments = if show_ammo { usize::from(*capacity) } else { 0 };
+        if overhead.ammo_segments.len() != desired_segments {
+            for segment in overhead.ammo_segments.drain(..) {
+                commands.entity(segment).despawn();
+            }
+            commands.entity(overhead.ammo_row).with_children(|parent| {
+                for _ in 0..desired_segments {
+                    let segment = parent
+                        .spawn((
+                            FighterAmmoSegmentUi,
+                            Node {
+                                flex_grow: 1.0,
+                                height: percent(100.0),
+                                border_radius: BorderRadius::all(px(2.5)),
+                                ..default()
+                            },
+                            BackgroundColor(ammo_segment_color(false)),
+                            Name::new("V3 fighter ammunition segment"),
+                        ))
+                        .id();
+                    overhead.ammo_segments.push(segment);
+                }
+            });
+        }
+        for (index, segment) in overhead.ammo_segments.iter().enumerate() {
+            if let Ok(mut color) = overhead_colors.get_mut(*segment) {
+                color.0 = ammo_segment_color(index < usize::from(*ammo));
+            }
         }
     }
 
@@ -823,15 +1095,6 @@ pub(super) fn write_combat_visual_poses(
             Without<V3ProjectileVisual>,
         ),
     >,
-    mut health_visuals: Query<
-        (&CombatVisualOwner, &mut Transform),
-        (
-            With<WorldHealthVisual3d>,
-            Without<V3FighterVisual>,
-            Without<V3ProjectileVisual>,
-            Without<SentryVisual3d>,
-        ),
-    >,
     mut status_visuals: Query<
         (&CombatVisualOwner, &mut Transform),
         (
@@ -839,7 +1102,6 @@ pub(super) fn write_combat_visual_poses(
             Without<V3FighterVisual>,
             Without<V3ProjectileVisual>,
             Without<SentryVisual3d>,
-            Without<WorldHealthVisual3d>,
         ),
     >,
 ) {
@@ -889,12 +1151,6 @@ pub(super) fn write_combat_visual_poses(
             transform.rotation = ground_rotation(*rotation);
         }
     }
-    for (owner, mut transform) in &mut health_visuals {
-        if let Ok((position, _)) = fighter_owners.get(owner.0) {
-            transform.translation = ground_position(position.0) + Vec3::Y * HEALTH_HEIGHT;
-            transform.rotation = Quat::IDENTITY;
-        }
-    }
     for (owner, mut transform) in &mut status_visuals {
         if let Ok((position, _)) = fighter_owners.get(owner.0) {
             let height = transform.translation.y;
@@ -906,6 +1162,13 @@ pub(super) fn write_combat_visual_poses(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn combat_visual_state_queries_are_runtime_disjoint() {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(update_combat_visual_state);
+        schedule.initialize(&mut World::new()).unwrap();
+    }
 
     #[test]
     fn independent_root_maps_positive_and_negative_simulation_y_once() {
@@ -941,22 +1204,32 @@ mod tests {
     }
 
     #[test]
-    fn health_ratio_is_clamped_and_offsets_fill_from_the_left_edge() {
-        let mut transform =
-            Transform::default().with_scale(Vec3::new(52.0, HEALTH_FILL_THICKNESS, 3.0));
-        let ratio = (25.0_f32 / 100.0).clamp(0.0, 1.0);
-        transform.scale.x = 52.0 * ratio;
-        transform.translation.x = -26.0 * (1.0 - ratio);
-        assert!((transform.scale.x - 13.0).abs() < f32::EPSILON);
-        assert!((transform.translation.x + 19.5).abs() < f32::EPSILON);
+    fn overhead_relation_colors_distinguish_names_and_health() {
+        assert_ne!(
+            overhead_name_color(GroundMarkerRelation::Local),
+            overhead_name_color(GroundMarkerRelation::Ally)
+        );
+        assert_eq!(
+            overhead_health_color(GroundMarkerRelation::Local),
+            overhead_health_color(GroundMarkerRelation::Ally)
+        );
+        assert_ne!(
+            overhead_health_color(GroundMarkerRelation::Ally),
+            overhead_health_color(GroundMarkerRelation::Enemy)
+        );
     }
 
     #[test]
-    fn health_fill_is_above_the_background_instead_of_occluded_inside_it() {
-        let background_top = HEALTH_BACKGROUND_THICKNESS / 2.0;
-        let fill_bottom = HEALTH_FILL_Y - HEALTH_FILL_THICKNESS / 2.0;
+    fn ammunition_segments_distinguish_available_shots() {
+        assert_ne!(ammo_segment_color(true), ammo_segment_color(false));
+    }
 
-        assert!(fill_bottom > background_top);
+    #[test]
+    fn compact_overhead_reserves_ammunition_height_only_for_the_local_player() {
+        assert_eq!(HEALTH_BAR_WIDTH, 76.8);
+        assert_eq!(PLAYER_NAME_FONT_SIZE, 12.8);
+        assert_eq!(overhead_height(false), OVERHEAD_HEALTH_HEIGHT);
+        assert!(overhead_height(false) < overhead_height(true));
     }
 
     #[test]
