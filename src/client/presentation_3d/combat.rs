@@ -6,10 +6,54 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 const PREVIEW_HEIGHT: f32 = 2.5;
 const HEALTH_HEIGHT: f32 = 72.0;
+const HEALTH_BACKGROUND_THICKNESS: f32 = 6.0;
+const HEALTH_FILL_THICKNESS: f32 = 4.0;
+const HEALTH_FILL_Y: f32 = HEALTH_BACKGROUND_THICKNESS / 2.0 + HEALTH_FILL_THICKNESS / 2.0 + 0.1;
+const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const MAX_EFFECTS: usize = 96;
 
 #[derive(Component)]
 pub(super) struct SentryVisual3d;
+
+#[derive(Component)]
+pub(super) struct FighterGroundMarker3d {
+    owner: Entity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GroundMarkerRelation {
+    Local,
+    Ally,
+    Enemy,
+}
+
+#[derive(Clone, Copy)]
+struct FighterVisualIdentity {
+    team: crate::combat::TeamId,
+    controlled: bool,
+    marker_relation: GroundMarkerRelation,
+}
+
+type FighterPresentationQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Position,
+        &'static crate::combat::TeamId,
+        Has<Controlled>,
+    ),
+    With<Fighter>,
+>;
+
+type GroundMarkerQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static FighterGroundMarker3d,
+        &'static mut MeshMaterial3d<StandardMaterial>,
+    ),
+>;
 
 #[derive(Component)]
 pub(super) struct WorldHealthVisual3d {
@@ -58,7 +102,7 @@ pub(super) fn reconcile_combat_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
-    fighters: Query<(Entity, &Position, &crate::combat::TeamId, Has<Controlled>), With<Fighter>>,
+    fighters: FighterPresentationQuery,
     projectiles: Query<
         (
             Entity,
@@ -80,11 +124,17 @@ pub(super) fn reconcile_combat_visuals(
     trails: Query<(Entity, &CombatVisualOwner), With<DashTrailVisual3d>>,
     statuses: Query<(Entity, &CombatVisualOwner), With<StatusVisual3d>>,
     previews: Query<&WeaponPreviewVisual3d>,
+    mut ground_markers: GroundMarkerQuery,
 ) {
     let fighter_roots = unique_roots(&mut commands, &fighter_visuals);
     let projectile_roots = unique_roots(&mut commands, &projectile_visuals);
     let sentry_roots = unique_roots(&mut commands, &sentry_visuals);
     let health_roots = unique_roots(&mut commands, &health_visuals);
+    let controlled_team = fighters
+        .iter()
+        .find_map(|(_, _, team, controlled)| controlled.then_some(*team));
+
+    update_ground_markers(&fighters, &mut ground_markers, controlled_team, &materials);
 
     for (owner, position, team, controlled) in &fighters {
         if !fighter_roots.contains_key(&owner) {
@@ -94,8 +144,11 @@ pub(super) fn reconcile_combat_visuals(
                 &materials,
                 owner,
                 position.0,
-                *team,
-                controlled,
+                FighterVisualIdentity {
+                    team: *team,
+                    controlled,
+                    marker_relation: ground_marker_relation(*team, controlled, controlled_team),
+                },
             );
         }
         if !health_roots.contains_key(&owner) {
@@ -175,6 +228,25 @@ pub(super) fn reconcile_combat_visuals(
     }
 }
 
+fn update_ground_markers(
+    fighters: &FighterPresentationQuery,
+    ground_markers: &mut GroundMarkerQuery,
+    controlled_team: Option<crate::combat::TeamId>,
+    materials: &Material3dAssets,
+) {
+    for (marker, mut material) in ground_markers {
+        if let Ok((_, _, team, controlled)) = fighters.get(marker.owner) {
+            let desired = ground_marker_material(
+                ground_marker_relation(*team, controlled, controlled_team),
+                materials,
+            );
+            if material.0 != desired {
+                material.0 = desired;
+            }
+        }
+    }
+}
+
 fn unique_roots<T: Component>(
     commands: &mut Commands,
     roots: &Query<(Entity, &CombatVisualOwner), With<T>>,
@@ -196,8 +268,7 @@ fn spawn_fighter(
     materials: &Material3dAssets,
     owner: Entity,
     position: Vec2,
-    team: crate::combat::TeamId,
-    controlled: bool,
+    identity: FighterVisualIdentity,
 ) {
     let root = commands
         .spawn((
@@ -216,29 +287,57 @@ fn spawn_fighter(
         parent.spawn((
             V3FallbackVisual { owner },
             Mesh3d(primitives.fighter.clone()),
-            MeshMaterial3d(team_material(team, materials)),
+            MeshMaterial3d(team_material(identity.team, materials)),
             Transform::from_xyz(0.0, 24.0, 0.0),
             Name::new("V3 fighter fallback"),
         ));
         parent.spawn((
+            FighterGroundMarker3d { owner },
             Mesh3d(primitives.ground_ring.clone()),
-            MeshMaterial3d(team_material(team, materials)),
+            MeshMaterial3d(ground_marker_material(identity.marker_relation, materials)),
             NotShadowCaster,
-            Transform::from_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
+            NotShadowReceiver,
+            Transform::from_xyz(0.0, GROUND_MARKER_HEIGHT, 0.0)
+                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
             Name::new("V3 fighter team ring"),
         ));
         parent.spawn((
             Mesh3d(primitives.direction.clone()),
-            MeshMaterial3d(if controlled {
+            MeshMaterial3d(if identity.controlled {
                 materials.neutral.clone()
             } else {
-                team_material(team, materials)
+                team_material(identity.team, materials)
             }),
             NotShadowCaster,
             Transform::from_xyz(27.0, 6.0, 0.0),
             Name::new("V3 fighter facing"),
         ));
     });
+}
+
+fn ground_marker_relation(
+    team: crate::combat::TeamId,
+    controlled: bool,
+    controlled_team: Option<crate::combat::TeamId>,
+) -> GroundMarkerRelation {
+    if controlled {
+        GroundMarkerRelation::Local
+    } else if controlled_team == Some(team) {
+        GroundMarkerRelation::Ally
+    } else {
+        GroundMarkerRelation::Enemy
+    }
+}
+
+fn ground_marker_material(
+    relation: GroundMarkerRelation,
+    materials: &Material3dAssets,
+) -> Handle<StandardMaterial> {
+    match relation {
+        GroundMarkerRelation::Local => materials.marker_local.clone(),
+        GroundMarkerRelation::Ally => materials.marker_ally.clone(),
+        GroundMarkerRelation::Enemy => materials.marker_enemy.clone(),
+    }
 }
 
 #[allow(
@@ -335,7 +434,11 @@ fn spawn_health(
             Mesh3d(primitives.unit_cuboid.clone()),
             MeshMaterial3d(materials.health_fill.clone()),
             NotShadowCaster,
-            Transform::from_xyz(0.0, 0.8, 0.0).with_scale(Vec3::new(52.0, 4.0, 3.0)),
+            Transform::from_xyz(0.0, HEALTH_FILL_Y, 0.0).with_scale(Vec3::new(
+                52.0,
+                HEALTH_FILL_THICKNESS,
+                3.0,
+            )),
             Name::new("V3 health fill"),
         ))
         .id();
@@ -356,7 +459,7 @@ fn spawn_health(
                 Mesh3d(primitives.unit_cuboid.clone()),
                 MeshMaterial3d(materials.health_back.clone()),
                 NotShadowCaster,
-                Transform::default().with_scale(Vec3::new(56.0, 6.0, 4.0)),
+                Transform::default().with_scale(Vec3::new(56.0, HEALTH_BACKGROUND_THICKNESS, 4.0)),
                 Name::new("V3 health background"),
             ));
         });
@@ -839,11 +942,43 @@ mod tests {
 
     #[test]
     fn health_ratio_is_clamped_and_offsets_fill_from_the_left_edge() {
-        let mut transform = Transform::default().with_scale(Vec3::new(52.0, 4.0, 3.0));
+        let mut transform =
+            Transform::default().with_scale(Vec3::new(52.0, HEALTH_FILL_THICKNESS, 3.0));
         let ratio = (25.0_f32 / 100.0).clamp(0.0, 1.0);
         transform.scale.x = 52.0 * ratio;
         transform.translation.x = -26.0 * (1.0 - ratio);
         assert!((transform.scale.x - 13.0).abs() < f32::EPSILON);
         assert!((transform.translation.x + 19.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn health_fill_is_above_the_background_instead_of_occluded_inside_it() {
+        let background_top = HEALTH_BACKGROUND_THICKNESS / 2.0;
+        let fill_bottom = HEALTH_FILL_Y - HEALTH_FILL_THICKNESS / 2.0;
+
+        assert!(fill_bottom > background_top);
+    }
+
+    #[test]
+    fn ground_marker_colors_are_relative_to_the_controlled_fighter() {
+        let local_team = Some(crate::combat::TeamId(1));
+
+        assert_eq!(
+            ground_marker_relation(crate::combat::TeamId(1), true, local_team),
+            GroundMarkerRelation::Local
+        );
+        assert_eq!(
+            ground_marker_relation(crate::combat::TeamId(1), false, local_team),
+            GroundMarkerRelation::Ally
+        );
+        assert_eq!(
+            ground_marker_relation(crate::combat::TeamId(0), false, local_team),
+            GroundMarkerRelation::Enemy
+        );
+    }
+
+    #[test]
+    fn ground_marker_is_lifted_above_the_floor_plane() {
+        assert!(GROUND_MARKER_HEIGHT > 0.0);
     }
 }

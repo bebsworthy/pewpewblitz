@@ -334,6 +334,10 @@ context only.
 
 | Feedback | Decision | Verification |
 |---|---|---|
+| Imported character faced opposite the targeting line | Implemented during verification by correcting the Kenney model's local `+Z` front to the fighter root's `+X` convention | Focused transform regression test plus supervised visual recheck |
+| World health bars appeared grey instead of showing the green fill | Implemented during verification: the fill now sits above rather than inside the background cuboid and both readability materials are unlit | Geometry regression test plus supervised visual recheck |
+| Respawned characters retained the completed defeated pose | Implemented during verification by clearing the one-shot animation and its transition state before starting the live holding loop | Focused animation-state regression test plus supervised respawn recheck |
+| Fighter ground circles appeared broken and did not distinguish the local player from allies | Implemented during verification: markers are lifted off the floor to prevent depth fighting, use dedicated unlit/non-shadow-receiving materials, and resolve green/blue/red relative to the controlled fighter | Focused relation and floor-separation regression tests plus supervised visual recheck |
 | Awaiting supervised playtest after verification | — | — |
 
 ### Learn-from-errors review

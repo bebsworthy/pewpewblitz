@@ -8,7 +8,7 @@ use bevy::{
     camera::{ScalingMode, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
     gltf::Gltf,
-    light::{GlobalAmbientLight, NotShadowCaster},
+    light::{GlobalAmbientLight, NotShadowCaster, NotShadowReceiver},
     math::primitives::Annulus,
     world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady},
 };
@@ -30,10 +30,10 @@ use coordinates::{ground_extents, ground_point, ground_position, ground_rotation
 const WALL_HEIGHT: f32 = 72.0;
 const GROUND_OFFSET: f32 = 1.0;
 const ZONE_RING_WIDTH: f32 = 28.0;
-// Kenney's Mini Characters face local -Z, while Brawler fighter roots face local +X.
-const KENNEY_CHARACTER_FORWARD_CORRECTION: f32 = -core::f32::consts::FRAC_PI_2;
-// Blaster Kit barrels point local +Z. Turn the weapon toward the character's local -Z facing.
-const KENNEY_BLASTER_GRIP_ROTATION: f32 = core::f32::consts::PI;
+// Kenney's Mini Characters face local +Z, while Brawler fighter roots face local +X.
+const KENNEY_CHARACTER_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
+// Blaster Kit barrels also point local +Z, so the corrected character hierarchy needs no extra yaw.
+const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 // Keep a straight shot nearly on its authoritative plane. A larger lift produces a strong
 // screen-space parallax offset under the tilted orthographic camera and makes it miss the muzzle.
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
@@ -64,6 +64,9 @@ pub(crate) struct Material3dAssets {
     pub(crate) perimeter: Handle<StandardMaterial>,
     pub(crate) team_blue: Handle<StandardMaterial>,
     pub(crate) team_red: Handle<StandardMaterial>,
+    pub(crate) marker_local: Handle<StandardMaterial>,
+    pub(crate) marker_ally: Handle<StandardMaterial>,
+    pub(crate) marker_enemy: Handle<StandardMaterial>,
     pub(crate) neutral: Handle<StandardMaterial>,
     pub(crate) zone_fill: Handle<StandardMaterial>,
     pub(crate) zone_boundary: Handle<StandardMaterial>,
@@ -259,6 +262,21 @@ fn setup_3d_foundation(
         perimeter: materials.add(matte(Color::srgb(0.25, 0.72, 0.92))),
         team_blue: materials.add(matte(Color::srgb(0.12, 0.72, 0.96))),
         team_red: materials.add(matte(Color::srgb(1.0, 0.42, 0.12))),
+        marker_local: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.18, 0.95, 0.36),
+            unlit: true,
+            ..default()
+        }),
+        marker_ally: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.12, 0.72, 0.96),
+            unlit: true,
+            ..default()
+        }),
+        marker_enemy: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.18, 0.14),
+            unlit: true,
+            ..default()
+        }),
         neutral: materials.add(matte(Color::srgb(0.72, 0.76, 0.82))),
         zone_fill: materials.add(StandardMaterial {
             base_color: Color::srgba(0.2, 0.5, 0.95, 0.30),
@@ -277,8 +295,16 @@ fn setup_3d_foundation(
             cull_mode: None,
             ..matte(Color::srgb(0.44, 0.38, 0.29))
         }),
-        health_back: materials.add(matte(Color::srgb(0.025, 0.03, 0.04))),
-        health_fill: materials.add(matte(Color::srgb(0.2, 0.95, 0.35))),
+        health_back: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.025, 0.03, 0.04),
+            unlit: true,
+            ..default()
+        }),
+        health_fill: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.2, 0.95, 0.35),
+            unlit: true,
+            ..default()
+        }),
         preview: materials.add(StandardMaterial {
             base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
             alpha_mode: AlphaMode::Blend,
@@ -825,11 +851,32 @@ fn update_character_animation(
             CharacterMotion::Shoot => imported.shoot,
             CharacterMotion::Defeated => imported.defeated,
         };
-        let animation = transitions.play(&mut player, node, Duration::from_millis(100));
-        if !matches!(next, CharacterMotion::Shoot | CharacterMotion::Defeated) {
-            animation.repeat();
-        }
+        play_character_motion(&mut player, &mut transitions, node, runtime.current, next);
         runtime.current = next;
+    }
+}
+
+fn play_character_motion(
+    player: &mut AnimationPlayer,
+    transitions: &mut AnimationTransitions,
+    node: AnimationNodeIndex,
+    previous: CharacterMotion,
+    next: CharacterMotion,
+) {
+    let recovered_from_defeat =
+        previous == CharacterMotion::Defeated && next != CharacterMotion::Defeated;
+    if recovered_from_defeat {
+        player.stop_all();
+        *transitions = AnimationTransitions::new();
+    }
+    let duration = if recovered_from_defeat {
+        Duration::ZERO
+    } else {
+        Duration::from_millis(100)
+    };
+    let animation = transitions.play(player, node, duration);
+    if !matches!(next, CharacterMotion::Shoot | CharacterMotion::Defeated) {
+        animation.repeat();
     }
 }
 
@@ -999,6 +1046,44 @@ fn tint_3d_zone(
 mod tests {
     use super::*;
 
+    #[test]
+    fn imported_character_front_aligns_with_fighter_root_facing() {
+        let corrected_front = Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION) * Vec3::Z;
+
+        assert!(corrected_front.abs_diff_eq(Vec3::X, 1e-5));
+    }
+
+    #[test]
+    fn attached_blaster_remains_aligned_with_fighter_root_facing() {
+        let corrected_barrel = Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION)
+            * Quat::from_rotation_y(KENNEY_BLASTER_GRIP_ROTATION)
+            * Vec3::Z;
+
+        assert!(corrected_barrel.abs_diff_eq(Vec3::X, 1e-5));
+    }
+
+    #[test]
+    fn respawn_stops_defeated_pose_before_starting_live_loop() {
+        let defeated = AnimationNodeIndex::new(0);
+        let holding = AnimationNodeIndex::new(1);
+        let mut player = AnimationPlayer::default();
+        let mut transitions = AnimationTransitions::new();
+        transitions.play(&mut player, defeated, Duration::ZERO);
+
+        play_character_motion(
+            &mut player,
+            &mut transitions,
+            holding,
+            CharacterMotion::Defeated,
+            CharacterMotion::Holding,
+        );
+
+        assert!(!player.is_playing_animation(defeated));
+        assert!(player.is_playing_animation(holding));
+        assert_eq!(transitions.get_main_animation(), Some(holding));
+        assert!(!player.animation(holding).unwrap().is_finished());
+    }
+
     fn map_app(snapshot: crate::map::ResolvedMapSnapshot) -> App {
         let mut app = App::new();
         app.add_plugins((
@@ -1044,6 +1129,9 @@ mod tests {
             perimeter: material.clone(),
             team_blue: material.clone(),
             team_red: material.clone(),
+            marker_local: material.clone(),
+            marker_ally: material.clone(),
+            marker_enemy: material.clone(),
             neutral: material.clone(),
             zone_fill: material.clone(),
             zone_boundary: material.clone(),
