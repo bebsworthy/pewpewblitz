@@ -4,14 +4,15 @@
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
+| Status | Complete |
 | Prepared | 2026-08-19; reconciled after M03 completion and user-approved review fixes |
 | Objective | Let an authenticated lobby player compose a bounded build, submit it with one selected advertised game type, receive an authoritative immutable queue ticket, inspect honest aggregate pool state, and cancel without leaving the lobby |
 | Entry dependency | Satisfied 2026-08-19: M03 is complete; its delivered lobby catalog, client flow, overlay, persistence-error, and session-loss seams are reconciled below |
 | Scope authority | User validated the specification and directed implementation on 2026-08-19 |
 
-M04 research began while M03 was implementing. M03 is now complete and the user validated this
-specification by directing implementation on 2026-08-19.
+M04 research began while M03 was implementing. M03 is complete, the user validated this
+specification by directing implementation on 2026-08-19, and explicitly directed M04 closeout on
+2026-08-19 after five implementation-review passes and the final automated verification matrix.
 
 ## Player-visible outcome
 
@@ -911,9 +912,10 @@ Implementation was authorized by the user on 2026-08-19.
 
 - [x] M03 is complete and its final delivered seams are reconciled here.
 - [x] The user validated the final M04 specification by directing implementation on 2026-08-19.
-- [ ] Build Editor supports every current preset/custom choice with honest budget, preview, precise
+- [x] Build Editor supports every current preset/custom choice with honest budget, preview, precise
   invalid feedback, visible option costs and meaningful tradeoffs, and controller/keyboard/mouse
-  operation.
+  input mappings. The unexecuted physical-controller feel and full layout matrix are explicitly
+  deferred as `V2-M04-MANUAL-MATRIX` by the user's closeout direction.
 - [x] Last server-accepted build survives restart when valid and missing/malformed/stale/save-failed
   local data fails safely without altering queue authority.
 - [x] The lobby admits queue intent only from sessions authenticated at frame start, atomically
@@ -944,9 +946,11 @@ Implementation was authorized by the user on 2026-08-19.
   player, ticket, request, build, capability, or address identity.
 - [x] M04 product composition never allocates a worker; M01 transition and direct-match behavioral
   baselines remain explicit and green.
-- [ ] Focused pure/ECS/protocol/network/process/role and representative visual/controller evidence
-  pass.
-- [ ] User playtest feedback is recorded and triaged before M04 is marked `Complete`.
+- [x] Focused pure/ECS/protocol/network/process/role evidence passes. Representative visual and
+  physical-controller execution is not claimed and is explicitly deferred as
+  `V2-M04-MANUAL-MATRIX` by the user's closeout direction.
+- [x] The user directed M04 closure on 2026-08-19 without additional defect feedback; the remaining
+  manual matrix is recorded as a visible deferred item rather than silently treated as passing.
 
 ## Research record
 
@@ -1229,8 +1233,9 @@ process/runtime/isolation suites. The routed smoke completed the two-client
 lobby-to-match-to-fresh-lobby transition, while the direct-UDP baseline completed with both clients
 exiting successfully.
 
-The remaining open gates are unchanged: representative visual inspection, physical-controller
-playtest, and feedback triage. M04 remains `User playtest` until those observations are recorded.
+At that review point, the remaining open gates were representative visual inspection,
+physical-controller playtest, and feedback triage, so M04 remained `User playtest` pending a final
+user disposition.
 
 ### Implementation review remediation — 2026-08-19, fifth pass
 
@@ -1257,34 +1262,46 @@ Remediation:
 Post-remediation verification passed `just check`, `just lint`, `just server-features`, and
 `just test`, followed by `just network-product-queue-smoke`. The resulting matrix contains 343
 client tests, 293 server tests, 81 serial separate-App/UDP network tests, 14 performance gates, and
-79 routing unit tests plus its process/runtime/isolation suites. The remaining open gates are
-unchanged: representative visual inspection, physical-controller playtest, and feedback triage.
-M04 remains `User playtest` until those observations are recorded.
+79 routing unit tests plus its process/runtime/isolation suites. At that review point, the remaining
+open gates were representative visual inspection, physical-controller playtest, and feedback
+triage, so M04 remained `User playtest` pending a final user disposition.
 
-## Open user playtest record
+## User feedback and closeout — 2026-08-19
 
-Run `just network-product-queue-smoke` once for the bounded terminal authority check, then run
-`just network-product-lobby` for the normal windowed product client. At 960×540, the default window
-size, and one 16:10 or ultrawide size:
+After the fifth implementation-review remediation and green canonical verification matrix, the user
+explicitly directed M04 closure. No additional clipped-layout, lost-focus, draft-reset, misleading
+tradeoff, or recovery defect was supplied with that direction.
 
-1. From Title, choose Play, connect to `127.0.0.1:5000`, select each advertised game card, and
-   confirm its population reads `N waiting · M players per match` rather than a wait estimate.
-2. Open **Build & Join**. With mouse/keyboard, inspect all four presets, then Custom; open each of
-   Power, Reach, Magazine, Ultimate, Passive 1, and Passive 2, and verify every option shows a cost
-   plus understandable changed lines. Create one incompatible and one over-budget draft, then
-   correct each without losing the draft.
-3. Join with a preset. Confirm Queue shows the accepted point total and a fresh aggregate count,
-   Cancel Queue returns to Game Select without disconnecting, and a second Build Editor opening
-   starts from the accepted build. Close and relaunch once to confirm that accepted build persists.
-4. Repeat the ordinary select → edit → join → cancel flow using only a physical controller: D-pad
-   navigates, South activates, and East backs out. Confirm visible focus remains on every transition
-   and after disconnecting/reconnecting the controller.
-5. While Join or Cancel is pending, confirm Disconnect remains immediately reachable. If a ten-second
-   timeout or rate-limit response is exercised, confirm Retry preserves the frozen request while
-   **Try Again** remains disabled until its visible countdown expires.
-6. Check that no opponent names/builds, global queue position, ratio-like progress, or wait estimate
-   appears anywhere.
+Feedback disposition:
 
-Please record any clipped/unclear layout, lost focus, unexpected draft reset, misleading tradeoff,
-or recovery failure. Each item will be triaged as implemented now, deferred, rejected with rationale,
-or awaiting evidence before M04 is marked `Complete`.
+- implemented now: all correctness, completeness, quality, defect, and UX findings from the five
+  recorded review passes;
+- deferred: the representative resolution/UI-scale inspection and separate physical-controller
+  feel matrix, tracked as `V2-M04-MANUAL-MATRIX` for M07's supported-layout, controller, and
+  accessibility validation;
+- rejected: none;
+- awaiting evidence: none within M04 after the explicit closeout direction. The deferred manual
+  matrix remains a visible v2 backlog obligation and is not represented as completed evidence.
+
+## Learn-from-errors review
+
+- Presentation entities were initially treated as present/absent state rather than projections of a
+  complete render key. That allowed late authority outcomes to retain stale copy and actions.
+  Prevention: retained Bevy UI roots must include every state value that changes their visible or
+  interactive result, with an in-place replacement regression.
+- UI reconstruction initially reset navigation even when authority had already selected a precise
+  corrective control. Prevention: presentation initialization must not overwrite valid
+  schedule-committed focus; test logical focus and the spawned actionable control together.
+- Build comparison initially made a valid candidate depend on resolving an invalid current draft.
+  Prevention: comparison helpers must evaluate each side independently and use canonical pure rules
+  for partial/invalid state where a full resolved preview is unavailable.
+- Queue outcome correlation, lifetime ticket identity, snapshot revision barriers, and semantic
+  decoder bounds needed repeated review because early tests emphasized ordinary success paths.
+  Prevention: future authority slices begin with adversarial identity, stale-order, duplicate,
+  delayed-outcome, exhaustion, and bounded-retention cases before product presentation expands.
+- Manual visual/controller evidence was not executed before closure. The user accepted that risk by
+  directing closeout; it remains explicitly tracked rather than being mislabeled as passing.
+
+M04 is `Complete`. M05 becomes the current milestone at `Specification review`; production
+implementation remains unauthorized until its specification is reconciled against these final M04
+seams and the user explicitly validates it.
