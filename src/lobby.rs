@@ -16,9 +16,10 @@ pub use queue::{
     BeginMatchConnect, FormationAvailability, MAX_QUEUE_FORMATION_SIZE, MAX_QUEUE_OUTCOME_BYTES,
     MAX_QUEUE_RETRY_AFTER_MILLIS, MAX_QUEUE_TICKETS, MatchLoadingPhase, MatchReservationId,
     MatchStartFailure, MatchmakingClientAction, MatchmakingClientMessage, MatchmakingServerMessage,
-    MatchmakingServerPhase, QueueCancelCommand, QueueClientMessage, QueueCommand,
-    QueueCommandOutcome, QueueDecision, QueueJoinCommand, QueueMembership, QueuePoolRow,
-    QueuePoolSnapshot, QueueRejection, QueueRequestId, QueueTicketId, ReservationStarted,
+    MatchmakingServerPhase, PracticeRequestId, PracticeStartRejection, PracticeStartRequest,
+    QueueCancelCommand, QueueClientMessage, QueueCommand, QueueCommandOutcome, QueueDecision,
+    QueueJoinCommand, QueueMembership, QueuePoolRow, QueuePoolSnapshot, QueueRejection,
+    QueueRequestId, QueueTicketId, ReservationStarted,
 };
 
 pub const MAX_GAME_TYPES: usize = 8;

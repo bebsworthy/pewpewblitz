@@ -76,7 +76,7 @@ pub use build_editor::{
 pub use build_persistence::{BuildFileV1, ClientBuildPath, load_build, save_build};
 pub use flow::{
     CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,
-    FlowErrorAction, FlowErrorKind, SelectedGameType,
+    FlowErrorAction, FlowErrorKind, SelectedGameType, SessionPurpose,
 };
 #[allow(clippy::wildcard_imports)]
 use input::*;
@@ -86,7 +86,8 @@ use presentation::{
     clamp_camera_center, update_client_hud, write_interpolated_fighter_pose_to_transform,
 };
 pub use queue::{
-    ClientMatchLoadingModel, ClientQueueModel, ClientQueuePlugin, PendingQueueCommand,
+    ClientMatchLoadingModel, ClientPracticeModel, ClientQueueModel, ClientQueuePlugin,
+    PendingQueueCommand,
 };
 pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
 pub use server_select::{LogicalServerAddress, ServerAddressHost, parse_server_address};

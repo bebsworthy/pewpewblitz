@@ -135,6 +135,7 @@ fn allocation_request() -> AllocateRequestBody {
                 build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[4]).unwrap(),
             },
         ],
+        bots: Vec::new(),
     }
 }
 

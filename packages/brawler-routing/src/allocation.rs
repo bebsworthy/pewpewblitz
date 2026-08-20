@@ -101,11 +101,11 @@ impl AllocationPolicy {
     }
 }
 
-/// Validate one exact 1v1, 2v2, or 3v3 request without consulting runtime state.
-pub fn validate_m01_request(request: &AllocateRequestBody) -> Result<(), CodecError> {
+/// Validate one exact 1v1, 2v2, or 3v3 product request without consulting runtime state.
+pub fn validate_product_request(request: &AllocateRequestBody) -> Result<(), CodecError> {
     request.validate_product()?;
     let mut sessions = HashSet::with_capacity(request.participants.len());
-    let mut players = HashSet::with_capacity(request.participants.len());
+    let mut players = HashSet::with_capacity(request.participants.len() + request.bots.len());
     let mut clients = HashSet::with_capacity(request.participants.len());
     if !request
         .participants
@@ -125,16 +125,30 @@ pub fn validate_m01_request(request: &AllocateRequestBody) -> Result<(), CodecEr
             return Err(CodecError::InvalidValue);
         }
     }
+    for bot in &request.bots {
+        if !players.insert(bot.player_id) || bot.team >= request.team_count {
+            return Err(CodecError::InvalidValue);
+        }
+    }
     for team in 0..request.team_count {
-        if request
+        let humans = request
             .participants
             .iter()
             .filter(|participant| participant.team == team)
-            .count()
-            != usize::from(request.players_per_team)
-        {
+            .count();
+        let bots = request.bots.iter().filter(|bot| bot.team == team).count();
+        if humans.saturating_add(bots) != usize::from(request.players_per_team) {
             return Err(CodecError::InvalidValue);
         }
+    }
+    Ok(())
+}
+
+/// Preserve the M01 direct-human baseline contract.
+pub fn validate_m01_request(request: &AllocateRequestBody) -> Result<(), CodecError> {
+    validate_product_request(request)?;
+    if !request.bots.is_empty() {
+        return Err(CodecError::InvalidValue);
     }
     Ok(())
 }
@@ -195,6 +209,7 @@ mod tests {
             team_count: 2,
             players_per_team: 2,
             participants: vec![participant, participant],
+            bots: Vec::new(),
         };
         assert_eq!(
             validate_m01_request(&request),
@@ -229,8 +244,51 @@ mod tests {
             team_count: 2,
             players_per_team: 1,
             participants: vec![participant(1, 0), participant(2, 1)],
+            bots: Vec::new(),
         };
 
         assert_eq!(validate_m01_request(&request), Ok(()));
+    }
+
+    #[test]
+    fn product_validation_accepts_one_human_and_named_bot_roster() {
+        let human = crate::AllocateParticipant {
+            lobby_session_id: crate::LobbySessionId::new(1).unwrap(),
+            player_id: crate::PlayerId::new(1).unwrap(),
+            netcode_client_id: crate::NetcodeClientId::new(1).unwrap(),
+            team: 0,
+            display_name: crate::MatchDisplayName::new("Player").unwrap(),
+            source_build_preset: Some(1),
+            recipe_fingerprint: 1,
+            build_revision: 1,
+            build_snapshot: crate::MatchBuildSnapshot::new(&[1]).unwrap(),
+        };
+        let bot = |identity, team, name| crate::AllocateBot {
+            player_id: crate::PlayerId::new(identity).unwrap(),
+            team,
+            display_name: crate::MatchDisplayName::new(name).unwrap(),
+            source_build_preset: Some(1),
+            recipe_fingerprint: identity,
+            build_revision: 1,
+            build_snapshot: crate::MatchBuildSnapshot::new(&[1]).unwrap(),
+        };
+        let request = AllocateRequestBody {
+            request_id: crate::RequestId::new(1).unwrap(),
+            lobby_session_id: human.lobby_session_id,
+            mode: GameMode::HotZone,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            objective_target: 1_800,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
+            team_count: 2,
+            players_per_team: 2,
+            participants: vec![human],
+            bots: vec![bot(2, 0, "Bot 1"), bot(3, 1, "Bot 2"), bot(4, 1, "Bot 3")],
+        };
+
+        assert_eq!(validate_product_request(&request), Ok(()));
     }
 }

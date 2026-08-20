@@ -50,9 +50,10 @@ commands and scripts remain available for diagnostics, but they are deliberately
 top-level `just` recipes. E2E runs choose an unused loopback port by default, so they can run beside
 an interactive server; set `BRAWLER_ROUTED_BIND` only when a fixed test address is required.
 
-Normal client startup opens the product Title without connecting. Play opens Server Select, whose
-first-run address is `127.0.0.1:5000`; the client then connects to the supervisor-backed lobby and
-shows its advertised game types.
+Normal client startup opens the product Title without connecting. Play opens Server Select for
+multiplayer; Practice uses the same server connection and advertised game types but immediately
+starts a server-hosted authoritative match with inert `Bot N` fighters filling the roster. Neither
+path launches server processes from the client. The first-run address is `127.0.0.1:5000`.
 
 Server game types are authored in `config/server/game-types.ron`. Each entry owns flat match rules:
 Wipeout uses `kills_to_win`, Hot Zone uses `capture_seconds`, and every entry declares

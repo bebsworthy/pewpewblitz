@@ -1378,6 +1378,7 @@ mod tests {
             team_count: 2,
             players_per_team: 2,
             participants: Vec::new(),
+            bots: Vec::new(),
         }
     }
 

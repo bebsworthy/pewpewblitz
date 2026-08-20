@@ -156,6 +156,7 @@ fn allocation_request(
         team_count: 2,
         players_per_team: 1,
         participants: participants.to_vec(),
+        bots: Vec::new(),
     }
 }
 

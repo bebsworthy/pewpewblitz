@@ -37,8 +37,8 @@ pub use server::{
 #[cfg(feature = "server")]
 pub(crate) use server::{
     ConnectedMatchRoster, ModeOutcomeCause, ModeRuleOutcome, PendingMatchRestart,
-    PendingModeRuleOutcome, clear_combat_facts, offer_mode_rule_outcome, prepare_mode_rule_facts,
-    record_match_telemetry,
+    PendingModeRuleOutcome, clear_combat_facts, initialize_match_root, offer_mode_rule_outcome,
+    prepare_mode_rule_facts, record_match_telemetry,
 };
 pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
 #[cfg(any(feature = "server", test))]

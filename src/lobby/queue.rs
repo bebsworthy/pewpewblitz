@@ -41,6 +41,11 @@ macro_rules! nonzero_id {
 }
 
 nonzero_id!(QueueRequestId, u64, "queue request ID must be nonzero");
+nonzero_id!(
+    PracticeRequestId,
+    u64,
+    "practice request ID must be nonzero"
+);
 nonzero_id!(QueueTicketId, u128, "queue ticket ID must be nonzero");
 nonzero_id!(
     MatchReservationId,
@@ -62,7 +67,7 @@ pub enum MatchLoadingPhase {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ReservationStarted {
     pub reservation_id: MatchReservationId,
-    pub ticket_id: QueueTicketId,
+    pub ticket_id: Option<QueueTicketId>,
     pub game_type_id: GameTypeId,
     pub map_preset_id: crate::map::MapPresetId,
     pub team_count: u8,
@@ -92,9 +97,33 @@ pub enum MatchmakingServerPhase {
     },
     Removed {
         reservation_id: MatchReservationId,
-        ticket_id: QueueTicketId,
+        ticket_id: Option<QueueTicketId>,
         reason: MatchStartFailure,
     },
+    PracticeRejected {
+        request_id: PracticeRequestId,
+        reason: PracticeStartRejection,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PracticeStartRequest {
+    pub request_id: PracticeRequestId,
+    pub catalog_revision: CatalogRevision,
+    pub game_type_id: GameTypeId,
+    pub game_type_configuration_revision: u32,
+    pub build: BuildCandidate,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PracticeStartRejection {
+    StaleCatalog,
+    UnknownGameType,
+    StaleGameConfiguration,
+    InvalidBuild,
+    Busy,
+    CapacityUnavailable,
+    Internal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

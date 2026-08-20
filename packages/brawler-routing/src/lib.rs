@@ -21,18 +21,21 @@ mod public_envelope;
 mod runtime;
 mod supervisor;
 
-pub use allocation::{AllocationPolicy, ModeAllocationPolicy, SeedPolicy, validate_m01_request};
+pub use allocation::{
+    AllocationPolicy, ModeAllocationPolicy, SeedPolicy, validate_m01_request,
+    validate_product_request,
+};
 pub use capability::{CAPABILITY_BYTES, Capability, CapabilityEntropyError};
 pub use control::RESULT_SCHEMA_VERSION_V1;
 pub use control::ResultBody as Result;
 pub use control::{
-    ActivationBody, AllocateParticipant, AllocateRequest, AllocateRequestBody, AllocationGrant,
-    AllocationGranted, AllocationGrantedBody, AllocationRejected, AllocationRejectedBody,
-    ControlBody, ControlFrame, ControlSequenceTracker, ControlStreamDecoder, ControlType, Exit,
-    ExitBody, Failure, FailureBody, Heartbeat, HeartbeatBody, LobbyAuthenticated,
-    LobbyAuthenticatedBody, LobbyCapacityBody, LobbyNetcodeAuthenticatedBody, Manifest,
-    ManifestBody, PeerClose, PeerCloseBody, Ready, ReadyBody, ResultBody, SequenceDisposition,
-    Stop, StopBody,
+    ActivationBody, AllocateBot, AllocateParticipant, AllocateRequest, AllocateRequestBody,
+    AllocationGrant, AllocationGranted, AllocationGrantedBody, AllocationRejected,
+    AllocationRejectedBody, ControlBody, ControlFrame, ControlSequenceTracker,
+    ControlStreamDecoder, ControlType, Exit, ExitBody, Failure, FailureBody, Heartbeat,
+    HeartbeatBody, LobbyAuthenticated, LobbyAuthenticatedBody, LobbyCapacityBody,
+    LobbyNetcodeAuthenticatedBody, Manifest, ManifestBody, PeerClose, PeerCloseBody, Ready,
+    ReadyBody, ResultBody, SequenceDisposition, Stop, StopBody,
 };
 pub use digest::{MANIFEST_DIGEST_DOMAIN, RESULT_DIGEST_DOMAIN, manifest_digest, result_digest};
 pub use error::{CodecError, RoutingErrorCategory};
@@ -48,7 +51,8 @@ pub use ipc::{
 pub use limits::*;
 pub use manifest::{
     GameMode, LobbyManifest, ManifestCommon, MatchBuildSnapshot, MatchDisplayName, MatchManifest,
-    MatchManifestParticipant, MatchManifestV1, WorkerRole, raw_catalog_fingerprint,
+    MatchManifestBot, MatchManifestParticipant, MatchManifestV1, WorkerRole,
+    raw_catalog_fingerprint,
 };
 pub use memory::{MemoryBackend, MemoryDuplex};
 pub use metrics::{LatencyHistogram, RoutingMetrics, TrafficCounters};

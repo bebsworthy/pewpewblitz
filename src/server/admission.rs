@@ -192,8 +192,12 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
     let fighter = fighter_definitions
         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
         .ok_or(MatchWorkerManifestError::BuildSelectionMismatch)?;
-    for participant in &manifest.participants {
-        let snapshot = crate::builds::MatchBuildSnapshotV1::decode(&participant.build_snapshot)
+    let validate = |snapshot_bytes: &brawler_routing::MatchBuildSnapshot,
+                    source_build_preset: Option<u16>,
+                    recipe_fingerprint: u64,
+                    revision: u16|
+     -> Result<(), MatchWorkerManifestError> {
+        let snapshot = crate::builds::MatchBuildSnapshotV1::decode(snapshot_bytes)
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
         let (recipe, source_preset) = match snapshot.candidate.selection {
             crate::builds::BuildSelection::Preset(preset_id) => {
@@ -210,13 +214,29 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
             || snapshot.accepted.canonical_recipe != recipe
             || snapshot.accepted.identity != resolved.identity
             || snapshot.accepted.total_points != resolved.total_points
-            || resolved.identity.source_build_preset_id.map(|id| id.0)
-                != participant.source_build_preset
-            || resolved.identity.recipe_fingerprint.0 != participant.recipe_fingerprint
-            || resolved.identity.revision.0 != participant.revision
+            || resolved.identity.source_build_preset_id.map(|id| id.0) != source_build_preset
+            || resolved.identity.recipe_fingerprint.0 != recipe_fingerprint
+            || resolved.identity.revision.0 != revision
         {
             return Err(MatchWorkerManifestError::BuildSelectionMismatch);
         }
+        Ok(())
+    };
+    for participant in &manifest.participants {
+        validate(
+            &participant.build_snapshot,
+            participant.source_build_preset,
+            participant.recipe_fingerprint,
+            participant.revision,
+        )?;
+    }
+    for bot in &manifest.bots {
+        validate(
+            &bot.build_snapshot,
+            bot.source_build_preset,
+            bot.recipe_fingerprint,
+            bot.revision,
+        )?;
     }
     Ok(())
 }
@@ -253,7 +273,12 @@ pub fn validate_match_manifest(
     if manifest.rules_profile != expected_rules_profile(config.match_rules_profile) {
         return Err(MatchWorkerManifestError::RulesProfileMismatch);
     }
-    if manifest.participants.len() > config.max_clients {
+    if manifest
+        .participants
+        .len()
+        .saturating_add(manifest.bots.len())
+        > config.max_clients
+    {
         return Err(MatchWorkerManifestError::ParticipantCapacity);
     }
     let mut players = BTreeSet::new();
@@ -275,6 +300,20 @@ pub fn validate_match_manifest(
             return Err(MatchWorkerManifestError::DuplicateClient);
         }
         teams[usize::from(participant.team)] += 1;
+    }
+    for bot in &manifest.bots {
+        if bot.team > 1 {
+            return Err(MatchWorkerManifestError::InvalidTeam);
+        }
+        if !crate::lobby::normalize_proposed_display_name(bot.display_name.as_str())
+            .is_ok_and(|name| name == bot.display_name.as_str())
+        {
+            return Err(MatchWorkerManifestError::InvalidDisplayName);
+        }
+        if !players.insert(bot.player_id.get()) {
+            return Err(MatchWorkerManifestError::DuplicatePlayer);
+        }
+        teams[usize::from(bot.team)] += 1;
     }
     if !matches!(teams, [1, 1] | [2, 2] | [3, 3]) {
         return Err(MatchWorkerManifestError::ParticipantCapacity);
@@ -315,8 +354,14 @@ pub fn build_match_worker_app(
     config.match_countdown_ticks = Some(manifest.countdown_ticks);
     config.match_respawn_ticks = Some(manifest.respawn_ticks);
     validate_match_manifest(&config, &manifest)?;
-    let players_per_team = u8::try_from(manifest.participants.len() / 2)
-        .map_err(|_| MatchWorkerManifestError::ParticipantCapacity)?;
+    let players_per_team = u8::try_from(
+        manifest
+            .participants
+            .len()
+            .saturating_add(manifest.bots.len())
+            / 2,
+    )
+    .map_err(|_| MatchWorkerManifestError::ParticipantCapacity)?;
     let mut app = build_match_worker_graph(config, players_per_team);
     validate_runtime_identity(
         &mut app,
@@ -386,8 +431,8 @@ mod tests {
     use super::*;
     use crate::builds::BuildPresetId;
     use brawler_routing::{
-        AllocationId, Generation, LobbySessionId, LogicalServerId, ManifestCommon, MatchId, PeerId,
-        ProcessId, RouteId, WorkerId, WorkerRole,
+        AllocationId, Generation, LobbySessionId, LogicalServerId, ManifestCommon, MatchId,
+        MatchManifestBot, PeerId, ProcessId, RouteId, WorkerId, WorkerRole,
     };
 
     fn manifest() -> MatchManifestV1 {
@@ -405,7 +450,7 @@ mod tests {
         let (_, map_preset, map_revision) = expected_mode_fields(config.game_mode);
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 2,
+                manifest_version: 3,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -477,6 +522,7 @@ mod tests {
                 fourth.team = 1;
                 vec![base, second, third, fourth]
             },
+            bots: Vec::new(),
             heartbeat_ms: 1_000,
             nonce: 9,
             digest: [0; 32],
@@ -581,6 +627,64 @@ mod tests {
             state.unwrap().match_id,
             crate::matchplay::MatchId(value.match_id.get())
         );
+    }
+
+    #[test]
+    fn match_worker_materializes_manifest_bots_as_inert_ordinary_fighters() {
+        let config = ServerNetworkConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            ..default()
+        };
+        let mut direct = build_app_with_config(config.clone());
+        let protocol = protocol_fingerprint(direct.world_mut());
+        let content = gameplay_content_fingerprint(
+            &direct.world().resource::<WeaponCatalogResource>().0,
+            &direct.world().resource::<MapCatalogResource>().0,
+            &direct.world().resource::<BuildCatalogResource>().0,
+        )
+        .unwrap();
+        let mut value = manifest();
+        let template = value.participants[0];
+        value.participants.truncate(1);
+        value.bots = [(100, 0, "Bot 1"), (101, 1, "Bot 2"), (102, 1, "Bot 3")]
+            .into_iter()
+            .map(|(player_id, team, name)| MatchManifestBot {
+                player_id: brawler_routing::PlayerId::new(player_id).unwrap(),
+                team,
+                display_name: brawler_routing::MatchDisplayName::new(name).unwrap(),
+                source_build_preset: template.source_build_preset,
+                recipe_fingerprint: template.recipe_fingerprint,
+                revision: template.revision,
+                build_snapshot: template.build_snapshot,
+            })
+            .collect();
+        value.common.protocol_registry_fingerprint = protocol;
+        value.common.content_fingerprint = content.0;
+
+        let mut worker = build_match_worker_app(config, value).unwrap();
+        worker.update();
+        let world = worker.world_mut();
+        let mut query = world.query_filtered::<(
+            &crate::matchplay::FighterDisplayName,
+            Has<lightyear::prelude::ControlledBy>,
+            Has<lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>>,
+        ), With<crate::protocol::Fighter>>();
+        let rows = query
+            .iter(world)
+            .map(|(name, controlled, has_neutral_input)| {
+                (name.0.clone(), controlled, has_neutral_input)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|(_, controlled, _)| !controlled));
+        assert!(rows.iter().all(|(_, _, has_input)| *has_input));
+        let mut names = rows
+            .iter()
+            .map(|(name, _, _)| name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        assert_eq!(names, vec!["Bot 1", "Bot 2", "Bot 3"]);
     }
 
     #[test]

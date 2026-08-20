@@ -192,6 +192,30 @@ pub struct AllocateParticipant {
     pub build_snapshot: crate::MatchBuildSnapshot,
 }
 
+/// Server-local participant selection. Bots are roster members, never routed network peers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct AllocateBot {
+    pub player_id: crate::PlayerId,
+    pub team: u8,
+    pub display_name: MatchDisplayName,
+    pub source_build_preset: Option<u16>,
+    pub recipe_fingerprint: u64,
+    pub build_revision: u16,
+    pub build_snapshot: crate::MatchBuildSnapshot,
+}
+
+impl fmt::Debug for AllocateBot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AllocateBot")
+            .field("identity", &"[REDACTED]")
+            .field("team", &self.team)
+            .field("build", &"[REDACTED]")
+            .field("build_revision", &self.build_revision)
+            .finish_non_exhaustive()
+    }
+}
+
 impl fmt::Debug for AllocateParticipant {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -252,6 +276,46 @@ fn decode_allocate_participant(
     })
 }
 
+fn encode_allocate_bot(encoder: &mut Encoder, bot: &AllocateBot) {
+    encoder.put_u64(bot.player_id.get());
+    encoder.put_u8(bot.team);
+    encoder.put_u8(u8::try_from(bot.display_name.as_str().len()).expect("bounded"));
+    encoder.put_bytes(bot.display_name.as_str().as_bytes());
+    match bot.source_build_preset {
+        None => encoder.put_u8(0),
+        Some(preset) => {
+            encoder.put_u8(1);
+            encoder.put_u16(preset);
+        }
+    }
+    encoder.put_u64(bot.recipe_fingerprint);
+    encoder.put_u16(bot.build_revision);
+    encoder.put_u8(u8::try_from(bot.build_snapshot.as_bytes().len()).expect("bounded"));
+    encoder.put_bytes(bot.build_snapshot.as_bytes());
+}
+
+fn decode_allocate_bot(decoder: &mut Decoder<'_>) -> Result<AllocateBot, CodecError> {
+    let player_id = crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
+    let team = decoder.u8()?;
+    let display_name_length = usize::from(decoder.u8()?);
+    let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
+        .map_err(|_| CodecError::InvalidValue)
+        .and_then(MatchDisplayName::new)?;
+    let source_build_preset = decoder.optional(Decoder::u16)?;
+    let recipe_fingerprint = decoder.u64()?;
+    let build_revision = decoder.u16()?;
+    let build_length = usize::from(decoder.u8()?);
+    Ok(AllocateBot {
+        player_id,
+        team,
+        display_name,
+        source_build_preset,
+        recipe_fingerprint,
+        build_revision,
+        build_snapshot: crate::MatchBuildSnapshot::new(decoder.take(build_length)?)?,
+    })
+}
+
 /// Idempotent lobby allocation request.
 #[derive(Clone, PartialEq, Eq)]
 pub struct AllocateRequestBody {
@@ -268,6 +332,7 @@ pub struct AllocateRequestBody {
     pub team_count: u8,
     pub players_per_team: u8,
     pub participants: Vec<AllocateParticipant>,
+    pub bots: Vec<AllocateBot>,
 }
 
 impl fmt::Debug for AllocateRequestBody {
@@ -279,6 +344,7 @@ impl fmt::Debug for AllocateRequestBody {
             .field("map_preset", &self.map_preset)
             .field("topology", &(self.team_count, self.players_per_team))
             .field("participant_count", &self.participants.len())
+            .field("bot_count", &self.bots.len())
             .finish_non_exhaustive()
     }
 }
@@ -295,7 +361,7 @@ impl AllocateRequestBody {
             || self.team_count == 0
             || self.players_per_team == 0
             || self.participants.is_empty()
-            || self.participants.len() > MAX_PARTICIPANTS
+            || self.participants.len().saturating_add(self.bots.len()) > MAX_PARTICIPANTS
         {
             return Err(CodecError::InvalidValue);
         }
@@ -309,7 +375,7 @@ impl AllocateRequestBody {
             .ok_or(CodecError::InvalidValue)?;
         if self.team_count != 2
             || !matches!(self.players_per_team, 1..=3)
-            || self.participants.len() != expected
+            || self.participants.len().saturating_add(self.bots.len()) != expected
         {
             return Err(CodecError::InvalidValue);
         }
@@ -320,7 +386,7 @@ impl AllocateRequestBody {
     /// extensible to eight for later milestones.
     pub fn validate_m01(&self) -> Result<(), CodecError> {
         self.validate()?;
-        if self.participants.len() != 2 {
+        if self.participants.len() != 2 || !self.bots.is_empty() {
             return Err(CodecError::InvalidValue);
         }
         Ok(())
@@ -924,6 +990,10 @@ impl ControlBody {
                 for participant in &value.participants {
                     encode_allocate_participant(&mut encoder, participant);
                 }
+                encoder.put_u8(u8::try_from(value.bots.len()).map_err(|_| CodecError::Oversize)?);
+                for bot in &value.bots {
+                    encode_allocate_bot(&mut encoder, bot);
+                }
             }
             Self::AllocationGranted(value) => {
                 encoder.put_u64(value.request_id.get());
@@ -1082,6 +1152,14 @@ impl ControlBody {
                 for _ in 0..count {
                     participants.push(decode_allocate_participant(decoder)?);
                 }
+                let bot_count = usize::from(decoder.u8()?);
+                if count.saturating_add(bot_count) > MAX_PARTICIPANTS {
+                    return Err(CodecError::InvalidValue);
+                }
+                let mut bots = Vec::with_capacity(bot_count);
+                for _ in 0..bot_count {
+                    bots.push(decode_allocate_bot(decoder)?);
+                }
                 Self::AllocateRequest(AllocateRequestBody {
                     request_id,
                     lobby_session_id,
@@ -1096,6 +1174,7 @@ impl ControlBody {
                     team_count,
                     players_per_team,
                     participants,
+                    bots,
                 })
             }
             ControlType::AllocationGranted => {
@@ -1572,6 +1651,7 @@ mod tests {
                 team_count: 2,
                 players_per_team: 1,
                 participants: vec![participant(1), participant(2)],
+                bots: Vec::new(),
             }),
             ControlBody::AllocationGranted(AllocationGrantedBody {
                 request_id: id64(1),
@@ -1669,13 +1749,14 @@ mod tests {
             team_count: 2,
             players_per_team: 4,
             participants: (1..=8).map(participant).collect(),
+            bots: Vec::new(),
         };
         assert_eq!(
             frame(ControlBody::AllocateRequest(request))
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 516
+            52 + 517
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),
@@ -1755,6 +1836,7 @@ mod tests {
             team_count: 1,
             players_per_team: 1,
             participants: vec![participant(3)],
+            bots: Vec::new(),
         };
         let debug = format!("{request:?} {:?}", request.participants[0]);
         assert!(debug.contains("participant_count: 1"));

@@ -138,7 +138,7 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
     };
     let manifest = MatchManifestV1 {
         common: ManifestCommon {
-            manifest_version: 2,
+            manifest_version: 3,
             role: WorkerRole::Match,
             logical_server_id: id128(LOGICAL_SERVER_ID),
             process_id: registration.process_id,
@@ -166,6 +166,7 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
         reserved: 0,
         seed: worker_u64,
         participants: vec![participant],
+        bots: Vec::new(),
         heartbeat_ms: 100,
         nonce: 70_000 + worker,
         digest: [0; 32],

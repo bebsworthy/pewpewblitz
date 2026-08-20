@@ -1073,7 +1073,7 @@ fn candidate_matches_ticket(candidate: &BuildCandidate, ticket: &QueueTicket) ->
     }
 }
 
-fn resolve_candidate(
+pub(crate) fn resolve_candidate(
     candidate: &BuildCandidate,
     builds: &BuildCatalog,
     weapons: &WeaponCatalog,

@@ -41,6 +41,10 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
   query-conflict panic was fixed and the exact `just run 2` startup remained stable, the user
   explicitly directed M07 closeout on 2026-08-20. The unexecuted native layout, physical-controller,
   and perceptual-audio matrix remains visible as `V2-M07-MANUAL-MATRIX`.
+- By explicit user direction on 2026-08-20, M08 research and specification preparation overlapped
+  M07 implementation. Multiplayer queues remain unchanged; Practice selects any compatible game
+  type and fills its non-human roster positions outside the queue. The server-hosted inert-bot slice
+  and automated verification are complete; M08 is at interactive user playtest.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -56,8 +60,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | Specification review |
-| Current milestone | M07 — Minimal combat HUD, menus, readability, and accessibility |
+| Status | User playtest |
+| Current milestone | M08 — Server-hosted bot practice for any game type |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
@@ -72,7 +76,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 05 | User playtest | Exact formation and match handoff | [milestone-05.md](./milestone-05.md) |
 | 06 | Complete | Concurrent match lifecycle, results, and requeue | [milestone-06.md](./milestone-06.md) |
 | 07 | Complete | Minimal combat HUD, menus, readability, and accessibility | [milestone-07.md](./milestone-07.md) |
-| 08 | Not started | Authoritative bot practice and local supervisor launch | Create when next |
+| 08 | User playtest | Server-hosted bot practice for any game type | [milestone-08.md](./milestone-08.md) |
 | 09 | Not started | Recovery, security, capacity, usability, and v2 closeout | Create when next |
 
 ## Ordering rationale and milestone gates
@@ -170,14 +174,19 @@ M06's result, return-to-lobby, or Queue Again authority contracts.
 Gate: automated layout/state tests and supervised controller/keyboard playtests show readable
 combat and complete navigation at supported resolutions and accessibility settings.
 
-### M08 — Authoritative bot practice and local supervisor launch
+### M08 — Server-hosted bot practice for any game type
 
-Expose a first-run Practice path using the same supervisor/worker topology, normal validation, and
-routed Lightyear connection. Start an explicitly named bot game and shut down/reap children
-predictably. PvP queues never insert bots silently.
+Expose Practice from Title through the normal server selection/connection path. Let the player
+select any compatible server-advertised game type and request an immediate authoritative match
+worker with bots filling the remaining roster. The request uses ordinary supervisor capacity but
+never creates a queue ticket or changes multiplayer pool formation; PvP queues remain human-only
+in M08. Bots are inert authoritative fighters identified only by ordinary `Bot N` display names;
+all AI is deferred beyond v2. The client does not launch or package server processes.
 
-Gate: a fresh client reaches controllable authoritative practice within one minute, with no orphan
-process or alternate authority path after normal or failed shutdown.
+Gate: a connected client can select any compatible game type and reach controllable authoritative
+practice within one minute when server capacity is available, complete the normal match/Results
+flow, and exit through the normal disconnect path with no queue mutation or alternate authority
+path.
 
 ### M09 — Recovery, security, capacity, usability, and v2 closeout
 
@@ -202,7 +211,7 @@ feedback disposition.
 - Lobby and match connections are distinct Lightyear sessions at one public endpoint.
 - Stable typed IDs and bounded versioned frames cross IPC; process-local Bevy entities and handles
   do not.
-- The client never becomes authority, including local practice.
+- The client never becomes authority, including Practice.
 
 ### Test and measurement policy
 
@@ -241,6 +250,7 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 
 ## Explicitly deferred beyond v2
 
+- bot AI, including movement, combat decisions, objective play, difficulty, and competitive tuning;
 - global/cross-server matchmaking, rank, skill rating, and leaderboards;
 - public registry, NAT traversal, relay, and production internet reachability;
 - accounts, authentication services, parties, invitations, cloud saves, and entitlements;

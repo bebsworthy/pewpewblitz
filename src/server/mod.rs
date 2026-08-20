@@ -67,6 +67,7 @@ use std::{
 
 mod admission;
 mod lobby;
+mod practice;
 mod routed_worker;
 mod verification;
 mod worker;
@@ -1450,6 +1451,7 @@ fn build_authoritative_app(
             AuthoritativeMatchPlugin,
             crate::terrain::AuthoritativeTerrainPlugin,
             crate::diagnostics::ProcessDiagnosticsPlugin,
+            practice::InertPracticeBotPlugin,
         ));
     if let Some(path) =
         crate::diagnostics::ProcessDiagnosticsSettings::default().failure_record_path()

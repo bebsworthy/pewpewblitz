@@ -153,6 +153,83 @@ fn start_product_join(harness: &mut Harness, client_index: usize, game_index: us
 }
 
 #[test]
+fn practice_request_bypasses_queue_and_starts_one_human_three_v_three_reservation() {
+    let mut harness = Harness::new_product_lobby(1);
+    wait_for_product_lobby(&mut harness);
+    let capacity = brawler_routing::ControlFrame::from_raw_sequence(
+        1,
+        brawler_routing::ProcessId::new(2).unwrap(),
+        brawler_routing::WorkerId::new(3).unwrap(),
+        brawler_routing::ControlBody::LobbyCapacity(brawler_routing::LobbyCapacityBody {
+            free_match_slots: 1,
+        }),
+    )
+    .unwrap();
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<brawler::server::LobbyState>()
+        .apply_control_frame(capacity)
+        .unwrap();
+    let client_entity = harness.client_entities[0];
+    let lobby = harness.clients[0]
+        .world()
+        .get::<brawler::client::ClientLobbyMembership>(client_entity)
+        .unwrap()
+        .clone();
+    let game = lobby
+        .game_types
+        .iter()
+        .find(|game| game.id.as_str() == "hot-zone-3v3")
+        .unwrap();
+    let selected = brawler::client::SelectedGameType {
+        catalog_revision: Some(lobby.catalog_revision),
+        game_type_id: Some(game.id.clone()),
+        configuration_revision: Some(game.configuration_revision),
+    };
+    let revision = harness.clients[0]
+        .world()
+        .resource::<brawler::builds::BuildCatalogResource>()
+        .0
+        .balance_revision;
+    assert!(
+        harness.clients[0]
+            .world_mut()
+            .resource_mut::<brawler::client::ClientPracticeModel>()
+            .start(
+                &selected,
+                brawler::builds::BuildCandidate {
+                    build_revision: revision,
+                    selection: BuildSelection::Preset(BuildPresetId(1)),
+                },
+            )
+    );
+
+    harness.step_until(|harness| {
+        harness.clients[0]
+            .world()
+            .resource::<brawler::client::ClientMatchLoadingModel>()
+            .active()
+            .is_some()
+    });
+    let started = harness.clients[0]
+        .world()
+        .resource::<brawler::client::ClientMatchLoadingModel>()
+        .active()
+        .unwrap();
+    assert_eq!(started.ticket_id, None);
+    assert_eq!((started.team_count, started.players_per_team), (2, 3));
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .resource::<brawler::server::QueueState>()
+            .ticket_count(),
+        0
+    );
+}
+
+#[test]
 fn product_lobby_two_client_fifo_cancel_and_aggregate_convergence() {
     let mut harness = Harness::new_product_lobby(2);
     wait_for_product_lobby(&mut harness);

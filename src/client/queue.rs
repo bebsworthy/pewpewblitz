@@ -9,6 +9,92 @@ const SNAPSHOT_FRESHNESS: Duration = Duration::from_secs(3);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Resource, Clone, Debug, Default)]
+pub struct ClientPracticeModel {
+    generation: Option<u64>,
+    next_request_id: u64,
+    pending: Option<crate::lobby::PracticeStartRequest>,
+    outbound: VecDeque<crate::lobby::PracticeStartRequest>,
+    rejection: Option<crate::lobby::PracticeStartRejection>,
+}
+
+impl ClientPracticeModel {
+    fn bind_generation(&mut self, generation: u64) {
+        if self.generation != Some(generation) {
+            *self = Self {
+                generation: Some(generation),
+                next_request_id: self.next_request_id,
+                ..Self::default()
+            };
+        }
+    }
+
+    pub fn start(
+        &mut self,
+        selected: &super::flow::SelectedGameType,
+        build: crate::builds::BuildCandidate,
+    ) -> bool {
+        let (Some(catalog_revision), Some(game_type_id), Some(configuration_revision)) = (
+            selected.catalog_revision,
+            selected.game_type_id.clone(),
+            selected.configuration_revision,
+        ) else {
+            return false;
+        };
+        if self.pending.is_some() || self.generation.is_none() {
+            return false;
+        }
+        let Some(request_id) = self
+            .next_request_id
+            .checked_add(1)
+            .and_then(crate::lobby::PracticeRequestId::new)
+        else {
+            return false;
+        };
+        self.next_request_id = request_id.get();
+        let request = crate::lobby::PracticeStartRequest {
+            request_id,
+            catalog_revision,
+            game_type_id,
+            game_type_configuration_revision: configuration_revision,
+            build,
+        };
+        self.pending = Some(request.clone());
+        self.outbound.push_back(request);
+        self.rejection = None;
+        true
+    }
+
+    fn accept_started(&mut self) {
+        self.pending = None;
+        self.rejection = None;
+    }
+
+    fn accept_rejection(
+        &mut self,
+        request_id: crate::lobby::PracticeRequestId,
+        reason: crate::lobby::PracticeStartRejection,
+    ) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.request_id == request_id)
+        {
+            self.pending = None;
+            self.rejection = Some(reason);
+        }
+    }
+
+    pub fn take_rejection(&mut self) -> Option<crate::lobby::PracticeStartRejection> {
+        self.rejection.take()
+    }
+
+    #[must_use]
+    pub fn pending(&self) -> bool {
+        self.pending.is_some()
+    }
+}
+
+#[derive(Resource, Clone, Debug, Default)]
 pub struct ClientMatchLoadingModel {
     lobby_generation: Option<u64>,
     expected_sequence: u64,
@@ -527,6 +613,7 @@ impl Plugin for ClientQueuePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClientQueueModel>()
             .init_resource::<ClientMatchLoadingModel>()
+            .init_resource::<ClientPracticeModel>()
             .init_resource::<HeadlessQueueSmokeStage>()
             .init_resource::<HeadlessRequeueSmokeStage>()
             .add_systems(
@@ -539,9 +626,22 @@ impl Plugin for ClientQueuePlugin {
                     drive_headless_requeue_smoke,
                     send_queue_messages,
                     send_matchmaking_messages,
+                    send_practice_messages,
                 )
                     .chain(),
             );
+    }
+}
+
+fn send_practice_messages(
+    mut model: ResMut<ClientPracticeModel>,
+    mut senders: Query<&mut MessageSender<crate::lobby::PracticeStartRequest>, With<Client>>,
+) {
+    let Ok(mut sender) = senders.single_mut() else {
+        return;
+    };
+    while let Some(message) = model.outbound.pop_front() {
+        sender.send::<crate::protocol::SessionChannel>(message);
     }
 }
 
@@ -603,6 +703,7 @@ fn send_matchmaking_messages(
 #[allow(clippy::too_many_lines, clippy::type_complexity)]
 fn observe_matchmaking_messages(
     mut model: ResMut<ClientMatchLoadingModel>,
+    mut practice: ResMut<ClientPracticeModel>,
     mut lifecycle: ResMut<super::RoutedClientLifecycle>,
     mut clients: Query<
         (
@@ -621,6 +722,7 @@ fn observe_matchmaking_messages(
         if model.lobby_generation != Some(session.generation) {
             model.reset_for_lobby_generation(session.generation);
         }
+        practice.bind_generation(session.generation);
         let Some(mut receiver) = receiver else {
             continue;
         };
@@ -646,6 +748,7 @@ fn observe_matchmaking_messages(
                     model.phase = Some(crate::lobby::MatchLoadingPhase::Reserving);
                     model.active = Some(started.clone());
                     model.started_observation = Some(started);
+                    practice.accept_started();
                 }
                 crate::lobby::MatchmakingServerPhase::BeginMatchConnect(begin) => {
                     if model
@@ -667,6 +770,9 @@ fn observe_matchmaking_messages(
                     model.phase = Some(crate::lobby::MatchLoadingPhase::ReturningToQueue);
                     model.returned_observation = true;
                     model.match_cancel_requested = false;
+                }
+                crate::lobby::MatchmakingServerPhase::PracticeRejected { request_id, reason } => {
+                    practice.accept_rejection(request_id, reason);
                 }
             }
         }
@@ -925,13 +1031,43 @@ mod tests {
     }
 
     #[test]
+    fn practice_request_is_single_flight_and_rejection_clears_it() {
+        let mut model = ClientPracticeModel::default();
+        model.bind_generation(7);
+        let selected = super::super::flow::SelectedGameType {
+            catalog_revision: Some(crate::lobby::CatalogRevision([1; 32])),
+            game_type_id: Some(crate::lobby::GameTypeId::new("hot-zone-3v3").unwrap()),
+            configuration_revision: Some(1),
+        };
+        let candidate = crate::builds::BuildCandidate {
+            build_revision: crate::builds::BuildRevision(4),
+            selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
+        };
+
+        assert!(model.start(&selected, candidate));
+        assert!(model.pending());
+        assert!(!model.start(&selected, candidate));
+        let request = model.outbound.pop_front().unwrap();
+        assert_eq!(request.game_type_id.as_str(), "hot-zone-3v3");
+        model.accept_rejection(
+            request.request_id,
+            crate::lobby::PracticeStartRejection::CapacityUnavailable,
+        );
+        assert!(!model.pending());
+        assert_eq!(
+            model.take_rejection(),
+            Some(crate::lobby::PracticeStartRejection::CapacityUnavailable)
+        );
+    }
+
+    #[test]
     fn cancelled_match_start_clears_loading_and_returns_to_game_select_observation() {
         let joined = joined_membership("wipeout-2v2", 7);
         let reservation_id = crate::lobby::MatchReservationId::new(11).unwrap();
         let mut model = ClientMatchLoadingModel {
             active: Some(crate::lobby::ReservationStarted {
                 reservation_id,
-                ticket_id: joined.ticket_id,
+                ticket_id: Some(joined.ticket_id),
                 game_type_id: joined.game_type_id,
                 map_preset_id: crate::map::MapPresetId(1),
                 team_count: 2,
@@ -971,7 +1107,7 @@ mod tests {
             expected_sequence: 4,
             active: Some(crate::lobby::ReservationStarted {
                 reservation_id: crate::lobby::MatchReservationId::new(11).unwrap(),
-                ticket_id: joined.ticket_id,
+                ticket_id: Some(joined.ticket_id),
                 game_type_id: joined.game_type_id,
                 map_preset_id: crate::map::MapPresetId(1),
                 team_count: 2,

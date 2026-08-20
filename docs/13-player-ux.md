@@ -42,8 +42,8 @@ V2 includes:
    milestone's R&D.
 7. A redesigned combat HUD, scoreboard, in-match menu, results flow, and non-fatal session
    lifecycle.
-8. An authoritative bot-practice path so a first-time player can test controls and builds without a
-   populated server queue.
+8. An authoritative bot-practice path where a first-time player can select any compatible game type
+   and test controls and builds without a populated server queue.
 9. An accessibility and usability baseline: input calibration/remapping, non-color-only team
    identification, UI scaling, reduced shake/flashes, and audio/display settings.
 10. Automated lifecycle, race, cross-match isolation, recovery, performance, visual-layout, and
@@ -66,10 +66,10 @@ V2 explicitly defers:
 ### Dedicated-server authority
 
 Authoritative simulation always runs in a `brawler-server` worker configuration. One logical server
-is a thin supervisor/router plus a long-lived lobby worker and isolated match worker processes. A
-product practice launcher may start the same supervisor and worker topology locally, but the
-windowed client never owns gameplay authority or bypasses the routed network, validation, and
-server-owned simulation path. The proposed topology and its remaining R&D gates are recorded in
+is a thin supervisor/router plus a long-lived lobby worker and isolated match worker processes.
+Practice runs on the connected server through that same topology; the windowed client never launches
+a server process, owns gameplay authority, or bypasses routed validation and server-owned
+simulation. The proposed topology and its remaining R&D gates are recorded in
 [Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md).
 
 ### Joining and discovery
@@ -113,6 +113,14 @@ The resolved values are carried into the isolated match worker and installed as 
 rule resources. The server selects among multiple allowed maps by deterministic rotation; clients
 do not vote or author rules in v2. Runtime hot-editing is deferred.
 
+Practice reuses the connected server's validated game-type advertisements without entering a
+multiplayer pool. After the player selects a compatible type, the lobby requests ordinary
+supervisor capacity for a match worker containing that player and bots in the remaining roster
+positions. A full server rejects the request immediately rather than creating a practice wait list.
+M08 bots are inert named participants with no AI; compatibility validates only that ordinary mode
+rules and lifecycle accept the complete roster. An incompatible type is marked unavailable rather
+than falling back to different rules. Bot behavior is deferred to a later version.
+
 ### Server-local pool formation
 
 - Each advertised game type owns a FIFO pool of validated queue tickets.
@@ -127,8 +135,8 @@ do not vote or author rules in v2. Runtime hot-editing is deferred.
   formation resolves cancellation races deterministically.
 - Parties and group affinity are absent. Two friends may join the same queue, but v2 does not
   promise the same match or team.
-- PvP game types never insert bots silently. Practice and any bot-filled game types are separately
-  named and visibly identified.
+- Multiplayer pools contain human tickets only and retain exact-human formation in M08. Practice
+  does not join, wait in, or fill those pools.
 
 ### Concurrent matches as isolated workers
 
@@ -174,8 +182,9 @@ The windowed client connects immediately on launch and never shows a product men
 ## Experience principles
 
 1. **Boot to a useful choice; fight within a minute when a path is available.** Practice is always
-   available; a reachable populated favorite is a short path to PvP. The UI never invents a short
-   queue estimate when the population cannot support one.
+   offered and starts immediately when the selected server is reachable and has worker capacity; a
+   reachable populated favorite is a short path to PvP. The UI never invents a short queue estimate
+   when the population cannot support one.
 2. **Controller-first navigation, keyboard/mouse first-class.** Focus navigation, confirm, cancel,
    and back are consistent. Direct address and optional name editing may use keyboard/paste;
    controller users can accept a generated name and navigate saved servers without text entry.
@@ -449,8 +458,9 @@ match, map, terrain, focus, and presentation state exactly once.
 - **Visual/accessibility checks:** minimum resolution, window resizing, ultrawide behavior, UI scale,
   safe margins, non-color team reading, reduced-effects mode, controller disconnect, and input-glyph
   switching.
-- **Usability checks:** first-run Practice reaches controllable play within one minute; a populated
-  favorite requires only a handful of inputs; queue state never promises an unsupported wait time.
+- **Usability checks:** first-run Practice reaches controllable play within one minute against a
+  reachable server with capacity; a populated favorite requires only a handful of inputs; queue
+  state never promises an unsupported wait time.
 
 ## Remaining milestone R&D questions
 
@@ -469,8 +479,10 @@ These are technical research tasks rather than unsettled product behavior:
    network profiles?
 7. Which platform path and atomic persistence mechanism should store the versioned client settings,
    favorites, recents, name, and last-used build?
-8. How should the product launcher invoke the same supervisor/worker topology for local practice
-   across startup, readiness, failure, and shutdown without adding a second gameplay path?
-
 These questions belong in the relevant v2 milestone research sections. They do not reopen the
 agreed authority, membership, formation, rematch, or global-matchmaking boundaries above.
+
+The practice-hosting question is resolved for specification review by
+[`v2/milestone-08.md`](./implementation/v2/milestone-08.md): Practice runs on the connected server,
+bypasses multiplayer queues, and uses ordinary supervisor capacity to allocate one authoritative
+match worker for the player and bots. The client launches no helper processes.

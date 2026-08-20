@@ -634,6 +634,8 @@ fn register_queue_protocol(app: &mut App) {
         .add_direction(NetworkDirection::ClientToServer);
     app.register_message::<crate::lobby::MatchmakingServerMessage>()
         .add_direction(NetworkDirection::ServerToClient);
+    app.register_message::<crate::lobby::PracticeStartRequest>()
+        .add_direction(NetworkDirection::ClientToServer);
     app.add_channel::<QueueSnapshotChannel>(ChannelSettings {
         mode: ChannelMode::SequencedUnreliable,
         retry_unsent_messages: false,
@@ -832,6 +834,7 @@ mod tests {
         assert!(app.is_message_registered::<crate::lobby::QueuePoolSnapshot>());
         assert!(app.is_message_registered::<crate::lobby::MatchmakingClientMessage>());
         assert!(app.is_message_registered::<crate::lobby::MatchmakingServerMessage>());
+        assert!(app.is_message_registered::<crate::lobby::PracticeStartRequest>());
         assert!(app.is_message_registered::<MatchRouteGrant>());
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());

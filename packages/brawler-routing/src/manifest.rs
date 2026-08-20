@@ -79,7 +79,7 @@ impl ManifestCommon {
     fn validate(self, expected_role: WorkerRole) -> Result<(), CodecError> {
         let expected_version = match expected_role {
             WorkerRole::Lobby => 1,
-            WorkerRole::Match => 2,
+            WorkerRole::Match => 3,
         };
         if self.manifest_version != expected_version || self.role != expected_role {
             return Err(CodecError::InvalidValue);
@@ -439,6 +439,70 @@ fn decode_match_participant(
     })
 }
 
+/// A server-local bot roster entry. It intentionally carries no connection or routing identity.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct MatchManifestBot {
+    pub player_id: crate::PlayerId,
+    pub team: u8,
+    pub display_name: MatchDisplayName,
+    pub source_build_preset: Option<u16>,
+    pub recipe_fingerprint: u64,
+    pub revision: u16,
+    pub build_snapshot: MatchBuildSnapshot,
+}
+
+impl fmt::Debug for MatchManifestBot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatchManifestBot")
+            .field("identity", &"[REDACTED]")
+            .field("team", &self.team)
+            .field("build", &"[REDACTED]")
+            .field("revision", &self.revision)
+            .finish_non_exhaustive()
+    }
+}
+
+fn encode_match_bot(encoder: &mut Encoder, bot: &MatchManifestBot) {
+    encoder.put_u64(bot.player_id.get());
+    encoder.put_u8(bot.team);
+    encoder.put_u8(u8::try_from(bot.display_name.as_str().len()).expect("bounded"));
+    encoder.put_bytes(bot.display_name.as_str().as_bytes());
+    match bot.source_build_preset {
+        None => encoder.put_u8(0),
+        Some(preset) => {
+            encoder.put_u8(1);
+            encoder.put_u16(preset);
+        }
+    }
+    encoder.put_u64(bot.recipe_fingerprint);
+    encoder.put_u16(bot.revision);
+    encoder.put_u8(u8::try_from(bot.build_snapshot.as_bytes().len()).expect("bounded"));
+    encoder.put_bytes(bot.build_snapshot.as_bytes());
+}
+
+fn decode_match_bot(decoder: &mut Decoder<'_>) -> Result<MatchManifestBot, CodecError> {
+    let player_id = crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
+    let team = decoder.u8()?;
+    let display_name_length = usize::from(decoder.u8()?);
+    let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
+        .map_err(|_| CodecError::InvalidValue)
+        .and_then(MatchDisplayName::new)?;
+    let source_build_preset = decoder.optional(Decoder::u16)?;
+    let recipe_fingerprint = decoder.u64()?;
+    let revision = decoder.u16()?;
+    let build_length = usize::from(decoder.u8()?);
+    Ok(MatchManifestBot {
+        player_id,
+        team,
+        display_name,
+        source_build_preset,
+        recipe_fingerprint,
+        revision,
+        build_snapshot: MatchBuildSnapshot::new(decoder.take(build_length)?)?,
+    })
+}
+
 /// A match worker's canonical v1 manifest.
 #[derive(Clone, PartialEq, Eq)]
 pub struct MatchManifestV1 {
@@ -457,6 +521,7 @@ pub struct MatchManifestV1 {
     pub reserved: u8,
     pub seed: u64,
     pub participants: Vec<MatchManifestParticipant>,
+    pub bots: Vec<MatchManifestBot>,
     pub heartbeat_ms: u32,
     pub nonce: u128,
     pub digest: [u8; 32],
@@ -481,6 +546,7 @@ impl fmt::Debug for MatchManifestV1 {
             .field("reserved", &self.reserved)
             .field("seed", &self.seed)
             .field("participant_count", &self.participants.len())
+            .field("bot_count", &self.bots.len())
             .field("heartbeat_ms", &self.heartbeat_ms)
             .field("nonce", &"[REDACTED]")
             .field("digest", &"[REDACTED]")
@@ -520,6 +586,10 @@ impl MatchManifestV1 {
         encoder.put_u8(u8::try_from(self.participants.len()).map_err(|_| CodecError::Oversize)?);
         for participant in &self.participants {
             encode_match_participant(&mut encoder, participant);
+        }
+        encoder.put_u8(u8::try_from(self.bots.len()).map_err(|_| CodecError::Oversize)?);
+        for bot in &self.bots {
+            encode_match_bot(&mut encoder, bot);
         }
         encoder.put_u32(self.heartbeat_ms);
         encoder.put_u128(self.nonce);
@@ -573,6 +643,14 @@ impl MatchManifestV1 {
         for _ in 0..count {
             participants.push(decode_match_participant(&mut decoder)?);
         }
+        let bot_count = usize::from(decoder.u8()?);
+        if count.saturating_add(bot_count) > MAX_PARTICIPANTS {
+            return Err(CodecError::InvalidValue);
+        }
+        let mut bots = Vec::with_capacity(bot_count);
+        for _ in 0..bot_count {
+            bots.push(decode_match_bot(&mut decoder)?);
+        }
         let value = Self {
             common,
             request_id,
@@ -589,6 +667,7 @@ impl MatchManifestV1 {
             reserved,
             seed,
             participants,
+            bots,
             heartbeat_ms: decoder.u32()?,
             nonce: decoder.u128()?,
             digest: bytes[split..].try_into().expect("exact digest width"),
@@ -609,7 +688,7 @@ impl MatchManifestV1 {
             || self.countdown_ticks == 0
             || self.respawn_ticks == 0
             || self.participants.is_empty()
-            || self.participants.len() > MAX_PARTICIPANTS
+            || self.participants.len().saturating_add(self.bots.len()) > MAX_PARTICIPANTS
             || self.heartbeat_ms == 0
         {
             return Err(CodecError::InvalidValue);
@@ -658,7 +737,7 @@ mod tests {
     fn match_manifest(participant_count: usize) -> MatchManifestV1 {
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 2,
+                manifest_version: 3,
                 role: WorkerRole::Match,
                 logical_server_id: id128(1),
                 process_id: id128(2),
@@ -688,6 +767,7 @@ mod tests {
             participants: (1..=u64::try_from(participant_count).unwrap())
                 .map(participant)
                 .collect(),
+            bots: Vec::new(),
             heartbeat_ms: 1_000,
             nonce: 14,
             digest: [0; 32],
@@ -707,7 +787,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 368);
+        assert_eq!(encoded.len(), 369);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])

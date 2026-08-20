@@ -21,12 +21,12 @@ use crate::{
     AllocateRequestBody, AllocationGrant, AllocationGrantedBody, AllocationId, AllocationPolicy,
     AllocationRejectedBody, CONTROL_VERSION_CURRENT, Capability, CapabilityBinding, ControlBody,
     ControlFrame, ControlSequenceTracker, CoreConfig, Generation, IpcChannel, IpcIoError,
-    LifecycleEvent, ManifestBody, ManifestCommon, MatchId, MatchManifestParticipant,
-    MatchManifestV1, MonotonicMillis, PACKET_VERSION_V1, PacketDirection, PacketRecord, PeerId,
-    PrivateRuntimeDir, ProcessId, ProcessSupervisor, ProcessSupervisorConfig, PublicEnvelope,
-    ROUTE_VERSION_V1, RequestId, RouteId, RouteRegistration, RoutingErrorCategory, RoutingMetrics,
-    SeedPolicy, SourceIngressLimiter, StopId, UnixWorkerChannels, UnixWorkerListeners, WorkerId,
-    WorkerKind, WorkerLaunchSpec, WorkerRegistration, WorkerRole,
+    LifecycleEvent, ManifestBody, ManifestCommon, MatchId, MatchManifestBot,
+    MatchManifestParticipant, MatchManifestV1, MonotonicMillis, PACKET_VERSION_V1, PacketDirection,
+    PacketRecord, PeerId, PrivateRuntimeDir, ProcessId, ProcessSupervisor, ProcessSupervisorConfig,
+    PublicEnvelope, ROUTE_VERSION_V1, RequestId, RouteId, RouteRegistration, RoutingErrorCategory,
+    RoutingMetrics, SeedPolicy, SourceIngressLimiter, StopId, UnixWorkerChannels,
+    UnixWorkerListeners, WorkerId, WorkerKind, WorkerLaunchSpec, WorkerRegistration, WorkerRole,
 };
 
 const PUBLIC_TOKEN: Token = Token(0);
@@ -464,7 +464,7 @@ impl SupervisorRuntime {
             );
             return Ok(());
         }
-        if crate::validate_m01_request(&request).is_err() {
+        if crate::validate_product_request(&request).is_err() {
             self.insert_rejected_allocation(request, lobby_worker_id, ALLOCATION_REJECT_INVALID);
             return Ok(());
         }
@@ -571,9 +571,22 @@ impl SupervisorRuntime {
                 capability,
             });
         }
+        let manifest_bots = request
+            .bots
+            .iter()
+            .map(|source| MatchManifestBot {
+                player_id: source.player_id,
+                team: source.team,
+                display_name: source.display_name,
+                source_build_preset: source.source_build_preset,
+                recipe_fingerprint: source.recipe_fingerprint,
+                revision: source.build_revision,
+                build_snapshot: source.build_snapshot,
+            })
+            .collect();
         let manifest = MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 2,
+                manifest_version: 3,
                 role: WorkerRole::Match,
                 logical_server_id,
                 process_id,
@@ -601,6 +614,7 @@ impl SupervisorRuntime {
             reserved: 0,
             seed,
             participants: manifest_participants,
+            bots: manifest_bots,
             heartbeat_ms: policy.heartbeat_ms,
             nonce: random_u128()
                 .map_err(|_| RuntimeError::Routing(RoutingErrorCategory::SupervisorInternal))?,
@@ -3182,6 +3196,7 @@ mod tests {
             team_count: 2,
             players_per_team: 2,
             participants: Vec::new(),
+            bots: Vec::new(),
         };
         runtime.allocations.insert(
             request.request_id,
@@ -3290,6 +3305,7 @@ mod tests {
             team_count: 2,
             players_per_team: 2,
             participants: Vec::new(),
+            bots: Vec::new(),
         };
         runtime.allocations.insert(
             pending_request.request_id,

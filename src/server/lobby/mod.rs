@@ -63,6 +63,10 @@ pub struct LobbyBuildIdentity {
 
 /// Resolve the embedded default build without installing any gameplay authority.
 pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
+    build_identity(BuildPresetId(1))
+}
+
+fn build_identity(preset_id: BuildPresetId) -> Result<LobbyBuildIdentity, String> {
     let builds = BuildCatalog::embedded()?;
     let weapons = WeaponCatalog::embedded()?;
     let fighters = FighterDefinitions::default();
@@ -70,8 +74,8 @@ pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
         .get(STANDARD_FIGHTER_DEFINITION)
         .ok_or_else(|| "standard fighter definition is missing".to_string())?;
     let preset = builds
-        .preset(BuildPresetId(1))
-        .ok_or_else(|| "default build preset is missing".to_string())?;
+        .preset(preset_id)
+        .ok_or_else(|| format!("build preset {} is missing", preset_id.0))?;
     let resolved = resolve_build_recipe(&builds, &weapons, fighter, preset.recipe, Some(preset.id))
         .map_err(|error| format!("default build resolution failed: {error:?}"))?;
     let accepted = crate::builds::AcceptedBuildSummary {
@@ -94,6 +98,38 @@ pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
         build_revision: resolved.identity.revision.0,
         snapshot,
     })
+}
+
+fn practice_bot_rows(
+    team_count: u8,
+    players_per_team: u8,
+) -> Result<Vec<brawler_routing::AllocateBot>, crate::lobby::PracticeStartRejection> {
+    use crate::lobby::PracticeStartRejection as Rejection;
+    let roster_size = usize::from(team_count) * usize::from(players_per_team);
+    let mut bots = Vec::with_capacity(roster_size.saturating_sub(1));
+    for ordinal in 0..roster_size.saturating_sub(1) {
+        let roster_index = ordinal + 1;
+        let team = u8::try_from(roster_index / usize::from(players_per_team))
+            .map_err(|_| Rejection::Internal)?;
+        let preset = BuildPresetId(u16::try_from((ordinal % 4) + 1).expect("bounded preset"));
+        let build = build_identity(preset).map_err(|_| Rejection::Internal)?;
+        bots.push(brawler_routing::AllocateBot {
+            player_id: PlayerId::new(
+                u64::MAX
+                    .checked_sub(u64::try_from(ordinal).map_err(|_| Rejection::Internal)?)
+                    .ok_or(Rejection::Internal)?,
+            )
+            .ok_or(Rejection::Internal)?,
+            team,
+            display_name: brawler_routing::MatchDisplayName::new(&format!("Bot {}", ordinal + 1))
+                .map_err(|_| Rejection::Internal)?,
+            source_build_preset: build.source_build_preset,
+            recipe_fingerprint: build.recipe_fingerprint,
+            build_revision: build.build_revision,
+            build_snapshot: build.snapshot,
+        });
+    }
+    Ok(bots)
 }
 
 /// Why an unauthenticated hello cannot become a lobby session.
@@ -524,6 +560,7 @@ impl LobbyState {
             team_count: 2,
             players_per_team: 1,
             participants,
+            bots: Vec::new(),
         };
         self.pending = Some(PendingAllocation { body, sent: false });
         self.product_request = false;
@@ -613,12 +650,121 @@ impl LobbyState {
                 team_count: reservation.team_count,
                 players_per_team: reservation.players_per_team,
                 participants,
+                bots: Vec::new(),
             },
             sent: false,
         });
         self.product_request = true;
         self.allocation_rejected = false;
         Ok(())
+    }
+
+    fn create_practice_request(
+        &mut self,
+        session: &LobbySession,
+        command: &crate::lobby::PracticeStartRequest,
+        catalog: &catalog::ResolvedLobbyCatalog,
+        builds: &BuildCatalog,
+        weapons: &WeaponCatalog,
+        fighters: &FighterDefinitions,
+    ) -> Result<crate::lobby::ReservationStarted, crate::lobby::PracticeStartRejection> {
+        use crate::lobby::PracticeStartRejection as Rejection;
+        if self.pending.is_some() || self.allocation_completed {
+            return Err(Rejection::Busy);
+        }
+        if self.free_match_slots == 0 {
+            return Err(Rejection::CapacityUnavailable);
+        }
+        if command.catalog_revision != catalog.revision {
+            return Err(Rejection::StaleCatalog);
+        }
+        let game = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id == command.game_type_id)
+            .ok_or(Rejection::UnknownGameType)?;
+        if game.configuration_revision != command.game_type_configuration_revision {
+            return Err(Rejection::StaleGameConfiguration);
+        }
+        let (recipe, resolved) =
+            queue::resolve_candidate(&command.build, builds, weapons, fighters)
+                .map_err(|_| Rejection::InvalidBuild)?;
+        let accepted_build = crate::builds::AcceptedBuildSummary {
+            canonical_recipe: recipe,
+            identity: resolved.identity,
+            total_points: resolved.total_points,
+        };
+        let human_snapshot = crate::builds::MatchBuildSnapshotV1 {
+            schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
+            candidate: command.build,
+            accepted: accepted_build,
+        }
+        .encode()
+        .map_err(|_| Rejection::Internal)?;
+        let request_id = RequestId::new(self.next_request_id).ok_or(Rejection::Internal)?;
+        self.next_request_id = self
+            .next_request_id
+            .checked_add(1)
+            .ok_or(Rejection::Internal)?;
+        let reservation_entropy = Capability::generate().map_err(|_| Rejection::Internal)?;
+        let reservation_id = crate::lobby::MatchReservationId::new(u128::from_le_bytes(
+            reservation_entropy.into_bytes()[..16]
+                .try_into()
+                .expect("capability prefix width"),
+        ))
+        .ok_or(Rejection::Internal)?;
+        let human = AllocateParticipant {
+            lobby_session_id: session.lobby_session_id,
+            player_id: session.player_id,
+            netcode_client_id: session.netcode_client_id,
+            team: 0,
+            display_name: brawler_routing::MatchDisplayName::new(
+                self.accepted_name(session.netcode_client_id)
+                    .ok_or(Rejection::Internal)?,
+            )
+            .map_err(|_| Rejection::Internal)?,
+            source_build_preset: resolved.identity.source_build_preset_id.map(|id| id.0),
+            recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
+            build_revision: resolved.identity.revision.0,
+            build_snapshot: human_snapshot,
+        };
+        let bots = practice_bot_rows(game.team_count, game.players_per_team)?;
+        let rules = catalog.rules(&game.id).ok_or(Rejection::Internal)?;
+        self.pending = Some(PendingAllocation {
+            body: AllocateRequestBody {
+                request_id,
+                lobby_session_id: session.lobby_session_id,
+                mode: if game.mode_definition_id == crate::map::WIPEOUT_MODE_DEFINITION {
+                    brawler_routing::GameMode::Wipeout
+                } else {
+                    brawler_routing::GameMode::HotZone
+                },
+                map_preset: game.map_preset_ids[0].0,
+                map_revision: 1,
+                rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
+                objective_target: rules.objective_target,
+                match_duration_ticks: rules.match_duration_ticks,
+                countdown_ticks: rules.countdown_ticks,
+                respawn_ticks: rules.respawn_ticks,
+                team_count: game.team_count,
+                players_per_team: game.players_per_team,
+                participants: vec![human],
+                bots,
+            },
+            sent: false,
+        });
+        self.product_request = true;
+        self.allocation_rejected = false;
+        Ok(crate::lobby::ReservationStarted {
+            reservation_id,
+            ticket_id: None,
+            game_type_id: game.id.clone(),
+            map_preset_id: game.map_preset_ids[0],
+            team_count: game.team_count,
+            players_per_team: game.players_per_team,
+            accepted_build,
+            loading_deadline_millis: 30_000,
+        })
     }
 
     /// Return the one stable allocation request body for the current exact-two roster. The worker
@@ -879,11 +1025,19 @@ pub(crate) enum LobbyScheduleSet {
 #[derive(Resource, Default)]
 struct ProductFormationState {
     active: Option<crate::lobby::MatchReservationId>,
+    practice: Option<PracticeFormation>,
     next_sequence: BTreeMap<LobbySessionId, u64>,
     pending_grants: BTreeMap<LobbySessionId, MatchRouteGrant>,
     begin_sent: BTreeSet<LobbySessionId>,
     loading_deadline: Option<Duration>,
     grant_deadline: Option<Duration>,
+}
+
+#[derive(Clone)]
+struct PracticeFormation {
+    request_id: crate::lobby::PracticeRequestId,
+    session_id: LobbySessionId,
+    started: crate::lobby::ReservationStarted,
 }
 
 impl ProductFormationState {
@@ -899,6 +1053,12 @@ impl ProductFormationState {
         self.begin_sent.clear();
         self.loading_deadline = None;
         self.grant_deadline = None;
+    }
+
+    fn clear_active(&mut self) {
+        self.active = None;
+        self.practice = None;
+        self.clear_handoff();
     }
 }
 
@@ -986,6 +1146,7 @@ impl Plugin for LobbyPlugin {
                         .in_set(LobbyScheduleSet::CleanupDisconnectedSessions),
                     apply_queue_transactions.in_set(LobbyScheduleSet::ApplyQueueTransactions),
                     (
+                        apply_practice_start_requests,
                         apply_matchmaking_client_messages,
                         lobby_apply_control_frames,
                         flush_deferred_product_cancel,
@@ -1303,6 +1464,16 @@ fn cleanup_disconnected_sessions(
     let losses = core::mem::take(&mut losses.0);
     for (session_id, client_id) in losses {
         frame.eligible.remove(&session_id);
+        if formation
+            .practice
+            .as_ref()
+            .is_some_and(|practice| practice.session_id == session_id)
+        {
+            if let Some(fact) = state.cancel_product_allocation() {
+                let _ = outbox.push_activation_cancel(fact);
+            }
+            formation.clear_active();
+        }
         let reserved = queue.ticket_for_session(session_id).and_then(|ticket| {
             queue
                 .reservation_for_ticket(ticket.ticket_id)
@@ -1313,8 +1484,7 @@ fn cleanup_disconnected_sessions(
             if let Some(fact) = state.cancel_product_allocation() {
                 let _ = outbox.push_activation_cancel(fact);
             }
-            formation.active = None;
-            formation.clear_handoff();
+            formation.clear_active();
             frame.snapshot_changed = true;
             for (client, mut sender) in &mut clients {
                 let Some(ticket) = removed
@@ -1327,7 +1497,7 @@ fn cleanup_disconnected_sessions(
                     sequence: formation.next_sequence(client.lobby_session_id),
                     phase: crate::lobby::MatchmakingServerPhase::Removed {
                         reservation_id,
-                        ticket_id: ticket.ticket_id,
+                        ticket_id: Some(ticket.ticket_id),
                         reason: crate::lobby::MatchStartFailure::ParticipantLost,
                     },
                 });
@@ -1528,6 +1698,104 @@ fn lobby_enqueue_product_allocation(
 }
 
 #[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::needless_pass_by_value
+)]
+fn apply_practice_start_requests(
+    time: Res<Time<Real>>,
+    mut state: ResMut<LobbyState>,
+    queue: Res<QueueState>,
+    catalog: Res<catalog::ResolvedLobbyCatalog>,
+    builds: Res<crate::builds::BuildCatalogResource>,
+    weapons: Res<crate::combat::WeaponCatalogResource>,
+    fighters: Res<FighterDefinitions>,
+    mut formation: ResMut<ProductFormationState>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageReceiver<crate::lobby::PracticeStartRequest>,
+        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
+        Has<Connected>,
+        Has<Disconnected>,
+    )>,
+) {
+    let mut ordered: Vec<_> = clients.iter_mut().collect();
+    ordered.sort_by_key(|(client, _, _, _, _)| client.lobby_session_id);
+    for (client, mut receiver, mut sender, connected, disconnected) in ordered {
+        let requests: Vec<_> = receiver.receive().take(2).collect();
+        if !connected || disconnected {
+            continue;
+        }
+        for command in requests.into_iter().take(1) {
+            if let Some(practice) = formation.practice.clone() {
+                if practice.session_id == client.lobby_session_id
+                    && practice.request_id == command.request_id
+                {
+                    sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+                        sequence: formation.next_sequence(client.lobby_session_id),
+                        phase: crate::lobby::MatchmakingServerPhase::ReservationStarted(
+                            practice.started.clone(),
+                        ),
+                    });
+                } else {
+                    sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+                        sequence: formation.next_sequence(client.lobby_session_id),
+                        phase: crate::lobby::MatchmakingServerPhase::PracticeRejected {
+                            request_id: command.request_id,
+                            reason: crate::lobby::PracticeStartRejection::Busy,
+                        },
+                    });
+                }
+                continue;
+            }
+            let rejection = if formation.active.is_some() || queue.reservation_count() != 0 {
+                Some(crate::lobby::PracticeStartRejection::Busy)
+            } else {
+                None
+            };
+            let session = state
+                .session_by_lobby_id(client.lobby_session_id)
+                .expect("authenticated lobby client owns session");
+            let started = rejection.map_or_else(
+                || {
+                    state.create_practice_request(
+                        &session, &command, &catalog, &builds.0, &weapons.0, &fighters,
+                    )
+                },
+                Err,
+            );
+            match started {
+                Ok(started) => {
+                    formation.active = Some(started.reservation_id);
+                    formation.practice = Some(PracticeFormation {
+                        request_id: command.request_id,
+                        session_id: client.lobby_session_id,
+                        started: started.clone(),
+                    });
+                    formation.loading_deadline =
+                        Some(time.elapsed().saturating_add(Duration::from_secs(30)));
+                    formation.grant_deadline =
+                        Some(time.elapsed().saturating_add(Duration::from_secs(10)));
+                    sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+                        sequence: formation.next_sequence(client.lobby_session_id),
+                        phase: crate::lobby::MatchmakingServerPhase::ReservationStarted(started),
+                    });
+                }
+                Err(reason) => {
+                    sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+                        sequence: formation.next_sequence(client.lobby_session_id),
+                        phase: crate::lobby::MatchmakingServerPhase::PracticeRejected {
+                            request_id: command.request_id,
+                            reason,
+                        },
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_lines,
     clippy::type_complexity
@@ -1565,12 +1833,30 @@ fn apply_matchmaking_client_messages(
     let Some(reservation_id) = cancel else {
         return;
     };
+    if let Some(practice) = formation.practice.clone() {
+        if let Some(fact) = state.cancel_product_allocation() {
+            let _ = outbox.push_activation_cancel(fact);
+        }
+        formation.clear_active();
+        for (client, _, mut sender) in &mut clients {
+            if client.lobby_session_id == practice.session_id {
+                sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+                    sequence: formation.next_sequence(client.lobby_session_id),
+                    phase: crate::lobby::MatchmakingServerPhase::Removed {
+                        reservation_id,
+                        ticket_id: None,
+                        reason: crate::lobby::MatchStartFailure::Cancelled,
+                    },
+                });
+            }
+        }
+        return;
+    }
     let removed = queue.complete_reservation(reservation_id);
     if let Some(fact) = state.cancel_product_allocation() {
         let _ = outbox.push_activation_cancel(fact);
     }
-    formation.active = None;
-    formation.clear_handoff();
+    formation.clear_active();
     frame.snapshot_changed = true;
     for (client, _, mut sender) in &mut clients {
         let Some(ticket) = removed
@@ -1583,7 +1869,7 @@ fn apply_matchmaking_client_messages(
             sequence: formation.next_sequence(client.lobby_session_id),
             phase: crate::lobby::MatchmakingServerPhase::Removed {
                 reservation_id,
-                ticket_id: ticket.ticket_id,
+                ticket_id: Some(ticket.ticket_id),
                 reason: crate::lobby::MatchStartFailure::Cancelled,
             },
         });
@@ -1658,7 +1944,7 @@ fn form_product_reservation(
             phase: crate::lobby::MatchmakingServerPhase::ReservationStarted(
                 crate::lobby::ReservationStarted {
                     reservation_id,
-                    ticket_id: ticket.ticket_id,
+                    ticket_id: Some(ticket.ticket_id),
                     game_type_id: reservation.game_type_id.clone(),
                     map_preset_id: reservation.map_preset_id,
                     team_count: reservation.team_count,
@@ -1697,9 +1983,24 @@ fn apply_product_dissolution(
     let Some(reservation_id) = formation.active else {
         return;
     };
+    if let Some(practice) = formation.practice.clone() {
+        formation.clear_active();
+        for (client, mut sender) in &mut clients {
+            if client.lobby_session_id == practice.session_id {
+                sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
+                    sequence: formation.next_sequence(client.lobby_session_id),
+                    phase: crate::lobby::MatchmakingServerPhase::Removed {
+                        reservation_id,
+                        ticket_id: None,
+                        reason: crate::lobby::MatchStartFailure::WorkerFailed,
+                    },
+                });
+            }
+        }
+        return;
+    }
     let removed = queue.complete_reservation(reservation_id);
-    formation.active = None;
-    formation.clear_handoff();
+    formation.clear_active();
     frame.snapshot_changed = true;
     for (client, mut sender) in &mut clients {
         let Some(ticket) = removed
@@ -1712,7 +2013,7 @@ fn apply_product_dissolution(
             sequence: formation.next_sequence(client.lobby_session_id),
             phase: crate::lobby::MatchmakingServerPhase::Removed {
                 reservation_id,
-                ticket_id: ticket.ticket_id,
+                ticket_id: Some(ticket.ticket_id),
                 reason: crate::lobby::MatchStartFailure::WorkerFailed,
             },
         });
@@ -1731,9 +2032,13 @@ fn apply_product_activation(
     let Some(reservation_id) = formation.active else {
         return;
     };
+    if formation.practice.is_some() {
+        formation.clear_active();
+        state.complete_product_activation();
+        return;
+    }
     let _active_tickets = queue.complete_reservation(reservation_id);
-    formation.active = None;
-    formation.clear_handoff();
+    formation.clear_active();
     state.complete_product_activation();
     frame.snapshot_changed = true;
 }
@@ -1759,9 +2064,13 @@ fn expire_product_reservation(
         return;
     };
     let now = time.elapsed();
-    let expected = queue
-        .reservation(reservation_id)
-        .map_or(0, |reservation| reservation.participants.len());
+    let expected = if formation.practice.is_some() {
+        1
+    } else {
+        queue
+            .reservation(reservation_id)
+            .map_or(0, |reservation| reservation.participants.len())
+    };
     let grant_expired = formation.pending_grants.len() != expected
         && formation
             .grant_deadline
@@ -1779,25 +2088,36 @@ fn expire_product_reservation(
     } else {
         crate::lobby::MatchStartFailure::TimedOut
     };
-    let removed = queue.complete_reservation(reservation_id);
+    let practice = formation.practice.clone();
+    let removed = if practice.is_some() {
+        Vec::new()
+    } else {
+        queue.complete_reservation(reservation_id)
+    };
     if let Some(fact) = state.cancel_product_allocation() {
         let _ = outbox.push_activation_cancel(fact);
     }
-    formation.active = None;
-    formation.clear_handoff();
-    frame.snapshot_changed = true;
+    formation.clear_active();
+    frame.snapshot_changed |= practice.is_none();
     for (client, mut sender) in &mut clients {
-        let Some(ticket) = removed
+        let ticket_id = if practice
+            .as_ref()
+            .is_some_and(|practice| practice.session_id == client.lobby_session_id)
+        {
+            None
+        } else if let Some(ticket) = removed
             .iter()
             .find(|ticket| ticket.lobby_session_id == client.lobby_session_id)
-        else {
+        {
+            Some(ticket.ticket_id)
+        } else {
             continue;
         };
         sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
             sequence: formation.next_sequence(client.lobby_session_id),
             phase: crate::lobby::MatchmakingServerPhase::Removed {
                 reservation_id,
-                ticket_id: ticket.ticket_id,
+                ticket_id,
                 reason,
             },
         });
@@ -1818,15 +2138,32 @@ fn lobby_deliver_product_grants(
     let Some(reservation_id) = formation.active else {
         return;
     };
-    let participant_count = queue
-        .reservation(reservation_id)
-        .map_or(0, |reservation| reservation.participants.len());
+    let participant_count = if formation.practice.is_some() {
+        1
+    } else {
+        queue
+            .reservation(reservation_id)
+            .map_or(0, |reservation| reservation.participants.len())
+    };
     if participant_count == 0 {
         return;
     }
 
     // Collect the complete roster's grants before beginning any client migration.
     for (client, _, _) in &mut clients {
+        if let Some(practice) = formation.practice.as_ref() {
+            if practice.session_id == client.lobby_session_id
+                && !formation
+                    .pending_grants
+                    .contains_key(&client.lobby_session_id)
+                && let Some(grant) = state.take_route_grant(client.client_id.get())
+            {
+                formation
+                    .pending_grants
+                    .insert(client.lobby_session_id, grant);
+            }
+            continue;
+        }
         let Some(ticket) = queue.ticket_for_session(client.lobby_session_id) else {
             continue;
         };
@@ -1847,7 +2184,9 @@ fn lobby_deliver_product_grants(
         return;
     }
 
-    queue.mark_reservation_handoff_ready(reservation_id);
+    if formation.practice.is_none() {
+        queue.mark_reservation_handoff_ready(reservation_id);
+    }
 
     for (client, mut phase_sender, mut compatibility_sender) in &mut clients {
         if formation.begin_sent.contains(&client.lobby_session_id) {
@@ -1982,6 +2321,65 @@ mod tests {
                 &hello,
             )
             .unwrap();
+    }
+
+    #[test]
+    fn practice_uses_one_human_and_fills_the_selected_roster_with_named_bots() {
+        let mut lobby = state();
+        lobby.free_match_slots = 1;
+        let session = lobby
+            .accept_client(
+                11,
+                RouteId::new(20).unwrap(),
+                PeerId::new(21).unwrap(),
+                &hello(),
+            )
+            .unwrap();
+        let catalog =
+            resolve_operator_catalog(include_bytes!("../../../config/server/game-types.ron"))
+                .unwrap();
+        let game = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == "hot-zone-3v3")
+            .unwrap();
+        let builds = BuildCatalog::embedded().unwrap();
+        let weapons = WeaponCatalog::embedded().unwrap();
+        let command = crate::lobby::PracticeStartRequest {
+            request_id: crate::lobby::PracticeRequestId::new(1).unwrap(),
+            catalog_revision: catalog.revision,
+            game_type_id: game.id.clone(),
+            game_type_configuration_revision: game.configuration_revision,
+            build: crate::builds::BuildCandidate {
+                build_revision: builds.balance_revision,
+                selection: crate::builds::BuildSelection::Preset(BuildPresetId(1)),
+            },
+        };
+
+        let started = lobby
+            .create_practice_request(
+                &session,
+                &command,
+                &catalog,
+                &builds,
+                &weapons,
+                &FighterDefinitions::default(),
+            )
+            .unwrap();
+        let request = &lobby.pending.as_ref().unwrap().body;
+        assert_eq!(started.ticket_id, None);
+        assert_eq!(request.participants.len(), 1);
+        assert_eq!(request.bots.len(), 5);
+        assert_eq!(
+            request
+                .bots
+                .iter()
+                .map(|bot| bot.display_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Bot 1", "Bot 2", "Bot 3", "Bot 4", "Bot 5"]
+        );
+        assert_eq!(request.bots.iter().filter(|bot| bot.team == 0).count(), 2);
+        assert_eq!(request.bots.iter().filter(|bot| bot.team == 1).count(), 3);
     }
 
     #[test]

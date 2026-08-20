@@ -55,6 +55,13 @@ pub enum ClientFlow {
     Results,
 }
 
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SessionPurpose {
+    #[default]
+    Multiplayer,
+    Practice,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CancelMatchStartConfirmation {
     pub reservation_id: crate::lobby::MatchReservationId,
@@ -87,6 +94,7 @@ pub enum FlowErrorKind {
     Queue,
     Persistence,
     Content,
+    Practice,
 }
 
 impl FlowErrorKind {
@@ -96,6 +104,7 @@ impl FlowErrorKind {
             Self::Queue => "QUEUE ERROR",
             Self::Persistence => "SAVE ERROR",
             Self::Content => "CONTENT ERROR",
+            Self::Practice => "PRACTICE ERROR",
         }
     }
 }
@@ -149,6 +158,7 @@ enum FlowUiAction {
     },
     CancelBuildEditor,
     JoinQueue,
+    StartPractice,
     CancelQueue,
     RetryQueue,
     TryAgainQueue,
@@ -182,6 +192,7 @@ enum SessionObservation {
     CountdownObserved,
     FreshLobbyReturn,
     MatchFailed,
+    PracticeRejected(crate::lobby::PracticeStartRejection),
 }
 
 #[derive(Resource, Default)]
@@ -364,6 +375,7 @@ struct BuildEditorRenderKey {
     game_name: String,
     joining: bool,
     capacity_occupied: bool,
+    practice: bool,
 }
 
 #[derive(Component)]
@@ -418,10 +430,12 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<ClientLocalLoadFailures>()
             .init_resource::<super::BuildEditorState>()
             .init_resource::<super::ClientQueueModel>()
+            .init_resource::<super::ClientPracticeModel>()
             .init_resource::<super::ClientMatchLoadingModel>()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .init_resource::<crate::combat::WeaponCatalogResource>()
             .init_resource::<SelectedGameType>()
+            .init_resource::<SessionPurpose>()
             .init_resource::<super::ClientMatchResultState>()
             .init_resource::<RoutedClientLifecycle>()
             .init_resource::<MatchFailureNotice>()
@@ -617,6 +631,7 @@ fn observe_session(
     mut actions: ResMut<PendingFlowActions>,
     mut queue: ResMut<super::ClientQueueModel>,
     mut loading: ResMut<super::ClientMatchLoadingModel>,
+    mut practice: ResMut<super::ClientPracticeModel>,
     result_state: Res<super::ClientMatchResultState>,
     routed: Res<RoutedClientLifecycle>,
 ) {
@@ -634,6 +649,10 @@ fn observe_session(
     }
     if queue.protocol_failure() {
         actions.session = Some(SessionObservation::QueueProtocolFailure);
+        return;
+    }
+    if let Some(reason) = practice.take_rejection() {
+        actions.session = Some(SessionObservation::PracticeRejected(reason));
         return;
     }
     if let Some(started) = loading.take_started() {
@@ -938,12 +957,14 @@ fn resolve_flow_action(
     path: Res<ClientConnectionsPath>,
     overlay: Res<ClientOverlay>,
     mut selection: ResMut<SelectedGameType>,
-    mut models: (
+    models: (
         ResMut<super::ClientQueueModel>,
+        ResMut<super::ClientPracticeModel>,
         ResMut<super::ClientMatchLoadingModel>,
         ResMut<super::ClientMatchResultState>,
         ResMut<RoutedClientLifecycle>,
         ResMut<MatchFailureNotice>,
+        ResMut<SessionPurpose>,
     ),
     mut editor: ResMut<super::BuildEditorState>,
     builds: Res<crate::builds::BuildCatalogResource>,
@@ -951,17 +972,24 @@ fn resolve_flow_action(
     build_path: Res<super::ClientBuildPath>,
 ) {
     let (
-        ref mut queue,
-        ref mut loading,
-        ref mut result_state,
-        ref mut routed,
-        ref mut match_failure,
+        mut queue,
+        mut practice,
+        mut loading,
+        mut result_state,
+        mut routed,
+        mut match_failure,
+        mut purpose,
     ) = models;
     if let Some(explicit) = actions.explicit.take() {
         match explicit {
             FlowUiAction::Cancel | FlowUiAction::Disconnect => {
                 commit.teardown = true;
-                commit.next_flow = Some(ClientFlow::ServerSelect);
+                commit.next_flow = Some(if *purpose == SessionPurpose::Practice {
+                    *purpose = SessionPurpose::Multiplayer;
+                    ClientFlow::Title
+                } else {
+                    ClientFlow::ServerSelect
+                });
                 *selection = SelectedGameType::default();
                 result_state.context = None;
                 editor.close_without_acceptance();
@@ -1154,6 +1182,14 @@ fn resolve_flow_action(
                 result_state.context = None;
                 match_failure.0 = true;
                 let _ = routed.request_return_to_lobby();
+            }
+            SessionObservation::PracticeRejected(reason) => {
+                commit.error = Some(FlowError {
+                    kind: FlowErrorKind::Practice,
+                    message: practice_rejection_copy(reason).to_string(),
+                    return_flow: ClientFlow::GameSelect,
+                    actions: [Some(FlowErrorAction::Back), None],
+                });
             }
             SessionObservation::CountdownObserved => {
                 commit.next_flow = Some(ClientFlow::Match);
@@ -1432,10 +1468,12 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::OpenBuildEditor => {
-            if queue.snapshot().is_some_and(|snapshot| {
-                snapshot.formation_availability
-                    == crate::lobby::FormationAvailability::ProductMatchOccupied
-            }) {
+            if *purpose != SessionPurpose::Practice
+                && queue.snapshot().is_some_and(|snapshot| {
+                    snapshot.formation_availability
+                        == crate::lobby::FormationAvailability::ProductMatchOccupied
+                })
+            {
                 return;
             }
             editor.open();
@@ -1478,7 +1516,40 @@ fn resolve_flow_action(
                 }
             }
         }
+        FlowUiAction::StartPractice => {
+            let draft = editor.selection(&builds.0);
+            match super::resolve_build_preview(draft, &builds.0, &weapons.0) {
+                Ok(_) => {
+                    let candidate = crate::builds::BuildCandidate {
+                        build_revision: builds.0.balance_revision,
+                        selection: draft,
+                    };
+                    if practice.start(&selection, candidate) {
+                        editor.submitted_selection = Some(draft);
+                        editor.inline_error = None;
+                    }
+                }
+                Err(error) => {
+                    editor.inline_error = Some(super::build_editor::build_error_copy(&error));
+                }
+            }
+        }
         FlowUiAction::QueueAgain => {
+            if *purpose == SessionPurpose::Practice {
+                let candidate = crate::builds::BuildCandidate {
+                    build_revision: builds.0.balance_revision,
+                    selection: editor.loaded_selection,
+                };
+                if !practice.start(&selection, candidate) {
+                    commit.error = Some(FlowError {
+                        kind: FlowErrorKind::Practice,
+                        message: "The practice connection is unavailable.".to_string(),
+                        return_flow: ClientFlow::Results,
+                        actions: [Some(FlowErrorAction::Back), None],
+                    });
+                }
+                return;
+            }
             let current_lobby = membership
                 .iter()
                 .find(|(_, _, session)| session.kind == super::RoutedClientSessionKind::Lobby);
@@ -1570,6 +1641,26 @@ fn resolve_flow_action(
         FlowUiAction::CancelBuildEditor | FlowUiAction::Cancel | FlowUiAction::Disconnect => {}
     }
     let _ = flow;
+}
+
+const fn practice_rejection_copy(reason: crate::lobby::PracticeStartRejection) -> &'static str {
+    match reason {
+        crate::lobby::PracticeStartRejection::StaleCatalog
+        | crate::lobby::PracticeStartRejection::StaleGameConfiguration => {
+            "The server's game catalog changed. Choose the game again."
+        }
+        crate::lobby::PracticeStartRejection::UnknownGameType => {
+            "That practice game is no longer available."
+        }
+        crate::lobby::PracticeStartRejection::InvalidBuild => {
+            "The selected build was rejected by the server."
+        }
+        crate::lobby::PracticeStartRejection::Busy => "Another match start is already in progress.",
+        crate::lobby::PracticeStartRejection::CapacityUnavailable => {
+            "The server has no free match capacity right now."
+        }
+        crate::lobby::PracticeStartRejection::Internal => "The server could not start practice.",
+    }
 }
 
 fn queue_recovery_overlay(command: &crate::lobby::QueueCommand) -> OverlayCommit {
@@ -2206,6 +2297,8 @@ fn present_build_editor_overlay(
     weapons: Res<crate::combat::WeaponCatalogResource>,
     selection: Res<SelectedGameType>,
     queue: Res<super::ClientQueueModel>,
+    practice: Res<super::ClientPracticeModel>,
+    purpose: Res<SessionPurpose>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     roots: Query<(Entity, &ScrollPosition), With<BuildEditorRoot>>,
     mut navigation: ResMut<FlowNavigation>,
@@ -2220,12 +2313,19 @@ fn present_build_editor_overlay(
         *rendered = None;
         return;
     }
-    let joining = queue
-        .pending()
-        .is_some_and(|pending| matches!(pending.command, crate::lobby::QueueCommand::Join(_)));
-    let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
-        snapshot.formation_availability == crate::lobby::FormationAvailability::ProductMatchOccupied
-    });
+    let is_practice = *purpose == SessionPurpose::Practice;
+    let joining = if is_practice {
+        practice.pending()
+    } else {
+        queue
+            .pending()
+            .is_some_and(|pending| matches!(pending.command, crate::lobby::QueueCommand::Join(_)))
+    };
+    let capacity_occupied = !is_practice
+        && queue.snapshot().is_some_and(|snapshot| {
+            snapshot.formation_availability
+                == crate::lobby::FormationAvailability::ProductMatchOccupied
+        });
     let game_name = selected_game_name(&selection, memberships.iter().next()).to_string();
     let render_key = BuildEditorRenderKey {
         selected_choice: editor.selected_choice,
@@ -2236,6 +2336,7 @@ fn present_build_editor_overlay(
         game_name: game_name.clone(),
         joining,
         capacity_occupied,
+        practice: is_practice,
     };
     if !roots.is_empty() && rendered.as_ref() == Some(&render_key) {
         return;
@@ -2396,8 +2497,22 @@ fn present_build_editor_overlay(
             spawn_build_editor_button(
                 root,
                 BUILD_EDITOR_JOIN_INDEX,
-                FlowUiAction::JoinQueue,
-                if joining { "JOINING..." } else { "JOIN QUEUE" },
+                if is_practice {
+                    FlowUiAction::StartPractice
+                } else {
+                    FlowUiAction::JoinQueue
+                },
+                if joining {
+                    if is_practice {
+                        "STARTING..."
+                    } else {
+                        "JOINING..."
+                    }
+                } else if is_practice {
+                    "START PRACTICE"
+                } else {
+                    "JOIN QUEUE"
+                },
                 joining || preview.is_err() || capacity_occupied,
             );
             spawn_build_editor_button(
@@ -2729,6 +2844,7 @@ fn spawn_game_select(
     mut navigation: ResMut<FlowNavigation>,
     mut selection: ResMut<SelectedGameType>,
     queue: Res<super::ClientQueueModel>,
+    purpose: Res<SessionPurpose>,
 ) {
     let Some(membership) = memberships.iter().next() else {
         return;
@@ -2820,22 +2936,32 @@ fn spawn_game_select(
                 );
                 root.spawn((
                     GamePopulationLabel(index),
-                    Text::new(queue_population(&queue, game_type)),
+                    Text::new(if *purpose == SessionPurpose::Practice {
+                        format!(
+                            "Starts immediately with {} inert bots",
+                            game_type.players_per_team as usize * 2 - 1
+                        )
+                    } else {
+                        queue_population(&queue, game_type)
+                    }),
                     TextFont::from_font_size(15.0),
                     TextColor(Color::srgb(0.68, 0.78, 0.86)),
                 ));
             }
             let offset = membership.game_types.len();
-            let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
-                snapshot.formation_availability
-                    == crate::lobby::FormationAvailability::ProductMatchOccupied
-            });
+            let capacity_occupied = *purpose != SessionPurpose::Practice
+                && queue.snapshot().is_some_and(|snapshot| {
+                    snapshot.formation_availability
+                        == crate::lobby::FormationAvailability::ProductMatchOccupied
+                });
             spawn_flow_button(
                 root,
                 offset,
                 FlowUiAction::OpenBuildEditor,
                 if capacity_occupied {
                     "MATCH IN PROGRESS"
+                } else if *purpose == SessionPurpose::Practice {
+                    "BUILD & START PRACTICE"
                 } else {
                     "BUILD & JOIN"
                 },
@@ -3139,6 +3265,7 @@ fn spawn_results(
     mut commands: Commands,
     result_state: Res<super::ClientMatchResultState>,
     mut navigation: ResMut<FlowNavigation>,
+    purpose: Res<SessionPurpose>,
 ) {
     let Some(context) = result_state.context.as_ref() else {
         return;
@@ -3200,9 +3327,29 @@ fn spawn_results(
                     TextLayout::new(Justify::Center, LineBreak::WordBoundary),
                 ));
             }
-            spawn_flow_button(root, 0, FlowUiAction::QueueAgain, "QUEUE AGAIN", None);
+            spawn_flow_button(
+                root,
+                0,
+                FlowUiAction::QueueAgain,
+                if *purpose == SessionPurpose::Practice {
+                    "PLAY AGAIN"
+                } else {
+                    "QUEUE AGAIN"
+                },
+                None,
+            );
             spawn_flow_button(root, 1, FlowUiAction::ChangeGame, "CHANGE GAME", None);
-            spawn_flow_button(root, 2, FlowUiAction::Disconnect, "DISCONNECT", None);
+            spawn_flow_button(
+                root,
+                2,
+                FlowUiAction::Disconnect,
+                if *purpose == SessionPurpose::Practice {
+                    "EXIT PRACTICE"
+                } else {
+                    "DISCONNECT"
+                },
+                None,
+            );
         });
 }
 
