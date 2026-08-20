@@ -390,7 +390,9 @@ pub(super) fn automatic_match_command_enabled(
     config: &ClientNetworkConfig,
     roster_count: usize,
 ) -> bool {
-    config.headless_simulation_ticks.is_some()
+    (config.headless_simulation_ticks.is_some()
+        || config.windowed_combat_demo.is_some()
+        || config.windowed_controller_demo.is_some())
         && config
             .exit_after_roster
             .is_none_or(|target| roster_count >= target)

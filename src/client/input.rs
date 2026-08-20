@@ -50,7 +50,7 @@ pub(super) fn sample_local_input(
     mouse_motion: Option<Res<AccumulatedMouseMotion>>,
     gamepads: Query<(Entity, &Gamepad)>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), (With<Camera2d>, Without<IsDefaultUiCamera>)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
     // The replicated loadout is the wire shape; a standalone `ResolvedWeapon` never
     // arrives in network play, so controller lob ranging must read the loadout's weapon.
     fighters: Query<
@@ -551,7 +551,7 @@ fn controlled_lob_range(
 )]
 pub(super) fn mouse_aim(
     windows: &Query<&Window, With<PrimaryWindow>>,
-    cameras: &Query<(&Camera, &GlobalTransform), (With<Camera2d>, Without<IsDefaultUiCamera>)>,
+    cameras: &Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
     fighters: &Query<
         (&Position, Option<&crate::builds::ResolvedMatchLoadout>),
         (With<Fighter>, With<Controlled>),
@@ -559,7 +559,7 @@ pub(super) fn mouse_aim(
 ) -> Option<(Vec2, f32)> {
     let cursor = windows.iter().next()?.cursor_position()?;
     let (camera, camera_transform) = cameras.iter().next()?;
-    let world = camera.viewport_to_world_2d(camera_transform, cursor).ok()?;
+    let world = presentation_3d::cursor_ground_point(camera, camera_transform, cursor)?;
     let fighter = fighters.iter().next()?.0.0;
     let delta = world - fighter;
     (delta.is_finite() && delta.length_squared() > f32::EPSILON)

@@ -1374,31 +1374,19 @@ fn m10_recovery_serialization_and_client_image_painting_stay_within_budget() {
         "every snapshot stays under the wire ceiling"
     );
 
-    let full = layout
-        .chunks
-        .values()
-        .next()
-        .copied()
-        .expect("allocated chunk bits");
     let start = Instant::now();
     for _ in 0..20 {
-        for chunk_bits in layout.chunks.values() {
-            let _ = brawler::terrain::paint_chunk_pixels(
-                chunk_bits,
-                Some(&full),
-                Some(&full),
-                Some(&full),
-                Some(&full),
-            );
+        for (chunk, chunk_bits) in &layout.chunks {
+            let _ = brawler::terrain::build_terrain_chunk_mesh(*chunk, chunk_bits, &layout.chunks);
         }
     }
-    let painting = start.elapsed() / 20 / layout.chunks.len().max(1) as u32;
+    let meshing = start.elapsed() / 20 / layout.chunks.len().max(1) as u32;
     assert!(
-        painting.as_micros() < 500,
-        "one chunk image paints in {painting:?}"
+        meshing.as_micros() < 1_500,
+        "one exposed-face chunk mesh builds in {meshing:?}"
     );
     println!(
-        "m10 recovery serialize p50={serialization:?} bytes={} chunks={} image-per-chunk={painting:?}",
+        "m10 recovery serialize p50={serialization:?} bytes={} chunks={} mesh-per-chunk={meshing:?}",
         sizes[0],
         layout.chunks.len()
     );

@@ -1,116 +1,39 @@
-//! Windowed terrain presentation: chunk images, sprites, and bounded debris.
-//!
-//! Everything here is derived exclusively from committed convergence occupancy. The
-//! headless composition simply lacks `Assets<Image>` and skips all of it.
+//! Windowed 3D terrain presentation derived from committed client occupancy.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    reason = "terrain indices and local coordinates are bounded to 32x32 chunks"
+)]
 
-use crate::map::MapInstanceId;
+use super::ExpectedClientTerrainSlot;
+use crate::client::presentation_3d::{
+    Material3dAssets, Primitive3dAssets, coordinates::ground_position,
+};
 use crate::terrain::model::{
     MAX_TERRAIN_DEBRIS_EFFECTS, TERRAIN_CHUNK_SIDE_CELLS, TerrainBits, TerrainChunkId,
     TerrainGeneration,
 };
 use crate::terrain::network::{ClientTerrainConvergence, TerrainConvergencePhase};
-use bevy::image::{Image, ImageSampler};
-use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::{
+    asset::RenderAssetUsages, mesh::Indices, prelude::*, render::render_resource::PrimitiveTopology,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::ExpectedClientTerrainSlot;
-
-/// Presentation depth: above the floor, below spawn areas, the Hot Zone objective, and
-/// every dynamic entity.
-pub const TERRAIN_PRESENTATION_Z: f32 = -6.0;
-
-/// Opaque interior rock, distinct from the dark floor and the blue permanent walls.
-pub(crate) const TERRAIN_FILL_PIXEL: [u8; 4] = [112, 96, 74, 255];
-/// Brighter rim for occupied cells beside an empty neighbor or an open seam.
-pub(crate) const TERRAIN_EDGE_PIXEL: [u8; 4] = [186, 158, 112, 255];
-/// Cosmetic debris lifetime in client presentation time.
+const TERRAIN_HEIGHT: f32 = 48.0;
 const TERRAIN_DEBRIS_LIFETIME: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// One retained per-chunk visual: a nearest-sampled 32x32 image sprite scaled to one
-/// 256x256 world-unit chunk.
 #[derive(Component)]
 pub struct TerrainChunkVisual {
     pub chunk: TerrainChunkId,
-    pub map_instance_id: MapInstanceId,
-    pub(super) image: Handle<Image>,
+    pub generation: TerrainGeneration,
+    mesh: Handle<Mesh>,
 }
 
-/// One bounded cosmetic destruction burst. Never collides, replicates, or plays audio.
-/// Carries its terrain generation so a reset, map replacement, or disconnect despawns it
-/// immediately instead of outliving its generation by the presentation timer.
 #[derive(Component)]
 pub(crate) struct TerrainDebris {
     generation: TerrainGeneration,
     expires_at: std::time::Duration,
-}
-
-/// Paint one chunk's 32x32 RGBA rows from occupancy plus the orthogonal neighbors that
-/// decide crater-edge colors across seams. Image rows run top-down; cell y grows up.
-#[must_use]
-pub fn paint_chunk_pixels(
-    bits: &TerrainBits,
-    west: Option<&TerrainBits>,
-    east: Option<&TerrainBits>,
-    north: Option<&TerrainBits>,
-    south: Option<&TerrainBits>,
-) -> Vec<u8> {
-    let side = TERRAIN_CHUNK_SIDE_CELLS;
-    let mut data = vec![0_u8; (side * side * 4) as usize];
-    for local_y in 0..side {
-        for local_x in 0..side {
-            if !bits.get(local_x, local_y) {
-                continue;
-            }
-            let east_empty = if local_x + 1 < side {
-                !bits.get(local_x + 1, local_y)
-            } else {
-                east.is_none_or(|neighbor| !neighbor.get(0, local_y))
-            };
-            let west_empty = if local_x > 0 {
-                !bits.get(local_x - 1, local_y)
-            } else {
-                west.is_none_or(|neighbor| !neighbor.get(side - 1, local_y))
-            };
-            let north_empty = if local_y + 1 < side {
-                !bits.get(local_x, local_y + 1)
-            } else {
-                north.is_none_or(|neighbor| !neighbor.get(local_x, 0))
-            };
-            let south_empty = if local_y > 0 {
-                !bits.get(local_x, local_y - 1)
-            } else {
-                south.is_none_or(|neighbor| !neighbor.get(local_x, side - 1))
-            };
-            let pixel = if east_empty || west_empty || north_empty || south_empty {
-                TERRAIN_EDGE_PIXEL
-            } else {
-                TERRAIN_FILL_PIXEL
-            };
-            let row = side - 1 - local_y;
-            let index = ((row * side + local_x) * 4) as usize;
-            data[index..index + 4].copy_from_slice(&pixel);
-        }
-    }
-    data
-}
-
-/// Build the tiny nearest-sampled chunk image from painted pixel rows.
-pub(crate) fn chunk_image(data: Vec<u8>) -> Image {
-    let mut image = Image::new_fill(
-        Extent3d {
-            width: TERRAIN_CHUNK_SIDE_CELLS,
-            height: TERRAIN_CHUNK_SIDE_CELLS,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &[0, 0, 0, 0],
-        TextureFormat::Rgba8UnormSrgb,
-        bevy::asset::RenderAssetUsages::default(),
-    );
-    image.data = Some(data);
-    image.sampler = ImageSampler::nearest();
-    image
 }
 
 fn orthogonal_neighbors(chunk: TerrainChunkId) -> [TerrainChunkId; 4] {
@@ -134,27 +57,19 @@ fn orthogonal_neighbors(chunk: TerrainChunkId) -> [TerrainChunkId; 4] {
     ]
 }
 
-fn neighbor_bits(
-    chunks: &BTreeMap<TerrainChunkId, TerrainBits>,
-    neighbor: TerrainChunkId,
-) -> Option<&TerrainBits> {
-    chunks.get(&neighbor)
-}
-
-/// Ensure one sprite per expected chunk, repaint dirty chunks and their orthogonal
-/// visual neighbors, and retire sprites that left the expected generation.
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+    reason = "Bevy system parameters own committed terrain presentation state"
 )]
 pub(crate) fn update_terrain_visuals(
     mut commands: Commands,
-    mut images: Option<ResMut<Assets<Image>>>,
+    mut meshes: Option<ResMut<Assets<Mesh>>>,
+    materials: Option<Res<Material3dAssets>>,
     expected: Res<ExpectedClientTerrainSlot>,
     mut convergence: ResMut<ClientTerrainConvergence>,
     visuals: Query<(Entity, &TerrainChunkVisual)>,
 ) {
-    let Some(images) = images.as_deref_mut() else {
+    let (Some(meshes), Some(materials)) = (meshes.as_deref_mut(), materials.as_deref()) else {
         return;
     };
     let ExpectedClientTerrainSlot::Derived(expected) = &*expected else {
@@ -163,117 +78,116 @@ pub(crate) fn update_terrain_visuals(
         }
         return;
     };
-    if matches!(
-        convergence.phase,
-        TerrainConvergencePhase::WaitingForMap | TerrainConvergencePhase::Invalid { .. }
-    ) {
+    let TerrainConvergencePhase::Ready { generation } = convergence.phase else {
+        for (entity, _) in &visuals {
+            commands.entity(entity).try_despawn();
+        }
+        return;
+    };
+    if generation != expected.generation {
         for (entity, _) in &visuals {
             commands.entity(entity).try_despawn();
         }
         return;
     }
-    let mut repaint: BTreeSet<TerrainChunkId> = convergence.take_dirty().into_iter().collect();
-    let committed = convergence.chunks();
-    let expected_chunks: BTreeSet<_> = expected.layout.chunks.keys().copied().collect();
-    for chunk in repaint.iter().copied().collect::<Vec<_>>() {
-        for neighbor in orthogonal_neighbors(chunk) {
-            if expected_chunks.contains(&neighbor) {
-                repaint.insert(neighbor);
-            }
-        }
-    }
+
     let existing: BTreeMap<_, _> = visuals
         .iter()
-        .map(|(entity, visual)| {
-            (
-                visual.chunk,
-                (entity, visual.map_instance_id, visual.image.clone()),
-            )
-        })
+        .map(|(entity, visual)| (visual.chunk, (entity, visual)))
         .collect();
-    for chunk in &expected_chunks {
-        let Some((entity, instance, handle)) = existing.get(chunk) else {
-            let bits = committed.get(chunk).copied().unwrap_or_default();
-            let data = paint_chunk_pixels(
-                &bits,
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[0]),
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[1]),
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[2]),
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[3]),
-            );
-            let handle = images.add(chunk_image(data));
-            let min = crate::terrain::grid::chunk_min_world(*chunk);
-            let center = min + Vec2::splat(crate::terrain::TERRAIN_CHUNK_SIDE_WORLD * 0.5);
-            commands.spawn((
-                TerrainChunkVisual {
-                    chunk: *chunk,
-                    map_instance_id: expected.generation.map_instance_id,
-                    image: handle.clone(),
-                },
-                Sprite {
-                    image: handle,
-                    custom_size: Some(Vec2::splat(crate::terrain::TERRAIN_CHUNK_SIDE_WORLD)),
-                    ..default()
-                },
-                Transform::from_translation(center.extend(TERRAIN_PRESENTATION_Z)),
-            ));
-            continue;
-        };
-        if instance != &expected.generation.map_instance_id {
-            commands.entity(*entity).try_despawn();
-            continue;
-        }
-        if repaint.contains(chunk) {
-            let bits = committed.get(chunk).copied().unwrap_or_default();
-            let data = paint_chunk_pixels(
-                &bits,
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[0]),
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[1]),
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[2]),
-                neighbor_bits(committed, orthogonal_neighbors(*chunk)[3]),
-            );
-            if let Some(mut image) = images.get_mut(handle) {
-                image.data = Some(data);
-            }
-        }
+    let expected_chunks: BTreeSet<_> = expected.layout.chunks.keys().copied().collect();
+    let generation_changed = existing
+        .values()
+        .any(|(_, visual)| visual.generation != generation);
+    let mut rebuild: BTreeSet<_> = convergence.take_dirty().into_iter().collect();
+    if generation_changed || existing.is_empty() {
+        rebuild.extend(expected_chunks.iter().copied());
     }
-    for (chunk, (entity, _, _)) in &existing {
-        if !expected_chunks.contains(chunk) {
-            commands.entity(*entity).try_despawn();
+    for dirty in rebuild.iter().copied().collect::<Vec<_>>() {
+        rebuild.extend(
+            orthogonal_neighbors(dirty)
+                .into_iter()
+                .filter(|neighbor| expected_chunks.contains(neighbor)),
+        );
+    }
+
+    let committed = convergence.chunks();
+    for chunk in &expected_chunks {
+        let bits = committed.get(chunk).copied().unwrap_or_default();
+        if bits.is_empty() {
+            if let Some((entity, _)) = existing.get(chunk) {
+                commands.entity(*entity).try_despawn();
+            }
+            continue;
+        }
+        if let Some((entity, visual)) = existing.get(chunk) {
+            if visual.generation == generation {
+                if rebuild.contains(chunk)
+                    && let Some(mut mesh) = meshes.get_mut(&visual.mesh)
+                {
+                    *mesh = build_terrain_chunk_mesh(*chunk, &bits, committed);
+                }
+                continue;
+            }
+            if let Some(mut mesh) = meshes.get_mut(&visual.mesh) {
+                *mesh = build_terrain_chunk_mesh(*chunk, &bits, committed);
+            }
+            commands.entity(*entity).insert(TerrainChunkVisual {
+                chunk: *chunk,
+                generation,
+                mesh: visual.mesh.clone(),
+            });
+            continue;
+        }
+        let mesh = meshes.add(build_terrain_chunk_mesh(*chunk, &bits, committed));
+        commands.spawn((
+            TerrainChunkVisual {
+                chunk: *chunk,
+                generation,
+                mesh: mesh.clone(),
+            },
+            Mesh3d(mesh),
+            MeshMaterial3d(materials.terrain.clone()),
+            Transform::from_translation(ground_position(crate::terrain::grid::chunk_min_world(
+                *chunk,
+            ))),
+            Name::new("V3 destructible terrain chunk"),
+        ));
+    }
+    for (chunk, (entity, _)) in existing {
+        if !expected_chunks.contains(&chunk) {
+            commands.entity(entity).try_despawn();
         }
     }
 }
 
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+    reason = "Bevy system parameters own bounded terrain feedback"
 )]
 pub(crate) fn spawn_terrain_debris(
     mut commands: Commands,
-    images: Option<ResMut<Assets<Image>>>,
+    primitives: Option<Res<Primitive3dAssets>>,
+    materials: Option<Res<Material3dAssets>>,
     time: Res<Time<Virtual>>,
     mut convergence: ResMut<ClientTerrainConvergence>,
-    debris: Query<(Entity, &Transform), With<TerrainDebris>>,
+    debris: Query<(Entity, &TerrainDebris)>,
 ) {
-    if images.as_deref().is_none() {
+    let (Some(primitives), Some(materials)) = (primitives, materials) else {
         return;
-    }
+    };
     let brushes = convergence.take_applied_brushes();
     let TerrainConvergencePhase::Ready { generation } = convergence.phase else {
         return;
     };
-    // Budget the ceiling across live debris plus this tick's applied brushes, keeping
-    // the newest feedback: retire the oldest existing effects first and, when a single
-    // burst exceeds the ceiling on its own, present only its newest brushes.
     let mut live: Vec<_> = debris.iter().collect();
     live.sort_by_key(|(entity, _)| *entity);
     let overflow = live
         .len()
         .saturating_add(brushes.len())
         .saturating_sub(MAX_TERRAIN_DEBRIS_EFFECTS);
-    for _ in 0..overflow.min(live.len()) {
-        let (expire, _) = live.remove(0);
-        commands.entity(expire).try_despawn();
+    for (entity, _) in live.into_iter().take(overflow) {
+        commands.entity(entity).try_despawn();
     }
     let newest = brushes.len().min(MAX_TERRAIN_DEBRIS_EFFECTS);
     let expires_at = time.elapsed() + TERRAIN_DEBRIS_LIFETIME;
@@ -284,25 +198,17 @@ pub(crate) fn spawn_terrain_debris(
                 generation,
                 expires_at,
             },
-            Sprite::from_color(
-                Color::srgba(0.85, 0.66, 0.34, 0.85),
-                Vec2::splat(
-                    f32::from(brush.radius_half_cells)
-                        * crate::terrain::model::TERRAIN_SUBCELL_SIZE_WORLD
-                        * 0.5,
-                ),
-            ),
-            Transform::from_translation(center.extend(TERRAIN_PRESENTATION_Z + 2.0)),
+            Mesh3d(primitives.debris.clone()),
+            MeshMaterial3d(materials.terrain.clone()),
+            Transform::from_translation(ground_position(center) + Vec3::Y * 5.0),
+            Name::new("V3 terrain debris"),
         ));
     }
 }
 
-/// Expire debris by client presentation time and immediately retire any debris whose
-/// terrain generation left the convergence machine (reset, map replacement, or
-/// disconnect); the durable crater stays.
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+    reason = "Bevy system parameters own bounded terrain feedback"
 )]
 pub(crate) fn expire_terrain_debris(
     mut commands: Commands,
@@ -319,5 +225,175 @@ pub(crate) fn expire_terrain_debris(
         if now >= debris.expires_at || Some(debris.generation) != current {
             commands.entity(entity).try_despawn();
         }
+    }
+}
+
+fn occupied(
+    chunks: &BTreeMap<TerrainChunkId, TerrainBits>,
+    chunk: TerrainChunkId,
+    local_x: i32,
+    local_y: i32,
+) -> bool {
+    let side = TERRAIN_CHUNK_SIDE_CELLS as i32;
+    let chunk_x = i32::from(chunk.x) + local_x.div_euclid(side);
+    let chunk_y = i32::from(chunk.y) + local_y.div_euclid(side);
+    let (Ok(chunk_x), Ok(chunk_y)) = (i16::try_from(chunk_x), i16::try_from(chunk_y)) else {
+        return false;
+    };
+    chunks
+        .get(&TerrainChunkId {
+            x: chunk_x,
+            y: chunk_y,
+        })
+        .is_some_and(|bits| {
+            bits.get(
+                local_x.rem_euclid(side) as u32,
+                local_y.rem_euclid(side) as u32,
+            )
+        })
+}
+
+#[must_use]
+pub fn build_terrain_chunk_mesh(
+    chunk: TerrainChunkId,
+    bits: &TerrainBits,
+    chunks: &BTreeMap<TerrainChunkId, TerrainBits>,
+) -> Mesh {
+    let cell = crate::terrain::model::TERRAIN_CELL_SIZE_WORLD;
+    let mut positions = Vec::<[f32; 3]>::new();
+    let mut normals = Vec::<[f32; 3]>::new();
+    let mut uvs = Vec::<[f32; 2]>::new();
+    let mut indices = Vec::<u32>::new();
+    for (x, y) in bits.iter_occupied() {
+        let x0 = x as f32 * cell;
+        let x1 = x0 + cell;
+        let z0 = -(y as f32 * cell);
+        let z1 = z0 - cell;
+        add_quad(
+            &mut positions,
+            &mut normals,
+            &mut uvs,
+            &mut indices,
+            [
+                [x0, TERRAIN_HEIGHT, z0],
+                [x1, TERRAIN_HEIGHT, z0],
+                [x1, TERRAIN_HEIGHT, z1],
+                [x0, TERRAIN_HEIGHT, z1],
+            ],
+            [0.0, 1.0, 0.0],
+        );
+        if !occupied(chunks, chunk, x as i32 - 1, y as i32) {
+            add_quad(
+                &mut positions,
+                &mut normals,
+                &mut uvs,
+                &mut indices,
+                [
+                    [x0, 0.0, z1],
+                    [x0, 0.0, z0],
+                    [x0, TERRAIN_HEIGHT, z0],
+                    [x0, TERRAIN_HEIGHT, z1],
+                ],
+                [-1.0, 0.0, 0.0],
+            );
+        }
+        if !occupied(chunks, chunk, x as i32 + 1, y as i32) {
+            add_quad(
+                &mut positions,
+                &mut normals,
+                &mut uvs,
+                &mut indices,
+                [
+                    [x1, 0.0, z0],
+                    [x1, 0.0, z1],
+                    [x1, TERRAIN_HEIGHT, z1],
+                    [x1, TERRAIN_HEIGHT, z0],
+                ],
+                [1.0, 0.0, 0.0],
+            );
+        }
+        if !occupied(chunks, chunk, x as i32, y as i32 - 1) {
+            add_quad(
+                &mut positions,
+                &mut normals,
+                &mut uvs,
+                &mut indices,
+                [
+                    [x0, 0.0, z0],
+                    [x1, 0.0, z0],
+                    [x1, TERRAIN_HEIGHT, z0],
+                    [x0, TERRAIN_HEIGHT, z0],
+                ],
+                [0.0, 0.0, 1.0],
+            );
+        }
+        if !occupied(chunks, chunk, x as i32, y as i32 + 1) {
+            add_quad(
+                &mut positions,
+                &mut normals,
+                &mut uvs,
+                &mut indices,
+                [
+                    [x1, 0.0, z1],
+                    [x0, 0.0, z1],
+                    [x0, TERRAIN_HEIGHT, z1],
+                    [x1, TERRAIN_HEIGHT, z1],
+                ],
+                [0.0, 0.0, -1.0],
+            );
+        }
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn add_quad(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    vertices: [[f32; 3]; 4],
+    normal: [f32; 3],
+) {
+    let base = u32::try_from(positions.len()).expect("one terrain chunk mesh fits u32 indices");
+    positions.extend(vertices);
+    normals.extend([normal; 4]);
+    uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+    indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_terrain_cell_emits_top_and_four_exposed_sides() {
+        let chunk = TerrainChunkId::default();
+        let mut bits = TerrainBits::default();
+        bits.set(0, 0);
+        let chunks = BTreeMap::from([(chunk, bits)]);
+        let mesh = build_terrain_chunk_mesh(chunk, &bits, &chunks);
+        assert_eq!(mesh.count_vertices(), 20);
+        assert_eq!(mesh.indices().map(Indices::len), Some(30));
+    }
+
+    #[test]
+    fn adjacent_cells_and_cross_chunk_neighbors_remove_internal_sides() {
+        let west = TerrainChunkId::default();
+        let east = TerrainChunkId { x: 1, y: 0 };
+        let mut west_bits = TerrainBits::default();
+        west_bits.set(TERRAIN_CHUNK_SIDE_CELLS - 1, 0);
+        let mut east_bits = TerrainBits::default();
+        east_bits.set(0, 0);
+        let chunks = BTreeMap::from([(west, west_bits), (east, east_bits)]);
+        let mesh = build_terrain_chunk_mesh(west, &west_bits, &chunks);
+        assert_eq!(mesh.count_vertices(), 16, "east seam face is hidden");
     }
 }

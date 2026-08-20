@@ -1,5 +1,13 @@
 # Sprite inventory
 
+## Status
+
+This is a historical inventory for the superseded 2D production-art proposal. V3 is the active
+version and replaces gameplay-world sprites and `Mesh2d` presentation with a fixed-camera 3D scene.
+The active scope is [V3 M02](./implementation/v3/milestone-02.md) within the
+[V3 roadmap](./implementation/v3/roadmap.md). Screen-space Bevy UI remains outside that world-renderer
+replacement.
+
 ## Purpose and scope
 
 This document is a complete list of objects that require sprite images, synthesized from the
@@ -9,9 +17,8 @@ map/mode model ([Maps and game modes](./04-maps-and-game-modes.md)), the combat 
 ([Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md)), and the prototype
 shortlist ([MVP asset shortlist](./07-mvp-asset-shortlist.md)).
 
-It is an inventory, not a scheduling document. The version roadmap and its milestone
-specifications remain the authority for what gets authored when. v1 keeps greybox presentation
-through Milestone 11 closeout, including the Milestone 10 per-chunk placeholder terrain images.
+It is an inventory, not a scheduling document. It described the sprite requirements considered
+before V3 superseded that direction; the active roadmap and milestone remain authoritative.
 
 Status triage:
 

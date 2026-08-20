@@ -30,7 +30,7 @@ pub struct ClientCombatPlugin;
 pub struct DeduplicatedCombatCue(pub CombatCue);
 
 /// Named client combat update phases. The registration below preserves the exact
-/// fifteen-system order the milestone locked before the split; the names document the
+/// phase order the milestone locked before the split; the names document the
 /// demonstrated data/message-flow dependencies (cue ingestion before visual sync, command
 /// application before HUD/effect readers, evidence capture last). No edge is relaxed
 /// without a measured, schedule-tested demonstration of independence.
@@ -77,10 +77,8 @@ impl Plugin for ClientCombatPlugin {
                 (
                     cues::receive_combat_cues.in_set(CombatClientSet::Ingest),
                     receive_combat_evidence_checkpoints.in_set(CombatClientSet::Ingest),
-                    world::ensure_projectile_visuals.in_set(CombatClientSet::Ensure),
                     world::ensure_sentry_visuals.in_set(CombatClientSet::Ensure),
                     world::ensure_dash_trails.in_set(CombatClientSet::Ensure),
-                    world::sync_projectile_visuals.in_set(CombatClientSet::Sync),
                     world::sync_sentry_visuals.in_set(CombatClientSet::Sync),
                     world::sync_dash_trails.in_set(CombatClientSet::Sync),
                     preview::update_weapon_preview.in_set(CombatClientSet::Sync),

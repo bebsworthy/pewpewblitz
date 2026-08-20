@@ -73,7 +73,7 @@ fn spawn_client_camera(mut commands: Commands) {
     ));
 }
 
-fn spawn_pause_overlay(mut commands: Commands) {
+pub(super) fn spawn_pause_overlay(mut commands: Commands) {
     commands
         .spawn((
             PauseOverlay,
@@ -101,7 +101,7 @@ fn spawn_pause_overlay(mut commands: Commands) {
         });
 }
 
-fn spawn_client_hud(mut commands: Commands) {
+pub(super) fn spawn_client_hud(mut commands: Commands) {
     commands.spawn((
         CombatHudText,
         Text::new("HEALTH  --/--"),
@@ -483,8 +483,8 @@ impl Plugin for ClientPresentationPlugin {
                 assets::ClientAssetPlugin,
                 audio::ClientAudioPlugin,
                 hud::ClientReadinessHudPlugin,
-                MovementPresentationPlugin,
             ));
+        app.add_plugins(presentation_3d::WorldPresentationPlugin);
     }
 }
 

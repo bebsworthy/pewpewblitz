@@ -1,5 +1,6 @@
 # Local upstream source checkouts used for research.
 /references/
+/external_assets/
 /target/
 # Isolated cargo cache for metrics-enabled measurement builds.
 /target-metrics/

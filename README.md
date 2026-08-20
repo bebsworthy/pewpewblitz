@@ -14,6 +14,15 @@ the [completed v2 roadmap](docs/implementation/v2/roadmap.md),
 [v2 closeout milestone](docs/implementation/v2/milestone-09.md), and
 [completed v1 roadmap](docs/implementation/v1/roadmap.md).
 
+V3 is now in progress. Its goal is to replace the client gameplay-world sprites and `Mesh2d`
+presentation with a fixed-camera orthographic 3D scene while preserving the existing planar
+authority, Avian 2D collision, protocol, routed server topology, and Bevy UI shell. M01's 3D
+feasibility foundation was accepted on 2026-08-20. The active scope is
+[V3 M02 — default 3D arena, map, terrain, camera, and input cutover](docs/implementation/v3/milestone-02.md),
+within the [V3 roadmap](docs/implementation/v3/roadmap.md). M02's production cutover and repository
+verification are complete and awaiting user playtest feedback: every windowed client uses the 3D
+world composition by default, while the server-authoritative simulation and protocol remain planar.
+
 ## Toolchain
 
 The repository pins Rust 1.95.0 in [`rust-toolchain.toml`](rust-toolchain.toml). Bevy is pinned to 0.19.1 and Lightyear to 0.29.0. `Cargo.lock` is committed and must be updated intentionally.
@@ -104,6 +113,11 @@ an explicit `--client-id`. The client also accepts `--server`, `--local-addr`, a
 --move-axis X,Y --aim-axis X,Y --aim-dummy --fire --ultimate --simulation-ticks N`. `--combat-demo` enables the
 same authoritative aim-at-dummy/fire loop in a windowed client for a reproducible visual smoke run.
 Use `--window-size WIDTHxHEIGHT` to reproduce a supported visual-check layout.
+For the legacy direct-UDP visual harness, `BRAWLER_NETWORK_SCREENSHOT_DIR=<DIR>` captures the first
+windowed client's scheduled frame through the same built-in screenshot path; set
+`BRAWLER_NETWORK_SCREENSHOT_FIRST=<update>` to capture after countdown/startup.
+Set `BRAWLER_FORCE_PRIMITIVE_WORLD=1` on a windowed client to verify the deterministic primitive
+fallbacks without modifying the packaged optional Kenney assets.
 On macOS, `scripts/macos-client-bundle.sh` creates a temporary addressable `.app` wrapper around the
 already-built client for native visual automation; it prints the wrapper path and does not modify the
 production application composition.
@@ -171,4 +185,4 @@ Authoritative authored gameplay data lives under `content/v1/` and is compiled i
 Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
 recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.
 The active implementation scope is always the current milestone file; deferred release polish must
-remain visible in the roadmap rather than being folded into unrelated v2 infrastructure work.
+remain visible in the roadmap rather than being folded into unrelated V3 presentation work.

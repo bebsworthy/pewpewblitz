@@ -2,8 +2,9 @@
 #![allow(clippy::wildcard_imports)]
 
 use super::*;
-use bevy::asset::LoadState;
+use bevy::asset::{LoadState, RecursiveDependencyLoadState};
 use bevy::audio::AudioSource;
+use bevy::gltf::Gltf;
 use serde::Deserialize;
 use std::collections::HashSet;
 
@@ -18,6 +19,9 @@ pub(crate) struct ClientAssetHandles {
     pub defeat: Handle<AudioSource>,
     pub ready: Handle<AudioSource>,
     pub error: Handle<AudioSource>,
+    pub character: Handle<Gltf>,
+    pub blaster: Handle<Gltf>,
+    pub arena_block: Handle<Gltf>,
 }
 
 impl ClientAssetHandles {
@@ -30,10 +34,14 @@ impl ClientAssetHandles {
             defeat: asset_server.load("brawler/audio/defeat.ogg"),
             ready: asset_server.load("brawler/audio/ready.ogg"),
             error: asset_server.load("brawler/audio/error.ogg"),
+            character: asset_server
+                .load("brawler/models/kenney/mini-characters/character-male-a.glb"),
+            blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
+            arena_block: asset_server.load("brawler/models/kenney/mini-arena/block.glb"),
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 7] {
+    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 10] {
         [
             (
                 "fighter.team_blue",
@@ -50,7 +58,36 @@ impl ClientAssetHandles {
             ("audio.defeat", false, asset_server.load_state(&self.defeat)),
             ("audio.ready", false, asset_server.load_state(&self.ready)),
             ("audio.error", false, asset_server.load_state(&self.error)),
+            (
+                "model.character_male_a",
+                false,
+                dependency_aware_state(asset_server, &self.character),
+            ),
+            (
+                "model.blaster_a",
+                false,
+                dependency_aware_state(asset_server, &self.blaster),
+            ),
+            (
+                "model.mini_arena_block",
+                false,
+                dependency_aware_state(asset_server, &self.arena_block),
+            ),
         ]
+    }
+}
+
+fn dependency_aware_state<T: Asset>(asset_server: &AssetServer, handle: &Handle<T>) -> LoadState {
+    match (
+        asset_server.load_state(handle),
+        asset_server.recursive_dependency_load_state(handle),
+    ) {
+        (LoadState::Failed(error), _) | (_, RecursiveDependencyLoadState::Failed(error)) => {
+            LoadState::Failed(error)
+        }
+        (LoadState::Loaded, RecursiveDependencyLoadState::Loaded) => LoadState::Loaded,
+        (LoadState::NotLoaded, RecursiveDependencyLoadState::NotLoaded) => LoadState::NotLoaded,
+        _ => LoadState::Loading,
     }
 }
 
@@ -180,7 +217,7 @@ fn validate_manifest(source: &str) -> Result<(), String> {
             || entry.license != "CC0-1.0"
             || !entry.license_url.starts_with("https://")
             || !entry.source_url.starts_with("https://")
-            || entry.imported != "2026-08-15"
+            || !valid_import_date(&entry.imported)
             || entry.fallback.is_empty()
         {
             return Err(format!("asset provenance is incomplete: {}", entry.id));
@@ -195,6 +232,23 @@ fn validate_manifest(source: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn valid_import_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    let Ok(year) = value[0..4].parse::<u16>() else {
+        return false;
+    };
+    let Ok(month) = value[5..7].parse::<u8>() else {
+        return false;
+    };
+    let Ok(day) = value[8..10].parse::<u8>() else {
+        return false;
+    };
+    year >= 2026 && (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +256,14 @@ mod tests {
     #[test]
     fn retained_asset_manifest_has_unique_complete_cc0_provenance() {
         validate_manifest(CLIENT_ASSET_MANIFEST).unwrap();
+    }
+
+    #[test]
+    fn import_dates_are_strict_iso_calendar_shapes() {
+        assert!(valid_import_date("2026-08-20"));
+        assert!(!valid_import_date("2026-8-20"));
+        assert!(!valid_import_date("2026-13-20"));
+        assert!(!valid_import_date("not-a-date"));
     }
 
     #[test]

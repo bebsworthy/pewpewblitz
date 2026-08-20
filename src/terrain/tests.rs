@@ -1957,15 +1957,49 @@ mod client_presentation_tests {
     use crate::terrain::telemetry::{TerrainTelemetry, TerrainTelemetryOutcome};
     use bevy::prelude::*;
 
+    pub(super) fn install_3d_assets(app: &mut App) {
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>();
+        let debris = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Cuboid::new(12.0, 8.0, 12.0));
+        let terrain = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        app.insert_resource(crate::client::presentation_3d::Primitive3dAssets {
+            floor_tile: Handle::default(),
+            cover_block: Handle::default(),
+            map_entity: Handle::default(),
+            debris,
+            fighter: Handle::default(),
+            direction: Handle::default(),
+            projectile: Handle::default(),
+            lobbed_projectile: Handle::default(),
+        })
+        .insert_resource(crate::client::presentation_3d::Material3dAssets {
+            floor: Handle::default(),
+            wall: Handle::default(),
+            perimeter: Handle::default(),
+            team_blue: Handle::default(),
+            team_red: Handle::default(),
+            neutral: Handle::default(),
+            zone_fill: Handle::default(),
+            zone_boundary: Handle::default(),
+            terrain,
+        });
+    }
+
     fn debris_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<Image>>()
             .init_resource::<ClientTerrainConvergence>()
             .add_systems(
                 Update,
                 (spawn_terrain_debris, expire_terrain_debris).chain(),
             );
+        install_3d_assets(&mut app);
         app
     }
 
@@ -2204,7 +2238,7 @@ mod client_presentation_tests {
 
 #[cfg(feature = "client")]
 mod client_soak_tests {
-    use super::client_presentation_tests::{commit_burst, debris_count};
+    use super::client_presentation_tests::{commit_burst, debris_count, install_3d_assets};
     use super::convergence_tests::{generation, initial_chunks};
     use crate::terrain::ClientTerrainConvergence;
     use crate::terrain::TerrainConvergenceAction;
@@ -2223,8 +2257,8 @@ mod client_soak_tests {
         visuals.iter(app.world()).count()
     }
 
-    fn image_count(app: &mut App) -> usize {
-        app.world().resource::<Assets<Image>>().len()
+    fn mesh_count(app: &mut App) -> usize {
+        app.world().resource::<Assets<Mesh>>().len()
     }
 
     /// The M10 client growth soak: one hundred destroy/reset cycles through the public
@@ -2237,7 +2271,6 @@ mod client_soak_tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(50),
             ))
-            .init_resource::<Assets<Image>>()
             .init_resource::<ClientTerrainConvergence>()
             .init_resource::<ExpectedClientTerrainSlot>()
             .add_systems(
@@ -2248,6 +2281,7 @@ mod client_soak_tests {
                     expire_terrain_debris,
                 ),
             );
+        install_3d_assets(&mut app);
         let chunks = initial_chunks();
         let layout = crate::map::InitialTerrainLayout {
             terrain_fingerprint: 0xabcd_ef01,
@@ -2277,7 +2311,7 @@ mod client_soak_tests {
         set_slot(&mut app, first);
         app.update();
         let baseline_visuals = visual_count(&mut app);
-        let baseline_images = image_count(&mut app);
+        let baseline_meshes = mesh_count(&mut app);
         assert_eq!(baseline_visuals, chunks.len());
         for cycle in 0..100_u64 {
             {
@@ -2312,14 +2346,14 @@ mod client_soak_tests {
                     "cycle {cycle} leaks no chunk visuals"
                 );
                 assert_eq!(
-                    image_count(&mut app),
-                    baseline_images,
-                    "cycle {cycle} leaks no image handles"
+                    mesh_count(&mut app),
+                    baseline_meshes,
+                    "cycle {cycle} leaks no mesh handles"
                 );
             }
         }
         assert_eq!(visual_count(&mut app), baseline_visuals);
-        assert_eq!(image_count(&mut app), baseline_images);
+        assert_eq!(mesh_count(&mut app), baseline_meshes);
         assert_eq!(
             app.world()
                 .resource::<ClientTerrainConvergence>()

@@ -1,4 +1,5 @@
 use super::*;
+use crate::combat::TeamId;
 use crate::combat::WeaponDefinitions;
 use crate::combat::client::cues::{
     ClientCombatEvidenceStatus, RecentCombatEvents, remember_combat_event,
@@ -8,14 +9,7 @@ use crate::combat::client::hud::{CombatHudText, update_combat_hud};
 use crate::combat::client::preview::{
     MAX_PREVIEW_SEGMENTS, WeaponPreviewVisual, preview_segments, update_weapon_preview,
 };
-use crate::combat::client::world::{
-    ensure_projectile_visuals, ensure_sentry_visuals, sync_projectile_visuals,
-};
-use crate::combat::{
-    AttackId, AttackSource, CombatSourceKind, Projectile, ProjectileSource, ReplicatedAttackSource,
-    ShotId, TeamId, WeaponDefinitionId, WeaponPresentationProfileId, WeaponRecipeFingerprint,
-    WorldPoint,
-};
+use crate::combat::client::world::ensure_sentry_visuals;
 use crate::combat::{
     AuthoritativeTick, CombatEventId, CurrentHealth, Defeated, WeaponPhase, WeaponState,
     fighter_color, projectile_color,
@@ -357,40 +351,10 @@ fn fighter_and_projectile_palettes_distinguish_replicated_sources() {
 }
 
 #[test]
-fn projectile_presentation_keeps_authoritative_position_and_facing() {
+fn replicated_sentry_visual_waits_for_an_authoritative_pose() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_systems(Update, sync_projectile_visuals);
-    let projectile = app
-        .world_mut()
-        .spawn((
-            Projectile,
-            Position::from_xy(120.0, -40.0),
-            Rotation::radians(std::f32::consts::FRAC_PI_2),
-            Transform::default(),
-        ))
-        .id();
-
-    app.update();
-
-    let transform = app
-        .world()
-        .get::<Transform>(projectile)
-        .expect("projectile transform");
-    assert_eq!(transform.translation.truncate(), Vec2::new(120.0, -40.0));
-    assert!(
-        (transform.rotation.to_euler(EulerRot::ZYX).0 - std::f32::consts::FRAC_PI_2).abs() < 0.001
-    );
-}
-
-#[test]
-fn replicated_delivery_visuals_wait_for_an_authoritative_pose() {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins).add_systems(
-        Update,
-        (ensure_projectile_visuals, ensure_sentry_visuals).chain(),
-    );
-    let projectile = app.world_mut().spawn(Projectile).id();
+        .add_systems(Update, ensure_sentry_visuals);
     let sentry = app
         .world_mut()
         .spawn((
@@ -407,54 +371,13 @@ fn replicated_delivery_visuals_wait_for_an_authoritative_pose() {
         .id();
 
     app.update();
-    assert!(app.world().get::<Transform>(projectile).is_none());
     assert!(app.world().get::<Transform>(sentry).is_none());
 
-    app.world_mut()
-        .entity_mut(projectile)
-        .insert((Position::from_xy(120.0, -40.0), Rotation::radians(0.5)));
     app.world_mut()
         .entity_mut(sentry)
         .insert((Position::from_xy(-90.0, 75.0), Rotation::radians(-0.25)));
     app.update();
 
-    assert!(
-        app.world().get::<Transform>(projectile).is_none(),
-        "a pose without both replicated source identities must remain hidden"
-    );
-    app.world_mut().entity_mut(projectile).insert((
-        ProjectileSource {
-            shot_id: ShotId(9),
-            player_id: PlayerId(1),
-            owner_network_entity_id: NetworkEntityId(1),
-            team_id: TeamId(0),
-            weapon_definition_id: WeaponDefinitionId(1),
-        },
-        ReplicatedAttackSource {
-            attack: AttackSource {
-                kind: CombatSourceKind::PrimaryWeapon,
-                attack_id: AttackId(9),
-                player_id: PlayerId(1),
-                owner_network_entity_id: NetworkEntityId(1),
-                team_id: TeamId(0),
-                recipe_fingerprint: WeaponRecipeFingerprint(1),
-                presentation_profile_id: WeaponPresentationProfileId(1),
-                legacy_compatibility: false,
-                source_preset_id: None,
-                origin: WorldPoint { x: 120.0, y: -40.0 },
-                facing: 0.5,
-            },
-        },
-    ));
-    app.update();
-
-    assert_eq!(
-        app.world()
-            .get::<Transform>(projectile)
-            .unwrap()
-            .translation,
-        Vec3::new(120.0, -40.0, 20.0)
-    );
     assert_eq!(
         app.world().get::<Transform>(sentry).unwrap().translation,
         Vec3::new(-90.0, 75.0, 12.0)

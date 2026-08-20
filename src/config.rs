@@ -433,13 +433,19 @@ impl ClientNetworkConfig {
         if self.expected_build_version.is_empty() {
             return Err("expected build version must not be empty".to_string());
         }
-        if let Some(schedule) = &self.screenshot_schedule {
-            if self.headless {
-                return Err("--screenshot-dir requires a windowed client".to_string());
-            }
-            if schedule.interval == 0 || schedule.count == 0 {
-                return Err("screenshot interval and count must be greater than zero".to_string());
-            }
+        self.validate_screenshot_schedule()?;
+        Ok(())
+    }
+
+    fn validate_screenshot_schedule(&self) -> Result<(), String> {
+        let Some(schedule) = &self.screenshot_schedule else {
+            return Ok(());
+        };
+        if self.headless {
+            return Err("--screenshot-dir requires a windowed client".to_string());
+        }
+        if schedule.interval == 0 || schedule.count == 0 {
+            return Err("screenshot interval and count must be greater than zero".to_string());
         }
         Ok(())
     }

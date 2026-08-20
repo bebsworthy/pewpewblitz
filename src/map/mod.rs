@@ -12,7 +12,7 @@ mod tests;
 #[cfg(feature = "client")]
 pub use client::{
     ClientMapReadiness, MapPresentationMember, MapPresentationPlugin, MapPresentationSet,
-    PresentedMap, ZoneObjectiveBoundary, ZoneObjectiveFill, perimeter_visual_shapes,
+    PresentedMap, perimeter_visual_shapes,
 };
 pub use definitions::{
     DESTRUCTIBLE_TERRAIN_REGION_PROFILE, EngineMapLimits, HOT_ZONE_LAYOUT_SCHEMA_VERSION,

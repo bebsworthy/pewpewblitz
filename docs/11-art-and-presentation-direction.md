@@ -1,17 +1,34 @@
-# Art and presentation direction
+# Art and presentation direction — superseded 2D proposal
+
+## Status
+
+This document preserves the 2D pixel-art research and the decisions validated on 2026-08-16, but
+it is no longer Brawler's active renderer or production-art direction. On 2026-08-20 the user
+reopened the decision after comparing the intended dimensional arena result with the complexity of
+simulating depth through sprites, cliff tiles, Y sorting, directional body art, and authored
+shadows. V3 now plans a complete 3D gameplay-world presentation over the unchanged 2D
+server-authoritative simulation.
+
+The active migration scope is [Version 3 implementation roadmap](./implementation/v3/roadmap.md).
+The [3D presentation feasibility foundation](./implementation/v3/milestone-01.md) is complete, and
+[the default 3D arena/map/terrain cutover](./implementation/v3/milestone-02.md) is now active.
+The enduring boundaries in this document—combat readability, client-only presentation, stable
+presentation IDs, bounded effects, licensing/originality, and no render dependency on the
+dedicated server—still apply. Its pixel density, blob tileset, paper-doll rig, Y-sort, sprite
+particle, and 2D material decisions are historical inputs, not implementation requirements.
 
 ## Purpose and scope
 
-This document records the validated visual direction and presentation architecture for moving
-Brawler from greybox placeholder visuals to production-quality presentation: tileset-based
-terrain, skinned animated characters, weapon/effect visuals, and readable area effects. It is a
-direction and research catalog in the spirit of [environment and tile ideas](./09-environment-and-tile-ideas.md);
-a version roadmap and its milestone specifications remain the authority for scheduled scope.
+This document records the formerly validated 2D visual direction and presentation architecture
+for moving Brawler from greybox placeholder visuals to production-quality presentation:
+tileset-based terrain, skinned animated characters, weapon/effect visuals, and readable area
+effects. It is a direction and research catalog in the spirit of
+[environment and tile ideas](./09-environment-and-tile-ideas.md); the V3 roadmap and its milestone
+specifications now supersede it for scheduled scope.
 
 The direction was validated with the user on 2026-08-16 across style references, terrain
-authoring strategy, character animation architecture, and art pixel density. Until a future
-version schedules presentation work, v1 keeps its current greybox presentation, including the
-Milestone 10 per-chunk placeholder terrain images.
+authoring strategy, character animation architecture, and art pixel density. It governed the V1
+greybox-to-art proposal until the user reopened the renderer decision for V3 on 2026-08-20.
 
 In scope for this document:
 
@@ -296,11 +313,13 @@ Each phase is client-only and independently shippable; none blocks the v1 closeo
 
 ## Relationship to version scope
 
-v1 keeps its greybox presentation through Milestone 11 closeout, including M10's placeholder
-per-chunk terrain images; this document does not schedule work. When a future version scopes
-presentation, its roadmap should triage the sequencing proposal above into milestones, and each
-milestone's research phase re-verifies exact Bevy 0.19.1 APIs (atlas, material, and sampling
-surfaces) against pinned sources — the checked-in Bevy reference is 0.20-dev and must not be
+V1 kept its greybox presentation through Milestone 11 closeout, including M10's placeholder
+per-chunk terrain images. V2 deliberately deferred the complete production-art replacement. V3
+supersedes this document's sprite/tileset sequencing with a staged 3D gameplay-world migration.
+That migration uses primitives for exact dynamic geometry and fallbacks plus a curated subset of
+the user-supplied CC0 Kenney GLBs for first-release environments, characters, weapons, and supplied
+animation. Original production art remains later work. Each V3 milestone still re-verifies exact
+Bevy 0.19.1 APIs against pinned sources—the checked-in Bevy reference is 0.20-dev and must not be
 trusted for exact APIs.
 
 ## Research references

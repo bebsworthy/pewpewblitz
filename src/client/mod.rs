@@ -62,6 +62,7 @@ mod input;
 #[cfg(feature = "owner-prediction")]
 pub mod prediction;
 mod presentation;
+pub(crate) mod presentation_3d;
 mod queue;
 mod routed_udp;
 mod server_select;
@@ -521,7 +522,7 @@ fn apply_pause_request(
 }
 
 #[derive(Component)]
-struct ArenaCamera;
+pub(crate) struct ArenaCamera;
 
 /// Marker for the reproducible, windowed controller smoke path.
 #[derive(Component)]

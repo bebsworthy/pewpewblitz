@@ -7,29 +7,37 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/13-player-ux.md` for the active v2 player-flow boundary.
-3. `docs/14-multiplayer-server-architecture.md` for the active v2 process/routing decision.
+2. `docs/implementation/v3/roadmap.md` for the active 3D-presentation migration, milestone order,
+   and enduring V3 decisions.
+3. `docs/implementation/v3/milestone-02.md` for the current implementation contract.
 4. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-5. `docs/implementation/v2/roadmap.md` for current progress and milestone order.
-6. `docs/implementation/v2/milestone-01.md` for the current research contract. It does not yet
-   authorize production implementation.
+5. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
+   player-flow and routed-process decisions that V3 preserves.
+6. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
+   baseline and closeout evidence.
 7. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
    verification evidence, deferred release polish, and the direct-UDP comparison baseline.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
 playtest. It is not a release-ready claim: controller feel, audio, HUD/readability, balance, pacing,
-and related tuning remain tracked as `POST-V1-RELEASE-POLISH`. V2 M01 is currently `Researching`;
-do not implement the routed supervisor/worker topology until its specification is validated.
+and related tuning remain tracked as `POST-V1-RELEASE-POLISH`. V2 completed and was accepted on
+2026-08-20. V3 is the active version. M01 completed on 2026-08-20 after the user accepted the 3D
+feasibility result and its projectile-origin corrections. M02 completed on 2026-08-20 after its
+default 3D arena/map/terrain/camera/input cutover, projectile-placement feedback fix, removal of the
+obsolete projectile sprite/XY writer, affected verification, and user acceptance. M03 is next and
+not started; it moves remaining world visuals to dedicated 3D presentation entities. M04 audits
+complete retirement of the legacy XY presentation convention.
 
 ## Technical stack
 
-- One Rust package currently provides independently buildable macOS-client and dedicated
-  headless-server application configurations. V2 M01 researches whether routed protocol,
-  supervisor, lobby-worker, match-worker, or IPC boundaries justify additional targets/modules or
-  a crate; do not pre-create those boundaries before specification validation.
-- Bevy 0.19 for ECS, application/plugin structure, rendering, input, assets, audio, and UI.
+- The main Rust package provides independently buildable macOS-client and headless gameplay-worker
+  configurations; `packages/brawler-routing` owns the completed V2 route/IPC protocol used by the
+  supervisor, lobby worker, and match workers.
+- Bevy 0.19 for ECS, application/plugin structure, client-side 2D/3D rendering, input, assets,
+  animation, audio, and UI.
 - Lightyear 0.29 for client/server transport, input networking, replication, interpolation, and later prediction/rollback where evidence justifies it.
-- Avian 2D 0.7 only when collision queries, contact handling, or generated terrain colliders justify it.
+- Avian 2D 0.7 for authoritative planar collision and generated terrain colliders. V3 does not
+  replace it with 3D physics.
 - Fixed-tick, dedicated-server-authoritative simulation from the first gameplay code.
 - macOS is the initial client development target; local dedicated-server and multi-client testing are required.
 
@@ -113,6 +121,8 @@ src/
     hud.rs                 session, combat, build, match, and mode HUD
     input.rs               keyboard, mouse, gamepad, and native-input sampling
     presentation.rs        camera, arena, effects, and replicated-pose presentation
+    presentation_3d/       accepted V3 camera/coordinate/GLB/mesh feasibility foundation; M02
+                           decomposes map and terrain lifecycle into their owning modules
     session.rs             connection, selection, shutdown, and headless automation lifecycle
     settings/              local calibration/rebinding state and pause-overlay UI
     tests.rs               client composition and behavior tests
@@ -149,9 +159,10 @@ tests/
 material and is not part of Brawler's production module layout.
 
 The routed supervisor, route envelope, IPC transport, and isolated lobby/match-worker composition
-described by v2 M01 are research targets, not current source layout. The existing `brawler-server`,
-`brawler-client`, `scripts/network.sh`, and `just network` still exercise the v1 direct-UDP topology
-and provide M01's comparison baseline.
+are completed V2 production paths. `just server`, `just client`, `just run`, and `just e2e` exercise
+that routed topology; `scripts/network.sh` remains only the explicitly named legacy direct-UDP
+diagnostic baseline. M02 is replacing the development-selected M01 renderer with the default 3D
+arena/map/terrain/camera/input composition.
 
 ## Code organization rules
 
@@ -243,7 +254,7 @@ Use the checked-in source and examples before guessing an API or copying an unre
 - `references/bevy/examples/` — official Bevy example source. Start with `README.md`, then locate focused examples with `rg`; useful foundation examples include `app/headless.rs`, `app/plugin.rs`, and `app/plugin_group.rs`.
 - `references/lightyear/examples/` — official Lightyear example projects and their `Cargo.toml` feature sets. Start with `README.md`; use `simple_setup` for minimal client/server composition, `simple_box` for authoritative replication/prediction/interpolation, and `avian_2d` only when physics integration is in scope.
 - `references/lightyear/book/` — local Lightyear book. Start with `src/SUMMARY.md`, then read the relevant tutorial or concept pages for protocol, transport, replication, inputs, system ordering, shared plugins, client/server setup, prediction, interpolation, and Avian integration.
-- `references/avian/crates/avian2d/examples` — official Avian 2D examples project and their `Cargo.toml` feature sets. 
+- `references/avian/crates/avian2d/examples` — official Avian 2D examples project and their `Cargo.toml` feature sets.
 
 The Lightyear 0.29 snapshot targets Bevy 0.19, while the checked-in Bevy source is currently 0.20-dev. Use the Bevy snapshot for architectural examples, but confirm exact APIs against Bevy 0.19 source or official documentation before implementation.
 
@@ -266,6 +277,9 @@ docs/implementation/
     roadmap.md
     milestone-01.md
     ...
+  v3/
+    roadmap.md
+    milestone-01.md
 ```
 
 `roadmap.md` defines version scope, ordering, delivery gates, status, and backlog. Each `milestone-NN.md` records the research, user-validated technical specification, implementation checklist, test evidence, playtest handoff, feedback decisions, and closeout learning for one milestone.
@@ -303,6 +317,6 @@ For the next non-complete milestone:
 - Preserve unrelated user changes and keep deferred work visible in the active version backlog.
 
 Canonical build, test, process, closeout, and playtest commands already live in `justfile` and the
-root `README.md`; use those rather than inventing substitutes. V2 M01 must document any new routed
-commands only after specification validation, and must preserve an explicitly named direct-UDP
-baseline command until the roadmap's retirement gate is satisfied.
+root `README.md`; use those rather than inventing substitutes. V3 M01 may add only a bounded
+development selector for its 3D feasibility composition; it must not replace the supported 2D path
+before acceptance or turn the migration into a permanent renderer setting.

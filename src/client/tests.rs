@@ -38,6 +38,13 @@ fn automatic_match_ready_waits_for_the_requested_roster() {
 }
 
 #[test]
+fn windowed_combat_demo_automatically_readies_the_match() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.windowed_combat_demo = Some(crate::config::WindowedCombatDemo);
+    assert!(automatic_match_command_enabled(&config, 2));
+}
+
+#[test]
 fn headless_match_command_rearms_during_countdown_for_waiting_retry() {
     let match_id = crate::matchplay::MatchId(7);
     assert!(should_rearm_headless_match_command(

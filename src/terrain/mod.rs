@@ -29,7 +29,7 @@ pub use authority::{
     TerrainOutbox, TerrainRecoveryCache, TerrainRoot, TerrainTransaction,
 };
 #[cfg(feature = "client")]
-pub use client::{ClientTerrainPlugin, ClientTerrainReadiness, paint_chunk_pixels};
+pub use client::{ClientTerrainPlugin, ClientTerrainReadiness, build_terrain_chunk_mesh};
 #[cfg(all(test, feature = "server"))]
 pub(crate) use lifecycle::reset_terrain_on_match_restart;
 #[cfg(feature = "server")]

@@ -8,6 +8,8 @@ combat_assert="${BRAWLER_NETWORK_ASSERT_COMBAT:-0}"
 terrain_assert="${BRAWLER_NETWORK_ASSERT_TERRAIN:-0}"
 windowed_combat_demo="${BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO:-0}"
 windowed_controller_demo="${BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO:-0}"
+screenshot_dir="${BRAWLER_NETWORK_SCREENSHOT_DIR:-}"
+screenshot_first="${BRAWLER_NETWORK_SCREENSHOT_FIRST:-30}"
 combat_report_file="${BRAWLER_NETWORK_COMBAT_REPORT_FILE:-}"
 combat_test_preset="${BRAWLER_NETWORK_COMBAT_TEST_PRESET:-}"
 network_run_id="${BRAWLER_NETWORK_RUN_ID:-network-script}"
@@ -101,6 +103,14 @@ if [[ "$windowed_controller_demo" == "1" && "$headless" == "1" ]]; then
 fi
 if [[ "$windowed_combat_demo" == "1" && "$windowed_controller_demo" == "1" ]]; then
     printf 'brawler network: combat and controller demos cannot be combined\n' >&2
+    exit 2
+fi
+if [[ -n "$screenshot_dir" && "$headless" == "1" ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_SCREENSHOT_DIR requires a windowed client\n' >&2
+    exit 2
+fi
+if ! [[ "$screenshot_first" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_SCREENSHOT_FIRST must be a positive integer\n' >&2
     exit 2
 fi
 
@@ -391,6 +401,10 @@ if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO:-}" ]]; then
 fi
 if [[ "$windowed_combat_demo" == "1" ]]; then
     client_one_args+=(--combat-demo)
+    client_two_args+=(--combat-demo)
+fi
+if [[ -n "$screenshot_dir" ]]; then
+    client_one_args+=(--screenshot-dir "$screenshot_dir" --screenshot-first "$screenshot_first")
 fi
 if [[ "$windowed_controller_demo" == "1" ]]; then
     client_one_args+=(--controller-demo)
