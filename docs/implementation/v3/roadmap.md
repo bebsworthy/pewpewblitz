@@ -103,8 +103,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M03 — Complete 3D combat, fighter, cue, preview, and world-HUD replacement |
+| Status | Verifying |
+| Current milestone | M04 — 2D world-renderer retirement, readability, performance, and V3 closeout |
 | Entry gate | Satisfied — the user accepted the M01 feasibility result and directed M01 closeout and M02 start on 2026-08-20 |
 | Completion gate | Every gameplay-world visual uses the 3D scene, no sprite/`Mesh2d` world fallback remains, the server and protocol stay 2D and authoritative, and representative networked play passes the accepted visual, performance, and lifecycle gates |
 
@@ -114,8 +114,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 |---|---|---|---|
 | 01 | Complete | 3D presentation feasibility and reusable foundation | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Default 3D arena, map, terrain, camera, and input cutover | [milestone-02.md](./milestone-02.md) |
-| 03 | User playtest | Complete 3D combat, fighter, cue, preview, and world-HUD replacement | [milestone-03.md](./milestone-03.md) |
-| 04 | Not started | 2D world-renderer retirement, readability, performance, and V3 closeout | Create after M03 completion |
+| 03 | Complete | Complete 3D combat, fighter, cue, preview, and world-HUD replacement | [milestone-03.md](./milestone-03.md) |
+| 04 | Verifying | 2D world-renderer retirement, readability, performance, and V3 closeout | [milestone-04.md](./milestone-04.md) |
 
 ## Ordering rationale and milestone gates
 

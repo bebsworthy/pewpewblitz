@@ -166,6 +166,7 @@ pub(super) fn reconcile_combat_visuals(
                 WeaponPreviewVisual3d { slot },
                 Mesh3d(primitives.unit_cuboid.clone()),
                 MeshMaterial3d(materials.preview.clone()),
+                NotShadowCaster,
                 Transform::default(),
                 Visibility::Hidden,
                 Name::new("V3 weapon preview slot"),
@@ -222,6 +223,7 @@ fn spawn_fighter(
         parent.spawn((
             Mesh3d(primitives.ground_ring.clone()),
             MeshMaterial3d(team_material(team, materials)),
+            NotShadowCaster,
             Transform::from_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
             Name::new("V3 fighter team ring"),
         ));
@@ -232,6 +234,7 @@ fn spawn_fighter(
             } else {
                 team_material(team, materials)
             }),
+            NotShadowCaster,
             Transform::from_xyz(27.0, 6.0, 0.0),
             Name::new("V3 fighter facing"),
         ));
@@ -271,6 +274,7 @@ fn spawn_projectile(
                 primitives.projectile.clone()
             }),
             MeshMaterial3d(team_material(team, materials)),
+            NotShadowCaster,
             Transform::from_rotation(if lobbed {
                 Quat::IDENTITY
             } else {
@@ -312,6 +316,7 @@ fn spawn_sentry(
         parent.spawn((
             Mesh3d(primitives.direction.clone()),
             MeshMaterial3d(team_material(team, materials)),
+            NotShadowCaster,
             Transform::from_xyz(25.0, 23.0, 0.0).with_scale(Vec3::new(0.8, 0.7, 0.7)),
         ));
     });
@@ -329,6 +334,7 @@ fn spawn_health(
             HealthFill3d,
             Mesh3d(primitives.unit_cuboid.clone()),
             MeshMaterial3d(materials.health_fill.clone()),
+            NotShadowCaster,
             Transform::from_xyz(0.0, 0.8, 0.0).with_scale(Vec3::new(52.0, 4.0, 3.0)),
             Name::new("V3 health fill"),
         ))
@@ -349,6 +355,7 @@ fn spawn_health(
             parent.spawn((
                 Mesh3d(primitives.unit_cuboid.clone()),
                 MeshMaterial3d(materials.health_back.clone()),
+                NotShadowCaster,
                 Transform::default().with_scale(Vec3::new(56.0, 6.0, 4.0)),
                 Name::new("V3 health background"),
             ));
@@ -475,6 +482,7 @@ pub(super) fn update_combat_visual_state(
                     },
                     Mesh3d(primitives.unit_cuboid.clone()),
                     MeshMaterial3d(materials.dash.clone()),
+                    NotShadowCaster,
                     Transform::from_translation(ground_position(position.0) + Vec3::Y * 3.0),
                     Name::new("V3 dash trail"),
                 ));
@@ -535,6 +543,7 @@ pub(super) fn update_combat_visual_state(
                 StatusKind::Slow => materials.status_slow.clone(),
                 StatusKind::Knockback => materials.status_knockback.clone(),
             }),
+            NotShadowCaster,
             Transform {
                 translation: ground_position(*position)
                     + Vec3::Y * if kind == StatusKind::Slow { 2.0 } else { 3.0 },
@@ -621,6 +630,7 @@ pub(super) fn consume_combat_cues(
             },
             Mesh3d(primitives.effect_sphere.clone()),
             MeshMaterial3d(material),
+            NotShadowCaster,
             Transform::from_translation(ground_position(position) + Vec3::Y * (scale * 0.45))
                 .with_scale(Vec3::splat(scale * if reduced { 0.65 } else { 1.0 })),
             Name::new("V3 bounded combat cue effect"),

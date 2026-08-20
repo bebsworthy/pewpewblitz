@@ -12,8 +12,6 @@ pub const CLIENT_ASSET_MANIFEST: &str = include_str!("../../assets/manifest.ron"
 
 #[derive(Resource, Clone)]
 pub(crate) struct ClientAssetHandles {
-    pub team_blue: Handle<Image>,
-    pub team_red: Handle<Image>,
     pub fire: Handle<AudioSource>,
     pub impact: Handle<AudioSource>,
     pub defeat: Handle<AudioSource>,
@@ -27,8 +25,6 @@ pub(crate) struct ClientAssetHandles {
 impl ClientAssetHandles {
     fn load(asset_server: &AssetServer) -> Self {
         Self {
-            team_blue: asset_server.load("brawler/fighters/team_blue.png"),
-            team_red: asset_server.load("brawler/fighters/team_red.png"),
             fire: asset_server.load("brawler/audio/fire.ogg"),
             impact: asset_server.load("brawler/audio/impact.ogg"),
             defeat: asset_server.load("brawler/audio/defeat.ogg"),
@@ -41,18 +37,8 @@ impl ClientAssetHandles {
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 10] {
+    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 8] {
         [
-            (
-                "fighter.team_blue",
-                true,
-                asset_server.load_state(&self.team_blue),
-            ),
-            (
-                "fighter.team_red",
-                true,
-                asset_server.load_state(&self.team_red),
-            ),
             ("audio.fire", false, asset_server.load_state(&self.fire)),
             ("audio.impact", false, asset_server.load_state(&self.impact)),
             ("audio.defeat", false, asset_server.load_state(&self.defeat)),

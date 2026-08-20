@@ -2129,6 +2129,30 @@ mod client_presentation_tests {
     }
 
     #[test]
+    fn reduced_effects_keep_terrain_feedback_but_apply_the_smaller_bound() {
+        let mut app = debris_app();
+        app.insert_resource(crate::client::ClientShellSettings {
+            reduced_combat_effects: true,
+            ..Default::default()
+        });
+        {
+            let mut convergence = app.world_mut().resource_mut::<ClientTerrainConvergence>();
+            *convergence = converged(generation(1));
+            commit_burst(&mut convergence, 0, 24);
+        }
+        app.update();
+        assert_eq!(debris_count(&mut app), 16);
+        let mut transforms = app
+            .world_mut()
+            .query_filtered::<&Transform, With<TerrainDebris>>();
+        assert!(
+            transforms
+                .iter(app.world())
+                .all(|value| value.scale == Vec3::splat(0.65))
+        );
+    }
+
+    #[test]
     fn stale_generation_debris_is_retired_immediately() {
         let mut app = debris_app();
         {

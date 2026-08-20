@@ -366,6 +366,7 @@ fn finish_product_match_smoke(
     mut exit: MessageWriter<AppExit>,
 ) {
     if config.product_match_smoke
+        && config.render_measurement.is_none()
         && !config.product_requeue_smoke
         && roots
             .iter()
@@ -392,7 +393,8 @@ pub(super) fn automatic_match_command_enabled(
 ) -> bool {
     (config.headless_simulation_ticks.is_some()
         || config.windowed_combat_demo.is_some()
-        || config.windowed_controller_demo.is_some())
+        || config.windowed_controller_demo.is_some()
+        || config.render_measurement.is_some())
         && config
             .exit_after_roster
             .is_none_or(|target| roster_count >= target)
@@ -842,7 +844,8 @@ pub(super) fn send_build_selection_request(
         || crossbeam_transport(&config)
         || cfg!(feature = "network-test")
         || config.windowed_combat_demo.is_some()
-        || config.windowed_controller_demo.is_some();
+        || config.windowed_controller_demo.is_some()
+        || config.render_measurement.is_some();
     let should_send = automatic && state.last_sent.is_none() || confirm;
     if !should_send {
         return;

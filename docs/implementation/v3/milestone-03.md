@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
+| Status | Complete |
 | Prepared | 2026-08-20 after the user accepted and closed M02 |
 | Objective | Replace every remaining gameplay-world sprite/XY presentation path with dedicated 3D visual entities while preserving the planar authoritative simulation and interpolated wire pose |
 | Entry dependency | Satisfied — M02 is complete at commit `d084938` with the default 3D map/terrain/camera, corrected projectile placement, and obsolete projectile sprite writer removed |
@@ -520,10 +520,17 @@ reference is 0.20-dev and the current online Bevy examples can advance independe
 
 | Feedback | Decision | Verification |
 |---|---|---|
-| Awaiting implementation and user playtest | — | — |
+| User directed M03 commit and M04 research with no additional visual correction | Accepted as the M03 playtest closeout; no code change required | Canonical verification and native smoke evidence above remained green |
 
 ### Learn-from-errors review
 
-Complete after feedback review. At minimum revisit whether visual ownership, schedule placement,
-scene scoping, animation derivation, effect bounds, and visual evidence exposed a reusable mistake
-or prevention rule.
+The first native visual smoke exposed overlapping mutable `Transform` and `Visibility` queries that
+the focused `MinimalPlugins` tests could not schedule against the complete renderer. The cause was
+relying on marker intent without proving query disjointness to Bevy. The correction added explicit
+role markers and reciprocal `Without` filters. Future presentation families must test root/child
+markers separately and run one native smoke before declaring verification complete.
+
+Independent visual roots and the single post-interpolation pose writer prevented recurrence of the
+axis-dependent muzzle offset. Scene descendant search remained scoped to each ready world instance,
+and bounded effect/preview pools avoided per-frame asset creation. No new reusable project skill is
+needed: these rules are now recorded in this milestone and the repository organization guidance.

@@ -4,7 +4,7 @@
 
 This is a historical inventory for the superseded 2D production-art proposal. V3 is the active
 version and replaces gameplay-world sprites and `Mesh2d` presentation with a fixed-camera 3D scene.
-The active scope is [V3 M02](./implementation/v3/milestone-02.md) within the
+The active scope is [V3 M04](./implementation/v3/milestone-04.md) within the
 [V3 roadmap](./implementation/v3/roadmap.md). Screen-space Bevy UI remains outside that world-renderer
 replacement.
 
@@ -142,7 +142,7 @@ Source: [MVP asset shortlist](./07-mvp-asset-shortlist.md) and
 | Hit flash | v1 stand-in | Rendered; separate from sprite. |
 | App icon | Backlog | GAP-BUILD-NOTARIZE packaging. |
 
-## Recommended file structure
+## Historical proposed file structure
 
 Source: the atlas/batching, theme, and skin models in
 [Art and presentation direction](./11-art-and-presentation-direction.md). The renderer is
@@ -186,8 +186,6 @@ assets/
       debris.png
       particles.png             # sparks, casings, dust (pooled sheet)
       glow.png
-    map/
-      facility_tileset.png      # v1 greybox stand-in
     hud/
       icons.png                 # ability/weapon/status/objective icon atlas
 ```

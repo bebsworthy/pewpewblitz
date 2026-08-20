@@ -17,12 +17,11 @@ the [completed v2 roadmap](docs/implementation/v2/roadmap.md),
 V3 is now in progress. Its goal is to replace the client gameplay-world sprites and `Mesh2d`
 presentation with a fixed-camera orthographic 3D scene while preserving the existing planar
 authority, Avian 2D collision, protocol, routed server topology, and Bevy UI shell. M01's 3D
-feasibility foundation and M02 world cutover were accepted on 2026-08-20. The active scope is
-[V3 M03 — complete 3D combat and fighter replacement](docs/implementation/v3/milestone-03.md),
-within the [V3 roadmap](docs/implementation/v3/roadmap.md). M03 implementation and automated
-verification are complete and awaiting user playtest feedback: fighters, projectiles, sentries,
-previews, combat cues, status feedback, dash trails, and world health use independent 3D visual
-entities, while the server-authoritative simulation and protocol remain planar.
+feasibility foundation, M02 world cutover, and M03 complete combat replacement were accepted on
+2026-08-20. The active scope is
+[V3 M04 — renderer retirement, readability, performance, and closeout](docs/implementation/v3/milestone-04.md),
+within the [V3 roadmap](docs/implementation/v3/roadmap.md). M04 implementation is now verifying;
+the deterministic gates pass and routed native release evidence remains the current closeout gate.
 
 ## Toolchain
 
@@ -43,6 +42,7 @@ just check
 just lint
 just test
 just e2e [client-count]
+just v3-render-evidence [report-path]
 just ci
 just clean
 ```
@@ -52,6 +52,11 @@ opens one normal product client against that address. `just run <client-count>` 
 the routed server, and opens exactly that many interactive clients; counts from 1 through 16 are
 accepted so partial queues and disconnects are easy to reproduce. Press Ctrl-C to stop the complete
 local process tree.
+
+`just v3-render-evidence` builds release client/server/supervisor binaries, runs two routed native
+clients at 1280×720, records a bounded 10-second warm-up plus 30-second measurement, and writes
+`target/v3-render-evidence.txt` without overwriting an existing report. Set
+`BRAWLER_RENDER_MODE=hot-zone` for the second mode or pass a different report path.
 
 `just test` owns all deterministic Rust suites, including routing, client, server, network, and
 performance tests. `just e2e` runs the shortest real-process product path with two clients and First

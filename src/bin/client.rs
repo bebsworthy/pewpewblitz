@@ -3,15 +3,15 @@
 use bevy::app::AppExit;
 use brawler::client::build_app_with_config;
 use brawler::config::{
-    ClientNetworkConfig, NetworkTransport, ScreenshotSchedule, WindowedCombatDemo,
-    WindowedControllerDemo,
+    ClientNetworkConfig, NetworkTransport, RenderMeasurementConfig, ScreenshotSchedule,
+    WindowedCombatDemo, WindowedControllerDemo,
 };
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --product-queue-smoke | --product-match-smoke-1v1 | --product-match-smoke | --product-match-smoke-3v3 | --product-requeue-smoke | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120>]"
     );
 }
 
@@ -85,6 +85,9 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut screenshot_first: u32 = 30;
     let mut screenshot_every: u32 = 60;
     let mut screenshot_count: u32 = 1;
+    let mut render_report = None;
+    let mut render_warmup_seconds: u64 = 10;
+    let mut render_measure_seconds: u64 = 30;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--client-id" => client_id = Some(parse_value(&flag, args.next())?),
@@ -136,6 +139,18 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--screenshot-first" => screenshot_first = parse_value(&flag, args.next())?,
             "--screenshot-every" => screenshot_every = parse_value(&flag, args.next())?,
             "--screenshot-count" => screenshot_count = parse_value(&flag, args.next())?,
+            "--render-report" => {
+                render_report = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| format!("{flag} requires a value"))?,
+                ));
+            }
+            "--render-warmup-seconds" => {
+                render_warmup_seconds = parse_value(&flag, args.next())?;
+            }
+            "--render-measure-seconds" => {
+                render_measure_seconds = parse_value(&flag, args.next())?;
+            }
             "--help" | "-h" => {
                 usage();
                 process::exit(0);
@@ -238,6 +253,13 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             first_update: screenshot_first,
             interval: screenshot_every,
             count: screenshot_count,
+        });
+    }
+    if let Some(report_path) = render_report {
+        config.render_measurement = Some(RenderMeasurementConfig {
+            report_path,
+            warmup: Duration::from_secs(render_warmup_seconds),
+            measurement: Duration::from_secs(render_measure_seconds),
         });
     }
     if windowed_combat_demo {

@@ -9,7 +9,7 @@ Start with:
 1. `docs/00-product-direction.md` for product intent and non-goals.
 2. `docs/implementation/v3/roadmap.md` for the active 3D-presentation migration, milestone order,
    and enduring V3 decisions.
-3. `docs/implementation/v3/milestone-03.md` for the current implementation and playtest contract.
+3. `docs/implementation/v3/milestone-04.md` for the current implementation contract.
 4. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
 5. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
    player-flow and routed-process decisions that V3 preserves.
@@ -24,18 +24,19 @@ and related tuning remain tracked as `POST-V1-RELEASE-POLISH`. V2 completed and 
 2026-08-20. V3 is the active version. M01 completed on 2026-08-20 after the user accepted the 3D
 feasibility result and its projectile-origin corrections. M02 completed on 2026-08-20 after its
 default 3D arena/map/terrain/camera/input cutover, projectile-placement feedback fix, removal of the
-obsolete projectile sprite/XY writer, affected verification, and user acceptance. M03 implementation
-is complete and in `User playtest`: remaining fighter, projectile, sentry, preview, cue, status,
-trail, and world-health visuals now use independent 3D presentation entities. M04 audits final
-readability, performance, occlusion, and dependency retirement after M03 feedback closes.
+obsolete projectile sprite/XY writer, affected verification, and user acceptance. M03 completed on
+2026-08-20 after its independent fighter/combat visual implementation, canonical verification,
+native smoke, and accepted playtest handoff. M04 is now `Verifying` final renderer retirement,
+readability, native performance, lifecycle evidence, and V3 closeout under
+`docs/implementation/v3/milestone-04.md`.
 
 ## Technical stack
 
 - The main Rust package provides independently buildable macOS-client and headless gameplay-worker
   configurations; `packages/brawler-routing` owns the completed V2 route/IPC protocol used by the
   supervisor, lobby worker, and match workers.
-- Bevy 0.19 for ECS, application/plugin structure, client-side 2D/3D rendering, input, assets,
-  animation, audio, and UI.
+- Bevy 0.19 for ECS, application/plugin structure, client-side 3D world rendering, screen-space UI,
+  input, assets, animation, and audio.
 - Lightyear 0.29 for client/server transport, input networking, replication, interpolation, and later prediction/rollback where evidence justifies it.
 - Avian 2D 0.7 for authoritative planar collision and generated terrain colliders. V3 does not
   replace it with 3D physics.

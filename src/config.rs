@@ -279,6 +279,7 @@ pub struct ClientNetworkConfig {
     pub render_profile: RenderProfile,
     pub window_size: Option<(u16, u16)>,
     pub screenshot_schedule: Option<ScreenshotSchedule>,
+    pub render_measurement: Option<RenderMeasurementConfig>,
 }
 
 /// Enables the reproducible, windowed aim-at-dummy/fire smoke scenario.
@@ -293,6 +294,14 @@ pub struct ScreenshotSchedule {
     pub first_update: u32,
     pub interval: u32,
     pub count: u32,
+}
+
+/// Bounded, opt-in native render evidence. Normal clients leave this absent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderMeasurementConfig {
+    pub report_path: std::path::PathBuf,
+    pub warmup: Duration,
+    pub measurement: Duration,
 }
 
 /// Enables a reproducible windowed smoke scenario through the native gamepad input path.
@@ -338,6 +347,7 @@ impl ClientNetworkConfig {
             render_profile: RenderProfile::from_env(),
             window_size: None,
             screenshot_schedule: None,
+            render_measurement: None,
         }
     }
 
@@ -365,8 +375,10 @@ impl ClientNetworkConfig {
                 "--product-queue-smoke conflicts with --exit-after-lobby-welcome".to_string(),
             );
         }
-        if self.product_match_smoke && !self.headless {
-            return Err("--product-match-smoke requires --headless".to_string());
+        if self.product_match_smoke && !self.headless && self.render_measurement.is_none() {
+            return Err(
+                "--product-match-smoke requires --headless or a bounded render report".to_string(),
+            );
         }
         if self.product_match_smoke && self.transport != NetworkTransport::RoutedUdp {
             return Err("--product-match-smoke requires --transport routed-udp".to_string());
@@ -434,6 +446,7 @@ impl ClientNetworkConfig {
             return Err("expected build version must not be empty".to_string());
         }
         self.validate_screenshot_schedule()?;
+        self.validate_render_measurement()?;
         Ok(())
     }
 
@@ -446,6 +459,29 @@ impl ClientNetworkConfig {
         }
         if schedule.interval == 0 || schedule.count == 0 {
             return Err("screenshot interval and count must be greater than zero".to_string());
+        }
+        Ok(())
+    }
+
+    fn validate_render_measurement(&self) -> Result<(), String> {
+        let Some(measurement) = &self.render_measurement else {
+            return Ok(());
+        };
+        if self.headless {
+            return Err("--render-report requires a windowed client".to_string());
+        }
+        if measurement.report_path.as_os_str().is_empty() {
+            return Err("--render-report requires a non-empty path".to_string());
+        }
+        let maximum = Duration::from_mins(2);
+        if measurement.warmup.is_zero()
+            || measurement.measurement.is_zero()
+            || measurement.warmup > maximum
+            || measurement.measurement > maximum
+        {
+            return Err(
+                "render warm-up and measurement must be between 1 and 120 seconds".to_string(),
+            );
         }
         Ok(())
     }
@@ -536,6 +572,26 @@ mod tests {
         );
         assert_eq!(RenderProfile::parse("unknown"), None);
         assert_eq!(RenderProfile::HighRefresh.name(), "high-refresh");
+    }
+
+    #[test]
+    fn render_measurement_is_windowed_and_bounded() {
+        let mut config = ClientNetworkConfig::new(1);
+        config.render_measurement = Some(RenderMeasurementConfig {
+            report_path: "render.txt".into(),
+            warmup: Duration::from_secs(10),
+            measurement: Duration::from_secs(30),
+        });
+        assert!(config.validate().is_ok());
+        config.headless = true;
+        assert!(
+            config
+                .validate()
+                .is_err_and(|error| error.contains("windowed"))
+        );
+        config.headless = false;
+        config.render_measurement.as_mut().unwrap().measurement = Duration::from_secs(121);
+        assert!(config.validate().is_err_and(|error| error.contains("120")));
     }
 
     #[test]

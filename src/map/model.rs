@@ -153,7 +153,6 @@ pub struct GeometryPlacement {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum VisualPlacementKind {
-    Sprite,
     TiledRectangle { half_extents: Vec2, cell_size: Vec2 },
 }
 

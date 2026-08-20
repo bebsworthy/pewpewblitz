@@ -45,6 +45,19 @@ fn windowed_combat_demo_automatically_readies_the_match() {
 }
 
 #[test]
+fn render_measurement_automatically_readies_without_injecting_combat_input() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.render_measurement = Some(crate::config::RenderMeasurementConfig {
+        report_path: "target/report.txt".into(),
+        warmup: Duration::from_secs(10),
+        measurement: Duration::from_secs(30),
+    });
+    assert!(automatic_match_command_enabled(&config, 2));
+    assert!(config.windowed_combat_demo.is_none());
+    assert!(!config.headless_fire);
+}
+
+#[test]
 fn headless_match_command_rearms_during_countdown_for_waiting_retry() {
     let match_id = crate::matchplay::MatchId(7);
     assert!(should_rearm_headless_match_command(

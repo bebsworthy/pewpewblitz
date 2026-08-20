@@ -22,6 +22,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 const TERRAIN_HEIGHT: f32 = 48.0;
 const TERRAIN_DEBRIS_LIFETIME: std::time::Duration = std::time::Duration::from_millis(500);
+const REDUCED_TERRAIN_DEBRIS_LIFETIME: std::time::Duration = std::time::Duration::from_millis(220);
+const REDUCED_TERRAIN_DEBRIS_LIMIT: usize = 16;
 
 #[derive(Component)]
 pub struct TerrainChunkVisual {
@@ -169,6 +171,7 @@ pub(crate) fn spawn_terrain_debris(
     mut commands: Commands,
     primitives: Option<Res<Primitive3dAssets>>,
     materials: Option<Res<Material3dAssets>>,
+    settings: Option<Res<crate::client::ClientShellSettings>>,
     time: Res<Time<Virtual>>,
     mut convergence: ResMut<ClientTerrainConvergence>,
     debris: Query<(Entity, &TerrainDebris)>,
@@ -180,17 +183,28 @@ pub(crate) fn spawn_terrain_debris(
     let TerrainConvergencePhase::Ready { generation } = convergence.phase else {
         return;
     };
+    let reduced = settings.is_some_and(|settings| settings.reduced_combat_effects);
+    let debris_limit = if reduced {
+        REDUCED_TERRAIN_DEBRIS_LIMIT
+    } else {
+        MAX_TERRAIN_DEBRIS_EFFECTS
+    };
     let mut live: Vec<_> = debris.iter().collect();
     live.sort_by_key(|(entity, _)| *entity);
     let overflow = live
         .len()
         .saturating_add(brushes.len())
-        .saturating_sub(MAX_TERRAIN_DEBRIS_EFFECTS);
+        .saturating_sub(debris_limit);
     for (entity, _) in live.into_iter().take(overflow) {
         commands.entity(entity).try_despawn();
     }
-    let newest = brushes.len().min(MAX_TERRAIN_DEBRIS_EFFECTS);
-    let expires_at = time.elapsed() + TERRAIN_DEBRIS_LIFETIME;
+    let newest = brushes.len().min(debris_limit);
+    let expires_at = time.elapsed()
+        + if reduced {
+            REDUCED_TERRAIN_DEBRIS_LIFETIME
+        } else {
+            TERRAIN_DEBRIS_LIFETIME
+        };
     for brush in &brushes[brushes.len() - newest..] {
         let center = crate::terrain::grid::brush_center_world(*brush);
         commands.spawn((
@@ -200,7 +214,9 @@ pub(crate) fn spawn_terrain_debris(
             },
             Mesh3d(primitives.debris.clone()),
             MeshMaterial3d(materials.terrain.clone()),
-            Transform::from_translation(ground_position(center) + Vec3::Y * 5.0),
+            bevy::light::NotShadowCaster,
+            Transform::from_translation(ground_position(center) + Vec3::Y * 5.0)
+                .with_scale(Vec3::splat(if reduced { 0.65 } else { 1.0 })),
             Name::new("V3 terrain debris"),
         ));
     }

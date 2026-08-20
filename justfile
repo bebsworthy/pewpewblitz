@@ -24,7 +24,7 @@ fmt:
 check: _check-routing _check-client _check-server _check-network
 
 # Run formatting, Clippy, and dedicated-server isolation checks.
-lint: _fmt-check _clippy-routing _clippy-client _clippy-server _server-features
+lint: _fmt-check _clippy-routing _clippy-client _clippy-server _server-features _v3-world-presentation
 
 # Run all deterministic Rust test suites, including the performance gates.
 test: _test-routing _test-client _test-server _test-network _test-performance
@@ -32,6 +32,10 @@ test: _test-routing _test-client _test-server _test-network _test-performance
 # Run a real-process product match with 2, 4, or 6 clients (default: 2).
 e2e clients="2":
     ./scripts/e2e.sh {{clients}}
+
+# Record one bounded routed release-client render report at 1280x720.
+v3-render-evidence report="target/v3-render-evidence.txt":
+    ./scripts/v3-render-evidence.sh {{report}}
 
 # Run the complete automated gate, including 2/4/6-client product matches.
 ci: lint test _e2e-matrix
@@ -66,6 +70,9 @@ _clippy-server:
 
 _server-features:
     ./scripts/check-server-features.sh
+
+_v3-world-presentation:
+    ./scripts/check-v3-world-presentation.sh
 
 _test-client:
     cargo test --locked --no-default-features --features client --all-targets

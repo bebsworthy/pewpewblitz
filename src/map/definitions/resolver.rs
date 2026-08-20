@@ -84,14 +84,12 @@ pub(crate) fn normalize_recipe(recipe: &mut MapRecipe) -> Result<(), String> {
     for placement in &mut recipe.visuals {
         placement.position = normalize_vec2(placement.position)?;
         placement.rotation = normalize_rotation(placement.rotation)?;
-        if let VisualPlacementKind::TiledRectangle {
+        let VisualPlacementKind::TiledRectangle {
             half_extents,
             cell_size,
-        } = &mut placement.kind
-        {
-            *half_extents = normalize_vec2(*half_extents)?;
-            *cell_size = normalize_vec2(*cell_size)?;
-        }
+        } = &mut placement.kind;
+        *half_extents = normalize_vec2(*half_extents)?;
+        *cell_size = normalize_vec2(*cell_size)?;
     }
     for placement in &mut recipe.entities {
         placement.position = normalize_vec2(placement.position)?;
@@ -487,13 +485,6 @@ fn expand_visuals(
     let mut resolved = Vec::new();
     for visual in visuals {
         match visual.kind {
-            VisualPlacementKind::Sprite => resolved.push(ResolvedVisualInstance {
-                placement_id: visual.placement_id,
-                instance_index: 0,
-                presentation_profile_id: visual.presentation_profile_id,
-                position: visual.position,
-                rotation: visual.rotation,
-            }),
             VisualPlacementKind::TiledRectangle {
                 half_extents,
                 cell_size,

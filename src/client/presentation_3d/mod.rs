@@ -8,7 +8,7 @@ use bevy::{
     camera::{ScalingMode, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
     gltf::Gltf,
-    light::GlobalAmbientLight,
+    light::{GlobalAmbientLight, NotShadowCaster},
     math::primitives::Annulus,
     world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady},
 };
@@ -17,6 +17,7 @@ use core::time::Duration;
 mod camera;
 mod combat;
 pub(crate) mod coordinates;
+mod diagnostics;
 
 #[cfg(test)]
 use camera::clamp_3d_camera_center;
@@ -168,6 +169,9 @@ struct V3ZoneFill;
 #[derive(Component)]
 struct V3ZoneBoundary;
 
+#[derive(Component)]
+struct GeneratedMapMesh(Handle<Mesh>);
+
 #[derive(Resource, Clone, Copy)]
 struct Presented3dMap(crate::map::MapInstanceId);
 
@@ -176,6 +180,14 @@ pub(super) struct WorldPresentationPlugin;
 
 impl Plugin for WorldPresentationPlugin {
     fn build(&self, app: &mut App) {
+        if let Some(config) = app
+            .world()
+            .resource::<ClientNetworkConfig>()
+            .render_measurement
+            .clone()
+        {
+            app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
+        }
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .insert_resource(GlobalAmbientLight {
                 color: Color::srgb(0.72, 0.78, 0.9),
@@ -326,6 +338,7 @@ fn setup_3d_foundation(
     ) * CAMERA_DISTANCE;
     commands.spawn((
         Camera3d::default(),
+        Msaa::Sample4,
         ArenaCamera,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::FixedVertical {
@@ -378,10 +391,17 @@ fn reconcile_3d_map(
     accepted: Option<Res<crate::map::PresentedMap>>,
     current: Option<Res<Presented3dMap>>,
     snapshots: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
-    members: Query<(Entity, &crate::map::MapPresentationMember)>,
+    members: Query<(
+        Entity,
+        &crate::map::MapPresentationMember,
+        Option<&GeneratedMapMesh>,
+    )>,
 ) {
     let Some(accepted) = accepted else {
-        for (entity, _) in &members {
+        for (entity, _, generated) in &members {
+            if let Some(generated) = generated {
+                meshes.remove(generated.0.id());
+            }
             commands.entity(entity).try_despawn();
         }
         commands.remove_resource::<Presented3dMap>();
@@ -393,7 +413,10 @@ fn reconcile_3d_map(
     if current.is_some_and(|current| current.0 == snapshot.identity.instance_id) {
         return;
     }
-    for (entity, _) in &members {
+    for (entity, _, generated) in &members {
+        if let Some(generated) = generated {
+            meshes.remove(generated.0.id());
+        }
         commands.entity(entity).try_despawn();
     }
     let marker = crate::map::MapPresentationMember {
@@ -407,6 +430,7 @@ fn reconcile_3d_map(
             marker,
             Mesh3d(primitives.floor_tile.clone()),
             MeshMaterial3d(materials.floor.clone()),
+            NotShadowCaster,
             Transform {
                 translation,
                 rotation: Quat::from_rotation_y(visual.rotation),
@@ -447,9 +471,11 @@ fn reconcile_3d_map(
             crate::map::MapShape::Circle { radius } => {
                 let mut translation = ground_position(geometry.position);
                 translation.y = WALL_HEIGHT * 0.5;
+                let mesh = meshes.add(Cylinder::new(radius, WALL_HEIGHT));
                 commands.spawn((
                     marker,
-                    Mesh3d(meshes.add(Cylinder::new(radius, WALL_HEIGHT))),
+                    Mesh3d(mesh.clone()),
+                    GeneratedMapMesh(mesh),
                     MeshMaterial3d(materials.wall.clone()),
                     Transform::from_translation(translation),
                     Name::new("V3 circular cover"),
@@ -460,9 +486,11 @@ fn reconcile_3d_map(
     for (position, size) in crate::map::perimeter_visual_shapes(bounds) {
         let mut translation = ground_position(position);
         translation.y = WALL_HEIGHT * 0.5;
+        let mesh = meshes.add(Cuboid::new(size.x, WALL_HEIGHT, size.y));
         commands.spawn((
             marker,
-            Mesh3d(meshes.add(Cuboid::new(size.x, WALL_HEIGHT, size.y))),
+            Mesh3d(mesh.clone()),
+            GeneratedMapMesh(mesh),
             MeshMaterial3d(materials.perimeter.clone()),
             Transform::from_translation(translation),
             Name::new("V3 arena perimeter"),
@@ -490,25 +518,31 @@ fn reconcile_3d_map(
                 let rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
                 let mut translation = ground_position(position);
                 translation.y = GROUND_OFFSET;
+                let fill_mesh = meshes.add(Circle::new(radius));
                 commands.spawn((
                     marker,
                     V3ZoneFill,
-                    Mesh3d(meshes.add(Circle::new(radius))),
+                    Mesh3d(fill_mesh.clone()),
+                    GeneratedMapMesh(fill_mesh),
                     MeshMaterial3d(materials.zone_fill.clone()),
+                    NotShadowCaster,
                     Transform {
                         translation,
                         rotation,
                         ..default()
                     },
                 ));
+                let boundary_mesh = meshes.add(Annulus::new(
+                    (radius - ZONE_RING_WIDTH * 0.5).max(0.0),
+                    radius + ZONE_RING_WIDTH * 0.5,
+                ));
                 commands.spawn((
                     marker,
                     V3ZoneBoundary,
-                    Mesh3d(meshes.add(Annulus::new(
-                        (radius - ZONE_RING_WIDTH * 0.5).max(0.0),
-                        radius + ZONE_RING_WIDTH * 0.5,
-                    ))),
+                    Mesh3d(boundary_mesh.clone()),
+                    GeneratedMapMesh(boundary_mesh),
                     MeshMaterial3d(materials.zone_boundary.clone()),
+                    NotShadowCaster,
                     Transform {
                         translation: translation + Vec3::Y * 0.2,
                         rotation,
@@ -520,11 +554,14 @@ fn reconcile_3d_map(
                 let size = half_extents * 2.0;
                 let mut translation = ground_position(position);
                 translation.y = GROUND_OFFSET;
+                let mesh = meshes.add(Plane3d::default().mesh().size(size.x, size.y));
                 commands.spawn((
                     marker,
                     V3ZoneFill,
-                    Mesh3d(meshes.add(Plane3d::default().mesh().size(size.x, size.y))),
+                    Mesh3d(mesh.clone()),
+                    GeneratedMapMesh(mesh),
                     MeshMaterial3d(materials.zone_fill.clone()),
+                    NotShadowCaster,
                     Transform::from_translation(translation),
                 ));
             }
@@ -859,9 +896,11 @@ fn spawn_fallback_wall_modules(
     let counts = (size / MODULE).round();
     if (counts * MODULE).distance(size) > 0.01 || counts.x < 1.0 || counts.y < 1.0 {
         let extents = ground_extents(size);
+        let mesh = meshes.add(Cuboid::new(extents.x, WALL_HEIGHT, extents.z));
         commands.spawn((
             crate::map::MapPresentationMember { instance_id },
-            Mesh3d(meshes.add(Cuboid::new(extents.x, WALL_HEIGHT, extents.z))),
+            Mesh3d(mesh.clone()),
+            GeneratedMapMesh(mesh),
             MeshMaterial3d(materials.wall.clone()),
             Transform {
                 translation: ground_position(center) + Vec3::Y * (WALL_HEIGHT * 0.5),
@@ -1187,5 +1226,64 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn repeated_map_replacement_keeps_generated_meshes_and_entities_bounded() {
+        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+        let first = catalog
+            .resolve_preset(
+                crate::map::MapPresetId(1),
+                crate::map::MapInstanceId(1),
+                &crate::map::MapLayoutRequirements::wipeout(),
+            )
+            .unwrap()
+            .snapshot;
+        let mut app = map_app(first);
+        app.update();
+        app.update();
+        let baseline_meshes = app.world().resource::<Assets<Mesh>>().len();
+        let baseline_entities = app
+            .world_mut()
+            .query::<&crate::map::MapPresentationMember>()
+            .iter(app.world())
+            .count();
+
+        for generation in 2..=40 {
+            let hot_zone = generation % 2 == 0;
+            let requirements = if hot_zone {
+                crate::map::MapLayoutRequirements::hot_zone()
+            } else {
+                crate::map::MapLayoutRequirements::wipeout()
+            };
+            let snapshot = catalog
+                .resolve_preset(
+                    crate::map::MapPresetId(if hot_zone { 2 } else { 1 }),
+                    crate::map::MapInstanceId(generation),
+                    &requirements,
+                )
+                .unwrap()
+                .snapshot;
+            app.world_mut().spawn((
+                crate::map::MapRoot,
+                snapshot.identity.instance_id,
+                snapshot.identity,
+                snapshot,
+            ));
+            app.update();
+            app.update();
+            assert!(
+                app.world().resource::<Assets<Mesh>>().len() <= baseline_meshes + 2,
+                "generation {generation} leaked generated meshes"
+            );
+            assert!(
+                app.world_mut()
+                    .query::<&crate::map::MapPresentationMember>()
+                    .iter(app.world())
+                    .count()
+                    <= baseline_entities + 2,
+                "generation {generation} leaked presentation entities"
+            );
+        }
     }
 }
