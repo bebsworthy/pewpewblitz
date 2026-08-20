@@ -78,7 +78,7 @@ product-lobby, automatic-transition, and direct-match compositions.
 - a general text-editing widget, selection, undo history, on-screen keyboard, IME composition UI,
   localization, or a generic UI/navigation framework;
 - DNS caching, custom resolver protocols, Happy Eyeballs, and hostile-network resolver hardening
-  beyond the bounded M03 task/attempt policy (reassess in M09).
+  beyond the bounded M03 task/attempt policy (backlog until a deployment need justifies them).
 
 ## Current seams and constraints
 
@@ -371,7 +371,7 @@ address/name validation
   still blocked fails immediately as `ResolverBusy` with Retry/Back instead of waiting in
   Connecting or spawning unbounded work. Numeric addresses remain immediately usable. Once the
   abandoned task returns, a fresh hostname attempt may start normally. This is an explicit M03
-  limitation; selecting a cancellable resolver remains part of M09 hardening.
+  limitation; selecting a cancellable resolver remains backlog hardening.
 - `std::net::ToSocketAddrs` may block, so call it only in `IoTaskPool`, never in an ECS system on
   the main schedule. The exact five-second client deadline above may report DNS timeout even though
   the operating system call itself is not cancellable.

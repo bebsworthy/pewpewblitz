@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
+| Status | Complete |
 | Prepared | 2026-08-19; simplified during implementation review on the same date |
 | Objective | Turn an exact lobby queue roster into one isolated authoritative match and reach the existing server-owned Countdown |
 | Entry dependency | M04 complete |
@@ -275,8 +275,9 @@ formatting, warning-free lint, both complete role checks, and fresh 2v2, 3v3, an
 | Replace inconvenient game-type rule profiles with basic parameters and no shared defaults block | Implement now | Every game now directly declares `kills_to_win` or `capture_seconds`, plus its own match duration, countdown, and respawn seconds; resolved values travel in the worker manifest |
 | Replace the growing flat list of `just` recipes with development basics plus `server`, `client`, and `run <n>` | Implement now | Reduced the advertised surface from 70 recipes to 11; deterministic checks live under `test`, real-process matches live under `e2e [2|4|6]`, and specialized evidence remains in focused scripts |
 
-No feedback item is deferred or rejected. The remaining feedback gate is a rerun of the hands-on
-1v1/2v2/3v3 and cancel-path playtest using the corrected canonical windowed commands.
+No feedback item is deferred or rejected. On 2026-08-20 the user accepted the outstanding hands-on
+gate after four gameplay rounds covering bots and multiple clients. Together with the recorded
+1v1/2v2/3v3 automated and real-process evidence, this closes M05; no further M05 work was requested.
 
 ## Learn-from-errors review
 

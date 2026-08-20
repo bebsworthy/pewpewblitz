@@ -150,7 +150,7 @@ fabricated result.
 
 A lobby-worker crash retains current M05 behavior: the supervisor may stop matches allocated by that
 lobby. Restart reconciliation and reconnecting to an active match with the retained client token are
-M09 work, not M06.
+backlog work, not M06 or minimal M09 closeout.
 
 ## Implementation plan
 
@@ -231,7 +231,7 @@ M09 work, not M06.
   real Queue Again process path are the functional closeout evidence.
 - **Deferred to M07:** physical-controller execution and the broader Results/Leave presentation
   matrix (`V2-M06-MANUAL-FLOW`).
-- **Deferred to M09:** simultaneous heterogeneous-mode process execution and repeated
+- **Backlog:** simultaneous heterogeneous-mode process execution and repeated
   completion/requeue growth soak (`V2-M06-LIFECYCLE-SOAK`). Existing deterministic isolation,
   bounded-state, serial multi-worker, cleanup, and real requeue evidence remains accepted; the
   deferred campaign is not represented as having passed.
@@ -286,11 +286,11 @@ M09 work, not M06.
 
 ## Deferred
 
-- lobby/supervisor restart recovery and reconnect-to-active-match hardening (M09);
+- lobby/supervisor restart recovery and reconnect-to-active-match hardening (backlog);
 - final Results styling, scoreboard, combat menus, and accessibility polish (M07);
 - physical-controller Results/Leave execution and presentation matrix (M07,
   `V2-M06-MANUAL-FLOW`);
-- heterogeneous-mode simultaneous process run and repeated completion/requeue growth soak (M09,
+- heterogeneous-mode simultaneous process run and repeated completion/requeue growth soak (backlog,
   `V2-M06-LIFECYCLE-SOAK`);
 - rewards, accounts, durable match history, rematch, parties, spectators, join-in-progress, and global
   matchmaking (outside v2).

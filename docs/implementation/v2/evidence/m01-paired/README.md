@@ -52,6 +52,6 @@ most plausible contributors are different pre-Active replication warmup, require
 lifecycle ticks. This result is retained as a failed measurement, not relaxed or relabeled.
 
 On 2026-08-19 the user accepted the topology for development use and deferred performance tuning
-and exhaustive production evidence to M09. A future hardening run should add an identical
+and exhaustive production evidence to the backlog. A future hardening run should add an identical
 benchmark-only pre-ready settle interval, A/B direct MTU 1,133, and capture transport counters at
 one explicit boundary before attributing the full delta to routed transport.

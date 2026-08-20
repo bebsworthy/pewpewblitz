@@ -4,12 +4,12 @@
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
+| Status | Complete |
 | Prepared | 2026-08-20; researched during M07 implementation by explicit user direction; corrected to server-hosted practice by user direction |
 | Objective | Let one connected player select any supported server game type and immediately request an authoritative match with bots filling every other roster position, without entering or changing multiplayer queues |
 | Entry dependency | Satisfied 2026-08-20: M07 is complete. Confirm its final UI, Results, participant, and protocol seams against the implementation starting commit before editing them |
 | Research | Complete for the current product contracts, live M01–M07 worktree, pinned Bevy 0.19.1/Lightyear 0.29.0/Avian 0.7.0 material, and current primary documentation |
-| Implementation | Complete 2026-08-20; automated verification passed and the milestone is ready for interactive playtest |
+| Implementation | Complete 2026-08-20; automated verification and the accepted interactive playtest passed |
 | Scope authority | User chose selectable server-hosted practice for any game type, unchanged queues, names as the only bot label, and inert bots with AI deferred to a later version |
 
 ## Player-visible outcome
@@ -353,17 +353,38 @@ targets sufficient for testing builds and modes at this stage? Are Results and e
 - [x] A connected client can select every compatible advertised game type and request Practice
   without entering a queue.
 - [x] The server allocates one human plus a complete bot roster subject to ordinary capacity.
-- [ ] Bots remain inert while ordinary human-driven Wipeout/Hot Zone rules reach Results.
+- [x] Bots remain inert while ordinary human-driven Wipeout/Hot Zone rules reach Results.
 - [x] Existing name surfaces reuse `Bot N`; there is no extra bot labelling or protocol kind.
 - [x] Bots never receive network-client identity or ownership, and M08 adds no AI behavior.
-- [ ] Results actions, rejection, leave, disconnect, and failures have bounded flows.
+- [x] Results actions and ordinary exit/disconnect flows passed interactive play; rejection and
+  failure bounds retain their automated coverage.
 - [x] Multiplayer queue, routed PvP, role isolation, protocol, network, and performance gates pass.
-- [ ] Practice reaches play within one minute when capacity exists; five-bot 3v3 stays in budget.
-- [ ] Keyboard/mouse and controller playtests cover every current game type; feedback is triaged.
-- [ ] Learn-from-errors review is recorded before M08 becomes Complete.
+- [x] Practice reaches play within one minute when capacity exists; five-bot 3v3 stays in budget.
+- [x] The user accepted four gameplay rounds covering bots and multiple clients; no defect was
+  reported and no exhaustive device/mode matrix is required for M08 closeout.
+- [x] Learn-from-errors review is recorded below.
 
 ## Specification-review questions
 
 The user accepted the flow choices, selected `Bot N` names as the only bot labelling, deferred all
-bot AI to a later version, and directed implementation. No product choice remains open; interactive
-playtest feedback is now required before closeout.
+bot AI to a later version, and directed implementation. No product choice remains open.
+
+## Feedback review and closeout — 2026-08-20
+
+The user completed four gameplay rounds with bots and multiple clients and directed that the
+playtest be considered done. No practice, multiplayer, Results, naming, or inert-bot defect was
+reported. The playtest is accepted as sufficient for this development milestone; exhaustive
+resolution/controller coverage and production-scale hardening remain backlog work rather than M08
+requirements.
+
+## Learn-from-errors review
+
+- The first practice proposal incorrectly placed authority and helper processes on the macOS
+  client. Correction: practice is an ordinary server-hosted match allocation.
+- Queue-filling bots and bot AI initially threatened to expand a simple practice slice. Correction:
+  practice bypasses queues and bots are ordinary inert server fighters named `Bot N`.
+- Reusable lesson: introduce only the minimum new identity and allocation data needed by the
+  current player-visible behavior; do not build future AI, matchmaking, or hosting infrastructure
+  around inert test opponents.
+
+M08 is complete.

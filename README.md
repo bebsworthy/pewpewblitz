@@ -7,10 +7,11 @@ terrain, replicated match/map/combat state, local input settings, and client-onl
 Lightyear Netcode/UDP.
 
 V1 completion is not a release-ready claim. Controller feel, audio, HUD/readability, balance, match
-pacing, and related tuning remain explicit pre-release polish. V2 M05 is in user playtest with a
-single-public-port routed supervisor and isolated lobby and match workers. See the
-[v2 roadmap](docs/implementation/v2/roadmap.md),
-[active milestone](docs/implementation/v2/milestone-05.md), and
+pacing, and related tuning remain explicit pre-release polish. V2 completed on 2026-08-20 with the
+product client flow, single-public-port routed supervisor, isolated lobby and match workers,
+server-local matchmaking, concurrent match lifecycle, product HUD, and server-hosted practice. See
+the [completed v2 roadmap](docs/implementation/v2/roadmap.md),
+[v2 closeout milestone](docs/implementation/v2/milestone-09.md), and
 [completed v1 roadmap](docs/implementation/v1/roadmap.md).
 
 ## Toolchain

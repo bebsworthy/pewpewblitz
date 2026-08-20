@@ -12,7 +12,7 @@
 | Entry artifacts | Complete 2026-08-18: [V1 M11 worker-readiness handoff](../v1/milestone-11.md#v2-worker-readiness-handoff) and [direct-UDP baseline](../v1/evidence/v2-baseline/README.md) |
 | Specification validation | Approved 2026-08-18 when the user explicitly directed implementation of v2 M01. |
 | Implementation | Complete 2026-08-18. All implementation slices below are present in production role graphs and commands. |
-| Verification | Development-use gate passed 2026-08-19. Canonical `CARGO_INCREMENTAL=0 just verify` passed: formatting; client/server/routing Clippy; 95 routing, 270 client, 261 server, 77 network integration, and 14 performance tests; server feature isolation; and a clean two-client routed lobby→match→fresh-lobby smoke with graceful match/lobby reap. Both-mode, crash/restart, RSS, public-envelope accounting, cleanup, and an exact 3,600-tick paired lane are also implemented. Exhaustive production campaigns and performance optimization are deferred to M09 by the user-approved scope decision below. |
+| Verification | Development-use gate passed 2026-08-19. Canonical `CARGO_INCREMENTAL=0 just verify` passed: formatting; client/server/routing Clippy; 95 routing, 270 client, 261 server, 77 network integration, and 14 performance tests; server feature isolation; and a clean two-client routed lobby→match→fresh-lobby smoke with graceful match/lobby reap. Both-mode, crash/restart, RSS, public-envelope accounting, cleanup, and an exact 3,600-tick paired lane are also implemented. Exhaustive production campaigns and performance optimization remain backlog work after the user reduced M09 to minimal v2 closeout on 2026-08-20. |
 | User playtest | Accepted 2026-08-19. The user reported that the routed build “seems to work roughly” and directed M01 closeout. No specific correctness defect was reported; roughness remains visible for later UX/performance hardening. |
 
 ## Outcome and evidence labels
@@ -39,7 +39,8 @@ M01 is a production foundation, not a disposable spike. The user approved this s
 The user accepted the routed topology for development use and explicitly rejected treating a small
 performance-threshold miss as grounds to discard the implementation. M01 therefore requires its
 correctness, isolation, bounded-lifecycle, clean-smoke, and user-playtest gates, while exhaustive
-production campaigns and late-stage performance optimization move to M09. This does not turn a
+production campaigns and late-stage performance optimization were deferred. On 2026-08-20 the user
+moved them to the unscheduled backlog rather than M09. This does not turn a
 failed or unsupported measurement into a pass: the latest exact 3,600-tick paired run remains
 recorded as 12.31% routed egress overhead versus the selected 10% target (ingress +0.35%, total
 +7.92%), and
@@ -65,8 +66,8 @@ cardinalities remain deferred work.
 
 - **Deferred to M03–M06:** product game advertisement, build editing, queues, formation, results UI,
   requeue, and complete reconciliation.
-- **Deferred to M09:** hardened recovery/resumption, fleet-scale security/capacity closeout, and
-  final direct-UDP retirement.
+- **Backlog:** hardened recovery/resumption, fleet-scale security/capacity work, production
+  optimization, and final direct-UDP retirement.
 - **Deferred until Windows is active:** named-pipe IPC; its logical backend boundary is required now.
 - **Excluded:** accounts, global matchmaking, parties, discovery, NAT traversal, relays, fleet
   orchestration, join-in-progress, live connection migration, supervisor-side ECS/gameplay
@@ -552,7 +553,7 @@ The approved implementation proceeds in the following slices.
 | Match-worker manifest admission | Complete | Explicit Netcode client ID plus exact manifest PeerId, exact u128 MatchId, immutable whitelist/team/build validation, and reuse of the authoritative App graph |
 | Worker link and process roles | Complete | Routed Lightyear peer links, bounded per-peer post-Netcode send FIFO, control sequencing/heartbeat/Result/Exit, and supervisor child spawn/reap/restart lifecycle |
 | Minimum lobby and sequential transition | Complete | Two authenticated clients allocate one match worker, receive redacted grants, fully unlink lobby Netcode/Link, reconnect at the same public address, pass manifest admission, and replicate the two-player roster |
-| Real-process evidence and measurement | Development-use gate complete; hardening deferred | Production two-worker isolation, lobby restart, Wipeout and Hot Zone Result→packet-drain→Exit→reap→fresh-lobby cycles pass. The 2026-08-18 both-mode run recorded 12,228/12,335 supervisor-owner diagnostic samples (maximum per-cycle p95 64 µs; not the IPC hard gate), supervisor/lobby/match RSS maxima 6.5/29.8/41.4 MiB, exact public-envelope overhead, directional mixed IPC diagnostics, zero live routes/capabilities/queues/source limits, and no leftover children/socket files. IPv4 and IPv6 production loopback smokes pass. On 2026-08-19 a clean two-client routed smoke again completed allocation, both handoffs, authoritative Result/Exit, graceful worker/lobby reap, and cleanup. The paired lane now proves an exact 3,600-tick authoritative interval with identical nonzero protocol/content fingerprints; the latest run measured routed ingress +0.35%, egress +12.31%, and total +7.92% versus direct. The egress target remains an honest miss, most plausibly affected by startup replication and transport-boundary sampling, and is deferred with full IPC latency, packet-only IPC overhead, correlated CPU, dual-stack MTU capture, fixed-tick comparison, and full 25/20-cycle campaigns to M09. See [routed evidence](./evidence/m01-routed/README.md) and [paired evidence](./evidence/m01-paired/README.md). |
+| Real-process evidence and measurement | Development-use gate complete; hardening deferred | Production two-worker isolation, lobby restart, Wipeout and Hot Zone Result→packet-drain→Exit→reap→fresh-lobby cycles pass. The 2026-08-18 both-mode run recorded 12,228/12,335 supervisor-owner diagnostic samples (maximum per-cycle p95 64 µs; not the IPC hard gate), supervisor/lobby/match RSS maxima 6.5/29.8/41.4 MiB, exact public-envelope overhead, directional mixed IPC diagnostics, zero live routes/capabilities/queues/source limits, and no leftover children/socket files. IPv4 and IPv6 production loopback smokes pass. On 2026-08-19 a clean two-client routed smoke again completed allocation, both handoffs, authoritative Result/Exit, graceful worker/lobby reap, and cleanup. The paired lane now proves an exact 3,600-tick authoritative interval with identical nonzero protocol/content fingerprints; the latest run measured routed ingress +0.35%, egress +12.31%, and total +7.92% versus direct. The egress target remains an honest miss, most plausibly affected by startup replication and transport-boundary sampling. Full IPC latency, packet-only IPC overhead, correlated CPU, dual-stack MTU capture, fixed-tick comparison, and full 25/20-cycle campaigns remain unscheduled backlog work. See [routed evidence](./evidence/m01-routed/README.md) and [paired evidence](./evidence/m01-paired/README.md). |
 
 After approval, expected existing ownership touched is workspace/Cargo; client session; server
 entry/composition; diagnostics; network/process tests; canonical scripts/justfile/README.
@@ -676,10 +677,10 @@ development-use scope:
 - bounded observable malformed/stolen/expired/pressure/IPC/crash/shutdown behavior;
 - isolated feature graphs; identical memory/real semantics; no test-only authority;
 - commands, honest measurements, user check, feedback, and learning complete;
-- direct UDP retained explicitly; M09 owns removal.
+- direct UDP retained explicitly; its eventual removal is backlog housekeeping.
 
 The 2026-08-19 scope decision defers exhaustive latency/CPU/overhead/MTU measurement, performance
-optimization, and full campaign cardinalities to M09. Those observations retain their failed or
+optimization, and full campaign cardinalities to the backlog. Those observations retain their failed or
 unsupported labels; they are not production-readiness completion claims.
 
 Limitations: scripted two-client transition, four-worker provisional host cap, one host, no
@@ -743,7 +744,7 @@ no unapproved transport contingency was selected.
 
 | Feedback | Disposition |
 |---|---|
-| Routed development build “seems to work roughly.” | **Accepted for M01.** The successful interaction satisfies the development-usability gate. No actionable correctness defect was identified, so no speculative code change is made. General transition/presentation roughness remains owned by M02–M07, while routed performance and exhaustive production hardening remain `V2-ROUTED-HARDENING` in M09. |
+| Routed development build “seems to work roughly.” | **Accepted for M01.** The successful interaction satisfies the development-usability gate. No actionable correctness defect was identified, so no speculative code change is made. General transition/presentation roughness remains owned by M02–M07, while routed performance and exhaustive production hardening remain backlog item `V2-ROUTED-HARDENING`. |
 | Close M01. | **Implemented.** Verification evidence, limitations, deferred measurements, and this feedback disposition are recorded; M01 and the roadmap are marked Complete. |
 
 ## Learn-from-errors review
@@ -753,8 +754,8 @@ no unapproved transport contingency was selected.
    otherwise functioning foundation. Cause: the specification optimized for production confidence
    before the product needed that confidence. Prevention: future infrastructure milestones must
    separate correctness/development-use gates from later capacity, optimization, and operational
-   hardening at specification time. M09 now owns the deferred routed gates without relabeling their
-   failed or unsupported evidence.
+   hardening at specification time. The backlog retains the deferred routed gates without
+   relabeling their failed or unsupported evidence.
 2. **Control ownership was too distributed.** Runtime and lifecycle code could allocate from the
    same BRCT sequence space during shutdown, and Result could overtake final packet IPC on a
    separate stream. Cause: cross-stream ordering and sequence ownership were implicit. Prevention:

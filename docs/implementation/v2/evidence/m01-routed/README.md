@@ -1,7 +1,7 @@
 # M01 routed verification evidence
 
 Recorded 2026-08-18 through 2026-08-19 on the Apple M3 reference host. These are development-use
-verification facts, not a production-readiness claim; the active milestone and M09 backlog retain
+verification facts, not a production-readiness claim; the v2 backlog retains
 the deferred hardening measurements and soak cardinalities.
 
 ## Passing commands

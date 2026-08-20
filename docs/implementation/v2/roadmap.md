@@ -44,7 +44,12 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
 - By explicit user direction on 2026-08-20, M08 research and specification preparation overlapped
   M07 implementation. Multiplayer queues remain unchanged; Practice selects any compatible game
   type and fills its non-human roster positions outside the queue. The server-hosted inert-bot slice
-  and automated verification are complete; M08 is at interactive user playtest.
+  and automated verification are complete. On 2026-08-20 the user accepted the playtest after four
+  gameplay rounds covering bots and multiple clients; M05 and M08 are complete.
+- By explicit user direction on 2026-08-20, M09 was reduced to the minimum v2 closeout: one
+  canonical regression pass, disposition of any blocking defect it finds, and truthful closeout
+  records. Production optimization, exhaustive campaigns and matrices, internet-facing hardening,
+  resumption, and legacy direct-UDP retirement remain backlog work.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -60,10 +65,10 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M08 — Server-hosted bot practice for any game type |
+| Status | Complete |
+| Current milestone | None — v2 is complete |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
-| Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
+| Completion gate | The canonical regression suite passes, any blocking regression is resolved or explicitly blocks closeout, and v2 limitations and learning are recorded truthfully |
 
 ## Milestone overview
 
@@ -73,11 +78,11 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 02 | Complete | Product client shell, navigation, settings, and persistence | [milestone-02.md](./milestone-02.md) |
 | 03 | Complete | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
 | 04 | Complete | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
-| 05 | User playtest | Exact formation and match handoff | [milestone-05.md](./milestone-05.md) |
+| 05 | Complete | Exact formation and match handoff | [milestone-05.md](./milestone-05.md) |
 | 06 | Complete | Concurrent match lifecycle, results, and requeue | [milestone-06.md](./milestone-06.md) |
 | 07 | Complete | Minimal combat HUD, menus, readability, and accessibility | [milestone-07.md](./milestone-07.md) |
-| 08 | User playtest | Server-hosted bot practice for any game type | [milestone-08.md](./milestone-08.md) |
-| 09 | Not started | Recovery, security, capacity, usability, and v2 closeout | Create when next |
+| 08 | Complete | Server-hosted bot practice for any game type | [milestone-08.md](./milestone-08.md) |
+| 09 | Complete | Minimal v2 closeout | [milestone-09.md](./milestone-09.md) |
 
 ## Ordering rationale and milestone gates
 
@@ -188,17 +193,14 @@ practice within one minute when server capacity is available, complete the norma
 flow, and exit through the normal disconnect path with no queue mutation or alternate authority
 path.
 
-### M09 — Recovery, security, capacity, usability, and v2 closeout
+### M09 — Minimal v2 closeout
 
-Harden abuse boundaries, impaired-network behavior, diagnostics, host ceilings,
-reconnect-to-lobby, soak/growth evidence, routed performance/IPC/MTU measurement and optimization,
-usability flows, attribution, and feedback/learning
-records. Review and remove the legacy v1 direct-UDP executable/configuration after the final
-comparison evidence unless a documented compatibility requirement remains. This closes gaps; it
-does not add global matchmaking or fleet services.
+Run the canonical regression suite once against the completed v2 product path, fix only a blocking
+regression it exposes, and record final limitations, feedback disposition, and reusable learning.
+M09 adds no product feature, architecture, optimization target, soak campaign, exhaustive manual
+matrix, production hardening, or legacy-path cleanup.
 
-Gate: the version completion gate and every prior deferred exit observation have evidence and user
-feedback disposition.
+Gate: [milestone-09.md](./milestone-09.md) passes and the user accepts v2 closeout.
 
 ## Cross-version technical policies
 
@@ -239,14 +241,15 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 |---|---|---|
 | V2-TRANSPORT-CONTINGENCY | Bounded worker-port range using standard Lightyear UDP | Costed in M01. A qualifying routed hard-gate failure may only return M01 to specification review with evidence; selecting or implementing this contingency requires the user's express approval |
 | V2-WINDOWS-IPC | Production Windows named-pipe backend | Preserve the contract in M01; implement when Windows becomes an active target |
-| V2-ROUTE-RESUMPTION | Resume an interrupted match connection | Deferred; v2 returns to a fresh lobby session |
-| V2-ROUTED-HARDENING | Complete routed latency, packet-only IPC overhead, correlated CPU, dual-stack MTU capture, 25/20-cycle campaigns, and optimize the latest recorded +12.31% directional egress delta | Deferred from M01 to M09 by the user-approved 2026-08-19 development-use scope decision; measurements retain their failed/unsupported labels until rerun |
-| V2-M03-MANUAL-MATRIX | Broader physical-controller feel and full aspect/UI-scale matrix for the direct-connect lobby | Deferred by explicit M03 closeout acceptance on 2026-08-19. Automated controller lifecycle regressions and representative native layouts passed, but separate physical-controller/full-matrix execution is not claimed; revisit in M07's supported-layout/controller validation |
-| V2-M04-MANUAL-MATRIX | Representative resolution/UI-scale inspection and separate physical-controller feel matrix for Game Select, Build Editor, Queue, and recovery overlays | Deferred by explicit M04 closeout direction on 2026-08-19. Automated input, focus, authority, recovery, and presentation regressions passed, but physical-controller/full-layout execution is not claimed; revisit with M03's matrix in M07's supported-layout/controller/accessibility validation |
-| V2-M06-MANUAL-FLOW | Physical-controller Results actions and confirmed Leave presentation/feel matrix | Deferred by explicit M06 closeout direction on 2026-08-20. Automated navigation/lifecycle evidence passed and real Queue Again passed end to end; execute with M07's controller and supported-layout validation |
-| V2-M06-LIFECYCLE-SOAK | Simultaneous heterogeneous First Blood/Wipeout/Hot Zone process run plus repeated completion/requeue bounded-growth campaign | Deferred by explicit M06 closeout direction on 2026-08-20. Deterministic isolation/capacity tests, serial multi-worker process evidence, cleanup, and one real completion-to-requeue cycle passed; execute as M09 soak/capacity evidence |
-| V2-M07-MANUAL-MATRIX | Native Wipeout/Hot Zone layout and contrast at representative aspect ratios/UI scales, physical-controller navigation/feel, perceptual volume/focus mute, and live non-pausing-menu observation | Deferred by explicit M07 closeout direction on 2026-08-20 after automated UI/input/authority tests, routed 1v1/2v2/3v3 process matches, and the exact two-window native startup passed; execute as M09 usability/closeout evidence together with the inherited M03/M04/M06 manual items |
-| V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | M01 makes the routed supervisor path the default for `network.sh`/`just network` after validating its minimum transition driver and retains direct UDP only as an explicitly named compatibility/baseline command; M09 removes the legacy executable/configuration after final comparison evidence unless a documented compatibility requirement remains |
+| V2-ROUTE-RESUMPTION | Resume an interrupted match connection | Backlog; v2 returns to a fresh lobby session. Revisit only when continuity becomes a product requirement |
+| V2-ROUTED-HARDENING | Routed latency and packet-only IPC measurement, correlated CPU campaigns, dual-stack MTU capture, and optimization of the recorded +12.31% directional egress delta against the former 10% target | Backlog; no current player-visible or correctness problem justifies optimization. Revisit with a real deployment target or measured bottleneck |
+| V2-HOSTING-HARDENING | Fleet-scale capacity/security work, production credentials, and internet-facing hardening | Backlog; revisit when public or production hosting enters scope |
+| V2-M03-MANUAL-MATRIX | Broader physical-controller feel and full aspect/UI-scale matrix for the direct-connect lobby | Backlog; automated controller lifecycle regressions and representative native layouts passed. Revisit only for a supported-platform or usability release gate |
+| V2-M04-MANUAL-MATRIX | Representative resolution/UI-scale inspection and separate physical-controller feel matrix for Game Select, Build Editor, Queue, and recovery overlays | Backlog; current automated input, focus, authority, recovery, and presentation regressions passed |
+| V2-M06-MANUAL-FLOW | Physical-controller Results actions and confirmed Leave presentation/feel matrix | Backlog; automated navigation/lifecycle evidence and real Queue Again passed end to end |
+| V2-M06-LIFECYCLE-SOAK | Simultaneous heterogeneous modes plus repeated completion/requeue bounded-growth campaigns | Backlog; deterministic isolation/capacity tests, cleanup, serial multi-worker evidence, and hands-on multiple-client play passed. Revisit when host scale or a leak warrants it |
+| V2-M07-MANUAL-MATRIX | Exhaustive native layout, contrast, physical-controller, audio, and non-pausing-menu matrix | Backlog; revisit for a supported-platform release gate, not v2 closeout |
+| V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | Backlog housekeeping; remove when its comparison/debug value is gone, without making another optimization campaign a prerequisite |
 
 ## Explicitly deferred beyond v2
 
