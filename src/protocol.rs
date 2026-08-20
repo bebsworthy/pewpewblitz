@@ -42,8 +42,8 @@ use crate::map::{
     MapInstanceId, MapRoot, ResolvedMapIdentity, ResolvedMapSnapshot, SpawnAssignment,
 };
 use crate::matchplay::{
-    HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker, MatchState,
-    RespawnState, SpawnProtection, WipeoutState,
+    FighterDisplayName, HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker,
+    MatchState, RespawnState, SpawnProtection, WipeoutState,
 };
 use crate::timing::SIMULATION_TICK;
 
@@ -650,6 +650,7 @@ fn register_replicated_components(app: &mut App) {
     app.component::<WipeoutState>().replicate();
     app.component::<HotZoneState>().replicate();
     app.component::<MatchParticipant>().replicate();
+    app.component::<FighterDisplayName>().replicate_once();
     app.component::<RespawnState>().replicate();
     app.component::<SpawnProtection>().replicate();
     app.component::<MapRoot>().replicate_once();
@@ -862,6 +863,7 @@ mod tests {
         assert!(components.is_registered::<WipeoutState>());
         assert!(components.is_registered::<HotZoneState>());
         assert!(components.is_registered::<MatchParticipant>());
+        assert!(components.is_registered::<FighterDisplayName>());
         assert!(components.is_registered::<RespawnState>());
         assert!(components.is_registered::<SpawnProtection>());
         assert!(components.is_registered::<PlayerId>());

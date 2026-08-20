@@ -177,7 +177,10 @@ pub(crate) fn receive_combat_cues(
         With<lightyear::prelude::client::Client>,
     >,
     local_fighter: Query<&PlayerId, (With<Fighter>, With<lightyear::prelude::Controlled>)>,
+    presentation_settings: Option<Res<crate::client::ClientShellSettings>>,
 ) {
+    let reduced_effects =
+        presentation_settings.is_some_and(|settings| settings.reduced_combat_effects);
     let local_player = local_fighter.iter().next().copied();
     for receiver in &mut receivers {
         let Some(mut receiver) = receiver else {
@@ -339,9 +342,13 @@ pub(crate) fn receive_combat_cues(
                     continue;
                 }
             };
+            let size = if reduced_effects { size * 0.65 } else { size };
             commands.spawn((
                 CombatEffect {
-                    timer: Timer::from_seconds(0.18, TimerMode::Once),
+                    timer: Timer::from_seconds(
+                        if reduced_effects { 0.1 } else { 0.18 },
+                        TimerMode::Once,
+                    ),
                 },
                 Sprite::from_color(color, size),
                 Transform::from_translation(position.extend(30.0)),

@@ -293,7 +293,19 @@ fn combat_hud_reports_replicated_reload_and_defeat_state() {
         .add_systems(Update, update_combat_hud);
     let hud = app
         .world_mut()
-        .spawn((CombatHudText, Text::new("placeholder")))
+        .spawn((
+            CombatHudText,
+            Text::new("placeholder"),
+            Visibility::Inherited,
+        ))
+        .id();
+    let abilities = app
+        .world_mut()
+        .spawn((
+            CombatAbilityHudText,
+            Text::new("placeholder"),
+            Visibility::Inherited,
+        ))
         .id();
     app.world_mut().spawn((
         Fighter,
@@ -310,7 +322,11 @@ fn combat_hud_reports_replicated_reload_and_defeat_state() {
     app.update();
     assert_eq!(
         app.world().get::<Text>(hud).expect("combat HUD").0,
-        "Player 1   Custom   Health  42/100   Pulse 0/6   RELOADING 15t\nULT --"
+        "HEALTH  42/100"
+    );
+    assert_eq!(
+        app.world().get::<Text>(abilities).expect("ability HUD").0,
+        "Pulse  0/6  RELOADING 15t\nULT --"
     );
 
     app.world_mut().entity_mut(hud).insert(Text::new("stale"));
@@ -325,7 +341,11 @@ fn combat_hud_reports_replicated_reload_and_defeat_state() {
     app.update();
     assert_eq!(
         app.world().get::<Text>(hud).expect("combat HUD").0,
-        "Player 1   Custom   Health  42/100   Pulse 0/6   DEFEATED\nULT --"
+        "HEALTH  42/100  DEFEATED"
+    );
+    assert_eq!(
+        app.world().get::<Text>(abilities).expect("ability HUD").0,
+        "Pulse  0/6  DEFEATED\nULT --"
     );
 }
 

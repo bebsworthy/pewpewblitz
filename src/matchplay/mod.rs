@@ -26,8 +26,9 @@ pub(crate) use lifecycle::{
     reset_fighter_runtime,
 };
 pub use model::{
-    ActiveCombatant, MatchClock, MatchId, MatchMember, MatchParticipant, MatchPhase, MatchResult,
-    MatchRoot, MatchState, ResolvedMatchCapacity, RespawnState, SpawnProtection, TeamSlotCapacity,
+    ActiveCombatant, FighterDisplayName, MatchClock, MatchId, MatchMember, MatchParticipant,
+    MatchPhase, MatchResult, MatchRoot, MatchState, ResolvedMatchCapacity, RespawnState,
+    SpawnProtection, TeamSlotCapacity,
 };
 #[cfg(feature = "server")]
 pub use server::{

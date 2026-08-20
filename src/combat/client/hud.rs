@@ -15,6 +15,10 @@ pub struct CombatHudText;
 
 #[cfg(feature = "client")]
 #[derive(Component)]
+pub struct CombatAbilityHudText;
+
+#[cfg(feature = "client")]
+#[derive(Component)]
 pub struct BuildSelectionText;
 
 #[cfg(feature = "client")]
@@ -111,7 +115,14 @@ pub(crate) fn update_health_bars(
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
 )]
 pub(crate) fn update_combat_hud(
-    mut text: Query<&mut Text, With<CombatHudText>>,
+    mut health_text: Query<
+        (&mut Text, &mut Visibility),
+        (With<CombatHudText>, Without<CombatAbilityHudText>),
+    >,
+    mut ability_text: Query<
+        (&mut Text, &mut Visibility),
+        (With<CombatAbilityHudText>, Without<CombatHudText>),
+    >,
     fighter: Query<
         (
             &PlayerId,
@@ -154,6 +165,12 @@ pub(crate) fn update_combat_hud(
         passive_state,
     )) = fighter.iter().next()
     else {
+        for (_, mut visibility) in &mut health_text {
+            *visibility = Visibility::Hidden;
+        }
+        for (_, mut visibility) in &mut ability_text {
+            *visibility = Visibility::Hidden;
+        }
         return;
     };
     let weapon_id = loadout.map_or(PULSE_SIDEARM_DEFINITION, |loadout| {
@@ -204,14 +221,7 @@ pub(crate) fn update_combat_hud(
     };
     let phase = defeated.map_or(phase, |_| "DEFEATED".to_string());
     let maximum_health = loadout.map_or(100, |loadout| loadout.fighter_stats.maximum_health);
-    let build_name = loadout
-        .and_then(|loadout| loadout.identity.source_build_preset_id)
-        .and_then(|id| {
-            build_catalog
-                .as_ref()
-                .and_then(|catalog| catalog.0.preset(id))
-        })
-        .map_or("Custom", |preset| preset.display_name.as_str());
+    let _ = build_catalog;
     let ultimate = ability.map_or_else(
         || "ULT --".to_string(),
         |ability| {
@@ -224,32 +234,18 @@ pub(crate) fn update_combat_hud(
             format!("ULT {:>3}% {phase}", ability.charge / 10)
         },
     );
-    let passive = passive_state.map_or_else(String::new, |state| {
-        let adrenaline = state.adrenaline_until_tick.map_or_else(
-            || "ready".to_string(),
-            |deadline| {
-                format!(
-                    "{}t",
-                    authoritative_tick.map_or(0, |tick| deadline.saturating_sub(tick.0))
-                )
-            },
-        );
-        let quick_cycle = if state.quick_cycle_primed {
-            "primed"
-        } else {
-            "idle"
-        };
-        format!("  ADR {adrenaline} QC {quick_cycle}")
-    });
+    let _ = passive_state;
     let sentry = sentries
         .iter()
         .find(|(identity, _, _)| identity.owner_player_id == *player_id)
         .map_or_else(String::new, |(_, health, deadline)| {
             format!(
-                "  SENTRY {}hp {}t",
+                "  SENTRY {} HP / {}s",
                 health.0,
-                authoritative_tick
-                    .map_or(0, |tick| deadline.expires_at_tick.saturating_sub(tick.0))
+                authoritative_tick.map_or(0, |tick| deadline
+                    .expires_at_tick
+                    .saturating_sub(tick.0)
+                    .div_ceil(60))
             )
         });
     let slow = active_effects
@@ -257,23 +253,24 @@ pub(crate) fn update_combat_hud(
         .zip(authoritative_tick)
         .filter(|(slow, tick)| slow.expires_at_tick > tick.0)
         .map_or_else(String::new, |(slow, tick)| {
-            format!("  SLOW {}t", slow.expires_at_tick.saturating_sub(tick.0))
+            format!(
+                "  SLOWED {}s",
+                slow.expires_at_tick.saturating_sub(tick.0).div_ceil(60)
+            )
         });
-    for mut value in &mut text {
-        **value = format!(
-            "Player {}   {}   Health {:>3}/{:>3}   {} {}/{}   {}{}\n{}{}{}",
-            player_id.0,
-            build_name,
-            health.0,
-            maximum_health,
-            weapon_name,
-            state.ammo,
-            capacity,
-            phase,
-            slow,
-            ultimate,
-            passive,
-            sentry
+    let health_status = if defeated.is_some() { "  DEFEATED" } else { "" };
+    for (mut value, mut visibility) in &mut health_text {
+        *visibility = Visibility::Inherited;
+        value.0 = format!(
+            "HEALTH  {}/{}{}{}",
+            health.0, maximum_health, slow, health_status
+        );
+    }
+    for (mut value, mut visibility) in &mut ability_text {
+        *visibility = Visibility::Inherited;
+        value.0 = format!(
+            "{}  {}/{}  {}\n{}{}",
+            weapon_name, state.ammo, capacity, phase, ultimate, sentry
         );
     }
 }

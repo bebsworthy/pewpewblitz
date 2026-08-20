@@ -11,9 +11,11 @@ pub(crate) struct DashTrailVisual {
 #[cfg(feature = "client")]
 pub(crate) fn ensure_dash_trails(
     mut commands: Commands,
+    settings: Option<Res<crate::client::ClientShellSettings>>,
     fighters: Query<(Entity, &Position, &crate::builds::AbilityState), With<Fighter>>,
     trails: Query<&DashTrailVisual>,
 ) {
+    let reduced = settings.is_some_and(|settings| settings.reduced_combat_effects);
     let existing: HashSet<_> = trails.iter().map(|trail| trail.target).collect();
     for (entity, position, ability) in &fighters {
         if matches!(ability.phase, crate::builds::AbilityPhase::Dashing { .. })
@@ -24,7 +26,10 @@ pub(crate) fn ensure_dash_trails(
                     target: entity,
                     last_position: position.0,
                 },
-                Sprite::from_color(Color::srgba(0.25, 0.9, 1.0, 0.55), Vec2::ONE),
+                Sprite::from_color(
+                    Color::srgba(0.25, 0.9, 1.0, if reduced { 0.3 } else { 0.55 }),
+                    Vec2::ONE,
+                ),
                 Transform::from_translation(position.0.extend(10.0)),
                 Name::new("Dash Trail"),
             ));
@@ -35,9 +40,11 @@ pub(crate) fn ensure_dash_trails(
 #[cfg(feature = "client")]
 pub(crate) fn sync_dash_trails(
     mut commands: Commands,
+    settings: Option<Res<crate::client::ClientShellSettings>>,
     fighters: Query<(&Position, &crate::builds::AbilityState), With<Fighter>>,
     mut trails: Query<(Entity, &mut DashTrailVisual, &mut Transform, &mut Sprite)>,
 ) {
+    let reduced = settings.is_some_and(|settings| settings.reduced_combat_effects);
     for (entity, mut trail, mut transform, mut sprite) in &mut trails {
         let Ok((position, ability)) = fighters.get(trail.target) else {
             commands.entity(entity).despawn();
@@ -51,7 +58,10 @@ pub(crate) fn sync_dash_trails(
         if delta.length_squared() > f32::EPSILON {
             transform.translation = trail.last_position.midpoint(position.0).extend(10.0);
             transform.rotation = Quat::from_rotation_z(delta.y.atan2(delta.x));
-            sprite.custom_size = Some(Vec2::new(delta.length().max(2.0), 14.0));
+            sprite.custom_size = Some(Vec2::new(
+                delta.length().max(2.0) * if reduced { 0.65 } else { 1.0 },
+                if reduced { 8.0 } else { 14.0 },
+            ));
             trail.last_position = position.0;
         }
     }

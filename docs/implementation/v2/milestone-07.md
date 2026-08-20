@@ -4,11 +4,11 @@
 
 | Field | Value |
 |---|---|
-| Status | Specification review |
+| Status | Complete |
 | Prepared | 2026-08-19, by explicit user direction while M06 remains under development |
 | Objective | Replace development-heavy match presentation with the smallest readable gameplay HUD, mode score display, scoreboard, non-pausing menu, polished Results, and bounded accessibility/audio/display settings |
 | Entry dependency | Satisfied 2026-08-20: M06 is complete and its accepted Match/Results/Leave seams are recorded; implementation still requires user validation of this specification |
-| Scope authority | Research and specification only; production implementation requires user validation |
+| Scope authority | User validated the revised specification for implementation on 2026-08-20 |
 
 ## MVP outcome
 
@@ -42,7 +42,7 @@ remain available through the existing F3/environment-controlled diagnostics mode
 - existing UI scale applied consistently to shell, flows, match UI, and diagnostics;
 - master volume, mute on focus loss, windowed/fullscreen, vsync, reduced motion, and reduced combat
   effects;
-- direct migration from settings schema v1 to v2;
+- one current pre-release settings file shape with safe fallback for stale or invalid files;
 - supported-layout, keyboard/mouse, controller, contrast, and reduced-effects verification.
 
 ### Deferred or explicitly absent
@@ -234,9 +234,9 @@ labels and numeric values. Color is reinforcement, never the only carrier.
 
 The accepted display name is added to the bounded match-manifest participant row, included in its
 canonical encoding/digest, validated again by the match worker, and installed as one replicated
-presentation component. This is a deliberate application-protocol change: bump the global protocol
-version/registry fingerprint as required and update both directions atomically. Do not add a
-per-message version or compatibility decoder.
+presentation component. Update the current pre-release wire contract and both directions
+atomically. Let the existing global registry fingerprint detect mismatched builds; do not retain the
+old shape, add a per-message version, or build a compatibility decoder.
 
 ## In-match menu and input
 
@@ -293,10 +293,11 @@ No screen shake exists today, so M07 does not add a shake system merely to expos
 combat effects adjusts only current transient presentation. Essential gameplay feedback remains
 visible in both modes and is tested as such.
 
-Create `SettingsFileV2` only because new persisted fields now exist. Read a tiny
-`schema_version` probe, decode v1 or v2 directly, map v1 fields plus safe new defaults into v2, and
-write only v2 after Apply. Do not create a migration registry. Unknown, malformed, invalid, or
-oversized files retain the existing safe-default/error behavior and are not overwritten silently.
+Replace the current pre-release persisted settings shape directly with the fields above. There is
+no shipped settings contract to migrate, so do not add a schema version, legacy decoder, migration
+registry, or compatibility API. Missing files use safe defaults. Stale, malformed, invalid, or
+oversized files retain the existing safe-default/error behavior and are not overwritten silently;
+the next explicit successful Apply writes the one current shape atomically.
 
 ## Responsive and visual rules
 
@@ -320,42 +321,43 @@ specification.
 
 ### Slice 1 — Product HUD and diagnostics separation
 
-- [ ] Replace controls, connection/input/action, local numeric identity, and monolithic match text
+- [x] Replace controls, connection/input/action, local numeric identity, and monolithic match text
   with retained product HUD slots.
-- [ ] Build focused pure combat, phase/time, alert, and `ModeScoreView` functions.
-- [ ] Implement the top-right Wipeout and Hot Zone presentations with generation-safe syncing.
-- [ ] Preserve crosshair/range/landing, world health bars, durable status cues, and authoritative
+- [x] Build focused pure combat, phase/time, alert, and `ModeScoreView` functions.
+- [x] Implement the top-right Wipeout and Hot Zone presentations with generation-safe syncing.
+- [x] Preserve crosshair/range/landing, world health bars, durable status cues, and authoritative
   countdown behavior.
-- [ ] Keep all development facts in the existing F3/environment diagnostics mode.
+- [x] Keep all development facts in the existing F3/environment diagnostics mode.
 
 ### Slice 2 — Team-readable scoreboard and menus
 
-- [ ] Carry accepted display names through the bounded match manifest and one replicated
+- [x] Carry accepted display names through the bounded match manifest and one replicated
   presentation component; update the global protocol contract atomically.
-- [ ] Add non-color team/local labels to fighters, HUD, scoreboard, and Results.
-- [ ] Replace the placeholder held scoreboard with bounded team rows and current participant state.
-- [ ] Replace the legacy pause surface with the non-pausing menu, same-frame neutral input, Settings
+- [x] Add non-color team/local labels to fighters, HUD, scoreboard, and Results.
+- [x] Replace the placeholder held scoreboard with bounded team rows and current participant state.
+- [x] Replace the legacy pause surface with the non-pausing menu, same-frame neutral input, Settings
   return destination, latched scoreboard, and existing Leave confirmation.
 
 ### Slice 3 — Results, settings, and accessibility
 
-- [ ] Capture final `ModeScoreView` into M06's local result context and restyle Results without new
+- [x] Capture final `ModeScoreView` into M06's local result context and restyle Results without new
   lobby/supervisor state.
-- [ ] Add master volume, focus mute, fullscreen, vsync, and reduced combat effects to the existing
+- [x] Add master volume, focus mute, fullscreen, vsync, and reduced combat effects to the existing
   settings draft.
-- [ ] Add direct settings v1-to-v2 migration and preserve atomic save/error behavior.
-- [ ] Apply UI scale and contrast/safe-margin rules consistently across shell, product flow, match
+- [x] Replace the pre-release settings shape directly and preserve atomic save/error behavior.
+- [x] Apply UI scale and contrast/safe-margin rules consistently across shell, product flow, match
   UI, scoreboard, menus, Results, and diagnostics.
 
 ### Slice 4 — Verify and hand off
 
-- [ ] Run canonical formatting, lint, client/server role checks, unit, network, process, and
+- [x] Run canonical formatting, lint, client/server role checks, unit, network, process, and
   performance commands.
-- [ ] Run automated HUD/model/layout snapshots or node-bound assertions for both modes, all match
-  states, supported representative layouts, default/max UI scale, and reduced effects.
-- [ ] Run supervised keyboard/mouse and physical-controller matches for Wipeout and Hot Zone.
-- [ ] Record visual, controller, contrast, audio, and non-pausing-menu observations; triage user
-  feedback and complete the learn-from-errors review.
+- [x] Record automated HUD/model/query evidence; the broader native layout matrix is explicitly
+  deferred to `V2-M07-MANUAL-MATRIX` by the user's 2026-08-20 closeout direction.
+- [x] Defer supervised keyboard/mouse and physical-controller matches for Wipeout and Hot Zone to
+  `V2-M07-MANUAL-MATRIX` by the user's 2026-08-20 closeout direction.
+- [x] Record the visual, controller, contrast, audio, and non-pausing-menu matrix as deferred;
+  triage delivered feedback and complete the learn-from-errors review below.
 
 ## Verification contract
 
@@ -371,14 +373,16 @@ specification.
 - held scoreboard does not suppress gameplay input; menu scoreboard returns to the menu;
 - reduced effects retains durable statuses, hit feedback, reticle/range, objective state, and
   telegraphs;
-- v1 settings migrate to safe v2 defaults; v2 round-trips; invalid/unknown files fail safely;
+- current settings round-trip; stale, malformed, invalid, and oversized files fail safely without
+  compatibility or migration machinery;
 - UI scale changes presentation only; audio/display settings affect only client resources/window.
 
 ### Protocol, role, and network tests
 
 - accepted names remain bounded/normalized through lobby, manifest encode/decode/digest, match
   admission, replication, disconnect, and cleanup;
-- the one global compatibility handshake rejects the old protocol; there is no per-message version;
+- the existing global compatibility handshake rejects a mismatched pre-release wire contract;
+  there is no retained old shape or per-message version;
 - clients cannot author names, scores, objective progress, result, roster status, or match time after
   admission;
 - Wipeout and Hot Zone matches reach Countdown/Active/Results through routed workers with the right
@@ -431,24 +435,86 @@ Menu, diagnostics mode, and Settings, and a short checklist:
    comfortable?
 7. Are Results and Queue Again/Change Game/Disconnect clear after both modes?
 
+## Implementation and automated evidence — 2026-08-20
+
+The implemented slice keeps the product HUD to the fixed timer, mode score, health/status, and
+weapon/ability slots. Wipeout and Hot Zone share one presentation-only `ModeScoreView` dispatch;
+scoreboard rows use accepted bounded display names and explicit team/`YOU` labels. The non-pausing
+menu reuses the existing Settings and Leave ownership, and Results copies only the final bounded
+mode-score view before the routed match unlink.
+
+Settings now have one unversioned current RON shape. Missing files use defaults; malformed, stale,
+invalid, and oversized files fail without rewriting the source. Reduced effects modifies only
+transient cue scale/lifetime and dash-trail intensity. Master volume/focus mute and display choices
+write only client audio/window resources.
+
+Automated evidence:
+
+- `just lint` — passed, including client/server Clippy and the dedicated-server feature isolation
+  audit;
+- `just check` — passed for routing, client, server, and network-test roles;
+- `just test` — passed: routing/process tests, 351 client tests, 299 server tests, 81 serial network
+  tests, and 14 performance tests;
+- `just e2e 2`, `just e2e 4`, and `just e2e 6` — passed with exact routed 1v1, 2v2, and 3v3 rosters
+  reaching Active;
+- post-handoff `just run 2` startup smoke — both native client windows remained live until the
+  launcher was intentionally stopped. This caught and fixed a Bevy B0001 conflict between the
+  retained mutable HUD text queries and the scoreboard query; a focused full-system initialization
+  regression now proves all five query filters are disjoint;
+- the product-lobby network harness now explicitly starts the same routed lobby lifecycle that its
+  synthetic `RoutedClientSession` claims, preventing queue snapshots from being intentionally
+  ignored as the wrong generation.
+
+The remaining unchecked work is deliberately human evidence: representative window sizes and UI
+scale, both modes' visual/contrast pass, physical-controller navigation, perceptual audio/focus
+mute, and confirmation that live authority continues while Menu/Settings/Leave owns local input.
+
 ## Exit criteria
 
-- [ ] The user validates this specification before implementation.
+- [x] The user validates this revised specification before implementation.
 - [x] M06's final Match, Results, Leave, and fresh-lobby seams are reconciled without duplicating
   lifecycle ownership.
-- [ ] Product combat HUD contains only gameplay-relevant information; development facts are hidden
+- [x] Product combat HUD contains only gameplay-relevant information; development facts are hidden
   in diagnostics mode.
-- [ ] One top-right slot cleanly presents Wipeout and Hot Zone score/objective state through the
+- [x] One top-right slot cleanly presents Wipeout and Hot Zone score/objective state through the
   small enum dispatch.
-- [ ] Scoreboard, menu, Settings return, Leave, and Results work with keyboard/mouse and controller
-  while the server continues normally.
-- [ ] Team meaning is never color-only, and representative contrast/layout/reduced-effects checks
-  pass.
-- [ ] Settings v1 migrates to v2 and audio/display/reduced-effects choices persist and fail safely.
-- [ ] Required automated, routed/direct, role-isolation, performance, visual, controller, and audio
-  evidence is recorded.
-- [ ] User feedback is triaged and learn-from-errors review is complete before M07 becomes
+- [x] Automated scoreboard, menu, Settings return, Leave, Results, neutral-input, and authority
+  paths pass; physical-controller feel is explicitly deferred to `V2-M07-MANUAL-MATRIX`.
+- [x] Team meaning has explicit labels and reduced-effects behavior is covered; representative
+  native contrast/layout inspection is explicitly deferred to `V2-M07-MANUAL-MATRIX`.
+- [x] Audio/display/reduced-effects choices persist in the one current settings shape and stale or
+  invalid files fail safely.
+- [x] Required automated, routed/direct, role-isolation, and performance evidence is recorded;
+  visual, physical-controller, and perceptual-audio evidence has an explicit backlog disposition.
+- [x] User feedback is triaged and learn-from-errors review is complete before M07 becomes
   `Complete`.
+
+## Feedback review and closeout — 2026-08-20
+
+The user accepted the delivered M07 slice and explicitly directed closeout after the reported
+`just run 2` startup panic was fixed and the exact interactive path remained stable. Feedback is
+triaged as follows:
+
+| Feedback | Disposition |
+|---|---|
+| Settings do not need v1-to-v2 migration because no settings contract shipped | Implemented: one current unversioned settings shape replaces the pre-release shape directly |
+| `just run 2` panics with Bevy B0001 in `update_readiness_hud` | Implemented: all mutable HUD text queries are explicitly disjoint and a full-system initialization regression covers the composition |
+| Close M07 | Accepted: automated evidence and the native startup smoke are sufficient for this closeout; the unexecuted human matrix remains explicit backlog work rather than a claimed pass |
+
+### Learn from errors
+
+- **Mistake:** focused HUD tests exercised view functions and individual nodes but did not
+  initialize the complete windowed HUD system, so Bevy's runtime query-conflict validation did not
+  run before handoff.
+- **Cause:** the new scoreboard query was added beside four mutually-disjoint mutable `Text`
+  queries without reciprocal `Without<ScoreboardOverlay>` filters. Compilation and headless tests
+  cannot prove Bevy runtime query disjointness.
+- **Prevention:** every system with multiple mutable queries over the same component now needs one
+  test that installs and runs the whole system once, even when its pure helpers already have focused
+  coverage. Retained UI marker queries must use reciprocal filters or one `ParamSet`.
+- **Reusable lesson:** a native startup smoke is part of the minimum evidence for presentation
+  milestones; process/headless end-to-end success is not a substitute for initializing the actual
+  rendering/UI composition.
 
 ## Risks and mitigations
 
@@ -460,7 +526,7 @@ Menu, diagnostics mode, and Settings, and a short checklist:
 | Display names expand identity/security scope | Carry only the lobby-accepted bounded presentation name; stable player ID remains authority |
 | Reduced effects hides counterplay | Maintain an explicit never-remove list and test both settings against the same authoritative cues |
 | Menu appears to pause or leaks one input frame | Honest copy plus schedule test proving neutral intent before the next network input write |
-| Settings migration becomes infrastructure | One schema probe and direct v1/v2 conversion; no registry until a third real schema exists |
+| Pre-release settings grow compatibility machinery | Replace the current shape directly; add versioning only after a shipped compatibility requirement exists |
 | UI scale clips the smallest layout | Fixed semantic slots, safe margins, compact labels, and node-bound checks at scale 1.4 |
 
 ## Research sources

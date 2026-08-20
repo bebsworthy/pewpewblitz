@@ -325,6 +325,41 @@ impl fmt::Debug for MatchBuildSnapshot {
     }
 }
 
+/// Lobby-accepted player name carried into one match for presentation only.
+///
+/// The fixed representation keeps allocation and manifest rows `Copy`, bounded, and free of an
+/// allocator-dependent wire shape. Unicode normalization remains application-owned at lobby
+/// admission; routing only preserves valid UTF-8 bytes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct MatchDisplayName {
+    len: u8,
+    bytes: [u8; 64],
+}
+
+impl MatchDisplayName {
+    pub fn new(value: &str) -> Result<Self, CodecError> {
+        let len = u8::try_from(value.len()).map_err(|_| CodecError::Oversize)?;
+        if value.is_empty() || value.len() > 64 {
+            return Err(CodecError::InvalidValue);
+        }
+        let mut bytes = [0; 64];
+        bytes[..value.len()].copy_from_slice(value.as_bytes());
+        Ok(Self { len, bytes })
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.bytes[..usize::from(self.len)])
+            .expect("MatchDisplayName is constructed from valid UTF-8")
+    }
+}
+
+impl fmt::Debug for MatchDisplayName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("[REDACTED]")
+    }
+}
+
 /// A participant entry in a match manifest.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct MatchManifestParticipant {
@@ -333,6 +368,7 @@ pub struct MatchManifestParticipant {
     pub netcode_client_id: crate::NetcodeClientId,
     pub peer_id: PeerId,
     pub team: u8,
+    pub display_name: MatchDisplayName,
     pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub revision: u16,
@@ -357,6 +393,8 @@ fn encode_match_participant(encoder: &mut Encoder, participant: &MatchManifestPa
     encoder.put_u64(participant.netcode_client_id.get());
     encoder.put_u128(participant.peer_id.get());
     encoder.put_u8(participant.team);
+    encoder.put_u8(u8::try_from(participant.display_name.as_str().len()).expect("bounded"));
+    encoder.put_bytes(participant.display_name.as_str().as_bytes());
     match participant.source_build_preset {
         None => encoder.put_u8(0),
         Some(preset) => {
@@ -379,6 +417,10 @@ fn decode_match_participant(
         crate::NetcodeClientId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
     let peer_id = PeerId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
     let team = decoder.u8()?;
+    let display_name_length = usize::from(decoder.u8()?);
+    let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
+        .map_err(|_| CodecError::InvalidValue)
+        .and_then(MatchDisplayName::new)?;
     let source_build_preset = decoder.optional(Decoder::u16)?;
     let recipe_fingerprint = decoder.u64()?;
     let revision = decoder.u16()?;
@@ -389,6 +431,7 @@ fn decode_match_participant(
         netcode_client_id,
         peer_id,
         team,
+        display_name,
         source_build_preset,
         recipe_fingerprint,
         revision,
@@ -604,6 +647,7 @@ mod tests {
             netcode_client_id: NetcodeClientId::new(index + 25).unwrap(),
             peer_id: id128(u128::from(index) + 30),
             team: u8::try_from(index % 2).unwrap(),
+            display_name: MatchDisplayName::new("Player").unwrap(),
             source_build_preset: Some(u16::try_from(index + 40).unwrap()),
             recipe_fingerprint: index + 50,
             revision: u16::try_from(index + 60).unwrap(),
@@ -663,7 +707,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 354);
+        assert_eq!(encoded.len(), 368);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])
@@ -786,5 +830,19 @@ mod tests {
         assert!(!debug.contains("23"));
         assert!(!debug.contains("33"));
         assert!(!debug.contains("43"));
+    }
+
+    #[test]
+    fn match_display_name_is_utf8_bounded_and_round_trips_in_manifest_digest() {
+        assert_eq!(MatchDisplayName::new(""), Err(CodecError::InvalidValue));
+        assert_eq!(
+            MatchDisplayName::new(&"x".repeat(65)),
+            Err(CodecError::InvalidValue)
+        );
+        let mut manifest = match_manifest(1);
+        manifest.participants[0].display_name = MatchDisplayName::new("Café").unwrap();
+        let decoded = MatchManifestV1::decode(&manifest.encode().unwrap()).unwrap();
+        assert_eq!(decoded.participants[0].display_name.as_str(), "Café");
+        assert_eq!(decoded.digest, manifest.compute_digest().unwrap());
     }
 }

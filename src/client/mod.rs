@@ -4,7 +4,7 @@ use crate::{
     VERSION,
     combat::{
         AuthoritativeTick, BuildSelectionText, ClientCombatEvidenceStatus, ClientCombatPlugin,
-        CombatHudText, SelectingBuild,
+        CombatAbilityHudText, CombatHudText, SelectingBuild,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
@@ -94,6 +94,7 @@ pub use session::ClientNetworkPlugin;
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
 use session::*;
+pub use settings::persistence::ClientShellSettings;
 pub use settings::ui::{InputSettingsField, InputSettingsSelection, compose_input_settings_lines};
 use settings::ui::{adjust_input_settings_from_pause_keys, update_input_settings_overlay};
 pub use settings::{
@@ -199,6 +200,7 @@ pub struct ClientMatchResultContext {
     pub local_team: Option<crate::combat::TeamId>,
     pub game_type_id: Option<crate::lobby::GameTypeId>,
     pub game_name: Option<String>,
+    pub(crate) final_score: Option<hud::ModeScoreView>,
 }
 
 #[derive(Resource, Debug, Default, PartialEq, Eq)]
@@ -344,7 +346,7 @@ pub struct ClientPresentation;
 pub enum ClientInputContext {
     #[default]
     Gameplay,
-    Paused,
+    Menu,
     /// The offline product shell owns local input and always emits neutral gameplay intent.
     Shell,
 }
@@ -358,6 +360,9 @@ pub(crate) enum ClientSettingsUiSet {
 
 #[derive(Resource, Default)]
 pub(crate) struct InputCaptureConsumed(pub bool);
+
+#[derive(Resource, Default)]
+pub(crate) struct MatchSettingsRequest(pub bool);
 
 /// Local presentation/readiness gate. Headless automation has no asset requirement.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -440,10 +445,9 @@ impl Default for PendingLocalActions {
     }
 }
 
-const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
 const HEADLESS_FIRE_DURATION_TICKS: u32 = 6_000;
-const ACTION_ACTIVE_ITEM: u16 = 1 << 1;
-const ACTION_ULTIMATE: u16 = 1 << 2;
+#[cfg(test)]
+const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
 const ACTION_INTERACT: u16 = 1 << 3;
 const ACTION_CANCEL: u16 = 1 << 8;
 const ACTION_PAUSE: u16 = 1 << 9;
@@ -507,8 +511,8 @@ fn apply_pause_request(
 ) {
     if pause_pressed {
         *context = match *context {
-            ClientInputContext::Gameplay => ClientInputContext::Paused,
-            ClientInputContext::Paused => ClientInputContext::Gameplay,
+            ClientInputContext::Gameplay => ClientInputContext::Menu,
+            ClientInputContext::Menu => ClientInputContext::Gameplay,
             ClientInputContext::Shell => ClientInputContext::Shell,
         };
         pending.latched_buttons = 0;
@@ -526,13 +530,10 @@ struct ControllerDemoGamepad;
 struct PauseOverlay;
 
 #[derive(Component)]
+struct MatchMenuText;
+
+#[derive(Component)]
 struct InputSettingsText;
-
-#[derive(Component)]
-struct ControlsText;
-
-#[derive(Component)]
-struct InputStatusText;
 
 #[derive(Component)]
 struct ScoreboardOverlay;

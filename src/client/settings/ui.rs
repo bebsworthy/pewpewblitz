@@ -355,10 +355,7 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
 }
 
 const fn settings_context_owns_input(context: ClientInputContext) -> bool {
-    matches!(
-        context,
-        ClientInputContext::Paused | ClientInputContext::Shell
-    )
+    matches!(context, ClientInputContext::Shell)
 }
 
 #[allow(

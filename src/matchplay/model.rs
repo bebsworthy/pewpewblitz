@@ -123,6 +123,11 @@ pub struct MatchParticipant {
     pub restart_ready: bool,
 }
 
+/// Lobby-accepted, bounded presentation name replicated with a match fighter.
+/// Stable player IDs remain the authority identity; clients never mutate this component.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct FighterDisplayName(pub String);
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RespawnState {
     pub respawn_at_tick: u64,

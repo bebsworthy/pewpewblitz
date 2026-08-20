@@ -230,6 +230,10 @@ impl Harness {
             let client_entity = harness.client_entities[client_id as usize - 1];
             harness.clients[client_id as usize - 1]
                 .world_mut()
+                .resource_mut::<brawler::client::RoutedClientLifecycle>()
+                .start_lobby();
+            harness.clients[client_id as usize - 1]
+                .world_mut()
                 .entity_mut(client_entity)
                 .insert(brawler::client::RoutedClientSession {
                     generation: 1,

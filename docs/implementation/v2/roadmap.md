@@ -36,8 +36,11 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
   completion-to-fresh-Join smoke, the user explicitly directed M06 closeout on 2026-08-20. The
   unexecuted manual-flow and repeated heterogeneous lifecycle campaigns remain visible backlog work.
 - By explicit user direction on 2026-08-19, M07 research and specification preparation overlap M06
-  implementation. M06 is now complete and its seams are reconciled. M07 remains at `Specification
-  review`; production implementation is gated on user validation.
+  implementation. M06 is now complete and its seams are reconciled. The user validated the revised
+  M07 specification and directed implementation on 2026-08-20. After the reported native HUD
+  query-conflict panic was fixed and the exact `just run 2` startup remained stable, the user
+  explicitly directed M07 closeout on 2026-08-20. The unexecuted native layout, physical-controller,
+  and perceptual-audio matrix remains visible as `V2-M07-MANUAL-MATRIX`.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -68,7 +71,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 04 | Complete | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
 | 05 | User playtest | Exact formation and match handoff | [milestone-05.md](./milestone-05.md) |
 | 06 | Complete | Concurrent match lifecycle, results, and requeue | [milestone-06.md](./milestone-06.md) |
-| 07 | Specification review | Minimal combat HUD, menus, readability, and accessibility | [milestone-07.md](./milestone-07.md) |
+| 07 | Complete | Minimal combat HUD, menus, readability, and accessibility | [milestone-07.md](./milestone-07.md) |
 | 08 | Not started | Authoritative bot practice and local supervisor launch | Create when next |
 | 09 | Not started | Recovery, security, capacity, usability, and v2 closeout | Create when next |
 
@@ -233,6 +236,7 @@ generalizing for global matchmaking, orchestration, accounts, or spectators.
 | V2-M04-MANUAL-MATRIX | Representative resolution/UI-scale inspection and separate physical-controller feel matrix for Game Select, Build Editor, Queue, and recovery overlays | Deferred by explicit M04 closeout direction on 2026-08-19. Automated input, focus, authority, recovery, and presentation regressions passed, but physical-controller/full-layout execution is not claimed; revisit with M03's matrix in M07's supported-layout/controller/accessibility validation |
 | V2-M06-MANUAL-FLOW | Physical-controller Results actions and confirmed Leave presentation/feel matrix | Deferred by explicit M06 closeout direction on 2026-08-20. Automated navigation/lifecycle evidence passed and real Queue Again passed end to end; execute with M07's controller and supported-layout validation |
 | V2-M06-LIFECYCLE-SOAK | Simultaneous heterogeneous First Blood/Wipeout/Hot Zone process run plus repeated completion/requeue bounded-growth campaign | Deferred by explicit M06 closeout direction on 2026-08-20. Deterministic isolation/capacity tests, serial multi-worker process evidence, cleanup, and one real completion-to-requeue cycle passed; execute as M09 soak/capacity evidence |
+| V2-M07-MANUAL-MATRIX | Native Wipeout/Hot Zone layout and contrast at representative aspect ratios/UI scales, physical-controller navigation/feel, perceptual volume/focus mute, and live non-pausing-menu observation | Deferred by explicit M07 closeout direction on 2026-08-20 after automated UI/input/authority tests, routed 1v1/2v2/3v3 process matches, and the exact two-window native startup passed; execute as M09 usability/closeout evidence together with the inherited M03/M04/M06 manual items |
 | V2-V1-DIRECT-UDP-RETIREMENT | Retire the legacy v1 direct-UDP launch path | M01 makes the routed supervisor path the default for `network.sh`/`just network` after validating its minimum transition driver and retains direct UDP only as an explicitly named compatibility/baseline command; M09 removes the legacy executable/configuration after final comparison evidence unless a documented compatibility requirement remains |
 
 ## Explicitly deferred beyond v2

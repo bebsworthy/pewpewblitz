@@ -130,6 +130,7 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
         netcode_client_id: id64(30_000 + worker_u64),
         peer_id: id128(40_000 + worker),
         team: 0,
+        display_name: brawler_routing::MatchDisplayName::new("Player").unwrap(),
         source_build_preset: Some(1),
         recipe_fingerprint: worker_u64,
         revision: 1,

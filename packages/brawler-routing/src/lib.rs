@@ -47,7 +47,7 @@ pub use ipc::{
 };
 pub use limits::*;
 pub use manifest::{
-    GameMode, LobbyManifest, ManifestCommon, MatchBuildSnapshot, MatchManifest,
+    GameMode, LobbyManifest, ManifestCommon, MatchBuildSnapshot, MatchDisplayName, MatchManifest,
     MatchManifestParticipant, MatchManifestV1, WorkerRole, raw_catalog_fingerprint,
 };
 pub use memory::{MemoryBackend, MemoryDuplex};

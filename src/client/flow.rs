@@ -157,7 +157,6 @@ enum FlowUiAction {
     ConfirmCancelMatchStart,
     QueueAgain,
     ChangeGame,
-    RequestLeaveMatch,
     KeepPlaying,
     ConfirmLeaveMatch,
 }
@@ -209,7 +208,6 @@ enum OverlayCommit {
     Clear,
     BuildEditor,
     Confirmation(CancelMatchStartConfirmation),
-    LeaveConfirmation,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -878,7 +876,13 @@ fn collect_flow_input(
                 | ClientFlow::Queue
                 | ClientFlow::MatchLoading
                 | ClientFlow::Results => FlowUiAction::Disconnect,
-                ClientFlow::Match => FlowUiAction::RequestLeaveMatch,
+                ClientFlow::Match => {
+                    if matches!(overlay.as_ref(), ClientOverlay::LeaveConfirmation) {
+                        FlowUiAction::KeepPlaying
+                    } else {
+                        return;
+                    }
+                }
                 ClientFlow::ServerSelect => FlowUiAction::Back,
                 ClientFlow::Title => return,
             }
@@ -1523,10 +1527,6 @@ fn resolve_flow_action(
             result_state.context = None;
             commit.next_flow = Some(ClientFlow::GameSelect);
         }
-        FlowUiAction::RequestLeaveMatch => {
-            commit.overlay = Some(OverlayCommit::LeaveConfirmation);
-            commit.focus_index = Some(0);
-        }
         FlowUiAction::KeepPlaying | FlowUiAction::KeepLoading => {
             commit.overlay = Some(OverlayCommit::Clear);
             commit.focus_index = Some(0);
@@ -1837,7 +1837,6 @@ fn commit_flow(
             OverlayCommit::Clear => ClientOverlay::None,
             OverlayCommit::BuildEditor => ClientOverlay::BuildEditor,
             OverlayCommit::Confirmation(value) => ClientOverlay::Confirmation(value),
-            OverlayCommit::LeaveConfirmation => ClientOverlay::LeaveConfirmation,
         };
     }
     if let Some(index) = commit.focus_index {
@@ -3187,6 +3186,20 @@ fn spawn_results(
                     TextColor(Color::srgb(0.68, 0.78, 0.86)),
                 ));
             }
+            if let Some(team) = context.local_team {
+                root.spawn((
+                    Text::new(format!("YOU — T{}", team.0 + 1)),
+                    TextColor(Color::srgb(0.85, 0.9, 0.96)),
+                ));
+            }
+            if let Some(score) = context.final_score {
+                root.spawn((
+                    Text::new(super::hud::mode_score_text(score)),
+                    TextFont::from_font_size(22.0),
+                    TextColor(Color::WHITE),
+                    TextLayout::new(Justify::Center, LineBreak::WordBoundary),
+                ));
+            }
             spawn_flow_button(root, 0, FlowUiAction::QueueAgain, "QUEUE AGAIN", None);
             spawn_flow_button(root, 1, FlowUiAction::ChangeGame, "CHANGE GAME", None);
             spawn_flow_button(root, 2, FlowUiAction::Disconnect, "DISCONNECT", None);
@@ -3723,11 +3736,11 @@ mod tests {
 
         *app.world_mut()
             .resource_mut::<super::super::ClientInputContext>() =
-            super::super::ClientInputContext::Paused;
+            super::super::ClientInputContext::Menu;
         app.update();
         assert_eq!(
             *app.world().resource::<super::super::ClientInputContext>(),
-            super::super::ClientInputContext::Paused
+            super::super::ClientInputContext::Menu
         );
 
         app.world_mut()
@@ -3850,6 +3863,7 @@ mod tests {
                 local_team: None,
                 game_type_id: None,
                 game_name: None,
+                final_score: None,
             });
         }
         *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();

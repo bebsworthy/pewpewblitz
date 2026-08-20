@@ -20,9 +20,24 @@ struct MatchPhaseOverlayText;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CachedRosterEntry {
     team: TeamId,
+    display_name: String,
     weapon_preset: Option<u16>,
     status: CachedRosterStatus,
     connected: bool,
+}
+
+/// Small presentation-only dispatch for the one shared top-right objective slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModeScoreView {
+    Wipeout {
+        scores: [u16; 2],
+        target: u16,
+    },
+    HotZone {
+        progress_percent: [u8; 2],
+        status: crate::matchplay::HotZoneStatus,
+    },
+    Syncing,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,33 +79,39 @@ impl Plugin for ClientReadinessHudPlugin {
 fn spawn_readiness_hud(mut commands: Commands) {
     commands.spawn((
         ReadinessHudText,
-        Text::new("LOADING CLIENT CONTENT"),
-        TextFont::from_font_size(18.0),
-        TextColor(Color::srgb(0.72, 0.88, 1.0)),
+        Text::new(""),
+        TextFont::from_font_size(28.0),
+        TextColor(Color::WHITE),
         TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
-            left: percent(30.0),
-            right: percent(30.0),
+            left: percent(40.0),
+            right: percent(40.0),
             top: px(16.0),
+            padding: UiRect::axes(px(10.0), px(5.0)),
+            border_radius: BorderRadius::all(px(7.0)),
             ..default()
         },
+        BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.9)),
     ));
     commands.spawn((
         MatchHudText,
-        Text::new("WIPEOUT | waiting for fighter"),
-        TextFont::from_font_size(16.0),
-        TextColor(Color::srgb(0.78, 0.82, 0.88)),
-        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
+        Text::new("SYNCING OBJECTIVE"),
+        TextFont::from_font_size(18.0),
+        TextColor(Color::WHITE),
+        TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         GlobalZIndex(100),
         Node {
             position_type: PositionType::Absolute,
             right: px(16.0),
-            top: px(80.0),
-            width: px(380.0),
+            top: px(16.0),
+            width: px(270.0),
+            padding: UiRect::all(px(10.0)),
+            border_radius: BorderRadius::all(px(7.0)),
             ..default()
         },
+        BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.92)),
     ));
     commands.spawn((
         CountdownHudText,
@@ -137,11 +158,6 @@ fn spawn_readiness_hud(mut commands: Commands) {
 )]
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn update_readiness_hud(
-    joins: Query<&ClientJoinStatus>,
-    map: Res<crate::map::ClientMapReadiness>,
-    terrain: Res<crate::terrain::ClientTerrainReadiness>,
-    assets: Res<assets::ClientAssetReadiness>,
-    playable: Res<ClientPlayableGate>,
     controlled: Query<(&PlayerId, &TeamId), (With<Fighter>, With<Controlled>)>,
     matches: Query<(&MatchState, Option<&crate::matchplay::WipeoutState>), With<MatchRoot>>,
     hot_zones: Query<&crate::matchplay::HotZoneState, With<MatchRoot>>,
@@ -150,6 +166,7 @@ fn update_readiness_hud(
         (
             &PlayerId,
             &TeamId,
+            &crate::matchplay::FighterDisplayName,
             &MatchParticipant,
             Option<&crate::builds::SelectedBuild>,
             Option<&crate::builds::ResolvedMatchLoadout>,
@@ -159,24 +176,25 @@ fn update_readiness_hud(
         ),
         With<Fighter>,
     >,
-    pending: Res<PendingLocalActions>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
     mut readiness_text: Query<
-        &mut Text,
+        (&mut Text, &mut Visibility),
         (
             With<ReadinessHudText>,
             Without<MatchHudText>,
             Without<CountdownHudText>,
             Without<MatchPhaseOverlayText>,
+            Without<ScoreboardOverlay>,
         ),
     >,
     mut match_text: Query<
-        &mut Text,
+        (&mut Text, &mut Visibility),
         (
             With<MatchHudText>,
             Without<ReadinessHudText>,
             Without<CountdownHudText>,
             Without<MatchPhaseOverlayText>,
+            Without<ScoreboardOverlay>,
         ),
     >,
     mut countdown_text: Query<
@@ -186,6 +204,7 @@ fn update_readiness_hud(
             Without<ReadinessHudText>,
             Without<MatchHudText>,
             Without<MatchPhaseOverlayText>,
+            Without<ScoreboardOverlay>,
         ),
     >,
     mut phase_overlay: Query<
@@ -195,24 +214,49 @@ fn update_readiness_hud(
             Without<ReadinessHudText>,
             Without<MatchHudText>,
             Without<CountdownHudText>,
+            Without<ScoreboardOverlay>,
+        ),
+    >,
+    mut scoreboard_text: Query<
+        &mut Text,
+        (
+            With<ScoreboardOverlay>,
+            Without<ReadinessHudText>,
+            Without<MatchHudText>,
+            Without<CountdownHudText>,
+            Without<MatchPhaseOverlayText>,
         ),
     >,
 ) {
-    let join = joins.iter().next().map(|status| &status.phase);
-    let status = readiness_status(join, &map, &terrain, &assets, playable.0);
-    for mut text in &mut readiness_text {
-        text.0 = if status == "READY" {
-            String::new()
-        } else {
-            status.clone()
-        };
-    }
     let fighter = controlled.iter().next();
     let match_state = matches.iter().next();
     let clock = clocks.iter().next();
     // Deadlines derive only from the phase minus the generation-tagged match clock; any other
     // component arrival order displays a syncing label instead of a stale or local countdown.
     let now = match_deadline_tick(match_state.map(|(state, _)| *state), clock);
+    for (mut text, mut visibility) in &mut readiness_text {
+        text.0 = match_state.map_or_else(String::new, |(state, _)| match state.phase {
+            MatchPhase::Countdown { starts_at_tick } => now.map_or_else(
+                || "SYNCING".to_string(),
+                |now| {
+                    format!(
+                        "START {}",
+                        starts_at_tick.saturating_sub(now).div_ceil(60).max(1)
+                    )
+                },
+            ),
+            MatchPhase::Active { ends_at_tick } => now.map_or_else(
+                || "SYNCING".to_string(),
+                |now| format_match_time(ends_at_tick.saturating_sub(now)),
+            ),
+            MatchPhase::Waiting | MatchPhase::Completed { .. } => String::new(),
+        });
+        *visibility = if text.0.is_empty() {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+    }
     for (mut text, mut visibility) in &mut countdown_text {
         if let Some(label) = countdown_label(match_state.map(|(state, _)| *state), now) {
             text.0 = label;
@@ -249,101 +293,32 @@ fn update_readiness_hud(
             *visibility = Visibility::Hidden;
         }
     }
-    for mut text in &mut match_text {
-        **text = match_state.map_or_else(
-            || "waiting for match state".to_string(),
-            |(state, wipeout)| {
-                let phase = match state.phase {
-                    MatchPhase::Waiting => "WAITING".to_string(),
-                    MatchPhase::Countdown { starts_at_tick } => match now {
-                        Some(now) => format!(
-                            "STARTING IN {}",
-                            starts_at_tick.saturating_sub(now).div_ceil(60)
-                        ),
-                        None => "SYNCING".to_string(),
-                    },
-                    MatchPhase::Active { ends_at_tick } => match now {
-                        Some(now) => format!(
-                            "{}:{:02}",
-                            ends_at_tick.saturating_sub(now) / 3600,
-                            (ends_at_tick.saturating_sub(now) / 60) % 60
-                        ),
-                        None => "SYNCING".to_string(),
-                    },
-                    MatchPhase::Completed { result, .. } => format!("{result:?}"),
-                };
-                let local = fighter.map_or_else(String::new, |(player, team)| {
-                    format!(" | P{} T{}", player.0, team.0 + 1)
-                });
-                let roster = roster_presentation
-                    .entries
-                    .iter()
-                    .map(|(player, entry)| {
-                        roster_entry_text(
-                            *player,
-                            entry,
-                            now.unwrap_or(0),
-                            local_player == Some(*player),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let show_roster =
-                    pending.scoreboard_held || !matches!(state.phase, MatchPhase::Active { .. });
-                let roster = if show_roster {
-                    format!("\n{roster}")
-                } else {
-                    String::new()
-                };
-                match state.mode_definition_id {
-                    crate::map::WIPEOUT_MODE_DEFINITION => {
-                        let scores = wipeout.map_or_else(
-                            || "SYNCING".to_string(),
-                            |wipeout| {
-                                format!(
-                                    "{}-{} / {}",
-                                    wipeout.team_scores[0],
-                                    wipeout.team_scores[1],
-                                    wipeout.target_score
-                                )
-                            },
-                        );
-                        format!("WIPEOUT{local} | {scores} | {phase}{roster}")
-                    }
-                    crate::map::HOT_ZONE_MODE_DEFINITION => {
-                        let hot_zone = hot_zones.iter().next().filter(|hot_zone| {
-                            hot_zone.match_id == state.match_id
-                                && clock_generation_matches(match_state, clock)
-                        });
-                        let objective = hot_zone.map_or_else(
-                            || "SYNCING OBJECTIVE".to_string(),
-                            |hot_zone| {
-                                let percent = |progress: u16| {
-                                    u32::from(progress) * 100
-                                        / u32::from(hot_zone.target_progress_ticks)
-                                };
-                                let ownership = match hot_zone.status {
-                                    crate::matchplay::HotZoneStatus::Empty => "EMPTY".to_string(),
-                                    crate::matchplay::HotZoneStatus::Contested => {
-                                        "CONTESTED".to_string()
-                                    }
-                                    crate::matchplay::HotZoneStatus::Controlled { team } => {
-                                        format!("TEAM {} CONTROL", team.0 + 1)
-                                    }
-                                };
-                                format!(
-                                    "T1 {}% T2 {}% | {ownership}",
-                                    percent(hot_zone.progress_ticks[0]),
-                                    percent(hot_zone.progress_ticks[1]),
-                                )
-                            },
-                        );
-                        format!("HOT ZONE{local} | {objective} | {phase}{roster}")
-                    }
-                    _ => format!("UNKNOWN MODE{local} | {phase}{roster}"),
-                }
-            },
-        );
+    let score_view = build_mode_score_view(match_state, hot_zones.iter().next(), clock);
+    for (mut text, mut visibility) in &mut match_text {
+        text.0 = score_view.map_or_else(String::new, mode_score_text);
+        *visibility = if match_state.is_some_and(|(state, _)| {
+            matches!(
+                state.phase,
+                MatchPhase::Countdown { .. } | MatchPhase::Active { .. }
+            )
+        }) && !text.0.is_empty()
+        {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+    let mut roster_rows = roster_presentation.entries.iter().collect::<Vec<_>>();
+    roster_rows.sort_by_key(|(player, entry)| (entry.team.0, **player));
+    let roster_text = roster_rows
+        .into_iter()
+        .map(|(player, entry)| {
+            roster_entry_text(entry, now.unwrap_or(0), local_player == Some(*player))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    for mut text in &mut scoreboard_text {
+        text.0 = format!("SCOREBOARD\n\n{roster_text}");
     }
 }
 
@@ -358,11 +333,73 @@ fn match_deadline_tick(
     (clock.match_id == state.match_id).then_some(clock.completed_tick)
 }
 
-fn clock_generation_matches(
+pub(crate) fn build_mode_score_view(
     state: Option<(&MatchState, Option<&crate::matchplay::WipeoutState>)>,
+    hot_zone: Option<&crate::matchplay::HotZoneState>,
     clock: Option<&crate::matchplay::MatchClock>,
-) -> bool {
-    state.is_some_and(|(state, _)| clock.is_some_and(|clock| clock.match_id == state.match_id))
+) -> Option<ModeScoreView> {
+    let (state, wipeout) = state?;
+    if clock.is_none_or(|clock| clock.match_id != state.match_id) {
+        return Some(ModeScoreView::Syncing);
+    }
+    match state.mode_definition_id {
+        crate::map::WIPEOUT_MODE_DEFINITION => Some(wipeout.map_or(
+            ModeScoreView::Syncing,
+            |wipeout| ModeScoreView::Wipeout {
+                scores: wipeout.team_scores,
+                target: wipeout.target_score,
+            },
+        )),
+        crate::map::HOT_ZONE_MODE_DEFINITION => Some(
+            hot_zone
+                .filter(|hot_zone| hot_zone.match_id == state.match_id)
+                .map_or(ModeScoreView::Syncing, |hot_zone| {
+                    let percent = |progress: u16| {
+                        let value = u32::from(progress) * 100
+                            / u32::from(hot_zone.target_progress_ticks.max(1));
+                        u8::try_from(value.min(100)).unwrap_or(100)
+                    };
+                    ModeScoreView::HotZone {
+                        progress_percent: [
+                            percent(hot_zone.progress_ticks[0]),
+                            percent(hot_zone.progress_ticks[1]),
+                        ],
+                        status: hot_zone.status,
+                    }
+                }),
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
+    match view {
+        ModeScoreView::Wipeout { scores, target } => {
+            format!("T1  {}  —  {}  T2\nFIRST TO {target}", scores[0], scores[1])
+        }
+        ModeScoreView::HotZone {
+            progress_percent,
+            status,
+        } => {
+            let status = match status {
+                crate::matchplay::HotZoneStatus::Empty => "EMPTY".to_string(),
+                crate::matchplay::HotZoneStatus::Contested => "CONTESTED".to_string(),
+                crate::matchplay::HotZoneStatus::Controlled { team } => {
+                    format!("T{} CONTROL", team.0 + 1)
+                }
+            };
+            format!(
+                "T1  {}%  —  {}%  T2\n{status}",
+                progress_percent[0], progress_percent[1]
+            )
+        }
+        ModeScoreView::Syncing => "SYNCING OBJECTIVE".to_string(),
+    }
+}
+
+fn format_match_time(remaining_ticks: u64) -> String {
+    let total_seconds = remaining_ticks.div_ceil(60);
+    format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
 }
 
 fn sync_roster_and_collect_phase_facts<'a>(
@@ -372,6 +409,7 @@ fn sync_roster_and_collect_phase_facts<'a>(
         Item = (
             &'a PlayerId,
             &'a TeamId,
+            &'a crate::matchplay::FighterDisplayName,
             &'a MatchParticipant,
             Option<&'a crate::builds::SelectedBuild>,
             Option<&'a crate::builds::ResolvedMatchLoadout>,
@@ -383,6 +421,8 @@ fn sync_roster_and_collect_phase_facts<'a>(
     roster: &mut MatchRosterPresentation,
 ) -> PhasePresentationFacts {
     let Some(state) = state else {
+        roster.match_id = None;
+        roster.entries.clear();
         return PhasePresentationFacts::default();
     };
     if roster.match_id != Some(state.match_id) {
@@ -393,7 +433,9 @@ fn sync_roster_and_collect_phase_facts<'a>(
         entry.connected = false;
     }
     let mut facts = PhasePresentationFacts::default();
-    for (player, team, participant, build, loadout, respawn, protection, defeated) in participants {
+    for (player, team, display_name, participant, build, loadout, respawn, protection, defeated) in
+        participants
+    {
         if participant.match_id != state.match_id {
             continue;
         }
@@ -409,6 +451,7 @@ fn sync_roster_and_collect_phase_facts<'a>(
             player.0,
             CachedRosterEntry {
                 team: *team,
+                display_name: display_name.0.clone(),
                 weapon_preset: loadout.and_then(|loadout| {
                     loadout
                         .primary_weapon
@@ -551,7 +594,7 @@ fn countdown_label(state: Option<MatchState>, now: Option<u64>) -> Option<String
     )
 }
 
-fn roster_entry_text(player: u64, entry: &CachedRosterEntry, now: u64, is_local: bool) -> String {
+fn roster_entry_text(entry: &CachedRosterEntry, now: u64, is_local: bool) -> String {
     let status = if entry.connected {
         match entry.status {
             CachedRosterStatus::Alive => "alive".to_string(),
@@ -574,9 +617,14 @@ fn roster_entry_text(player: u64, entry: &CachedRosterEntry, now: u64, is_local:
         .weapon_preset
         .map_or_else(|| "W?".to_string(), |preset| format!("W{preset}"));
     let local = if is_local { "YOU " } else { "" };
-    format!("{local}P{player} T{} {weapon} {status}", entry.team.0 + 1)
+    format!(
+        "T{}  {local}{}  {weapon}  {status}",
+        entry.team.0 + 1,
+        entry.display_name
+    )
 }
 
+#[cfg(test)]
 fn readiness_status(
     join: Option<&ClientJoinPhase>,
     map: &crate::map::ClientMapReadiness,
@@ -642,6 +690,26 @@ fn readiness_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_hud_text_queries_are_disjoint_in_runtime_composition() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<MatchRosterPresentation>()
+            .add_systems(Update, update_readiness_hud);
+        app.world_mut()
+            .spawn((ReadinessHudText, Text::new(""), Visibility::Hidden));
+        app.world_mut()
+            .spawn((MatchHudText, Text::new(""), Visibility::Hidden));
+        app.world_mut()
+            .spawn((CountdownHudText, Text::new(""), Visibility::Hidden));
+        app.world_mut()
+            .spawn((MatchPhaseOverlayText, Text::new(""), Visibility::Hidden));
+        app.world_mut()
+            .spawn((ScoreboardOverlay, Text::new(""), Visibility::Hidden));
+
+        app.update();
+    }
 
     #[test]
     fn invalid_map_has_priority_over_loading_state() {
@@ -716,17 +784,18 @@ mod tests {
     fn cached_roster_keeps_weapon_and_disconnected_state() {
         let entry = CachedRosterEntry {
             team: TeamId(1),
+            display_name: "Player Seven".to_string(),
             weapon_preset: Some(3),
             status: CachedRosterStatus::Ready,
             connected: false,
         };
         assert_eq!(
-            roster_entry_text(7, &entry, 100, false),
-            "P7 T2 W3 disconnected"
+            roster_entry_text(&entry, 100, false),
+            "T2  Player Seven  W3  disconnected"
         );
         assert_eq!(
-            roster_entry_text(7, &entry, 100, true),
-            "YOU P7 T2 W3 disconnected"
+            roster_entry_text(&entry, 100, true),
+            "T2  YOU Player Seven  W3  disconnected"
         );
     }
 
@@ -754,6 +823,64 @@ mod tests {
             ends_at_tick: 1_000,
         };
         assert_eq!(countdown_label(Some(state), Some(120)), None);
+    }
+
+    #[test]
+    fn mode_score_views_are_generation_safe_and_mode_specific() {
+        let wipeout_state = crate::matchplay::WipeoutState {
+            team_scores: [3, 2],
+            target_score: 5,
+        };
+        let mut state = MatchState {
+            match_id: crate::matchplay::MatchId(7),
+            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+            phase: MatchPhase::Active { ends_at_tick: 600 },
+            rules_revision: 1,
+        };
+        let clock = crate::matchplay::MatchClock {
+            match_id: state.match_id,
+            completed_tick: 10,
+        };
+        assert_eq!(
+            build_mode_score_view(Some((&state, Some(&wipeout_state))), None, Some(&clock)),
+            Some(ModeScoreView::Wipeout {
+                scores: [3, 2],
+                target: 5,
+            })
+        );
+        assert_eq!(
+            mode_score_text(ModeScoreView::Wipeout {
+                scores: [3, 2],
+                target: 5,
+            }),
+            "T1  3  —  2  T2\nFIRST TO 5"
+        );
+
+        state.mode_definition_id = crate::map::HOT_ZONE_MODE_DEFINITION;
+        let hot_zone = crate::matchplay::HotZoneState {
+            match_id: state.match_id,
+            zone_anchor_id: crate::map::ModeAnchorId(1),
+            occupants: [1, 0],
+            status: crate::matchplay::HotZoneStatus::Controlled { team: TeamId(0) },
+            progress_ticks: [30, 15],
+            target_progress_ticks: 60,
+            next_evaluation_tick: 11,
+        };
+        assert_eq!(
+            build_mode_score_view(Some((&state, None)), Some(&hot_zone), Some(&clock)),
+            Some(ModeScoreView::HotZone {
+                progress_percent: [50, 25],
+                status: crate::matchplay::HotZoneStatus::Controlled { team: TeamId(0) },
+            })
+        );
+        let stale_clock = crate::matchplay::MatchClock {
+            match_id: crate::matchplay::MatchId(8),
+            ..clock
+        };
+        assert_eq!(
+            build_mode_score_view(Some((&state, None)), Some(&hot_zone), Some(&stale_clock)),
+            Some(ModeScoreView::Syncing)
+        );
     }
 
     #[test]

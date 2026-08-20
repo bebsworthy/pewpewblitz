@@ -772,6 +772,10 @@ fn process_client_hellos(
                                         PlayerId(participant.player_id.get())
                                     });
                                 let network_entity_id = baseline_network_entity_id;
+                                let display_name = worker_participant.map_or_else(
+                                    || crate::lobby::generated_display_name(player_id.0),
+                                    |participant| participant.display_name.as_str().to_string(),
+                                );
                                 let candidates = spawn_points
                                     .0
                                     .get(&assigned_team.0)
@@ -829,6 +833,7 @@ fn process_client_hellos(
                                     ))
                                     .id();
                                 commands.entity(fighter_entity).insert((
+                                    crate::matchplay::FighterDisplayName(display_name),
                                     MatchParticipant {
                                         match_id: match_state.match_id,
                                         ready: false,

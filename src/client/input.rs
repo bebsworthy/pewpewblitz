@@ -244,7 +244,7 @@ pub(super) fn sample_local_input(
         selection.listening
             && matches!(
                 *context,
-                ClientInputContext::Paused | ClientInputContext::Shell
+                ClientInputContext::Menu | ClientInputContext::Shell
             )
     });
     pending.cancel_pressed = !capturing_rebind

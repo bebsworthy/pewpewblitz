@@ -20,7 +20,7 @@ pub use cues::CaptureCombatCues;
 pub use cues::ClientCombatEvidenceStatus;
 pub use cues::ClientCombatObservation;
 pub(crate) use cues::RecentCombatEvents;
-pub use hud::{BuildSelectionText, CombatHudText};
+pub use hud::{BuildSelectionText, CombatAbilityHudText, CombatHudText};
 pub use preview::MAX_PREVIEW_SEGMENTS;
 
 pub struct ClientCombatPlugin;

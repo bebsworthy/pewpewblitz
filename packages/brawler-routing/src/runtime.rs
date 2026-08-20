@@ -558,6 +558,7 @@ impl SupervisorRuntime {
                 netcode_client_id: source.netcode_client_id,
                 peer_id,
                 team: source.team,
+                display_name: source.display_name,
                 source_build_preset: source.source_build_preset,
                 recipe_fingerprint: source.recipe_fingerprint,
                 revision: source.build_revision,

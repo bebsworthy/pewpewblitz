@@ -484,17 +484,23 @@ impl LobbyState {
         sessions.sort_by_key(|session| session.lobby_session_id);
         let participants = sessions
             .iter()
-            .map(|session| AllocateParticipant {
-                lobby_session_id: session.lobby_session_id,
-                player_id: session.player_id,
-                netcode_client_id: session.netcode_client_id,
-                team: session.team,
-                source_build_preset: session.build.source_build_preset,
-                recipe_fingerprint: session.build.recipe_fingerprint,
-                build_revision: session.build.build_revision,
-                build_snapshot: session.build.snapshot,
+            .map(|session| -> Result<AllocateParticipant, CodecError> {
+                Ok(AllocateParticipant {
+                    lobby_session_id: session.lobby_session_id,
+                    player_id: session.player_id,
+                    netcode_client_id: session.netcode_client_id,
+                    team: session.team,
+                    display_name: brawler_routing::MatchDisplayName::new(
+                        self.accepted_name(session.netcode_client_id)
+                            .ok_or(CodecError::InvalidValue)?,
+                    )?,
+                    source_build_preset: session.build.source_build_preset,
+                    recipe_fingerprint: session.build.recipe_fingerprint,
+                    build_revision: session.build.build_revision,
+                    build_snapshot: session.build.snapshot,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         let body = AllocateRequestBody {
             request_id,
             lobby_session_id: sessions[0].lobby_session_id,
@@ -553,6 +559,10 @@ impl LobbyState {
                 player_id: ticket.player_id,
                 netcode_client_id: ticket.netcode_client_id,
                 team: reserved.team,
+                display_name: brawler_routing::MatchDisplayName::new(
+                    self.accepted_name(ticket.netcode_client_id)
+                        .ok_or(CodecError::InvalidValue)?,
+                )?,
                 source_build_preset: ticket
                     .accepted_build
                     .identity

@@ -1390,12 +1390,21 @@ fn process_match_route_grant(
 /// current session and then creates one fresh lobby session.
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::type_complexity,
     reason = "Bevy resources are schedule-owned system parameters"
 )]
 pub(super) fn observe_completed_match(
     config: Res<ClientNetworkConfig>,
     mut lifecycle: ResMut<RoutedClientLifecycle>,
-    roots: Query<&MatchState, With<MatchRoot>>,
+    roots: Query<
+        (
+            &MatchState,
+            Option<&crate::matchplay::WipeoutState>,
+            Option<&crate::matchplay::HotZoneState>,
+            Option<&crate::matchplay::MatchClock>,
+        ),
+        With<MatchRoot>,
+    >,
     statuses: Query<&ClientJoinStatus, With<Client>>,
     fighters: Query<(&PlayerId, &crate::combat::TeamId), With<Fighter>>,
     selection: Option<Res<SelectedGameType>>,
@@ -1406,10 +1415,18 @@ pub(super) fn observe_completed_match(
     {
         return;
     }
-    let Some(result) = roots.iter().find_map(|state| match state.phase {
-        MatchPhase::Completed { result, .. } => Some(result),
-        _ => None,
-    }) else {
+    let Some((result, final_score)) =
+        roots
+            .iter()
+            .find_map(|(state, wipeout, hot_zone, clock)| match state.phase {
+                MatchPhase::Completed { result, .. } => Some((
+                    result,
+                    hud::build_mode_score_view(Some((state, wipeout)), hot_zone, clock)
+                        .filter(|score| !matches!(score, hud::ModeScoreView::Syncing)),
+                )),
+                _ => None,
+            })
+    else {
         return;
     };
     if let Some(mut result_state) = result_state
@@ -1433,6 +1450,7 @@ pub(super) fn observe_completed_match(
             local_team,
             game_type_id,
             game_name: None,
+            final_score,
         });
     }
     if lifecycle.request_return_to_lobby() {

@@ -1,4 +1,4 @@
-//! Versioned, bounded persistence for client-owned input and shell preferences.
+//! Bounded persistence for the one current pre-release client settings shape.
 
 use super::{ClientInputSettings, GamepadBindings, KeyboardBindings};
 use atomic_write_file::AtomicWriteFile;
@@ -11,16 +11,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SETTINGS_SCHEMA_VERSION: u16 = 1;
 const MAX_SETTINGS_BYTES: u64 = 64 * 1024;
 pub const MIN_UI_SCALE: f32 = 0.8;
 pub const MAX_UI_SCALE: f32 = 1.4;
 
 /// Persistent shell preferences kept separate from input capture and focus state.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "these independent user-facing toggles are the complete current settings contract"
+)]
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct ClientShellSettings {
     pub ui_scale: f32,
     pub reduced_motion: bool,
+    pub reduced_combat_effects: bool,
+    pub master_volume: u8,
+    pub mute_when_unfocused: bool,
+    pub fullscreen: bool,
+    pub vsync: bool,
 }
 
 impl Default for ClientShellSettings {
@@ -28,6 +36,11 @@ impl Default for ClientShellSettings {
         Self {
             ui_scale: 1.0,
             reduced_motion: false,
+            reduced_combat_effects: false,
+            master_volume: 100,
+            mute_when_unfocused: true,
+            fullscreen: false,
+            vsync: true,
         }
     }
 }
@@ -38,6 +51,9 @@ impl ClientShellSettings {
             return Err(format!(
                 "UI scale must be between {MIN_UI_SCALE:.1} and {MAX_UI_SCALE:.1}"
             ));
+        }
+        if self.master_volume > 100 || !self.master_volume.is_multiple_of(10) {
+            return Err("Master volume must be between 0 and 100 in steps of 10".to_string());
         }
         Ok(())
     }
@@ -59,8 +75,12 @@ impl Default for ClientSettingsPath {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SettingsFileV1 {
-    pub schema_version: u16,
+#[serde(deny_unknown_fields)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the persisted shape directly mirrors the bounded current settings contract"
+)]
+pub struct SettingsFile {
     pub keyboard: KeyboardBindings,
     pub gamepad: GamepadBindings,
     pub mouse_primary: MouseButton,
@@ -73,13 +93,17 @@ pub struct SettingsFileV1 {
     pub invert_aim_y: bool,
     pub ui_scale: f32,
     pub reduced_motion: bool,
+    pub reduced_combat_effects: bool,
+    pub master_volume: u8,
+    pub mute_when_unfocused: bool,
+    pub fullscreen: bool,
+    pub vsync: bool,
 }
 
-impl SettingsFileV1 {
+impl SettingsFile {
     #[must_use]
     pub fn from_active(input: ClientInputSettings, shell: ClientShellSettings) -> Self {
         Self {
-            schema_version: SETTINGS_SCHEMA_VERSION,
             keyboard: input.keyboard,
             gamepad: input.gamepad,
             mouse_primary: input.mouse_primary,
@@ -92,16 +116,15 @@ impl SettingsFileV1 {
             invert_aim_y: input.invert_aim_y,
             ui_scale: shell.ui_scale,
             reduced_motion: shell.reduced_motion,
+            reduced_combat_effects: shell.reduced_combat_effects,
+            master_volume: shell.master_volume,
+            mute_when_unfocused: shell.mute_when_unfocused,
+            fullscreen: shell.fullscreen,
+            vsync: shell.vsync,
         }
     }
 
     pub fn into_active(self) -> Result<(ClientInputSettings, ClientShellSettings), String> {
-        if self.schema_version != SETTINGS_SCHEMA_VERSION {
-            return Err(format!(
-                "unsupported settings schema version {}",
-                self.schema_version
-            ));
-        }
         let input = ClientInputSettings {
             keyboard: self.keyboard,
             gamepad: self.gamepad,
@@ -119,6 +142,11 @@ impl SettingsFileV1 {
         let shell = ClientShellSettings {
             ui_scale: self.ui_scale,
             reduced_motion: self.reduced_motion,
+            reduced_combat_effects: self.reduced_combat_effects,
+            master_volume: self.master_volume,
+            mute_when_unfocused: self.mute_when_unfocused,
+            fullscreen: self.fullscreen,
+            vsync: self.vsync,
         };
         shell.validate()?;
         Ok((input, shell))
@@ -169,7 +197,7 @@ pub fn load_settings(
     }
     let source =
         String::from_utf8(bytes).map_err(|error| SettingsLoadError::Rejected(error.to_string()))?;
-    let file: SettingsFileV1 =
+    let file: SettingsFile =
         ron::from_str(&source).map_err(|error| SettingsLoadError::Rejected(error.to_string()))?;
     file.into_active()
         .map(Some)
@@ -189,7 +217,7 @@ pub fn save_settings(
     fs::create_dir_all(parent)
         .map_err(|error| format!("could not create settings directory: {error}"))?;
     let serialized = ron::ser::to_string_pretty(
-        &SettingsFileV1::from_active(input, shell),
+        &SettingsFile::from_active(input, shell),
         ron::ser::PrettyConfig::default(),
     )
     .map_err(|error| format!("could not encode settings: {error}"))?;
@@ -225,8 +253,18 @@ mod tests {
         let shell = ClientShellSettings {
             ui_scale: 1.2,
             reduced_motion: true,
+            reduced_combat_effects: true,
+            master_volume: 60,
+            fullscreen: true,
+            vsync: false,
+            ..ClientShellSettings::default()
         };
         save_settings(&path, input, shell).unwrap();
+        assert!(
+            !fs::read_to_string(&path)
+                .unwrap()
+                .contains("schema_version")
+        );
         let (loaded_input, loaded_shell) = load_settings(&path).unwrap().unwrap();
         assert!(loaded_input.invert_aim_y);
         assert_eq!(loaded_input.revision, 0);
@@ -241,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_unsupported_and_oversized_files_are_rejected_without_replacement() {
+    fn malformed_stale_invalid_and_oversized_files_are_rejected_without_replacement() {
         let dir = test_path("rejected");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.ron");
@@ -252,20 +290,15 @@ mod tests {
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), "this is not ron");
 
-        let mut unsupported = SettingsFileV1::from_active(
-            ClientInputSettings::default(),
-            ClientShellSettings::default(),
-        );
-        unsupported.schema_version = 99;
-        let unsupported_source = ron::to_string(&unsupported).unwrap();
-        fs::write(&path, &unsupported_source).unwrap();
+        let stale_source = "(schema_version:1,ui_scale:1.0,reduced_motion:false)";
+        fs::write(&path, stale_source).unwrap();
         assert!(matches!(
             load_settings(&path),
             Err(SettingsLoadError::Rejected(_))
         ));
-        assert_eq!(fs::read_to_string(&path).unwrap(), unsupported_source);
+        assert_eq!(fs::read_to_string(&path).unwrap(), stale_source);
 
-        let mut invalid = SettingsFileV1::from_active(
+        let mut invalid = SettingsFile::from_active(
             ClientInputSettings::default(),
             ClientShellSettings::default(),
         );

@@ -137,6 +137,7 @@ pub enum MatchWorkerManifestError {
     DuplicateClient,
     UnlistedClient,
     InvalidTeam,
+    InvalidDisplayName,
     BuildSelectionMismatch,
 }
 
@@ -261,6 +262,11 @@ pub fn validate_match_manifest(
     for participant in &manifest.participants {
         if participant.team > 1 {
             return Err(MatchWorkerManifestError::InvalidTeam);
+        }
+        if !crate::lobby::normalize_proposed_display_name(participant.display_name.as_str())
+            .is_ok_and(|name| name == participant.display_name.as_str())
+        {
+            return Err(MatchWorkerManifestError::InvalidDisplayName);
         }
         if !players.insert(participant.player_id.get()) {
             return Err(MatchWorkerManifestError::DuplicatePlayer);
@@ -433,6 +439,7 @@ mod tests {
                     netcode_client_id: brawler_routing::NetcodeClientId::new(8).unwrap(),
                     peer_id: PeerId::new(8).unwrap(),
                     team: 0,
+                    display_name: brawler_routing::MatchDisplayName::new("Player One").unwrap(),
                     source_build_preset: Some(1),
                     recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
                     revision: resolved.identity.revision.0,

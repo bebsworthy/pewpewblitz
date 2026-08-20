@@ -10,7 +10,7 @@ use crate::{
     RouteId, Sequence, StopId, WorkerId,
     codec::{Decoder, Encoder, FramedDecoder, frame_record},
     digest::result_digest,
-    manifest::{GameMode, LobbyManifest, MatchManifestV1, WorkerRole},
+    manifest::{GameMode, LobbyManifest, MatchDisplayName, MatchManifestV1, WorkerRole},
 };
 
 /// The current BRCT control body kinds.
@@ -185,6 +185,7 @@ pub struct AllocateParticipant {
     pub player_id: crate::PlayerId,
     pub netcode_client_id: NetcodeClientId,
     pub team: u8,
+    pub display_name: MatchDisplayName,
     pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub build_revision: u16,
@@ -208,6 +209,8 @@ fn encode_allocate_participant(encoder: &mut Encoder, participant: &AllocatePart
     encoder.put_u64(participant.player_id.get());
     encoder.put_u64(participant.netcode_client_id.get());
     encoder.put_u8(participant.team);
+    encoder.put_u8(u8::try_from(participant.display_name.as_str().len()).expect("bounded"));
+    encoder.put_bytes(participant.display_name.as_str().as_bytes());
     match participant.source_build_preset {
         None => encoder.put_u8(0),
         Some(preset) => {
@@ -228,6 +231,10 @@ fn decode_allocate_participant(
     let player_id = crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
     let netcode_client_id = NetcodeClientId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?;
     let team = decoder.u8()?;
+    let display_name_length = usize::from(decoder.u8()?);
+    let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
+        .map_err(|_| CodecError::InvalidValue)
+        .and_then(MatchDisplayName::new)?;
     let source_build_preset = decoder.optional(Decoder::u16)?;
     let recipe_fingerprint = decoder.u64()?;
     let build_revision = decoder.u16()?;
@@ -237,6 +244,7 @@ fn decode_allocate_participant(
         player_id,
         netcode_client_id,
         team,
+        display_name,
         source_build_preset,
         recipe_fingerprint,
         build_revision,
@@ -1385,6 +1393,7 @@ mod tests {
             player_id: id64(wide + 20),
             netcode_client_id: id64(wide + 25),
             team: u8::try_from(index % 2).unwrap(),
+            display_name: MatchDisplayName::new("Player").unwrap(),
             source_build_preset: Some(small),
             recipe_fingerprint: wide + 30,
             build_revision: small,
@@ -1666,7 +1675,7 @@ mod tests {
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 460
+            52 + 516
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),

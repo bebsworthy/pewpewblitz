@@ -15,6 +15,7 @@ use super::{
     },
 };
 use bevy::{
+    audio::{AudioSink, AudioSinkPlayback, GlobalVolume, SpatialAudioSink, Volume},
     input::mouse::{MouseScrollUnit, MouseWheel},
     input_focus::{
         FocusCause, InputFocus, InputFocusVisible,
@@ -25,6 +26,7 @@ use bevy::{
     math::CompassOctant,
     prelude::*,
     ui::{Overflow, ScrollPosition, UiScale, UiSystems, UiTransform, Val2},
+    window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode},
 };
 
 const ENTRANCE_SECONDS: f32 = 0.16;
@@ -86,6 +88,9 @@ struct OverlayRoot;
 struct ShellScrollArea;
 
 #[derive(Component)]
+struct ShellSettingsText;
+
+#[derive(Component)]
 struct EntranceAnimation {
     elapsed: f32,
 }
@@ -115,6 +120,12 @@ enum ShellControlId {
     ToggleAimY,
     UiScaleDown,
     ToggleReducedMotion,
+    ToggleReducedEffects,
+    VolumeDown,
+    VolumeUp,
+    ToggleFocusMute,
+    ToggleFullscreen,
+    ToggleVsync,
     UiScaleUp,
     Reset,
     Apply,
@@ -128,6 +139,7 @@ enum ShellControlId {
 enum ShellAction {
     Play,
     OpenSettings,
+    OpenMatchSettings,
     OpenCredits,
     Quit,
     PreviousField,
@@ -139,6 +151,12 @@ enum ShellAction {
     ToggleAimY,
     UiScaleDown,
     ToggleReducedMotion,
+    ToggleReducedEffects,
+    VolumeDown,
+    VolumeUp,
+    ToggleFocusMute,
+    ToggleFullscreen,
+    ToggleVsync,
     UiScaleUp,
     Reset,
     Apply,
@@ -146,6 +164,13 @@ enum ShellAction {
     Back,
     RetrySave,
     ContinueWithoutSaving,
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SettingsReturnTarget {
+    #[default]
+    Title,
+    MatchMenu,
 }
 
 #[derive(Component)]
@@ -172,6 +197,8 @@ impl Plugin for ClientShellPlugin {
             .init_resource::<NavigationLatch>()
             .init_resource::<NavigationDirty>()
             .init_resource::<InputCaptureConsumed>()
+            .init_resource::<super::MatchSettingsRequest>()
+            .init_resource::<SettingsReturnTarget>()
             .add_systems(Startup, load_persistent_settings)
             .add_systems(OnEnter(ClientFlow::Title), spawn_initial_shell)
             .add_systems(
@@ -179,10 +206,14 @@ impl Plugin for ClientShellPlugin {
                 (
                     collect_navigation_input.in_set(ClientFlowSet::CollectFlowInput),
                     collect_pointer_actions.in_set(ClientFlowSet::CollectFlowInput),
+                    collect_match_settings_request.in_set(ClientFlowSet::CollectFlowInput),
                     handle_shell_actions.in_set(ClientFlowSet::ResolveFlowAction),
+                    restore_match_menu_after_settings.in_set(ClientFlowSet::PresentFlow),
                     rebuild_navigation.in_set(ClientFlowSet::PresentFlow),
                     style_shell_buttons.in_set(ClientFlowSet::PresentFlow),
                     preview_shell_preferences.in_set(ClientFlowSet::PresentFlow),
+                    apply_audio_preferences.in_set(ClientFlowSet::PresentFlow),
+                    update_shell_settings_text.in_set(ClientFlowSet::PresentFlow),
                     animate_shell_entrance.in_set(ClientFlowSet::PresentFlow),
                     scroll_shell_panels.in_set(ClientFlowSet::PresentFlow),
                 )
@@ -391,6 +422,17 @@ fn spawn_settings(commands: &mut Commands) {
             },
         ));
         panel.spawn((
+            ShellSettingsText,
+            Text::new(""),
+            TextFont::from_font_size(14.0),
+            TextColor(Color::srgb(0.88, 0.92, 0.96)),
+            TextLayout::linebreak(LineBreak::WordBoundary),
+            Node {
+                width: percent(100),
+                ..default()
+            },
+        ));
+        panel.spawn((
             Text::new(
                 "Select a row, adjust it, or start rebind capture. East/Escape cancels capture.",
             ),
@@ -408,45 +450,75 @@ fn spawn_settings(commands: &mut Commands) {
                 ..default()
             })
             .with_children(|buttons| {
-                for (label, id, action) in [
-                    (
-                        "PREVIOUS FIELD",
-                        ShellControlId::PreviousField,
-                        ShellAction::PreviousField,
-                    ),
-                    (
-                        "NEXT FIELD",
-                        ShellControlId::NextField,
-                        ShellAction::NextField,
-                    ),
-                    ("- VALUE", ShellControlId::Decrease, ShellAction::Decrease),
-                    ("+ VALUE", ShellControlId::Increase, ShellAction::Increase),
-                    ("REBIND", ShellControlId::Rebind, ShellAction::Rebind),
-                    (
-                        "MOVE Y",
-                        ShellControlId::ToggleMoveY,
-                        ShellAction::ToggleMoveY,
-                    ),
-                    ("AIM Y", ShellControlId::ToggleAimY, ShellAction::ToggleAimY),
-                    (
-                        "UI -",
-                        ShellControlId::UiScaleDown,
-                        ShellAction::UiScaleDown,
-                    ),
-                    (
-                        "REDUCED MOTION",
-                        ShellControlId::ToggleReducedMotion,
-                        ShellAction::ToggleReducedMotion,
-                    ),
-                    ("UI +", ShellControlId::UiScaleUp, ShellAction::UiScaleUp),
-                    ("RESET", ShellControlId::Reset, ShellAction::Reset),
-                    ("APPLY", ShellControlId::Apply, ShellAction::Apply),
-                    ("CANCEL", ShellControlId::Cancel, ShellAction::Cancel),
-                ] {
-                    spawn_button(buttons, label, id, Some(action), ShellLayer::Settings);
-                }
+                spawn_settings_buttons(buttons);
             });
     });
+}
+
+fn spawn_settings_buttons(buttons: &mut ChildSpawnerCommands) {
+    for (label, id, action) in [
+        (
+            "PREVIOUS FIELD",
+            ShellControlId::PreviousField,
+            ShellAction::PreviousField,
+        ),
+        (
+            "NEXT FIELD",
+            ShellControlId::NextField,
+            ShellAction::NextField,
+        ),
+        ("- VALUE", ShellControlId::Decrease, ShellAction::Decrease),
+        ("+ VALUE", ShellControlId::Increase, ShellAction::Increase),
+        ("REBIND", ShellControlId::Rebind, ShellAction::Rebind),
+        (
+            "MOVE Y",
+            ShellControlId::ToggleMoveY,
+            ShellAction::ToggleMoveY,
+        ),
+        ("AIM Y", ShellControlId::ToggleAimY, ShellAction::ToggleAimY),
+        (
+            "UI -",
+            ShellControlId::UiScaleDown,
+            ShellAction::UiScaleDown,
+        ),
+        (
+            "REDUCED MOTION",
+            ShellControlId::ToggleReducedMotion,
+            ShellAction::ToggleReducedMotion,
+        ),
+        (
+            "REDUCED EFFECTS",
+            ShellControlId::ToggleReducedEffects,
+            ShellAction::ToggleReducedEffects,
+        ),
+        (
+            "VOLUME -",
+            ShellControlId::VolumeDown,
+            ShellAction::VolumeDown,
+        ),
+        ("VOLUME +", ShellControlId::VolumeUp, ShellAction::VolumeUp),
+        (
+            "MUTE UNFOCUSED",
+            ShellControlId::ToggleFocusMute,
+            ShellAction::ToggleFocusMute,
+        ),
+        (
+            "FULLSCREEN",
+            ShellControlId::ToggleFullscreen,
+            ShellAction::ToggleFullscreen,
+        ),
+        (
+            "VSYNC",
+            ShellControlId::ToggleVsync,
+            ShellAction::ToggleVsync,
+        ),
+        ("UI +", ShellControlId::UiScaleUp, ShellAction::UiScaleUp),
+        ("RESET", ShellControlId::Reset, ShellAction::Reset),
+        ("APPLY", ShellControlId::Apply, ShellAction::Apply),
+        ("CANCEL", ShellControlId::Cancel, ShellAction::Cancel),
+    ] {
+        spawn_button(buttons, label, id, Some(action), ShellLayer::Settings);
+    }
 }
 
 fn spawn_credits(commands: &mut Commands) {
@@ -675,6 +747,15 @@ fn collect_pointer_actions(
     }
 }
 
+fn collect_match_settings_request(
+    mut request: ResMut<super::MatchSettingsRequest>,
+    mut pending: ResMut<PendingActions>,
+) {
+    if core::mem::take(&mut request.0) && !pending.0.contains(&ShellAction::OpenMatchSettings) {
+        pending.0.push(ShellAction::OpenMatchSettings);
+    }
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -695,6 +776,8 @@ fn handle_shell_actions(
     mut dirty: ResMut<NavigationDirty>,
     mut next_flow: ResMut<NextState<ClientFlow>>,
     mut client_overlay: ResMut<ClientOverlay>,
+    mut context: ResMut<ClientInputContext>,
+    mut settings_return: ResMut<SettingsReturnTarget>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let actions = core::mem::take(&mut pending.0);
@@ -704,7 +787,13 @@ fn handle_shell_actions(
                 *client_overlay = ClientOverlay::None;
                 next_flow.set(ClientFlow::ServerSelect);
             }
-            ShellAction::OpenSettings => {
+            ShellAction::OpenSettings | ShellAction::OpenMatchSettings => {
+                *settings_return = if action == ShellAction::OpenMatchSettings {
+                    *context = ClientInputContext::Shell;
+                    SettingsReturnTarget::MatchMenu
+                } else {
+                    SettingsReturnTarget::Title
+                };
                 *client_overlay = ClientOverlay::Settings;
                 commands.insert_resource(InputSettingsDraft(*active_input));
                 commands.insert_resource(ShellSettingsDraft(*active_shell));
@@ -767,6 +856,35 @@ fn handle_shell_actions(
             ShellAction::ToggleReducedMotion => {
                 if let Some(draft) = shell_draft.as_deref_mut() {
                     draft.0.reduced_motion = !draft.0.reduced_motion;
+                }
+            }
+            ShellAction::ToggleReducedEffects => {
+                if let Some(draft) = shell_draft.as_deref_mut() {
+                    draft.0.reduced_combat_effects = !draft.0.reduced_combat_effects;
+                }
+            }
+            ShellAction::VolumeDown | ShellAction::VolumeUp => {
+                if let Some(draft) = shell_draft.as_deref_mut() {
+                    draft.0.master_volume = if action == ShellAction::VolumeDown {
+                        draft.0.master_volume.saturating_sub(10)
+                    } else {
+                        draft.0.master_volume.saturating_add(10).min(100)
+                    };
+                }
+            }
+            ShellAction::ToggleFocusMute => {
+                if let Some(draft) = shell_draft.as_deref_mut() {
+                    draft.0.mute_when_unfocused = !draft.0.mute_when_unfocused;
+                }
+            }
+            ShellAction::ToggleFullscreen => {
+                if let Some(draft) = shell_draft.as_deref_mut() {
+                    draft.0.fullscreen = !draft.0.fullscreen;
+                }
+            }
+            ShellAction::ToggleVsync => {
+                if let Some(draft) = shell_draft.as_deref_mut() {
+                    draft.0.vsync = !draft.0.vsync;
                 }
             }
             ShellAction::Reset => {
@@ -899,6 +1017,22 @@ fn handle_shell_actions(
                 );
             }
         }
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+fn restore_match_menu_after_settings(
+    overlay: Res<ClientOverlay>,
+    mut target: ResMut<SettingsReturnTarget>,
+    mut context: ResMut<ClientInputContext>,
+) {
+    if *target == SettingsReturnTarget::MatchMenu && matches!(overlay.as_ref(), ClientOverlay::None)
+    {
+        *context = ClientInputContext::Menu;
+        *target = SettingsReturnTarget::Title;
     }
 }
 
@@ -1059,10 +1193,87 @@ fn preview_shell_preferences(
     active: Res<ClientShellSettings>,
     draft: Option<Res<ShellSettingsDraft>>,
     mut scale: ResMut<UiScale>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    scale.0 = draft
-        .as_deref()
-        .map_or(active.ui_scale, |draft| draft.0.ui_scale);
+    let settings = draft.as_deref().map_or(*active, |draft| draft.0);
+    scale.0 = settings.ui_scale;
+    for mut window in &mut windows {
+        window.mode = if settings.fullscreen {
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        } else {
+            WindowMode::Windowed
+        };
+        window.present_mode = if settings.vsync {
+            PresentMode::AutoVsync
+        } else {
+            PresentMode::AutoNoVsync
+        };
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+fn update_shell_settings_text(
+    active: Res<ClientShellSettings>,
+    draft: Option<Res<ShellSettingsDraft>>,
+    mut texts: Query<&mut Text, With<ShellSettingsText>>,
+) {
+    let settings = draft.as_deref().map_or(*active, |draft| draft.0);
+    let on_off = |value| if value { "ON" } else { "OFF" };
+    for mut text in &mut texts {
+        text.0 = format!(
+            "UI SCALE  {:.1}    REDUCED MOTION  {}    REDUCED EFFECTS  {}\nMASTER VOLUME  {}%    MUTE UNFOCUSED  {}\nDISPLAY  {}    VSYNC  {}",
+            settings.ui_scale,
+            on_off(settings.reduced_motion),
+            on_off(settings.reduced_combat_effects),
+            settings.master_volume,
+            on_off(settings.mute_when_unfocused),
+            if settings.fullscreen {
+                "BORDERLESS FULLSCREEN"
+            } else {
+                "WINDOWED"
+            },
+            on_off(settings.vsync),
+        );
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+fn apply_audio_preferences(
+    settings: Res<ClientShellSettings>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    global: Option<ResMut<GlobalVolume>>,
+    mut sinks: Query<&mut AudioSink>,
+    mut spatial_sinks: Query<&mut SpatialAudioSink>,
+) {
+    let volume = Volume::Linear(f32::from(settings.master_volume) / 100.0);
+    if let Some(mut global) = global {
+        global.volume = volume;
+    }
+    let muted =
+        settings.mute_when_unfocused && windows.iter().next().is_some_and(|window| !window.focused);
+    for mut sink in &mut sinks {
+        sink.set_volume(volume);
+        if muted {
+            sink.mute();
+        } else {
+            sink.unmute();
+        }
+    }
+    for mut sink in &mut spatial_sinks {
+        sink.set_volume(volume);
+        if muted {
+            sink.mute();
+        } else {
+            sink.unmute();
+        }
+    }
 }
 
 #[allow(
@@ -1732,6 +1943,7 @@ mod tests {
                 .insert_resource(ClientShellSettings {
                     ui_scale: 1.0,
                     reduced_motion: reduced,
+                    ..ClientShellSettings::default()
                 })
                 .add_systems(Update, animate_shell_entrance);
             app.world_mut().spawn((

@@ -580,7 +580,7 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
     assert_ne!(pending.held_buttons & FighterInput::PRIMARY_FIRE, 0);
     assert_eq!(
         *app.world().resource::<ClientInputContext>(),
-        ClientInputContext::Paused
+        ClientInputContext::Menu
     );
     assert_ne!(pending.action_indicator & ACTION_PAUSE, 0);
 }
@@ -726,7 +726,7 @@ fn controller_cancel_does_not_toggle_pause() {
     assert_eq!(pending.latched_buttons, FighterInput::INTERACT);
 
     apply_pause_request(&mut context, &mut pending, true);
-    assert_eq!(context, ClientInputContext::Paused);
+    assert_eq!(context, ClientInputContext::Menu);
     assert_eq!(pending.latched_buttons, 0);
 
     context = ClientInputContext::Shell;
@@ -766,7 +766,7 @@ fn paused_input_writes_neutral_and_clears_latched_actions() {
         ))
         .init_resource::<PendingLocalActions>()
         .init_resource::<FixedTickCount>()
-        .insert_resource(ClientInputContext::Paused)
+        .insert_resource(ClientInputContext::Menu)
         .insert_resource(ClientPlayableGate(true))
         .add_systems(Update, write_client_input)
         .add_systems(FixedUpdate, |mut ticks: ResMut<FixedTickCount>| {
@@ -797,28 +797,16 @@ fn paused_input_writes_neutral_and_clears_latched_actions() {
 }
 
 #[test]
-fn hud_reports_connection_device_actions_and_scoreboard_state() {
+fn held_scoreboard_is_visible_without_a_debug_status_surface() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<PendingLocalActions>()
         .init_resource::<ClientInputContext>()
         .add_systems(Update, update_client_hud);
-    let status = app.world_mut().spawn((InputStatusText, Text::new(""))).id();
     let scoreboard = app
         .world_mut()
         .spawn((ScoreboardOverlay, Visibility::Hidden))
         .id();
-    app.world_mut().spawn((
-        Client,
-        ClientJoinStatus {
-            phase: ClientJoinPhase::Active {
-                player_id: PlayerId(1),
-                network_entity_id: NetworkEntityId(1),
-            },
-            started_at: Duration::ZERO,
-            disconnect_requested: false,
-        },
-    ));
     {
         let mut pending = app.world_mut().resource_mut::<PendingLocalActions>();
         pending.active_device = ActiveInputDevice::Gamepad(Entity::from_raw_u32(7).unwrap());
@@ -828,10 +816,6 @@ fn hud_reports_connection_device_actions_and_scoreboard_state() {
 
     app.update();
 
-    let text = app.world().get::<Text>(status).expect("HUD status text");
-    assert!(text.0.contains("Connection: connected"));
-    assert!(text.0.contains("Input: gamepad | gameplay"));
-    assert!(text.0.contains("Actions: fire,scoreboard"));
     assert_eq!(
         app.world().get::<Visibility>(scoreboard),
         Some(&Visibility::Inherited)
@@ -840,7 +824,7 @@ fn hud_reports_connection_device_actions_and_scoreboard_state() {
 
 #[test]
 #[allow(clippy::float_cmp)]
-fn pause_keys_adjust_calibration_only_while_paused() {
+fn settings_keys_adjust_calibration_only_while_shell_owns_input() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<ButtonInput<KeyCode>>()
@@ -859,7 +843,7 @@ fn pause_keys_adjust_calibration_only_while_paused() {
     assert_eq!(settings.move_deadzone, 0.0);
     assert!(!settings.invert_move_y);
 
-    *app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Paused;
+    *app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Shell;
     let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
     keyboard.reset_all();
     keyboard.press(KeyCode::BracketRight);
@@ -898,11 +882,11 @@ fn pause_keys_adjust_calibration_only_while_paused() {
 }
 
 #[test]
-fn pause_trigger_calibration_keeps_the_hysteresis_band() {
+fn settings_trigger_calibration_keeps_the_hysteresis_band() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<ButtonInput<KeyCode>>()
-        .insert_resource(ClientInputContext::Paused)
+        .insert_resource(ClientInputContext::Shell)
         .init_resource::<ClientInputSettings>()
         .init_resource::<InputSettingsSelection>()
         .add_systems(Update, adjust_input_settings_from_pause_keys);
@@ -932,11 +916,11 @@ fn pause_trigger_calibration_keeps_the_hysteresis_band() {
 }
 
 #[test]
-fn pause_rebind_flow_captures_the_next_physical_key_press() {
+fn settings_rebind_flow_captures_the_next_physical_key_press() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<ButtonInput<KeyCode>>()
-        .insert_resource(ClientInputContext::Paused)
+        .insert_resource(ClientInputContext::Shell)
         .init_resource::<ClientInputSettings>()
         .init_resource::<InputSettingsSelection>()
         .add_systems(Update, adjust_input_settings_from_pause_keys);
@@ -989,14 +973,14 @@ fn pause_rebind_flow_captures_the_next_physical_key_press() {
 }
 
 #[test]
-fn pause_rebind_captures_mouse_and_gamepad_buttons() {
+fn settings_rebind_captures_mouse_and_gamepad_buttons() {
     let mut gamepad = Gamepad::default();
     gamepad.digital_mut().press(GamepadButton::North);
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
-        .insert_resource(ClientInputContext::Paused)
+        .insert_resource(ClientInputContext::Shell)
         .init_resource::<ClientInputSettings>()
         .init_resource::<InputSettingsSelection>()
         .add_systems(Update, adjust_input_settings_from_pause_keys);
@@ -1049,7 +1033,7 @@ fn capturing_a_rebind_suppresses_pause_cancel_and_latched_actions() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<ButtonInput<KeyCode>>()
-        .insert_resource(ClientInputContext::Paused)
+        .insert_resource(ClientInputContext::Menu)
         .init_resource::<PendingLocalActions>()
         .init_resource::<InputDeviceActivity>()
         .init_resource::<ClientInputSettings>()
@@ -1068,7 +1052,7 @@ fn capturing_a_rebind_suppresses_pause_cancel_and_latched_actions() {
     app.update();
     assert_eq!(
         *app.world().resource::<ClientInputContext>(),
-        ClientInputContext::Paused
+        ClientInputContext::Menu
     );
     let pending = app.world().resource::<PendingLocalActions>();
     assert!(!pending.cancel_pressed);

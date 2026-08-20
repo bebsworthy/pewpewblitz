@@ -54,7 +54,9 @@ pub use client::ClientCombatEvidenceStatus;
 #[cfg(feature = "client")]
 pub(crate) use client::DeduplicatedCombatCue;
 #[cfg(feature = "client")]
-pub use client::{BuildSelectionText, CaptureCombatCues, ClientCombatPlugin, CombatHudText};
+pub use client::{
+    BuildSelectionText, CaptureCombatCues, ClientCombatPlugin, CombatAbilityHudText, CombatHudText,
+};
 pub use cues::*;
 pub use definitions::{
     DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,
