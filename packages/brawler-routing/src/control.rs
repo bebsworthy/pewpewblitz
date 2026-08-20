@@ -13,7 +13,7 @@ use crate::{
     manifest::{GameMode, LobbyManifest, MatchManifestV1, WorkerRole},
 };
 
-/// The nineteen control body kinds in the current BRCT contract.
+/// The current BRCT control body kinds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ControlType {
@@ -38,6 +38,8 @@ pub enum ControlType {
     ActivationDissolved = 17,
     Activated = 18,
     StartFailed = 19,
+    /// Supervisor-owned reusable match capacity published only to the lobby worker.
+    LobbyCapacity = 20,
 }
 
 impl TryFrom<u8> for ControlType {
@@ -62,6 +64,7 @@ impl TryFrom<u8> for ControlType {
             17 => Ok(Self::ActivationDissolved),
             18 => Ok(Self::Activated),
             19 => Ok(Self::StartFailed),
+            20 => Ok(Self::LobbyCapacity),
             other => Err(CodecError::UnsupportedType(other)),
         }
     }
@@ -159,6 +162,12 @@ pub struct HeartbeatBody {
     pub control_bytes: u32,
     pub fixed_tick_lag_us: u32,
     pub health_flags: u32,
+}
+
+/// Ordered, idempotent supervisor-owned match capacity for one lobby worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LobbyCapacityBody {
+    pub free_match_slots: u8,
 }
 
 /// Correlation shared by the match worker's prepare fact and the supervisor's one-shot commit.
@@ -690,6 +699,7 @@ pub enum ControlBody {
     ActivationDissolved(ActivationBody),
     Activated(ActivationBody),
     StartFailed(ActivationBody),
+    LobbyCapacity(LobbyCapacityBody),
 }
 
 impl fmt::Debug for ControlBody {
@@ -733,6 +743,9 @@ impl fmt::Debug for ControlBody {
                 .finish(),
             Self::Activated(value) => formatter.debug_tuple("Activated").field(value).finish(),
             Self::StartFailed(value) => formatter.debug_tuple("StartFailed").field(value).finish(),
+            Self::LobbyCapacity(value) => {
+                formatter.debug_tuple("LobbyCapacity").field(value).finish()
+            }
         }
     }
 }
@@ -770,6 +783,7 @@ impl ControlBody {
             Self::ActivationDissolved(_) => ControlType::ActivationDissolved,
             Self::Activated(_) => ControlType::Activated,
             Self::StartFailed(_) => ControlType::StartFailed,
+            Self::LobbyCapacity(_) => ControlType::LobbyCapacity,
         }
     }
 
@@ -812,7 +826,7 @@ impl ControlBody {
                 }
                 value.validate()
             }
-            Self::Failure(_) | Self::Exit(_) => Ok(()),
+            Self::Failure(_) | Self::Exit(_) | Self::LobbyCapacity(_) => Ok(()),
             Self::LobbyAuthenticated(value) => {
                 if value.route_id.get() == 0
                     || value.peer_id.get() == 0
@@ -973,6 +987,7 @@ impl ControlBody {
                 encoder.put_u128(value.allocation_id.get());
                 encoder.put_u128(value.match_id.get());
             }
+            Self::LobbyCapacity(value) => encoder.put_u8(value.free_match_slots),
         }
         Ok(encoder.finish())
     }
@@ -1000,6 +1015,7 @@ impl ControlBody {
             | ControlType::ActivationDissolved
             | ControlType::Activated
             | ControlType::StartFailed => Some(40),
+            ControlType::LobbyCapacity => Some(1),
         };
         if expected_length.is_some_and(|length| length != body_length) {
             return Err(CodecError::LengthMismatch);
@@ -1188,6 +1204,9 @@ impl ControlBody {
                     _ => unreachable!("activation kinds were matched above"),
                 }
             }
+            ControlType::LobbyCapacity => Self::LobbyCapacity(LobbyCapacityBody {
+                free_match_slots: decoder.u8()?,
+            }),
         };
         body.validate()?;
         Ok(body)
@@ -1592,6 +1611,9 @@ mod tests {
                 request_id: id64(1),
                 allocation_id: id128(2),
                 match_id: id128(3),
+            }),
+            ControlBody::LobbyCapacity(LobbyCapacityBody {
+                free_match_slots: 4,
             }),
             ControlBody::Stop(StopBody {
                 stop_id: id64(1),

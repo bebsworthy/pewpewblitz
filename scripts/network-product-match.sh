@@ -1,14 +1,16 @@
 #!/bin/sh
 set -eu
 
-# M05 product path: form one exact 1v1, 2v2, or 3v3 reservation, deliver each participant's grant,
-# connect every fresh match session, check in, and exit after authoritative Active.
+# Product path: form exact 1v1, 2v2, or 3v3 reservations, deliver every participant's grant,
+# connect each fresh match session, check in, and exit after authoritative Active. M06 may override
+# the client count to exercise several serial handoffs from one queue pool.
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
 timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-60}
 players_per_team=${BRAWLER_PRODUCT_PLAYERS_PER_TEAM:-2}
 headless=${BRAWLER_NETWORK_HEADLESS:-1}
+requeue_smoke=${BRAWLER_PRODUCT_REQUEUE_SMOKE:-0}
 case "$headless" in
     0 | 1) ;;
     *)
@@ -16,15 +18,38 @@ case "$headless" in
         exit 2
         ;;
 esac
+case "$requeue_smoke" in
+    0 | 1) ;;
+    *)
+        echo "brawler product match: BRAWLER_PRODUCT_REQUEUE_SMOKE must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
 case "$players_per_team" in
-    1) client_count=2; match_flag=--product-match-smoke-1v1 ;;
-    2) client_count=4; match_flag=--product-match-smoke ;;
-    3) client_count=6; match_flag=--product-match-smoke-3v3 ;;
+    1) roster_size=2; match_flag=--product-match-smoke-1v1 ;;
+    2) roster_size=4; match_flag=--product-match-smoke ;;
+    3) roster_size=6; match_flag=--product-match-smoke-3v3 ;;
     *)
         echo "brawler product match: players per team must be 1, 2, or 3" >&2
         exit 2
         ;;
 esac
+client_count=${BRAWLER_PRODUCT_CLIENT_COUNT:-$roster_size}
+case "$client_count" in
+    2 | 4 | 6) ;;
+    *)
+        echo "brawler product match: client count must be 2, 4, or 6" >&2
+        exit 2
+        ;;
+esac
+if [ $((client_count % roster_size)) -ne 0 ]; then
+    echo "brawler product match: client count must contain whole ${players_per_team}v${players_per_team} rosters" >&2
+    exit 2
+fi
+if [ "$requeue_smoke" = 1 ] && { [ "$players_per_team" -ne 1 ] || [ "$client_count" -ne 2 ]; }; then
+    echo "brawler product match: requeue smoke requires exactly one 1v1 roster" >&2
+    exit 2
+fi
 
 supervisor_pid=
 watchdog_pid=
@@ -78,14 +103,29 @@ index=1
 while [ "$index" -le "$client_count" ]; do
     preset=$((1 + (index - 1) % 5))
     if [ "$headless" = 1 ]; then
-        target/debug/brawler-client \
-            --client-id $((5000 + index)) \
-            --server "$bind_addr" \
-            --transport routed-udp \
-            --auto-connect \
-            --headless \
-            "$match_flag" \
-            --build-preset "$preset" &
+        if [ "$requeue_smoke" = 1 ]; then
+            if [ "$index" -eq 1 ]; then aim_axis=1,0; else aim_axis=-1,0; fi
+            target/debug/brawler-client \
+                --client-id $((5000 + index)) \
+                --server "$bind_addr" \
+                --transport routed-udp \
+                --auto-connect \
+                --headless \
+                --product-requeue-smoke \
+                --aim-axis "$aim_axis" \
+                --fire \
+                --simulation-ticks 4000 \
+                --build-preset 1 &
+        else
+            target/debug/brawler-client \
+                --client-id $((5000 + index)) \
+                --server "$bind_addr" \
+                --transport routed-udp \
+                --auto-connect \
+                --headless \
+                "$match_flag" \
+                --build-preset "$preset" &
+        fi
     else
         target/debug/brawler-client \
             --server "$bind_addr" \
@@ -140,7 +180,12 @@ kill -INT "$supervisor_pid"
 wait "$supervisor_pid"
 supervisor_pid=
 if [ "$headless" = 1 ]; then
-    echo "brawler product match: exact ${players_per_team}v${players_per_team} reached Active"
+    roster_count=$((client_count / roster_size))
+    if [ "$requeue_smoke" = 1 ]; then
+        echo "brawler product match: Results -> Queue Again received a fresh Joined outcome"
+    else
+        echo "brawler product match: ${roster_count} exact ${players_per_team}v${players_per_team} roster(s) reached Active"
+    fi
 else
     echo "brawler product match: windowed ${players_per_team}v${players_per_team} session closed cleanly"
 fi

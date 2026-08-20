@@ -248,7 +248,6 @@ pub struct QueueState {
     next_admission_order: u64,
     state_revision: u64,
     revision_exhausted: bool,
-    product_match_occupied: bool,
     ticket_namespace: Option<u64>,
     ticket_ids: Box<dyn QueueTicketIdSource>,
     telemetry: QueueTelemetry,
@@ -311,7 +310,6 @@ impl QueueState {
             next_admission_order: 1,
             state_revision: 1,
             revision_exhausted: false,
-            product_match_occupied: false,
             ticket_namespace: None,
             ticket_ids: Box::new(ticket_ids),
             telemetry: QueueTelemetry::default(),
@@ -375,32 +373,6 @@ impl QueueState {
         self.reservations.len()
     }
 
-    /// Commit M05's deliberately single active-product-match occupancy and remove only tickets
-    /// that were not part of the activated reservation.
-    pub fn occupy_product_match(&mut self) -> Vec<QueueTicket> {
-        if self.product_match_occupied {
-            return Vec::new();
-        }
-        self.product_match_occupied = true;
-        let queued = self
-            .tickets
-            .values()
-            .filter(|ticket| !self.reservation_by_ticket.contains_key(&ticket.ticket_id))
-            .cloned()
-            .collect::<Vec<_>>();
-        for ticket in &queued {
-            self.remove_ticket(ticket.ticket_id);
-        }
-        self.refresh_pool_rows();
-        if let Some(revision) = self.state_revision.checked_add(1) {
-            self.state_revision = revision;
-        } else {
-            self.revision_exhausted = true;
-        }
-        self.observe_counts();
-        queued
-    }
-
     pub fn complete_reservation(
         &mut self,
         reservation_id: crate::lobby::MatchReservationId,
@@ -442,11 +414,7 @@ impl QueueState {
         QueuePoolSnapshot {
             catalog_revision: self.catalog_revision,
             state_revision: self.state_revision,
-            formation_availability: if self.product_match_occupied {
-                crate::lobby::FormationAvailability::ProductMatchOccupied
-            } else {
-                crate::lobby::FormationAvailability::Available
-            },
+            formation_availability: crate::lobby::FormationAvailability::Available,
             pools: self.pool_rows.clone(),
         }
     }
@@ -653,13 +621,6 @@ impl QueueState {
         weapons: &WeaponCatalog,
         fighters: &FighterDefinitions,
     ) -> (QueueDecision, bool) {
-        if self.product_match_occupied {
-            QueueTelemetry::increment(&mut self.telemetry.unavailable_rejections);
-            return (
-                QueueDecision::Rejected(QueueRejection::ServerMatchCapacityOccupied),
-                false,
-            );
-        }
         if let Err(rejection) = self.validate_join_target(command) {
             QueueTelemetry::increment(&mut self.telemetry.game_rejections);
             return (QueueDecision::Rejected(rejection), false);
@@ -982,7 +943,8 @@ impl QueueState {
             })
     }
 
-    /// Atomically reserve the catalog-first exact eligible roster. Queued overflow stays ordered.
+    /// Atomically reserve the oldest complete eligible roster across catalog pools. Queued
+    /// overflow stays ordered and catalog order breaks an otherwise impossible identity tie.
     pub(crate) fn reserve_oldest_exact(
         &mut self,
         catalog: &ResolvedLobbyCatalog,
@@ -992,7 +954,8 @@ impl QueueState {
         if !self.reservations.is_empty() || self.reservations.contains_key(&reservation_id) {
             return None;
         }
-        for game in &catalog.game_types {
+        let mut candidate = None;
+        for (catalog_index, game) in catalog.game_types.iter().enumerate() {
             let formation_size = usize::from(game.team_count.checked_mul(game.players_per_team)?);
             let pool = self.pools.get(&game.id)?;
             let selected = pool
@@ -1009,42 +972,50 @@ impl QueueState {
             if selected.len() != formation_size {
                 continue;
             }
-            let next_revision = self.state_revision.checked_add(1)?;
-            let ordinal = *self.map_ordinals.get(&game.id).unwrap_or(&0);
-            let map_index = usize::try_from(ordinal).unwrap_or(0) % game.map_preset_ids.len();
-            let selected_set: BTreeSet<_> = selected.iter().copied().collect();
-            self.pools
-                .get_mut(&game.id)
-                .expect("catalog pool exists")
-                .retain(|id| !selected_set.contains(id));
-            let participants = selected
-                .iter()
-                .enumerate()
-                .map(|(index, ticket_id)| ReservedParticipant {
-                    ticket_id: *ticket_id,
-                    team: u8::try_from(index % usize::from(game.team_count)).expect("team bound"),
-                })
-                .collect::<Vec<_>>();
-            let reservation = QueueReservation {
-                reservation_id,
-                game_type_id: game.id.clone(),
-                map_preset_id: game.map_preset_ids[map_index],
-                team_count: game.team_count,
-                players_per_team: game.players_per_team,
-                participants,
-                handoff_ready: false,
-            };
-            for participant in &reservation.participants {
-                self.reservation_by_ticket
-                    .insert(participant.ticket_id, reservation_id);
+            let first = self.tickets.get(selected.first()?)?;
+            let key = (first.admission_order, first.ticket_id, catalog_index);
+            if candidate
+                .as_ref()
+                .is_none_or(|(current, _, _)| key < *current)
+            {
+                candidate = Some((key, game, selected));
             }
-            self.reservations
-                .insert(reservation_id, reservation.clone());
-            self.state_revision = next_revision;
-            self.refresh_pool_rows();
-            return Some(reservation);
         }
-        None
+        let (_, game, selected) = candidate?;
+        let next_revision = self.state_revision.checked_add(1)?;
+        let ordinal = *self.map_ordinals.get(&game.id).unwrap_or(&0);
+        let map_index = usize::try_from(ordinal).unwrap_or(0) % game.map_preset_ids.len();
+        let selected_set: BTreeSet<_> = selected.iter().copied().collect();
+        self.pools
+            .get_mut(&game.id)
+            .expect("catalog pool exists")
+            .retain(|id| !selected_set.contains(id));
+        let participants = selected
+            .iter()
+            .enumerate()
+            .map(|(index, ticket_id)| ReservedParticipant {
+                ticket_id: *ticket_id,
+                team: u8::try_from(index % usize::from(game.team_count)).expect("team bound"),
+            })
+            .collect::<Vec<_>>();
+        let reservation = QueueReservation {
+            reservation_id,
+            game_type_id: game.id.clone(),
+            map_preset_id: game.map_preset_ids[map_index],
+            team_count: game.team_count,
+            players_per_team: game.players_per_team,
+            participants,
+            handoff_ready: false,
+        };
+        for participant in &reservation.participants {
+            self.reservation_by_ticket
+                .insert(participant.ticket_id, reservation_id);
+        }
+        self.reservations
+            .insert(reservation_id, reservation.clone());
+        self.state_revision = next_revision;
+        self.refresh_pool_rows();
+        Some(reservation)
     }
 
     pub fn mark_reservation_handoff_ready(
@@ -1692,6 +1663,41 @@ mod tests {
         assert_eq!(removed.len(), 4);
         assert_eq!(queue.reservation_count(), 0);
         assert_eq!(queue.snapshot().pools[0].queued, 1);
+        assert!(queue.indexes_are_valid());
+    }
+
+    #[test]
+    fn oldest_complete_pool_wins_and_the_next_roster_can_start_after_completion() {
+        let catalog = catalog();
+        let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(1));
+        for value in 1..=4 {
+            let player = session(value);
+            submit(&mut queue, player, 1, join_pool(&catalog, 1, 1), 0);
+            queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
+        }
+        for value in 5..=8 {
+            let player = session(value);
+            submit(&mut queue, player, 1, join_pool(&catalog, 0, 1), 0);
+            queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
+        }
+        let live_sessions = (1..=8)
+            .map(|value| LobbySessionId::new(value).unwrap())
+            .collect();
+        let first_id = crate::lobby::MatchReservationId::new(30).unwrap();
+        let first = queue
+            .reserve_oldest_exact(&catalog, first_id, &live_sessions)
+            .unwrap();
+        assert_eq!(first.game_type_id, catalog.game_types[1].id);
+        assert_eq!(queue.complete_reservation(first_id).len(), 4);
+
+        let second = queue
+            .reserve_oldest_exact(
+                &catalog,
+                crate::lobby::MatchReservationId::new(31).unwrap(),
+                &live_sessions,
+            )
+            .unwrap();
+        assert_eq!(second.game_type_id, catalog.game_types[0].id);
         assert!(queue.indexes_are_valid());
     }
 

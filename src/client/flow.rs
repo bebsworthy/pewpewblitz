@@ -52,6 +52,7 @@ pub enum ClientFlow {
     Queue,
     MatchLoading,
     Match,
+    Results,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +69,7 @@ pub enum ClientOverlay {
     Credits,
     BuildEditor,
     Confirmation(CancelMatchStartConfirmation),
+    LeaveConfirmation,
     Error(FlowError),
 }
 
@@ -153,6 +155,11 @@ enum FlowUiAction {
     RequestCancelMatchStart,
     KeepLoading,
     ConfirmCancelMatchStart,
+    QueueAgain,
+    ChangeGame,
+    RequestLeaveMatch,
+    KeepPlaying,
+    ConfirmLeaveMatch,
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +182,7 @@ enum SessionObservation {
     MatchStartReturned,
     CountdownObserved,
     FreshLobbyReturn,
+    MatchFailed,
 }
 
 #[derive(Resource, Default)]
@@ -201,6 +209,7 @@ enum OverlayCommit {
     Clear,
     BuildEditor,
     Confirmation(CancelMatchStartConfirmation),
+    LeaveConfirmation,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -321,6 +330,9 @@ struct FlowNavigation {
     selected: usize,
 }
 
+#[derive(Resource, Default)]
+struct MatchFailureNotice(bool);
+
 #[derive(Component)]
 struct FlowRoot;
 
@@ -375,6 +387,9 @@ struct MatchLoadingStatusLabel;
 struct CancelConfirmationRoot;
 
 #[derive(Component)]
+struct LeaveConfirmationRoot;
+
+#[derive(Component)]
 struct MatchCompletionRoot;
 
 #[derive(Component, Clone, Copy)]
@@ -389,6 +404,10 @@ struct ConnectingLabel;
 pub struct ClientFlowPlugin;
 
 impl Plugin for ClientFlowPlugin {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the composition point keeps the ordered product-flow schedule and state hooks visible"
+    )]
     fn build(&self, app: &mut App) {
         app.init_state::<ClientFlow>()
             .init_resource::<ClientOverlay>()
@@ -405,6 +424,9 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<crate::builds::BuildCatalogResource>()
             .init_resource::<crate::combat::WeaponCatalogResource>()
             .init_resource::<SelectedGameType>()
+            .init_resource::<super::ClientMatchResultState>()
+            .init_resource::<RoutedClientLifecycle>()
+            .init_resource::<MatchFailureNotice>()
             .init_resource::<FlowNavigation>()
             .add_systems(
                 Startup,
@@ -452,6 +474,9 @@ impl Plugin for ClientFlowPlugin {
                     present_cancel_confirmation
                         .in_set(ClientFlowSet::PresentFlow)
                         .before(present_flow),
+                    present_leave_confirmation
+                        .in_set(ClientFlowSet::PresentFlow)
+                        .before(present_flow),
                     present_match_completion
                         .in_set(ClientFlowSet::PresentFlow)
                         .before(present_flow),
@@ -483,6 +508,8 @@ impl Plugin for ClientFlowPlugin {
             .add_systems(OnEnter(ClientFlow::Connecting), spawn_connecting)
             .add_systems(OnEnter(ClientFlow::GameSelect), spawn_game_select)
             .add_systems(OnEnter(ClientFlow::Match), enter_match_input)
+            .add_systems(OnEnter(ClientFlow::Results), spawn_results)
+            .add_systems(OnExit(ClientFlow::Results), clear_results)
             .add_systems(OnExit(ClientFlow::Match), exit_match_input);
         app.add_systems(OnEnter(ClientFlow::Queue), spawn_queue);
         app.add_systems(OnEnter(ClientFlow::MatchLoading), spawn_match_loading);
@@ -575,6 +602,7 @@ fn begin_flow_frame(mut actions: ResMut<PendingFlowActions>, mut commit: ResMut<
 
 #[allow(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::type_complexity,
     clippy::needless_pass_by_value,
     reason = "this schedule phase observes distinct runtime-owned Bevy inputs"
@@ -591,6 +619,8 @@ fn observe_session(
     mut actions: ResMut<PendingFlowActions>,
     mut queue: ResMut<super::ClientQueueModel>,
     mut loading: ResMut<super::ClientMatchLoadingModel>,
+    result_state: Res<super::ClientMatchResultState>,
+    routed: Res<RoutedClientLifecycle>,
 ) {
     if let Some(task) = resolver.task.as_mut()
         && let Some(result) = block_on(poll_once(&mut task.task))
@@ -624,6 +654,16 @@ fn observe_session(
             .any(|status| matches!(status.phase, ClientJoinPhase::LobbyActive { .. }))
     {
         actions.session = Some(SessionObservation::FreshLobbyReturn);
+        return;
+    }
+    if *flow.get() == ClientFlow::Match
+        && routed.phase == RoutedClientPhase::Match
+        && result_state.context.is_none()
+        && statuses
+            .iter()
+            .any(|status| matches!(status.phase, ClientJoinPhase::Disconnected))
+    {
+        actions.session = Some(SessionObservation::MatchFailed);
         return;
     }
     if *flow.get() == ClientFlow::MatchLoading {
@@ -693,6 +733,7 @@ fn observe_session(
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
+    clippy::type_complexity,
     clippy::needless_pass_by_value,
     reason = "the bounded flow input phase keeps field and navigation precedence visible"
 )]
@@ -836,7 +877,8 @@ fn collect_flow_input(
                 ClientFlow::GameSelect
                 | ClientFlow::Queue
                 | ClientFlow::MatchLoading
-                | ClientFlow::Match => FlowUiAction::Disconnect,
+                | ClientFlow::Results => FlowUiAction::Disconnect,
+                ClientFlow::Match => FlowUiAction::RequestLeaveMatch,
                 ClientFlow::ServerSelect => FlowUiAction::Back,
                 ClientFlow::Title => return,
             }
@@ -847,7 +889,9 @@ fn collect_flow_input(
 
 fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
     match overlay {
-        ClientOverlay::Error(_) | ClientOverlay::Confirmation(_) => button.error_action,
+        ClientOverlay::Error(_)
+        | ClientOverlay::Confirmation(_)
+        | ClientOverlay::LeaveConfirmation => button.error_action,
         ClientOverlay::BuildEditor => button.build_editor_action,
         _ => !button.error_action && !button.build_editor_action,
     }
@@ -867,6 +911,7 @@ fn queue_ui_action(actions: &mut PendingFlowActions, action: FlowUiAction) {
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
+    clippy::type_complexity,
     clippy::needless_pass_by_value,
     reason = "one bounded coordinator makes flow-action precedence and commits explicit"
 )]
@@ -878,26 +923,43 @@ fn resolve_flow_action(
     mut model: ResMut<ServerSelectModel>,
     mut persistence: ResMut<ConnectionPersistence>,
     mut pending: Option<ResMut<PendingConnection>>,
-    membership: Query<(&ClientLobbyMembership, &RuntimeLobbyTarget), With<Client>>,
+    membership: Query<
+        (
+            &ClientLobbyMembership,
+            Option<&RuntimeLobbyTarget>,
+            &RoutedClientSession,
+        ),
+        With<Client>,
+    >,
     path: Res<ClientConnectionsPath>,
     overlay: Res<ClientOverlay>,
     mut selection: ResMut<SelectedGameType>,
     mut models: (
         ResMut<super::ClientQueueModel>,
         ResMut<super::ClientMatchLoadingModel>,
+        ResMut<super::ClientMatchResultState>,
+        ResMut<RoutedClientLifecycle>,
+        ResMut<MatchFailureNotice>,
     ),
     mut editor: ResMut<super::BuildEditorState>,
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
     build_path: Res<super::ClientBuildPath>,
 ) {
-    let (ref mut queue, ref mut loading) = models;
+    let (
+        ref mut queue,
+        ref mut loading,
+        ref mut result_state,
+        ref mut routed,
+        ref mut match_failure,
+    ) = models;
     if let Some(explicit) = actions.explicit.take() {
         match explicit {
             FlowUiAction::Cancel | FlowUiAction::Disconnect => {
                 commit.teardown = true;
                 commit.next_flow = Some(ClientFlow::ServerSelect);
                 *selection = SelectedGameType::default();
+                result_state.context = None;
                 editor.close_without_acceptance();
             }
             FlowUiAction::CancelBuildEditor => {
@@ -906,7 +968,7 @@ fn resolve_flow_action(
                 commit.focus_index = membership
                     .iter()
                     .next()
-                    .map(|(membership, _)| membership.game_types.len());
+                    .map(|(membership, _, _)| membership.game_types.len());
             }
             _ => {}
         }
@@ -915,11 +977,13 @@ fn resolve_flow_action(
     if let Some(observation) = actions.session.take() {
         match observation {
             SessionObservation::Accepted => {
-                if let Some((membership, target)) = membership.iter().next() {
+                if let Some((membership, target, _)) = membership.iter().next() {
                     persistence.state.preferred_display_name = Some(model.committed_name.clone());
-                    let _ = persistence
-                        .state
-                        .record_recent(&membership.server_name, &target.logical_address);
+                    if let Some(target) = target {
+                        let _ = persistence
+                            .state
+                            .record_recent(&membership.server_name, &target.logical_address);
+                    }
                     if let Err(error) = save_connections(&path.0, &persistence.state) {
                         persistence.dirty_error = Some(error.clone());
                         commit.error = Some(FlowError {
@@ -1054,8 +1118,38 @@ fn resolve_flow_action(
                 commit.overlay = Some(OverlayCommit::Clear);
             }
             SessionObservation::MatchStartReturned | SessionObservation::FreshLobbyReturn => {
-                commit.next_flow = Some(ClientFlow::GameSelect);
+                if let Some(context) = result_state.context.as_mut()
+                    && let Some(game_type_id) = context.game_type_id.as_ref()
+                    && let Some((membership, _, _)) = membership.iter().next()
+                    && let Some(game) = membership
+                        .game_types
+                        .iter()
+                        .find(|game| &game.id == game_type_id)
+                {
+                    context.game_name = Some(game.display_name.clone());
+                    selection.catalog_revision = Some(membership.catalog_revision);
+                    selection.game_type_id = Some(game.id.clone());
+                    selection.configuration_revision = Some(game.configuration_revision);
+                }
+                commit.next_flow = Some(if result_state.context.is_some() {
+                    ClientFlow::Results
+                } else {
+                    ClientFlow::GameSelect
+                });
+                if core::mem::take(&mut match_failure.0) {
+                    commit.error = Some(FlowError {
+                        kind: FlowErrorKind::Connection,
+                        message: "The match server stopped unexpectedly".to_string(),
+                        return_flow: ClientFlow::GameSelect,
+                        actions: [Some(FlowErrorAction::Back), None],
+                    });
+                }
                 commit.overlay = Some(OverlayCommit::Clear);
+            }
+            SessionObservation::MatchFailed => {
+                result_state.context = None;
+                match_failure.0 = true;
+                let _ = routed.request_return_to_lobby();
             }
             SessionObservation::CountdownObserved => {
                 commit.next_flow = Some(ClientFlow::Match);
@@ -1063,6 +1157,12 @@ fn resolve_flow_action(
             }
             SessionObservation::QueueOutcome(outcome) => match outcome.decision {
                 crate::lobby::QueueDecision::Joined(membership) => {
+                    result_state.context = None;
+                    result_state.last_accepted_game_type_id = Some(membership.game_type_id.clone());
+                    selection.catalog_revision = Some(membership.catalog_revision);
+                    selection.game_type_id = Some(membership.game_type_id.clone());
+                    selection.configuration_revision =
+                        Some(membership.game_type_configuration_revision);
                     let selection_to_save = editor.submitted_selection.unwrap_or_else(|| {
                         membership
                             .accepted_build
@@ -1295,7 +1395,7 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::SelectGame(index) => {
-            if let Some((membership, _)) = membership.iter().next()
+            if let Some((membership, _, _)) = membership.iter().next()
                 && let Some(game_type) = membership.game_types.get(index)
             {
                 selection.catalog_revision = Some(membership.catalog_revision);
@@ -1304,7 +1404,10 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::ToggleFavorite => {
-            if let Some((membership, target)) = membership.iter().next() {
+            if let Some((membership, target, _)) = membership.iter().next() {
+                let Some(target) = target else {
+                    return;
+                };
                 if persistence
                     .state
                     .favorites
@@ -1371,6 +1474,68 @@ fn resolve_flow_action(
                 }
             }
         }
+        FlowUiAction::QueueAgain => {
+            let current_lobby = membership
+                .iter()
+                .find(|(_, _, session)| session.kind == super::RoutedClientSessionKind::Lobby);
+            if let Some((_, _, session)) = current_lobby {
+                queue.bind_lobby_generation(session.generation);
+            }
+            let game_type_id = result_state
+                .context
+                .as_ref()
+                .and_then(|context| context.game_type_id.clone())
+                .or_else(|| result_state.last_accepted_game_type_id.clone())
+                .or_else(|| queue.last_accepted_game_type_id().cloned())
+                .or_else(|| selection.game_type_id.clone());
+            let started = current_lobby.zip(game_type_id).is_some_and(
+                |((membership, _, session), game_type_id)| {
+                    let started = queue.start_requeue_join(
+                        session.generation,
+                        membership,
+                        &game_type_id,
+                        editor.loaded_selection,
+                        builds.0.balance_revision,
+                        time.elapsed(),
+                    );
+                    if started {
+                        selection.catalog_revision = Some(membership.catalog_revision);
+                        selection.game_type_id = Some(game_type_id);
+                        selection.configuration_revision = membership
+                            .game_types
+                            .iter()
+                            .find(|game| selection.game_type_id.as_ref() == Some(&game.id))
+                            .map(|game| game.configuration_revision);
+                    }
+                    started
+                },
+            );
+            if !started && queue.pending().is_none() {
+                commit.error = Some(FlowError {
+                    kind: FlowErrorKind::Queue,
+                    message: "The queue connection is unavailable.".to_string(),
+                    return_flow: ClientFlow::Results,
+                    actions: [Some(FlowErrorAction::Back), None],
+                });
+            }
+        }
+        FlowUiAction::ChangeGame => {
+            result_state.context = None;
+            commit.next_flow = Some(ClientFlow::GameSelect);
+        }
+        FlowUiAction::RequestLeaveMatch => {
+            commit.overlay = Some(OverlayCommit::LeaveConfirmation);
+            commit.focus_index = Some(0);
+        }
+        FlowUiAction::KeepPlaying | FlowUiAction::KeepLoading => {
+            commit.overlay = Some(OverlayCommit::Clear);
+            commit.focus_index = Some(0);
+        }
+        FlowUiAction::ConfirmLeaveMatch => {
+            result_state.context = None;
+            let _ = routed.request_return_to_lobby();
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
         FlowUiAction::CancelQueue => {
             let _ = queue.start_cancel(time.elapsed());
         }
@@ -1396,10 +1561,6 @@ fn resolve_flow_action(
                 }));
                 commit.focus_index = Some(0);
             }
-        }
-        FlowUiAction::KeepLoading => {
-            commit.overlay = Some(OverlayCommit::Clear);
-            commit.focus_index = Some(0);
         }
         FlowUiAction::ConfirmCancelMatchStart => {
             if loading.request_cancel() {
@@ -1676,6 +1837,7 @@ fn commit_flow(
             OverlayCommit::Clear => ClientOverlay::None,
             OverlayCommit::BuildEditor => ClientOverlay::BuildEditor,
             OverlayCommit::Confirmation(value) => ClientOverlay::Confirmation(value),
+            OverlayCommit::LeaveConfirmation => ClientOverlay::LeaveConfirmation,
         };
     }
     if let Some(index) = commit.focus_index {
@@ -2870,6 +3032,62 @@ fn present_cancel_confirmation(
 }
 
 #[allow(clippy::needless_pass_by_value)]
+fn present_leave_confirmation(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    roots: Query<Entity, With<LeaveConfirmationRoot>>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    if !matches!(overlay.as_ref(), ClientOverlay::LeaveConfirmation) {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    if roots.iter().next().is_some() || *flow.get() != ClientFlow::Match {
+        return;
+    }
+    navigation.selected = 0;
+    commands
+        .spawn((
+            LeaveConfirmationRoot,
+            DespawnOnExit(ClientFlow::Match),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
+            GlobalZIndex(500),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: percent(88),
+                    max_width: px(640),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(12),
+                    padding: UiRect::all(px(24)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.055, 0.08, 0.12)),
+            ))
+            .with_children(|panel| {
+                spawn_heading(panel, "LEAVE MATCH?");
+                spawn_flow_error_button(panel, 0, FlowUiAction::KeepPlaying, "KEEP PLAYING");
+                spawn_flow_error_button(panel, 1, FlowUiAction::ConfirmLeaveMatch, "LEAVE MATCH");
+            });
+        });
+}
+
+#[allow(clippy::needless_pass_by_value)]
 fn present_match_completion(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
@@ -2915,6 +3133,68 @@ fn present_match_completion(
                 TextColor(Color::srgb(0.58, 0.66, 0.74)),
             ));
         });
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn spawn_results(
+    mut commands: Commands,
+    result_state: Res<super::ClientMatchResultState>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    let Some(context) = result_state.context.as_ref() else {
+        return;
+    };
+    navigation.selected = 0;
+    let outcome = match context.result {
+        crate::matchplay::MatchResult::TeamVictory { team } => {
+            if context.local_team == Some(team) {
+                "VICTORY".to_string()
+            } else if context.local_team.is_some() {
+                "DEFEAT".to_string()
+            } else {
+                format!("TEAM {} WINS", team.0 + 1)
+            }
+        }
+        crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
+        crate::matchplay::MatchResult::Forfeit { winner, .. } => {
+            if context.local_team == Some(winner) {
+                "VICTORY BY FORFEIT".to_string()
+            } else if context.local_team.is_some() {
+                "DEFEAT BY FORFEIT".to_string()
+            } else {
+                format!("TEAM {} WINS BY FORFEIT", winner.0 + 1)
+            }
+        }
+    };
+    commands
+        .spawn((
+            FlowRoot,
+            DespawnOnExit(ClientFlow::Results),
+            flow_root_node(),
+            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
+            GlobalZIndex(410),
+        ))
+        .with_children(|root| {
+            spawn_heading(root, "RESULTS");
+            root.spawn((
+                Text::new(outcome),
+                TextFont::from_font_size(30.0),
+                TextColor(Color::srgb(0.9, 0.95, 1.0)),
+            ));
+            if let Some(name) = context.game_name.as_deref() {
+                root.spawn((
+                    Text::new(name.to_string()),
+                    TextColor(Color::srgb(0.68, 0.78, 0.86)),
+                ));
+            }
+            spawn_flow_button(root, 0, FlowUiAction::QueueAgain, "QUEUE AGAIN", None);
+            spawn_flow_button(root, 1, FlowUiAction::ChangeGame, "CHANGE GAME", None);
+            spawn_flow_button(root, 2, FlowUiAction::Disconnect, "DISCONNECT", None);
+        });
+}
+
+fn clear_results(mut result_state: ResMut<super::ClientMatchResultState>) {
+    result_state.context = None;
 }
 
 fn queue_population(
@@ -3524,6 +3804,97 @@ mod tests {
     }
 
     #[test]
+    fn results_queue_again_uses_the_fresh_lobby_catalog_when_selection_was_cleared() {
+        let mut app = flow_test_app();
+        app.world_mut()
+            .insert_resource(super::super::ClientInputContext::Shell);
+        let lobby = lobby_membership();
+        let game_type_id = lobby.game_types[0].id.clone();
+        app.world_mut().spawn((
+            Client,
+            lobby,
+            RoutedClientSession {
+                generation: 3,
+                kind: super::super::RoutedClientSessionKind::Lobby,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::LobbyActive {
+                    player_id: crate::protocol::PlayerId(1),
+                },
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ));
+        app.world_mut().spawn((
+            Client,
+            RoutedClientSession {
+                generation: 2,
+                kind: super::super::RoutedClientSessionKind::Match,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::Disconnected,
+                started_at: Duration::ZERO,
+                disconnect_requested: true,
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<RoutedClientLifecycle>()
+            .generation = 4;
+        {
+            let mut result = app
+                .world_mut()
+                .resource_mut::<super::super::ClientMatchResultState>();
+            result.last_accepted_game_type_id = Some(game_type_id.clone());
+            result.context = Some(super::super::ClientMatchResultContext {
+                result: crate::matchplay::MatchResult::Draw,
+                local_team: None,
+                game_type_id: None,
+                game_name: None,
+            });
+        }
+        *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Match);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<State<ClientFlow>>().get(),
+            ClientFlow::Results
+        );
+        assert_eq!(
+            app.world()
+                .resource::<SelectedGameType>()
+                .game_type_id
+                .as_ref(),
+            None
+        );
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.update();
+
+        let pending = app
+            .world()
+            .resource::<super::super::ClientQueueModel>()
+            .pending()
+            .expect("Queue Again should create a fresh Join");
+        assert!(matches!(
+            &pending.command,
+            crate::lobby::QueueCommand::Join(command) if command.game_type_id == game_type_id
+        ));
+        assert_eq!(
+            app.world()
+                .resource::<SelectedGameType>()
+                .game_type_id
+                .as_ref(),
+            Some(&game_type_id)
+        );
+    }
+
+    #[test]
     fn build_editor_retains_root_and_scroll_until_render_state_changes() {
         let mut app = flow_test_app();
         app.world_mut().spawn((Client, lobby_membership()));
@@ -3581,6 +3952,10 @@ mod tests {
         app.world_mut().spawn((
             Client,
             lobby_membership(),
+            RoutedClientSession {
+                generation: 1,
+                kind: super::super::RoutedClientSessionKind::Lobby,
+            },
             RuntimeLobbyTarget {
                 logical_address: "localhost:5000".to_string(),
                 proposed_display_name: "Player".to_string(),

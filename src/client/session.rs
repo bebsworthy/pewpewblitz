@@ -44,6 +44,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<ClientInputSettings>()
             .init_resource::<InputSettingsSelection>()
             .init_resource::<RoutedClientLifecycle>()
+            .init_resource::<ClientMatchResultState>()
             .init_resource::<crate::diagnostics::ProcessExitClassification>()
             .add_systems(
                 Startup,
@@ -365,6 +366,7 @@ fn finish_product_match_smoke(
     mut exit: MessageWriter<AppExit>,
 ) {
     if config.product_match_smoke
+        && !config.product_requeue_smoke
         && roots
             .iter()
             .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
@@ -1394,17 +1396,46 @@ pub(super) fn observe_completed_match(
     config: Res<ClientNetworkConfig>,
     mut lifecycle: ResMut<RoutedClientLifecycle>,
     roots: Query<&MatchState, With<MatchRoot>>,
+    statuses: Query<&ClientJoinStatus, With<Client>>,
+    fighters: Query<(&PlayerId, &crate::combat::TeamId), With<Fighter>>,
+    selection: Option<Res<SelectedGameType>>,
+    result_state: Option<ResMut<ClientMatchResultState>>,
 ) {
     if config.transport != NetworkTransport::RoutedUdp
         || lifecycle.phase != RoutedClientPhase::Match
     {
         return;
     }
-    if roots
-        .iter()
-        .any(|state| matches!(state.phase, MatchPhase::Completed { .. }))
-        && lifecycle.request_return_to_lobby()
+    let Some(result) = roots.iter().find_map(|state| match state.phase {
+        MatchPhase::Completed { result, .. } => Some(result),
+        _ => None,
+    }) else {
+        return;
+    };
+    if let Some(mut result_state) = result_state
+        && result_state.context.is_none()
     {
+        let local_player = statuses.iter().find_map(|status| match status.phase {
+            ClientJoinPhase::Active { player_id, .. } => Some(player_id),
+            _ => None,
+        });
+        let local_team = local_player.and_then(|local_player| {
+            fighters
+                .iter()
+                .find_map(|(player_id, team)| (*player_id == local_player).then_some(*team))
+        });
+        let game_type_id = selection
+            .as_ref()
+            .and_then(|value| value.game_type_id.clone())
+            .or_else(|| result_state.last_accepted_game_type_id.clone());
+        result_state.context = Some(ClientMatchResultContext {
+            result,
+            local_team,
+            game_type_id,
+            game_name: None,
+        });
+    }
+    if lifecycle.request_return_to_lobby() {
         info!("brawler client observed authoritative match completion; returning to lobby");
     }
 }
@@ -1596,8 +1627,10 @@ pub(super) fn enforce_routed_timeout(
             }
             continue;
         }
-        if matches!(status.phase, ClientJoinPhase::Active { .. })
-            || now < status.started_at.saturating_add(config.connect_timeout)
+        if matches!(
+            status.phase,
+            ClientJoinPhase::Active { .. } | ClientJoinPhase::LobbyActive { .. }
+        ) || now < status.started_at.saturating_add(config.connect_timeout)
         {
             continue;
         }

@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process, time::Duration};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --product-queue-smoke | --product-match-smoke-1v1 | --product-match-smoke | --product-match-smoke-3v3 | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-5> (5=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (--exit-after-lobby-welcome | --product-queue-smoke | --product-match-smoke-1v1 | --product-match-smoke | --product-match-smoke-3v3 | --product-requeue-smoke | --exit-after-roster <N> [--exit-after-lobby-return]) --move-axis <X,Y> --aim-axis <X,Y> --aim-dummy --fire --ultimate --simulation-ticks <N>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> --screenshot-first <N> --screenshot-every <N> --screenshot-count <N>]"
     );
 }
 
@@ -69,6 +69,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut exit_after_lobby_welcome = false;
     let mut product_queue_smoke = false;
     let mut product_match_smoke = false;
+    let mut product_requeue_smoke = false;
     let mut product_match_players_per_team = 2;
     let mut headless_move = None;
     let mut headless_aim = None;
@@ -106,6 +107,11 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--product-match-smoke-3v3" => {
                 product_match_smoke = true;
                 product_match_players_per_team = 3;
+            }
+            "--product-requeue-smoke" => {
+                product_match_smoke = true;
+                product_requeue_smoke = true;
+                product_match_players_per_team = 1;
             }
             "--move-axis" => headless_move = Some(parse_axis(&flag, args.next())?),
             "--aim-axis" => headless_aim = Some(parse_axis(&flag, args.next())?),
@@ -208,6 +214,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.exit_after_lobby_welcome = exit_after_lobby_welcome;
     config.product_queue_smoke = product_queue_smoke;
     config.product_match_smoke = product_match_smoke;
+    config.product_requeue_smoke = product_requeue_smoke;
     config.product_match_players_per_team = product_match_players_per_team;
     if product_match_smoke {
         // Six debug clients can contend during simultaneous local startup. Keep the automation

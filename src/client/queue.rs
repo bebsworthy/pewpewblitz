@@ -123,6 +123,7 @@ pub struct ClientQueueModel {
     deferred_snapshot: Option<crate::lobby::QueuePoolSnapshot>,
     snapshot_fresh: bool,
     membership: Option<crate::lobby::QueueMembership>,
+    last_accepted_game_type_id: Option<crate::lobby::GameTypeId>,
     pending: Option<PendingQueueCommand>,
     latest_outcome: Option<crate::lobby::QueueCommandOutcome>,
     outbound: VecDeque<crate::lobby::QueueClientMessage>,
@@ -133,6 +134,43 @@ pub struct ClientQueueModel {
 }
 
 impl ClientQueueModel {
+    pub(super) fn bind_lobby_generation(&mut self, generation: u64) {
+        if self.generation != Some(generation) {
+            self.reset_for_generation(Some(generation));
+        }
+    }
+
+    pub(super) fn start_requeue_join(
+        &mut self,
+        generation: u64,
+        lobby: &ClientLobbyMembership,
+        game_type_id: &crate::lobby::GameTypeId,
+        build: crate::builds::BuildSelection,
+        build_revision: crate::builds::BuildRevision,
+        now: Duration,
+    ) -> bool {
+        let Some(game) = lobby
+            .game_types
+            .iter()
+            .find(|game| &game.id == game_type_id)
+        else {
+            return false;
+        };
+        self.bind_lobby_generation(generation);
+        self.start_join(
+            &super::flow::SelectedGameType {
+                catalog_revision: Some(lobby.catalog_revision),
+                game_type_id: Some(game.id.clone()),
+                configuration_revision: Some(game.configuration_revision),
+            },
+            crate::builds::BuildCandidate {
+                build_revision,
+                selection: build,
+            },
+            now,
+        )
+    }
+
     #[must_use]
     pub fn snapshot(&self) -> Option<&crate::lobby::QueuePoolSnapshot> {
         self.snapshot
@@ -148,6 +186,11 @@ impl ClientQueueModel {
     #[must_use]
     pub fn membership(&self) -> Option<&crate::lobby::QueueMembership> {
         self.membership.as_ref()
+    }
+
+    #[must_use]
+    pub(super) fn last_accepted_game_type_id(&self) -> Option<&crate::lobby::GameTypeId> {
+        self.last_accepted_game_type_id.as_ref()
     }
 
     #[must_use]
@@ -289,8 +332,10 @@ impl ClientQueueModel {
     fn reset_for_generation(&mut self, generation: Option<u64>) {
         let aged = self.freshness_aged;
         let restored = self.freshness_restored;
+        let last_accepted_game_type_id = self.last_accepted_game_type_id.clone();
         *self = Self {
             generation,
+            last_accepted_game_type_id,
             freshness_aged: aged,
             freshness_restored: restored,
             ..Self::default()
@@ -359,6 +404,7 @@ impl ClientQueueModel {
             });
         match &outcome.decision {
             crate::lobby::QueueDecision::Joined(membership) => {
+                self.last_accepted_game_type_id = Some(membership.game_type_id.clone());
                 self.required_snapshot_revision = Some(membership.admitted_at_pool_state_revision);
                 self.membership = Some(membership.clone());
                 self.pending = None;
@@ -469,11 +515,20 @@ enum HeadlessQueueSmokeStage {
     Complete,
 }
 
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum HeadlessRequeueSmokeStage {
+    #[default]
+    AwaitingFreshLobby,
+    AwaitingJoined,
+    Complete,
+}
+
 impl Plugin for ClientQueuePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClientQueueModel>()
             .init_resource::<ClientMatchLoadingModel>()
             .init_resource::<HeadlessQueueSmokeStage>()
+            .init_resource::<HeadlessRequeueSmokeStage>()
             .add_systems(
                 Update,
                 (
@@ -481,11 +536,55 @@ impl Plugin for ClientQueuePlugin {
                     observe_matchmaking_messages,
                     update_queue_time,
                     drive_headless_queue_smoke,
+                    drive_headless_requeue_smoke,
                     send_queue_messages,
                     send_matchmaking_messages,
                 )
                     .chain(),
             );
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
+fn drive_headless_requeue_smoke(
+    time: Res<Time<Real>>,
+    config: Res<super::ClientNetworkConfig>,
+    builds: Res<crate::builds::BuildCatalogResource>,
+    lobbies: Query<(&ClientLobbyMembership, &RoutedClientSession), With<Client>>,
+    mut model: ResMut<ClientQueueModel>,
+    mut stage: ResMut<HeadlessRequeueSmokeStage>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if !config.product_requeue_smoke || *stage == HeadlessRequeueSmokeStage::Complete {
+        return;
+    }
+    if *stage == HeadlessRequeueSmokeStage::AwaitingJoined && model.membership().is_some() {
+        info!("brawler product requeue smoke accepted a fresh queue Join");
+        *stage = HeadlessRequeueSmokeStage::Complete;
+        exit.write(AppExit::Success);
+        return;
+    }
+    let Some((lobby, session)) = lobbies.iter().find(|(_, session)| {
+        session.kind == super::RoutedClientSessionKind::Lobby && session.generation >= 3
+    }) else {
+        return;
+    };
+    let Some(game_type_id) = model.last_accepted_game_type_id().cloned() else {
+        return;
+    };
+    let build_selection = match config.build_preset.unwrap_or(1) {
+        5 => crate::builds::BuildSelection::Custom(super::build_editor::default_custom_recipe()),
+        id => crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(id)),
+    };
+    if model.start_requeue_join(
+        session.generation,
+        lobby,
+        &game_type_id,
+        build_selection,
+        builds.0.balance_revision,
+        time.elapsed(),
+    ) {
+        *stage = HeadlessRequeueSmokeStage::AwaitingJoined;
     }
 }
 
@@ -581,6 +680,7 @@ fn observe_matchmaking_messages(
 )]
 pub(super) fn observe_queue_messages(
     time: Res<Time<Real>>,
+    lifecycle: Res<super::RoutedClientLifecycle>,
     mut model: ResMut<ClientQueueModel>,
     mut clients: Query<
         (
@@ -593,8 +693,11 @@ pub(super) fn observe_queue_messages(
         With<Client>,
     >,
 ) {
-    let Ok((session, membership, outcome_receiver, snapshot_receiver, disconnected)) =
-        clients.single_mut()
+    let Some((session, membership, outcome_receiver, snapshot_receiver, disconnected)) =
+        clients.iter_mut().find(|(session, _, _, _, _)| {
+            session.kind == super::RoutedClientSessionKind::Lobby
+                && session.generation == lifecycle.generation
+        })
     else {
         if model.generation.is_some() {
             model.reset_for_generation(None);
@@ -607,9 +710,7 @@ pub(super) fn observe_queue_messages(
         }
         return;
     }
-    if model.generation != Some(session.generation) {
-        model.reset_for_generation(Some(session.generation));
-    }
+    model.bind_lobby_generation(session.generation);
     let now = time.elapsed();
     if let Some(mut snapshots) = snapshot_receiver {
         for snapshot in snapshots.receive() {

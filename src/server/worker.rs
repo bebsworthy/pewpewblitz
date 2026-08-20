@@ -703,7 +703,9 @@ fn worker_control_receive(
                     "supervisor close reason {reason}"
                 )),
             }),
-            ControlBody::AllocationGranted(_) | ControlBody::AllocationRejected(_) => {
+            ControlBody::AllocationGranted(_)
+            | ControlBody::AllocationRejected(_)
+            | ControlBody::LobbyCapacity(_) => {
                 if let Some(inbox) = lobby_inbox.as_mut()
                     && !inbox.push(frame.clone())
                 {

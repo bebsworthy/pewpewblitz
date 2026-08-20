@@ -192,6 +192,21 @@ pub enum RoutedClientSessionKind {
     Match,
 }
 
+/// Bounded client-local presentation copied from replicated match authority before unlink.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientMatchResultContext {
+    pub result: crate::matchplay::MatchResult,
+    pub local_team: Option<crate::combat::TeamId>,
+    pub game_type_id: Option<crate::lobby::GameTypeId>,
+    pub game_name: Option<String>,
+}
+
+#[derive(Resource, Debug, Default, PartialEq, Eq)]
+pub struct ClientMatchResultState {
+    pub context: Option<ClientMatchResultContext>,
+    pub(crate) last_accepted_game_type_id: Option<crate::lobby::GameTypeId>,
+}
+
 /// User-visible client connection state. Lightyear lifecycle components remain the truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub enum ClientJoinPhase {

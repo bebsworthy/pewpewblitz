@@ -263,6 +263,9 @@ pub struct ClientNetworkConfig {
     pub product_queue_smoke: bool,
     /// Headless M05 evidence: join an exact product pool and exit only after authoritative Active.
     pub product_match_smoke: bool,
+    /// Headless M06 evidence: complete a product match, return through Results, submit Queue Again,
+    /// and exit only after the fresh queue Join is accepted.
+    pub product_requeue_smoke: bool,
     pub product_match_players_per_team: u8,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
@@ -321,6 +324,7 @@ impl ClientNetworkConfig {
             exit_after_lobby_welcome: false,
             product_queue_smoke: false,
             product_match_smoke: false,
+            product_requeue_smoke: false,
             product_match_players_per_team: 2,
             headless_move: None,
             headless_aim: None,
@@ -372,6 +376,9 @@ impl ClientNetworkConfig {
         }
         if self.product_match_smoke && self.product_queue_smoke {
             return Err("product queue and match smokes are mutually exclusive".to_string());
+        }
+        if self.product_requeue_smoke && !self.product_match_smoke {
+            return Err("--product-requeue-smoke requires product match automation".to_string());
         }
         if self.exit_after_lobby_return && self.transport != NetworkTransport::RoutedUdp {
             return Err("--exit-after-lobby-return requires --transport routed-udp".to_string());

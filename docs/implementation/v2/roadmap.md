@@ -29,10 +29,15 @@ join-in-progress, fleet orchestration, and the complete production-art pipeline.
 - By explicit user direction on 2026-08-19, M05 research and specification preparation overlapped
   M04 implementation. Its simplified implementation and automated verification are complete, so
   M05 is now at `User playtest`.
-- By explicit user direction on 2026-08-19, M06 research and specification preparation overlap M05
-  implementation. M05 remains the current delivery milestone; M06 is at `Specification review` with
-  a simplified lobby-only queue/formation boundary. Production implementation is not authorized
-  until M05 verification completes and the user validates the M06 specification.
+- By explicit user direction on 2026-08-19, M06 research, specification, and implementation overlap
+  M05 playtest. The user subsequently clarified on 2026-08-19 that M06 remains under development,
+  so it is tracked as `Implementing` with one serialized M05 handoff at a time, reusable
+  supervisor-owned worker capacity, client-local Results, and no active-match/recovery ownership in
+  the lobby. The user validated the simplified M06 specification by directing implementation on
+  2026-08-19.
+- By explicit user direction on 2026-08-19, M07 research and specification preparation overlap M06
+  implementation. M07 is at `Specification review`; production implementation remains gated on
+  user validation and reconciliation with the final M06 seams.
 - A milestone moves from `Researching` to `Specification review`; user validation is required before
   it moves to `Implementing`.
 - Each milestone delivers a production-reusable vertical increment and extends shared process,
@@ -48,8 +53,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M05 — Exact formation and match handoff |
+| Status | Implementing |
+| Current milestone | M06 — Reusable match slots, results, and fresh requeue |
 | Entry gate | Satisfied 2026-08-18: V1 M11 is complete, the user accepted the basic v1 MVP, release polish is explicitly deferred, and the worker-readiness audit plus reproducible direct-UDP baseline are delivered with no v2 blocker. The user validated the M01 specification by directing implementation on 2026-08-18 |
 | Completion gate | Direct-connect, queue, isolated match, results/requeue, and practice pass automated, process, network, controller, visual, accessibility, recovery, and capacity evidence |
 
@@ -62,8 +67,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | 03 | Complete | Direct-connect lobby session and advertised game selection | [milestone-03.md](./milestone-03.md) |
 | 04 | Complete | Product build editor and authoritative queue admission | [milestone-04.md](./milestone-04.md) |
 | 05 | User playtest | Exact formation and match handoff | [milestone-05.md](./milestone-05.md) |
-| 06 | Specification review | Concurrent match lifecycle, results, and requeue | [milestone-06.md](./milestone-06.md) |
-| 07 | Not started | Combat HUD, menus, readability, and accessibility | Create when next |
+| 06 | Implementing | Concurrent match lifecycle, results, and requeue | [milestone-06.md](./milestone-06.md) |
+| 07 | Specification review | Minimal combat HUD, menus, readability, and accessibility | [milestone-07.md](./milestone-07.md) |
 | 08 | Not started | Authoritative bot practice and local supervisor launch | Create when next |
 | 09 | Not started | Recovery, security, capacity, usability, and v2 closeout | Create when next |
 
@@ -139,20 +144,22 @@ Replace M05's one-match admission pause with multiple heterogeneous workers and 
 Complete leave/forfeit, worker result, route cleanup, return-to-lobby, Results, Queue Again, Change
 Game, worker crash, supervisor shutdown, and cross-match isolation behavior.
 
-M06 keeps the lobby limited to current sessions, queue tickets, and pre-handoff reservations. The
-supervisor owns worker capacity and cleanup; match workers own gameplay/results; clients retain their
-in-memory route grant and result presentation. There is no lobby active-match registry, result
+M06 keeps one M05 reservation/allocation handoff in flight at a time, clears it at Active, and starts
+another roster when the supervisor advertises a free worker slot. Match workers own gameplay and
+results; clients retain local Results presentation. There is no lobby active-match registry, result
 forwarding, terminal replay, returning-player recognition, or cross-generation reconciliation.
-Queue Again is an ordinary fresh queue Join.
+Queue Again is an ordinary fresh queue Join, and confirmed Leave uses the existing disconnect path.
 
 Gate: simultaneous Wipeout and Hot Zone matches cannot leak state or traffic, and repeated
 formation/completion/failure returns routes, processes, memory, and queues to bounds.
 
 ### M07 — Combat HUD, menus, readability, and accessibility
 
-Replace debug presentation with product combat HUD, score/objective display, scoreboard,
-non-pausing menu, results, non-color team identity, UI scaling, reduced effects, audio/display
-settings, and supported-layout validation.
+Replace debug presentation with a minimal product combat HUD, a top-right mode-owned score/objective
+slot, scoreboard, non-pausing menu, results, non-color team identity, UI scaling, reduced effects,
+audio/display settings, and supported-layout validation. Gameplay-relevant information stays in the
+product HUD; connection, input, identity, tick, entity, and similar development facts stay behind
+the separate diagnostics mode.
 
 M07 polishes and extends M06's functional Results and minimal Leave surface; it does not replace
 M06's result, return-to-lobby, or Queue Again authority contracts.

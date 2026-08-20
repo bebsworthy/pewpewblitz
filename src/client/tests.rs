@@ -1272,7 +1272,9 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
             phase: RoutedClientPhase::Match,
             generation: 2,
             ..default()
-        });
+        })
+        .init_resource::<ClientMatchResultState>()
+        .init_resource::<SelectedGameType>();
     app.add_systems(Update, observe_completed_match);
     app.world_mut().spawn((
         MatchRoot,
@@ -1291,6 +1293,14 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
     assert_eq!(
         app.world().resource::<RoutedClientLifecycle>().phase,
         RoutedClientPhase::AwaitingMatchUnlink
+    );
+    assert_eq!(
+        app.world()
+            .resource::<ClientMatchResultState>()
+            .context
+            .as_ref()
+            .map(|context| context.result),
+        Some(crate::matchplay::MatchResult::Draw)
     );
 }
 

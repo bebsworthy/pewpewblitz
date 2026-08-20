@@ -30,8 +30,9 @@ pub use control::{
     AllocationGranted, AllocationGrantedBody, AllocationRejected, AllocationRejectedBody,
     ControlBody, ControlFrame, ControlSequenceTracker, ControlStreamDecoder, ControlType, Exit,
     ExitBody, Failure, FailureBody, Heartbeat, HeartbeatBody, LobbyAuthenticated,
-    LobbyAuthenticatedBody, LobbyNetcodeAuthenticatedBody, Manifest, ManifestBody, PeerClose,
-    PeerCloseBody, Ready, ReadyBody, ResultBody, SequenceDisposition, Stop, StopBody,
+    LobbyAuthenticatedBody, LobbyCapacityBody, LobbyNetcodeAuthenticatedBody, Manifest,
+    ManifestBody, PeerClose, PeerCloseBody, Ready, ReadyBody, ResultBody, SequenceDisposition,
+    Stop, StopBody,
 };
 pub use digest::{MANIFEST_DIGEST_DOMAIN, RESULT_DIGEST_DOMAIN, manifest_digest, result_digest};
 pub use error::{CodecError, RoutingErrorCategory};

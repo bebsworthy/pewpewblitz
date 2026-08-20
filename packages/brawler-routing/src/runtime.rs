@@ -201,6 +201,8 @@ struct RuntimeWorker {
     result_received: bool,
     result_drain_deadline: Option<Instant>,
     result_teardown_started: bool,
+    match_slot_limit: Option<u16>,
+    last_free_match_slots: Option<u8>,
 }
 
 struct AllocationParticipant {
@@ -249,6 +251,8 @@ impl RuntimeWorker {
             result_received: false,
             result_drain_deadline: None,
             result_teardown_started: false,
+            match_slot_limit: None,
+            last_free_match_slots: None,
         }
     }
 }
@@ -1045,19 +1049,22 @@ impl SupervisorRuntime {
         let worker_id = spec.registration.worker_id;
         let registration = spec.registration;
         let manifest_body = spec.manifest.clone();
-        let pending_default_route = if registration.kind == WorkerKind::Lobby {
+        let (pending_default_route, match_slot_limit) = if registration.kind == WorkerKind::Lobby {
             let manifest = crate::LobbyManifest::decode(&manifest_body.manifest)
                 .map_err(|_| RuntimeError::Routing(RoutingErrorCategory::ManifestMalformed))?;
-            Some(RouteRegistration {
-                route_id: manifest.default_route_id,
-                worker_id,
-                peer_id: PeerId::new(manifest.default_route_id.get()).ok_or(
-                    RuntimeError::Routing(RoutingErrorCategory::ManifestIdentity),
-                )?,
-                is_default_lobby: true,
-            })
+            (
+                Some(RouteRegistration {
+                    route_id: manifest.default_route_id,
+                    worker_id,
+                    peer_id: PeerId::new(manifest.default_route_id.get()).ok_or(
+                        RuntimeError::Routing(RoutingErrorCategory::ManifestIdentity),
+                    )?,
+                    is_default_lobby: true,
+                }),
+                Some(manifest.active_matches),
+            )
         } else {
-            None
+            (None, None)
         };
         let runtime = self.runtime_dir.as_ref().ok_or(RuntimeError::Routing(
             RoutingErrorCategory::SupervisorShutdown,
@@ -1075,6 +1082,7 @@ impl SupervisorRuntime {
         self.register_worker_listener(registration, listeners)?;
         if let Some(worker) = self.workers.get_mut(&worker_id) {
             worker.pending_default_route = pending_default_route;
+            worker.match_slot_limit = match_slot_limit;
         }
         Ok(events)
     }
@@ -1277,6 +1285,7 @@ impl SupervisorRuntime {
         }
         if !self.shutting_down {
             self.queue_allocation_responses();
+            self.refresh_lobby_capacity();
         }
         self.expire_result_packet_drains();
         if self.stop_flag.load(Ordering::Acquire) {
@@ -1519,6 +1528,58 @@ impl SupervisorRuntime {
                     .ipc_to_worker
                     .observe_ipc_frame(record.len().saturating_add(4));
             }
+        }
+    }
+
+    /// Publish only the scalar capacity needed by the lobby. Match workers remain counted until
+    /// their runtime entry is removed after the lifecycle owner observes actual child reap.
+    fn refresh_lobby_capacity(&mut self) {
+        let match_workers = self.processes.as_ref().map_or_else(
+            || {
+                self.workers
+                    .values()
+                    .filter(|worker| worker.registration.kind == WorkerKind::Match)
+                    .count()
+            },
+            |processes| processes.worker_count().saturating_sub(1),
+        );
+        let Some((lobby_worker_id, manifest_limit, previous, ready)) =
+            self.workers.iter().find_map(|(worker_id, worker)| {
+                if worker.registration.kind != WorkerKind::Lobby {
+                    return None;
+                }
+                Some((
+                    *worker_id,
+                    usize::from(worker.match_slot_limit?),
+                    worker.last_free_match_slots,
+                    worker.pending_default_route.is_none(),
+                ))
+            })
+        else {
+            return;
+        };
+        if !ready {
+            return;
+        }
+        let host_limit = self.config.core.max_workers.saturating_sub(1);
+        let free = u8::try_from(
+            manifest_limit
+                .min(host_limit)
+                .saturating_sub(match_workers)
+                .min(usize::from(u8::MAX)),
+        )
+        .expect("free slot value was clamped to u8");
+        if previous == Some(free) {
+            return;
+        }
+        if self.queue_control_body(
+            lobby_worker_id,
+            ControlBody::LobbyCapacity(crate::LobbyCapacityBody {
+                free_match_slots: free,
+            }),
+        ) && let Some(worker) = self.workers.get_mut(&lobby_worker_id)
+        {
+            worker.last_free_match_slots = Some(free);
         }
     }
 
@@ -3476,5 +3537,40 @@ mod tests {
         assert!(report.lifecycle_events.is_empty());
         assert_eq!(runtime.core().worker_count(), 1);
         assert_eq!(runtime.core().route_count(), 1);
+    }
+
+    #[test]
+    fn lobby_capacity_is_scalar_idempotent_and_tracks_registered_match_workers() {
+        let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let lobby = registration(1, WorkerKind::Lobby);
+        runtime.register_worker(lobby).unwrap();
+        {
+            let worker = runtime.workers.get_mut(&lobby.worker_id).unwrap();
+            worker.match_slot_limit = Some(3);
+            worker.pending_default_route = None;
+        }
+        runtime.refresh_lobby_capacity();
+        let first = runtime.core_mut().drain_controls(4);
+        assert_eq!(first.len(), 1);
+        assert!(matches!(
+            ControlFrame::decode(&first[0].1).unwrap().body,
+            ControlBody::LobbyCapacity(crate::LobbyCapacityBody {
+                free_match_slots: 3
+            })
+        ));
+        runtime.refresh_lobby_capacity();
+        assert!(runtime.core_mut().drain_controls(4).is_empty());
+
+        runtime
+            .register_worker(registration(2, WorkerKind::Match))
+            .unwrap();
+        runtime.refresh_lobby_capacity();
+        let second = runtime.core_mut().drain_controls(4);
+        assert!(matches!(
+            ControlFrame::decode(&second[0].1).unwrap().body,
+            ControlBody::LobbyCapacity(crate::LobbyCapacityBody {
+                free_match_slots: 2
+            })
+        ));
     }
 }

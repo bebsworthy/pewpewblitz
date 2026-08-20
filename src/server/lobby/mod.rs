@@ -222,6 +222,8 @@ pub struct LobbyState {
     product_activated: bool,
     product_dissolved: bool,
     product_cancel_requested: bool,
+    product_request: bool,
+    free_match_slots: u8,
     grants: BTreeMap<NetcodeClientId, MatchRouteGrant>,
 }
 
@@ -273,6 +275,8 @@ impl LobbyState {
             product_activated: false,
             product_dissolved: false,
             product_cancel_requested: false,
+            product_request: false,
+            free_match_slots: 0,
             grants: BTreeMap::new(),
         }
     }
@@ -516,6 +520,7 @@ impl LobbyState {
             participants,
         };
         self.pending = Some(PendingAllocation { body, sent: false });
+        self.product_request = false;
         Ok(())
     }
 
@@ -601,6 +606,7 @@ impl LobbyState {
             },
             sent: false,
         });
+        self.product_request = true;
         self.allocation_rejected = false;
         Ok(())
     }
@@ -704,16 +710,19 @@ impl LobbyState {
             .iter()
             .filter(|(client_id, _)| !self.allocated_clients.contains(client_id))
             .count();
-        if self
-            .allocated_clients
-            .len()
-            .saturating_add(new_identity_count)
-            > MAX_ALLOCATED_LOBBY_CLIENT_IDS
+        if !self.product_request
+            && self
+                .allocated_clients
+                .len()
+                .saturating_add(new_identity_count)
+                > MAX_ALLOCATED_LOBBY_CLIENT_IDS
         {
             return Err(LobbyAllocationError::AllocationIdentityMemoryFull);
         }
         for (client_id, grant) in converted {
-            self.allocated_clients.insert(client_id);
+            if !self.product_request {
+                self.allocated_clients.insert(client_id);
+            }
             self.grants.insert(client_id, grant);
         }
         self.active_allocation = Some(brawler_routing::ActivationBody {
@@ -723,6 +732,7 @@ impl LobbyState {
         });
         self.pending = None;
         self.allocation_completed = true;
+        self.product_request = false;
         Ok(())
     }
 
@@ -741,6 +751,7 @@ impl LobbyState {
         self.pending = None;
         self.allocation_rejected = true;
         self.product_cancel_requested = false;
+        self.product_request = false;
         Ok(())
     }
 
@@ -758,6 +769,10 @@ impl LobbyState {
                 self.product_dissolved = true;
                 self.active_allocation = None;
                 self.allocation_completed = false;
+                Ok(())
+            }
+            ControlBody::LobbyCapacity(body) => {
+                self.free_match_slots = body.free_match_slots;
                 Ok(())
             }
             _ => Err(LobbyAllocationError::RequestMismatch),
@@ -811,6 +826,15 @@ impl LobbyState {
         core::mem::take(&mut self.product_activated)
     }
 
+    fn complete_product_activation(&mut self) {
+        self.pending = None;
+        self.allocation_completed = false;
+        self.active_allocation = None;
+        self.grants.clear();
+        self.product_cancel_requested = false;
+        self.product_request = false;
+    }
+
     fn take_product_dissolved(&mut self) -> bool {
         core::mem::take(&mut self.product_dissolved)
     }
@@ -850,7 +874,6 @@ struct ProductFormationState {
     begin_sent: BTreeSet<LobbySessionId>,
     loading_deadline: Option<Duration>,
     grant_deadline: Option<Duration>,
-    occupied: bool,
 }
 
 impl ProductFormationState {
@@ -1576,7 +1599,7 @@ fn form_product_reservation(
         Has<Disconnected>,
     )>,
 ) {
-    if formation.occupied || formation.active.is_some() || queue.reservation_count() != 0 {
+    if state.free_match_slots == 0 || formation.active.is_some() || queue.reservation_count() != 0 {
         return;
     }
     let Ok(capability) = Capability::generate() else {
@@ -1686,16 +1709,11 @@ fn apply_product_dissolution(
     }
 }
 
-#[allow(clippy::type_complexity)]
 fn apply_product_activation(
     mut state: ResMut<LobbyState>,
     mut queue: ResMut<QueueState>,
     mut formation: ResMut<ProductFormationState>,
     mut frame: ResMut<LobbyQueueFrame>,
-    mut clients: Query<(
-        &LobbyClient,
-        &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
-    )>,
 ) {
     if !state.take_product_activated() {
         return;
@@ -1703,28 +1721,11 @@ fn apply_product_activation(
     let Some(reservation_id) = formation.active else {
         return;
     };
-    let removed = queue.occupy_product_match();
     let _active_tickets = queue.complete_reservation(reservation_id);
     formation.active = None;
-    formation.occupied = true;
     formation.clear_handoff();
+    state.complete_product_activation();
     frame.snapshot_changed = true;
-    for (client, mut sender) in &mut clients {
-        let Some(ticket) = removed
-            .iter()
-            .find(|ticket| ticket.lobby_session_id == client.lobby_session_id)
-        else {
-            continue;
-        };
-        sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
-            sequence: formation.next_sequence(client.lobby_session_id),
-            phase: crate::lobby::MatchmakingServerPhase::Removed {
-                reservation_id,
-                ticket_id: ticket.ticket_id,
-                reason: crate::lobby::MatchStartFailure::CapacityOccupied,
-            },
-        });
-    }
 }
 
 #[allow(

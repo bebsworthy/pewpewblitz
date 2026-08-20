@@ -377,13 +377,14 @@ extend; it must not leave a throwaway prototype beside the real server path.
 
 | Item | Status | V2 result |
 |---|---|---|
-| Combat HUD | Debug-only → replace | Health, ammo/cooldown, weapon/build identity, ultimate charge, score/objective, and bounded alerts using icons/bars/pips |
+| Combat HUD | Debug-only → replace | A minimal gameplay-only surface: health, ammo/reload, item/ultimate readiness, time/phase, and bounded status alerts using labels/bars/pips. Do not keep player IDs, connection/input state, raw ticks, controls help, or other development facts here |
 | Crosshair/range/landing | Have | Restyle and validate for controller readability |
 | Objective presentation | Have | Preserve authoritative facts; restyle Wipeout and Hot Zone presentation |
 | Scoreboard | Text → replace | Readable team panel on View/in-menu; no queue-wide identity disclosure |
 | In-match menu | Debug-only → replace | Non-pausing overlay with neutral local intent and confirmed leave |
 | Results | Debug-only → replace | Final result plus Queue Again, Change Game, and Disconnect |
-| Debug overlay | M11 | Remains separately toggleable and never becomes the product HUD |
+| Mode score/objective | Debug-only → replace | Reserve the top-right HUD slot for the active mode's compact score/objective model; Wipeout and Hot Zone compose only their own replicated facts into the shared slot |
+| Debug overlay | M11 | Remains separately toggleable as diagnostics mode and never becomes the product HUD |
 | Combat feedback | Have/partial | Preserve hit/defeat feedback; add only v2 readability polish, not the full production VFX pipeline |
 
 ## Settings, accessibility, and text input
