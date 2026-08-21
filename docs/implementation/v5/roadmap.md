@@ -28,7 +28,8 @@ allocates a worker, and match workers still own gameplay and outcomes.
 
 ## User-requested direction
 
-The following direction is resolved into the M01 technical specification and awaits user approval:
+The following direction was accepted and delivered through M01; M02 now completes its connected
+child-screen and return-loop implications:
 
 1. Remove the standalone Title screen from the ordinary launch path.
 2. Auto-connect to one last/default/preferred server and show Connecting during the attempt.
@@ -52,9 +53,9 @@ The following direction is resolved into the M01 technical specification and awa
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M01 — auto-connect and player-dashboard vertical slice |
-| Entry gate | Satisfied: V4 closeout and the M01 specification were accepted on 2026-08-21 |
+| Status | Researching |
+| Current milestone | M02 — Dashboard-owned selection and connected-loop convergence |
+| Entry gate | Satisfied: V5 M01 was accepted and completed on 2026-08-21 |
 | Completion gate | Normal launch, connected hub, selection, queue/practice, match exit, recovery, settings, controller/pointer navigation, and native presentation form one accepted dashboard-centered loop |
 
 Allowed statuses are `Not started`, `Researching`, `Specification review`, `Implementing`,
@@ -64,8 +65,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
-| 01 | User playtest | Auto-connect launch and a functional Player Dashboard showing the current brawler, game type, server/session identity, Play, Practice, and utilities | [milestone-01.md](./milestone-01.md) |
-| 02 | Not started | Dashboard-owned brawler/game selection and a match/queue/results loop whose ordinary exits converge on the dashboard | Create when M01 is complete |
+| 01 | Complete | Auto-connect launch and a functional Player Dashboard showing the current brawler, game type, server/session identity, Play, Practice, and utilities | [milestone-01.md](./milestone-01.md) |
+| 02 | Researching | Dashboard-owned brawler/game selection and a match/queue/results loop whose ordinary exits converge on the dashboard | [milestone-02.md](./milestone-02.md) |
 | 03 | Not started | Responsive visual, input, accessibility, recovery, lifecycle, and native-performance hardening plus V5 closeout | Create when M02 is complete |
 
 ## Ordering rationale and milestone gates

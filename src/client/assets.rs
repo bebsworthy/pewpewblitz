@@ -21,6 +21,13 @@ pub(crate) struct ClientAssetHandles {
     pub blaster: Handle<Gltf>,
     pub loading_logo: Handle<Image>,
     pub wordmark: Handle<Image>,
+    pub dashboard_font: Handle<Font>,
+    pub settings_icon: Handle<Image>,
+    pub menu_icon: Handle<Image>,
+    pub build_icon: Handle<Image>,
+    pub mode_icon: Handle<Image>,
+    pub practice_icon: Handle<Image>,
+    pub play_icon: Handle<Image>,
 }
 
 impl ClientAssetHandles {
@@ -36,10 +43,17 @@ impl ClientAssetHandles {
             blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
             loading_logo: asset_server.load("brawler/ui/branding/pewpew-blitz-lockup.png"),
             wordmark: asset_server.load("brawler/ui/branding/pewpew-blitz-wordmark.png"),
+            dashboard_font: asset_server.load("brawler/ui/fonts/lilita-one-regular.ttf"),
+            settings_icon: asset_server.load("brawler/ui/icons/settings.png"),
+            menu_icon: asset_server.load("brawler/ui/icons/menu.png"),
+            build_icon: asset_server.load("brawler/ui/icons/build.png"),
+            mode_icon: asset_server.load("brawler/ui/icons/mode.png"),
+            practice_icon: asset_server.load("brawler/ui/icons/practice.png"),
+            play_icon: asset_server.load("brawler/ui/icons/play.png"),
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 9] {
+    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 16] {
         [
             ("audio.fire", false, asset_server.load_state(&self.fire)),
             ("audio.impact", false, asset_server.load_state(&self.impact)),
@@ -65,6 +79,41 @@ impl ClientAssetHandles {
                 "ui.pewpew_blitz_wordmark",
                 false,
                 asset_server.load_state(&self.wordmark),
+            ),
+            (
+                "font.dashboard_display",
+                false,
+                asset_server.load_state(&self.dashboard_font),
+            ),
+            (
+                "ui.icon_settings",
+                false,
+                asset_server.load_state(&self.settings_icon),
+            ),
+            (
+                "ui.icon_menu",
+                false,
+                asset_server.load_state(&self.menu_icon),
+            ),
+            (
+                "ui.icon_build",
+                false,
+                asset_server.load_state(&self.build_icon),
+            ),
+            (
+                "ui.icon_mode",
+                false,
+                asset_server.load_state(&self.mode_icon),
+            ),
+            (
+                "ui.icon_practice",
+                false,
+                asset_server.load_state(&self.practice_icon),
+            ),
+            (
+                "ui.icon_play",
+                false,
+                asset_server.load_state(&self.play_icon),
             ),
         ]
     }
@@ -207,7 +256,7 @@ fn validate_manifest(source: &str) -> Result<(), String> {
         if entry.pack.is_empty()
             || entry.original.is_empty()
             || entry.author.is_empty()
-            || entry.license != "CC0-1.0"
+            || !matches!(entry.license.as_str(), "CC0-1.0" | "OFL-1.1")
             || !entry.license_url.starts_with("https://")
             || !entry.source_url.starts_with("https://")
             || !valid_import_date(&entry.imported)
@@ -247,8 +296,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retained_asset_manifest_has_unique_complete_cc0_provenance() {
+    fn retained_asset_manifest_has_unique_complete_provenance() {
         validate_manifest(CLIENT_ASSET_MANIFEST).unwrap();
+    }
+
+    #[test]
+    fn dashboard_font_icons_and_licenses_are_shipped() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let promoted = [
+            "brawler/ui/fonts/lilita-one-regular.ttf",
+            "brawler/ui/icons/settings.png",
+            "brawler/ui/icons/menu.png",
+            "brawler/ui/icons/build.png",
+            "brawler/ui/icons/mode.png",
+            "brawler/ui/icons/practice.png",
+            "brawler/ui/icons/play.png",
+        ];
+        let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
+        let manifested = manifest
+            .assets
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<HashSet<_>>();
+        for file in promoted {
+            assert!(
+                root.join("assets").join(file).is_file(),
+                "missing asset: {file}"
+            );
+            assert!(manifested.contains(file), "unmanifested asset: {file}");
+        }
+        for file in [
+            "assets/licenses/LilitaOne-OFL-1.1.txt",
+            "assets/licenses/kenney-game-icons.txt",
+        ] {
+            assert!(root.join(file).is_file(), "missing promoted asset: {file}");
+        }
     }
 
     #[test]

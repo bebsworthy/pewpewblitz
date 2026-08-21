@@ -114,7 +114,7 @@ fn ensure_dashboard_background(
         time_motion: Vec4::new(0.0, 1.0, 0.0, 0.0),
         palette_dark: Color::srgb(0.012, 0.025, 0.055).to_linear().to_vec4(),
         palette_light: Color::srgb(0.035, 0.15, 0.22).to_linear().to_vec4(),
-        glow: Vec4::new(0.5, 0.46, 0.18, 0.27),
+        glow: Vec4::new(0.5, 0.41, 0.13, 0.2),
     });
     commands.spawn((
         DashboardBackground,
@@ -203,35 +203,14 @@ fn spawn_dashboard_preview(
                 ..default()
             }),
             Tonemapping::None,
-            Transform::from_xyz(235.0, 65.0, 80.0).looking_at(Vec3::new(0.0, 38.0, 0.0), Vec3::Y),
+            Transform::from_xyz(205.0, 72.0, 125.0).looking_at(Vec3::new(0.0, 34.0, 0.0), Vec3::Y),
             layer.clone(),
         ))
         .id();
     commands.entity(host).insert(ViewportNode::new(camera));
     commands.insert_resource(DashboardPreviewTarget(target));
 
-    commands.spawn((
-        DespawnOnExit(ClientFlow::Dashboard),
-        DirectionalLight {
-            illuminance: 9_000.0,
-            shadow_maps_enabled: true,
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.65, -0.55, 0.0)),
-        layer.clone(),
-    ));
-    commands.spawn((
-        DespawnOnExit(ClientFlow::Dashboard),
-        PointLight {
-            color: Color::srgb(0.05, 0.72, 0.92),
-            intensity: 1_800_000.0,
-            range: 220.0,
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(-58.0, 88.0, -28.0),
-        layer.clone(),
-    ));
+    spawn_dashboard_preview_lights(&mut commands, &layer);
     let root = commands
         .spawn((
             DashboardPreviewRoot,
@@ -243,8 +222,14 @@ fn spawn_dashboard_preview(
         .with_children(|root| {
             root.spawn((
                 Mesh3d(primitives.sentry_base.clone()),
-                MeshMaterial3d(materials.zone_fill.clone()),
-                Transform::from_xyz(0.0, -2.0, 0.0).with_scale(Vec3::new(2.25, 0.45, 2.25)),
+                MeshMaterial3d(materials.marker_ally.clone()),
+                Transform::from_xyz(0.0, -3.0, 0.0).with_scale(Vec3::new(1.78, 0.18, 1.78)),
+                layer.clone(),
+            ));
+            root.spawn((
+                Mesh3d(primitives.sentry_base.clone()),
+                MeshMaterial3d(materials.team_blue.clone()),
+                Transform::from_xyz(0.0, -1.0, 0.0).with_scale(Vec3::new(1.55, 0.14, 1.55)),
                 layer.clone(),
             ));
             root.spawn((
@@ -268,6 +253,43 @@ fn spawn_dashboard_preview(
     }
 }
 
+fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers) {
+    commands.spawn((
+        DespawnOnExit(ClientFlow::Dashboard),
+        DirectionalLight {
+            illuminance: 9_000.0,
+            shadow_maps_enabled: true,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.65, -0.55, 0.0)),
+        layer.clone(),
+    ));
+    commands.spawn((
+        DespawnOnExit(ClientFlow::Dashboard),
+        PointLight {
+            color: Color::srgb(1.0, 0.82, 0.68),
+            intensity: 1_150_000.0,
+            range: 260.0,
+            shadow_maps_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(135.0, 105.0, 125.0),
+        layer.clone(),
+    ));
+    commands.spawn((
+        DespawnOnExit(ClientFlow::Dashboard),
+        PointLight {
+            color: Color::srgb(0.05, 0.72, 0.92),
+            intensity: 1_800_000.0,
+            range: 220.0,
+            shadow_maps_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(-58.0, 88.0, -28.0),
+        layer.clone(),
+    ));
+}
+
 fn spawn_imported_character(
     commands: &mut Commands,
     root: Entity,
@@ -282,7 +304,7 @@ fn spawn_imported_character(
                 rotation: Quat::from_rotation_y(
                     super::presentation_3d::KENNEY_CHARACTER_FORWARD_CORRECTION - 0.12,
                 ),
-                scale: Vec3::splat(88.0),
+                scale: Vec3::splat(112.0),
                 ..default()
             },
             layer,
@@ -367,7 +389,7 @@ fn setup_dashboard_imported_scene(
                 rotation: Quat::from_rotation_y(
                     super::presentation_3d::KENNEY_BLASTER_GRIP_ROTATION,
                 ),
-                ..default()
+                scale: Vec3::splat(0.72),
             },
             layer,
             Name::new("Dashboard attached blaster-a"),

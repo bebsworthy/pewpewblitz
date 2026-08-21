@@ -5,7 +5,7 @@ unchanged during this version.
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
+| Status | Complete |
 | Depends on | V4 closeout accepted on 2026-08-21; completed V2 routed product flow and V3/V4 client presentation foundations |
 | Outcome | Normal launch attempts one server and reaches a functional connected Player Dashboard whose real brawler, game-type, session, Play, Practice, and utility actions form the new product center |
 
@@ -481,6 +481,31 @@ This feedback is accepted M01 scope because it evaluates the milestone's explici
 model framing, background integration, and Play-versus-Practice exit criteria. Queue/results
 convergence and final child-screen redesign remain M02.
 
+## Second visual feedback execution plan — 2026-08-21
+
+The second target comparison accepted a further M01 presentation pass. The existing hierarchy and
+real-data contract remain correct; the remaining gap is the dashboard's visual language and central
+composition.
+
+1. Promote the unmodified `external_assets/Lilita_One/LilitaOne-Regular.ttf` under SIL OFL 1.1,
+   retain it through the client asset owner, ship its license, and use it for dashboard display
+   headings and actions. Keep compact live values in Fira Mono rather than forcing a display face
+   into dense status copy.
+2. Promote one coherent CC0 Kenney game-icon subset for Settings, Menu, build, mode, Practice, and
+   Play. `kenney_ui-pack` was requested as a preferred source but is not present in the workspace at
+   implementation start, so the checked-in `kenney_game-icons` pack is the available coherent
+   source; no generated genre-reference icons are introduced.
+3. Raise and enlarge the actual runtime fighter, retune its camera/pose/light for a clear face and
+   silhouette, tighten the localized halo, and replace the oversized flat platform with a smaller
+   layered pedestal.
+4. Narrow and visually attach the build card to the fighter stack. Add icon wells, layered borders,
+   stronger Lilita One headings, and compact real-data rows to the mode, Practice, and Play actions.
+5. Preserve explicit rest, pointer-hover, focus, press, and disabled states. The fighter-preview
+   fill remains transparent in every state; only its outline may change.
+6. Verify the native 16:9 composition at 1280x720 and 1920x1080, long real labels, pointer/keyboard/
+   gamepad focus, imported and primitive fighter paths, asset failure fallback, and canonical role
+   isolation before returning M01 to User playtest.
+
 ## Verification plan
 
 ### Focused automated coverage
@@ -563,6 +588,26 @@ First-feedback refinement implemented on 2026-08-21:
 - Settings and Menu moved into the header; Menu owns Credits, Change Server, Quit, and Back without
   adding product features or leaving an authenticated Dashboard session.
 
+Second visual-feedback refinement implemented on 2026-08-21:
+
+- the unchanged Lilita One regular font is promoted as the dashboard display face, retained by the
+  client asset owner, manifested as SIL OFL 1.1, attributed in Credits, and accompanied by its full
+  shipped license; compact server, population, rules, map-pool, weapon, and budget facts remain in
+  Fira Mono for small-size readability;
+- six white CC0 Kenney Game Icons now provide one coherent Settings, Menu, build, mode, Practice,
+  and Play family. The requested `kenney_ui-pack` was not present in the workspace, so no untracked
+  or invented substitute source was assumed;
+- the Dashboard uses Lilita One headings and actions, blue icon wells, bounded drop shadows, a warm
+  white-on-orange Play treatment, a pale secondary Practice treatment, and explicit distinct hover
+  fills for every actionable card family;
+- the actual fighter is larger and more readable with a reduced dashboard-only weapon scale, warm
+  frontal light, cyan rim light, tighter shader halo, and a smaller two-layer blue pedestal;
+- the fighter/build stack now has cohesive central ownership: it remains centered between the fixed
+  header and bottom action row, caps its preview height on taller windows, and keeps the build card
+  attached without hiding or clipping it;
+- the whole fighter preview remains transparent in rest, hover, focus, and press states. It retains
+  only its cyan outline interaction cue.
+
 Automated evidence:
 
 - `just lint` passed, including client/server Clippy, server feature isolation, and the retired 2D
@@ -582,13 +627,62 @@ Automated evidence:
 - after the first-feedback refinement, `just lint` and `just check` passed; all 396 existing client
   library tests passed, and the added focused preview-interaction test proves that rest, hover, and
   press retain a transparent fighter-preview fill while hover retains a visible border cue.
+- after the second visual-feedback refinement, `just lint` and `just check` passed, including the
+  independent client/server feature graphs and server presentation-isolation guards; all 399 client
+  library tests passed. New focused coverage validates promoted font/icon/license presence and
+  manifest membership plus visibly distinct header/card/Practice/Play hover colors.
+- native comparison captures at the exact 1280x720 logical request and the host-constrained larger
+  window verified the Lilita One hierarchy, coherent icons, real-data wrapping, model lighting,
+  pedestal, bottom-row anchoring, and absence of clipping. The representative captures are
+  `target/v5-m01-ui-responsive-1280/brawler-000180.png` and
+  `target/v5-m01-ui-responsive-1920/brawler-000180.png`; macOS constrained the requested 1920x1080
+  window to the available display work area, producing a 3420x2082 Retina framebuffer. Exact
+  1920x1080 hardware verification remains part of the user/M03 matrix rather than being inferred.
 
-The milestone remains open at User playtest. The broader resolution/controller/repeated-entry matrix,
-feedback triage, and learning review are still required before Complete.
+## Feedback review and acceptance
+
+Closed on 2026-08-21 after the user accepted the refined dashboard by directing that M01 be
+committed, closed, and followed by M02. The accepted pass includes the centered actual fighter,
+transparent fighter activation surface, restrained procedural field and glow, attached real-data
+cards, Lilita One display hierarchy, coherent Kenney icon family, dominant Play action, secondary
+Practice action, and compact authenticated header.
+
+Feedback dispositions:
+
+- the dark fighter-preview hover regression was fixed in M01 and is protected by focused tests;
+- the requested Lilita One face and available Kenney Game Icons were promoted with manifests,
+  attribution, and shipped licenses;
+- `kenney_ui-pack` was not present in `external_assets`; the available coherent CC0
+  `kenney_game-icons` family was accepted for this pass rather than inventing an asset source;
+- exact 1920x1080 hardware coverage and the exhaustive resolution, controller, repeated-entry, and
+  lifecycle matrix remain explicitly assigned to M03. The host-constrained high-resolution Retina
+  capture is supporting evidence, not a substitute for that closeout matrix;
+- dashboard-child selection and connected match-loop convergence remain M02 scope.
+
+## Learn-from-errors review
+
+- The first functional dashboard treated most information and actions as uniform monospace blocks.
+  That weakened scan order even though the data was correct. Future shell work should establish
+  display/body typography roles and a coherent icon family before fine spacing work.
+- The fighter activation surface initially inherited the generic button hover fill, obscuring the
+  model with a dark rectangle. Preview interaction now owns an explicit transparent-fill invariant
+  for every state, with a regression test; distinctive focus belongs on the outline.
+- Direct root-level percentage sizing produced excessive empty space on taller windows. The final
+  layout gives the fighter and build card one cohesive center wrapper and anchors the action row,
+  which is the reusable pattern for M02 children.
+- A late negative-margin experiment could hide the build card behind the viewport. It was reverted
+  before delivery. Any future overlap or stacking change must be checked in a native capture as
+  well as through layout tests.
+- Client-retained font and image handles, explicit asset manifests/licenses, and dashboard-only
+  camera/light/model scaling delivered the visual change without leaking presentation ownership
+  into gameplay or server feature graphs. Preserve that boundary in later dashboard screens.
+
+M01 is complete. The intentionally deferred M02/M03 work below remains visible and does not weaken
+the accepted vertical-slice result.
 
 ## Exit criteria
 
-M01 may advance beyond User playtest only when:
+M01 completion required:
 
 - ordinary launch never visits Title and deterministically attempts one visible logical server;
 - cancellation and bounded failure reach a fully usable Server Select, while success reaches a

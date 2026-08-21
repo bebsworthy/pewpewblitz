@@ -440,9 +440,10 @@ struct DashboardBuildCard;
 #[derive(Component)]
 struct DashboardModeCard;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug)]
 enum DashboardButtonStyle {
     Preview,
+    Header,
     Build,
     Mode,
     Practice,
@@ -3137,9 +3138,10 @@ fn spawn_dashboard(
                     .lines
                     .iter()
                     .find(|line| line.starts_with("Weapon:"))
-                    .map_or("Weapon unavailable", String::as_str);
+                    .and_then(|line| line.strip_prefix("Weapon: "))
+                    .unwrap_or("Weapon unavailable");
                 format!(
-                    "{weapon} - {} / {} points",
+                    "{weapon} · {}/{}",
                     preview.total_points,
                     crate::builds::BUILD_POINT_BUDGET
                 )
@@ -3185,7 +3187,7 @@ fn spawn_dashboard(
                     } else {
                         header.spawn((
                             Text::new("PEWPEW BLITZ"),
-                            TextFont::from_font_size(32.0),
+                            dashboard_font(assets.as_deref(), 32.0),
                             TextColor(Color::srgb(0.28, 0.92, 1.0)),
                         ));
                     }
@@ -3205,7 +3207,7 @@ fn spawn_dashboard(
                         .with_children(|identity| {
                             identity.spawn((
                                 Text::new(&membership.accepted_display_name),
-                                TextFont::from_font_size(18.0),
+                                dashboard_font(assets.as_deref(), 22.0),
                                 TextColor(Color::WHITE),
                             ));
                             identity.spawn((
@@ -3222,89 +3224,130 @@ fn spawn_dashboard(
                         header,
                         4,
                         FlowUiAction::OpenSettings,
-                        "SETTINGS",
-                        px(112),
-                        false,
-                        false,
+                        DashboardButtonPresentation {
+                            label: "SETTINGS",
+                            width: px(112),
+                            primary: false,
+                            disabled: false,
+                            assets: assets.as_deref(),
+                            icon: assets.as_deref().map(|assets| assets.settings_icon.clone()),
+                        },
                     );
                     spawn_dashboard_button(
                         header,
                         5,
                         FlowUiAction::OpenDashboardMenu,
-                        "MENU",
-                        px(92),
-                        false,
-                        false,
+                        DashboardButtonPresentation {
+                            label: "MENU",
+                            width: px(92),
+                            primary: false,
+                            disabled: false,
+                            assets: assets.as_deref(),
+                            icon: assets.as_deref().map(|assets| assets.menu_icon.clone()),
+                        },
                     );
                 });
-            root.spawn((
-                DashboardPreviewHost,
-                DashboardButtonStyle::Preview,
-                Button,
-                FlowButton {
-                    index: 3,
-                    action: FlowUiAction::OpenBuildEditor,
-                    error_action: false,
-                    build_editor_action: false,
-                },
-                Node {
-                    width: percent(58),
-                    max_width: px(700),
-                    min_height: px(250),
-                    max_height: px(430),
-                    flex_grow: 1.0,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::End,
-                    border: UiRect::all(px(2)),
-                    border_radius: BorderRadius::all(px(24)),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-                BorderColor::all(Color::NONE),
-            ));
-            root.spawn((
-                Button,
-                DashboardBuildCard,
-                DashboardButtonStyle::Build,
-                FlowButton {
-                    index: 3,
-                    action: FlowUiAction::OpenBuildEditor,
-                    error_action: false,
-                    build_editor_action: false,
-                },
-                Node {
-                    width: percent(42),
-                    max_width: px(470),
-                    min_height: px(78),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    padding: UiRect::axes(px(18), px(8)),
-                    border: UiRect::all(px(2)),
-                    border_radius: BorderRadius::all(px(14)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.91, 0.95, 1.0)),
-                BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
-            ))
-            .with_children(|card| {
-                card.spawn((
-                    Text::new(build_name.to_uppercase()),
-                    TextFont::from_font_size(21.0),
-                    TextColor(Color::srgb(0.035, 0.12, 0.32)),
-                ));
-                card.spawn((
-                    Text::new(build_summary),
-                    TextFont::from_font_size(13.0),
-                    TextColor(Color::srgb(0.08, 0.18, 0.35)),
-                ));
-                card.spawn((
-                    Text::new("CHANGE BRAWLER"),
-                    TextFont::from_font_size(13.0),
-                    TextColor(Color::srgb(0.03, 0.36, 0.82)),
-                ));
-            });
+            root.spawn((Node {
+                width: percent(100),
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(5),
+                ..default()
+            },))
+                .with_children(|center| {
+                    center.spawn((
+                        DashboardPreviewHost,
+                        DashboardButtonStyle::Preview,
+                        Button,
+                        FlowButton {
+                            index: 3,
+                            action: FlowUiAction::OpenBuildEditor,
+                            error_action: false,
+                            build_editor_action: false,
+                        },
+                        Node {
+                            width: percent(54),
+                            max_width: px(650),
+                            min_height: px(280),
+                            max_height: px(470),
+                            flex_grow: 1.0,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::End,
+                            border: UiRect::all(px(2)),
+                            border_radius: BorderRadius::all(px(24)),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                        BorderColor::all(Color::NONE),
+                    ));
+                    center
+                        .spawn((
+                            Button,
+                            DashboardBuildCard,
+                            DashboardButtonStyle::Build,
+                            FlowButton {
+                                index: 3,
+                                action: FlowUiAction::OpenBuildEditor,
+                                error_action: false,
+                                build_editor_action: false,
+                            },
+                            Node {
+                                width: percent(30),
+                                max_width: px(365),
+                                min_height: px(104),
+                                column_gap: px(12),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                padding: UiRect::axes(px(12), px(8)),
+                                border: UiRect::all(px(2)),
+                                border_radius: BorderRadius::all(px(14)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.91, 0.95, 1.0)),
+                            BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
+                            BoxShadow::new(
+                                Color::srgba(0.0, 0.02, 0.08, 0.65),
+                                px(0),
+                                px(5),
+                                px(0),
+                                px(3),
+                            ),
+                        ))
+                        .with_children(|card| {
+                            spawn_dashboard_icon_well(
+                                card,
+                                assets.as_deref().map(|assets| assets.build_icon.clone()),
+                                52.0,
+                                31.0,
+                                Color::srgb(0.05, 0.34, 0.82),
+                            );
+                            card.spawn((Node {
+                                flex_direction: FlexDirection::Column,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },))
+                                .with_children(|details| {
+                                    details.spawn((
+                                        Text::new(build_name.to_uppercase()),
+                                        dashboard_font(assets.as_deref(), 24.0),
+                                        TextColor(Color::srgb(0.035, 0.12, 0.32)),
+                                    ));
+                                    details.spawn((
+                                        Text::new(build_summary),
+                                        TextFont::from_font_size(12.0),
+                                        TextColor(Color::srgb(0.08, 0.18, 0.35)),
+                                    ));
+                                    details.spawn((
+                                        Text::new("CHANGE BRAWLER"),
+                                        dashboard_font(assets.as_deref(), 15.0),
+                                        TextColor(Color::srgb(0.03, 0.36, 0.82)),
+                                    ));
+                                });
+                        });
+                });
             root.spawn((Node {
                 width: percent(94),
                 max_width: px(1180),
@@ -3330,8 +3373,8 @@ fn spawn_dashboard(
                             Node {
                                 width: percent(44),
                                 min_height: px(104),
-                                flex_direction: FlexDirection::Column,
-                                align_items: AlignItems::FlexStart,
+                                column_gap: px(14),
+                                align_items: AlignItems::Center,
                                 justify_content: JustifyContent::Center,
                                 padding: UiRect::axes(px(18), px(10)),
                                 border: UiRect::all(px(3)),
@@ -3340,42 +3383,71 @@ fn spawn_dashboard(
                             },
                             BackgroundColor(Color::srgb(0.92, 0.95, 1.0)),
                             BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
+                            BoxShadow::new(
+                                Color::srgba(0.0, 0.02, 0.08, 0.65),
+                                px(0),
+                                px(5),
+                                px(0),
+                                px(3),
+                            ),
                         ))
                         .with_children(|card| {
-                            card.spawn((
-                                Text::new(game.display_name.to_uppercase()),
-                                TextFont::from_font_size(24.0),
-                                TextColor(Color::srgb(0.035, 0.12, 0.32)),
-                            ));
-                            card.spawn((
-                                Text::new(format!("{game_summary}\n{population}")),
-                                DashboardGameSummaryLabel,
-                                TextFont::from_font_size(13.0),
-                                TextColor(Color::srgb(0.08, 0.18, 0.35)),
-                                TextLayout::new(Justify::Left, LineBreak::WordBoundary),
-                            ));
+                            spawn_dashboard_icon_well(
+                                card,
+                                assets.as_deref().map(|assets| assets.mode_icon.clone()),
+                                68.0,
+                                42.0,
+                                Color::srgb(0.05, 0.34, 0.82),
+                            );
+                            card.spawn((Node {
+                                flex_direction: FlexDirection::Column,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },))
+                                .with_children(|details| {
+                                    details.spawn((
+                                        Text::new(game.display_name.to_uppercase()),
+                                        dashboard_font(assets.as_deref(), 28.0),
+                                        TextColor(Color::srgb(0.035, 0.12, 0.32)),
+                                    ));
+                                    details.spawn((
+                                        Text::new(format!("{game_summary}\n{population}")),
+                                        DashboardGameSummaryLabel,
+                                        TextFont::from_font_size(12.0),
+                                        TextColor(Color::srgb(0.08, 0.18, 0.35)),
+                                        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
+                                    ));
+                                });
                         });
                     spawn_dashboard_button(
                         actions,
                         1,
                         FlowUiAction::StartPractice,
-                        "PRACTICE",
-                        percent(21),
-                        false,
-                        false,
+                        DashboardButtonPresentation {
+                            label: "PRACTICE",
+                            width: percent(21),
+                            primary: false,
+                            disabled: false,
+                            assets: assets.as_deref(),
+                            icon: assets.as_deref().map(|assets| assets.practice_icon.clone()),
+                        },
                     );
                     spawn_dashboard_button(
                         actions,
                         0,
                         FlowUiAction::JoinQueue,
-                        if capacity_occupied {
-                            "MATCH IN PROGRESS"
-                        } else {
-                            "PLAY"
+                        DashboardButtonPresentation {
+                            label: if capacity_occupied {
+                                "MATCH IN PROGRESS"
+                            } else {
+                                "PLAY"
+                            },
+                            width: percent(33),
+                            primary: true,
+                            disabled: capacity_occupied,
+                            assets: assets.as_deref(),
+                            icon: assets.as_deref().map(|assets| assets.play_icon.clone()),
                         },
-                        percent(33),
-                        true,
-                        capacity_occupied,
                     );
                 });
         });
@@ -4314,9 +4386,73 @@ fn dashboard_root_node() -> Node {
         flex_direction: FlexDirection::Column,
         align_items: AlignItems::Center,
         justify_content: JustifyContent::FlexStart,
-        row_gap: px(7),
-        padding: UiRect::axes(px(16), px(10)),
+        row_gap: px(5),
+        padding: UiRect::axes(px(16), px(8)),
         ..default()
+    }
+}
+
+fn dashboard_font(assets: Option<&super::ClientAssetHandles>, size: f32) -> TextFont {
+    assets.map_or_else(
+        || TextFont::from_font_size(size),
+        |assets| TextFont {
+            font: assets.dashboard_font.clone().into(),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+    )
+}
+
+fn spawn_dashboard_icon_well(
+    parent: &mut ChildSpawnerCommands,
+    icon: Option<Handle<Image>>,
+    well_size: f32,
+    icon_size: f32,
+    color: Color,
+) {
+    parent
+        .spawn((
+            Node {
+                width: px(well_size),
+                height: px(well_size),
+                flex_shrink: 0.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(px(well_size * 0.28)),
+                ..default()
+            },
+            BackgroundColor(color),
+        ))
+        .with_children(|well| {
+            if let Some(icon) = icon {
+                well.spawn((
+                    ImageNode::new(icon),
+                    Node {
+                        width: px(icon_size),
+                        height: px(icon_size),
+                        ..default()
+                    },
+                ));
+            }
+        });
+}
+
+struct DashboardButtonPresentation<'a> {
+    label: &'a str,
+    width: Val,
+    primary: bool,
+    disabled: bool,
+    assets: Option<&'a super::ClientAssetHandles>,
+    icon: Option<Handle<Image>>,
+}
+
+const fn dashboard_button_icon_size(is_play: bool, is_practice: bool) -> f32 {
+    if is_play {
+        42.0
+    } else if is_practice {
+        32.0
+    } else {
+        21.0
     }
 }
 
@@ -4324,13 +4460,19 @@ fn spawn_dashboard_button(
     parent: &mut ChildSpawnerCommands,
     index: usize,
     action: FlowUiAction,
-    label: &str,
-    width: Val,
-    primary: bool,
-    disabled: bool,
+    presentation: DashboardButtonPresentation<'_>,
 ) {
+    let DashboardButtonPresentation {
+        label,
+        width,
+        primary,
+        disabled,
+        assets,
+        icon,
+    } = presentation;
     let is_play = matches!(action, FlowUiAction::JoinQueue);
     let is_practice = matches!(action, FlowUiAction::StartPractice);
+    let icon_size = dashboard_button_icon_size(is_play, is_practice);
     let mut button = parent.spawn((
         Button,
         FlowButton {
@@ -4342,7 +4484,8 @@ fn spawn_dashboard_button(
         Node {
             width,
             min_height: px(if is_play || is_practice { 104 } else { 42 }),
-            padding: UiRect::axes(px(10), px(7)),
+            column_gap: px(if is_play || is_practice { 12 } else { 7 }),
+            padding: UiRect::axes(px(12), px(7)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             border: UiRect::all(px(if primary { 3 } else { 2 })),
@@ -4355,27 +4498,53 @@ fn spawn_dashboard_button(
             Color::srgb(0.09, 0.14, 0.2)
         }),
         BorderColor::all(Color::NONE),
+        BoxShadow::new(
+            Color::srgba(0.0, 0.02, 0.08, 0.65),
+            px(0),
+            px(if is_play { 7 } else { 4 }),
+            px(0),
+            px(3),
+        ),
     ));
     if is_play {
         button.insert((DashboardPlayButton, DashboardButtonStyle::Play));
     } else if is_practice {
         button.insert(DashboardButtonStyle::Practice);
+    } else {
+        button.insert(DashboardButtonStyle::Header);
     }
     if disabled {
         button.insert(InteractionDisabled);
     }
     button.with_children(|button| {
+        if let Some(icon) = icon {
+            button.spawn((
+                ImageNode::new(icon),
+                Node {
+                    width: px(icon_size),
+                    height: px(icon_size),
+                    ..default()
+                },
+            ));
+        }
         let mut text = button.spawn((
             Text::new(label),
-            TextFont::from_font_size(if primary {
-                31.0
-            } else if is_practice {
-                20.0
-            } else {
-                16.0
-            }),
+            dashboard_font(
+                assets,
+                if primary {
+                    38.0
+                } else if is_practice {
+                    24.0
+                } else {
+                    15.0
+                },
+            ),
             TextColor(if primary || is_practice {
-                Color::srgb(0.04, 0.04, 0.05)
+                if primary {
+                    Color::WHITE
+                } else {
+                    Color::srgb(0.04, 0.2, 0.55)
+                }
             } else {
                 Color::srgb(0.9, 0.95, 1.0)
             }),
@@ -4520,6 +4689,9 @@ fn flow_button_background(
                 | DashboardButtonStyle::Practice,
             ),
         ) => Color::srgb(0.78, 0.87, 0.98),
+        (Interaction::Pressed, Some(DashboardButtonStyle::Header)) => {
+            Color::srgb(0.025, 0.22, 0.58)
+        }
         (Interaction::Pressed, None) => Color::srgb(0.08, 0.48, 0.58),
         (Interaction::Hovered, Some(DashboardButtonStyle::Play)) => Color::srgb(1.0, 0.7, 0.08),
         (
@@ -4530,6 +4702,7 @@ fn flow_button_background(
                 | DashboardButtonStyle::Practice,
             ),
         ) => Color::srgb(0.86, 0.93, 1.0),
+        (Interaction::Hovered, Some(DashboardButtonStyle::Header)) => Color::srgb(0.06, 0.4, 0.9),
         (Interaction::Hovered, None) => Color::srgb(0.12, 0.32, 0.42),
         (_, Some(DashboardButtonStyle::Play)) => Color::srgb(1.0, 0.62, 0.04),
         (
@@ -4540,6 +4713,7 @@ fn flow_button_background(
                 | DashboardButtonStyle::Practice,
             ),
         ) => Color::srgb(0.92, 0.95, 1.0),
+        (_, Some(DashboardButtonStyle::Header)) => Color::srgb(0.035, 0.3, 0.76),
         (_, None) if focused => Color::srgb(0.12, 0.32, 0.42),
         (_, None) if selected => Color::srgb(0.12, 0.24, 0.34),
         (_, None) => Color::srgb(0.09, 0.14, 0.2),
@@ -4564,6 +4738,8 @@ fn flow_button_border(
         Color::WHITE
     } else if matches!(dashboard_style, Some(DashboardButtonStyle::Play)) {
         Color::srgb(1.0, 0.86, 0.35)
+    } else if matches!(dashboard_style, Some(DashboardButtonStyle::Header)) {
+        Color::srgb(0.18, 0.58, 1.0)
     } else if matches!(
         dashboard_style,
         Some(
@@ -4856,6 +5032,23 @@ mod tests {
             ),
             Color::NONE
         );
+    }
+
+    #[test]
+    fn dashboard_action_hover_colors_are_visibly_distinct_from_rest() {
+        for style in [
+            DashboardButtonStyle::Header,
+            DashboardButtonStyle::Build,
+            DashboardButtonStyle::Mode,
+            DashboardButtonStyle::Practice,
+            DashboardButtonStyle::Play,
+        ] {
+            assert_ne!(
+                flow_button_background(false, Interaction::None, false, false, Some(style)),
+                flow_button_background(false, Interaction::Hovered, false, false, Some(style)),
+                "{style:?} must have a visible hover fill"
+            );
+        }
     }
 
     #[test]
