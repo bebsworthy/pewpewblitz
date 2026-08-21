@@ -1,11 +1,14 @@
 //! Stable game-object taxonomy and render-neutral visual-variant compatibility.
 
-use super::{MapObjectDefinitionId, MapPresentationThemeId, MapShape, MapVisualVariantId};
+use super::{
+    CollisionProfileId, EntityDefinitionId, MapObjectDefinitionId, MapPresentationProfileId,
+    MapPresentationThemeId, MapShape, MapVisualVariantId,
+};
 use bevy::prelude::{FromWorld, Resource, Vec2};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MAP_OBJECT_CATALOG_SCHEMA_VERSION: u16 = 1;
+pub const MAP_OBJECT_CATALOG_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapObjectRole {
@@ -26,6 +29,21 @@ pub enum MapObjectFitPolicy {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum MapObjectPlacementBinding {
+    Obstacle {
+        collision_profile_id: CollisionProfileId,
+        presentation_profile_id: Option<MapPresentationProfileId>,
+    },
+    Decoration {
+        definition_id: EntityDefinitionId,
+        presentation_profile_id: MapPresentationProfileId,
+    },
+    Generated,
+    Unsupported,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MapObjectDefinition {
     pub id: MapObjectDefinitionId,
     pub key: String,
@@ -35,9 +53,11 @@ pub struct MapObjectDefinition {
     pub rotation_step_degrees: u16,
     pub compatible_visual_variants: Vec<MapVisualVariantId>,
     pub tags: Vec<String>,
+    pub placement_binding: MapObjectPlacementBinding,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MapVisualVariantDefinition {
     pub id: MapVisualVariantId,
     pub key: String,
@@ -47,17 +67,20 @@ pub struct MapVisualVariantDefinition {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct MapThemeVariantDefault {
     pub object_definition_id: MapObjectDefinitionId,
     pub visual_variant_id: MapVisualVariantId,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MapThemeDefinition {
     pub id: MapPresentationThemeId,
     pub key: String,
     pub defaults: Vec<MapThemeVariantDefault>,
-    pub outside_dressing_variants: Vec<MapVisualVariantId>,
+    pub outside_dressing_anchor_variants: Vec<MapVisualVariantId>,
+    pub outside_dressing_detail_variants: Vec<MapVisualVariantId>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -66,6 +89,27 @@ pub struct MapObjectCatalog {
     pub objects: Vec<MapObjectDefinition>,
     pub visual_variants: Vec<MapVisualVariantDefinition>,
     pub themes: Vec<MapThemeDefinition>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapObjectSource {
+    schema_version: u16,
+    objects: Vec<MapObjectDefinition>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapVisualVariantSource {
+    schema_version: u16,
+    visual_variants: Vec<MapVisualVariantDefinition>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapThemeSource {
+    schema_version: u16,
+    themes: Vec<MapThemeDefinition>,
 }
 
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -79,8 +123,27 @@ impl FromWorld for MapObjectCatalogResource {
 
 impl MapObjectCatalog {
     pub fn embedded() -> Result<Self, String> {
-        let catalog: Self = ron::from_str(include_str!("../../content/v4/map_objects.ron"))
-            .map_err(|error| format!("embedded map-object catalog parse failed: {error}"))?;
+        let objects: MapObjectSource =
+            ron::from_str(include_str!("../../content/v4/map_objects.ron")).map_err(|error| {
+                format!("embedded map-object definitions parse failed: {error}")
+            })?;
+        let variants: MapVisualVariantSource =
+            ron::from_str(include_str!("../../content/v4/map_visual_variants.ron"))
+                .map_err(|error| format!("embedded map visual variants parse failed: {error}"))?;
+        let themes: MapThemeSource = ron::from_str(include_str!("../../content/v4/map_themes.ron"))
+            .map_err(|error| format!("embedded map themes parse failed: {error}"))?;
+        if objects.schema_version != MAP_OBJECT_CATALOG_SCHEMA_VERSION
+            || variants.schema_version != MAP_OBJECT_CATALOG_SCHEMA_VERSION
+            || themes.schema_version != MAP_OBJECT_CATALOG_SCHEMA_VERSION
+        {
+            return Err("map object source schema versions do not match".to_string());
+        }
+        let catalog = Self {
+            schema_version: MAP_OBJECT_CATALOG_SCHEMA_VERSION,
+            objects: objects.objects,
+            visual_variants: variants.visual_variants,
+            themes: themes.themes,
+        };
         catalog.validate()?;
         Ok(catalog)
     }
@@ -118,74 +181,9 @@ impl MapObjectCatalog {
             .iter()
             .map(|value| (value.id, value))
             .collect();
-        for object in &self.objects {
-            if object.display_name.trim().is_empty()
-                || object.rotation_step_degrees == 0
-                || 360 % object.rotation_step_degrees != 0
-                || object.compatible_visual_variants.is_empty()
-                || !is_sorted_unique(&object.compatible_visual_variants)
-                || object.tags.iter().any(|tag| !valid_key(tag))
-                || !valid_role_footprint(object.role, object.default_footprint)
-            {
-                return Err(format!("invalid map-object definition: {}", object.key));
-            }
-            for variant_id in &object.compatible_visual_variants {
-                let Some(variant) = variants.get(variant_id) else {
-                    return Err(format!("object {} references unknown variant", object.key));
-                };
-                if !variant.compatible_objects.contains(&object.id) {
-                    return Err(format!(
-                        "object/variant compatibility is not reciprocal: {}",
-                        object.key
-                    ));
-                }
-            }
-        }
-        for variant in &self.visual_variants {
-            if variant.compatible_objects.is_empty()
-                || !is_sorted_unique(&variant.compatible_objects)
-                || !variant.native_footprint.is_finite()
-                || variant.native_footprint.min_element() <= 0.0
-                || variant
-                    .compatible_objects
-                    .iter()
-                    .any(|id| !objects.contains_key(id))
-            {
-                return Err(format!(
-                    "invalid visual-variant definition: {}",
-                    variant.key
-                ));
-            }
-        }
-        for theme in &self.themes {
-            if theme.defaults.is_empty()
-                || theme.outside_dressing_variants.is_empty()
-                || !is_sorted_unique(&theme.outside_dressing_variants)
-            {
-                return Err(format!("invalid map theme: {}", theme.key));
-            }
-            let mut default_objects = BTreeSet::new();
-            for default in &theme.defaults {
-                let (Some(object), Some(variant)) = (
-                    objects.get(&default.object_definition_id),
-                    variants.get(&default.visual_variant_id),
-                ) else {
-                    return Err(format!("theme {} references unknown default", theme.key));
-                };
-                if !default_objects.insert(default.object_definition_id)
-                    || !object.compatible_visual_variants.contains(&variant.id)
-                {
-                    return Err(format!("theme {} has incompatible defaults", theme.key));
-                }
-            }
-            if theme
-                .outside_dressing_variants
-                .iter()
-                .any(|id| !variants.contains_key(id))
-            {
-                return Err(format!("theme {} references unknown dressing", theme.key));
-            }
-        }
+        validate_objects(&self.objects, &variants)?;
+        validate_variants(&self.visual_variants, &objects)?;
+        validate_themes(&self.themes, &objects, &variants)?;
         Ok(())
     }
 
@@ -202,6 +200,11 @@ impl MapObjectCatalog {
     #[must_use]
     pub fn theme(&self, id: MapPresentationThemeId) -> Option<&MapThemeDefinition> {
         self.themes.iter().find(|value| value.id == id)
+    }
+
+    #[cfg(feature = "client")]
+    pub(crate) fn themes(&self) -> impl Iterator<Item = &MapThemeDefinition> {
+        self.themes.iter()
     }
 
     #[must_use]
@@ -224,6 +227,119 @@ impl MapObjectCatalog {
             .find(|value| value.object_definition_id == object)
             .map(|value| value.visual_variant_id)
     }
+}
+
+fn validate_objects(
+    objects: &[MapObjectDefinition],
+    variants: &BTreeMap<MapVisualVariantId, &MapVisualVariantDefinition>,
+) -> Result<(), String> {
+    for object in objects {
+        if object.display_name.trim().is_empty()
+            || object.rotation_step_degrees == 0
+            || 360 % object.rotation_step_degrees != 0
+            || object.compatible_visual_variants.is_empty()
+            || !is_sorted_unique(&object.compatible_visual_variants)
+            || object.tags.iter().any(|tag| !valid_key(tag))
+            || !valid_role_footprint(object.role, object.default_footprint)
+            || !valid_role_binding(object.role, &object.placement_binding)
+        {
+            return Err(format!("invalid map-object definition: {}", object.key));
+        }
+        for variant_id in &object.compatible_visual_variants {
+            let Some(variant) = variants.get(variant_id) else {
+                return Err(format!("object {} references unknown variant", object.key));
+            };
+            if !variant.compatible_objects.contains(&object.id) {
+                return Err(format!(
+                    "object/variant compatibility is not reciprocal: {}",
+                    object.key
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_variants(
+    variants: &[MapVisualVariantDefinition],
+    objects: &BTreeMap<MapObjectDefinitionId, &MapObjectDefinition>,
+) -> Result<(), String> {
+    for variant in variants {
+        if variant.compatible_objects.is_empty()
+            || !is_sorted_unique(&variant.compatible_objects)
+            || !variant.native_footprint.is_finite()
+            || variant.native_footprint.min_element() <= 0.0
+            || variant
+                .compatible_objects
+                .iter()
+                .any(|id| !objects.contains_key(id))
+        {
+            return Err(format!(
+                "invalid visual-variant definition: {}",
+                variant.key
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_themes(
+    themes: &[MapThemeDefinition],
+    objects: &BTreeMap<MapObjectDefinitionId, &MapObjectDefinition>,
+    variants: &BTreeMap<MapVisualVariantId, &MapVisualVariantDefinition>,
+) -> Result<(), String> {
+    for theme in themes {
+        if theme.defaults.is_empty()
+            || !is_sorted_unique(&theme.outside_dressing_anchor_variants)
+            || !is_sorted_unique(&theme.outside_dressing_detail_variants)
+        {
+            return Err(format!("invalid map theme: {}", theme.key));
+        }
+        let mut default_objects = BTreeSet::new();
+        for default in &theme.defaults {
+            let (Some(object), Some(variant)) = (
+                objects.get(&default.object_definition_id),
+                variants.get(&default.visual_variant_id),
+            ) else {
+                return Err(format!("theme {} references unknown default", theme.key));
+            };
+            if !default_objects.insert(default.object_definition_id)
+                || !object.compatible_visual_variants.contains(&variant.id)
+            {
+                return Err(format!("theme {} has incompatible defaults", theme.key));
+            }
+        }
+        if theme
+            .outside_dressing_anchor_variants
+            .iter()
+            .chain(&theme.outside_dressing_detail_variants)
+            .any(|id| !variants.contains_key(id))
+        {
+            return Err(format!("theme {} references unknown dressing", theme.key));
+        }
+    }
+    Ok(())
+}
+
+fn valid_role_binding(role: MapObjectRole, binding: &MapObjectPlacementBinding) -> bool {
+    matches!(
+        (role, binding),
+        (
+            MapObjectRole::ObstacleIndestructible,
+            MapObjectPlacementBinding::Obstacle { .. }
+        ) | (
+            MapObjectRole::Decoration,
+            MapObjectPlacementBinding::Decoration { .. }
+        ) | (
+            MapObjectRole::Surface | MapObjectRole::Boundary,
+            MapObjectPlacementBinding::Generated
+        ) | (
+            MapObjectRole::ObstacleDestructible
+                | MapObjectRole::TerrainDestructible
+                | MapObjectRole::Marker,
+            MapObjectPlacementBinding::Unsupported
+        )
+    )
 }
 
 fn validate_sorted_ids_and_keys<'a>(

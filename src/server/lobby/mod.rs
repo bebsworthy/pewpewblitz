@@ -537,6 +537,18 @@ impl LobbyState {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let map_preset = match self.mode {
+            GameMode::Wipeout => crate::map::BUILT_IN_MAP_PRESET,
+            GameMode::HotZone => crate::map::HOT_ZONE_MAP_PRESET,
+        };
+        let map_revision = crate::map::MapContentCatalog::embedded()
+            .ok()
+            .and_then(|catalog| {
+                catalog
+                    .preset(map_preset)
+                    .map(|preset| preset.admission_revision)
+            })
+            .ok_or(CodecError::InvalidValue)?;
         let body = AllocateRequestBody {
             request_id,
             lobby_session_id: sessions[0].lobby_session_id,
@@ -544,11 +556,8 @@ impl LobbyState {
                 GameMode::Wipeout => brawler_routing::GameMode::Wipeout,
                 GameMode::HotZone => brawler_routing::GameMode::HotZone,
             },
-            map_preset: match self.mode {
-                GameMode::Wipeout => crate::map::BUILT_IN_MAP_PRESET.0,
-                GameMode::HotZone => crate::map::HOT_ZONE_MAP_PRESET.0,
-            },
-            map_revision: 1,
+            map_preset: map_preset.0,
+            map_revision,
             rules_profile: 1,
             objective_target: match self.mode {
                 GameMode::Wipeout => 10,
@@ -641,7 +650,9 @@ impl LobbyState {
                     brawler_routing::GameMode::HotZone
                 },
                 map_preset: reservation.map_preset_id.0,
-                map_revision: 1,
+                map_revision: catalog
+                    .map_admission_revision(reservation.map_preset_id)
+                    .ok_or(CodecError::InvalidValue)?,
                 rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
                 objective_target: rules.objective_target,
                 match_duration_ticks: rules.match_duration_ticks,
@@ -740,7 +751,9 @@ impl LobbyState {
                     brawler_routing::GameMode::HotZone
                 },
                 map_preset: game.map_preset_ids[0].0,
-                map_revision: 1,
+                map_revision: catalog
+                    .map_admission_revision(game.map_preset_ids[0])
+                    .ok_or(Rejection::Internal)?,
                 rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
                 objective_target: rules.objective_target,
                 match_duration_ticks: rules.match_duration_ticks,

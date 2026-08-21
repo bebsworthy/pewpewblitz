@@ -144,6 +144,17 @@ impl MapShape {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MapObjectPlacement {
+    pub placement_id: MapPlacementId,
+    pub object_definition_id: MapObjectDefinitionId,
+    pub visual_variant_id: Option<MapVisualVariantId>,
+    pub position: Vec2,
+    pub rotation: f32,
+    pub footprint_override: Option<MapShape>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GeometryPlacement {
     pub placement_id: MapPlacementId,
     pub object_definition_id: MapObjectDefinitionId,
@@ -222,6 +233,7 @@ pub struct ModeAnchorPlacement {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MapRecipe {
     pub recipe_id: MapRecipeId,
     pub revision: u32,
@@ -230,9 +242,7 @@ pub struct MapRecipe {
     pub presentation_theme_id: MapPresentationThemeId,
     pub playable_bounds: AxisAlignedMapRect,
     pub camera_bounds: AxisAlignedMapRect,
-    pub geometry: Vec<GeometryPlacement>,
-    pub visuals: Vec<VisualPlacement>,
-    pub entities: Vec<MapEntityPlacement>,
+    pub objects: Vec<MapObjectPlacement>,
     pub regions: Vec<MapRegionPlacement>,
     pub spawn_areas: Vec<TeamSpawnArea>,
     pub spawn_points: Vec<TeamSpawnPoint>,

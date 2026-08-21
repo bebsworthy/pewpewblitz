@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Feedback review |
+| Status | Complete |
 | Depends on | V3 complete |
 | Outcome | Crossroads reads as a rich 3D arena with themed ground, recognizable modular cover, a wide decorated perimeter, and a reusable game-object taxonomy whose placements may mix compatible visual styles |
 
@@ -538,6 +538,30 @@ M01 enters playtest when:
 
 Complete only after feedback classification, reverification, and learning review. M02 does not
 begin before closeout.
+
+## Closeout and learning review — 2026-08-21
+
+The user accepted the arena presentation as a sufficient first pass after the long-lens visual
+review. The final full verification passed before commit `83707b4`: `just check`, `just lint`, and
+`just test`, including 82 network and 14 performance tests.
+
+Lessons carried into M02:
+
+- camera framing must be derived from the actual projection and ground footprint; orthographic
+  assumptions cannot survive a perspective conversion;
+- imported models need variant-owned transforms and material treatment because source scale,
+  pivots, and palettes are pack-specific;
+- visual feedback needs clear screenshots before changing behavior—the suspected overhead-label
+  clipping was a review error and the speculative change was reverted;
+- reusable presentation works best when gameplay objects, compatible visual variants, client-only
+  asset profiles, and theme defaults remain separate;
+- map generation, generated meshes, and imported scenes need explicit ownership so replacement,
+  restart, and reconnect cleanup stay testable;
+- generated ground and terrain detail should be bounded, deterministic, and subtle enough not to
+  compete with combat information.
+
+No new general-purpose skill is justified by these project-specific findings. The reusable rules
+are recorded in this milestone and the V4 roadmap.
 
 ## Research references
 

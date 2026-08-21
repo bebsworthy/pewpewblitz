@@ -21,12 +21,12 @@ weapon, and cover families; cached primitives and generated meshes retain exact 
 and deterministic fallbacks. See the [completed V3 roadmap](docs/implementation/v3/roadmap.md) and
 [V3 closeout milestone](docs/implementation/v3/milestone-04.md).
 
-V4 M01 is in feedback review with the accepted fixed-perspective correction. Its scope turns the V3
-renderer into a reusable map-presentation and content foundation: a game-object taxonomy mapped to curated visual assets,
-themed ground and modular decorated borders, one document per map, and a second map/theme proof.
+V4 completed on 2026-08-21. It turned the V3 renderer into a reusable map-presentation and content
+foundation: a game-object taxonomy mapped to curated visual assets, themed ground and modular
+decorated borders, one document per built-in map, and the Ashen Court second-map/theme proof.
 The player-facing map editor is deferred to the root backlog. The
 [V4 roadmap](docs/implementation/v4/roadmap.md) and
-[M01 specification](docs/implementation/v4/milestone-01.md) define the active feedback contract.
+[M03 closeout](docs/implementation/v4/milestone-03.md) record the completed scope and evidence.
 
 ## Toolchain
 
@@ -61,7 +61,8 @@ local process tree.
 `just v3-render-evidence` builds release client/server/supervisor binaries, runs two routed native
 clients at 1280×720, records a bounded 10-second warm-up plus 30-second measurement, and writes
 `target/v3-render-evidence.txt` without overwriting an existing report. Set
-`BRAWLER_RENDER_MODE=hot-zone` for the second mode or pass a different report path.
+`BRAWLER_RENDER_MODE=hot-zone` to target the exact Hot Zone 2v2 game type with two additional
+headless roster clients, or pass a different report path.
 
 `just test` owns all deterministic Rust suites, including routing, client, server, network, and
 performance tests. `just e2e` runs the shortest real-process product path with two clients and First
@@ -81,6 +82,15 @@ Wipeout uses `kills_to_win`, Hot Zone uses `capture_seconds`, and every entry de
 `match_duration_seconds`, `countdown_seconds`, and `respawn_seconds`. There is no shared defaults
 block or operator-facing rules profile; startup validates and passes the resolved values to the
 authoritative match worker.
+
+Built-in maps are authored under `content/v4/maps/`. To add one, create
+`content/v4/maps/builtin/<map-key>.ron` and add its stable metadata and admission revision to the
+sorted `content/v4/maps/index.ron`. The build embeds every direct `.ron` document and startup fails
+if the index and embedded source set differ. Shared server-safe definitions live in
+`map_definitions.ron`, semantic objects in `map_objects.ron`, compatibility/fitting data in
+`map_visual_variants.ron`, and theme defaults in `map_themes.ron`. Recipes reference stable IDs,
+never GLB paths; the server lowers semantic placements into the authoritative resolved snapshot,
+while the client maps those stable IDs to its separately packaged visual catalog.
 
 `python3 scripts/network-routed-evidence.py` runs bounded cold routed-process cycles.
 It records the exact
@@ -196,6 +206,7 @@ Do not use `--all-features` as a supported application build: client and server 
 Authoritative authored gameplay data lives under `content/v1/` and is compiled into both roles.
 Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
 recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.
-The active implementation scope is always the next validated milestone file. V4 M01 is currently
-in user playtest; its roadmap and milestone define the presentation/asset feedback work, while
-deferred release polish remains visible in the completed V3 roadmap and root backlog.
+The active implementation scope is always the next validated milestone file. V4 is complete; V5
+research defines the next proposed product-shell work, while production implementation still waits
+for user validation of its milestone specification. Deferred release polish remains visible in the
+completed version roadmaps and root backlog.

@@ -7,9 +7,9 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v4/roadmap.md` and `milestone-01.md` for the active game-object taxonomy,
-   reusable map presentation, asset-library, and scalable-map direction. M01 is in user playtest
-   after implementation and automated verification on 2026-08-20.
+2. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the completed independently
+   embedded map documents, semantic object placement, two reusable themes, routed admission,
+   presentation hardening, and V4 closeout evidence.
 3. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
 4. `docs/11-art-and-presentation-direction.md` and `docs/12-sprite-inventory.md` for the current
@@ -32,9 +32,11 @@ obsolete projectile sprite/XY writer, affected verification, and user acceptance
 2026-08-20 after its independent fighter/combat visual implementation, canonical verification,
 native smoke, and accepted playtest handoff. M04 completed after renderer retirement, lifecycle and
 readability verification, iterative fighter-presentation feedback, documentation reconciliation,
-and its learning review. V4 M01 is now `User playtest` after the user approved implementation and
-the automated implementation gates passed on 2026-08-20; keep feedback changes within its accepted
-object-taxonomy, floor, perimeter, camera, and asset-library scope.
+and its learning review. V4 M01 completed after its accepted first presentation pass and learning
+review. V4 M02 completed on 2026-08-21 after canonical verification and a user playtest confirmed
+that the storage migration preserved the accepted presentation. V4 M03 and V4 completed on
+2026-08-21 after Ashen Court and the second theme passed canonical/native verification, the
+detached-overhead feedback fix was accepted, and the learning review was recorded.
 
 ## Technical stack
 
@@ -163,8 +165,10 @@ tests/
   performance.rs           fixed-tick and subsystem performance/capacity gates
 ```
 
-`content/v1/` owns build-embedded authored gameplay data. `references/` contains read-only upstream
-material and is not part of Brawler's production module layout.
+`content/v1/` retains non-map build-embedded authored gameplay data. `content/v4/` owns shared map
+definitions, semantic object/variant/theme catalogs, the built-in map index, and one recipe document
+per built-in. `references/` contains read-only upstream material and is not part of Brawler's
+production module layout.
 
 The routed supervisor, route envelope, IPC transport, and isolated lobby/match-worker composition
 are completed V2 production paths. `just server`, `just client`, `just run`, and `just e2e` exercise

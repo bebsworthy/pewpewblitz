@@ -11,6 +11,7 @@ const OVERHEAD_HEALTH_HEIGHT: f32 = 37.0;
 const OVERHEAD_AMMO_HEIGHT: f32 = 50.0;
 const HEALTH_BAR_WIDTH: f32 = 76.8;
 const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
+const FIGHTER_BODY_WORLD_HEIGHT: f32 = 24.0;
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const MAX_EFFECTS: usize = 96;
 
@@ -596,6 +597,34 @@ fn overhead_height(has_ammunition: bool) -> f32 {
     }
 }
 
+fn projected_overhead_top_left(
+    viewport_size: Vec2,
+    fighter_viewport: Vec2,
+    overhead_viewport: Vec2,
+    height: f32,
+) -> Option<Vec2> {
+    if !viewport_size.is_finite()
+        || viewport_size.x <= 0.0
+        || viewport_size.y <= 0.0
+        || !fighter_viewport.is_finite()
+        || fighter_viewport.x < 0.0
+        || fighter_viewport.x > viewport_size.x
+        || fighter_viewport.y < 0.0
+        || fighter_viewport.y > viewport_size.y
+        || !overhead_viewport.is_finite()
+        || !height.is_finite()
+        || height <= 0.0
+    {
+        return None;
+    }
+    let top_left = overhead_viewport - Vec2::new(OVERHEAD_WIDTH * 0.5, height);
+    (top_left.x + OVERHEAD_WIDTH >= 0.0
+        && top_left.x <= viewport_size.x
+        && top_left.y + height >= 0.0
+        && top_left.y <= viewport_size.y)
+        .then_some(top_left)
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "the projection phase reads the propagated world camera and writes absolute UI nodes"
@@ -604,12 +633,12 @@ pub(super) fn project_fighter_overhead_ui(
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
     fighters: Query<
         (
-            &Position,
             &crate::combat::CurrentHealth,
             Option<&crate::combat::Defeated>,
         ),
         With<Fighter>,
     >,
+    fighter_visuals: Query<(&CombatVisualOwner, &GlobalTransform), With<V3FighterVisual>>,
     mut overheads: Query<
         (
             &CombatVisualOwner,
@@ -627,10 +656,13 @@ pub(super) fn project_fighter_overhead_ui(
         return;
     };
     let Some(viewport_size) = camera.logical_viewport_size() else {
+        for (_, _, _, mut visibility) in &mut overheads {
+            *visibility = Visibility::Hidden;
+        }
         return;
     };
     for (owner, overhead, mut node, mut visibility) in &mut overheads {
-        let Ok((position, health, defeated)) = fighters.get(owner.0) else {
+        let Ok((health, defeated)) = fighters.get(owner.0) else {
             *visibility = Visibility::Hidden;
             continue;
         };
@@ -638,24 +670,39 @@ pub(super) fn project_fighter_overhead_ui(
             *visibility = Visibility::Hidden;
             continue;
         }
-        let world_position = ground_position(position.0) + Vec3::Y * OVERHEAD_WORLD_HEIGHT;
-        let Ok(viewport) = camera.world_to_viewport(camera_transform, world_position) else {
+        let Some((_, visual_transform)) = fighter_visuals
+            .iter()
+            .find(|(visual_owner, _)| visual_owner.0 == owner.0)
+        else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let ground_position = visual_transform.translation();
+        let Ok(fighter_viewport) = camera.world_to_viewport(
+            camera_transform,
+            ground_position + Vec3::Y * FIGHTER_BODY_WORLD_HEIGHT,
+        ) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let Ok(overhead_viewport) = camera.world_to_viewport(
+            camera_transform,
+            ground_position + Vec3::Y * OVERHEAD_WORLD_HEIGHT,
+        ) else {
             *visibility = Visibility::Hidden;
             continue;
         };
         let height = overhead_height(!overhead.ammo_segments.is_empty());
-        let top_left = viewport - Vec2::new(OVERHEAD_WIDTH * 0.5, height);
-        if top_left.x + OVERHEAD_WIDTH < 0.0
-            || top_left.x > viewport_size.x
-            || top_left.y + height < 0.0
-            || top_left.y > viewport_size.y
-        {
+        let Some(top_left) =
+            projected_overhead_top_left(viewport_size, fighter_viewport, overhead_viewport, height)
+        else {
             *visibility = Visibility::Hidden;
             continue;
-        }
+        };
         node.left = px(top_left.x);
         node.top = px(top_left.y);
         node.height = px(height);
+        // Projection is the sole owner that reveals a root, after installing valid coordinates.
         *visibility = Visibility::Inherited;
     }
 }
@@ -833,11 +880,10 @@ pub(super) fn update_combat_visual_state(
             *visibility = Visibility::Hidden;
             continue;
         };
-        *visibility = if *defeated {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
+        // State reconciliation may hide roots; projection alone reveals correctly positioned ones.
+        if *defeated {
+            *visibility = Visibility::Hidden;
+        }
         let ratio = (f32::from(*current) / f32::from((*maximum).max(1))).clamp(0.0, 1.0);
         if let Ok(mut fill) = fill_nodes.get_mut(overhead.fill) {
             fill.width = percent(ratio * 100.0);
@@ -1230,6 +1276,33 @@ mod tests {
         assert!((PLAYER_NAME_FONT_SIZE - 12.8).abs() < f32::EPSILON);
         assert!((overhead_height(false) - OVERHEAD_HEALTH_HEIGHT).abs() < f32::EPSILON);
         assert!(overhead_height(false) < overhead_height(true));
+    }
+
+    #[test]
+    fn overhead_is_hidden_when_only_its_elevated_anchor_intersects_the_viewport() {
+        let viewport = Vec2::new(640.0, 360.0);
+        assert_eq!(
+            projected_overhead_top_left(
+                viewport,
+                Vec2::new(650.0, 180.0),
+                Vec2::new(620.0, 150.0),
+                OVERHEAD_HEALTH_HEIGHT,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn overhead_uses_the_current_projected_anchor_when_the_fighter_is_visible() {
+        assert_eq!(
+            projected_overhead_top_left(
+                Vec2::new(640.0, 360.0),
+                Vec2::new(320.0, 180.0),
+                Vec2::new(320.0, 150.0),
+                OVERHEAD_HEALTH_HEIGHT,
+            ),
+            Some(Vec2::new(268.0, 113.0))
+        );
     }
 
     #[test]

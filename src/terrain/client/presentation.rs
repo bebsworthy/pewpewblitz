@@ -8,7 +8,8 @@
 
 use super::ExpectedClientTerrainSlot;
 use crate::client::presentation_3d::{
-    Material3dAssets, Primitive3dAssets, coordinates::ground_position,
+    Primitive3dAssets, coordinates::ground_position,
+    environment_assets::EnvironmentThemeMaterialCatalog,
 };
 use crate::terrain::model::{
     MAX_TERRAIN_DEBRIS_EFFECTS, TERRAIN_CHUNK_SIDE_CELLS, TerrainBits, TerrainChunkId,
@@ -30,6 +31,7 @@ const REDUCED_TERRAIN_DEBRIS_LIMIT: usize = 16;
 pub struct TerrainChunkVisual {
     pub chunk: TerrainChunkId,
     pub generation: TerrainGeneration,
+    pub theme_id: crate::map::MapPresentationThemeId,
     mesh: Handle<Mesh>,
 }
 
@@ -62,15 +64,17 @@ fn orthogonal_neighbors(chunk: TerrainChunkId) -> [TerrainChunkId; 4] {
 
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "Bevy system parameters own committed terrain presentation state"
+    clippy::too_many_lines,
+    reason = "one bounded system reconciles chunk mesh, generation, and theme material ownership"
 )]
 pub(crate) fn update_terrain_visuals(
     mut commands: Commands,
     mut meshes: Option<ResMut<Assets<Mesh>>>,
-    materials: Option<Res<Material3dAssets>>,
+    materials: Option<Res<EnvironmentThemeMaterialCatalog>>,
     expected: Res<ExpectedClientTerrainSlot>,
     mut convergence: ResMut<ClientTerrainConvergence>,
     visuals: Query<(Entity, &TerrainChunkVisual)>,
+    maps: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
 ) {
     let (Some(meshes), Some(materials)) = (meshes.as_deref_mut(), materials.as_deref()) else {
         return;
@@ -79,6 +83,16 @@ pub(crate) fn update_terrain_visuals(
         for (entity, _) in &visuals {
             commands.entity(entity).try_despawn();
         }
+        return;
+    };
+    let Some(snapshot) = maps
+        .iter()
+        .max_by_key(|snapshot| snapshot.identity.instance_id)
+    else {
+        return;
+    };
+    let theme_id = snapshot.presentation_theme_id;
+    let Some(theme_materials) = materials.get(theme_id) else {
         return;
     };
     let TerrainConvergencePhase::Ready { generation } = convergence.phase else {
@@ -124,7 +138,7 @@ pub(crate) fn update_terrain_visuals(
             continue;
         }
         if let Some((entity, visual)) = existing.get(chunk) {
-            if visual.generation == generation {
+            if visual.generation == generation && visual.theme_id == theme_id {
                 if rebuild.contains(chunk)
                     && let Some(mut mesh) = meshes.get_mut(&visual.mesh)
                 {
@@ -138,8 +152,12 @@ pub(crate) fn update_terrain_visuals(
             commands.entity(*entity).insert(TerrainChunkVisual {
                 chunk: *chunk,
                 generation,
+                theme_id,
                 mesh: visual.mesh.clone(),
             });
+            commands
+                .entity(*entity)
+                .insert(MeshMaterial3d(theme_materials.terrain.clone()));
             continue;
         }
         let mesh = meshes.add(build_terrain_chunk_mesh(*chunk, &bits, committed));
@@ -147,10 +165,11 @@ pub(crate) fn update_terrain_visuals(
             TerrainChunkVisual {
                 chunk: *chunk,
                 generation,
+                theme_id,
                 mesh: mesh.clone(),
             },
             Mesh3d(mesh),
-            MeshMaterial3d(materials.terrain.clone()),
+            MeshMaterial3d(theme_materials.terrain.clone()),
             Transform::from_translation(ground_position(crate::terrain::grid::chunk_min_world(
                 *chunk,
             ))),
@@ -166,18 +185,27 @@ pub(crate) fn update_terrain_visuals(
 
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "Bevy system parameters own bounded terrain feedback"
+    clippy::too_many_arguments,
+    reason = "Bevy system parameters own bounded terrain feedback and its current map theme"
 )]
 pub(crate) fn spawn_terrain_debris(
     mut commands: Commands,
     primitives: Option<Res<Primitive3dAssets>>,
-    materials: Option<Res<Material3dAssets>>,
+    materials: Option<Res<EnvironmentThemeMaterialCatalog>>,
     settings: Option<Res<crate::client::ClientShellSettings>>,
     time: Res<Time<Virtual>>,
     mut convergence: ResMut<ClientTerrainConvergence>,
     debris: Query<(Entity, &TerrainDebris)>,
+    maps: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
 ) {
     let (Some(primitives), Some(materials)) = (primitives, materials) else {
+        return;
+    };
+    let Some(theme_materials) = maps
+        .iter()
+        .max_by_key(|snapshot| snapshot.identity.instance_id)
+        .and_then(|snapshot| materials.get(snapshot.presentation_theme_id))
+    else {
         return;
     };
     let brushes = convergence.take_applied_brushes();
@@ -214,7 +242,7 @@ pub(crate) fn spawn_terrain_debris(
                 expires_at,
             },
             Mesh3d(primitives.debris.clone()),
-            MeshMaterial3d(materials.terrain.clone()),
+            MeshMaterial3d(theme_materials.terrain.clone()),
             bevy::light::NotShadowCaster,
             Transform::from_translation(ground_position(center) + Vec3::Y * 5.0)
                 .with_scale(Vec3::splat(if reduced { 0.65 } else { 1.0 })),

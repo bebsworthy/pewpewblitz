@@ -30,12 +30,11 @@ use brawler::{
     },
     gameplay::GameplayPlugin,
     map::{
-        AuthoritativeMapPlugin, CollisionProfileId, EntityDefinitionId, GeometryPlacement,
-        MapCatalogResource, MapEntityPlacement, MapInstanceId, MapInstanceMember,
-        MapLayoutRequirements, MapObjectDefinitionId, MapPlacementId, MapPresentationProfileId,
-        MapPresetId as ArenaPresetId, MapRegionPlacement, MapRoot, MapShape, MapVisualVariantId,
-        PlayableBounds, RegionId, RegionProfileId, ResolvedMap, ResolvedMapSnapshot,
-        SpawnAssignment, SpawnPointCatalog, SpawnPointId, TeamSpawnPoint, VisualPlacementKind,
+        AuthoritativeMapPlugin, MapCatalogResource, MapInstanceId, MapInstanceMember,
+        MapLayoutRequirements, MapObjectDefinitionId, MapObjectPlacement, MapPlacementId,
+        MapPresentationProfileId, MapPresetId as ArenaPresetId, MapRegionPlacement, MapRoot,
+        MapShape, MapVisualVariantId, PlayableBounds, RegionId, RegionProfileId, ResolvedMap,
+        ResolvedMapSnapshot, SpawnAssignment, SpawnPointCatalog, SpawnPointId, TeamSpawnPoint,
         install_resolved_map,
     },
     matchplay::{

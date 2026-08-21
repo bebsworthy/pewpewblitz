@@ -17,6 +17,7 @@ pub struct PresentedMap {
     pub source_root: Entity,
     pub instance_id: MapInstanceId,
     pub recipe_fingerprint: MapRecipeFingerprint,
+    pub presentation_theme_id: MapPresentationThemeId,
     pub playable_bounds: AxisAlignedMapRect,
     pub camera_bounds: AxisAlignedMapRect,
 }
@@ -75,10 +76,11 @@ fn reconcile_map_snapshot(
         }
         return;
     };
-    if presented
-        .as_ref()
-        .is_some_and(|presented| presented.instance_id == snapshot.identity.instance_id)
-    {
+    if presented.as_ref().is_some_and(|presented| {
+        presented.instance_id == snapshot.identity.instance_id
+            && presented.recipe_fingerprint == snapshot.identity.recipe_fingerprint
+            && presented.presentation_theme_id == snapshot.presentation_theme_id
+    }) {
         return;
     }
     if let Err(error) = validate_client_snapshot(snapshot, &catalog.0) {
@@ -100,6 +102,7 @@ fn reconcile_map_snapshot(
         source_root: root,
         instance_id: snapshot.identity.instance_id,
         recipe_fingerprint: snapshot.identity.recipe_fingerprint,
+        presentation_theme_id: snapshot.presentation_theme_id,
         playable_bounds: snapshot.playable_bounds,
         camera_bounds: snapshot.camera_bounds,
     });
@@ -162,6 +165,9 @@ fn validate_client_snapshot(
         );
     }
     let objects = &catalog.object_catalog;
+    if objects.theme(snapshot.presentation_theme_id).is_none() {
+        return Err("replicated map snapshot references an unknown presentation theme".to_string());
+    }
     if snapshot.geometry.iter().any(|placement| {
         objects
             .object(placement.object_definition_id)
@@ -277,7 +283,7 @@ mod tests {
     #[test]
     fn unknown_required_profile_fails_visibly_and_closes_gate() {
         let mut invalid = snapshot(1);
-        invalid.visual_instances[0].presentation_profile_id = MapPresentationProfileId(999);
+        invalid.geometry[0].presentation_profile_id = Some(MapPresentationProfileId(999));
         let mut app = app_with_snapshot(invalid);
         app.update();
         assert!(matches!(

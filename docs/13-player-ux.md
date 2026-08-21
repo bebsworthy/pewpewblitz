@@ -92,10 +92,10 @@ one mode to compatible maps, exact team topology, and validated settings:
 ```ron
 (
   id: "first-blood",
-  revision: 1,
+  revision: 2,
   name: "First Blood",
   mode: "wipeout",
-  maps: ["crossroads-facility"],
+  maps: ["ashen-court"],
   teams: 2,
   players_per_team: 1,
   kills_to_win: 1,

@@ -900,11 +900,11 @@ fn drive_headless_queue_smoke(
     };
     match *stage {
         HeadlessQueueSmokeStage::AwaitingInitialSnapshot => {
-            let Some(game) = lobby
-                .game_types
-                .iter()
-                .find(|game| game.players_per_team == config.product_match_players_per_team)
-            else {
+            let Some(game) = automation_game_type(
+                &lobby.game_types,
+                config.product_match_players_per_team,
+                config.product_match_game_type.as_ref(),
+            ) else {
                 return;
             };
             if model.snapshot().is_none() {
@@ -962,6 +962,19 @@ fn drive_headless_queue_smoke(
     }
 }
 
+fn automation_game_type<'a>(
+    games: &'a [crate::lobby::AdvertisedGameType],
+    players_per_team: u8,
+    requested: Option<&crate::lobby::GameTypeId>,
+) -> Option<&'a crate::lobby::AdvertisedGameType> {
+    games.iter().find(|game| {
+        requested.map_or_else(
+            || game.players_per_team == players_per_team,
+            |requested| &game.id == requested,
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -980,6 +993,27 @@ mod tests {
                 active_limit_ticks: 1_000,
             },
         }
+    }
+
+    #[test]
+    fn automation_can_target_an_exact_game_instead_of_the_first_matching_roster() {
+        let wipeout = game();
+        let mut hot_zone = wipeout.clone();
+        hot_zone.id = crate::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
+        hot_zone.mode_definition_id = crate::map::HOT_ZONE_MODE_DEFINITION;
+        let games = [wipeout, hot_zone];
+        assert_eq!(
+            automation_game_type(&games, 2, None).unwrap().id.as_str(),
+            "wipeout-2v2"
+        );
+        let requested = crate::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
+        assert_eq!(
+            automation_game_type(&games, 2, Some(&requested))
+                .unwrap()
+                .id
+                .as_str(),
+            "hot-zone-2v2"
+        );
     }
 
     fn membership() -> ClientLobbyMembership {

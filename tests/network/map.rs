@@ -9,35 +9,40 @@ fn maximum_policy_resolved_map(
     let mut recipe = catalog.presets[0].recipe.clone();
     recipe.recipe_id = brawler::map::MapRecipeId(99);
     recipe.revision = 1;
-    recipe.visuals[0].kind = VisualPlacementKind::TiledRectangle {
-        half_extents: Vec2::splat(512.0),
-        cell_size: Vec2::splat(32.0),
-    };
-    while recipe.geometry.len() < catalog.policy.max_geometry {
-        let index = recipe.geometry.len();
-        recipe.geometry.push(GeometryPlacement {
+    let initial_geometry = recipe
+        .objects
+        .iter()
+        .filter(|placement| placement.object_definition_id == MapObjectDefinitionId(1))
+        .count();
+    let initial_entities = recipe
+        .objects
+        .iter()
+        .filter(|placement| placement.object_definition_id.0 >= 100)
+        .count();
+    for index in initial_geometry..catalog.policy.max_geometry {
+        recipe.objects.push(MapObjectPlacement {
             placement_id: MapPlacementId(1_000 + u32::try_from(index).unwrap()),
             object_definition_id: MapObjectDefinitionId(1),
             visual_variant_id: Some(MapVisualVariantId(1)),
-            collision_profile_id: CollisionProfileId(1),
-            presentation_profile_id: Some(MapPresentationProfileId(2)),
             position: Vec2::new(0.0, 480.0),
             rotation: 0.0,
-            shape: MapShape::Circle { radius: 4.0 },
+            footprint_override: Some(MapShape::Rectangle {
+                half_extents: Vec2::splat(4.0),
+            }),
         });
     }
-    while recipe.entities.len() < catalog.policy.max_entities {
-        let index = recipe.entities.len();
-        recipe.entities.push(MapEntityPlacement {
+    for index in initial_entities..catalog.policy.max_entities {
+        recipe.objects.push(MapObjectPlacement {
             placement_id: MapPlacementId(2_000 + u32::try_from(index).unwrap()),
             object_definition_id: MapObjectDefinitionId(100),
             visual_variant_id: Some(MapVisualVariantId(11)),
-            definition_id: EntityDefinitionId(1),
-            presentation_profile_id: MapPresentationProfileId(5),
             position: Vec2::new(0.0, 400.0),
             rotation: 0.0,
+            footprint_override: None,
         });
     }
+    assert_eq!(initial_geometry, 6);
+    assert_eq!(initial_entities, 4);
     while recipe.regions.len() < 4 {
         let index = recipe.regions.len();
         let column = index % 2;
@@ -102,7 +107,7 @@ fn two_clients_receive_identical_map_snapshot_without_authoritative_colliders() 
     assert_eq!(first.identity.instance_id, MapInstanceId(1));
     assert_eq!(first.geometry.len(), 6);
     assert_eq!(first.spawn_points.len(), 8);
-    assert_eq!(first.visual_instances.len(), 28 * 18);
+    assert!(first.visual_instances.is_empty());
     for client in &mut harness.clients {
         let world = client.world_mut();
         let mut walls = world.query_filtered::<Entity, With<ArenaWall>>();
@@ -240,10 +245,7 @@ fn maximum_policy_snapshot_converges_over_impaired_real_udp() {
         let maximum_snapshot = maximum.snapshot.clone();
         let encoded_size = postcard::to_allocvec(&maximum_snapshot).unwrap().len();
         assert_eq!(maximum_snapshot.geometry.len(), catalog.policy.max_geometry);
-        assert_eq!(
-            maximum_snapshot.visual_instances.len(),
-            catalog.policy.max_visual_instances
-        );
+        assert!(maximum_snapshot.visual_instances.is_empty());
         assert_eq!(maximum_snapshot.entities.len(), catalog.policy.max_entities);
         assert!(encoded_size > 1_200 && encoded_size <= 64 * 1_024);
         println!(

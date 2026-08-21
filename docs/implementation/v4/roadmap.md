@@ -57,8 +57,8 @@ The user accepted these decisions during M01 specification review on 2026-08-20.
 
 | Field | Value |
 |---|---|
-| Status | Feedback review |
-| Current milestone | M01 — reusable environment library and first themed arena |
+| Status | Complete |
+| Current milestone | Complete — M03 closed V4 on 2026-08-21 |
 | Entry gate | V3 complete; user requested V4 map presentation, reusable assets, and scalable map storage on 2026-08-20 |
 | Completion gate | Two distinct map documents prove reusable object/theme composition; current-map presentation, scalable storage, lifecycle, readability, and performance checks are accepted |
 
@@ -69,9 +69,9 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
-| 01 | Feedback review | First richly presented Crossroads theme, wide 3D perimeter, game-object taxonomy mapped to reusable visual assets, and accepted camera treatment | [milestone-01.md](./milestone-01.md) |
-| 02 | Not started | Scalable one-document-per-map storage and expanded object-placement format | Create after M01 feedback |
-| 03 | Not started | Second map/theme proof, usability/performance hardening, and V4 closeout | Create after M02 feedback |
+| 01 | Complete | First richly presented Crossroads theme, wide 3D perimeter, game-object taxonomy mapped to reusable visual assets, and accepted camera treatment | [milestone-01.md](./milestone-01.md) |
+| 02 | Complete | Scalable one-document-per-map storage and expanded object-placement format | [milestone-02.md](./milestone-02.md) |
+| 03 | Complete | Second map/theme proof, usability/performance hardening, and V4 closeout | [milestone-03.md](./milestone-03.md) |
 
 ## Ordering rationale and milestone gates
 

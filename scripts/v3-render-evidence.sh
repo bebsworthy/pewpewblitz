@@ -6,6 +6,8 @@ report_path=${1:-target/v3-render-evidence.txt}
 peer_report_path=${report_path}.peer
 bind_addr=${BRAWLER_RENDER_BIND:-127.0.0.1:5024}
 game_mode=${BRAWLER_RENDER_MODE:-wipeout}
+players_per_team=${BRAWLER_RENDER_PLAYERS_PER_TEAM:-}
+game_type=${BRAWLER_RENDER_GAME_TYPE:-}
 timeout_seconds=${BRAWLER_RENDER_TIMEOUT_SECONDS:-75}
 warmup_seconds=${BRAWLER_RENDER_WARMUP_SECONDS:-10}
 measure_seconds=${BRAWLER_RENDER_MEASURE_SECONDS:-30}
@@ -19,6 +21,22 @@ case "$game_mode" in
         exit 2
         ;;
 esac
+if [[ -z "$players_per_team" ]]; then
+    if [[ "$game_mode" == hot-zone ]]; then players_per_team=2; else players_per_team=1; fi
+fi
+if [[ -z "$game_type" ]]; then
+    if [[ "$game_mode" == hot-zone ]]; then game_type=hot-zone-2v2; else game_type=first-blood; fi
+fi
+case "$players_per_team" in
+    1) match_flag=--product-match-smoke-1v1 ;;
+    2) match_flag=--product-match-smoke ;;
+    3) match_flag=--product-match-smoke-3v3 ;;
+    *)
+        printf '%s\n' 'brawler render evidence: players per team must be 1, 2, or 3' >&2
+        exit 2
+        ;;
+esac
+roster_size=$((players_per_team * 2))
 case "$timeout_seconds" in
     '' | *[!0-9]* | 0)
         printf '%s\n' 'brawler render evidence: timeout must be a positive integer' >&2
@@ -58,6 +76,9 @@ fi
 supervisor_pid=
 measured_pid=
 peer_pid=
+# Bash 3.2 treats an empty array expansion as unbound under `set -u`. Keep one harmless empty
+# sentinel so the common 1v1 evidence path and the 2v2 auxiliary-client path share safe cleanup.
+extra_pids=("")
 watchdog_pid=
 cleanup() {
     local status=$?
@@ -65,7 +86,7 @@ cleanup() {
     if [[ -n "$watchdog_pid" ]] && kill -0 "$watchdog_pid" 2>/dev/null; then
         kill "$watchdog_pid" 2>/dev/null || true
     fi
-    for pid in "$measured_pid" "$peer_pid"; do
+    for pid in "$measured_pid" "$peer_pid" "${extra_pids[@]}"; do
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null || true
         fi
@@ -73,7 +94,7 @@ cleanup() {
     if [[ -n "$supervisor_pid" ]] && kill -0 "$supervisor_pid" 2>/dev/null; then
         kill -INT "$supervisor_pid" 2>/dev/null || true
     fi
-    for pid in "$measured_pid" "$peer_pid" "$supervisor_pid"; do
+    for pid in "$measured_pid" "$peer_pid" "${extra_pids[@]}" "$supervisor_pid"; do
         if [[ -n "$pid" ]]; then
             wait "$pid" 2>/dev/null || true
         fi
@@ -96,7 +117,7 @@ target/debug/brawler-supervisor \
 supervisor_pid=$!
 
 target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
-    --auto-connect --product-match-smoke-1v1 --move-axis 1,0 \
+    --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
     --window-size 1280x720 \
     --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
     --render-measure-seconds "$measure_seconds" \
@@ -106,12 +127,21 @@ measured_pid=$!
 # against the deliberately small unauthenticated lobby ingress budget.
 sleep 2
 target/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
-    --auto-connect --product-match-smoke-1v1 --move-axis '-1,0' \
+    --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0' \
     --window-size 1280x720 \
     --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
     --render-measure-seconds "$measure_seconds" \
     >"$client_two_log" 2>&1 &
 peer_pid=$!
+
+for ((client_id = 3; client_id <= roster_size; client_id++)); do
+    sleep 1
+    target/release/brawler-client --client-id "$client_id" --server "$bind_addr" \
+        --transport routed-udp --headless --product-requeue-smoke \
+        --product-game-type "$game_type" \
+        >"${report_path}.client-${client_id}.log" 2>&1 &
+    extra_pids+=("$!")
+done
 
 (
     sleep "$timeout_seconds"

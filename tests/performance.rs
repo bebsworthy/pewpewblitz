@@ -974,9 +974,7 @@ fn maximum_terrain_resolved_map(off_grid: bool) -> brawler::map::ResolvedMap {
         max: origin + Vec2::new(4096.0, 3072.0),
     };
     recipe.camera_bounds = recipe.playable_bounds;
-    recipe.geometry.clear();
-    recipe.visuals.clear();
-    recipe.entities.clear();
+    recipe.objects.clear();
     // Near-complete destructible coverage built from four engine-legal rectangles
     // (extent <= 2048 each): a left column reaching the bottom edge keeps chunk row -1
     // populated on the off-grid map, a right column starting one chunk-row up leaves the

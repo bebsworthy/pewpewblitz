@@ -12,8 +12,8 @@ use crate::{
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
     content::gameplay_content_fingerprint,
     map::{
-        BUILT_IN_MAP_PRESET, HOT_ZONE_LAYOUT_SCHEMA_VERSION, HOT_ZONE_MAP_PRESET,
-        MapCatalogResource, WIPEOUT_LAYOUT_SCHEMA_VERSION,
+        HOT_ZONE_MODE_DEFINITION, MapCatalogResource, MapContentCatalog, MapInstanceId,
+        MapLayoutRequirements, MapPresetId, ServerMapSelection, WIPEOUT_MODE_DEFINITION,
     },
     protocol::protocol_fingerprint,
 };
@@ -165,19 +165,43 @@ pub fn admit_manifest_client<'a>(
     found.ok_or(MatchWorkerManifestError::UnlistedClient)
 }
 
-fn expected_mode_fields(mode: GameMode) -> (brawler_routing::GameMode, u16, u16) {
+fn expected_routing_mode(mode: GameMode) -> brawler_routing::GameMode {
     match mode {
-        GameMode::Wipeout => (
-            brawler_routing::GameMode::Wipeout,
-            BUILT_IN_MAP_PRESET.0,
-            WIPEOUT_LAYOUT_SCHEMA_VERSION,
-        ),
-        GameMode::HotZone => (
-            brawler_routing::GameMode::HotZone,
-            HOT_ZONE_MAP_PRESET.0,
-            HOT_ZONE_LAYOUT_SCHEMA_VERSION,
-        ),
+        GameMode::Wipeout => brawler_routing::GameMode::Wipeout,
+        GameMode::HotZone => brawler_routing::GameMode::HotZone,
     }
+}
+
+fn validate_manifest_map(
+    config: &ServerNetworkConfig,
+    manifest: &MatchManifestV1,
+) -> Result<(), MatchWorkerManifestError> {
+    let catalog = MapContentCatalog::embedded().map_err(MatchWorkerManifestError::Configuration)?;
+    validate_manifest_map_against_catalog(config, manifest, &catalog)
+}
+
+fn validate_manifest_map_against_catalog(
+    config: &ServerNetworkConfig,
+    manifest: &MatchManifestV1,
+    catalog: &MapContentCatalog,
+) -> Result<(), MatchWorkerManifestError> {
+    let preset = catalog
+        .preset(MapPresetId(manifest.map_preset))
+        .ok_or(MatchWorkerManifestError::MapPresetMismatch)?;
+    if preset.admission_revision != manifest.map_revision {
+        return Err(MatchWorkerManifestError::MapRevisionMismatch);
+    }
+    let (mode_definition, requirements) = match config.game_mode {
+        GameMode::Wipeout => (WIPEOUT_MODE_DEFINITION, MapLayoutRequirements::wipeout()),
+        GameMode::HotZone => (HOT_ZONE_MODE_DEFINITION, MapLayoutRequirements::hot_zone()),
+    };
+    if preset.recipe.mode_definition_id != mode_definition {
+        return Err(MatchWorkerManifestError::ModeMismatch);
+    }
+    catalog
+        .resolve_preset(preset.id, MapInstanceId(1), &requirements)
+        .map_err(MatchWorkerManifestError::Configuration)?;
+    Ok(())
 }
 
 fn expected_rules_profile(profile: MatchRulesProfile) -> u8 {
@@ -260,16 +284,11 @@ pub fn validate_match_manifest(
     if manifest.common.process_id.get() == 0 {
         return Err(MatchWorkerManifestError::InvalidManifest);
     }
-    let (mode, map_preset, map_revision) = expected_mode_fields(config.game_mode);
+    let mode = expected_routing_mode(config.game_mode);
     if manifest.mode != mode {
         return Err(MatchWorkerManifestError::ModeMismatch);
     }
-    if manifest.map_preset != map_preset {
-        return Err(MatchWorkerManifestError::MapPresetMismatch);
-    }
-    if manifest.map_revision != map_revision {
-        return Err(MatchWorkerManifestError::MapRevisionMismatch);
-    }
+    validate_manifest_map(config, manifest)?;
     if manifest.rules_profile != expected_rules_profile(config.match_rules_profile) {
         return Err(MatchWorkerManifestError::RulesProfileMismatch);
     }
@@ -368,6 +387,9 @@ pub fn build_match_worker_app(
         manifest.common.protocol_registry_fingerprint,
         manifest.common.content_fingerprint,
     )?;
+    app.insert_resource(ServerMapSelection {
+        preset_id: MapPresetId(manifest.map_preset),
+    });
     app.insert_resource(ServerRoleResource::match_worker(manifest));
     Ok(app)
 }
@@ -447,7 +469,9 @@ mod tests {
         let resolved =
             resolve_build_recipe(&builds, &weapons, fighter, preset.recipe, Some(preset.id))
                 .unwrap();
-        let (_, map_preset, map_revision) = expected_mode_fields(config.game_mode);
+        let map = MapContentCatalog::embedded().unwrap().presets[0].clone();
+        let map_preset = map.id.0;
+        let map_revision = map.admission_revision;
         MatchManifestV1 {
             common: ManifestCommon {
                 manifest_version: 3,
@@ -561,6 +585,31 @@ mod tests {
     }
 
     #[test]
+    fn catalog_backed_admission_accepts_a_second_same_mode_preset_and_revision() {
+        let config = ServerNetworkConfig::default();
+        let mut catalog = MapContentCatalog::embedded().unwrap();
+        let mut fixture = catalog.presets[0].clone();
+        fixture.id = MapPresetId(4);
+        fixture.key = "crossroads-facility-alt".to_string();
+        fixture.display_name = "Crossroads Facility Alt".to_string();
+        fixture.admission_revision = 7;
+        fixture.recipe.recipe_id = crate::map::MapRecipeId(4);
+        fixture.recipe.revision += 1;
+        catalog.presets.push(fixture);
+        catalog.validate().unwrap();
+
+        let mut value = manifest();
+        value.map_preset = 4;
+        value.map_revision = 7;
+        assert!(validate_manifest_map_against_catalog(&config, &value, &catalog).is_ok());
+        value.map_revision = 6;
+        assert_eq!(
+            validate_manifest_map_against_catalog(&config, &value, &catalog),
+            Err(MatchWorkerManifestError::MapRevisionMismatch)
+        );
+    }
+
+    #[test]
     fn manifest_admission_preserves_stable_team_and_build_selection() {
         let value = manifest();
         let participant = admit_manifest_client(
@@ -603,6 +652,10 @@ mod tests {
         assert_eq!(
             worker.world().resource::<ServerRoleResource>().manifest(),
             Some(&value)
+        );
+        assert_eq!(
+            worker.world().resource::<ServerMapSelection>().preset_id,
+            MapPresetId(value.map_preset)
         );
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
         assert_eq!(
@@ -715,16 +768,16 @@ mod tests {
         assert_eq!(
             policy.for_mode(brawler_routing::GameMode::Wipeout),
             brawler_routing::ModeAllocationPolicy::new(
-                BUILT_IN_MAP_PRESET.0,
-                WIPEOUT_LAYOUT_SCHEMA_VERSION,
+                crate::map::BUILT_IN_MAP_PRESET.0,
+                crate::map::WIPEOUT_LAYOUT_SCHEMA_VERSION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );
         assert_eq!(
             policy.for_mode(brawler_routing::GameMode::HotZone),
             brawler_routing::ModeAllocationPolicy::new(
-                HOT_ZONE_MAP_PRESET.0,
-                HOT_ZONE_LAYOUT_SCHEMA_VERSION,
+                crate::map::HOT_ZONE_MAP_PRESET.0,
+                crate::map::HOT_ZONE_LAYOUT_SCHEMA_VERSION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );

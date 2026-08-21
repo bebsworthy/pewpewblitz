@@ -27,7 +27,8 @@ pub use definitions::{
 pub use model::*;
 pub use objects::{
     MapObjectCatalog, MapObjectCatalogResource, MapObjectDefinition, MapObjectFitPolicy,
-    MapObjectRole, MapThemeDefinition, MapThemeVariantDefault, MapVisualVariantDefinition,
+    MapObjectPlacementBinding, MapObjectRole, MapThemeDefinition, MapThemeVariantDefault,
+    MapVisualVariantDefinition,
 };
 #[cfg(feature = "server")]
 pub use server::{

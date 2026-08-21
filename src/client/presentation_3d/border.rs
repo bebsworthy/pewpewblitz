@@ -83,18 +83,14 @@ pub(super) fn border_modules(bounds: crate::map::AxisAlignedMapRect) -> Vec<Bord
 pub(super) fn dressing_plan(
     bounds: crate::map::AxisAlignedMapRect,
     seed: u64,
-    variants: &[crate::map::MapVisualVariantId],
+    anchors: &[crate::map::MapVisualVariantId],
+    details: &[crate::map::MapVisualVariantId],
 ) -> Vec<DressingPlacement> {
-    if variants.is_empty() {
+    if anchors.is_empty() || details.is_empty() {
         return Vec::new();
     }
-    let variant_count = u64::try_from(variants.len()).expect("variant count fits u64");
-    let prominent = variants
-        .iter()
-        .copied()
-        .filter(|variant| matches!(variant.0, 4..=6))
-        .collect::<Vec<_>>();
-    let prominent_count = u64::try_from(prominent.len()).expect("prominent count fits u64");
+    let anchor_count = u64::try_from(anchors.len()).expect("anchor count fits u64");
+    let detail_count = u64::try_from(details.len()).expect("detail count fits u64");
     let mut result = Vec::with_capacity(
         usize::try_from(DRESSING_PLACEMENT_COUNT).expect("placement count fits usize"),
     );
@@ -139,11 +135,11 @@ pub(super) fn dressing_plan(
         result.push(DressingPlacement {
             position,
             rotation: unit(mixed.rotate_left(41)) * core::f32::consts::TAU,
-            variant: if member == 0 && prominent_count > 0 {
-                prominent[usize::try_from(cluster % prominent_count)
-                    .expect("prominent variant index fits usize")]
+            variant: if member == 0 {
+                anchors[usize::try_from(cluster % anchor_count)
+                    .expect("anchor variant index fits usize")]
             } else {
-                variants[usize::try_from(mixed % variant_count).expect("variant index fits usize")]
+                details[usize::try_from(mixed % detail_count).expect("detail index fits usize")]
             },
         });
     }
@@ -186,17 +182,31 @@ mod tests {
 
     #[test]
     fn dressing_is_deterministic_bounded_and_outside_play() {
-        let variants = [
+        let anchors = [
             crate::map::MapVisualVariantId(5),
             crate::map::MapVisualVariantId(6),
         ];
-        let first = dressing_plan(bounds(), 42, &variants);
-        assert_eq!(first, dressing_plan(bounds(), 42, &variants));
+        let details = [
+            crate::map::MapVisualVariantId(7),
+            crate::map::MapVisualVariantId(8),
+        ];
+        let first = dressing_plan(bounds(), 42, &anchors, &details);
+        assert_eq!(first, dressing_plan(bounds(), 42, &anchors, &details));
         assert_eq!(first.len(), 64);
         assert!(
             first
                 .iter()
                 .all(|placement| !bounds().contains(placement.position))
+        );
+        assert!(
+            first
+                .iter()
+                .enumerate()
+                .all(|(index, placement)| if index % 4 == 0 {
+                    anchors.contains(&placement.variant)
+                } else {
+                    details.contains(&placement.variant)
+                })
         );
     }
 }

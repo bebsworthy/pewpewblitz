@@ -1964,10 +1964,16 @@ mod client_presentation_tests {
             .world_mut()
             .resource_mut::<Assets<Mesh>>()
             .add(Cuboid::new(12.0, 8.0, 12.0));
-        let terrain = app
-            .world_mut()
-            .resource_mut::<Assets<StandardMaterial>>()
-            .add(StandardMaterial::default());
+        let objects = crate::map::MapObjectCatalog::embedded().unwrap();
+        let environment_catalog =
+            crate::client::presentation_3d::environment_assets::EnvironmentVisualCatalog::embedded(
+                &objects,
+            )
+            .unwrap();
+        let environment_materials = {
+            let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
+            environment_catalog.build_theme_materials(&mut materials)
+        };
         app.insert_resource(crate::client::presentation_3d::Primitive3dAssets {
             cover_block: Handle::default(),
             map_entity: Handle::default(),
@@ -1984,11 +1990,6 @@ mod client_presentation_tests {
             effect_sphere: Handle::default(),
         })
         .insert_resource(crate::client::presentation_3d::Material3dAssets {
-            floor: Handle::default(),
-            floor_accent: Handle::default(),
-            outer_ground: Handle::default(),
-            wall: Handle::default(),
-            perimeter: Handle::default(),
             team_blue: Handle::default(),
             team_red: Handle::default(),
             marker_local: Handle::default(),
@@ -1997,7 +1998,6 @@ mod client_presentation_tests {
             neutral: Handle::default(),
             zone_fill: Handle::default(),
             zone_boundary: Handle::default(),
-            terrain,
             preview: Handle::default(),
             preview_blocked: Handle::default(),
             status_slow: Handle::default(),
@@ -2006,7 +2006,18 @@ mod client_presentation_tests {
             effect_impact: Handle::default(),
             effect_damage: Handle::default(),
             dash: Handle::default(),
-        });
+        })
+        .insert_resource(environment_materials);
+        let snapshot = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(
+                crate::map::MapPresetId(1),
+                crate::map::MapInstanceId(1),
+                &crate::map::MapLayoutRequirements::wipeout(),
+            )
+            .unwrap()
+            .snapshot;
+        app.world_mut().spawn((crate::map::MapRoot, snapshot));
     }
 
     fn debris_app() -> App {
@@ -2303,6 +2314,32 @@ mod client_soak_tests {
         app.world().resource::<Assets<Mesh>>().len()
     }
 
+    fn assert_same_generation_theme_rematerializes(app: &mut App) {
+        assert!(
+            app.world_mut()
+                .query::<&TerrainChunkVisual>()
+                .iter(app.world())
+                .all(|visual| visual.theme_id == crate::map::MapPresentationThemeId(1))
+        );
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::map::MapRoot>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(root)
+            .get_mut::<crate::map::ResolvedMapSnapshot>()
+            .unwrap()
+            .presentation_theme_id = crate::map::MapPresentationThemeId(2);
+        app.update();
+        assert!(
+            app.world_mut()
+                .query::<&TerrainChunkVisual>()
+                .iter(app.world())
+                .all(|visual| visual.theme_id == crate::map::MapPresentationThemeId(2))
+        );
+    }
+
     /// The M10 client growth soak: one hundred destroy/reset cycles through the public
     /// convergence path hold visual-entity, image-handle, and debris bounds with no
     /// per-cycle growth, and debris reaches exact cleanup by presentation time.
@@ -2352,6 +2389,7 @@ mod client_soak_tests {
         }
         set_slot(&mut app, first);
         app.update();
+        assert_same_generation_theme_rematerializes(&mut app);
         let baseline_visuals = visual_count(&mut app);
         let baseline_meshes = mesh_count(&mut app);
         assert_eq!(baseline_visuals, chunks.len());

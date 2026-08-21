@@ -6,11 +6,11 @@ abilities, and equipment rather than selecting a fixed hero with a fixed kit.
 
 The project is intentionally starting with the gameplay loop. Production matchmaking, account services, monetization, cosmetics, live operations, and release engineering are out of scope initially. Core networking and the server-authoritative simulation are in scope from the beginning.
 
-V3 completed on 2026-08-20. V4 now evolves the fixed-camera 3D presentation with restrained
-perspective while retaining the completed V2 product flow/routed architecture and the planar
-authoritative simulation. V4 M01 is in feedback review with that correction alongside its reusable
-game-object/asset library and improved map presentation; scalable map documents follow in M02. The
-map editor is deferred to the root backlog.
+V3 completed on 2026-08-20. V4 completed on 2026-08-21, evolving the fixed-camera 3D presentation
+with restrained perspective while retaining the completed V2 product flow/routed architecture and
+planar authoritative simulation. Independently embedded map documents, semantic placement lowering,
+two reusable themes, and catalog-backed routed admission now form the current foundation. The map
+editor remains deferred to the root backlog.
 
 ## Documents
 
@@ -33,7 +33,11 @@ map editor is deferred to the root backlog.
 - [Version 2 implementation roadmap](./implementation/v2/roadmap.md) — completed product UX, routed transport, matchmaking, concurrent workers, and closeout.
 - [Version 3 implementation roadmap](./implementation/v3/roadmap.md) — completed 3D gameplay-world presentation migration and deferred art/render backlog.
 - [Version 4 implementation roadmap](./implementation/v4/roadmap.md) — accepted game-object taxonomy, reusable map presentation, scalable storage, second-map proof, and closeout order.
-- [V4 M01 — reusable environment library and first themed arena](./implementation/v4/milestone-01.md) — user playtest for the current-map improvement and production-reusable library.
+- [Version 5 implementation roadmap](./implementation/v5/roadmap.md) — dashboard-centered launch, connected player hub, selection/return simplification, and product-shell closeout plan.
+- [V5 M01 — auto-connect and player-dashboard vertical slice](./implementation/v5/milestone-01.md) — current research and discussion record for the new launch and connected home.
+- [V4 M01 — reusable environment library and first themed arena](./implementation/v4/milestone-01.md) — completed current-map improvement and production-reusable library.
+- [V4 M02 — scalable map documents and reusable object definitions](./implementation/v4/milestone-02.md) — completed per-map authored storage and semantic placement resolution.
+- [V4 M03 — second map/theme proof and V4 closeout](./implementation/v4/milestone-03.md) — completed Ashen Court, client theme profiles, usability hardening, feedback, and V4 closeout.
 - [V3 M01 — 3D presentation feasibility and foundation](./implementation/v3/milestone-01.md) — completed feasibility foundation and accepted learning review.
 - [V3 M02 — default 3D arena, map, terrain, camera, and input cutover](./implementation/v3/milestone-02.md) — completed world-cutover record.
 - [V3 M03 — complete 3D combat presentation](./implementation/v3/milestone-03.md) — completed fighter/combat/world-HUD replacement record.

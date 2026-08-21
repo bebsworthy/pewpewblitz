@@ -5,11 +5,20 @@ use bevy::prelude::{App, FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 
 use super::model::*;
-use super::objects::{MapObjectCatalog, MapObjectCatalogResource, MapObjectRole};
+use super::objects::{
+    MapObjectCatalog, MapObjectCatalogResource, MapObjectFitPolicy, MapObjectPlacementBinding,
+    MapObjectRole,
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ffi::OsStr,
+    path::Path,
+};
 
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 3;
-pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 2;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 3;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 4;
+pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 3;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 5;
+const MAP_INDEX_SCHEMA_VERSION: u16 = 1;
 pub const SANDBOX_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const WIPEOUT_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const HOT_ZONE_LAYOUT_SCHEMA_VERSION: u16 = 1;
@@ -115,6 +124,7 @@ pub struct MapPreset {
     pub id: MapPresetId,
     pub key: String,
     pub display_name: String,
+    pub admission_revision: u16,
     pub recipe: MapRecipe,
 }
 
@@ -133,6 +143,39 @@ pub struct MapContentCatalog {
     pub anchor_definitions: Vec<StableDefinition<ModeAnchorDefinitionId>>,
     pub presets: Vec<MapPreset>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapDefinitionSource {
+    schema_version: u16,
+    policy: MapRecipePolicy,
+    presentation_themes: Vec<StableDefinition<MapPresentationThemeId>>,
+    presentation_profiles: Vec<StableDefinition<MapPresentationProfileId>>,
+    collision_profiles: Vec<StableDefinition<CollisionProfileId>>,
+    region_profiles: Vec<StableDefinition<RegionProfileId>>,
+    entity_definitions: Vec<StableDefinition<EntityDefinitionId>>,
+    mode_definitions: Vec<StableDefinition<ModeDefinitionId>>,
+    anchor_definitions: Vec<StableDefinition<ModeAnchorDefinitionId>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapIndexSource {
+    schema_version: u16,
+    maps: Vec<MapIndexEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapIndexEntry {
+    id: MapPresetId,
+    key: String,
+    display_name: String,
+    admission_revision: u16,
+    document: String,
+}
+
+include!(concat!(env!("OUT_DIR"), "/embedded_builtin_maps.rs"));
 
 /// The shape constraint one required mode anchor must satisfy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -246,11 +289,11 @@ impl Plugin for MapContentPlugin {
 
 impl MapContentCatalog {
     pub fn embedded() -> Result<Self, String> {
-        let mut catalog: Self = ron::from_str(include_str!("../../../content/v1/maps.ron"))
-            .map_err(|error| format!("embedded map catalog parse failed: {error}"))?;
-        catalog.object_catalog = MapObjectCatalog::embedded()?;
-        catalog.validate()?;
-        Ok(catalog)
+        assemble_map_catalog(
+            include_str!("../../../content/v4/map_definitions.ron"),
+            include_str!("../../../content/v4/maps/index.ron"),
+            EMBEDDED_BUILTIN_MAPS,
+        )
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -267,17 +310,19 @@ impl MapContentCatalog {
         validate_definitions(&self.entity_definitions, "entity definition")?;
         validate_definitions(&self.mode_definitions, "mode definition")?;
         validate_definitions(&self.anchor_definitions, "anchor definition")?;
-        if self.presets.len() != 2
-            || self.presets[0].id != MapPresetId(1)
-            || self.presets[1].id != MapPresetId(2)
-        {
-            return Err(
-                "the gate accepts exactly built-in map presets 1 and 2 in ascending order"
-                    .to_string(),
-            );
+        if self.presets.is_empty() || self.presets.windows(2).any(|pair| pair[0].id >= pair[1].id) {
+            return Err("map presets must be nonempty and sorted by unique ID".to_string());
         }
+        let mut keys = BTreeSet::new();
+        let mut recipes = BTreeSet::new();
         for preset in &self.presets {
-            if !valid_key(&preset.key) || !valid_display_name(&preset.display_name) {
+            if preset.id.0 == 0
+                || preset.admission_revision == 0
+                || !valid_key(&preset.key)
+                || !valid_display_name(&preset.display_name)
+                || !keys.insert(preset.key.as_str())
+                || !recipes.insert(preset.recipe.recipe_id)
+            {
                 return Err("invalid map preset metadata".to_string());
             }
             validate_recipe_references(&preset.recipe, self)?;
@@ -337,6 +382,92 @@ impl MapContentCatalog {
             EngineMapLimits::default(),
         )
     }
+}
+
+fn assemble_map_catalog(
+    definitions_source: &str,
+    index_source: &str,
+    embedded_sources: &[(&str, &str)],
+) -> Result<MapContentCatalog, String> {
+    let definitions: MapDefinitionSource = ron::from_str(definitions_source)
+        .map_err(|error| format!("embedded map definitions parse failed: {error}"))?;
+    let index: MapIndexSource = ron::from_str(index_source)
+        .map_err(|error| format!("embedded map index parse failed: {error}"))?;
+    if definitions.schema_version != MAP_CATALOG_SCHEMA_VERSION
+        || index.schema_version != MAP_INDEX_SCHEMA_VERSION
+    {
+        return Err("unsupported map definitions or index schema".to_string());
+    }
+    let mut sources = BTreeMap::new();
+    for (path, source) in embedded_sources {
+        if !valid_document_path(path) || sources.insert(*path, *source).is_some() {
+            return Err("invalid or duplicate embedded map source path".to_string());
+        }
+    }
+    let indexed_paths = index
+        .maps
+        .iter()
+        .map(|entry| entry.document.as_str())
+        .collect::<BTreeSet<_>>();
+    if indexed_paths.len() != index.maps.len()
+        || indexed_paths != sources.keys().copied().collect::<BTreeSet<_>>()
+    {
+        return Err("map index and embedded source set differ".to_string());
+    }
+    let mut presets = Vec::with_capacity(index.maps.len());
+    for entry in index.maps {
+        if entry.document != format!("builtin/{}.ron", entry.key) {
+            return Err("map document path must match its stable key".to_string());
+        }
+        let source = sources
+            .get(entry.document.as_str())
+            .ok_or_else(|| "indexed map source is missing".to_string())?;
+        if source.len() > EngineMapLimits::default().max_recipe_bytes {
+            return Err("map recipe source exceeds byte limit".to_string());
+        }
+        let recipe: MapRecipe = ron::from_str(source)
+            .map_err(|error| format!("map recipe {} parse failed: {error}", entry.key))?;
+        presets.push(MapPreset {
+            id: entry.id,
+            key: entry.key,
+            display_name: entry.display_name,
+            admission_revision: entry.admission_revision,
+            recipe,
+        });
+    }
+    presets.sort_by_key(|preset| preset.id);
+    let catalog = MapContentCatalog {
+        schema_version: definitions.schema_version,
+        object_catalog: MapObjectCatalog::embedded()?,
+        policy: definitions.policy,
+        presentation_themes: definitions.presentation_themes,
+        presentation_profiles: definitions.presentation_profiles,
+        collision_profiles: definitions.collision_profiles,
+        region_profiles: definitions.region_profiles,
+        entity_definitions: definitions.entity_definitions,
+        mode_definitions: definitions.mode_definitions,
+        anchor_definitions: definitions.anchor_definitions,
+        presets,
+    };
+    catalog.validate()?;
+    for preset in &catalog.presets {
+        let requirements =
+            MapLayoutRequirements::for_mode_definition(preset.recipe.mode_definition_id)
+                .ok_or_else(|| "map preset uses an unsupported mode".to_string())?;
+        catalog.resolve_preset(preset.id, MapInstanceId(1), &requirements)?;
+    }
+    Ok(catalog)
+}
+
+fn valid_document_path(path: &str) -> bool {
+    let Some(name) = path.strip_prefix("builtin/") else {
+        return false;
+    };
+    !name.is_empty()
+        && Path::new(name).extension() == Some(OsStr::new("ron"))
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains("..")
 }
 
 fn validate_policy(policy: &MapRecipePolicy, limits: EngineMapLimits) -> Result<(), String> {
@@ -411,7 +542,7 @@ fn validate_recipe_references(
     {
         return Err("map recipe references an unknown object theme".to_string());
     }
-    if recipe.geometry.iter().any(|placement| {
+    if recipe.objects.iter().any(|placement| {
         let object = catalog
             .object_catalog
             .object(placement.object_definition_id);
@@ -420,44 +551,41 @@ fn validate_recipe_references(
             placement.object_definition_id,
             placement.visual_variant_id,
         );
-        object.is_none_or(|object| object.role != MapObjectRole::ObstacleIndestructible)
-            || variant.is_none()
-            || !catalog
-                .policy
-                .permitted_collision_profiles
-                .contains(&placement.collision_profile_id)
-            || placement
-                .presentation_profile_id
-                .is_some_and(|id| !catalog.policy.permitted_presentation_profiles.contains(&id))
-    }) || recipe.visuals.iter().any(|placement| {
-        !catalog
-            .policy
-            .permitted_presentation_profiles
-            .contains(&placement.presentation_profile_id)
+        object.is_none_or(|object| match &object.placement_binding {
+            MapObjectPlacementBinding::Obstacle {
+                collision_profile_id,
+                presentation_profile_id,
+            } => {
+                object.role != MapObjectRole::ObstacleIndestructible
+                    || !catalog
+                        .policy
+                        .permitted_collision_profiles
+                        .contains(collision_profile_id)
+                    || presentation_profile_id.is_some_and(|id| {
+                        !catalog.policy.permitted_presentation_profiles.contains(&id)
+                    })
+            }
+            MapObjectPlacementBinding::Decoration {
+                definition_id,
+                presentation_profile_id,
+            } => {
+                object.role != MapObjectRole::Decoration
+                    || !catalog
+                        .policy
+                        .permitted_entity_definitions
+                        .contains(definition_id)
+                    || !catalog
+                        .policy
+                        .permitted_presentation_profiles
+                        .contains(presentation_profile_id)
+            }
+            MapObjectPlacementBinding::Generated | MapObjectPlacementBinding::Unsupported => true,
+        }) || variant.is_none()
     }) || recipe.regions.iter().any(|placement| {
         !catalog
             .policy
             .permitted_region_profiles
             .contains(&placement.profile_id)
-            || !catalog
-                .policy
-                .permitted_presentation_profiles
-                .contains(&placement.presentation_profile_id)
-    }) || recipe.entities.iter().any(|placement| {
-        let object = catalog
-            .object_catalog
-            .object(placement.object_definition_id);
-        let variant = catalog.object_catalog.resolve_variant(
-            recipe.presentation_theme_id,
-            placement.object_definition_id,
-            placement.visual_variant_id,
-        );
-        object.is_none_or(|object| object.role != MapObjectRole::Decoration)
-            || variant.is_none()
-            || !catalog
-                .policy
-                .permitted_entity_definitions
-                .contains(&placement.definition_id)
             || !catalog
                 .policy
                 .permitted_presentation_profiles

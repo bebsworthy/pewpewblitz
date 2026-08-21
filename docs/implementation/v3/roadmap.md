@@ -210,8 +210,9 @@ collision, targeting, map shapes, and terrain occupancy remain planar and author
 M04 removed the residual 2D world assets and feature paths, closed presentation asset leaks,
 validated teardown through the native report's high-water/terminal counts, passed the locked
 routed release frame thresholds on the recorded Apple M3 reference machine, and incorporated the
-user's fighter, marker, animation, and overhead-readability feedback. No V4 scope is active; future
-art, theme, advanced-rendering, and vertical-gameplay decisions remain explicit backlog items.
+user's fighter, marker, animation, and overhead-readability feedback. At V3 closeout no V4 scope
+was active; V4 subsequently completed the reusable map/theme foundation, while advanced rendering
+and vertical-gameplay decisions remain explicit backlog items.
 
 ## Cross-version technical policies
 

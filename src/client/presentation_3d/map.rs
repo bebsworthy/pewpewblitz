@@ -10,13 +10,17 @@ const GROUND_ACCENT_COUNT: usize = 18;
 #[derive(Component)]
 pub(super) struct GeneratedMapMesh(pub(super) Handle<Mesh>);
 
-#[derive(Resource, Clone, Copy)]
-pub(super) struct Presented3dMap(pub(super) crate::map::MapInstanceId);
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Presented3dMap {
+    pub(super) instance_id: crate::map::MapInstanceId,
+    pub(super) recipe_fingerprint: crate::map::MapRecipeFingerprint,
+    pub(super) theme_id: crate::map::MapPresentationThemeId,
+}
 
 pub(super) fn spawn_ground_surfaces(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &Material3dAssets,
+    materials: &environment_assets::EnvironmentThemeMaterials,
     marker: crate::map::MapPresentationMember,
     bounds: crate::map::AxisAlignedMapRect,
 ) {

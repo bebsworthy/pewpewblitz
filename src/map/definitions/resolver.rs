@@ -25,7 +25,8 @@ pub fn resolve_map_recipe(
     }
     let mut recipe = recipe.clone();
     normalize_recipe(&mut recipe)?;
-    validate_recipe(&recipe, catalog, requirements, limits)?;
+    let (geometry, entities) = lower_objects(&recipe, catalog, limits)?;
+    validate_recipe(&recipe, &geometry, &entities, catalog, requirements, limits)?;
     let fingerprint_bytes = postcard::to_allocvec(&(
         MAP_FINGERPRINT_FORMAT_VERSION,
         MAP_RECIPE_SCHEMA_VERSION,
@@ -40,7 +41,6 @@ pub fn resolve_map_recipe(
         recipe_revision: recipe.revision,
         recipe_fingerprint: MapRecipeFingerprint(fnv1a64(&fingerprint_bytes)),
     };
-    let visual_instances = expand_visuals(&recipe.visuals, limits.max_visual_instances)?;
     let snapshot = ResolvedMapSnapshot {
         identity,
         catalog_schema_version: catalog.schema_version,
@@ -50,9 +50,9 @@ pub fn resolve_map_recipe(
         mode_definition_id: recipe.mode_definition_id,
         playable_bounds: recipe.playable_bounds,
         camera_bounds: recipe.camera_bounds,
-        geometry: recipe.geometry,
-        visual_instances,
-        entities: recipe.entities,
+        geometry,
+        visual_instances: Vec::new(),
+        entities,
         regions: recipe.regions,
         spawn_areas: recipe.spawn_areas,
         spawn_points: recipe.spawn_points,
@@ -76,24 +76,12 @@ pub(crate) fn normalize_recipe(recipe: &mut MapRecipe) -> Result<(), String> {
     recipe.playable_bounds.max = normalize_vec2(recipe.playable_bounds.max)?;
     recipe.camera_bounds.min = normalize_vec2(recipe.camera_bounds.min)?;
     recipe.camera_bounds.max = normalize_vec2(recipe.camera_bounds.max)?;
-    for placement in &mut recipe.geometry {
+    for placement in &mut recipe.objects {
         placement.position = normalize_vec2(placement.position)?;
         placement.rotation = normalize_rotation(placement.rotation)?;
-        normalize_shape(&mut placement.shape)?;
-    }
-    for placement in &mut recipe.visuals {
-        placement.position = normalize_vec2(placement.position)?;
-        placement.rotation = normalize_rotation(placement.rotation)?;
-        let VisualPlacementKind::TiledRectangle {
-            half_extents,
-            cell_size,
-        } = &mut placement.kind;
-        *half_extents = normalize_vec2(*half_extents)?;
-        *cell_size = normalize_vec2(*cell_size)?;
-    }
-    for placement in &mut recipe.entities {
-        placement.position = normalize_vec2(placement.position)?;
-        placement.rotation = normalize_rotation(placement.rotation)?;
+        if let Some(shape) = &mut placement.footprint_override {
+            normalize_shape(shape)?;
+        }
     }
     for placement in &mut recipe.regions {
         placement.position = normalize_vec2(placement.position)?;
@@ -120,9 +108,7 @@ pub(crate) fn normalize_recipe(recipe: &mut MapRecipe) -> Result<(), String> {
             }
         }
     }
-    recipe.geometry.sort_by_key(|value| value.placement_id);
-    recipe.visuals.sort_by_key(|value| value.placement_id);
-    recipe.entities.sort_by_key(|value| value.placement_id);
+    recipe.objects.sort_by_key(|value| value.placement_id);
     recipe.regions.sort_by_key(|value| value.placement_id);
     recipe.spawn_areas.sort_by_key(|value| value.placement_id);
     recipe.spawn_points.sort_by_key(|value| value.placement_id);
@@ -130,8 +116,124 @@ pub(crate) fn normalize_recipe(recipe: &mut MapRecipe) -> Result<(), String> {
     Ok(())
 }
 
+fn lower_objects(
+    recipe: &MapRecipe,
+    catalog: &MapContentCatalog,
+    limits: EngineMapLimits,
+) -> Result<(Vec<GeometryPlacement>, Vec<MapEntityPlacement>), String> {
+    let mut geometry = Vec::new();
+    let mut entities = Vec::new();
+    for placement in &recipe.objects {
+        let object = catalog
+            .object_catalog
+            .object(placement.object_definition_id)
+            .ok_or_else(|| "map object placement references an unknown object".to_string())?;
+        let visual_variant_id = catalog
+            .object_catalog
+            .resolve_variant(
+                recipe.presentation_theme_id,
+                placement.object_definition_id,
+                placement.visual_variant_id,
+            )
+            .ok_or_else(|| "map object placement has no compatible visual variant".to_string())?;
+        let variant = catalog
+            .object_catalog
+            .variant(visual_variant_id)
+            .ok_or_else(|| "resolved map visual variant is missing".to_string())?;
+        validate_object_rotation(placement.rotation, object.rotation_step_degrees)?;
+        match &object.placement_binding {
+            MapObjectPlacementBinding::Obstacle {
+                collision_profile_id,
+                presentation_profile_id,
+            } => {
+                let shape = placement
+                    .footprint_override
+                    .or(object.default_footprint)
+                    .ok_or_else(|| "obstacle has no authoritative footprint".to_string())?;
+                validate_variant_fit(variant.fit, object.default_footprint, shape)?;
+                validate_placed_shape(
+                    placement.position,
+                    placement.rotation,
+                    shape,
+                    recipe.playable_bounds,
+                    limits,
+                )?;
+                geometry.push(GeometryPlacement {
+                    placement_id: placement.placement_id,
+                    object_definition_id: placement.object_definition_id,
+                    visual_variant_id: Some(visual_variant_id),
+                    collision_profile_id: *collision_profile_id,
+                    presentation_profile_id: *presentation_profile_id,
+                    position: placement.position,
+                    rotation: placement.rotation,
+                    shape,
+                });
+            }
+            MapObjectPlacementBinding::Decoration {
+                definition_id,
+                presentation_profile_id,
+            } => {
+                if placement.footprint_override.is_some() {
+                    return Err("decoration placements cannot override a footprint".to_string());
+                }
+                entities.push(MapEntityPlacement {
+                    placement_id: placement.placement_id,
+                    object_definition_id: placement.object_definition_id,
+                    visual_variant_id: Some(visual_variant_id),
+                    definition_id: *definition_id,
+                    presentation_profile_id: *presentation_profile_id,
+                    position: placement.position,
+                    rotation: placement.rotation,
+                });
+            }
+            MapObjectPlacementBinding::Generated => {
+                return Err(
+                    "generated surface and boundary objects cannot be placed explicitly"
+                        .to_string(),
+                );
+            }
+            MapObjectPlacementBinding::Unsupported => {
+                return Err("this map object role has no runtime placement lifecycle".to_string());
+            }
+        }
+    }
+    Ok((geometry, entities))
+}
+
+fn validate_object_rotation(rotation: f32, step_degrees: u16) -> Result<(), String> {
+    if !rotation.is_finite() {
+        return Err("map object rotation must be finite".to_string());
+    }
+    let step = f32::from(step_degrees).to_radians();
+    let turns = rotation / step;
+    if (turns - turns.round()).abs() > 0.0001 {
+        return Err("map object rotation does not match its quantization step".to_string());
+    }
+    Ok(())
+}
+
+fn validate_variant_fit(
+    fit: MapObjectFitPolicy,
+    default: Option<MapShape>,
+    resolved: MapShape,
+) -> Result<(), String> {
+    match fit {
+        MapObjectFitPolicy::Exact if default != Some(resolved) => {
+            Err("exact-fit visual requires the default footprint".to_string())
+        }
+        MapObjectFitPolicy::Modular if !matches!(resolved, MapShape::Rectangle { .. }) => {
+            Err("modular visual requires a rectangular footprint".to_string())
+        }
+        MapObjectFitPolicy::Exact | MapObjectFitPolicy::Modular | MapObjectFitPolicy::Contained => {
+            Ok(())
+        }
+    }
+}
+
 fn validate_recipe(
     recipe: &MapRecipe,
+    geometry: &[GeometryPlacement],
+    entities: &[MapEntityPlacement],
     catalog: &MapContentCatalog,
     requirements: &MapLayoutRequirements,
     limits: EngineMapLimits,
@@ -144,8 +246,8 @@ fn validate_recipe(
         return Err("unsupported map recipe identity, revision, or layout".to_string());
     }
     validate_bounds(recipe.playable_bounds, recipe.camera_bounds, limits)?;
-    if recipe.geometry.len() > catalog.policy.max_geometry
-        || recipe.entities.len() > catalog.policy.max_entities
+    if geometry.len() > catalog.policy.max_geometry
+        || entities.len() > catalog.policy.max_entities
         || recipe.regions.len() > catalog.policy.max_regions
         || recipe.spawn_areas.len() > catalog.policy.max_spawn_areas
         || recipe.spawn_points.len() > catalog.policy.max_spawn_points
@@ -154,7 +256,7 @@ fn validate_recipe(
         return Err("map recipe exceeds catalog count policy".to_string());
     }
     validate_global_placement_ids(recipe)?;
-    for geometry in &recipe.geometry {
+    for geometry in geometry {
         validate_placed_shape(
             geometry.position,
             geometry.rotation,
@@ -178,7 +280,7 @@ fn validate_recipe(
             return Err("region profile is not allowed by the layout".to_string());
         }
     }
-    for entity in &recipe.entities {
+    for entity in entities {
         if !entity.position.is_finite()
             || !recipe.playable_bounds.contains(entity.position)
             || !requirements
@@ -188,17 +290,16 @@ fn validate_recipe(
             return Err("invalid or unsupported map entity placement".to_string());
         }
     }
-    validate_layout(recipe, requirements, limits)?;
-    validate_spawns(recipe)?;
+    validate_layout(recipe, geometry, requirements, limits)?;
+    validate_spawns(recipe, geometry)?;
     resolve_initial_terrain(
         recipe.playable_bounds,
-        &recipe.geometry,
+        geometry,
         &recipe.regions,
         &recipe.spawn_points,
         &recipe.mode_anchors,
         limits,
     )?;
-    expand_visuals(&recipe.visuals, catalog.policy.max_visual_instances)?;
     Ok(())
 }
 
@@ -233,11 +334,9 @@ fn validate_bounds(
 fn validate_global_placement_ids(recipe: &MapRecipe) -> Result<(), String> {
     let mut ids = HashSet::new();
     let all = recipe
-        .geometry
+        .objects
         .iter()
         .map(|value| value.placement_id)
-        .chain(recipe.visuals.iter().map(|value| value.placement_id))
-        .chain(recipe.entities.iter().map(|value| value.placement_id))
         .chain(recipe.regions.iter().map(|value| value.placement_id))
         .chain(recipe.spawn_areas.iter().map(|value| value.placement_id))
         .chain(recipe.spawn_points.iter().map(|value| value.placement_id))
@@ -283,6 +382,7 @@ fn validate_placed_shape(
 
 fn validate_layout(
     recipe: &MapRecipe,
+    geometry: &[GeometryPlacement],
     requirements: &MapLayoutRequirements,
     limits: EngineMapLimits,
 ) -> Result<(), String> {
@@ -360,7 +460,7 @@ fn validate_layout(
                 if !position.is_finite()
                     || !facing.is_finite()
                     || !recipe.playable_bounds.contains_with_inset(position, 32.0)
-                    || overlaps_geometry(position, 32.0, &recipe.geometry)
+                    || overlaps_geometry(position, 32.0, geometry)
                 {
                     return Err(
                         "mode anchor point is unsafe or outside playable bounds".to_string()
@@ -368,7 +468,7 @@ fn validate_layout(
                 }
             }
             ModeAnchorShape::Area { position, shape } => {
-                if !validate_objective_area(position, shape, recipe, limits) {
+                if !validate_objective_area(position, shape, recipe, geometry, limits) {
                     return Err(
                         "mode anchor area is invalid, out of bounds, or blocked".to_string()
                     );
@@ -385,6 +485,7 @@ fn validate_objective_area(
     position: Vec2,
     shape: MapShape,
     recipe: &MapRecipe,
+    geometry: &[GeometryPlacement],
     limits: EngineMapLimits,
 ) -> bool {
     const FIGHTER_CLEARANCE: f32 = 24.0;
@@ -409,14 +510,10 @@ fn validate_objective_area(
     {
         return false;
     }
-    !overlaps_geometry(
-        position,
-        half.max_element() + FIGHTER_CLEARANCE,
-        &recipe.geometry,
-    )
+    !overlaps_geometry(position, half.max_element() + FIGHTER_CLEARANCE, geometry)
 }
 
-fn validate_spawns(recipe: &MapRecipe) -> Result<(), String> {
+fn validate_spawns(recipe: &MapRecipe, geometry: &[GeometryPlacement]) -> Result<(), String> {
     const CLEARANCE: f32 = 32.0;
     const SAME_TEAM_DISTANCE: f32 = 64.0;
     const OPPOSING_DISTANCE: f32 = 600.0;
@@ -433,12 +530,12 @@ fn validate_spawns(recipe: &MapRecipe) -> Result<(), String> {
             || !point.position.is_finite()
             || !point.facing.is_finite()
             || facing.dot(to_center) <= 0.0
-            || overlaps_geometry(point.position, CLEARANCE, &recipe.geometry)
+            || overlaps_geometry(point.position, CLEARANCE, geometry)
             || segment_hits_geometry(
                 point.position,
                 point.position + facing * 96.0,
                 CLEARANCE,
-                &recipe.geometry,
+                geometry,
             )
         {
             return Err("unsafe, blocked, or wrong-facing spawn point".to_string());
@@ -470,69 +567,6 @@ fn validate_spawns(recipe: &MapRecipe) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)]
-fn expand_visuals(
-    visuals: &[VisualPlacement],
-    maximum: usize,
-) -> Result<Vec<ResolvedVisualInstance>, String> {
-    let mut resolved = Vec::new();
-    for visual in visuals {
-        match visual.kind {
-            VisualPlacementKind::TiledRectangle {
-                half_extents,
-                cell_size,
-            } => {
-                if !half_extents.is_finite()
-                    || !cell_size.is_finite()
-                    || half_extents.min_element() <= 0.0
-                    || cell_size.min_element() <= 0.0
-                {
-                    return Err("invalid tiled visual dimensions".to_string());
-                }
-                let count = half_extents * 2.0 / cell_size;
-                let columns = count.x.round();
-                let rows = count.y.round();
-                if (count.x - columns).abs() > 0.001
-                    || (count.y - rows).abs() > 0.001
-                    || columns < 1.0
-                    || rows < 1.0
-                {
-                    return Err("tiled visual does not align to whole cells".to_string());
-                }
-                let columns = columns as usize;
-                let rows = rows as usize;
-                for row in 0..rows {
-                    for column in 0..columns {
-                        let index = row * columns + column;
-                        let instance_index = u16::try_from(index)
-                            .map_err(|_| "tiled visual instance index overflow".to_string())?;
-                        let local = -half_extents
-                            + cell_size * 0.5
-                            + Vec2::new(column as f32 * cell_size.x, row as f32 * cell_size.y);
-                        resolved.push(ResolvedVisualInstance {
-                            placement_id: visual.placement_id,
-                            instance_index,
-                            presentation_profile_id: visual.presentation_profile_id,
-                            position: visual.position
-                                + Vec2::from_angle(visual.rotation).rotate(local),
-                            rotation: visual.rotation,
-                        });
-                    }
-                }
-            }
-        }
-        if resolved.len() > maximum {
-            return Err("expanded visuals exceed count limit".to_string());
-        }
-    }
-    Ok(resolved)
 }
 
 #[must_use]

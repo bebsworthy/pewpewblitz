@@ -63,7 +63,9 @@ const REPORT_FIELDS: &[&str] = &[
     "material_asset_high_water",
     "material_asset_terminal",
     "map_instance_id",
+    "map_recipe_id",
     "mode_definition_id",
+    "presentation_theme_id",
     "result",
     "first_failure",
 ];
@@ -83,6 +85,22 @@ struct HighWater {
     materials: usize,
 }
 
+type MeasuredMap = (
+    u64,
+    crate::map::MapRecipeId,
+    crate::map::ModeDefinitionId,
+    crate::map::MapPresentationThemeId,
+);
+
+fn measured_map(map: &crate::map::ResolvedMapSnapshot) -> MeasuredMap {
+    (
+        map.identity.instance_id.0,
+        map.identity.recipe_id,
+        map.mode_definition_id,
+        map.presentation_theme_id,
+    )
+}
+
 #[derive(Resource)]
 struct RenderMeasurementState {
     config: crate::config::RenderMeasurementConfig,
@@ -91,7 +109,7 @@ struct RenderMeasurementState {
     samples: Vec<f64>,
     high: HighWater,
     current: HighWater,
-    measured_map: Option<(u64, crate::map::ModeDefinitionId)>,
+    measured_map: Option<MeasuredMap>,
     written: bool,
 }
 
@@ -169,7 +187,7 @@ fn sample_and_finalize_render_measurement(
     let now = time.elapsed();
     let ready_at = *state.ready_at.get_or_insert(now);
     if let Some(map) = maps.iter().max_by_key(|map| map.identity.instance_id) {
-        state.measured_map = Some((map.identity.instance_id.0, map.mode_definition_id));
+        state.measured_map = Some(measured_map(map));
     }
     if now.saturating_sub(ready_at) < state.config.warmup {
         return;
@@ -294,14 +312,14 @@ fn compose_report(
     );
     let cpu = system.map_or("unknown", |value| value.cpu.as_str());
     let os = system.map_or("unknown", |value| value.os.as_str());
-    let measured_map = map
-        .map(|value| (value.identity.instance_id.0, value.mode_definition_id))
-        .or(state.measured_map);
+    let measured_map = map.map(measured_map).or(state.measured_map);
     let map_id = measured_map.map_or(0, |value| value.0);
+    let recipe_id = measured_map.map_or(0, |value| value.1.0);
     let mode_id =
-        measured_map.map_or_else(|| "unknown".to_string(), |value| format!("{:?}", value.1));
+        measured_map.map_or_else(|| "unknown".to_string(), |value| format!("{:?}", value.2));
+    let theme_id = measured_map.map_or(0, |value| value.3.0);
     format!(
-        "schema=1\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nterrain_chunk_high_water={}\nterrain_chunk_terminal={}\ndebris_high_water={}\ndebris_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nmap_instance_id={}\nmode_definition_id={}\nresult={}\nfirst_failure={}\n",
+        "schema=2\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nterrain_chunk_high_water={}\nterrain_chunk_terminal={}\ndebris_high_water={}\ndebris_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nresult={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -351,7 +369,9 @@ fn compose_report(
         state.high.materials,
         state.current.materials,
         map_id,
+        recipe_id,
         mode_id,
+        theme_id,
         if failed.is_none() { "pass" } else { "fail" },
         failed.unwrap_or("none"),
     )

@@ -23,11 +23,47 @@ fn resolved_builtin() -> (MapContentCatalog, ResolvedMap) {
 }
 
 #[test]
+fn embedded_source_order_does_not_change_catalog_identity() {
+    let definitions = include_str!("../../../content/v4/map_definitions.ron");
+    let index = include_str!("../../../content/v4/maps/index.ron");
+    let forward = assemble_map_catalog(definitions, index, EMBEDDED_BUILTIN_MAPS).unwrap();
+    let mut reversed = EMBEDDED_BUILTIN_MAPS.to_vec();
+    reversed.reverse();
+    let reversed = assemble_map_catalog(definitions, index, &reversed).unwrap();
+    assert_eq!(
+        forward.canonical_fingerprint_material().unwrap(),
+        reversed.canonical_fingerprint_material().unwrap()
+    );
+}
+
+#[test]
+fn embedded_index_requires_the_exact_safe_source_set() {
+    let definitions = include_str!("../../../content/v4/map_definitions.ron");
+    let index = include_str!("../../../content/v4/maps/index.ron");
+    assert!(assemble_map_catalog(definitions, index, &EMBEDDED_BUILTIN_MAPS[..1]).is_err());
+    let mut extra = EMBEDDED_BUILTIN_MAPS.to_vec();
+    extra.push(("builtin/unindexed.ron", EMBEDDED_BUILTIN_MAPS[0].1));
+    assert!(assemble_map_catalog(definitions, index, &extra).is_err());
+    let unsafe_source = [("../crossroads-facility.ron", EMBEDDED_BUILTIN_MAPS[0].1)];
+    assert!(assemble_map_catalog(definitions, index, &unsafe_source).is_err());
+}
+
+#[test]
+fn every_builtin_recipe_document_round_trips_independently() {
+    for (path, source) in EMBEDDED_BUILTIN_MAPS {
+        let recipe: MapRecipe = ron::from_str(source)
+            .unwrap_or_else(|error| panic!("{path} must parse independently: {error}"));
+        let encoded = ron::to_string(&recipe).unwrap();
+        assert_eq!(ron::from_str::<MapRecipe>(&encoded).unwrap(), recipe);
+    }
+}
+
+#[test]
 fn embedded_catalog_resolves_exact_bounded_arena() {
     let (catalog, resolved) = resolved_builtin();
-    assert_eq!(catalog.presets.len(), 2);
+    assert_eq!(catalog.presets.len(), 3);
     assert_eq!(resolved.snapshot.geometry.len(), 6);
-    assert_eq!(resolved.snapshot.visual_instances.len(), 28 * 18);
+    assert!(resolved.snapshot.visual_instances.is_empty());
     assert_eq!(resolved.snapshot.spawn_areas.len(), 2);
     assert_eq!(resolved.snapshot.spawn_points.len(), 8);
     assert_eq!(resolved.snapshot.regions.len(), 1);
@@ -41,6 +77,27 @@ fn embedded_catalog_resolves_exact_bounded_arena() {
         Vec2::new(896.0, 576.0)
     );
     assert!(postcard::to_allocvec(&resolved.snapshot).unwrap().len() < 64 * 1_024);
+}
+
+#[test]
+fn ashen_court_resolves_as_a_distinct_wipeout_slice() {
+    let catalog = MapContentCatalog::embedded().expect("embedded catalog");
+    let resolved = catalog
+        .resolve_preset(
+            MapPresetId(3),
+            MapInstanceId(3),
+            &MapLayoutRequirements::wipeout(),
+        )
+        .expect("Ashen Court resolves");
+    assert_eq!(
+        resolved.snapshot.presentation_theme_id,
+        MapPresentationThemeId(2)
+    );
+    assert_eq!(resolved.snapshot.geometry.len(), 10);
+    assert_eq!(resolved.snapshot.entities.len(), 6);
+    assert_eq!(resolved.snapshot.regions.len(), 2);
+    assert_eq!(resolved.snapshot.spawn_points.len(), 8);
+    assert!(resolved.snapshot.mode_anchors.is_empty());
 }
 
 #[test]
@@ -76,6 +133,72 @@ fn embedded_hot_zone_preset_resolves_one_central_area_anchor() {
     }
     assert_eq!(resolved.snapshot.geometry.len(), 6);
     assert_eq!(resolved.snapshot.spawn_points.len(), 8);
+}
+
+#[test]
+fn semantic_objects_enforce_variants_rotation_and_supported_lifecycles() {
+    let (catalog, resolved) = resolved_builtin();
+    assert_eq!(resolved.snapshot.geometry.len(), 6);
+    assert_eq!(resolved.snapshot.entities.len(), 4);
+
+    let mut default_variant = catalog.presets[0].recipe.clone();
+    default_variant.objects[0].visual_variant_id = None;
+    let default_resolved = resolve_map_recipe(
+        &default_variant,
+        None,
+        MapInstanceId(20),
+        &catalog,
+        &MapLayoutRequirements::wipeout(),
+        EngineMapLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        default_resolved.snapshot.geometry[0].shape,
+        resolved.snapshot.geometry[0].shape
+    );
+
+    let mut incompatible = catalog.presets[0].recipe.clone();
+    incompatible.objects[0].visual_variant_id = Some(MapVisualVariantId(5));
+    assert!(
+        resolve_map_recipe(
+            &incompatible,
+            None,
+            MapInstanceId(21),
+            &catalog,
+            &MapLayoutRequirements::wipeout(),
+            EngineMapLimits::default(),
+        )
+        .is_err()
+    );
+
+    let mut off_step = catalog.presets[0].recipe.clone();
+    off_step.objects[0].rotation = 0.1;
+    assert!(
+        resolve_map_recipe(
+            &off_step,
+            None,
+            MapInstanceId(22),
+            &catalog,
+            &MapLayoutRequirements::wipeout(),
+            EngineMapLimits::default(),
+        )
+        .is_err()
+    );
+
+    let mut unsupported = catalog.presets[0].recipe.clone();
+    unsupported.objects[0].object_definition_id = MapObjectDefinitionId(6);
+    unsupported.objects[0].visual_variant_id = Some(MapVisualVariantId(7));
+    assert!(
+        resolve_map_recipe(
+            &unsupported,
+            None,
+            MapInstanceId(23),
+            &catalog,
+            &MapLayoutRequirements::wipeout(),
+            EngineMapLimits::default(),
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -167,10 +290,15 @@ fn recipe_ron_round_trip_preserves_equality() {
 fn canonical_recipe_identity_ignores_order_rotation_equivalence_and_signed_zero() {
     let (catalog, first) = resolved_builtin();
     let mut equivalent = catalog.presets[0].recipe.clone();
-    equivalent.geometry.reverse();
+    equivalent.objects.reverse();
     equivalent.spawn_points.reverse();
-    equivalent.geometry[0].rotation = std::f32::consts::TAU;
-    equivalent.geometry[0].position.y = -0.0;
+    let placement = equivalent
+        .objects
+        .iter_mut()
+        .find(|placement| placement.position.y == 0.0)
+        .unwrap();
+    placement.rotation = std::f32::consts::TAU;
+    placement.position.y = -0.0;
     let second = resolve_map_recipe(
         &equivalent,
         None,
@@ -225,7 +353,7 @@ fn legal_non_preset_recipe_uses_the_same_resolver() {
 fn duplicate_global_placement_and_missing_anchor_fail_closed() {
     let catalog = MapContentCatalog::embedded().unwrap();
     let mut duplicate = catalog.presets[0].recipe.clone();
-    duplicate.spawn_points[0].placement_id = duplicate.geometry[0].placement_id;
+    duplicate.spawn_points[0].placement_id = duplicate.objects[0].placement_id;
     assert!(
         resolve_map_recipe(
             &duplicate,
@@ -403,6 +531,14 @@ fn built_in_presets_allocate_the_exact_central_terrain_block() {
             EngineMapLimits::default(),
         )
         .unwrap();
+        if preset.id == MapPresetId(3) {
+            assert_eq!(layout.total_cells, 288, "two 96x96 terrain courts");
+            assert!(!layout.is_empty());
+            assert!(resolved.snapshot.spawn_points.iter().all(|spawn| {
+                !layout.is_occupied(crate::terrain::grid::world_to_cell(spawn.position).unwrap())
+            }));
+            continue;
+        }
         assert_eq!(layout.total_cells, 576, "192x192 units at 8-unit cells");
         assert_eq!(
             layout.chunks.keys().copied().collect::<Vec<_>>(),

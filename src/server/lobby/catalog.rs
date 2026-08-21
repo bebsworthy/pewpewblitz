@@ -24,6 +24,7 @@ pub(crate) struct ResolvedLobbyCatalog {
     pub revision: CatalogRevision,
     pub game_types: Vec<AdvertisedGameType>,
     game_rules: BTreeMap<GameTypeId, ResolvedGameRules>,
+    map_admission_revisions: BTreeMap<MapPresetId, u16>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +38,10 @@ pub(crate) struct ResolvedGameRules {
 impl ResolvedLobbyCatalog {
     pub(crate) fn rules(&self, game_type_id: &GameTypeId) -> Option<ResolvedGameRules> {
         self.game_rules.get(game_type_id).copied()
+    }
+
+    pub(crate) fn map_admission_revision(&self, preset_id: MapPresetId) -> Option<u16> {
+        self.map_admission_revisions.get(&preset_id).copied()
     }
 }
 
@@ -91,6 +96,11 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
 
     let maps = MapContentCatalog::embedded()?;
+    let map_admission_revisions = maps
+        .presets
+        .iter()
+        .map(|preset| (preset.id, preset.admission_revision))
+        .collect();
     let lifecycle = MatchLifecycleRules::default()
         .validate()
         .map_err(str::to_string)?;
@@ -266,6 +276,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         revision,
         game_types: advertised,
         game_rules,
+        map_admission_revisions,
     })
 }
 
@@ -282,6 +293,8 @@ mod tests {
         assert_eq!(catalog.game_types.len(), 4);
         let first_blood = &catalog.game_types[3];
         assert_eq!(first_blood.display_name, "First Blood");
+        assert_eq!(first_blood.configuration_revision, 2);
+        assert_eq!(first_blood.map_preset_ids, vec![MapPresetId(3)]);
         assert_eq!(first_blood.players_per_team, 1);
         assert_eq!(
             first_blood.rules_summary,
@@ -302,9 +315,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0xe8, 0xde, 0xf1, 0x34, 0x7b, 0x3c, 0x24, 0x5e, 0xb7, 0xeb, 0x23, 0xb2, 0x5c, 0x1f,
-                0xc5, 0xf4, 0x42, 0x83, 0x40, 0xd0, 0x2d, 0x4e, 0x36, 0x2d, 0x02, 0x15, 0xe1, 0x8a,
-                0x6c, 0x75, 0xe4, 0x8f,
+                0x7b, 0xd1, 0xef, 0x3b, 0x3c, 0xd1, 0xe0, 0xc1, 0x8d, 0x6c, 0x5e, 0xb1, 0x5a, 0xdb,
+                0x52, 0x3b, 0xa9, 0xe1, 0x4f, 0x88, 0x4e, 0x92, 0xaf, 0x11, 0x68, 0xfb, 0x17, 0x9e,
+                0x87, 0xac, 0xb4, 0xaa,
             ]
         );
     }

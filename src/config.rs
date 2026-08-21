@@ -267,6 +267,7 @@ pub struct ClientNetworkConfig {
     /// and exit only after the fresh queue Join is accepted.
     pub product_requeue_smoke: bool,
     pub product_match_players_per_team: u8,
+    pub product_match_game_type: Option<crate::lobby::GameTypeId>,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
     pub headless_aim_at_dummy: bool,
@@ -335,6 +336,7 @@ impl ClientNetworkConfig {
             product_match_smoke: false,
             product_requeue_smoke: false,
             product_match_players_per_team: 2,
+            product_match_game_type: None,
             headless_move: None,
             headless_aim: None,
             headless_aim_at_dummy: false,
@@ -386,6 +388,7 @@ impl ClientNetworkConfig {
         if self.product_match_smoke && !matches!(self.product_match_players_per_team, 1..=3) {
             return Err("product match smoke requires 1v1, 2v2, or 3v3".to_string());
         }
+        self.validate_product_game_type()?;
         if self.product_match_smoke && self.product_queue_smoke {
             return Err("product queue and match smokes are mutually exclusive".to_string());
         }
@@ -449,6 +452,13 @@ impl ClientNetworkConfig {
         }
         self.validate_screenshot_schedule()?;
         self.validate_render_measurement()?;
+        Ok(())
+    }
+
+    fn validate_product_game_type(&self) -> Result<(), String> {
+        if self.product_match_game_type.is_some() && !self.product_match_smoke {
+            return Err("--product-game-type requires match automation".to_string());
+        }
         Ok(())
     }
 
@@ -643,5 +653,17 @@ mod tests {
         config.headless = true;
         assert!(!config.presents_product_shell());
         assert!(config.connects_on_startup());
+    }
+
+    #[test]
+    fn explicit_product_game_type_is_scoped_to_match_automation() {
+        let mut config = ClientNetworkConfig::new(1);
+        config.product_match_game_type =
+            Some(crate::lobby::GameTypeId::new("hot-zone-2v2").unwrap());
+        assert!(config.validate().is_err());
+        config.product_match_smoke = true;
+        config.transport = NetworkTransport::RoutedUdp;
+        config.headless = true;
+        assert!(config.validate().is_ok());
     }
 }

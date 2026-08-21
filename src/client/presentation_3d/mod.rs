@@ -6,13 +6,14 @@ use super::*;
 use crate::combat::client::CombatClientSet;
 use bevy::{
     asset::RenderAssetUsages,
-    camera::visibility::RenderLayers,
+    camera::{CameraUpdateSystems, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
     gltf::Gltf,
     light::{GlobalAmbientLight, NotShadowCaster, NotShadowReceiver},
     math::primitives::Annulus,
     mesh::Indices,
     render::render_resource::PrimitiveTopology,
+    ui::UiSystems,
     world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady},
 };
 use core::time::Duration;
@@ -71,11 +72,6 @@ pub(crate) struct Primitive3dAssets {
 
 #[derive(Resource)]
 pub(crate) struct Material3dAssets {
-    pub(crate) floor: Handle<StandardMaterial>,
-    pub(crate) floor_accent: Handle<StandardMaterial>,
-    pub(crate) outer_ground: Handle<StandardMaterial>,
-    pub(crate) wall: Handle<StandardMaterial>,
-    pub(crate) perimeter: Handle<StandardMaterial>,
     pub(crate) team_blue: Handle<StandardMaterial>,
     pub(crate) team_red: Handle<StandardMaterial>,
     pub(crate) marker_local: Handle<StandardMaterial>,
@@ -84,7 +80,6 @@ pub(crate) struct Material3dAssets {
     pub(crate) neutral: Handle<StandardMaterial>,
     pub(crate) zone_fill: Handle<StandardMaterial>,
     pub(crate) zone_boundary: Handle<StandardMaterial>,
-    pub(crate) terrain: Handle<StandardMaterial>,
     pub(crate) preview: Handle<StandardMaterial>,
     pub(crate) preview_blocked: Handle<StandardMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
@@ -228,7 +223,10 @@ impl Plugin for WorldPresentationPlugin {
             )
             .add_systems(
                 PostUpdate,
-                combat::project_fighter_overhead_ui.after(TransformSystems::Propagate),
+                combat::project_fighter_overhead_ui
+                    .after(TransformSystems::Propagate)
+                    .after(CameraUpdateSystems)
+                    .before(UiSystems::Prepare),
             )
             .add_observer(setup_imported_character)
             .add_observer(environment_assets::tint_environment_instance);
@@ -269,11 +267,6 @@ fn setup_3d_foundation(
         ..default()
     };
     let material_assets = Material3dAssets {
-        floor: materials.add(matte(Color::srgb(0.48, 0.31, 0.16))),
-        floor_accent: materials.add(matte(Color::srgb(0.53, 0.35, 0.18))),
-        outer_ground: materials.add(matte(Color::srgb(0.055, 0.22, 0.105))),
-        wall: materials.add(matte(Color::srgb(0.10, 0.36, 0.58))),
-        perimeter: materials.add(matte(Color::srgb(0.42, 0.16, 0.075))),
         team_blue: materials.add(matte(Color::srgb(0.12, 0.72, 0.96))),
         team_red: materials.add(matte(Color::srgb(1.0, 0.42, 0.12))),
         marker_local: materials.add(StandardMaterial {
@@ -303,11 +296,6 @@ fn setup_3d_foundation(
             emissive: LinearRgba::new(1.2, 0.8, 0.08, 1.0),
             unlit: true,
             ..default()
-        }),
-        terrain: materials.add(StandardMaterial {
-            double_sided: true,
-            cull_mode: None,
-            ..matte(Color::srgb(0.08, 0.30, 0.055))
         }),
         preview: materials.add(StandardMaterial {
             base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
@@ -452,6 +440,7 @@ fn reconcile_3d_map(
     mut meshes: ResMut<Assets<Mesh>>,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    theme_materials: Res<environment_assets::EnvironmentThemeMaterialCatalog>,
     object_catalog: Res<crate::map::MapObjectCatalogResource>,
     visual_catalog: Option<Res<environment_assets::EnvironmentVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
@@ -463,6 +452,8 @@ fn reconcile_3d_map(
         &crate::map::MapPresentationMember,
         Option<&GeneratedMapMesh>,
     )>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut directional_lights: Query<&mut DirectionalLight, With<V3WorldMember>>,
 ) {
     let Some(accepted) = accepted else {
         for (entity, _, generated) in &members {
@@ -477,8 +468,36 @@ fn reconcile_3d_map(
     let Ok(snapshot) = snapshots.get(accepted.source_root) else {
         return;
     };
-    if current.is_some_and(|current| current.0 == snapshot.identity.instance_id) {
+    let presentation_key = Presented3dMap {
+        instance_id: snapshot.identity.instance_id,
+        recipe_fingerprint: snapshot.identity.recipe_fingerprint,
+        theme_id: snapshot.presentation_theme_id,
+    };
+    if current.is_some_and(|current| *current == presentation_key) {
         return;
+    }
+    let Some(environment_materials) = theme_materials.get(snapshot.presentation_theme_id) else {
+        error!(
+            theme = snapshot.presentation_theme_id.0,
+            "accepted map has no client theme materials"
+        );
+        return;
+    };
+    let Some(environment_theme) = visual_catalog
+        .as_deref()
+        .and_then(|catalog| catalog.theme(snapshot.presentation_theme_id))
+    else {
+        error!(
+            theme = snapshot.presentation_theme_id.0,
+            "accepted map has no client theme profile"
+        );
+        return;
+    };
+    ambient.color = environment_theme.ambient_color();
+    ambient.brightness = environment_theme.ambient_brightness;
+    for mut light in &mut directional_lights {
+        light.color = environment_theme.directional_color();
+        light.illuminance = environment_theme.directional_illuminance;
     }
     for (entity, _, generated) in &members {
         if let Some(generated) = generated {
@@ -490,16 +509,22 @@ fn reconcile_3d_map(
         instance_id: snapshot.identity.instance_id,
     };
     let bounds = snapshot.playable_bounds;
-    map::spawn_ground_surfaces(&mut commands, &mut meshes, &materials, marker, bounds);
+    map::spawn_ground_surfaces(
+        &mut commands,
+        &mut meshes,
+        environment_materials,
+        marker,
+        bounds,
+    );
     for geometry in &snapshot.geometry {
+        let variant = object_catalog.0.resolve_variant(
+            snapshot.presentation_theme_id,
+            geometry.object_definition_id,
+            geometry.visual_variant_id,
+        );
         match geometry.shape {
             crate::map::MapShape::Rectangle { half_extents } => {
                 let size = half_extents * 2.0;
-                let variant = object_catalog.0.resolve_variant(
-                    snapshot.presentation_theme_id,
-                    geometry.object_definition_id,
-                    geometry.visual_variant_id,
-                );
                 if let (Some(variant), Some(imported), Some(visual_catalog)) =
                     (variant, imported.as_deref(), visual_catalog.as_deref())
                     && let (Some(scene), Some(profile)) =
@@ -521,7 +546,7 @@ fn reconcile_3d_map(
                         &mut commands,
                         &mut meshes,
                         &primitives,
-                        &materials,
+                        environment_materials,
                         geometry.position,
                         geometry.rotation,
                         size,
@@ -530,24 +555,46 @@ fn reconcile_3d_map(
                 }
             }
             crate::map::MapShape::Circle { radius } => {
-                let mut translation = ground_position(geometry.position);
-                translation.y = WALL_HEIGHT * 0.5;
-                let mesh = meshes.add(Cylinder::new(radius, WALL_HEIGHT));
-                commands.spawn((
-                    marker,
-                    Mesh3d(mesh.clone()),
-                    GeneratedMapMesh(mesh),
-                    MeshMaterial3d(materials.wall.clone()),
-                    Transform::from_translation(translation),
-                    Name::new("V3 circular cover"),
-                ));
+                if let (Some(variant), Some(imported), Some(visual_catalog)) =
+                    (variant, imported.as_deref(), visual_catalog.as_deref())
+                    && let (Some(scene), Some(profile)) =
+                        (imported.scene(variant), visual_catalog.profile(variant))
+                {
+                    spawn_imported_environment(
+                        &mut commands,
+                        marker,
+                        scene,
+                        profile,
+                        geometry.position,
+                        geometry.rotation,
+                        "V4 imported circular cover",
+                    );
+                } else {
+                    let mut translation = ground_position(geometry.position);
+                    translation.y = WALL_HEIGHT * 0.5;
+                    let mesh = meshes.add(Cylinder::new(radius, WALL_HEIGHT));
+                    commands.spawn((
+                        marker,
+                        Mesh3d(mesh.clone()),
+                        GeneratedMapMesh(mesh),
+                        MeshMaterial3d(environment_materials.wall.clone()),
+                        Transform::from_translation(translation),
+                        Name::new("V4 circular cover fallback"),
+                    ));
+                }
             }
         }
     }
     for module in border::border_modules(bounds) {
-        let variant = crate::map::MapVisualVariantId(if module.corner { 10 } else { 9 });
+        let boundary_object =
+            crate::map::MapObjectDefinitionId(if module.corner { 21 } else { 20 });
+        let variant =
+            object_catalog
+                .0
+                .resolve_variant(snapshot.presentation_theme_id, boundary_object, None);
         if let (Some(imported), Some(visual_catalog)) =
             (imported.as_deref(), visual_catalog.as_deref())
+            && let Some(variant) = variant
             && let (Some(scene), Some(profile)) =
                 (imported.scene(variant), visual_catalog.profile(variant))
         {
@@ -564,7 +611,7 @@ fn reconcile_3d_map(
             commands.spawn((
                 marker,
                 Mesh3d(primitives.cover_block.clone()),
-                MeshMaterial3d(materials.perimeter.clone()),
+                MeshMaterial3d(environment_materials.perimeter.clone()),
                 Transform {
                     translation: ground_position(module.position) + Vec3::Y * 46.0,
                     rotation: Quat::from_rotation_y(module.rotation),
@@ -620,7 +667,8 @@ fn reconcile_3d_map(
         for dressing in border::dressing_plan(
             bounds,
             snapshot.identity.recipe_fingerprint.0,
-            &theme.outside_dressing_variants,
+            &theme.outside_dressing_anchor_variants,
+            &theme.outside_dressing_detail_variants,
         ) {
             if let (Some(imported), Some(visual_catalog)) =
                 (imported.as_deref(), visual_catalog.as_deref())
@@ -713,7 +761,7 @@ fn reconcile_3d_map(
             }
         }
     }
-    commands.insert_resource(Presented3dMap(snapshot.identity.instance_id));
+    commands.insert_resource(presentation_key);
 }
 
 fn team_material(
@@ -1132,7 +1180,7 @@ fn spawn_fallback_wall_modules(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     primitives: &Primitive3dAssets,
-    materials: &Material3dAssets,
+    materials: &environment_assets::EnvironmentThemeMaterials,
     center: Vec2,
     rotation: f32,
     size: Vec2,
@@ -1352,6 +1400,14 @@ mod tests {
             .world_mut()
             .resource_mut::<Assets<StandardMaterial>>()
             .add(StandardMaterial::default());
+        let environment_catalog = environment_assets::EnvironmentVisualCatalog::embedded(
+            &crate::map::MapObjectCatalog::embedded().unwrap(),
+        )
+        .unwrap();
+        let environment_materials = {
+            let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
+            environment_catalog.build_theme_materials(&mut materials)
+        };
         app.insert_resource(Primitive3dAssets {
             cover_block,
             map_entity: Handle::default(),
@@ -1368,11 +1424,6 @@ mod tests {
             effect_sphere: Handle::default(),
         })
         .insert_resource(Material3dAssets {
-            floor: material.clone(),
-            floor_accent: material.clone(),
-            outer_ground: material.clone(),
-            wall: material.clone(),
-            perimeter: material.clone(),
             team_blue: material.clone(),
             team_red: material.clone(),
             marker_local: material.clone(),
@@ -1381,7 +1432,6 @@ mod tests {
             neutral: material.clone(),
             zone_fill: material.clone(),
             zone_boundary: material.clone(),
-            terrain: material.clone(),
             preview: material.clone(),
             preview_blocked: material.clone(),
             status_slow: material.clone(),
@@ -1390,7 +1440,11 @@ mod tests {
             effect_impact: material.clone(),
             effect_damage: material.clone(),
             dash: material,
-        });
+        })
+        .insert_resource(environment_catalog)
+        .insert_resource(environment_materials)
+        .insert_resource(environment_assets::EnvironmentImportedScenes::default())
+        .insert_resource(GlobalAmbientLight::default());
         app.world_mut().spawn((
             crate::map::MapRoot,
             snapshot.identity.instance_id,
@@ -1582,8 +1636,8 @@ mod tests {
             )
             .unwrap()
             .snapshot;
-        invalid.visual_instances[0].presentation_profile_id =
-            crate::map::MapPresentationProfileId(999);
+        invalid.geometry[0].presentation_profile_id =
+            Some(crate::map::MapPresentationProfileId(999));
         let mut invalid_app = map_app(invalid);
         invalid_app.update();
         invalid_app.update();
@@ -1594,6 +1648,50 @@ mod tests {
                 .iter(invalid_app.world())
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn same_instance_theme_change_rematerializes_the_world() {
+        let snapshot = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(
+                crate::map::MapPresetId(1),
+                crate::map::MapInstanceId(11),
+                &crate::map::MapLayoutRequirements::wipeout(),
+            )
+            .unwrap()
+            .snapshot;
+        let mut app = map_app(snapshot);
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().resource::<Presented3dMap>().theme_id,
+            crate::map::MapPresentationThemeId(1)
+        );
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::map::MapRoot>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(root)
+            .get_mut::<crate::map::ResolvedMapSnapshot>()
+            .unwrap()
+            .presentation_theme_id = crate::map::MapPresentationThemeId(2);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Presented3dMap>().theme_id,
+            crate::map::MapPresentationThemeId(2)
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::map::PresentedMap>()
+                .presentation_theme_id,
+            crate::map::MapPresentationThemeId(2)
         );
     }
 
