@@ -19,6 +19,8 @@ pub(crate) struct ClientAssetHandles {
     pub error: Handle<AudioSource>,
     pub character: Handle<Gltf>,
     pub blaster: Handle<Gltf>,
+    pub loading_logo: Handle<Image>,
+    pub wordmark: Handle<Image>,
 }
 
 impl ClientAssetHandles {
@@ -32,10 +34,12 @@ impl ClientAssetHandles {
             character: asset_server
                 .load("brawler/models/kenney/mini-characters/character-male-a.glb"),
             blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
+            loading_logo: asset_server.load("brawler/ui/branding/pewpew-blitz-lockup.png"),
+            wordmark: asset_server.load("brawler/ui/branding/pewpew-blitz-wordmark.png"),
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 7] {
+    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 9] {
         [
             ("audio.fire", false, asset_server.load_state(&self.fire)),
             ("audio.impact", false, asset_server.load_state(&self.impact)),
@@ -51,6 +55,16 @@ impl ClientAssetHandles {
                 "model.blaster_a",
                 false,
                 dependency_aware_state(asset_server, &self.blaster),
+            ),
+            (
+                "ui.pewpew_blitz_loading_logo",
+                false,
+                asset_server.load_state(&self.loading_logo),
+            ),
+            (
+                "ui.pewpew_blitz_wordmark",
+                false,
+                asset_server.load_state(&self.wordmark),
             ),
         ]
     }
@@ -235,6 +249,22 @@ mod tests {
     #[test]
     fn retained_asset_manifest_has_unique_complete_cc0_provenance() {
         validate_manifest(CLIENT_ASSET_MANIFEST).unwrap();
+    }
+
+    #[test]
+    fn pewpew_blitz_branding_assets_are_shipped_rgba_pngs() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/brawler/ui/branding");
+        for file in ["pewpew-blitz-lockup.png", "pewpew-blitz-wordmark.png"] {
+            let bytes = std::fs::read(root.join(file)).unwrap();
+            assert!(bytes.len() > 33, "{file} is not a complete PNG");
+            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+            assert_eq!(&bytes[12..16], b"IHDR");
+            let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+            let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+            assert!(width > 0 && height > 0);
+            assert_eq!(bytes[25], 6, "{file} must retain RGBA color data");
+        }
     }
 
     #[test]

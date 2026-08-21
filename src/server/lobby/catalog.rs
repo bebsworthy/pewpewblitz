@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
-        assert_eq!(catalog.server_name, "Local Brawler");
+        assert_eq!(catalog.server_name, "Local PewPew Blitz");
         assert_eq!(catalog.game_types.len(), 4);
         let first_blood = &catalog.game_types[3];
         assert_eq!(first_blood.display_name, "First Blood");

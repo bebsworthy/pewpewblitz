@@ -1,6 +1,6 @@
 (
   schema_version: 1,
-  server_name: "Local Brawler",
+  server_name: "Local PewPew Blitz",
   game_types: [
     (
       id: "wipeout-2v2",

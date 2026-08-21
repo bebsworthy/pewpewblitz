@@ -1,11 +1,11 @@
 # V5 Milestone 01 — Auto-connect and player-dashboard vertical slice
 
 Player-facing product name: **PewPew Blitz**. Historical repository/crate identifiers remain
-unchanged during this research milestone.
+unchanged during this version.
 
 | Field | Value |
 |---|---|
-| Status | Researching |
+| Status | User playtest |
 | Depends on | V4 closeout accepted on 2026-08-21; completed V2 routed product flow and V3/V4 client presentation foundations |
 | Outcome | Normal launch attempts one server and reaches a functional connected Player Dashboard whose real brawler, game-type, session, Play, Practice, and utility actions form the new product center |
 
@@ -176,9 +176,13 @@ The following checked-in references were inspected before external research:
 - `/Users/boyd/.codex/skills/bevy-game-engine/references/assets-and-states.md` — retain asset handles
   and couple screen spawn/cleanup to explicit state transitions.
 
-The checked-in Bevy source is 0.20-dev while Brawler uses 0.19. Exact `ViewportNode`, picking,
-camera-order, and automatic-navigation APIs must be confirmed against installed Bevy 0.19 before
-production implementation. Existing Brawler 0.19 focus code is the safer baseline.
+The checked-in Bevy source is 0.20-dev while Brawler uses 0.19. Exact APIs were therefore checked
+against the installed `bevy-0.19.1`, `bevy_ui-0.19.1`, `bevy_ui_render-0.19.1`, and
+`bevy_state-0.19.1` crate sources. Bevy 0.19.1 supports `ViewportNode`, an image render target,
+`UiMaterialPlugin`/`MaterialNode`, per-camera transparent clear color, and `DespawnOnExit`.
+`ViewportNode` does not own or remove its camera, so Dashboard must explicitly own the camera,
+preview scene, dynamic image, animation graph/material handles, and their teardown. Existing Brawler
+focus code remains the navigation baseline; no 0.20 automatic-navigation API is transferred.
 
 ## Current primary sources
 
@@ -195,37 +199,78 @@ The local Lightyear 0.29 snapshot is newer and more applicable than the currentl
 docs observed during research, so exact Lightyear lifecycle guidance remains pinned to the local
 book and checked-in production path rather than transferring a mismatched public version.
 
-## Alternatives under evaluation
+## Specification decisions
 
-### Launch target policy
+These decisions translate the accepted discussion direction into the M01 specification. Production
+implementation remains gated on user acceptance of this document.
 
-| Alternative | Benefit | Cost/risk | Initial recommendation |
-|---|---|---|---|
-| Explicit preferred, else last successful, else configured default | Predictable player choice with useful first-run fallback | Requires a small persisted preference distinction | Lead candidate |
-| Always last successful | Very simple | A temporary/manual server silently becomes sticky | Reject unless “preferred” is intentionally defined as last successful |
-| Try a list until one connects | Can hide outages | Slow, surprising, difficult to cancel/explain, can connect to the wrong community | Reject for M01 |
-| Always show Server Select first | Maximum control | Does not deliver the requested simplification | Retain only as recovery/explicit Change Server |
+### Startup target and recovery
 
-One logical target may resolve to multiple network-address candidates; the existing bounded DNS
-candidate behavior is not the same as silently trying multiple user-visible servers and remains
-valid.
+M01 defines “preferred” as the most recent successfully authenticated logical server already stored
+at `recents[0]`. It does not add a second pin/preference field without a demonstrated need. Startup
+chooses exactly one logical target in this order:
 
-### Dashboard brawler preview
+1. the explicit interactive `--server` value for this invocation;
+2. the most recent successfully authenticated logical server;
+3. the existing product default `127.0.0.1:5000`.
 
-| Alternative | Benefit | Cost/risk | Research disposition |
-|---|---|---|---|
-| Dedicated `ViewportNode` + render target | Clear UI rectangle, contained picking, independent framing | Additional image/camera lifecycle and render-target cost | Lead prototype candidate |
-| Full-screen layered 3D preview behind UI | Fewer UI-texture concepts and potentially richer composition | Camera/layer interaction and responsive framing can be harder | Compare in focused prototype |
-| Static thumbnail | Cheapest and simplest | Does not meet the requested central model experience; adds thumbnail pipeline | Fallback only for asset/load failure |
-| Reuse replicated match fighter/world camera | Superficially reuses code | Wrong ownership, requires match state, risks authority/presentation coupling | Reject |
+A successful manual selection naturally becomes the next launch target through the existing
+bounded recent-server record. Favorites remain a Server Select convenience and do not silently
+change startup. One logical DNS name may still resolve to at most the existing four address
+candidates; that is one user-visible server, not multi-server failover.
 
-The content shown inside the selected composition is no longer open: use the actual client fighter
-presentation already prepared in `src/client/presentation_3d/mod.rs`—the imported character scene,
-attached blaster, idle animation, orientation/scale corrections, and primitive fallback. Extract or
-reuse only the presentation helpers/assets needed by a separately owned dashboard preview; do not
-create a replicated/gameplay `Fighter` merely to drive the model.
+Normal interactive launch enters Connecting and starts the existing bounded attempt. Cancel performs
+orderly attempt cleanup and enters Server Select. Failure opens the existing structured error over
+Server Select with `Retry` for the same logical address and `Choose Server` to dismiss the error.
+Unexpected loss from Dashboard also leaves Dashboard immediately and exposes the same recovery
+surface; stale authenticated facts are never displayed as connected.
 
-### Dashboard background treatment
+An unreadable connections file does not supply a remembered target: startup uses the explicit or
+default address and defers the existing local-data warning until the first stable Dashboard or
+Server Select frame. Build/settings load failure likewise uses safe local defaults and reports the
+real failure without blocking connection. No persistence schema changes in M01.
+
+### Dashboard contents and actions
+
+The default Dashboard uses the balanced information set:
+
+- compact PewPew Blitz wordmark, accepted display name, authenticated server display name, and a
+  connected indicator;
+- the actual supported in-game character, attached current weapon presentation, and idle animation;
+- build name (or `Custom Build`), used/available budget, and primary weapon name;
+- advertised game-type name, mode, team size, concise rules, and map-pool display names;
+- fresh waiting population and formation availability when the current snapshot matches the active
+  catalog revision; otherwise explicit `Unavailable`/`Updating` copy rather than a retained number;
+- `Change Brawler`, `Change Game`, dominant `Play`, secondary `Practice`, direct Settings, and a
+  utility menu containing Credits, Change Server, and Quit.
+
+No ping, rank, currency, progression, selected map, or account fact is synthesized. Long rules and
+ultimate/passive detail stay in child surfaces. If Play or Practice is unavailable, the button is
+disabled and carries the actual advertised/catalog reason. Activating the preview and activating
+the labeled `Change Brawler` control are the same action; there is no carousel or second pencil
+action.
+
+Play submits the current locally resolved build and selected advertised game-type ID through the
+existing authoritative queue request. Practice uses the same build and the existing authoritative
+practice request. Neither action freezes, validates, allocates, selects a map, or creates a fighter
+on the client. M01 may adapt the existing Build Editor and Game Select as temporary selection
+surfaces; M02 owns their final dashboard-child presentation and all post-queue/match convergence.
+
+### Preview and background choice
+
+M01 selects a dedicated Bevy 0.19 `ViewportNode` with an image render target and dedicated
+transparent-clear 3D camera. It gives responsive UI clipping/framing without sharing the gameplay
+camera. The whole viewport sits inside an ordinary focusable/activatable UI control; M01 does not
+add 3D mesh picking for a single action.
+
+The preview resolves the same imported character scene, blaster scene, idle clip, scale/yaw
+corrections, and primitive fallback used by gameplay presentation, but its entities are marked and
+owned exclusively by the current Dashboard generation. It never creates `Fighter`, replicated
+identity, combat state, physics, or network components. If imported assets are unavailable, the
+current deterministic primitive character/weapon silhouette is shown instead of a generated or
+static hero portrait.
+
+The selected backdrop is one full-screen custom UI material behind the transparent viewport:
 
 The lead direction is intentionally smaller than the concept wallpaper:
 
@@ -253,19 +298,128 @@ palette colors, glow center/radius, and motion strength. It should produce:
 it is visually distracting. The effect remains client-only, bounded to Dashboard, and releases its
 material/render-target ownership on exit.
 
-Implementation alternatives remain deliberately local: one custom Bevy UI material behind a
-transparent preview, or one shader-backed backdrop plane inside the dedicated preview/layered 3D
-composition. The focused D5 prototype should choose the simpler lifecycle for Bevy 0.19. A static
-gradient plus a gently animated glow node is the fallback if a custom shader provides no material
-visual gain.
+The shader is client presentation only. Its material time advances only while Dashboard is active;
+`reduced_motion` freezes drift and breathing at a stable midpoint. If shader creation or support is
+unavailable, the dashboard retains a static navy background and static cyan glow using ordinary UI
+nodes. No dashboard effect changes gameplay or navigation state.
 
-### Dashboard information density
+### Branding preparation
 
-| Level | Contents | Tradeoff |
+Implementation derives two transparent runtime PNGs from the unchanged concept sources:
+
+- `assets/brawler/ui/branding/pewpew-blitz-lockup.png` from `inspiration/logo2.png`;
+- `assets/brawler/ui/branding/pewpew-blitz-wordmark.png` from `inspiration/wordmark.png`.
+
+Both receive tight content cropping, deliberate safe padding, cleaned stray pixels/alpha edges, and
+no baked background. The full lockup appears on Connecting; the wordmark appears in Dashboard.
+These project-provided generated concepts are not added to the third-party CC0 asset manifest.
+Focused asset checks verify shipped paths, nonzero dimensions, RGBA color type, and transparent
+pixels; native checks verify real-size legibility and absence of seams/clipping. Player-facing
+window title and shell copy become `PewPew Blitz`; crate names, paths, protocol identifiers,
+environment variables, and existing persistence directories remain unchanged.
+
+## Flow and focus contract
+
+### M01 flow changes
+
+`ClientFlow::Title` is retired from the ordinary product path and `ClientFlow::Dashboard` is added.
+Connecting becomes the ordinary initial screen after startup resources are loaded.
+
+| From | Trigger | To/result |
 |---|---|---|
-| Minimal | Brawler/build name, game type/mode, server, Play, Practice | Strong hierarchy; may hide useful build/rules context |
-| Balanced | Minimal plus budget/weapon, team size, rules, map-pool names, fresh population | Lead candidate; all facts are useful and currently owned |
-| Dense | Ultimate/passives, full rules, every population/availability detail on the home view | Competes with the brawler and primary action; reserve for child/detail surfaces |
+| Startup | one target resolved | Connecting; begin one bounded attempt |
+| Connecting | authenticated welcome/catalog accepted | Dashboard |
+| Connecting | Cancel | orderly cleanup, then Server Select |
+| Connecting | bounded failure | Server Select plus Retry/Choose Server error |
+| Server Select | valid Connect | Connecting |
+| Dashboard | Change Brawler/preview activation | existing Build Editor selection surface |
+| Dashboard | Change Game/game card activation | existing Game Select selection surface |
+| Dashboard | Play accepted | Queue |
+| Dashboard | Practice accepted | Match Loading |
+| Dashboard | Settings/Credits | existing overlay; close returns focus to invoker |
+| Dashboard | Change Server | disconnect confirmation, orderly cleanup, Server Select |
+| Dashboard | unexpected disconnect | Server Select plus classified recovery error |
+
+M01 does not claim the final connected return loop: queue cancellation, loading cancellation,
+confirmed match leave, and Results convergence remain explicitly owned by M02. Until then those
+paths retain their accepted V2 behavior and are a documented playtest limitation, not a second
+Dashboard implementation.
+
+### Focus and input
+
+The existing explicit directional focus graph remains authoritative across keyboard and gamepad;
+pointer activation synchronizes focus before action. Initial Dashboard focus is Play. The main row
+orders Game Type -> Practice -> Play; up reaches Change Brawler/preview; utilities are reachable
+without cycling through decorative content. Escape/East closes an overlay to its exact invoker and
+does not disconnect. Connecting initial focus is Cancel. Server Select retains its established
+editable-field and Settings access. Decorative model, logo, glow, and status text are not focusable.
+
+## ECS ownership and lifecycle
+
+### State and resources
+
+- `ClientFlow` remains the sole top-level product navigation state. `ClientOverlay` remains the sole
+  modal owner; no screen stack or second reducer is introduced.
+- A small client-only `DashboardViewModel` is rebuilt from `ClientLobbyMembership`, the selected
+  advertisement/snapshot, embedded catalogs, and `BuildEditorState::loaded_selection`. It contains
+  display-ready real facts and explicit freshness/availability states, not authority.
+- `DashboardPreviewGeneration` identifies the currently owned viewport, camera, render target,
+  preview root, scene/weapon roots, animation player linkage, and fallback entities. A generation
+  guards late asynchronous asset/scene callbacks after Dashboard exit or re-entry.
+- Dashboard shader material/elapsed presentation time is client-only. Reduced-motion settings are
+  read from the existing persisted settings resource.
+- Existing `PendingFlowActions`/`FlowCommit` remain the single transition arbitration path.
+  Dashboard buttons feed that path; render completion and animation never drive navigation.
+
+### Composition and schedule
+
+The client gains a cohesive private dashboard module, split only where ownership differs:
+
+```text
+src/client/dashboard/
+  mod.rs          plugin, view model, UI composition, actions, tests
+  preview.rs      viewport/camera/model/animation/fallback lifecycle
+  background.rs   custom UI material and reduced-motion uniforms
+assets/brawler/shaders/dashboard_background.wgsl
+```
+
+Shared imported fighter asset/profile preparation moves only as far as needed for the existing
+gameplay renderer and Dashboard preview to consume the same corrections. It does not become a new
+public crate/API.
+
+Startup ordering is explicit: load connection/build/settings state, apply deferred resource
+commands, resolve the single target, then allow the initial Connecting entry to begin the attempt.
+The existing chained flow phases remain:
+
+```text
+BeginFlowFrame -> ObserveSession -> CollectFlowInput -> ResolveFlowAction
+ -> TeardownSession -> CommitFlow -> PresentFlow
+```
+
+Dashboard input is collected in `CollectFlowInput`; state changes occur only in `CommitFlow`.
+Dashboard screen, preview, and background entities use state-scoped ownership plus explicit cleanup
+for non-entity assets. Preview scene/animation binding runs only for the active generation and only
+after required handles are ready. Dynamic render-target resize follows the computed viewport size
+and is clamped to a bounded nonzero size; resize never recreates networking or gameplay state.
+
+On Dashboard exit, the preview camera, scene roots, fallback entities, viewport nodes, and background
+entities despawn. Dynamic image/material handles and generation state are removed so repeated
+Dashboard entries do not accumulate render targets, cameras, animation graphs, or materials.
+
+## Network and authority behavior
+
+M01 changes no protocol or server behavior. It reuses the current routed lobby connection,
+compatibility handshake, catalog admission, queue/practice requests, reservations, match transfer,
+and disconnect teardown. The Dashboard exists only with a valid authenticated lobby membership.
+Clients continue to send display-name, connection, selected-build, queue, practice, cancel, and
+disconnect intent; the server continues to own identity acceptance, catalog/game-type truth, build
+legality at admission, population, formation, map choice, worker allocation, gameplay, and outcome.
+
+Normal interactive product clients use the flow-owned auto-connect path. Existing explicit
+`--auto-connect`, headless, controller/combat demos, screenshot/report automation, and routed E2E
+paths retain their established presentation bypass and numeric-socket requirements. The dedicated
+server feature graph does not acquire UI, rendering, image, animation, input-device, or dashboard
+assets.
 
 ## Risks and constraints
 
@@ -287,64 +441,137 @@ visual gain.
 8. **Scope pressure:** the reference screenshot contains progression/social surfaces. Empty space is
    preferable to inventing placeholder systems.
 
-## Discussion decisions required before specification review
+## Implementation plan
 
-### D1 — Startup target precedence
+1. Retire ordinary Title entry, add Dashboard, resolve the deterministic startup target from the
+   existing CLI/recent/default owners, and route success/cancel/failure/unexpected loss according to
+   the transition table.
+2. Add the Dashboard view model and UI using existing shell controls, focus, overlays, settings,
+   build/game-type owners, and one flow-action arbitration path.
+3. Extract the minimal shared fighter-presentation profile/asset preparation, implement the
+   dashboard viewport, actual character/weapon/idle path, primitive fallback, resize, generation,
+   and teardown.
+4. Implement the bounded background UI material, reduced-motion/static fallback, and localized
+   model grounding/glow.
+5. Clean and promote the two accepted branding concepts, update player-facing PewPew Blitz window
+   and shell copy, retain historical internal identifiers, and add focused asset validation.
+6. Connect Play, Practice, temporary selection entries, Settings, Credits, Change Server, Quit, and
+   disabled/stale states without changing authority or M02 return-loop scope.
+7. Run focused tests and canonical role checks, perform the native visual/input/lifecycle matrix,
+   then hand the build to the user with M02-owned limitations stated explicitly.
 
-Proposed: explicit preferred server, otherwise last successful server, otherwise configured
-default. On the very first run with no configured default, open Server Select directly. Attempt one
-logical server only; expose Retry and Choose Server after bounded failure.
+## Verification plan
 
-### D2 — Dashboard default-visible information
+### Focused automated coverage
 
-Proposed balanced set:
+- startup precedence: explicit interactive address, most recent success, product default, corrupt
+  persistence, retry same target, and cancel cleanup;
+- flow transitions: connecting success/failure/cancel, Dashboard action routing, disconnect
+  confirmation, unexpected loss, and overlay focus restoration;
+- Dashboard view model: real build/catalog/member facts, map-pool formatting, fresh/stale population,
+  unsupported Play/Practice reasons, and no selected-map or invented-fact fallback;
+- preview lifecycle: one active camera/render target/generation, late-scene rejection after exit,
+  imported/fallback paths, bounded resize, and no accumulation across repeated entries;
+- reduced-motion shader state and static fallback selection;
+- branding file path, PNG/RGBA dimensions, transparency, and retained source concepts;
+- existing connection persistence round trips and recent ordering remain compatible;
+- client composition includes Dashboard only in the interactive shell; server composition remains
+  free of client presentation dependencies.
 
-- accepted display name;
-- connected server name and connected indicator;
-- brawler/build name, budget use, and primary weapon;
-- advertised game-type name, mode, team size, concise rules, and map-pool names;
-- fresh waiting population or honest unavailable state;
-- Play, Practice, Change Brawler, Change Game, Settings, and utility menu.
+### Canonical automated gate
 
-Ultimate/passives belong in the brawler child surface unless the initial dashboard feels too empty.
+Run `just fmt`, `just lint`, `just check`, and `just test`. Run `just e2e 2` after affected routed
+tests pass to prove the unchanged lobby/admission/match path. Broader 4/6-client closeout remains
+M03 unless M01 changes expose a routing regression.
 
-### D3 — Primary actions
+### Native visual and interaction matrix
 
-Proposed: Play is the dominant action; Practice is smaller but adjacent. Both use the currently
-displayed brawler and game type. If the selected advertisement does not support a current action,
-show a real disabled reason rather than silently selecting something else.
+- normal first launch, remembered-success launch, explicit `--server`, bounded failure, Retry,
+  Choose Server, Cancel, Change Server, and unexpected loss;
+- 1280x720 and 1920x1080 at default scale, plus the existing minimum supported window/UI-scale
+  extremes; verify clipping, model framing, long server/build/game-type names, and map-pool wrapping;
+- keyboard, gamepad, and pointer parity, including initial focus, viewport activation, utility menu,
+  overlay close, and pointer-to-focus synchronization;
+- imported model/weapon/idle, forced primitive fallback, slow background over at least 30 seconds,
+  reduced motion, static shader fallback, repeated Dashboard entry/exit, and no model/logo seam;
+- logo lockup on Connecting and compact wordmark at actual header width with transparent edges;
+- Dashboard frame behavior compared with the existing shell, recording preview target size and
+  camera/material counts so a lifecycle or obvious frame-cost regression cannot be accepted by eye.
 
-### D4 — Utility placement
+## User playtest handoff
 
-Proposed: direct Settings gear plus a small menu containing Credits, Change Server, and Quit.
-“Change Server” communicates the result better than a large “Disconnect” control, while still
-performing an orderly lobby disconnect before Server Select. Connecting and Server Select retain
-Settings and Quit access; Credits may remain in the same utility menu.
+Use the canonical `just server` and `just client` path. Evaluate launch/recovery clarity, whether the
+actual fighter remains the visual center, information density, Play-versus-Practice hierarchy,
+model/background motion, logo legibility, and keyboard/gamepad/pointer navigation. Queue, loading,
+match-leave, and Results convergence plus final child selection surfaces remain M02 work.
 
-### D5 — M01 preview approach
+## Implementation and verification evidence
 
-Proposed: build a focused native prototype comparing dedicated `ViewportNode` with a layered 3D
-camera, using the actual supported in-game character/weapon presentation, idle animation, and one
-primitive fallback. Neither candidate includes a carousel. Compare the quiet shader/glow backdrop
-in the same prototype and choose from measured lifecycle, layout, picking, and frame cost—not from
-abstraction preference.
+Implemented on 2026-08-21:
 
-### D6 — First milestone boundary
+- ordinary interactive startup now enters Connecting and chooses one target in the accepted
+  explicit-address, most-recent-success, local-default order;
+- accepted lobby membership enters Dashboard, while cancel, bounded failure, orderly Change Server,
+  and unexpected loss use the Server Select recovery surface;
+- Dashboard presents the authenticated player/server, current persisted build and budget, weapon,
+  advertised game type/rules/map pool, fresh population/availability, actual imported fighter,
+  attached weapon, idle animation, and primitive fallback;
+- Play and Practice reuse the existing authoritative lobby requests; build/game selection reuse the
+  current temporary child surfaces; Settings, Credits, Change Server confirmation, and Quit are
+  directly reachable;
+- `src/client/dashboard.rs` owns the cohesive viewport/background lifecycle. A separate subdirectory
+  was not justified by the implemented size: the camera, dynamic image, scene hierarchy, custom UI
+  material, and state-scoped cleanup remain easy to audit together;
+- the background uses `assets/brawler/shaders/dashboard_background.wgsl`, freezes with reduced
+  motion, has a static navy fallback, and uses a client-only cyan rim light on the preview model;
+- exact transparent crops of the user-provided logo concepts ship as the loading lockup and compact
+  wordmark. Image-generation cleanup attempts were rejected because they baked visible backgrounds;
+  the unchanged RGBA source pixels were retained instead;
+- player-facing window, credits, and local server names use PewPew Blitz; internal crate, protocol,
+  environment, and persistence identities remain unchanged.
 
-Proposed: M01 replaces ordinary launch/Title, delivers the accepted dashboard hierarchy and its
-functional actions, and may route to the existing build/game selection surfaces. M02 owns their
-final dashboard-child presentation and every post-queue/match return convergence. This ends M01
-with a playable vertical slice without silently absorbing all shell polish.
+Automated evidence:
 
-## Specification work remaining
+- `just lint` passed, including client/server Clippy, server feature isolation, and the retired 2D
+  renderer guard;
+- `just check` passed for routing, client, server, and network-test feature graphs;
+- `just test` passed: 83 routing library tests plus routing process suites, 396 client tests, 311
+  server tests, 82 serialized network integration tests, and 14 performance gates;
+- `just e2e 2` passed with one exact routed 1v1 roster reaching Active and both workers shutting down
+  cleanly;
+- native 1280x720 captures verified the transparent wordmark, authenticated Dashboard facts, actual
+  imported fighter/weapon/idle path, dominant Play hierarchy, shader compilation, and bounded fit.
+  The final composition capture is
+  `target/v5-m01-screens-final2/brawler-000360.png`; automated capture occasionally records partially
+  uploaded glyph atlases, so live text/focus rendering remains part of the user playtest rather than
+  being accepted from that frame alone.
 
-- record the user's decisions for D1–D6;
-- verify exact installed Bevy 0.19 viewport/render-target/picking APIs;
-- define the final `ClientFlow`/overlay transition table and focus-return contract;
-- define startup preference persistence and first-run/migration behavior;
-- define dashboard ECS ownership, preview generation, asset readiness, and teardown;
-- prepare, promote, and real-size test the transparent loading logo and compact wordmark;
-- define real-data freshness/disabled states and the exact card copy;
-- define implementation tasks, focused tests, routed tests, native visual matrix, and exit criteria;
-- set M01 and the V5 roadmap to `Specification review` only when the complete specification is
-  ready for user validation.
+The milestone remains open at User playtest. The broader resolution/controller/repeated-entry matrix,
+feedback triage, and learning review are still required before Complete.
+
+## Exit criteria
+
+M01 may advance beyond User playtest only when:
+
+- ordinary launch never visits Title and deterministically attempts one visible logical server;
+- cancellation and bounded failure reach a fully usable Server Select, while success reaches a
+  valid authenticated Dashboard;
+- Dashboard displays only the specified real facts and all required actions function with keyboard,
+  gamepad, and pointer;
+- the actual supported character, weapon, idle animation, and primitive fallback render with no
+  gameplay/replication ownership and clean up across repeated entries;
+- the restrained shader/glow, reduced-motion state, and static fallback are readable and do not
+  control flow;
+- cleaned transparent PewPew Blitz lockup/wordmark assets work at their real runtime sizes and all
+  player-facing shell branding is updated without an internal compatibility rename;
+- focused tests, canonical checks/tests, routed two-client E2E, and the native matrix pass;
+- M02-owned return-loop limitations remain explicit, user feedback is triaged, affected checks are
+  rerun, and the milestone learning review is recorded before status becomes Complete.
+
+## Explicitly deferred to M02/M03
+
+- final Dashboard-child Build and Game selection presentation and confirm/back semantics;
+- queue/loading/leave/results convergence and exact Play Again behavior;
+- exhaustive responsive, accessibility, transition/audio, lifecycle/performance hardening and the
+  2/4/6-client V5 closeout matrix;
+- original final icon/art pass beyond the accepted cleaned branding and procedural Dashboard field.

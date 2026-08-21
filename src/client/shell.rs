@@ -1,7 +1,7 @@
 //! Functional windowed product shell: title, one overlay, focus, settings draft, and errors.
 
 use super::flow::ClientFlowSet;
-use super::flow::{ClientLocalLoadFailures, local_load_error};
+use super::flow::ClientLocalLoadFailures;
 use super::{
     ClientFlow, ClientInputContext, ClientOverlay, FlowError, FlowErrorAction, FlowErrorKind,
     InputCaptureConsumed, InputSettingsField, InputSettingsSelection, InputSettingsText,
@@ -31,7 +31,7 @@ use bevy::{
 };
 
 const ENTRANCE_SECONDS: f32 = 0.16;
-const CREDITS: &str = "Brawler 0.1.0\n\nBuilt with Bevy 0.19 (MIT OR Apache-2.0).\nDefault Fira Mono font: Mozilla Foundation / Telefonica, SIL OFL 1.1.\nFighters and sounds: Kenney, CC0 1.0.\nFacility tiles: Murphy's Dad / HaywardMorihara, CC0 1.0.\n\nFull license texts ship in assets/licenses/.";
+const CREDITS: &str = "PewPew Blitz 0.1.0\n\nBuilt with Bevy 0.19 (MIT OR Apache-2.0).\nDefault Fira Mono font: Mozilla Foundation / Telefonica, SIL OFL 1.1.\nFighters and sounds: Kenney, CC0 1.0.\nFacility tiles: Murphy's Dad / HaywardMorihara, CC0 1.0.\n\nFull license texts ship in assets/licenses/.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ErrorReturn {
@@ -80,6 +80,10 @@ struct NavigationLatch {
 struct NavigationDirty(Option<ShellControlId>);
 
 #[derive(Component)]
+#[allow(
+    dead_code,
+    reason = "retained temporarily for V2 shell regression fixtures during V5 M01"
+)]
 struct TitleRoot;
 
 #[derive(Component)]
@@ -107,10 +111,22 @@ enum ShellLayer {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellControlId {
+    #[allow(
+        dead_code,
+        reason = "retained for V2 title regression fixtures during V5 M01"
+    )]
     Play,
+    #[allow(
+        dead_code,
+        reason = "retained for V2 title regression fixtures during V5 M01"
+    )]
     Practice,
     Settings,
     Credits,
+    #[allow(
+        dead_code,
+        reason = "retained for V2 title regression fixtures during V5 M01"
+    )]
     Quit,
     PreviousField,
     NextField,
@@ -138,11 +154,31 @@ enum ShellControlId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellAction {
+    #[allow(
+        dead_code,
+        reason = "retained for V2 title regression fixtures during V5 M01"
+    )]
     Play,
+    #[allow(
+        dead_code,
+        reason = "retained for V2 title regression fixtures during V5 M01"
+    )]
     Practice,
+    #[allow(
+        dead_code,
+        reason = "retained for shell settings regression fixtures during V5 M01"
+    )]
     OpenSettings,
     OpenMatchSettings,
+    #[allow(
+        dead_code,
+        reason = "retained for V2 title regression fixtures during V5 M01"
+    )]
     OpenCredits,
+    #[allow(
+        dead_code,
+        reason = "retained for V2 title regression fixtures during V5 M01"
+    )]
     Quit,
     PreviousField,
     NextField,
@@ -203,7 +239,7 @@ impl Plugin for ClientShellPlugin {
             .init_resource::<SettingsReturnTarget>()
             .init_resource::<SessionPurpose>()
             .add_systems(Startup, load_persistent_settings)
-            .add_systems(OnEnter(ClientFlow::Title), spawn_initial_shell)
+            .add_systems(OnEnter(ClientFlow::Dashboard), enter_dashboard_shell)
             .add_systems(
                 Update,
                 (
@@ -211,6 +247,7 @@ impl Plugin for ClientShellPlugin {
                     collect_pointer_actions.in_set(ClientFlowSet::CollectFlowInput),
                     collect_match_settings_request.in_set(ClientFlowSet::CollectFlowInput),
                     handle_shell_actions.in_set(ClientFlowSet::ResolveFlowAction),
+                    present_flow_requested_overlay.in_set(ClientFlowSet::PresentFlow),
                     restore_match_menu_after_settings.in_set(ClientFlowSet::PresentFlow),
                     rebuild_navigation.in_set(ClientFlowSet::PresentFlow),
                     style_shell_buttons.in_set(ClientFlowSet::PresentFlow),
@@ -240,7 +277,6 @@ fn load_persistent_settings(
     mut input: ResMut<ClientInputSettings>,
     mut shell: ResMut<ClientShellSettings>,
     mut state: ResMut<ShellState>,
-    mut overlay: ResMut<ClientOverlay>,
     mut failures: ResMut<ClientLocalLoadFailures>,
 ) {
     match load_settings(&path.0) {
@@ -256,30 +292,54 @@ fn load_persistent_settings(
             state.message = error.to_string();
         }
     }
-    if let Some(error) = local_load_error(*failures) {
-        state.message.clone_from(&error.message);
-        *overlay = ClientOverlay::Error(error);
-    }
 }
 
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are runtime-owned"
 )]
-fn spawn_initial_shell(
-    mut commands: Commands,
-    state: Res<ShellState>,
-    overlay: Res<ClientOverlay>,
-    mut context: ResMut<ClientInputContext>,
-    mut dirty: ResMut<NavigationDirty>,
-) {
+fn enter_dashboard_shell(mut context: ResMut<ClientInputContext>) {
     *context = ClientInputContext::Shell;
-    spawn_title(&mut commands);
-    if matches!(overlay.as_ref(), ClientOverlay::Error(_)) {
-        spawn_error(&mut commands, &state.message, state.kind);
-        dirty.0 = Some(ShellControlId::ContinueWithoutSaving);
-    } else {
-        dirty.0 = Some(ShellControlId::Play);
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    reason = "flow-owned utility requests initialize the existing shell overlay drafts"
+)]
+fn present_flow_requested_overlay(
+    mut commands: Commands,
+    overlay: Res<ClientOverlay>,
+    roots: Query<Entity, With<OverlayRoot>>,
+    active_input: Res<ClientInputSettings>,
+    active_shell: Res<ClientShellSettings>,
+    input_draft: Option<Res<InputSettingsDraft>>,
+    shell_draft: Option<Res<ShellSettingsDraft>>,
+    mut selection: ResMut<InputSettingsSelection>,
+    mut dirty: ResMut<NavigationDirty>,
+    mut settings_return: ResMut<SettingsReturnTarget>,
+) {
+    if !roots.is_empty() {
+        return;
+    }
+    match overlay.as_ref() {
+        ClientOverlay::Settings => {
+            *settings_return = SettingsReturnTarget::Title;
+            if input_draft.is_none() {
+                commands.insert_resource(InputSettingsDraft(*active_input));
+            }
+            if shell_draft.is_none() {
+                commands.insert_resource(ShellSettingsDraft(*active_shell));
+            }
+            selection.listening = false;
+            spawn_settings(&mut commands);
+            dirty.0 = Some(ShellControlId::PreviousField);
+        }
+        ClientOverlay::Credits => {
+            spawn_credits(&mut commands);
+            dirty.0 = Some(ShellControlId::CreditsBack);
+        }
+        _ => {}
     }
 }
 
@@ -315,11 +375,15 @@ fn panel_node() -> Node {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "retained temporarily for V2 shell regression fixtures during V5 M01"
+)]
 fn spawn_title(commands: &mut Commands) {
     commands
         .spawn((
             TitleRoot,
-            DespawnOnExit(ClientFlow::Title),
+            DespawnOnExit(ClientFlow::Dashboard),
             root_node(),
             BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
             GlobalZIndex(400),
@@ -630,6 +694,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         ClientOverlay::Error(_) => ShellLayer::Error,
         ClientOverlay::BuildEditor
         | ClientOverlay::Confirmation(_)
+        | ClientOverlay::ChangeServerConfirmation
         | ClientOverlay::LeaveConfirmation => ShellLayer::FlowOwned,
     }
 }
@@ -926,7 +991,7 @@ fn handle_shell_actions(
                     *client_overlay = ClientOverlay::Error(FlowError {
                         kind: FlowErrorKind::Content,
                         message: state.message.clone(),
-                        return_flow: ClientFlow::Title,
+                        return_flow: ClientFlow::Dashboard,
                         actions: [Some(FlowErrorAction::ContinueWithoutSaving), None],
                     });
                     despawn_overlays(&mut commands, &roots);
@@ -945,7 +1010,7 @@ fn handle_shell_actions(
                     *client_overlay = ClientOverlay::Error(FlowError {
                         kind: FlowErrorKind::Persistence,
                         message: state.message.clone(),
-                        return_flow: ClientFlow::Title,
+                        return_flow: ClientFlow::Dashboard,
                         actions: [
                             Some(FlowErrorAction::RetrySave),
                             Some(FlowErrorAction::ContinueWithoutSaving),
@@ -1017,6 +1082,7 @@ fn handle_shell_actions(
                     ClientOverlay::Settings | ClientOverlay::Error(_) => ShellControlId::Settings,
                     ClientOverlay::BuildEditor
                     | ClientOverlay::Confirmation(_)
+                    | ClientOverlay::ChangeServerConfirmation
                     | ClientOverlay::LeaveConfirmation
                     | ClientOverlay::None => continue,
                 };
@@ -1382,6 +1448,10 @@ mod tests {
     use crate::client::settings::ui::adjust_input_settings_from_pause_keys;
     use bevy::input_focus::directional_navigation::NavNeighbor;
 
+    fn spawn_legacy_title_fixture(mut commands: Commands) {
+        spawn_title(&mut commands);
+    }
+
     fn shell_test_app(path: std::path::PathBuf) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1411,6 +1481,10 @@ mod tests {
                 adjust_input_settings_from_pause_keys.in_set(ClientSettingsUiSet::Capture),
             )
             .add_plugins(ClientShellPlugin);
+        app.add_systems(OnEnter(ClientFlow::Dashboard), spawn_legacy_title_fixture);
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
         app
     }
 
@@ -1945,7 +2019,7 @@ mod tests {
             active_layer(&ClientOverlay::Error(FlowError {
                 kind: FlowErrorKind::Connection,
                 message: String::new(),
-                return_flow: ClientFlow::Title,
+                return_flow: ClientFlow::Dashboard,
                 actions: [Some(FlowErrorAction::Back), None],
             })),
             ShellLayer::Error

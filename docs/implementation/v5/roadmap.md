@@ -28,8 +28,7 @@ allocates a worker, and match workers still own gameplay and outcomes.
 
 ## User-requested direction
 
-The following is the starting direction for M01 research and discussion, not yet an accepted
-technical specification:
+The following direction is resolved into the M01 technical specification and awaits user approval:
 
 1. Remove the standalone Title screen from the ordinary launch path.
 2. Auto-connect to one last/default/preferred server and show Connecting during the attempt.
@@ -53,9 +52,9 @@ technical specification:
 
 | Field | Value |
 |---|---|
-| Status | Researching |
+| Status | User playtest |
 | Current milestone | M01 — auto-connect and player-dashboard vertical slice |
-| Entry gate | Satisfied: V4 closeout accepted on 2026-08-21; V5 production implementation still requires M01 specification acceptance |
+| Entry gate | Satisfied: V4 closeout and the M01 specification were accepted on 2026-08-21 |
 | Completion gate | Normal launch, connected hub, selection, queue/practice, match exit, recovery, settings, controller/pointer navigation, and native presentation form one accepted dashboard-centered loop |
 
 Allowed statuses are `Not started`, `Researching`, `Specification review`, `Implementing`,
@@ -65,7 +64,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
-| 01 | Researching | Auto-connect launch and a functional Player Dashboard showing the current brawler, game type, server/session identity, Play, Practice, and utilities | [milestone-01.md](./milestone-01.md) |
+| 01 | User playtest | Auto-connect launch and a functional Player Dashboard showing the current brawler, game type, server/session identity, Play, Practice, and utilities | [milestone-01.md](./milestone-01.md) |
 | 02 | Not started | Dashboard-owned brawler/game selection and a match/queue/results loop whose ordinary exits converge on the dashboard | Create when M01 is complete |
 | 03 | Not started | Responsive visual, input, accessibility, recovery, lifecycle, and native-performance hardening plus V5 closeout | Create when M02 is complete |
 
@@ -159,9 +158,9 @@ canonical client/server/routing checks pass; user feedback and the learning revi
 
 | ID | Item | Disposition |
 |---|---|---|
-| V5-PREFERRED-SERVER-POLICY | Decide the exact precedence among explicit preferred, last successful, configured default, and empty first-run state | M01 discussion/specification |
-| V5-DASHBOARD-INFORMATION | Accept the default-visible brawler, mode, server, player, population, and availability facts | M01 discussion/specification |
-| V5-PREVIEW-COMPOSITION | Select dedicated viewport versus full-screen layered 3D preview after a focused native prototype | M01 research; no gameplay-world reuse |
+| V5-PREFERRED-SERVER-POLICY | Explicit invocation address, else most recent successful logical server, else product loopback default; one bounded target only | Resolved in M01 specification; no persistence migration |
+| V5-DASHBOARD-INFORMATION | Balanced real-data set with stale/unavailable states and no synthetic account/map/latency facts | Resolved in M01 specification |
+| V5-PREVIEW-COMPOSITION | Dedicated Bevy 0.19 UI viewport using the actual presentation model/weapon/idle and a separately owned lifecycle | Resolved in M01 specification |
 | V5-RESULTS-ACTIONS | Decide exact Play Again/Practice Again/Dashboard behavior and recovery when the previous selection is stale | M02 specification |
 | V5-BRANDING-PROMOTION | Clean and promote `inspiration/logo2.png` as the loading lockup and `inspiration/wordmark.png` as the compact header mark, preserving transparent masters and verifying real-size rendering | M01 implementation |
 | V5-ORIGINAL-DASHBOARD-ART | Replace remaining functional layout/materials and generated concept icons with original polished PewPew Blitz UI art | Defer until the interaction hierarchy is accepted |

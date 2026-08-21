@@ -39,9 +39,9 @@ const WALL_HEIGHT: f32 = 72.0;
 const GROUND_OFFSET: f32 = 1.0;
 const ZONE_RING_WIDTH: f32 = 28.0;
 // Kenney's Mini Characters face local +Z, while Brawler fighter roots face local +X.
-const KENNEY_CHARACTER_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
+pub(crate) const KENNEY_CHARACTER_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
 // Blaster Kit barrels also point local +Z, so the corrected character hierarchy needs no extra yaw.
-const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
+pub(crate) const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 // Keep a straight shot nearly on its authoritative plane. A larger lift produces a strong
 // screen-space parallax offset under the tilted orthographic camera and makes it miss the muzzle.
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
@@ -133,11 +133,11 @@ enum CharacterMotion {
 }
 
 #[derive(Resource)]
-struct Imported3dAssets {
-    character_scene: Handle<WorldAsset>,
-    blaster_scene: Handle<WorldAsset>,
-    animation_graph: Handle<AnimationGraph>,
-    idle: AnimationNodeIndex,
+pub(crate) struct Imported3dAssets {
+    pub(crate) character_scene: Handle<WorldAsset>,
+    pub(crate) blaster_scene: Handle<WorldAsset>,
+    pub(crate) animation_graph: Handle<AnimationGraph>,
+    pub(crate) idle: AnimationNodeIndex,
     walk: AnimationNodeIndex,
     holding: AnimationNodeIndex,
     shoot: AnimationNodeIndex,

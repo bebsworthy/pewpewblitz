@@ -55,6 +55,7 @@ mod audio;
 mod build_editor;
 mod build_persistence;
 mod connection_persistence;
+mod dashboard;
 mod flow;
 mod hud;
 mod input;
@@ -538,7 +539,6 @@ struct ScoreboardOverlay;
 /// Build the windowed or headless client application.
 pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     let headless = config.headless;
-    let client_id = config.client_id;
     let render_profile = config.render_profile;
     let window_size = config.window_size;
     let screenshot_schedule = config.screenshot_schedule.clone();
@@ -561,7 +561,7 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: format!("Brawler Client {client_id}"),
+                        title: "PewPew Blitz".to_string(),
                         present_mode,
                         resolution: window_size.map_or_else(Default::default, |(width, height)| {
                             WindowResolution::new(u32::from(width), u32::from(height))
@@ -604,7 +604,11 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
             .resource::<ClientNetworkConfig>()
             .presents_product_shell()
         {
-            app.add_plugins((ClientFlowPlugin, ClientShellPlugin));
+            app.add_plugins((
+                ClientFlowPlugin,
+                ClientShellPlugin,
+                dashboard::ClientDashboardPlugin,
+            ));
         }
         if let Some(schedule) = screenshot_schedule {
             std::fs::create_dir_all(&schedule.dir).expect("screenshot directory is creatable");
