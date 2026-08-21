@@ -62,12 +62,13 @@ A runtime model is accepted only when all of the following are true:
 
 `external_assets/` contains broader Kenney packs for future evaluation, including Mini Dungeon,
 Mini Forest, Pirate, Graveyard, and additional Mini Arena/Character/Blaster variants. They are not
-runtime content and are not all visually compatible with one another. Promote a new family only
-when a real theme or gameplay object owns it; choose one coherent visual language per map rather
-than mixing packs as a catalog demonstration.
+runtime content. V4's proposed game-object catalog permits one map to mix compatible visual variants
+from different packs: themes provide defaults and filters, not a style lock. Promote a new family
+only when a real game object or map placement owns it, and validate scale, footprint, palette, and
+readability rather than rejecting cross-pack composition categorically.
 
 The supplied 512×512 isometric renders and 128×64 tile guidance are preview/Tiled-authoring
-metadata. Brawler renders the GLBs through its fixed orthographic `Camera3d`; those PNG dimensions,
+metadata. Brawler renders the GLBs through its fixed perspective `Camera3d`; those PNG dimensions,
 drawing offsets, and tile sizes do not define runtime scale, collision, or camera projection.
 
 ## Original-art direction

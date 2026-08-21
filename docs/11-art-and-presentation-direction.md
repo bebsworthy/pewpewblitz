@@ -19,8 +19,8 @@ resolved 2D map shapes            ->   exact-footprint 3D/procedural geometry
 replicated combat state/cues      ->   animation, effects, audio, projected UI
 ```
 
-The camera is fixed, tilted, and orthographic. There is no player orbit, perspective gameplay
-camera, authoritative height, jumping, or walkable wall top. The depth buffer replaces 2D painter
+The camera is fixed, tilted, and uses restrained perspective. There is no player orbit,
+authoritative height, jumping, or walkable wall top. The depth buffer replaces 2D painter
 ordering; render height and animation never feed back into simulation.
 
 Screen-space menus, HUD, settings, and overlays remain Bevy UI on the UI camera. Fighter overhead
@@ -122,7 +122,7 @@ revision. Do not create a unique mesh or material asset per fighter, projectile,
 
 `WorldPresentationPlugin` owns the sole gameplay-world renderer. Its responsibilities are:
 
-- one `Camera3d`, orthographic projection, ambient light, directional light, and selected MSAA;
+- one `Camera3d`, fixed perspective projection, ambient light, directional light, and selected MSAA;
 - the tested simulation-XY to render-XZ conversion API;
 - map, terrain, fighter, projectile, sentry, objective, preview, status, debris, and cue visuals;
 - GLB readiness, imported-scene promotion, deterministic primitive fallback, animation, and weapon
@@ -165,7 +165,8 @@ terrain mutation, objectives, and representative combat density.
 ## Deferred art work
 
 - original environment, fighter, weapon, material, animation, VFX, icon, and branding production;
-- additional coherent map themes promoted from the available Kenney packs;
+- additional map-theme defaults promoted from the available Kenney packs; themes guide ground,
+  edge, lighting, palette, and default object variants but do not prohibit mixed styles;
 - skin selection, replication, entitlement, and accessibility validation;
-- model/weapon variant catalogs and authored presentation profiles;
+- game-object and model/weapon variant catalogs with per-placement compatible visual overrides;
 - advanced occlusion treatments or rendering features justified by later playtests.

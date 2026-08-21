@@ -2,9 +2,11 @@
 
 use super::*;
 
-pub(super) const CAMERA_VERTICAL_SPAN_3D: f32 = 900.0;
+pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 27.0_f32.to_radians();
 pub(super) const CAMERA_ELEVATION_RADIANS: f32 = 55.0_f32.to_radians();
-pub(super) const CAMERA_DISTANCE: f32 = 1_200.0;
+pub(super) const CAMERA_DISTANCE: f32 = 1_600.0;
+/// Keep a visible environment band beyond authoritative containment when following edge players.
+const PRESENTATION_MARGIN: f32 = 224.0;
 
 /// Intersect a viewport ray with the sole gameplay ground plane (`Y = 0`).
 pub(crate) fn cursor_ground_point(
@@ -41,7 +43,7 @@ pub(super) fn follow_3d_camera(
                 .iter()
                 .next()
                 .map_or_else(|| map.camera_bounds.center(), |position| position.0);
-            (map.camera_bounds, position)
+            (presentation_camera_bounds(map.camera_bounds), position)
         },
     );
     let viewport = windows
@@ -62,6 +64,15 @@ pub(super) fn follow_3d_camera(
     }
 }
 
+pub(super) fn presentation_camera_bounds(
+    bounds: crate::map::AxisAlignedMapRect,
+) -> crate::map::AxisAlignedMapRect {
+    crate::map::AxisAlignedMapRect {
+        min: bounds.min - Vec2::splat(PRESENTATION_MARGIN),
+        max: bounds.max + Vec2::splat(PRESENTATION_MARGIN),
+    }
+}
+
 pub(super) fn clamp_3d_camera_center(
     position: Vec2,
     bounds: crate::map::AxisAlignedMapRect,
@@ -72,10 +83,9 @@ pub(super) fn clamp_3d_camera_center(
     } else {
         16.0 / 9.0
     };
-    let half_y = CAMERA_VERTICAL_SPAN_3D * 0.5 / CAMERA_ELEVATION_RADIANS.sin();
-    let half_x = CAMERA_VERTICAL_SPAN_3D * 0.5 * aspect.max(0.0);
-    let min = bounds.min + Vec2::new(half_x, half_y);
-    let max = bounds.max - Vec2::new(half_x, half_y);
+    let footprint = perspective_ground_footprint(aspect);
+    let min = bounds.min - footprint.min;
+    let max = bounds.max - footprint.max;
     Vec2::new(
         if min.x > max.x {
             f32::midpoint(bounds.min.x, bounds.max.x)
@@ -88,4 +98,30 @@ pub(super) fn clamp_3d_camera_center(
             position.y.clamp(min.y, max.y)
         },
     )
+}
+
+pub(super) fn perspective_ground_footprint(aspect: f32) -> crate::map::AxisAlignedMapRect {
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        16.0 / 9.0
+    };
+    let sin_elevation = CAMERA_ELEVATION_RADIANS.sin();
+    let cos_elevation = CAMERA_ELEVATION_RADIANS.cos();
+    let camera_height = CAMERA_DISTANCE * sin_elevation;
+    let camera_ground_distance = CAMERA_DISTANCE * cos_elevation;
+    let vertical_tangent = (CAMERA_VERTICAL_FOV_RADIANS * 0.5).tan();
+    let horizontal_tangent = vertical_tangent * aspect;
+    let far_parameter = camera_height / (sin_elevation - vertical_tangent * cos_elevation);
+    let near_parameter = camera_height / (sin_elevation + vertical_tangent * cos_elevation);
+    let far_y =
+        far_parameter * (cos_elevation + vertical_tangent * sin_elevation) - camera_ground_distance;
+    let near_y = near_parameter * (cos_elevation - vertical_tangent * sin_elevation)
+        - camera_ground_distance;
+    let far_half_width = far_parameter * horizontal_tangent;
+
+    crate::map::AxisAlignedMapRect {
+        min: Vec2::new(-far_half_width, near_y),
+        max: Vec2::new(far_half_width, far_y),
+    }
 }

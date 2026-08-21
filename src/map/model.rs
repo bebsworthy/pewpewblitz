@@ -44,6 +44,8 @@ stable_id!(MapRecipeFingerprint, u64);
 stable_id!(MapPlacementId, u32);
 stable_id!(MapPresentationThemeId, u16);
 stable_id!(MapPresentationProfileId, u16);
+stable_id!(MapObjectDefinitionId, u16);
+stable_id!(MapVisualVariantId, u16);
 stable_id!(CollisionProfileId, u16);
 stable_id!(RegionProfileId, u16);
 stable_id!(EntityDefinitionId, u16);
@@ -144,6 +146,8 @@ impl MapShape {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GeometryPlacement {
     pub placement_id: MapPlacementId,
+    pub object_definition_id: MapObjectDefinitionId,
+    pub visual_variant_id: Option<MapVisualVariantId>,
     pub collision_profile_id: CollisionProfileId,
     pub presentation_profile_id: Option<MapPresentationProfileId>,
     pub position: Vec2,
@@ -168,6 +172,8 @@ pub struct VisualPlacement {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct MapEntityPlacement {
     pub placement_id: MapPlacementId,
+    pub object_definition_id: MapObjectDefinitionId,
+    pub visual_variant_id: Option<MapVisualVariantId>,
     pub definition_id: EntityDefinitionId,
     pub presentation_profile_id: MapPresentationProfileId,
     pub position: Vec2,

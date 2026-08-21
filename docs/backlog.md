@@ -1,7 +1,7 @@
 # Cross-version product and technical backlog
 
 This file began as the 2026-08-15 post-V1 documentation review and now carries unresolved work
-across the completed V1–V3 roadmaps. A completed version may resolve a row without erasing the
+across the completed V1–V3 roadmaps and the active V4 proposal. A completed version may resolve a row without erasing the
 historical finding; the triage table records that disposition. Future work becomes active only when
 promoted into a researched, user-reviewed version milestone.
 
@@ -30,6 +30,7 @@ is either absent from all of those lists or present only as an unstated assumpti
 | GAP-UI-SETTINGS | Settings screen and local persistence | Resolved by V2: product settings overlay, calibration/remapping, validation, and versioned local persistence. | V2 roadmap and closeout |
 | GAP-AUDIO-SETTINGS | Audio settings and music | No music/menu audio is ever named (only placeholder SFX cues in M06/M07) and no master/SFX/music volume controls exist. | Roadmap M06/M11 |
 | GAP-PERF-CLIENT | Client performance targets | Partially resolved by V3: bounded native render-report schema, Apple M3 reference profile, and explicit frame thresholds exist; broader minimum-spec/device coverage remains deferred. | V3 M04 |
+| GAP-MAP-EDITOR | Player-facing map editor | Build a future authoring workflow over the production map/object catalogs: choose a supported mode and background/theme defaults; browse the game-object taxonomy; mix compatible visual variants per placement; set legal bounds; place/move/rotate/duplicate/delete objects, spawns, regions, and mode anchors; show collision and validation overlays; provide bounded undo/redo; save/reopen a versioned map document; and launch it only through authoritative server validation. Keep custom asset upload, publishing, discovery, moderation, and arbitrary game rules separate. Explicitly deferred from V4 on 2026-08-20. | Product direction; V4 scoping decision |
 
 ## P2 — Traceability gaps (deferred by design docs, never backlogged)
 
@@ -39,7 +40,7 @@ is either absent from all of those lists or present only as an unstated assumpti
 | GAP-WEAPON-MECH | Additional weapon mechanics | Charge rifle (optional fifth preset), beam/ray delivery and beam-tick firing, trap and turret delivery, melee-dash, burst/radial firing patterns, hold-to-charge/channel/release-to-fire/quick-fire input behaviors, persistent damage/healing/control zones, summon/deployable impact rules. | `03-weapons-and-abilities.md` delivery, firing patterns, input behavior, impact rules |
 | GAP-NET-LAGCOMP | Lag compensation | Named as a real capability in docs 01 and 08 ("after the relevant early gates") but never scheduled or backlogged. | `01-engine-decision.md`; `08-network-architecture.md` |
 | GAP-NET-ROOMS | Coarse interest management (Rooms) — superseded | Resolved by the proposed process-per-match topology: matches no longer share one Lightyear authority, so routes and worker processes provide cross-match isolation. Per-client visibility inside one small match remains an unscheduled measured optimization, not a v2 dependency. | `08-network-architecture.md`; `14-multiplayer-server-architecture.md` superseded direction |
-| GAP-MAPS-BUILTIN | Additional built-in maps | Doc 04 describes four map-grammar archetypes (lane arena, cover maze, central-objective, chokepoint); v1 has one arena plus a Hot Zone variant, with no backlog item for more built-in maps. | `04-maps-and-game-modes.md` map grammar |
+| GAP-MAPS-BUILTIN | Additional built-in maps | Promoted into proposed V4 M03: a second map/theme must prove the object and presentation catalogs reusable rather than Crossroads-specific. | `04-maps-and-game-modes.md`; V4 roadmap |
 | GAP-COMBAT-DEBRIS | Deferred destruction cosmetics | Terrain deformation animation and falling debris were deferred by doc 04 but omitted from M10's deferral list. | `04-maps-and-game-modes.md` MVP destruction scope |
 | GAP-TERRAIN-BEAM | Terrain-carving laser | Add a beam/laser world effect that erases destructible terrain along a server-resolved, quantized segment/capsule rather than one circular impact brush. Permanent geometry should stop the beam and remain indestructible. Scope deterministic rasterization, endpoint/radius wire data, maximum beam length/cells/chunks, simultaneous-beam budgets, collider batching, recovery compatibility, and matching client carve feedback. | Product idea, 2026-08-16; build on M10 terrain world effects |
 | GAP-FX-PRESENTATION | Richer combat presentation | V3 added bounded 3D muzzle/impact/damage/reset effects, trails, statuses, and debris. Rich authored animation, material-specific impact, and broader VFX remain deferred. | `03-weapons-and-abilities.md`; V3 M03/M04 |
@@ -92,11 +93,14 @@ concealment, spell-created concealment, speedway/slow surfaces, and one readable
 | GAP-NET-ROOMS | Resolved 2026-08-17 — superseded by process-per-match routing; no implementation scheduled | Reopen only if one authority later hosts multiple matches or measured within-match visibility requires it |
 | GAP-UI-SETTINGS, GAP-MODE-TRAINING, GAP-UI-PAUSE-RENAME | Resolved by V2 | Reopen only for a new concrete product requirement |
 | GAP-PERF-CLIENT, GAP-FX-PRESENTATION | Partially resolved by V3; remaining scope is stated in each row | Future release/art milestone |
-| All other items | Unscheduled after V3 closeout | Future-version scoping |
+| GAP-MAPS-BUILTIN | Proposed for V4; not implemented until each V4 milestone specification is accepted | V4 M02–M03 |
+| GAP-MAP-EDITOR, FUT-MAP-BUILDER | Backlogged after removal from V4; no active implementation milestone | Future-version scoping |
+| All other items | Unscheduled after V3 closeout unless separately promoted | Future-version scoping |
 
 `GAP-ITEM-EQUIPMENT` elaborates the equipment part of `FUT-ARSENAL`; scope and schedule them
 together, while preserving the distinction between saved brawler/build identity and owned item
 instances. Other existing backlog rows that overlap and should be triaged together include
-`FUT-MAP-BUILDER`, `M03-PRED`, and the roadmap's future-version candidate backlog (advanced
-projectiles, systemic status interaction, environment surfaces and concealment, player map builder,
-Heist, Gem Grab, Solo Showdown).
+`GAP-MAP-EDITOR` now makes the older `FUT-MAP-BUILDER` reference explicit in this root backlog.
+Other overlapping candidates include `M03-PRED` and the roadmap's future-version backlog
+(advanced projectiles, systemic status interaction, environment surfaces and concealment, Heist,
+Gem Grab, and Solo Showdown).

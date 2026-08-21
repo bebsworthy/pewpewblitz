@@ -7,16 +7,19 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
+2. `docs/implementation/v4/roadmap.md` and `milestone-01.md` for the active game-object taxonomy,
+   reusable map presentation, asset-library, and scalable-map direction. M01 is in user playtest
+   after implementation and automated verification on 2026-08-20.
+3. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
-3. `docs/11-art-and-presentation-direction.md` and `docs/12-sprite-inventory.md` for the current
+4. `docs/11-art-and-presentation-direction.md` and `docs/12-sprite-inventory.md` for the current
    renderer, readability, and asset-family contracts.
-4. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-5. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
+5. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
+6. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
    player-flow and routed-process decisions that V3 preserves.
-6. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
+7. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
    baseline and closeout evidence.
-7. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
+8. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
    verification evidence, deferred release polish, and the direct-UDP comparison baseline.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
@@ -29,7 +32,9 @@ obsolete projectile sprite/XY writer, affected verification, and user acceptance
 2026-08-20 after its independent fighter/combat visual implementation, canonical verification,
 native smoke, and accepted playtest handoff. M04 completed after renderer retirement, lifecycle and
 readability verification, iterative fighter-presentation feedback, documentation reconciliation,
-and its learning review. No V4 milestone is active.
+and its learning review. V4 M01 is now `User playtest` after the user approved implementation and
+the automated implementation gates passed on 2026-08-20; keep feedback changes within its accepted
+object-taxonomy, floor, perimeter, camera, and asset-library scope.
 
 ## Technical stack
 

@@ -161,6 +161,34 @@ fn validate_client_snapshot(
             "replicated map snapshot references an unknown presentation profile".to_string(),
         );
     }
+    let objects = &catalog.object_catalog;
+    if snapshot.geometry.iter().any(|placement| {
+        objects
+            .object(placement.object_definition_id)
+            .is_none_or(|object| object.role != MapObjectRole::ObstacleIndestructible)
+            || objects
+                .resolve_variant(
+                    snapshot.presentation_theme_id,
+                    placement.object_definition_id,
+                    placement.visual_variant_id,
+                )
+                .is_none()
+    }) || snapshot.entities.iter().any(|placement| {
+        objects
+            .object(placement.object_definition_id)
+            .is_none_or(|object| object.role != MapObjectRole::Decoration)
+            || objects
+                .resolve_variant(
+                    snapshot.presentation_theme_id,
+                    placement.object_definition_id,
+                    placement.visual_variant_id,
+                )
+                .is_none()
+    }) {
+        return Err(
+            "replicated map snapshot references an invalid object/visual variant".to_string(),
+        );
+    }
     Ok(())
 }
 

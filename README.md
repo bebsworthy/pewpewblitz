@@ -15,11 +15,18 @@ the [completed v2 roadmap](docs/implementation/v2/roadmap.md),
 [completed v1 roadmap](docs/implementation/v1/roadmap.md).
 
 V3 completed on 2026-08-20. The supported client now presents the gameplay world as a fixed-camera
-orthographic 3D scene while preserving planar authority, Avian 2D collision, the existing protocol,
+3D scene while preserving planar authority, Avian 2D collision, the existing protocol,
 the routed server topology, and the Bevy UI shell. Imported Kenney GLBs provide the first fighter,
 weapon, and cover families; cached primitives and generated meshes retain exact dynamic geometry
 and deterministic fallbacks. See the [completed V3 roadmap](docs/implementation/v3/roadmap.md) and
 [V3 closeout milestone](docs/implementation/v3/milestone-04.md).
+
+V4 M01 is in feedback review with the accepted fixed-perspective correction. Its scope turns the V3
+renderer into a reusable map-presentation and content foundation: a game-object taxonomy mapped to curated visual assets,
+themed ground and modular decorated borders, one document per map, and a second map/theme proof.
+The player-facing map editor is deferred to the root backlog. The
+[V4 roadmap](docs/implementation/v4/roadmap.md) and
+[M01 specification](docs/implementation/v4/milestone-01.md) define the active feedback contract.
 
 ## Toolchain
 
@@ -189,6 +196,6 @@ Do not use `--all-features` as a supported application build: client and server 
 Authoritative authored gameplay data lives under `content/v1/` and is compiled into both roles.
 Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
 recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.
-The active implementation scope is always the next validated milestone file. With V3 complete and
-no V4 started, deferred presentation and release polish remains visible in the V3 roadmap and root
-backlog rather than being inferred as active work.
+The active implementation scope is always the next validated milestone file. V4 M01 is currently
+in user playtest; its roadmap and milestone define the presentation/asset feedback work, while
+deferred release polish remains visible in the completed V3 roadmap and root backlog.

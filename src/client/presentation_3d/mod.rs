@@ -6,7 +6,7 @@ use super::*;
 use crate::combat::client::CombatClientSet;
 use bevy::{
     asset::RenderAssetUsages,
-    camera::{ScalingMode, visibility::RenderLayers},
+    camera::visibility::RenderLayers,
     core_pipeline::tonemapping::Tonemapping,
     gltf::Gltf,
     light::{GlobalAmbientLight, NotShadowCaster, NotShadowReceiver},
@@ -17,18 +17,22 @@ use bevy::{
 };
 use core::time::Duration;
 
+mod border;
 mod camera;
 mod combat;
 pub(crate) mod coordinates;
 mod diagnostics;
+pub(crate) mod environment_assets;
+mod map;
 
-#[cfg(test)]
-use camera::clamp_3d_camera_center;
 pub(super) use camera::cursor_ground_point;
 use camera::{
-    CAMERA_DISTANCE, CAMERA_ELEVATION_RADIANS, CAMERA_VERTICAL_SPAN_3D, follow_3d_camera,
+    CAMERA_DISTANCE, CAMERA_ELEVATION_RADIANS, CAMERA_VERTICAL_FOV_RADIANS, follow_3d_camera,
 };
+#[cfg(test)]
+use camera::{clamp_3d_camera_center, perspective_ground_footprint, presentation_camera_bounds};
 use coordinates::{ground_extents, ground_point, ground_position, ground_rotation};
+use map::{GeneratedMapMesh, Presented3dMap};
 
 const WALL_HEIGHT: f32 = 72.0;
 const GROUND_OFFSET: f32 = 1.0;
@@ -50,7 +54,6 @@ const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
 
 #[derive(Resource)]
 pub(crate) struct Primitive3dAssets {
-    pub(crate) floor_tile: Handle<Mesh>,
     pub(crate) cover_block: Handle<Mesh>,
     pub(crate) map_entity: Handle<Mesh>,
     pub(crate) debris: Handle<Mesh>,
@@ -69,6 +72,8 @@ pub(crate) struct Primitive3dAssets {
 #[derive(Resource)]
 pub(crate) struct Material3dAssets {
     pub(crate) floor: Handle<StandardMaterial>,
+    pub(crate) floor_accent: Handle<StandardMaterial>,
+    pub(crate) outer_ground: Handle<StandardMaterial>,
     pub(crate) wall: Handle<StandardMaterial>,
     pub(crate) perimeter: Handle<StandardMaterial>,
     pub(crate) team_blue: Handle<StandardMaterial>,
@@ -144,11 +149,6 @@ struct Imported3dAssets {
     defeated: AnimationNodeIndex,
 }
 
-#[derive(Resource)]
-struct ImportedArenaAssets {
-    block_scene: Handle<WorldAsset>,
-}
-
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ImportedWorldFallbackPolicy {
     #[default]
@@ -180,12 +180,6 @@ struct V3ZoneFill;
 #[derive(Component)]
 struct V3ZoneBoundary;
 
-#[derive(Component)]
-struct GeneratedMapMesh(Handle<Mesh>);
-
-#[derive(Resource, Clone, Copy)]
-struct Presented3dMap(crate::map::MapInstanceId);
-
 /// Client-only 3D world composition. Gameplay authority remains planar and server-owned.
 pub(super) struct WorldPresentationPlugin;
 
@@ -206,10 +200,12 @@ impl Plugin for WorldPresentationPlugin {
                 ..default()
             })
             .add_systems(Startup, setup_3d_foundation)
+            .add_systems(Startup, environment_assets::load_environment_assets)
             .add_systems(
                 Update,
                 (
                     prepare_imported_assets,
+                    environment_assets::prepare_environment_scenes,
                     reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
                     combat::reconcile_combat_visuals,
                     upgrade_fighters_to_imported_models,
@@ -234,7 +230,8 @@ impl Plugin for WorldPresentationPlugin {
                 PostUpdate,
                 combat::project_fighter_overhead_ui.after(TransformSystems::Propagate),
             )
-            .add_observer(setup_imported_character);
+            .add_observer(setup_imported_character)
+            .add_observer(environment_assets::tint_environment_instance);
     }
 }
 
@@ -248,7 +245,6 @@ fn setup_3d_foundation(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let primitives = Primitive3dAssets {
-        floor_tile: meshes.add(Cuboid::new(64.0, 1.0, 64.0)),
         cover_block: meshes.add(Cuboid::new(64.0, 32.0, 64.0)),
         map_entity: meshes.add(Cuboid::new(24.0, 24.0, 24.0)),
         debris: meshes.add(Cuboid::new(12.0, 8.0, 12.0)),
@@ -273,9 +269,11 @@ fn setup_3d_foundation(
         ..default()
     };
     let material_assets = Material3dAssets {
-        floor: materials.add(matte(Color::srgb(0.055, 0.075, 0.10))),
+        floor: materials.add(matte(Color::srgb(0.48, 0.31, 0.16))),
+        floor_accent: materials.add(matte(Color::srgb(0.53, 0.35, 0.18))),
+        outer_ground: materials.add(matte(Color::srgb(0.055, 0.22, 0.105))),
         wall: materials.add(matte(Color::srgb(0.10, 0.36, 0.58))),
-        perimeter: materials.add(matte(Color::srgb(0.25, 0.72, 0.92))),
+        perimeter: materials.add(matte(Color::srgb(0.42, 0.16, 0.075))),
         team_blue: materials.add(matte(Color::srgb(0.12, 0.72, 0.96))),
         team_red: materials.add(matte(Color::srgb(1.0, 0.42, 0.12))),
         marker_local: materials.add(StandardMaterial {
@@ -309,7 +307,7 @@ fn setup_3d_foundation(
         terrain: materials.add(StandardMaterial {
             double_sided: true,
             cull_mode: None,
-            ..matte(Color::srgb(0.44, 0.38, 0.29))
+            ..matte(Color::srgb(0.08, 0.30, 0.055))
         }),
         preview: materials.add(StandardMaterial {
             base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
@@ -372,13 +370,11 @@ fn setup_3d_foundation(
         Camera3d::default(),
         Msaa::Sample4,
         ArenaCamera,
-        Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::FixedVertical {
-                viewport_height: CAMERA_VERTICAL_SPAN_3D,
-            },
+        Projection::Perspective(PerspectiveProjection {
+            fov: CAMERA_VERTICAL_FOV_RADIANS,
             near: 0.1,
-            far: 3_000.0,
-            ..OrthographicProjection::default_3d()
+            far: 4_000.0,
+            ..default()
         }),
         Tonemapping::None,
         Transform::from_translation(offset).looking_at(Vec3::ZERO, Vec3::Y),
@@ -456,7 +452,9 @@ fn reconcile_3d_map(
     mut meshes: ResMut<Assets<Mesh>>,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
-    imported: Option<Res<ImportedArenaAssets>>,
+    object_catalog: Res<crate::map::MapObjectCatalogResource>,
+    visual_catalog: Option<Res<environment_assets::EnvironmentVisualCatalog>>,
+    imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
     accepted: Option<Res<crate::map::PresentedMap>>,
     current: Option<Res<Presented3dMap>>,
     snapshots: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
@@ -492,30 +490,24 @@ fn reconcile_3d_map(
         instance_id: snapshot.identity.instance_id,
     };
     let bounds = snapshot.playable_bounds;
-    for visual in &snapshot.visual_instances {
-        let mut translation = ground_position(visual.position);
-        translation.y = -0.5;
-        commands.spawn((
-            marker,
-            Mesh3d(primitives.floor_tile.clone()),
-            MeshMaterial3d(materials.floor.clone()),
-            NotShadowCaster,
-            Transform {
-                translation,
-                rotation: Quat::from_rotation_y(visual.rotation),
-                ..default()
-            },
-            Name::new("V3 resolved floor tile"),
-        ));
-    }
+    map::spawn_ground_surfaces(&mut commands, &mut meshes, &materials, marker, bounds);
     for geometry in &snapshot.geometry {
         match geometry.shape {
             crate::map::MapShape::Rectangle { half_extents } => {
                 let size = half_extents * 2.0;
-                if let Some(imported) = imported.as_deref()
+                let variant = object_catalog.0.resolve_variant(
+                    snapshot.presentation_theme_id,
+                    geometry.object_definition_id,
+                    geometry.visual_variant_id,
+                );
+                if let (Some(variant), Some(imported), Some(visual_catalog)) =
+                    (variant, imported.as_deref(), visual_catalog.as_deref())
+                    && let (Some(scene), Some(profile)) =
+                        (imported.scene(variant), visual_catalog.profile(variant))
                     && spawn_imported_wall_modules(
                         &mut commands,
-                        imported,
+                        scene,
+                        profile,
                         geometry.position,
                         geometry.rotation,
                         size,
@@ -552,31 +544,116 @@ fn reconcile_3d_map(
             }
         }
     }
-    for (position, size) in crate::map::perimeter_visual_shapes(bounds) {
-        let mut translation = ground_position(position);
-        translation.y = WALL_HEIGHT * 0.5;
-        let mesh = meshes.add(Cuboid::new(size.x, WALL_HEIGHT, size.y));
-        commands.spawn((
-            marker,
-            Mesh3d(mesh.clone()),
-            GeneratedMapMesh(mesh),
-            MeshMaterial3d(materials.perimeter.clone()),
-            Transform::from_translation(translation),
-            Name::new("V3 arena perimeter"),
-        ));
+    for module in border::border_modules(bounds) {
+        let variant = crate::map::MapVisualVariantId(if module.corner { 10 } else { 9 });
+        if let (Some(imported), Some(visual_catalog)) =
+            (imported.as_deref(), visual_catalog.as_deref())
+            && let (Some(scene), Some(profile)) =
+                (imported.scene(variant), visual_catalog.profile(variant))
+        {
+            spawn_imported_environment(
+                &mut commands,
+                marker,
+                scene,
+                profile,
+                module.position,
+                module.rotation,
+                "V4 imported arena edge module",
+            );
+        } else {
+            commands.spawn((
+                marker,
+                Mesh3d(primitives.cover_block.clone()),
+                MeshMaterial3d(materials.perimeter.clone()),
+                Transform {
+                    translation: ground_position(module.position) + Vec3::Y * 46.0,
+                    rotation: Quat::from_rotation_y(module.rotation),
+                    scale: if module.corner {
+                        Vec3::splat(0.8)
+                    } else {
+                        Vec3::new(1.0, 0.75, 0.45)
+                    },
+                },
+                Name::new("V4 primitive arena edge module"),
+            ));
+        }
     }
     for entity in &snapshot.entities {
-        commands.spawn((
-            marker,
-            Mesh3d(primitives.map_entity.clone()),
-            MeshMaterial3d(materials.neutral.clone()),
-            Transform {
-                translation: ground_position(entity.position) + Vec3::Y * 12.0,
-                rotation: Quat::from_rotation_y(entity.rotation),
-                ..default()
-            },
-            Name::new("V3 placed map entity fallback"),
-        ));
+        let variant = object_catalog.0.resolve_variant(
+            snapshot.presentation_theme_id,
+            entity.object_definition_id,
+            entity.visual_variant_id,
+        );
+        if let (Some(variant), Some(imported), Some(visual_catalog)) =
+            (variant, imported.as_deref(), visual_catalog.as_deref())
+            && let (Some(scene), Some(profile)) =
+                (imported.scene(variant), visual_catalog.profile(variant))
+        {
+            spawn_imported_environment(
+                &mut commands,
+                marker,
+                scene,
+                profile,
+                entity.position,
+                entity.rotation,
+                "V4 imported placed decoration",
+            );
+        } else {
+            spawn_environment_fallback(
+                &mut commands,
+                marker,
+                &primitives,
+                &materials,
+                entity.position,
+                entity.rotation,
+                variant.and_then(|id| {
+                    visual_catalog
+                        .as_deref()?
+                        .profile(id)
+                        .map(|profile| profile.fallback)
+                }),
+                "V4 placed decoration fallback",
+            );
+        }
+    }
+    if let Some(theme) = object_catalog.0.theme(snapshot.presentation_theme_id) {
+        for dressing in border::dressing_plan(
+            bounds,
+            snapshot.identity.recipe_fingerprint.0,
+            &theme.outside_dressing_variants,
+        ) {
+            if let (Some(imported), Some(visual_catalog)) =
+                (imported.as_deref(), visual_catalog.as_deref())
+                && let (Some(scene), Some(profile)) = (
+                    imported.scene(dressing.variant),
+                    visual_catalog.profile(dressing.variant),
+                )
+            {
+                spawn_imported_environment(
+                    &mut commands,
+                    marker,
+                    scene,
+                    profile,
+                    dressing.position,
+                    dressing.rotation,
+                    "V4 imported outer dressing",
+                );
+            } else {
+                spawn_environment_fallback(
+                    &mut commands,
+                    marker,
+                    &primitives,
+                    &materials,
+                    dressing.position,
+                    dressing.rotation,
+                    visual_catalog
+                        .as_deref()
+                        .and_then(|catalog| catalog.profile(dressing.variant))
+                        .map(|profile| profile.fallback),
+                    "V4 outer dressing fallback",
+                );
+            }
+        }
     }
     for anchor in &snapshot.mode_anchors {
         let crate::map::ModeAnchorShape::Area { position, shape } = anchor.shape else {
@@ -662,7 +739,6 @@ fn prepare_imported_assets(
     gltfs: Res<Assets<Gltf>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     prepared: Option<Res<Imported3dAssets>>,
-    prepared_arena: Option<Res<ImportedArenaAssets>>,
     fallback_policy: Res<ImportedWorldFallbackPolicy>,
     mut last_load_report: Local<String>,
 ) {
@@ -673,26 +749,15 @@ fn prepare_imported_assets(
         return;
     };
     let load_report = format!(
-        "character={:?}/{:?} blaster={:?}/{:?} wall={:?}/{:?}",
+        "character={:?}/{:?} blaster={:?}/{:?}",
         asset_server.load_state(&handles.character),
         asset_server.recursive_dependency_load_state(&handles.character),
         asset_server.load_state(&handles.blaster),
         asset_server.recursive_dependency_load_state(&handles.blaster),
-        asset_server.load_state(&handles.arena_block),
-        asset_server.recursive_dependency_load_state(&handles.arena_block),
     );
     if *last_load_report != load_report {
         info!(state = %load_report, "V3 imported asset load state changed");
         *last_load_report = load_report;
-    }
-    if prepared_arena.is_none()
-        && asset_server.is_loaded_with_dependencies(&handles.arena_block)
-        && let Some(block) = gltfs.get(&handles.arena_block)
-        && let Some(block_scene) = block.default_scene.clone()
-    {
-        commands.insert_resource(ImportedArenaAssets { block_scene });
-        commands.remove_resource::<Presented3dMap>();
-        info!("curated Mini Arena block and colormap are ready");
     }
     if prepared.is_some()
         || !asset_server.is_loaded_with_dependencies(&handles.character)
@@ -964,7 +1029,8 @@ fn play_character_motion(
 )]
 fn spawn_imported_wall_modules(
     commands: &mut Commands,
-    imported: &ImportedArenaAssets,
+    scene: &Handle<WorldAsset>,
+    profile: &environment_assets::EnvironmentVisualProfile,
     center: Vec2,
     rotation: f32,
     size: Vec2,
@@ -986,17 +1052,74 @@ fn spawn_imported_wall_modules(
             let position = center + basis_x * local.x + basis_y * local.y;
             commands.spawn((
                 crate::map::MapPresentationMember { instance_id },
-                WorldAssetRoot(imported.block_scene.clone()),
+                environment_assets::EnvironmentMaterialTint(profile.tint()),
+                WorldAssetRoot(scene.clone()),
                 Transform {
-                    translation: ground_position(position),
-                    rotation: Quat::from_rotation_y(rotation),
-                    scale: Vec3::splat(MODULE),
+                    translation: ground_position(position) + Vec3::Y * profile.vertical_offset,
+                    rotation: Quat::from_rotation_y(rotation + profile.yaw_degrees.to_radians()),
+                    scale: Vec3::splat(profile.scale),
                 },
-                Name::new("V3 imported Mini Arena block module"),
+                Name::new("V4 imported wall module"),
             ));
         }
     }
     true
+}
+
+fn spawn_imported_environment(
+    commands: &mut Commands,
+    marker: crate::map::MapPresentationMember,
+    scene: &Handle<WorldAsset>,
+    profile: &environment_assets::EnvironmentVisualProfile,
+    position: Vec2,
+    rotation: f32,
+    name: &'static str,
+) {
+    commands.spawn((
+        marker,
+        environment_assets::EnvironmentMaterialTint(profile.tint()),
+        WorldAssetRoot(scene.clone()),
+        Transform {
+            translation: ground_position(position) + Vec3::Y * profile.vertical_offset,
+            rotation: Quat::from_rotation_y(rotation + profile.yaw_degrees.to_radians()),
+            scale: Vec3::splat(profile.scale),
+        },
+        Name::new(name),
+    ));
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the focused spawn helper receives explicit retained render assets and placement state"
+)]
+fn spawn_environment_fallback(
+    commands: &mut Commands,
+    marker: crate::map::MapPresentationMember,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    position: Vec2,
+    rotation: f32,
+    fallback: Option<environment_assets::EnvironmentFallback>,
+    name: &'static str,
+) {
+    let scale = match fallback {
+        Some(environment_assets::EnvironmentFallback::Column) => Vec3::new(1.0, 2.0, 1.0),
+        Some(environment_assets::EnvironmentFallback::Boundary) => Vec3::new(1.8, 1.0, 0.6),
+        Some(environment_assets::EnvironmentFallback::Wall) => Vec3::new(2.0, 2.0, 1.0),
+        Some(environment_assets::EnvironmentFallback::Block) => Vec3::splat(1.6),
+        _ => Vec3::ONE,
+    };
+    commands.spawn((
+        marker,
+        Mesh3d(primitives.map_entity.clone()),
+        MeshMaterial3d(materials.neutral.clone()),
+        Transform {
+            translation: ground_position(position) + Vec3::Y * 12.0,
+            rotation: Quat::from_rotation_y(rotation),
+            scale,
+        },
+        Name::new(name),
+    ));
 }
 
 #[allow(
@@ -1221,19 +1344,15 @@ mod tests {
             Update,
             reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
         );
-        let (floor_tile, cover_block) = {
+        let cover_block = {
             let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
-            (
-                meshes.add(Cuboid::new(64.0, 1.0, 64.0)),
-                meshes.add(Cuboid::new(64.0, 32.0, 64.0)),
-            )
+            meshes.add(Cuboid::new(64.0, 32.0, 64.0))
         };
         let material = app
             .world_mut()
             .resource_mut::<Assets<StandardMaterial>>()
             .add(StandardMaterial::default());
         app.insert_resource(Primitive3dAssets {
-            floor_tile,
             cover_block,
             map_entity: Handle::default(),
             debris: Handle::default(),
@@ -1250,6 +1369,8 @@ mod tests {
         })
         .insert_resource(Material3dAssets {
             floor: material.clone(),
+            floor_accent: material.clone(),
+            outer_ground: material.clone(),
             wall: material.clone(),
             perimeter: material.clone(),
             team_blue: material.clone(),
@@ -1295,6 +1416,29 @@ mod tests {
         };
         let clamped = clamp_3d_camera_center(Vec2::splat(2000.0), large, Vec2::new(1600.0, 900.0));
         assert!(clamped.x < 2000.0 && clamped.y < 2000.0);
+    }
+
+    #[test]
+    fn camera_follow_bounds_reveal_a_bounded_outer_environment_band() {
+        let gameplay = crate::map::AxisAlignedMapRect {
+            min: Vec2::new(-896.0, -576.0),
+            max: Vec2::new(896.0, 576.0),
+        };
+        let presentation = presentation_camera_bounds(gameplay);
+        assert_eq!(presentation.min, gameplay.min - Vec2::splat(224.0));
+        assert_eq!(presentation.max, gameplay.max + Vec2::splat(224.0));
+    }
+
+    #[test]
+    fn perspective_ground_footprint_is_trapezoidal_and_combat_sized() {
+        let footprint = perspective_ground_footprint(16.0 / 9.0);
+        let size = footprint.size();
+
+        assert!(footprint.min.x < 0.0 && footprint.max.x > 0.0);
+        assert!(footprint.min.y < 0.0 && footprint.max.y > 0.0);
+        assert!(footprint.max.y > -footprint.min.y);
+        assert!((1_550.0..=1_700.0).contains(&size.x));
+        assert!((900.0..=1_050.0).contains(&size.y));
     }
 
     #[test]
@@ -1352,7 +1496,7 @@ mod tests {
     }
 
     #[test]
-    fn built_in_wipeout_materializes_exact_floor_cover_and_perimeter_counts() {
+    fn built_in_wipeout_materializes_bounded_ground_cover_edge_and_dressing_counts() {
         let snapshot = crate::map::MapContentCatalog::embedded()
             .unwrap()
             .resolve_preset(
@@ -1371,9 +1515,16 @@ mod tests {
         assert_eq!(
             presented
                 .iter()
-                .filter(|name| **name == "V3 resolved floor tile")
+                .filter(|name| **name == "V4 playable ground surface")
                 .count(),
-            504
+            1
+        );
+        assert_eq!(
+            presented
+                .iter()
+                .filter(|name| **name == "V4 outer ground surface")
+                .count(),
+            1
         );
         assert_eq!(
             presented
@@ -1385,9 +1536,16 @@ mod tests {
         assert_eq!(
             presented
                 .iter()
-                .filter(|name| **name == "V3 arena perimeter")
+                .filter(|name| **name == "V4 primitive arena edge module")
                 .count(),
-            4
+            96
+        );
+        assert_eq!(
+            presented
+                .iter()
+                .filter(|name| **name == "V4 outer dressing fallback")
+                .count(),
+            64
         );
     }
 

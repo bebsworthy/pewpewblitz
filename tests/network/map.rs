@@ -17,6 +17,8 @@ fn maximum_policy_resolved_map(
         let index = recipe.geometry.len();
         recipe.geometry.push(GeometryPlacement {
             placement_id: MapPlacementId(1_000 + u32::try_from(index).unwrap()),
+            object_definition_id: MapObjectDefinitionId(1),
+            visual_variant_id: Some(MapVisualVariantId(1)),
             collision_profile_id: CollisionProfileId(1),
             presentation_profile_id: Some(MapPresentationProfileId(2)),
             position: Vec2::new(0.0, 480.0),
@@ -28,6 +30,8 @@ fn maximum_policy_resolved_map(
         let index = recipe.entities.len();
         recipe.entities.push(MapEntityPlacement {
             placement_id: MapPlacementId(2_000 + u32::try_from(index).unwrap()),
+            object_definition_id: MapObjectDefinitionId(100),
+            visual_variant_id: Some(MapVisualVariantId(11)),
             definition_id: EntityDefinitionId(1),
             presentation_profile_id: MapPresentationProfileId(5),
             position: Vec2::new(0.0, 400.0),

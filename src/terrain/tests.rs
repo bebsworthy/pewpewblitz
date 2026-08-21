@@ -1969,7 +1969,6 @@ mod client_presentation_tests {
             .resource_mut::<Assets<StandardMaterial>>()
             .add(StandardMaterial::default());
         app.insert_resource(crate::client::presentation_3d::Primitive3dAssets {
-            floor_tile: Handle::default(),
             cover_block: Handle::default(),
             map_entity: Handle::default(),
             debris,
@@ -1986,6 +1985,8 @@ mod client_presentation_tests {
         })
         .insert_resource(crate::client::presentation_3d::Material3dAssets {
             floor: Handle::default(),
+            floor_accent: Handle::default(),
+            outer_ground: Handle::default(),
             wall: Handle::default(),
             perimeter: Handle::default(),
             team_blue: Handle::default(),

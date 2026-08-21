@@ -517,6 +517,8 @@ fn destructible_validation_rejects_overlaps_geometry_bounds_and_budgets() {
     // A reservation overlapping permanent geometry rejects.
     let geometry = vec![GeometryPlacement {
         placement_id: MapPlacementId(9),
+        object_definition_id: MapObjectDefinitionId(1),
+        visual_variant_id: Some(MapVisualVariantId(1)),
         collision_profile_id: CollisionProfileId(1),
         presentation_profile_id: None,
         position: Vec2::new(0.0, -256.0),

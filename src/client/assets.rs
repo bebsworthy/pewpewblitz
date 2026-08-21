@@ -19,7 +19,6 @@ pub(crate) struct ClientAssetHandles {
     pub error: Handle<AudioSource>,
     pub character: Handle<Gltf>,
     pub blaster: Handle<Gltf>,
-    pub arena_block: Handle<Gltf>,
 }
 
 impl ClientAssetHandles {
@@ -33,11 +32,10 @@ impl ClientAssetHandles {
             character: asset_server
                 .load("brawler/models/kenney/mini-characters/character-male-a.glb"),
             blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
-            arena_block: asset_server.load("brawler/models/kenney/mini-arena/block.glb"),
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 8] {
+    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 7] {
         [
             ("audio.fire", false, asset_server.load_state(&self.fire)),
             ("audio.impact", false, asset_server.load_state(&self.impact)),
@@ -53,11 +51,6 @@ impl ClientAssetHandles {
                 "model.blaster_a",
                 false,
                 dependency_aware_state(asset_server, &self.blaster),
-            ),
-            (
-                "model.mini_arena_block",
-                false,
-                dependency_aware_state(asset_server, &self.arena_block),
             ),
         ]
     }
@@ -242,6 +235,42 @@ mod tests {
     #[test]
     fn retained_asset_manifest_has_unique_complete_cc0_provenance() {
         validate_manifest(CLIENT_ASSET_MANIFEST).unwrap();
+    }
+
+    #[test]
+    fn environment_catalog_assets_are_promoted_manifested_and_dependency_complete() {
+        let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
+        let manifested = manifest
+            .assets
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<HashSet<_>>();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        for asset_path in presentation_3d::environment_assets::environment_asset_paths().unwrap() {
+            assert!(
+                manifested.contains(asset_path.as_str()),
+                "unmanifested environment asset: {asset_path}"
+            );
+            assert!(
+                root.join(&asset_path).is_file(),
+                "missing promoted environment asset: {asset_path}"
+            );
+        }
+        for dependency in [
+            "brawler/models/kenney/mini-arena/Textures/colormap.png",
+            "brawler/models/kenney/mini-dungeon/Textures/colormap.png",
+            "brawler/models/kenney/mini-forest/Textures/colormap.png",
+            "brawler/models/kenney/graveyard/Textures/colormap.png",
+        ] {
+            assert!(
+                manifested.contains(dependency),
+                "unmanifested GLB dependency: {dependency}"
+            );
+            assert!(
+                root.join(dependency).is_file(),
+                "missing GLB dependency: {dependency}"
+            );
+        }
     }
 
     #[test]

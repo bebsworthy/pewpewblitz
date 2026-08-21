@@ -1,0 +1,19 @@
+(
+    schema_version: 1,
+    visuals: [
+        (variant_id: MapVisualVariantId(1), path: "brawler/models/kenney/mini-arena/wall.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (0.68, 0.54, 0.42), fallback: Wall),
+        (variant_id: MapVisualVariantId(2), path: "brawler/models/kenney/mini-dungeon/wall.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (0.58, 0.68, 0.78), fallback: Wall),
+        (variant_id: MapVisualVariantId(3), path: "brawler/models/kenney/mini-arena/block.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (0.68, 0.54, 0.42), fallback: Block),
+        (variant_id: MapVisualVariantId(4), path: "brawler/models/kenney/mini-arena/column.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (0.80, 0.70, 0.60), fallback: Column),
+        (variant_id: MapVisualVariantId(5), path: "brawler/models/kenney/mini-forest/tree.glb", scale: 50.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (1.0, 1.0, 1.0), fallback: Decoration),
+        (variant_id: MapVisualVariantId(6), path: "brawler/models/kenney/mini-forest/rocks-low.glb", scale: 50.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (1.0, 1.0, 1.0), fallback: Decoration),
+        (variant_id: MapVisualVariantId(7), path: "brawler/models/kenney/mini-dungeon/barrel.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (0.86, 0.82, 0.78), fallback: Decoration),
+        (variant_id: MapVisualVariantId(8), path: "brawler/models/kenney/mini-forest/fence.glb", scale: 58.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (1.0, 1.0, 1.0), fallback: Decoration),
+        (variant_id: MapVisualVariantId(9), path: "brawler/models/kenney/mini-arena/border-straight.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 34.0, material_tint: (0.72, 0.55, 0.40), fallback: Boundary),
+        (variant_id: MapVisualVariantId(10), path: "brawler/models/kenney/mini-arena/border-corner.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 34.0, material_tint: (0.72, 0.55, 0.40), fallback: Boundary),
+        (variant_id: MapVisualVariantId(11), path: "brawler/models/kenney/mini-arena/weapon-rack.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (0.90, 0.82, 0.74), fallback: Decoration),
+        (variant_id: MapVisualVariantId(12), path: "brawler/models/kenney/mini-forest/target.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (1.0, 1.0, 1.0), fallback: Decoration),
+        (variant_id: MapVisualVariantId(13), path: "brawler/models/kenney/graveyard/pumpkin.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (1.0, 1.0, 1.0), fallback: Decoration),
+        (variant_id: MapVisualVariantId(14), path: "brawler/models/kenney/mini-arena/floor-detail.glb", scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, material_tint: (0.90, 0.82, 0.74), fallback: Decoration),
+    ],
+)

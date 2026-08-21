@@ -32,10 +32,11 @@ use brawler::{
     map::{
         AuthoritativeMapPlugin, CollisionProfileId, EntityDefinitionId, GeometryPlacement,
         MapCatalogResource, MapEntityPlacement, MapInstanceId, MapInstanceMember,
-        MapLayoutRequirements, MapPlacementId, MapPresentationProfileId,
-        MapPresetId as ArenaPresetId, MapRegionPlacement, MapRoot, MapShape, PlayableBounds,
-        RegionId, RegionProfileId, ResolvedMap, ResolvedMapSnapshot, SpawnAssignment,
-        SpawnPointCatalog, SpawnPointId, TeamSpawnPoint, VisualPlacementKind, install_resolved_map,
+        MapLayoutRequirements, MapObjectDefinitionId, MapPlacementId, MapPresentationProfileId,
+        MapPresetId as ArenaPresetId, MapRegionPlacement, MapRoot, MapShape, MapVisualVariantId,
+        PlayableBounds, RegionId, RegionProfileId, ResolvedMap, ResolvedMapSnapshot,
+        SpawnAssignment, SpawnPointCatalog, SpawnPointId, TeamSpawnPoint, VisualPlacementKind,
+        install_resolved_map,
     },
     matchplay::{
         ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot as MatchRootMarker,

@@ -5,10 +5,11 @@ use bevy::prelude::{App, FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 
 use super::model::*;
+use super::objects::{MapObjectCatalog, MapObjectCatalogResource, MapObjectRole};
 
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 2;
-pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 1;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 2;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 3;
+pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 2;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 3;
 pub const SANDBOX_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const WIPEOUT_LAYOUT_SCHEMA_VERSION: u16 = 1;
 pub const HOT_ZONE_LAYOUT_SCHEMA_VERSION: u16 = 1;
@@ -120,6 +121,8 @@ pub struct MapPreset {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct MapContentCatalog {
     pub schema_version: u16,
+    #[serde(default)]
+    pub object_catalog: MapObjectCatalog,
     pub policy: MapRecipePolicy,
     pub presentation_themes: Vec<StableDefinition<MapPresentationThemeId>>,
     pub presentation_profiles: Vec<StableDefinition<MapPresentationProfileId>>,
@@ -236,14 +239,16 @@ pub struct MapContentPlugin;
 
 impl Plugin for MapContentPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MapCatalogResource>();
+        app.init_resource::<MapCatalogResource>()
+            .init_resource::<MapObjectCatalogResource>();
     }
 }
 
 impl MapContentCatalog {
     pub fn embedded() -> Result<Self, String> {
-        let catalog: Self = ron::from_str(include_str!("../../../content/v1/maps.ron"))
+        let mut catalog: Self = ron::from_str(include_str!("../../../content/v1/maps.ron"))
             .map_err(|error| format!("embedded map catalog parse failed: {error}"))?;
+        catalog.object_catalog = MapObjectCatalog::embedded()?;
         catalog.validate()?;
         Ok(catalog)
     }
@@ -253,6 +258,7 @@ impl MapContentCatalog {
         if self.schema_version != MAP_CATALOG_SCHEMA_VERSION {
             return Err("unsupported map catalog schema".to_string());
         }
+        self.object_catalog.validate()?;
         validate_policy(&self.policy, limits)?;
         validate_definitions(&self.presentation_themes, "presentation theme")?;
         validate_definitions(&self.presentation_profiles, "presentation profile")?;
@@ -398,11 +404,28 @@ fn validate_recipe_references(
     {
         return Err("map recipe references an unknown theme or mode".to_string());
     }
+    if catalog
+        .object_catalog
+        .theme(recipe.presentation_theme_id)
+        .is_none()
+    {
+        return Err("map recipe references an unknown object theme".to_string());
+    }
     if recipe.geometry.iter().any(|placement| {
-        !catalog
-            .policy
-            .permitted_collision_profiles
-            .contains(&placement.collision_profile_id)
+        let object = catalog
+            .object_catalog
+            .object(placement.object_definition_id);
+        let variant = catalog.object_catalog.resolve_variant(
+            recipe.presentation_theme_id,
+            placement.object_definition_id,
+            placement.visual_variant_id,
+        );
+        object.is_none_or(|object| object.role != MapObjectRole::ObstacleIndestructible)
+            || variant.is_none()
+            || !catalog
+                .policy
+                .permitted_collision_profiles
+                .contains(&placement.collision_profile_id)
             || placement
                 .presentation_profile_id
                 .is_some_and(|id| !catalog.policy.permitted_presentation_profiles.contains(&id))
@@ -421,10 +444,20 @@ fn validate_recipe_references(
                 .permitted_presentation_profiles
                 .contains(&placement.presentation_profile_id)
     }) || recipe.entities.iter().any(|placement| {
-        !catalog
-            .policy
-            .permitted_entity_definitions
-            .contains(&placement.definition_id)
+        let object = catalog
+            .object_catalog
+            .object(placement.object_definition_id);
+        let variant = catalog.object_catalog.resolve_variant(
+            recipe.presentation_theme_id,
+            placement.object_definition_id,
+            placement.visual_variant_id,
+        );
+        object.is_none_or(|object| object.role != MapObjectRole::Decoration)
+            || variant.is_none()
+            || !catalog
+                .policy
+                .permitted_entity_definitions
+                .contains(&placement.definition_id)
             || !catalog
                 .policy
                 .permitted_presentation_profiles

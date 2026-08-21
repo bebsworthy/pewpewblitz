@@ -4,6 +4,7 @@
 mod client;
 mod definitions;
 mod model;
+mod objects;
 #[cfg(feature = "server")]
 mod server;
 #[cfg(all(test, feature = "server"))]
@@ -24,6 +25,10 @@ pub use definitions::{
     overlaps_geometry, resolve_initial_terrain, resolve_map_recipe,
 };
 pub use model::*;
+pub use objects::{
+    MapObjectCatalog, MapObjectCatalogResource, MapObjectDefinition, MapObjectFitPolicy,
+    MapObjectRole, MapThemeDefinition, MapThemeVariantDefault, MapVisualVariantDefinition,
+};
 #[cfg(feature = "server")]
 pub use server::{
     AuthoritativeMapPlugin, BUILT_IN_MAP_PRESET, MapStartupSet, NextMapInstanceId,
