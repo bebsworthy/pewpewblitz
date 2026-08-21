@@ -194,7 +194,7 @@ fn spawn_dashboard_preview(
             Camera3d::default(),
             Camera {
                 order: -2,
-                clear_color: ClearColorConfig::Custom(Color::srgb(0.012, 0.052, 0.07)),
+                clear_color: ClearColorConfig::Custom(Color::NONE),
                 ..default()
             },
             RenderTarget::Image(target.clone().into()),
@@ -203,7 +203,7 @@ fn spawn_dashboard_preview(
                 ..default()
             }),
             Tonemapping::None,
-            Transform::from_xyz(220.0, 58.0, 0.0).looking_at(Vec3::new(0.0, 45.0, 0.0), Vec3::Y),
+            Transform::from_xyz(235.0, 65.0, 80.0).looking_at(Vec3::new(0.0, 38.0, 0.0), Vec3::Y),
             layer.clone(),
         ))
         .id();
@@ -213,7 +213,7 @@ fn spawn_dashboard_preview(
     commands.spawn((
         DespawnOnExit(ClientFlow::Dashboard),
         DirectionalLight {
-            illuminance: 6_500.0,
+            illuminance: 9_000.0,
             shadow_maps_enabled: true,
             ..default()
         },
@@ -224,12 +224,12 @@ fn spawn_dashboard_preview(
         DespawnOnExit(ClientFlow::Dashboard),
         PointLight {
             color: Color::srgb(0.05, 0.72, 0.92),
-            intensity: 950_000.0,
-            range: 190.0,
+            intensity: 1_800_000.0,
+            range: 220.0,
             shadow_maps_enabled: false,
             ..default()
         },
-        Transform::from_xyz(-48.0, 82.0, 0.0),
+        Transform::from_xyz(-58.0, 88.0, -28.0),
         layer.clone(),
     ));
     let root = commands
@@ -241,6 +241,12 @@ fn spawn_dashboard_preview(
             layer.clone(),
         ))
         .with_children(|root| {
+            root.spawn((
+                Mesh3d(primitives.sentry_base.clone()),
+                MeshMaterial3d(materials.zone_fill.clone()),
+                Transform::from_xyz(0.0, -2.0, 0.0).with_scale(Vec3::new(2.25, 0.45, 2.25)),
+                layer.clone(),
+            ));
             root.spawn((
                 DashboardPreviewFallback,
                 Mesh3d(primitives.fighter.clone()),
@@ -274,9 +280,9 @@ fn spawn_imported_character(
             WorldAssetRoot(imported.character_scene.clone()),
             Transform {
                 rotation: Quat::from_rotation_y(
-                    super::presentation_3d::KENNEY_CHARACTER_FORWARD_CORRECTION,
+                    super::presentation_3d::KENNEY_CHARACTER_FORWARD_CORRECTION - 0.12,
                 ),
-                scale: Vec3::splat(86.0),
+                scale: Vec3::splat(88.0),
                 ..default()
             },
             layer,
@@ -370,7 +376,7 @@ fn setup_dashboard_imported_scene(
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
-            .play(&mut animation_player, imported.idle, Duration::ZERO)
+            .play(&mut animation_player, imported.holding, Duration::ZERO)
             .repeat();
         commands
             .entity(player)

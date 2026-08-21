@@ -139,7 +139,7 @@ pub(crate) struct Imported3dAssets {
     pub(crate) animation_graph: Handle<AnimationGraph>,
     pub(crate) idle: AnimationNodeIndex,
     walk: AnimationNodeIndex,
-    holding: AnimationNodeIndex,
+    pub(crate) holding: AnimationNodeIndex,
     shoot: AnimationNodeIndex,
     defeated: AnimationNodeIndex,
 }

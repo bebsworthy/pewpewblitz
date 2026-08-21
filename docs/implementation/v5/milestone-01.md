@@ -460,6 +460,27 @@ assets.
 7. Run focused tests and canonical role checks, perform the native visual/input/lifecycle matrix,
    then hand the build to the user with M02-owned limitations stated explicitly.
 
+## First playtest feedback review — 2026-08-21
+
+The first native comparison confirmed that the information and authority contracts are correct but
+that the dashboard still reads as a functional wireframe beside the accepted visual target.
+
+| Feedback | Decision |
+|---|---|
+| The opaque preview reads as a black screen inside the dashboard | Implement now: visually merge its clear color with the procedural field and reduce the apparent viewport boundary |
+| The actual fighter is too small/low and its weapon obscures the face and torso | Implement now: enlarge and raise the framing, use a three-quarter presentation angle, and retune key/rim lighting |
+| The fighter lacks the target's halo and grounding | Implement now: retain the procedural halo and add a restrained client-only platform/contact treatment using existing primitives |
+| Build and game facts read as debug text rather than deliberate cards | Implement now: introduce bounded card containers, stronger type hierarchy, borders, and left-aligned fact grouping while preserving real data |
+| Play is prominent by size but not by visual energy | Implement now: use the accepted warm primary color, stronger outline, and larger label; keep Practice visibly secondary |
+| The bottom utility row is visually heavy | Implement now: move Settings and a compact Menu action into the header; the menu owns Credits, Change Server, and Quit without inventing new product features |
+| The target uses generated fighter art, obsolete branding, and invented values | Retain the implementation: actual runtime fighter, PewPew Blitz wordmark, and authenticated/catalog facts remain required |
+| A final icon/display-font art pass would improve finish | Defer to M03: do not block this hierarchy correction on new external assets or introduce placeholder genre icons |
+| The fighter preview becomes a dark rectangle when hovered | Implement now: keep the preview fill transparent for rest, focus, hover, and press; use only a cyan border as its interaction cue |
+
+This feedback is accepted M01 scope because it evaluates the milestone's explicit native hierarchy,
+model framing, background integration, and Play-versus-Practice exit criteria. Queue/results
+convergence and final child-screen redesign remain M02.
+
 ## Verification plan
 
 ### Focused automated coverage
@@ -530,6 +551,18 @@ Implemented on 2026-08-21:
 - player-facing window, credits, and local server names use PewPew Blitz; internal crate, protocol,
   environment, and persistence identities remain unchanged.
 
+First-feedback refinement implemented on 2026-08-21:
+
+- the preview now merges into the procedural field with a transparent camera clear and transparent
+  UI fill in every interaction state; fighter activation uses a cyan hover/focus outline without
+  covering the model or halo;
+- the actual fighter is larger and raised, uses a three-quarter holding pose with improved key/rim
+  lighting, and stands on a restrained platform inside the localized procedural glow;
+- the build and game facts now use bright bounded cards with stronger hierarchy, Practice is a
+  secondary pale card, and Play has an orange resting background plus a brighter warm hover state;
+- Settings and Menu moved into the header; Menu owns Credits, Change Server, Quit, and Back without
+  adding product features or leaving an authenticated Dashboard session.
+
 Automated evidence:
 
 - `just lint` passed, including client/server Clippy, server feature isolation, and the retired 2D
@@ -541,10 +574,14 @@ Automated evidence:
   cleanly;
 - native 1280x720 captures verified the transparent wordmark, authenticated Dashboard facts, actual
   imported fighter/weapon/idle path, dominant Play hierarchy, shader compilation, and bounded fit.
-  The final composition capture is
-  `target/v5-m01-screens-final2/brawler-000360.png`; automated capture occasionally records partially
+  The initial composition capture is `target/v5-m01-screens-final2/brawler-000360.png`; the
+  first-feedback composition capture is
+  `target/v5-m01-feedback-final-transparent/brawler-000240.png`. Automated capture occasionally records partially
   uploaded glyph atlases, so live text/focus rendering remains part of the user playtest rather than
   being accepted from that frame alone.
+- after the first-feedback refinement, `just lint` and `just check` passed; all 396 existing client
+  library tests passed, and the added focused preview-interaction test proves that rest, hover, and
+  press retain a transparent fighter-preview fill while hover retains a visible border cue.
 
 The milestone remains open at User playtest. The broader resolution/controller/repeated-entry matrix,
 feedback triage, and learning review are still required before Complete.

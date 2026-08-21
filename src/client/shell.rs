@@ -693,6 +693,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         ClientOverlay::Credits => ShellLayer::Credits,
         ClientOverlay::Error(_) => ShellLayer::Error,
         ClientOverlay::BuildEditor
+        | ClientOverlay::DashboardMenu
         | ClientOverlay::Confirmation(_)
         | ClientOverlay::ChangeServerConfirmation
         | ClientOverlay::LeaveConfirmation => ShellLayer::FlowOwned,
@@ -1081,6 +1082,7 @@ fn handle_shell_actions(
                     ClientOverlay::Credits => ShellControlId::Credits,
                     ClientOverlay::Settings | ClientOverlay::Error(_) => ShellControlId::Settings,
                     ClientOverlay::BuildEditor
+                    | ClientOverlay::DashboardMenu
                     | ClientOverlay::Confirmation(_)
                     | ClientOverlay::ChangeServerConfirmation
                     | ClientOverlay::LeaveConfirmation
