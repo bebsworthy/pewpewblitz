@@ -1,0 +1,417 @@
+use crate::{
+    builds::{PassiveDefinitionId, UltimateDefinitionId},
+    lobby::normalize_proposed_display_name,
+};
+use serde::{Deserialize, Serialize};
+use std::{fmt, num::NonZeroU64, str::FromStr};
+
+pub const MAX_BRAWLERS_PER_PROFILE: usize = 16;
+pub const MAX_PROFILE_SNAPSHOT_BYTES: usize = 16 * 1024;
+
+macro_rules! opaque_id {
+    ($name:ident) => {
+        #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+        pub struct $name(u128);
+
+        impl $name {
+            pub fn new(value: u128) -> Result<Self, ProfileModelError> {
+                (value != 0)
+                    .then_some(Self(value))
+                    .ok_or(ProfileModelError::ZeroId)
+            }
+
+            pub fn random() -> Result<Self, ProfileModelError> {
+                let mut bytes = [0_u8; 16];
+                getrandom::fill(&mut bytes).map_err(|_| ProfileModelError::EntropyUnavailable)?;
+                Self::new(u128::from_be_bytes(bytes))
+            }
+
+            #[must_use]
+            pub const fn get(self) -> u128 {
+                self.0
+            }
+
+            #[must_use]
+            pub const fn to_bytes(self) -> [u8; 16] {
+                self.0.to_be_bytes()
+            }
+
+            pub fn from_bytes(bytes: [u8; 16]) -> Result<Self, ProfileModelError> {
+                Self::new(u128::from_be_bytes(bytes))
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(formatter, "{:032x}", self.0)
+            }
+        }
+
+        impl fmt::Debug for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(stringify!($name))?;
+                formatter.write_str("(")?;
+                fmt::Display::fmt(self, formatter)?;
+                formatter.write_str(")")
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = ProfileModelError;
+
+            fn from_str(value: &str) -> Result<Self, Self::Err> {
+                if value.len() != 32
+                    || !value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                {
+                    return Err(ProfileModelError::MalformedId);
+                }
+                let raw =
+                    u128::from_str_radix(value, 16).map_err(|_| ProfileModelError::MalformedId)?;
+                Self::new(raw)
+            }
+        }
+    };
+}
+
+opaque_id!(AccountId);
+opaque_id!(SavedBrawlerId);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct FighterProfileId(pub u16);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct WeaponBaseId(pub u16);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct ProfileRevision(NonZeroU64);
+
+impl ProfileRevision {
+    pub const INITIAL: Self = Self(NonZeroU64::MIN);
+
+    pub fn new(value: u64) -> Result<Self, ProfileModelError> {
+        NonZeroU64::new(value)
+            .map(Self)
+            .ok_or(ProfileModelError::InvalidRevision)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+
+    pub fn next(self) -> Result<Self, ProfileModelError> {
+        self.get()
+            .checked_add(1)
+            .ok_or(ProfileModelError::InvalidRevision)
+            .and_then(Self::new)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProfileModelError {
+    ZeroId,
+    MalformedId,
+    EntropyUnavailable,
+    InvalidRevision,
+    InvalidName,
+    UnknownFighterProfile,
+    UnknownWeaponBase,
+    UnknownUltimate,
+    UnknownPassive,
+    DuplicatePassive,
+    TooManyBrawlers,
+    MissingSelection,
+    InvalidSelection,
+    DuplicateBrawler,
+    InvalidCreationOrdinal,
+}
+
+impl fmt::Display for ProfileModelError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct BrawlerDraft {
+    pub name: String,
+    pub fighter_profile_id: FighterProfileId,
+    pub weapon_base_id: WeaponBaseId,
+    pub ultimate_id: UltimateDefinitionId,
+    pub passive_ids: [PassiveDefinitionId; 2],
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct BrawlerEdit {
+    pub name: String,
+    pub ultimate_id: UltimateDefinitionId,
+    pub passive_ids: [PassiveDefinitionId; 2],
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SavedBrawler {
+    pub id: SavedBrawlerId,
+    pub creation_ordinal: u64,
+    pub name: String,
+    pub fighter_profile_id: FighterProfileId,
+    pub weapon_base_id: WeaponBaseId,
+    pub ultimate_id: UltimateDefinitionId,
+    pub passive_ids: [PassiveDefinitionId; 2],
+    pub revision: ProfileRevision,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ProfileSnapshot {
+    pub account_id: AccountId,
+    pub revision: ProfileRevision,
+    pub next_brawler_ordinal: u64,
+    pub selected_brawler_id: Option<SavedBrawlerId>,
+    pub brawlers: Vec<SavedBrawler>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum ProfileCommand {
+    CreateBrawler {
+        request_id: u64,
+        expected_profile_revision: ProfileRevision,
+        draft: BrawlerDraft,
+    },
+    EditBrawler {
+        request_id: u64,
+        expected_profile_revision: ProfileRevision,
+        brawler_id: SavedBrawlerId,
+        expected_brawler_revision: ProfileRevision,
+        edit: BrawlerEdit,
+    },
+    SelectBrawler {
+        request_id: u64,
+        expected_profile_revision: ProfileRevision,
+        brawler_id: SavedBrawlerId,
+    },
+    DeleteBrawler {
+        request_id: u64,
+        expected_profile_revision: ProfileRevision,
+        brawler_id: SavedBrawlerId,
+        expected_brawler_revision: ProfileRevision,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum ProfileDecision {
+    Accepted,
+    InvalidRequest,
+    StaleRevision,
+    MissingBrawler,
+    CapacityReached,
+    QueueLocked,
+    TemporarilyUnavailable,
+    StorageFault,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ProfileOutcome {
+    pub request_id: u64,
+    pub decision: ProfileDecision,
+    pub snapshot: Option<ProfileSnapshot>,
+}
+
+impl ProfileSnapshot {
+    pub fn validate_bounded(&self) -> Result<(), ProfileModelError> {
+        self.validate()?;
+        if postcard::to_allocvec(self)
+            .map_or(true, |bytes| bytes.len() > MAX_PROFILE_SNAPSHOT_BYTES)
+        {
+            return Err(ProfileModelError::TooManyBrawlers);
+        }
+        Ok(())
+    }
+}
+
+/// Immutable V7 loadout handed through routing without account or storage authority.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchBuildSnapshotV2 {
+    pub schema_version: u8,
+    pub brawler_id: SavedBrawlerId,
+    pub brawler_revision: ProfileRevision,
+    pub fighter_profile_id: FighterProfileId,
+    pub weapon_base_id: WeaponBaseId,
+    pub ultimate_id: UltimateDefinitionId,
+    pub passive_ids: [PassiveDefinitionId; 2],
+    pub accepted_identity: crate::builds::SelectedBuild,
+}
+
+impl MatchBuildSnapshotV2 {
+    pub const SCHEMA_VERSION: u8 = 2;
+
+    pub fn from_brawler(
+        brawler: &SavedBrawler,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+    ) -> Result<Self, crate::builds::BuildResolutionError> {
+        let resolved = brawler.resolve_loadout(builds, weapons, fighter)?;
+        Ok(Self {
+            schema_version: Self::SCHEMA_VERSION,
+            brawler_id: brawler.id,
+            brawler_revision: brawler.revision,
+            fighter_profile_id: brawler.fighter_profile_id,
+            weapon_base_id: brawler.weapon_base_id,
+            ultimate_id: brawler.ultimate_id,
+            passive_ids: brawler.passive_ids,
+            accepted_identity: resolved.identity,
+        })
+    }
+
+    pub fn encode(self) -> Result<brawler_routing::MatchBuildSnapshot, String> {
+        let bytes = postcard::to_allocvec(&self)
+            .map_err(|error| format!("match build snapshot encode failed: {error}"))?;
+        brawler_routing::MatchBuildSnapshot::new(&bytes)
+            .map_err(|error| format!("match build snapshot exceeds bound: {error:?}"))
+    }
+
+    pub fn decode(snapshot: &brawler_routing::MatchBuildSnapshot) -> Result<Self, String> {
+        let value: Self = postcard::from_bytes(snapshot.as_bytes())
+            .map_err(|error| format!("match build snapshot decode failed: {error}"))?;
+        if value.schema_version != Self::SCHEMA_VERSION {
+            return Err("unsupported match build snapshot version".to_string());
+        }
+        Ok(value)
+    }
+
+    pub fn resolve(
+        self,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+    ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
+        let resolved = crate::builds::resolve_saved_brawler_recipe(
+            builds,
+            weapons,
+            fighter,
+            self.fighter_profile_id,
+            self.weapon_base_id,
+            self.ultimate_id,
+            self.passive_ids,
+        )?;
+        if resolved.identity != self.accepted_identity {
+            return Err(crate::builds::BuildResolutionError::InvalidCombination);
+        }
+        Ok(resolved)
+    }
+}
+
+impl BrawlerDraft {
+    pub fn normalized(mut self) -> Result<Self, ProfileModelError> {
+        self.name = normalize_proposed_display_name(&self.name)
+            .map_err(|_| ProfileModelError::InvalidName)?;
+        validate_recipe(
+            self.fighter_profile_id,
+            self.weapon_base_id,
+            self.ultimate_id,
+            self.passive_ids,
+        )?;
+        Ok(self)
+    }
+}
+
+impl BrawlerEdit {
+    pub fn normalized(mut self) -> Result<Self, ProfileModelError> {
+        self.name = normalize_proposed_display_name(&self.name)
+            .map_err(|_| ProfileModelError::InvalidName)?;
+        validate_mutable_recipe(self.ultimate_id, self.passive_ids)?;
+        Ok(self)
+    }
+}
+
+impl SavedBrawler {
+    pub fn validate(&self) -> Result<(), ProfileModelError> {
+        if self.creation_ordinal == 0 {
+            return Err(ProfileModelError::InvalidCreationOrdinal);
+        }
+        if normalize_proposed_display_name(&self.name).as_deref() != Ok(self.name.as_str()) {
+            return Err(ProfileModelError::InvalidName);
+        }
+        validate_recipe(
+            self.fighter_profile_id,
+            self.weapon_base_id,
+            self.ultimate_id,
+            self.passive_ids,
+        )
+    }
+
+    pub fn resolve_loadout(
+        &self,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+    ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
+        self.validate()
+            .map_err(|_| crate::builds::BuildResolutionError::InvalidCombination)?;
+        crate::builds::resolve_saved_brawler_recipe(
+            builds,
+            weapons,
+            fighter,
+            self.fighter_profile_id,
+            self.weapon_base_id,
+            self.ultimate_id,
+            self.passive_ids,
+        )
+    }
+}
+
+impl ProfileSnapshot {
+    pub fn validate(&self) -> Result<(), ProfileModelError> {
+        if self.brawlers.len() > MAX_BRAWLERS_PER_PROFILE {
+            return Err(ProfileModelError::TooManyBrawlers);
+        }
+        if self.next_brawler_ordinal == 0 {
+            return Err(ProfileModelError::InvalidCreationOrdinal);
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        let mut ordinals = std::collections::BTreeSet::new();
+        for brawler in &self.brawlers {
+            brawler.validate()?;
+            if !ids.insert(brawler.id) || !ordinals.insert(brawler.creation_ordinal) {
+                return Err(ProfileModelError::DuplicateBrawler);
+            }
+        }
+        match self.selected_brawler_id {
+            Some(selected) if !ids.contains(&selected) => Err(ProfileModelError::InvalidSelection),
+            None if !self.brawlers.is_empty() => Err(ProfileModelError::MissingSelection),
+            _ => Ok(()),
+        }
+    }
+}
+
+fn validate_recipe(
+    fighter: FighterProfileId,
+    weapon: WeaponBaseId,
+    ultimate: UltimateDefinitionId,
+    passives: [PassiveDefinitionId; 2],
+) -> Result<(), ProfileModelError> {
+    if !(1..=3).contains(&fighter.0) {
+        return Err(ProfileModelError::UnknownFighterProfile);
+    }
+    if !(1..=4).contains(&weapon.0) {
+        return Err(ProfileModelError::UnknownWeaponBase);
+    }
+    validate_mutable_recipe(ultimate, passives)
+}
+
+fn validate_mutable_recipe(
+    ultimate: UltimateDefinitionId,
+    passives: [PassiveDefinitionId; 2],
+) -> Result<(), ProfileModelError> {
+    if !(1..=2).contains(&ultimate.0) {
+        return Err(ProfileModelError::UnknownUltimate);
+    }
+    if !passives.iter().all(|id| (3..=6).contains(&id.0)) {
+        return Err(ProfileModelError::UnknownPassive);
+    }
+    if passives[0] == passives[1] {
+        return Err(ProfileModelError::DuplicatePassive);
+    }
+    Ok(())
+}

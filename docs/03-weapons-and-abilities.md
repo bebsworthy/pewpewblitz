@@ -22,7 +22,8 @@ WeaponContentCatalog
   Typed primitives, compatibility, policy, costs, and engine-safe bounds
 
 PlayerWeaponSelection
-  Preset identity or bounded typed specification
+  Supported preset identity or bounded typed specification
+  Future permanent weapon-base identity plus four equipped part instances
 
 WeaponConfiguration
   Operational recipe plus an approved presentation-profile reference
@@ -46,6 +47,101 @@ scripts, or unbounded numeric maps.
 Built-in presets and player-authored selections use the same configuration validation and runtime
 execution paths. Preset identity may affect naming, onboarding, analytics, or presentation lookup;
 it must not select a separate combat implementation.
+
+## Weapon-base and part customization direction
+
+The intended long-lived brawler model fixes one fighter profile and one weapon base when the player
+creates that brawler. The fighter-profile identity and persistence lifecycle belong to
+[Fighter and build specification](./02-fighter-model.md); this document owns how the fixed weapon
+base and its equipped parts resolve into an operational weapon. The current four reference weapon
+presets are the initial weapon-base candidates. More bases may be added as complete playable recipes
+without changing the part-slot model.
+
+Every weapon has exactly four interchangeable part slots:
+
+```text
+SavedBrawlerWeapon
+  Permanent WeaponBaseId
+  EquippedPartInstanceIds [0..4]
+```
+
+A slot has no type, family, or gameplay role. Any legal weapon part may occupy any free slot, and
+moving the same equipped parts between slot positions must not change the resolved weapon or its
+gameplay fingerprint. One owned part instance cannot occupy more than one slot at the same time.
+
+Part type, generated name, icon, and model profile are presentation and inventory metadata. For
+example, a part presented as `Heavy Magazine of Frosting` may sort under a `Magazine` inventory
+label, while its authoritative effects grant two rounds, add a bounded frost effect, and reduce
+firing speed. Neither the `Magazine` label nor the generated name grants, restricts, or selects
+gameplay behavior. V7 does not render equipped parts on the in-match fighter or weapon; composited
+part models are a later presentation improvement and therefore have no mount-conflict rule today.
+
+Keep ownership, presentation, generated properties, resolved gameplay, and runtime state distinct:
+
+```text
+WeaponBaseDefinition
+  Stable identity
+  Complete legal base WeaponConfiguration
+
+WeaponPartInstance
+  Stable player-owned instance identity
+  Presentation metadata
+  Bounded generated or authored effect selections
+  Generation/content revision
+
+EquippedWeaponParts
+  Up to four owned part-instance identities
+
+ResolvedWeapon
+  Base configuration after canonical part-effect resolution and ordinary validation
+
+WeaponState
+  Mutable match economy and deadlines; no inventory or part-instance state
+```
+
+Acquisition source—such as a level reward, loot box, purchase, or trade—only determines how an
+account obtains a part instance. It must not change effect execution. V7 seeds fixed authored starter
+parts and caps an account at 128 part instances; acquisition systems remain deferred. Generation and
+persistence are server-owned: clients may propose owned instance identities but cannot submit
+arbitrary effect values, recipes, presentation assets, or generated names as authoritative data.
+Persisted rolls survive balance changes unless an explicit versioned migration changes them; content
+updates never silently reroll owned parts.
+
+Part effects use a closed typed vocabulary over implemented weapon properties and capabilities. The
+vocabulary may include bounded flat or percentage changes to capacity, damage, fire cooldown,
+refill or recharge duration, range, projectile speed, projectile radius, spread, knockback, and
+supported payload or status effects. It must not use string field paths, scripts, arbitrary numeric
+maps, or serialized ECS components. A new effect kind is added only with explicit combination,
+validation, presentation, lifecycle, and verification rules.
+
+Resolution is deterministic and independent of slot position:
+
+1. Load the permanent weapon base and the four or fewer equipped instances from server-owned data.
+2. Validate ownership, uniqueness, revisions, bounds, and applicability to the base recipe.
+3. Canonically order the equipped effects and aggregate each property using its declared stacking
+   rule. Numerical modifiers sum flat values, apply the combined percentage, then clamp and round
+   once. Repeated status contributions aggregate into one bounded effect per status kind.
+4. Apply the aggregate to a copy of the base `WeaponConfiguration`.
+5. Run the ordinary structural, capability, compatibility, balance, and engine-ceiling validator.
+6. Produce the existing immutable `ResolvedWeapon` and canonical gameplay fingerprint.
+
+An equipped part whose effect cannot apply to the selected weapon base makes the candidate invalid;
+the resolver must not silently discard an authoritative effect. Inventory UI may prevent or explain
+that selection, but the server remains the legality authority. Combat, movement, networking, and
+presentation systems consume the resolved recipe and grants rather than querying inventory records,
+part names, cosmetic types, acquisition history, or instance identity.
+
+V7 removes the shared 12-point budget. Its balance controls are the four-slot ceiling, bounded
+effect ranges, applicability validation, engine caps, and authored sidegrade tradeoffs. Empty slots
+are legal. Distinct instances of one part definition may be equipped together; the same owned
+instance may not appear twice.
+
+The current custom Pulse power, reach, and magazine choices are a useful first migration seam: their
+existing bounded changes can become starter part effects while retaining the same base recipe,
+validator, `ResolvedWeapon`, and combat execution. Accumulating frost is a separate target-owned
+status capability; until that capability is implemented, a frost-themed part may only grant an
+already-supported bounded effect such as slow, with presentation text that accurately describes the
+actual rule.
 
 ## Operational weapon recipe
 
@@ -89,8 +185,9 @@ them:
 
 1. **Structural and capability validation:** IDs exist, fields are finite and bounded, collection
    sizes are safe, and every selected primitive has an implemented authoritative execution path.
-2. **Balance and compatibility validation:** the configuration obeys current catalog policy, build
-   budget, fighter compatibility, mutual exclusions, and required tradeoffs.
+2. **Balance and compatibility validation:** the configuration obeys current catalog policy,
+   fighter compatibility, mutual exclusions, required tradeoffs, and—only for the current pre-V7
+   build contract—the build budget. V7 weapon-part resolution has no point budget.
 3. **Entitlement validation:** the account may use the selected options. This belongs to a future
    arsenal/account boundary, not to combat execution.
 
@@ -126,8 +223,11 @@ The four reference presets are:
 | Arc launcher | Lobbed splash projectile | Punishes cover and groups | Slow delivery and recovery |
 | Impact blade | Melee arc | Strong duel pressure and displacement | Must enter danger range |
 
-They exercise reusable composition primitives and are not permanent weapon classes. The bounded
-custom Pulse proves that a non-preset selection resolves into the same operational representation.
+They exercise reusable composition primitives and are not permanent weapon classes. In V7 they
+become the initial permanent weapon-base choices; the named Runner, Bruiser, Controller, and Duelist
+builds disappear rather than becoming starter templates. The bounded custom Pulse proves that a
+non-preset selection resolves into the same operational representation and provides a migration
+seam for authored starter part effects.
 
 ## Delivery and projectile model
 

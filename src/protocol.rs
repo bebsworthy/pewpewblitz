@@ -51,13 +51,16 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 16;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 17;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
 
 /// Ordered reliable channel for the compatibility handshake and join outcome.
 pub struct SessionChannel;
+
+/// Ordered reliable saved-profile mutations and authoritative whole-snapshot outcomes.
+pub struct ProfileChannel;
 
 /// Sequenced-unreliable server-to-client stream for replaceable complete queue snapshots.
 pub struct QueueSnapshotChannel;
@@ -716,6 +719,10 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<LobbyJoinOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<crate::profiles::ProfileCommand>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<crate::profiles::ProfileOutcome>()
+            .add_direction(NetworkDirection::ServerToClient);
         register_queue_protocol(app);
         app.register_message::<MatchRouteGrant>()
             .add_direction(NetworkDirection::ServerToClient);
@@ -742,6 +749,11 @@ impl Plugin for ProtocolPlugin {
             },
         });
         app.add_channel::<SessionChannel>(ChannelSettings {
+            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::Bidirectional);
+        app.add_channel::<ProfileChannel>(ChannelSettings {
             mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
             ..default()
         })

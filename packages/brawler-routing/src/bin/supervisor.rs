@@ -3,7 +3,13 @@
 //! This binary owns one public UDP endpoint, a Mio owner loop, and one validated lobby-worker
 //! bootstrap through the control-plane manifest contract.
 
-use std::{error::Error, fs, io::Read as _, net::SocketAddr, path::PathBuf};
+use std::{
+    error::Error,
+    fs,
+    io::{Read as _, Write as _},
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 use brawler_routing::{
     AllocationPolicy, CONTROL_VERSION_CURRENT, CoreConfig, GameMode, Generation, LobbyManifest,
@@ -28,7 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or("--worker-executable is required")?;
     let catalog_path = args.game_types.ok_or("--game-types is required")?;
     let raw_catalog = read_catalog_file(&catalog_path)?;
-    let logical_server_id = LogicalServerId::new(random_u128()?).ok_or("zero logical server ID")?;
+    let logical_server_id = load_or_create_logical_server_id(&args.data_directory)?;
     let generation = Generation::new(random_u64()?).ok_or("zero supervisor generation")?;
     let mut runtime = SupervisorRuntime::new(RuntimeConfig {
         public_bind: args.bind,
@@ -101,6 +107,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_environment("BRAWLER_LOBBY_TRANSITION_DRIVER", "1")
             .with_environment("BRAWLER_LOBBY_TRANSITION_MODE", transition_mode);
     }
+    lobby_spec = lobby_spec.with_environment(
+        "BRAWLER_PROFILE_DATABASE",
+        args.data_directory.join("profiles.sqlite3").as_os_str(),
+    );
     runtime.spawn_worker(lobby_spec)?;
     let stop = runtime.stop_handle();
     ctrlc::set_handler(move || {
@@ -285,6 +295,57 @@ fn random_u64() -> Result<u64, Box<dyn Error>> {
     Ok(u64::from_be_bytes(bytes).max(1))
 }
 
+fn load_or_create_logical_server_id(
+    data_directory: &Path,
+) -> Result<LogicalServerId, Box<dyn Error>> {
+    fs::create_dir_all(data_directory)?;
+    let path = data_directory.join("logical-server-id");
+    match fs::read_to_string(&path) {
+        Ok(value) => parse_logical_server_id(&value),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let id = LogicalServerId::new(random_u128()?).ok_or("zero logical server ID")?;
+            let temporary = data_directory.join(format!(
+                ".logical-server-id-{}-{}.tmp",
+                std::process::id(),
+                random_u64()?
+            ));
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
+            write!(file, "{:032x}\n", id.get())?;
+            file.sync_all()?;
+            match fs::rename(&temporary, &path) {
+                Ok(()) => Ok(id),
+                Err(_rename_error) if path.exists() => {
+                    let _ = fs::remove_file(&temporary);
+                    fs::read_to_string(path)
+                        .map_err(Into::into)
+                        .and_then(|value| parse_logical_server_id(&value))
+                }
+                Err(rename_error) => {
+                    let _ = fs::remove_file(&temporary);
+                    Err(rename_error.into())
+                }
+            }
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn parse_logical_server_id(value: &str) -> Result<LogicalServerId, Box<dyn Error>> {
+    let value = value.strip_suffix('\n').unwrap_or(value);
+    if value.len() != 32
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("logical server identity must be 32 lowercase hexadecimal digits".into());
+    }
+    let raw = u128::from_str_radix(value, 16)?;
+    LogicalServerId::new(raw).ok_or_else(|| "logical server identity must be nonzero".into())
+}
+
 #[derive(Debug)]
 struct Arguments {
     bind: SocketAddr,
@@ -297,6 +358,7 @@ struct Arguments {
     rules_profile: u8,
     mode: GameMode,
     automatic_transition_driver: bool,
+    data_directory: PathBuf,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<dyn Error>> {
@@ -311,6 +373,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
         rules_profile: 1,
         mode: GameMode::Wipeout,
         automatic_transition_driver: false,
+        data_directory: PathBuf::from("data/server"),
     };
     while let Some(argument) = args.next() {
         if argument == "--bind" {
@@ -346,6 +409,12 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
             parsed.game_types = Some(PathBuf::from(
                 args.next().ok_or("--game-types requires a path")?,
             ));
+        } else if argument == "--data-directory" {
+            parsed.data_directory =
+                PathBuf::from(args.next().ok_or("--data-directory requires a path")?);
+            if parsed.data_directory.as_os_str().is_empty() {
+                return Err("--data-directory requires a nonempty path".into());
+            }
         } else if argument == "--match-rules" {
             parsed.rules_profile = match args
                 .next()
@@ -370,7 +439,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
             parsed.automatic_transition_driver = true;
         } else if argument == "--help" || argument == "-h" {
             println!(
-                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--automatic-transition-driver] [--bind IP:PORT] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>] [--metrics-file PATH]"
+                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--data-directory PATH] [--automatic-transition-driver] [--bind IP:PORT] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>] [--metrics-file PATH]"
             );
             std::process::exit(0);
         } else {
@@ -431,5 +500,24 @@ mod tests {
             args.metrics_file,
             Some(PathBuf::from("/tmp/routed-metrics.json"))
         );
+    }
+
+    #[test]
+    fn logical_server_identity_is_stable_and_malformed_data_is_preserved() {
+        let directory = std::env::temp_dir().join(format!(
+            "brawler-logical-server-{}-{}",
+            std::process::id(),
+            random_u64().unwrap()
+        ));
+        let first = load_or_create_logical_server_id(&directory).unwrap();
+        let second = load_or_create_logical_server_id(&directory).unwrap();
+        assert_eq!(first, second);
+        fs::write(directory.join("logical-server-id"), "invalid").unwrap();
+        assert!(load_or_create_logical_server_id(&directory).is_err());
+        assert_eq!(
+            fs::read_to_string(directory.join("logical-server-id")).unwrap(),
+            "invalid"
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }

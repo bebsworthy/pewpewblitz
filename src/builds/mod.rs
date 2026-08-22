@@ -13,6 +13,7 @@ pub use definitions::{
     BuildResolutionError, CustomPulseTuning, FighterStatProfiles, MAX_BUILD_CANDIDATE_BYTES,
     MAX_RESOLVED_LOADOUT_BYTES, PassiveDefinition, PulseMagazineTuning, PulsePowerTuning,
     PulseReachTuning, UltimateDefinition, WeaponPointCost, build_point_total, resolve_build_recipe,
+    resolve_saved_brawler_recipe,
 };
 pub use model::{
     AbilityPhase, AbilityState, AcceptedBuildSummary, BrawlerBuildRecipe, BuildCandidate,

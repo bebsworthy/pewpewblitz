@@ -5,6 +5,8 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
 balance_lab_addr=${BRAWLER_BALANCE_LAB_ADDR:-127.0.0.1:5123}
 balance_lab_state=${BRAWLER_BALANCE_LAB_STATE:-$project_dir/target/balance-lab/session-v1.json}
+dev_data_dir=${BRAWLER_DEV_DATA_DIR:-$project_dir/target/dev}
+server_data_dir=${BRAWLER_SERVER_DATA_DIR:-$dev_data_dir/server}
 mode=${1:-}
 
 usage() {
@@ -66,6 +68,7 @@ supervisor_args() {
         --content-fingerprint "$content_fingerprint"
         --worker-executable "$project_dir/target/debug/brawler-server"
         --game-types "$project_dir/config/server/game-types.ron"
+        --data-directory "$server_data_dir"
         --bind "$bind_addr"
     )
 }
@@ -125,12 +128,14 @@ target/debug/brawler-supervisor "${SUPERVISOR_ARGS[@]}" &
 supervisor_pid=$!
 
 for ((index = 1; index <= client_count; index++)); do
-    target/debug/brawler-client --server "$bind_addr" --transport routed-udp &
+    client_data_dir="$dev_data_dir/clients/$index"
+    BRAWLER_CLIENT_DATA_DIR="$client_data_dir" \
+        target/debug/brawler-client --server "$bind_addr" --transport routed-udp &
     client_pids+=("$!")
 done
 
-printf 'brawler dev: running %s interactive client(s) against %s; press Ctrl-C to stop\n' \
-    "$client_count" "$bind_addr"
+printf 'brawler dev: running %s interactive client(s) against %s with stable slots under %s; press Ctrl-C to stop\n' \
+    "$client_count" "$bind_addr" "$dev_data_dir/clients"
 
 job_is_running() {
     jobs -pr | grep -qx "$1"

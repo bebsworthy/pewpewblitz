@@ -84,6 +84,7 @@ and closeout learning.
 | V4 | Independent map documents, semantic object placement, reusable themes, and second-map proof | [V4 roadmap](./implementation/v4/roadmap.md) |
 | V5 | Auto-connect, Player Dashboard, connected-loop convergence, responsive presentation, and lifecycle hardening | [V5 roadmap](./implementation/v5/roadmap.md) |
 | V6 | Development-only, server-authoritative Practice Balance Lab for rapid fighter and weapon tuning | [V6 roadmap](./implementation/v6/roadmap.md) |
+| V7 | Persistent server-owned player profiles, saved brawlers, weapon bases, and four-slot weapon-part equipment | [V7 roadmap](./implementation/v7/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.
@@ -94,8 +95,8 @@ These definitions provide cross-document orientation. The linked owning specific
 authoritative for exact schemas, supported fields, and lifecycle rules.
 
 - **Brawler:** the product-level player-authored configuration or identity from which a match
-  fighter is instantiated. Long-lived ownership and persistence belong to the envisioned arsenal
-  loop until that capability is promoted.
+  fighter is instantiated. V7 owns the promoted long-lived server-side identity, persistence, and
+  equipment loop; earlier versions retain match-scoped selections only.
 - **Fighter:** the server-owned in-match combatant instantiated from a validated, resolved brawler
   loadout.
 - **Build:** a bounded player selection that the server validates and resolves. The supported

@@ -52,6 +52,13 @@ most recently successful server, then the local default. A successful connection
 Dashboard; cancellation or bounded connection failure opens Server Select. Press Ctrl-C in a
 `just run` session to stop its complete local process tree.
 
+`just run N` gives each local window a stable numbered client-data slot under
+`target/dev/clients/1..N` and reuses the logical server under `target/dev/server`. Repeating the
+command therefore preserves N independent local identities without concurrent writes to one
+`connections.ron`. `just client` continues to use the normal platform user-data location. Set
+`BRAWLER_DEV_DATA_DIR` to relocate all development slots, or `BRAWLER_CLIENT_DATA_DIR` to give one
+manually launched client an explicit data directory.
+
 One client is sufficient for Practice. Multiplayer game types form only their exact advertised
 human roster, so the default First Blood path requires two clients.
 

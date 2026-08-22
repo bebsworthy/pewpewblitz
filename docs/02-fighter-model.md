@@ -214,36 +214,74 @@ Presentation may observe these transitions but must never be their authority.
 
 ## Arsenal direction
 
-The long-lived product direction is an arsenal of saved brawlers. Each saved brawler has a stable
-build identity and revision and contains its bounded weapon selection plus the rest of its loadout.
-Selecting a brawler for a match remains intent: the server retrieves or receives the candidate,
-validates it against the active content and balance policy, and creates a new resolved match
-loadout.
+V7 promotes the long-lived arsenal direction into a planned product contract. An account may own at
+most 16 saved brawlers. Each brawler has a stable server-owned identity and revision with:
 
-The established match path does not require accounts or persistence. Persistent arsenal storage,
-editing history, acquisition, currency, loot, unlocks, and migration policy are later product
-capabilities and must not leak into combat systems. The canonical candidate is tracked in
-[the backlog](./backlog.md#canonical-cross-version-candidate-index).
+- a non-unique, editable display name;
+- one fighter profile and one weapon base, both permanently fixed at creation;
+- up to four equipped weapon-part instances;
+- one freely swappable ultimate and two freely swappable passives.
 
-## Collectible equipment extension
+A saved brawler may be deleted. Name, equipment, ultimate, and passives may be edited outside queue,
+but the server rejects every edit while the player is queued. Queue admission freezes the canonical
+brawler revision and immutable resolved loadout used by the match. Creating a new brawler, rather
+than mutating its body or weapon identity, is the intended way to try another permanent combination.
 
-A future arsenal may include collectible, equippable items that grant bounded stat modifiers,
-passive effects, or capabilities. This extends the existing loadout pipeline rather than replacing
-it. Keep these concerns distinct:
+V7 starts with fresh server-side profile data and does not import today's locally saved build. It
+also removes the 12-point budget and retires Runner, Bruiser, Controller, and Duelist as
+player-facing builds rather than converting them into starter templates. The exact launch fighter
+profile catalog remains a V7 M01 content decision.
 
-1. **Item definition:** developer-authored grants, slot and family tags, compatibility rules,
-   presentation references, and balance revision.
-2. **Item instance:** a player-owned stable identity referencing an item definition, plus only the
+Selecting a brawler for a match remains intent: the server-side profile authority retrieves the
+candidate, validates ownership and the active content revision, and creates a new resolved match
+loadout. In V7 a client or test supplies an opaque `AccountId`; after bounded format validation, the
+server atomically loads that profile or creates it when absent. Normal clients generate and store an
+ID per logical server, while tests may use deterministic IDs. This seam has no proof-of-possession,
+security check, recovery, or profile-creation rate limit and is not a production credential. The
+long-lived lobby worker owns the logical-server-local `ProfileAuthority`; its ECS systems exchange
+bounded commands and results with a dedicated storage executor that exclusively owns SQLite.
+
+The established match path does not require accounts or persistence and must stay isolated from
+them. V7's first persistence baseline is transactional SQLite with WAL, versioned migrations, an
+operator backup command, and a tested restore path. Storage unavailability fails fast. Corruption
+preserves the database for recovery, rejects unsafe records, reports the fault, and never silently
+resets owned data. The supervisor may supply the database path but cannot open profile data, and
+match workers receive only immutable admitted loadouts. Progression, currency, loot, unlocks, and
+acquisition systems remain later capabilities and must not leak into combat systems.
+
+## Weapon-part equipment and later collectible extension
+
+V7 adds exactly four generic weapon-part slots to every saved brawler. Slots have no gameplay type,
+family, or semantic position. Empty slots are legal; distinct owned instances of the same part
+definition may be equipped together, while one instance cannot occupy more than one slot. Part
+type, name, icon, and model metadata exist only for inventory presentation in V7 and do not attach a
+part model to the in-match fighter or weapon.
+
+Weapon parts grant bounded stat modifiers, effects, or implemented capabilities. They extend the
+existing loadout pipeline rather than replacing it. Keep these concerns distinct:
+
+1. **Part definition:** developer-authored grants, applicability rules, presentation references, and
+   balance revision.
+2. **Part instance:** a player-owned stable identity referencing a definition, plus only the
    persistent properties the product explicitly supports.
-3. **Equipment selection:** item-instance identities proposed for legal brawler slots.
+3. **Equipment selection:** up to four part-instance identities proposed for generic brawler slots.
 4. **Resolved equipment grants:** immutable definition-derived modifiers, effects, and capabilities
    folded into the match loadout after server validation.
 5. **Equipment runtime:** cooldowns, trigger windows, charges, and active effects created by those
    grants during play.
 
-The server validates ownership or entitlement, slots, conflicts, stacking, caps, and revisions. An
-item instance ID must never become authority for a gameplay value. Combat behavior should branch on
-resolved grants or capabilities, not rarity, acquisition history, or a particular item ID.
+The server validates ownership, uniqueness, applicability, stacking, caps, and revisions. An effect
+that cannot apply to the permanent weapon base rejects the candidate; it is never silently ignored.
+Flat modifiers sum first, the combined percentage applies second, and resolution clamps and rounds
+once. Repeated status grants aggregate into one bounded effect per status kind. A part instance ID
+must never become authority for a gameplay value. Combat behavior branches on resolved grants or
+capabilities, not rarity, acquisition history, presentation type, or a particular instance ID.
+
+V7 seeds a fixed authored starter inventory and caps an account at 128 part instances. It preserves
+each generated roll across balance updates unless an explicit versioned migration changes it; no
+update silently rerolls owned equipment. Initial Frost parts map to the supported slow effect, while
+accumulating Frost remains a later status capability. Balance should favor readable sidegrades and
+capped tradeoffs.
 
 Pre-match equipment is the expected extension. Equipping loot during an active match would require
 pickup, inventory mutation, loadout transition, replication, presentation, and balance rules and is

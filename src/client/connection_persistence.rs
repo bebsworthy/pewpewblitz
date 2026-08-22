@@ -11,15 +11,28 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const CONNECTIONS_SCHEMA_VERSION: u16 = 1;
+const CONNECTIONS_SCHEMA_VERSION: u16 = 2;
 const MAX_CONNECTIONS_BYTES: u64 = 64 * 1024;
 pub const MAX_SAVED_SERVERS: usize = 16;
+pub const CLIENT_DATA_DIRECTORY_ENV: &str = "BRAWLER_CLIENT_DATA_DIR";
 
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
 pub struct ClientConnectionsPath(pub PathBuf);
 
+impl ClientConnectionsPath {
+    #[must_use]
+    pub fn for_data_directory(directory: impl Into<PathBuf>) -> Self {
+        Self(directory.into().join("connections.ron"))
+    }
+}
+
 impl Default for ClientConnectionsPath {
     fn default() -> Self {
+        if let Some(directory) =
+            std::env::var_os(CLIENT_DATA_DIRECTORY_ENV).filter(|value| !value.is_empty())
+        {
+            return Self::for_data_directory(directory);
+        }
         let path = ProjectDirs::from("com", "Brawler", "Brawler").map_or_else(
             || PathBuf::from("connections.ron"),
             |dirs| dirs.config_dir().join("connections.ron"),
@@ -35,6 +48,8 @@ pub struct ConnectionsFileV1 {
     pub preferred_display_name: Option<String>,
     pub favorites: Vec<SavedServerV1>,
     pub recents: Vec<RecentServerV1>,
+    #[serde(default)]
+    pub server_identities: Vec<ServerIdentityV2>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -51,6 +66,14 @@ pub struct RecentServerV1 {
     pub address: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ServerIdentityV2 {
+    pub logical_server_id: String,
+    pub account_id: crate::profiles::AccountId,
+    pub addresses: Vec<String>,
+}
+
 impl ConnectionsFileV1 {
     #[must_use]
     pub fn empty() -> Self {
@@ -61,11 +84,17 @@ impl ConnectionsFileV1 {
     }
 
     pub fn validate(mut self) -> Result<Self, String> {
+        if self.schema_version == 1 {
+            self.schema_version = CONNECTIONS_SCHEMA_VERSION;
+        }
         if self.schema_version != CONNECTIONS_SCHEMA_VERSION {
             return Err("unsupported connections schema".to_string());
         }
         if self.favorites.len() > MAX_SAVED_SERVERS || self.recents.len() > MAX_SAVED_SERVERS {
             return Err("connections list exceeds its bound".to_string());
+        }
+        if self.server_identities.len() > MAX_SAVED_SERVERS {
+            return Err("server identity list exceeds its bound".to_string());
         }
         if let Some(name) = &self.preferred_display_name {
             self.preferred_display_name = Some(
@@ -87,6 +116,22 @@ impl ConnectionsFileV1 {
             recent.address = canonical_address(&recent.address)?;
             if !recent_addresses.insert(recent.address.clone()) {
                 return Err("duplicate recent address".to_string());
+            }
+        }
+        let mut logical_ids = std::collections::BTreeSet::new();
+        for identity in &mut self.server_identities {
+            identity.logical_server_id = validate_opaque_id(&identity.logical_server_id)?;
+            if !logical_ids.insert(identity.logical_server_id.clone())
+                || identity.addresses.len() > MAX_SAVED_SERVERS
+            {
+                return Err("duplicate or oversized server identity".to_string());
+            }
+            let mut addresses = std::collections::BTreeSet::new();
+            for address in &mut identity.addresses {
+                *address = canonical_address(address)?;
+                if !addresses.insert(address.clone()) {
+                    return Err("duplicate server identity address".to_string());
+                }
             }
         }
         Ok(self)
@@ -134,6 +179,54 @@ impl ConnectionsFileV1 {
             .retain(|favorite| favorite.address != address);
         self.favorites.len() != before
     }
+
+    #[allow(
+        dead_code,
+        reason = "used by the V7 server-identity handshake introduced in this active milestone"
+    )]
+    pub fn account_for_server(
+        &mut self,
+        logical_server_id: &str,
+        address: &str,
+    ) -> Result<crate::profiles::AccountId, String> {
+        let logical_server_id = validate_opaque_id(logical_server_id)?;
+        let address = canonical_address(address)?;
+        if let Some(identity) = self
+            .server_identities
+            .iter_mut()
+            .find(|identity| identity.logical_server_id == logical_server_id)
+        {
+            if !identity.addresses.contains(&address) {
+                if identity.addresses.len() >= MAX_SAVED_SERVERS {
+                    return Err("server identity address list is full".to_string());
+                }
+                identity.addresses.push(address);
+            }
+            return Ok(identity.account_id);
+        }
+        if self.server_identities.len() >= MAX_SAVED_SERVERS {
+            return Err("server identity list is full".to_string());
+        }
+        let account_id = crate::profiles::AccountId::random().map_err(|error| error.to_string())?;
+        self.server_identities.push(ServerIdentityV2 {
+            logical_server_id,
+            account_id,
+            addresses: vec![address],
+        });
+        Ok(account_id)
+    }
+}
+
+fn validate_opaque_id(value: &str) -> Result<String, String> {
+    if value.len() != 32
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || value.bytes().all(|byte| byte == b'0')
+    {
+        return Err("logical server ID must be 32 lowercase hexadecimal digits and nonzero".into());
+    }
+    Ok(value.to_string())
 }
 
 fn validate_server_name(value: &str) -> Result<String, String> {
@@ -235,7 +328,7 @@ mod tests {
         let path = dir.join("connections.ron");
         for source in [
             "not ron".to_string(),
-            "(schema_version:2,preferred_display_name:None,favorites:[],recents:[])".to_string(),
+            "(schema_version:3,preferred_display_name:None,favorites:[],recents:[],server_identities:[])".to_string(),
             "(schema_version:1,preferred_display_name:None,favorites:[(name:\"x\",address:\"bad host\")],recents:[])".to_string(),
         ] {
             fs::write(&path, &source).unwrap();
@@ -249,5 +342,24 @@ mod tests {
         .unwrap();
         assert!(load_connections(&path).is_err());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn account_binding_is_idempotent_per_logical_server_and_tracks_aliases() {
+        let mut state = ConnectionsFileV1::empty();
+        let server = "00000000000000000000000000000001";
+        let account = state.account_for_server(server, "localhost:5000").unwrap();
+        let repeated = state.account_for_server(server, "127.0.0.1:5000").unwrap();
+        assert_eq!(account, repeated);
+        assert_eq!(state.server_identities.len(), 1);
+        assert_eq!(state.server_identities[0].addresses.len(), 2);
+    }
+
+    #[test]
+    fn explicit_client_data_directory_owns_one_connections_file() {
+        assert_eq!(
+            ClientConnectionsPath::for_data_directory("target/dev/clients/4"),
+            ClientConnectionsPath(PathBuf::from("target/dev/clients/4/connections.ron"))
+        );
     }
 }

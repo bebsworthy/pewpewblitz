@@ -1,6 +1,6 @@
 # Canonical cross-version candidate index
 
-Last reconciled: **2026-08-22**, after accepted V5 closeout.
+Last reconciled: **2026-08-22**, after recording the V7 arsenal decisions and browser candidates.
 
 This file is the canonical index of unresolved product and technical candidates for future PewPew
 Blitz versions. It provides one place to compare candidates without copying the detailed research,
@@ -41,7 +41,9 @@ index.
 |---|---|---|---|
 | CAND-BOTS | Playable, readable server-hosted opponents in the existing Start Practice flow | Candidate; architecture is ready for a first representative-build vertical slice when bots are selected for the next version | [Bot decision and first-slice contract](./10-bots.md); [V2 explicit bot deferral](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2) |
 | CAND-RELEASE-POLISH | Release-quality controller feel, audio, HUD/combat/terrain readability, balance, match length, and Hot Zone pacing | Candidate; promote before claiming release readiness or when focused playtests identify the next highest-value feel problem | [`POST-V1-RELEASE-POLISH`](./implementation/v1/roadmap.md#v1-backlog); [V2 manual-matrix rows](./implementation/v2/roadmap.md#v2-backlog) |
-| CAND-ARSENAL | Persistent player-owned brawlers, saved build identity/revisions, production build editing, and the minimum account/entitlement boundary needed by that slice | Candidate; promote when long-lived build ownership becomes the selected product outcome | [`FUT-ARSENAL`](./implementation/v1/roadmap.md#v1-backlog); [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md). Collectible equipment is a child slice, not an obligation to add acquisition, crafting, rarity, affixes, and inventory UI together |
+| CAND-ARSENAL | Persistent player-owned brawlers, immutable fighter-profile/weapon-base creation choices, four interchangeable owned weapon-part slots, production editing, and the minimum account/storage boundary required by that loop | Promoted to V7; roadmap is `Not started` until V6 completes and is accepted | [V7 roadmap](./implementation/v7/roadmap.md); [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md). V7 deliberately defers acquisition, currencies, loot, purchases, trade, crafting, global accounts, and cloud profiles |
+| CAND-WEB-ARSENAL | A browser profile/dashboard that creates, edits, deletes, selects, and presents the same server-owned brawlers through an HTTP API | Trigger-bound; promote when browser or remote arsenal management becomes a selected player workflow. It must call the same profile commands, revisions, validation, and queue-time edit rejection as the native Dashboard and must not access SQLite directly or imply browser gameplay | [V7 roadmap](./implementation/v7/roadmap.md); [player UX](./13-player-ux.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
+| CAND-WEB-GAME-CLIENT | A supported Bevy WASM gameplay client connecting through a browser-compatible Lightyear transport while preserving the routed, server-authoritative match path | Trigger-bound; promote only when browser gameplay is a supported platform target. Requires a WebTransport or evaluated WebSocket ingress rather than raw UDP, WASM-specific client feature composition and persistence, certificate/deployment policy, browser input/audio/render checks, and cross-browser performance evidence | [network architecture](./08-network-architecture.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md); [current native-only transport features](../Cargo.toml); [local Lightyear WASM/WebTransport example](../references/lightyear/examples/simple_setup/README.md) |
 | CAND-COMBAT-CAPABILITIES | One new readable combat/build family, such as support/control payloads, a new ultimate, systemic status interaction, an advanced projectile, or a terrain-destruction carrier | Candidate parent; promote exactly one coherent capability family after choosing its player-visible build tradeoff | [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md); [future-version combat candidates](./implementation/v1/roadmap.md#future-version-candidate-backlog); [`GAP-DESIGN-TERRAIN-RESERVATION`](./implementation/v1/roadmap.md#v1-backlog) |
 | CAND-GAME-MODE | One complete additional authoritative mode with compatible map requirements and a player-visible loop | Candidate parent; select Heist, Gem Grab, Solo Showdown, or another researched mode individually rather than implementing a mode framework | [future-version mode candidates](./implementation/v1/roadmap.md#future-version-candidate-backlog); [maps and modes](./04-maps-and-game-modes.md) |
 | CAND-ENVIRONMENT-GAMEPLAY | One readable environment slice—surface, concealment, hazard, traversal device, interactive geometry, or ability-created region—using server-owned outcomes | Candidate parent; promote one demonstrated gameplay composition and add shared primitives only when that slice needs them | [environment gameplay direction](./09-environment-gameplay.md); [future environment candidate](./implementation/v1/roadmap.md#future-version-candidate-backlog). The first environmental damage author must also revisit `M08-ENV-SOURCE` in the [V1 backlog](./implementation/v1/roadmap.md#v1-backlog) |
@@ -61,10 +63,10 @@ index.
 | CAND-SESSION-CONTINUITY | One explicit continuity feature such as interrupted-match resumption, join-in-progress, or a spectator/observer client | Trigger-bound; promote one feature when continuity, tournament observation, or larger playtest operations demonstrate the need | [`V2-ROUTE-RESUMPTION`](./implementation/v2/roadmap.md#v2-backlog); [V2 explicit deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [player UX](./13-player-ux.md) |
 | CAND-HOSTING-HARDENING | Internet-facing capacity, credentials, security, fleet scheduling, autoscaling, moderation, and administration appropriate to a concrete deployment | Trigger-bound; do not build a generic backend before a public hosting target exists | [`V2-HOSTING-HARDENING`](./implementation/v2/roadmap.md#v2-backlog); [V2 explicit deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
 
-Accounts, cloud profiles, social systems, parties, ranked play, currencies, monetization, live
-operations, and mobile controls remain outside the current candidate index unless a future product
-decision promotes a concrete player outcome. `CAND-ARSENAL` may justify only the minimum identity,
-storage, or entitlement boundary its selected slice actually needs.
+Global accounts, cloud profiles, social systems, parties, ranked play, currencies, monetization,
+live operations, and mobile controls remain outside the current candidate index unless a future
+product decision promotes a concrete player outcome. V7 owns only the minimum server-side identity,
+storage, and entitlement boundary required by its persistent-arsenal slice.
 
 ## Trigger-bound technical maintenance
 
@@ -88,6 +90,9 @@ necessary.
   multiplayer substitution, and supervisor-managed bot processes are later decisions.
 - **Arsenal and equipment:** saved brawler identity and owned item instances are distinct. Promote
   only the acquisition, entitlement, persistence, and UI behavior required by the selected slice.
+- **Browser surfaces:** a web arsenal is an HTTP adapter over profile authority and does not require
+  a browser game client. A WASM game client is a separate platform/transport effort and cannot use
+  the current raw-UDP ingress.
 - **Combat and environment:** add one player-visible capability before extracting general status,
   region, summon, payload, or navigation frameworks.
 - **Map builder and provisioning:** the builder can prove bounded authoring over current embedded

@@ -232,9 +232,24 @@ schema versions, bounded input, atomic replacement, and safe fallback after miss
 data. Favorites remain explicit; recents remain bounded and automatic. None of this persistence
 belongs in the dedicated-server feature graph.
 
-Accounts, cloud saves, entitlements, and persistent arsenals are envisioned external-loop
-capabilities. They require their own product, persistence, security, and recovery specifications
-before altering this local contract.
+V7 adds a fresh server-side persistent arsenal and does not import the locally saved build. An
+account may own up to 16 brawlers, delete them, and reuse display names. Fighter profile and weapon
+base are permanent creation choices; name, four generic weapon-part slots, ultimate, and both
+passives remain editable outside queue. Queue admission freezes the brawler and every edit is
+rejected while queued. The 12-point budget and the Runner, Bruiser, Controller, and Duelist builds
+do not carry into this flow.
+
+The V7 store uses SQLite WAL/transactions, versioned migrations, an operator backup command, and a
+tested restore path. Unavailable storage fails fast. Corrupt storage is preserved for recovery;
+unsafe records are rejected and reported without silently resetting owned data. Production
+authentication and external identity schemes remain deferred. For V7, the client generates and
+stores one opaque account ID per logical server. The server validates its bounded format and then
+atomically loads or creates the profile; deterministic IDs provide the same idempotent path for
+tests. There is no security check, recovery, or profile-creation rate limit. The UI must not describe
+this development seam as a protected or recoverable account. Profiles are local to one logical
+server and owned by `ProfileAuthority` in its long-lived lobby worker, backed by an exclusive SQLite
+storage executor. Cloud saves, entitlements, progression, and cross-server profiles remain later
+capabilities.
 
 ## Input, settings, and accessibility
 
@@ -321,7 +336,8 @@ The following directions may extend this shell without changing its present auth
 
 - public server discovery coordinated with reachability and server policy;
 - parties, invitations, private groups, and team-affinity rules;
-- account-backed arsenals, progression, entitlements, and cloud persistence;
+- progression, entitlements, and cloud or cross-server profile persistence beyond V7's server-side
+  arsenal;
 - match resumption, join-in-progress, spectator, or tournament-observer flows;
 - rank, leaderboards, social features, and moderation surfaces;
 - broader platform-specific input, localization, and release-readiness support.

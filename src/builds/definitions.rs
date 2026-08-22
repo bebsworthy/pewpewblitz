@@ -330,6 +330,52 @@ pub fn resolve_build_recipe(
     recipe: BrawlerBuildRecipe,
     source_preset_id: Option<BuildPresetId>,
 ) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
+    resolve_build_recipe_inner(catalog, weapons, fighter, recipe, source_preset_id, None)
+}
+
+/// Resolve V7's authored saved-brawler recipe without the retired point-budget or frame-passive
+/// stat inference. The fighter profile is an explicit immutable creation choice.
+pub fn resolve_saved_brawler_recipe(
+    catalog: &BuildCatalog,
+    weapons: &WeaponCatalog,
+    fighter: &FighterDefinition,
+    fighter_profile_id: crate::profiles::FighterProfileId,
+    weapon_base_id: crate::profiles::WeaponBaseId,
+    ultimate: UltimateDefinitionId,
+    passives: [PassiveDefinitionId; 2],
+) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
+    let fighter_stats = match fighter_profile_id.0 {
+        1 => catalog.fighter_profiles.default,
+        2 => catalog.fighter_profiles.lightweight,
+        3 => catalog.fighter_profiles.reinforced,
+        _ => return Err(BuildResolutionError::UnknownId),
+    };
+    if !(3..=6).contains(&passives[0].0) || !(3..=6).contains(&passives[1].0) {
+        return Err(BuildResolutionError::UnknownId);
+    }
+    resolve_build_recipe_inner(
+        catalog,
+        weapons,
+        fighter,
+        BrawlerBuildRecipe {
+            weapon: WeaponChoice::Preset(WeaponPresetId(weapon_base_id.0)),
+            ultimate,
+            passives,
+        },
+        None,
+        Some((fighter_profile_id.0, fighter_stats)),
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn resolve_build_recipe_inner(
+    catalog: &BuildCatalog,
+    weapons: &WeaponCatalog,
+    fighter: &FighterDefinition,
+    recipe: BrawlerBuildRecipe,
+    source_preset_id: Option<BuildPresetId>,
+    explicit_fighter_profile: Option<(u16, ResolvedFighterStats)>,
+) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
     if let Some(preset_id) = source_preset_id {
         let preset = catalog
             .preset(preset_id)
@@ -381,10 +427,12 @@ pub fn resolve_build_recipe(
     let (primary_weapon, _weapon_points) =
         resolve_weapon_choice(catalog, weapons, fighter, recipe.weapon)?;
     let total_points = build_point_total(catalog, recipe)?;
-    if total_points > BUILD_POINT_BUDGET {
+    if explicit_fighter_profile.is_none() && total_points > BUILD_POINT_BUDGET {
         return Err(BuildResolutionError::OverBudget);
     }
-    let fighter_stats = if has_lightweight {
+    let fighter_stats = if let Some((_, stats)) = explicit_fighter_profile {
+        stats
+    } else if has_lightweight {
         catalog.fighter_profiles.lightweight
     } else if has_reinforced {
         catalog.fighter_profiles.reinforced
@@ -393,14 +441,26 @@ pub fn resolve_build_recipe(
     };
     let mut canonical_passives = recipe.passives;
     canonical_passives.sort();
-    let fingerprint_bytes = postcard::to_allocvec(&(
-        BUILD_FINGERPRINT_FORMAT_VERSION,
-        catalog.schema_version,
-        catalog.balance_revision,
-        recipe.weapon,
-        recipe.ultimate,
-        canonical_passives,
-    ))
+    let fingerprint_bytes = if let Some((fighter_profile_id, _)) = explicit_fighter_profile {
+        postcard::to_allocvec(&(
+            BUILD_FINGERPRINT_FORMAT_VERSION,
+            catalog.schema_version,
+            catalog.balance_revision,
+            fighter_profile_id,
+            recipe.weapon,
+            recipe.ultimate,
+            canonical_passives,
+        ))
+    } else {
+        postcard::to_allocvec(&(
+            BUILD_FINGERPRINT_FORMAT_VERSION,
+            catalog.schema_version,
+            catalog.balance_revision,
+            recipe.weapon,
+            recipe.ultimate,
+            canonical_passives,
+        ))
+    }
     .map_err(|_| BuildResolutionError::ResolutionFailed)?;
     let identity = SelectedBuild {
         source_build_preset_id: source_preset_id,
@@ -409,7 +469,11 @@ pub fn resolve_build_recipe(
     };
     let resolved = ResolvedMatchLoadout {
         identity,
-        total_points,
+        total_points: if explicit_fighter_profile.is_some() {
+            0
+        } else {
+            total_points
+        },
         fighter_stats,
         primary_weapon,
         ultimate,
