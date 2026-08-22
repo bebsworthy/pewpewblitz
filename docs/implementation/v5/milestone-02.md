@@ -63,15 +63,16 @@ Audited on 2026-08-21 against:
 - `src/client/session.rs` for authoritative result capture and routed match-to-lobby return;
 - `src/client/queue.rs` and `src/client/build_editor.rs` for admission, cancellation, frozen queue
   membership, editable drafts, and accepted build ownership;
-- `README.md`, `docs/screen-flow-map.md`, and `docs/13-player-ux.md` for documentation that still
-  describes the superseded V2 title-first flow;
+- `README.md` and `docs/13-player-ux.md` for documentation that still described the superseded V2
+  title-first flow;
 - `references/bevy/examples/state/states.rs` and `state/sub_states.rs`, plus the local
   `bevy-game-engine` state reference, to confirm that primary destinations remain appropriate
   `States` while modal child concerns remain independently scoped overlays. The current two-axis
   design is sound; M02 does not need a new navigation framework or a state hierarchy rewrite.
 
-The complete as-built diagrams, surface table, remnant register, and proposed M02 destination map
-are maintained in [`../../screen-flow-map.md`](../../screen-flow-map.md).
+The as-built diagrams, surface inventory, remnant register, and proposed destination map below form
+this milestone's historical audit. The accepted durable flow is maintained in
+[`../../13-player-ux.md`](../../13-player-ux.md).
 
 ### Primary-state findings
 
@@ -318,7 +319,7 @@ Select, Queue, and Results.
   present the product shell; prevent its overlay from becoming a second V5 build selector;
 - replace stale `GameSelect` transition tests and historical milestone names where they obscure
   ownership;
-- reconcile README, `docs/13-player-ux.md`, and `docs/screen-flow-map.md` with the accepted V5 flow,
+- reconcile README and `docs/13-player-ux.md` with the accepted V5 flow,
   leaving versioned V2 documents as historical evidence.
 
 ### Network and authority behavior

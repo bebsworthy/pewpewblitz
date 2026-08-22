@@ -18,8 +18,8 @@ Start with:
 5. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
    provenance, degradation, and future-art contracts.
 6. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-7. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
-   player-flow and routed-process decisions that V3 preserves.
+7. `docs/13-player-ux.md` for the canonical player experience and
+   `docs/14-multiplayer-server-architecture.md` for the routed-process decisions it relies on.
 8. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
    baseline and closeout evidence.
 9. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,

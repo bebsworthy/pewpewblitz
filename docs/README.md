@@ -1,78 +1,110 @@
-# Brawler design documentation
+# PewPew Blitz documentation
 
-Brawler is an original, cross-platform top-down arena shooter built around player-authored
-brawlers. Players choose bounded primary-weapon behavior and specifications that the server resolves
-into an operational recipe, then combine them with body choices, abilities, and equipment rather
-than selecting a fixed hero with a fixed kit.
+PewPew Blitz is an original cross-platform top-down arena shooter built around player-authored
+brawler builds, readable combat, meaningful tradeoffs, short objective matches, and reusable
+content primitives. The server resolves bounded player choices and owns gameplay simulation;
+practice, multiplayer, creator, arsenal, progression, and social directions extend that foundation
+without creating alternate gameplay authority.
 
-The product centers a readable combat loop, short objective matches, and bounded build learning.
-Practice, multiplayer, arsenal, creator, progression, and social loops extend that core without
-creating alternate gameplay authority; server-owned validation and simulation remain foundational.
+Start with [Product direction](./00-product-direction.md) for the product promise and design
+principles. Use the specifications below for durable product and technical contracts, the
+[candidate index](./backlog.md) for unresolved future work, and versioned implementation records for
+delivery status and evidence.
 
-V3 completed on 2026-08-20. V4 completed on 2026-08-21, evolving the fixed-camera 3D presentation
-with restrained perspective while retaining the completed V2 product flow/routed architecture and
-planar authoritative simulation. Independently embedded map documents, semantic placement lowering,
-two reusable themes, and catalog-backed routed admission now form the current foundation. The map
-editor remains deferred to the root backlog.
+## How the documentation is organized
 
-## Documents
+- **Product direction and specifications** are aspirational and forward-looking. They describe the
+  intended product, settled boundaries, supported foundations, and envisioned extensions. They are
+  not implementation-status reports.
+- **The candidate index** is the canonical cross-version view of unresolved work. A candidate is
+  not a commitment until it is promoted into a version roadmap.
+- **Version roadmaps and milestones** are implementation records. They own scope, status, research,
+  accepted technical specifications, verification, playtest feedback, and closeout evidence for a
+  particular delivery period.
+- **Source and root project documentation** own current commands, configuration, and operational
+  behavior. Historical milestones may refer to older paths or implementations without redefining
+  the current architecture.
 
-- [Product direction](./00-product-direction.md) — vision, differentiation, principles, and non-goals.
-- [Engine specification](./01-engine-decision.md) — supported Bevy/Rust baseline, runtime roles,
-  application composition, scheduling, physics, presentation, and feature boundaries.
-- [Fighter and build specification](./02-fighter-model.md) — build selection, authoritative
-  resolution, fighter attributes and runtime, statuses, arsenal, and equipment boundaries.
+## Product and gameplay direction
+
+- [Product direction](./00-product-direction.md) — product promise, differentiation, principles,
+  creator direction, and non-goals.
+- [Fighter and build specification](./02-fighter-model.md) — authored choices, accepted build
+  identity, resolved loadouts, fighter runtime, statuses, and future arsenal/equipment boundaries.
 - [Weapons and abilities specification](./03-weapons-and-abilities.md) — combat authoring layers,
-  weapon recipes, delivery, effects, abilities, presentation, and extension boundaries.
-- [Map and mode specification](./04-maps-and-game-modes.md) — authored/resolved/runtime map layers,
-  mode composition, terrain, topology, supported rules, and extension boundaries.
-- [Gameplay loops](./05-gameplay-loops.md) — combat, fighter-life, objective, match, session,
-  build-learning, arsenal, creator, progression, and social loops.
-- [Research sources](./06-research-sources.md) — external references used for the baseline.
-- [Network architecture](./08-network-architecture.md) — authority model, global application-protocol evolution, Lightyear replication, Bevy server/client world composition, and local network testing.
+  weapon recipes, delivery, payloads, effects, abilities, presentation facts, and extension rules.
+- [Map and mode specification](./04-maps-and-game-modes.md) — authored, resolved, and runtime map
+  layers; mode composition; topology; terrain; supported rules; and the future builder boundary.
+- [Gameplay loops](./05-gameplay-loops.md) — combat, encounter, objective, match, session,
+  build-learning, practice, creator, progression, and social loops.
 - [Environment gameplay direction](./09-environment-gameplay.md) — established environment
   boundaries, focused candidate families, promotion rules, lifecycle questions, concealment, and
   presentation constraints.
 - [Bots](./10-bots.md) — server-hosted practice-controller decision, bounded policy contract,
   integration seams, first playable slice, and deferred hosting alternatives.
 - [Art, presentation, and asset specification](./11-art-and-presentation-direction.md) — visual
-  direction, presentation ownership, readability, themes, asset policy, provenance, lifecycle,
-  degradation, and future-art boundaries.
-- [Player UX and server-local matchmaking](./13-player-ux.md) — completed V2 player flow, queues, build selection, settings, accessibility, and verification decisions.
-- [Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md) — completed V2 supervisor, routed transport, isolated match-worker, and connection-handoff decisions.
-- [Version 1 implementation roadmap](./implementation/v1/roadmap.md) — completed gameplay MVP milestones and closeout.
-- [Version 2 implementation roadmap](./implementation/v2/roadmap.md) — completed product UX, routed transport, matchmaking, concurrent workers, and closeout.
-- [Version 3 implementation roadmap](./implementation/v3/roadmap.md) — completed 3D gameplay-world presentation migration and deferred art/render backlog.
-- [Version 4 implementation roadmap](./implementation/v4/roadmap.md) — accepted game-object taxonomy, reusable map presentation, scalable storage, second-map proof, and closeout order.
-- [Version 5 implementation roadmap](./implementation/v5/roadmap.md) — dashboard-centered launch, connected player hub, selection/return simplification, and product-shell closeout plan.
-- [V5 M01 — auto-connect and player-dashboard vertical slice](./implementation/v5/milestone-01.md) — current research and discussion record for the new launch and connected home.
-- [V4 M01 — reusable environment library and first themed arena](./implementation/v4/milestone-01.md) — completed current-map improvement and production-reusable library.
-- [V4 M02 — scalable map documents and reusable object definitions](./implementation/v4/milestone-02.md) — completed per-map authored storage and semantic placement resolution.
-- [V4 M03 — second map/theme proof and V4 closeout](./implementation/v4/milestone-03.md) — completed Ashen Court, client theme profiles, usability hardening, feedback, and V4 closeout.
-- [V3 M01 — 3D presentation feasibility and foundation](./implementation/v3/milestone-01.md) — completed feasibility foundation and accepted learning review.
-- [V3 M02 — default 3D arena, map, terrain, camera, and input cutover](./implementation/v3/milestone-02.md) — completed world-cutover record.
-- [V3 M03 — complete 3D combat presentation](./implementation/v3/milestone-03.md) — completed fighter/combat/world-HUD replacement record.
-- [V3 M04 — renderer retirement and closeout](./implementation/v3/milestone-04.md) — completed retirement, readability, lifecycle, feedback, and learning record.
+  direction, renderer and dashboard presentation ownership, readability, themes, asset policy,
+  provenance, lifecycle, degradation, and future-art boundaries.
+- [Player experience specification](./13-player-ux.md) — canonical Dashboard-centered flow,
+  admission, selection, settings, accessibility, recovery, and envisioned UX extensions.
 
-## Working vocabulary
+## Technical foundation
 
-- **Brawler:** a player-authored, potentially persistent fighter configuration in the player's
-  arsenal.
-- **Fighter:** the server-owned in-match combatant instantiated from a validated brawler build.
-- **Player weapon selection:** the preset identity or bounded typed specification chosen for a
+- [Engine specification](./01-engine-decision.md) — supported Bevy/Rust baseline, runtime roles,
+  application composition, scheduling, physics, presentation, and feature boundaries.
+- [Network architecture](./08-network-architecture.md) — gameplay authority, application-protocol
+  evolution, Lightyear replication, client/server world composition, recovery, and network
+  validation boundaries.
+- [Multi-process server architecture](./14-multiplayer-server-architecture.md) — supervisor,
+  single-port routed transport, lobby and isolated match workers, IPC, connection handoff, failure,
+  and security contracts.
+- [Research sources](./06-research-sources.md) — external references used to establish the original
+  product and technical baseline.
+
+## Future candidates
+
+[Canonical cross-version candidate index](./backlog.md) is the single comparison and promotion
+surface for unresolved product, service, architecture, release, and maintenance candidates. Detailed
+specifications and historical rationale remain in their owning documents; the index links to them
+rather than copying them.
+
+## Implementation history
+
+Each roadmap is the entry point for its version and links to the corresponding milestone records.
+The milestone files preserve research, implementation scope, verification evidence, user feedback,
+and closeout learning.
+
+| Version | Recorded delivery focus | Entry point |
+|---|---|---|
+| V1 | Server-authoritative gameplay MVP and direct-UDP comparison baseline; not a release-readiness claim | [V1 roadmap](./implementation/v1/roadmap.md) |
+| V2 | Product client shell, server-local matchmaking, routed multi-process hosting, concurrent matches, and practice | [V2 roadmap](./implementation/v2/roadmap.md) |
+| V3 | Client-side 3D gameplay-world presentation migration while retaining planar authoritative simulation | [V3 roadmap](./implementation/v3/roadmap.md) |
+| V4 | Independent map documents, semantic object placement, reusable themes, and second-map proof | [V4 roadmap](./implementation/v4/roadmap.md) |
+| V5 | Auto-connect, Player Dashboard, connected-loop convergence, responsive presentation, and lifecycle hardening | [V5 roadmap](./implementation/v5/roadmap.md) |
+
+Historical milestones are evidence for the choices and implementation of their version. They do not
+override later durable specifications or accepted changes recorded by subsequent versions.
+
+## Core vocabulary
+
+These definitions provide cross-document orientation. The linked owning specifications remain
+authoritative for exact schemas, supported fields, and lifecycle rules.
+
+- **Brawler:** the product-level player-authored configuration or identity from which a match
+  fighter is instantiated. Long-lived ownership and persistence belong to the envisioned arsenal
+  loop until that capability is promoted.
+- **Fighter:** the server-owned in-match combatant instantiated from a validated, resolved brawler
+  loadout.
+- **Build:** a bounded player selection that the server validates and resolves. The supported
+  foundation contains a primary-weapon selection, one ultimate, and two passives; additional body,
+  item, or equipment choices require an explicitly supported extension.
+- **Player weapon selection:** the bounded preset identity or typed specification chosen for the
   brawler's primary weapon.
-- **Weapon recipe:** the operational, server-validated composition derived from a player weapon
-  selection or developer-authored preset.
-- **Build:** the brawler's bounded weapon selection, ultimate, passive choices, body choices when
-  supported, and future equipment selections.
-- **Preset:** a developer-authored legal recipe/build used for onboarding, testing, or quick choice;
-  it is not a separate combat implementation.
-- **Map recipe:** a bounded arrangement of presentation layers, geometry, terrain, entities,
-  regions, spawn points, and mode-required anchors; built-in maps are preset recipes.
-- **Mode:** a server-owned rules implementation selected for a compatible map; players may lay out
-  its required anchors but do not author the rules.
-- **Item:** an equipable passive or active modifier.
-- **Payload:** the gameplay effect produced by an attack or ability.
-- **Map:** validated geometry, terrain, spawns, environment entities, gameplay regions, and
-  mode-required anchors.
-- **Gameplay region:** an authored or runtime area that applies movement, concealment, hazard, objective, or other server-owned rules independently from its visual tiles.
+- **Weapon recipe:** the operational, server-resolved weapon composition derived from a legal
+  player selection or developer-authored preset; it is not arbitrary client-authored runtime data.
+- **Map recipe:** a bounded authored layout that resolves into an immutable server-validated map
+  snapshot. Built-in presets and future player-authored maps use the same recipe boundary.
+- **Mode:** a developer-authored authoritative rules implementation. A compatible map supplies
+  validated space, spawns, and required anchors; it does not author executable mode logic.
+- **Game type:** one stable server advertisement combining a mode, compatible map pool, exact team
+  topology, bounded rule configuration, and content revisions for admission.

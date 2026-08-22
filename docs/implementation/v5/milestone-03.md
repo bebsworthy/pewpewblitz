@@ -46,8 +46,8 @@ closes V5 without creating a general UI framework or changing network authority?
   shader, focus, recovery, and deferred M03 matrix.
 - `docs/implementation/v5/milestone-02.md` — accepted child-screen, queue/match/results convergence,
   recovery, and overlay ownership.
-- `docs/13-player-ux.md` and `docs/screen-flow-map.md` — current product flow, settings,
-  accessibility, recovery, and navigation contracts.
+- `docs/13-player-ux.md` — current product flow, settings, accessibility, recovery, and navigation
+  contracts.
 - `src/client/flow.rs` — current product-flow schedule, fixed Dashboard layout, logical focus index,
   busy/disabled presentation, and focus-following Build Editor scroll.
 - `src/client/shell.rs` — existing Bevy directional navigation, scroll, focus visibility, UI-scale,
@@ -475,7 +475,7 @@ new generated elements into the accepted set.
 - [x] Resolve the manual input matrix. Pointer, keyboard, and synthetic controller paths are covered
   by focused tests; the user accepted the physical-controller observation as an unevidenced
   closeout limitation rather than a claimed test pass.
-- [x] Reconcile `README.md`, `docs/13-player-ux.md`, `docs/screen-flow-map.md`, and the V5 roadmap.
+- [x] Reconcile `README.md`, `docs/13-player-ux.md`, and the V5 roadmap.
 - [x] Deliver the playtest path and requested observations.
 - [x] Triage every user feedback item and re-run affected verification where behavior changed.
 - [x] Record the learn-from-errors review and close M03/V5 only after acceptance.

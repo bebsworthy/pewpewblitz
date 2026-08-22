@@ -1,224 +1,205 @@
-# Brawler
+# PewPew Blitz
 
-Brawler is a server-authoritative top-down arena shooter built around player-authored fighter builds.
-V1 completed on 2026-08-18 as a gameplay MVP: Wipeout and Hot Zone, typed weapon/build/map recipes,
-four weapon profiles, bounded passives and ultimates, generated arenas, quantized destructible
-terrain, replicated match/map/combat state, local input settings, and client-only presentation over
-Lightyear Netcode/UDP.
+PewPew Blitz is a server-authoritative top-down arena shooter built around player-authored brawler
+builds, readable combat, meaningful tradeoffs, and short objective matches. The current product
+supports Wipeout and Hot Zone, bounded weapon/build recipes, abilities and passives, destructible
+terrain, independently authored maps, a fixed-camera 3D presentation, server-local multiplayer,
+and server-hosted practice matches with inert roster bots.
 
-V1 completion is not a release-ready claim. Controller feel, audio, HUD/readability, balance, match
-pacing, and related tuning remain explicit pre-release polish. V2 completed on 2026-08-20 with the
-product client flow, single-public-port routed supervisor, isolated lobby and match workers,
-server-local matchmaking, concurrent match lifecycle, product HUD, and server-hosted practice. See
-the [completed v2 roadmap](docs/implementation/v2/roadmap.md),
-[v2 closeout milestone](docs/implementation/v2/milestone-09.md), and
-[completed v1 roadmap](docs/implementation/v1/roadmap.md).
+The windowed client presents the Player Dashboard and renders the world, HUD, audio, and local input.
+The routed supervisor and lobby own admission and server-local queues; isolated match workers own
+authoritative movement, combat, terrain, modes, lifecycle, and outcomes. Avian 2D remains the planar
+collision authority beneath the 3D presentation.
 
-V3 completed on 2026-08-20. The supported client now presents the gameplay world as a fixed-camera
-3D scene while preserving planar authority, Avian 2D collision, the existing protocol,
-the routed server topology, and the Bevy UI shell. Imported Kenney GLBs provide the first fighter,
-weapon, and cover families; cached primitives and generated meshes retain exact dynamic geometry
-and deterministic fallbacks. See the [completed V3 roadmap](docs/implementation/v3/roadmap.md) and
-[V3 closeout milestone](docs/implementation/v3/milestone-04.md).
+The product is named PewPew Blitz; repository, crate, executable, log-target, and environment-variable
+identifiers retain the established `brawler` name.
 
-V4 completed on 2026-08-21. It turned the V3 renderer into a reusable map-presentation and content
-foundation: a game-object taxonomy mapped to curated visual assets, themed ground and modular
-decorated borders, one document per built-in map, and the Ashen Court second-map/theme proof.
-The player-facing map editor is deferred to the root backlog. The
-[V4 roadmap](docs/implementation/v4/roadmap.md) and
-[M03 closeout](docs/implementation/v4/milestone-03.md) record the completed scope and evidence.
+Start with the [documentation index](docs/README.md) for durable product and technical
+specifications, the [product direction](docs/00-product-direction.md) for the vision, and the
+[candidate index](docs/backlog.md) for unresolved future work. Version roadmaps under
+`docs/implementation/` preserve delivery history and evidence.
 
-## Toolchain
+## Requirements and toolchain
 
-The repository pins Rust 1.95.0 in [`rust-toolchain.toml`](rust-toolchain.toml). Bevy is pinned to 0.19.1 and Lightyear to 0.29.0. `Cargo.lock` is committed and must be updated intentionally.
+- Rust 1.95.0, pinned by [`rust-toolchain.toml`](rust-toolchain.toml), with Rustfmt and Clippy;
+- [`just`](https://github.com/casey/just) for the canonical development commands;
+- macOS for the current native client-development and visual-validation path;
+- Python 3 for E2E port selection and the advanced network evidence scripts.
+
+Bevy is pinned to 0.19.1 and Lightyear to 0.29.0. `Cargo.lock` is committed and dependency updates
+must be intentional.
+
+## Quick start
+
+Start the routed server and two interactive clients together:
+
+```sh
+just run 2
+```
+
+Or use separate terminals:
+
+```sh
+just server
+```
+
+```sh
+just client
+```
+
+The server listens on `127.0.0.1:5000`. Normal client startup tries an explicit `--server`, then the
+most recently successful server, then the local default. A successful connection opens the Player
+Dashboard; cancellation or bounded connection failure opens Server Select. Press Ctrl-C in a
+`just run` session to stop its complete local process tree.
+
+One client is sufficient for Practice. Multiplayer game types form only their exact advertised
+human roster, so the default First Blood path requires two clients.
 
 ## Canonical commands
 
-The everyday development surface is intentionally small:
+Run `just` to list the supported everyday surface.
+
+| Command | Purpose |
+|---|---|
+| `just server` | Start the routed supervisor and production lobby on localhost |
+| `just client` | Open one interactive product client against the local server |
+| `just run <N>` | Build once, start the routed server, and open exactly 1–16 interactive clients |
+| `just fmt` | Format all Rust sources |
+| `just check` | Check every independently buildable role |
+| `just lint` | Run formatting, Clippy, server isolation, and renderer-boundary checks |
+| `just test` | Run deterministic routing, client, server, network, and performance suites |
+| `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
+| `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
+| `just ci` | Run lint, deterministic tests, and the complete 2/4/6-client E2E matrix |
+| `just clean` | Remove Cargo build artifacts |
+
+E2E runs choose an unused loopback port by default and may run beside an interactive server. Set
+`BRAWLER_ROUTED_BIND` only when a fixed test address is required.
+
+## Current player flow
+
+Dashboard is the sole authenticated home. Change Brawler and Change Game open child selection
+surfaces with explicit Confirm and Back behavior. Play enters the selected game type's multiplayer
+queue; Practice asks the connected server to allocate an authoritative match with inert `Bot N`
+fighters filling the remaining roster. Neither action launches a server process from the client.
+
+Queue cancellation, loading cancellation, confirmed leave, and ordinary no-result return converge
+on Dashboard while the lobby remains valid. Results retains the authoritative outcome and offers
+Dashboard plus exact replay when the previous game-type ID still exists in the fresh lobby catalog.
+
+The Dashboard uses its Wide composition when effective UI space is at least `1000x640` and the same
+semantic actions in a vertically scrollable Compact composition below either threshold. Effective
+size is logical window size divided by persisted UI scale. Disabled actions are skipped, focused
+Compact actions scroll into view, and Reduced Motion or Reduced Effects freezes non-essential
+procedural motion without removing state feedback.
+
+The complete navigation, recovery, and accessibility contract lives in the
+[player experience specification](docs/13-player-ux.md).
+
+## Controls
+
+### Product shell
+
+- Mouse hover/click, keyboard arrows or WASD, and controller D-pad navigate the same actions.
+- Enter or Space and controller South confirm or activate.
+- Escape and controller East cancel or return to the nearest valid parent.
+- Direct address and optional display-name fields accept keyboard input and paste; generated names
+  and saved servers keep ordinary controller use independent from text entry.
+
+### Match
+
+| Action | Keyboard and mouse | Controller |
+|---|---|---|
+| Move | WASD | Left stick |
+| Aim | Mouse position | Right stick |
+| Primary fire | Left mouse button | Right trigger |
+| Ultimate | E | Right bumper |
+| Active item | Q, reserved until a supported active-item capability exists | Left trigger, reserved |
+| Match menu | Escape | Start |
+| Hold scoreboard | Tab | Select |
+
+The match menu does not pause authoritative simulation. It suppresses local gameplay intent and
+offers Resume, Settings, Scoreboard, and confirmed Leave Match while the match continues. Settings
+opened from the product shell or match menu are validated and persisted locally; input calibration
+and bindings shape local intent before quantization and never become server authority.
+
+## Server configuration and authored content
+
+Server game types live in [`config/server/game-types.ron`](config/server/game-types.ron). Each stable
+advertisement combines one mode, compatible map pool, exact team topology, and flat bounded match
+rules. Startup validates the catalog before the lobby advertises it or a match worker installs it.
+
+Non-map authored gameplay catalogs live under [`content/v1/`](content/v1/). Built-in map documents
+and shared server-safe map definitions live under [`content/v4/`](content/v4/). To add a built-in
+map, create `content/v4/maps/builtin/<map-key>.ron` and add its stable metadata and admission revision
+to the sorted [`content/v4/maps/index.ron`](content/v4/maps/index.ron). Startup rejects disagreement
+between the index and embedded map sources.
+
+Map recipes reference stable semantic IDs rather than client asset paths. The server lowers those
+placements into a resolved authoritative snapshot. The client maps stable presentation IDs through
+[`assets/catalogs/`](assets/catalogs/) to art under [`assets/brawler/`](assets/brawler/). Exact source
+and CC0 provenance live in [`assets/manifest.ron`](assets/manifest.ron), with retained license texts
+under [`assets/licenses/`](assets/licenses/).
+
+## Executable configuration
+
+Run the built `brawler-client` or `brawler-server` binary with `--help` for its complete bounded CLI
+contract. Important ownership rules are:
+
+- the interactive product shell uses routed UDP, generates a random nonzero client ID, and rejects
+  an explicit `--client-id` or `--local-addr`;
+- `--auto-connect`, headless clients, and demo automation require an explicit `--client-id`;
+- `--server` prefills the interactive connection target and selects the automation endpoint;
+- `--window-size WIDTHxHEIGHT` reproduces supported visual-check layouts;
+- `--build-preset 1..5`, movement/aim/fire flags, demos, screenshots, and render reports are
+  development or automation inputs rather than alternate product flows;
+- `BRAWLER_FORCE_PRIMITIVE_WORLD=1` verifies deterministic meshes inside the sole 3D renderer; it is
+  not a renderer or content-mode selector;
+- `RUST_LOG` controls filtering, for example `RUST_LOG=brawler=info`.
+
+Do not use `--all-features` as a supported application build. Cargo features are additive: client
+and server are independently tested production configurations, while `network-test` is the
+dedicated separate-App integration-test configuration.
+
+## Verification and diagnostics
+
+`just test`, `just e2e`, and `just ci` are the canonical automated gates. For a focused live movement
+trace, run:
 
 ```sh
-just
-just server
-just client
-just run <client-count>
-
-just fmt
-just check
-just lint
-just test
-just e2e [client-count]
-just v3-render-evidence [report-path]
-just ci
-just clean
+BRAWLER_INPUT_TRACE=1 RUST_LOG=brawler=info just run 1
 ```
 
-`just server` starts the routed supervisor and production lobby at `127.0.0.1:5000`. `just client`
-opens one normal product client against that address. `just run <client-count>` builds once, starts
-the routed server, and opens exactly that many interactive clients; counts from 1 through 16 are
-accepted so partial queues and disconnects are easy to reproduce. Press Ctrl-C to stop the complete
-local process tree.
+The trace reports input sampling, the Lightyear target, authoritative movement, interpolation, and
+final presentation only when those states materially change.
 
-`just v3-render-evidence` builds release client/server/supervisor binaries, runs two routed native
-clients at 1280×720, records a bounded 10-second warm-up plus 30-second measurement, and writes
-`target/v3-render-evidence.txt` without overwriting an existing report. Set
-`BRAWLER_RENDER_MODE=hot-zone` to target the exact Hot Zone 2v2 game type with two additional
-headless roster clients, or pass a different report path. Render-report schema 3 identifies
-`measurement_context=gameplay` for this route and `measurement_context=dashboard` when an
-interactive release client settles on its authenticated Dashboard; both contexts include bounded
-Image counts, and Dashboard reports also include explicitly owned preview/UI roots.
+Advanced scripts remain available for focused evidence and historical comparison:
 
-`just test` owns all deterministic Rust suites, including routing, client, server, network, and
-performance tests. `just e2e` runs the shortest real-process product path with two clients and First
-Blood; pass `4` or `6` to exercise the 2v2 or 3v3 path. `just ci` runs formatting, Clippy, server
-feature isolation, all deterministic tests, and the complete 2/4/6-client E2E matrix. Focused Cargo
-commands and scripts remain available for diagnostics, but they are deliberately not separate
-top-level `just` recipes. E2E runs choose an unused loopback port by default, so they can run beside
-an interactive server; set `BRAWLER_ROUTED_BIND` only when a fixed test address is required.
+| Script | Role |
+|---|---|
+| [`scripts/v3-render-evidence.sh`](scripts/v3-render-evidence.sh) | Bounded routed native render report used by the retained `just v3-render-evidence` recipe |
+| [`scripts/network-routed-evidence.py`](scripts/network-routed-evidence.py) | Cold routed worker lifecycle, resource, traffic, latency, and cleanup evidence |
+| [`scripts/network-routed.sh`](scripts/network-routed.sh) | Focused production routed-process smoke, including explicit IPv6 runs |
+| [`scripts/network-routed-capture.sh`](scripts/network-routed-capture.sh) | macOS loopback packet capture and MTU/fragment verification |
+| [`scripts/network-paired-evidence.py`](scripts/network-paired-evidence.py) | Historical direct-versus-routed comparison campaign |
+| [`scripts/network.sh`](scripts/network.sh) | Retained legacy direct-UDP diagnostic baseline |
+| [`scripts/network-match.sh`](scripts/network-match.sh) and [`scripts/network-combat-profiles.sh`](scripts/network-combat-profiles.sh) | Legacy direct-UDP match and impairment gates |
+| [`scripts/macos-client-bundle.sh`](scripts/macos-client-bundle.sh) | Temporary addressable `.app` wrapper for native visual automation |
 
-Normal client startup immediately attempts the explicit `--server`, otherwise the most recent
-successful server, otherwise `127.0.0.1:5000`. A successful connection opens the Player Dashboard;
-cancel or failure opens Server Select. Dashboard owns Change Brawler, Change Game, multiplayer
-Play, and Practice. Practice uses the connected server and selected advertised game type to start a
-server-hosted authoritative match with inert `Bot N` fighters filling the roster. Neither path
-launches server processes from the client.
-
-The Dashboard preserves its accepted three-card Wide composition when effective UI space is at
-least `1000x640`. Below either threshold it becomes a vertically scrollable Compact composition;
-the threshold uses logical window size divided by the persisted UI scale. Arrow keys, WASD, and the
-controller D-pad navigate spatially, focused actions are scrolled into view, disabled actions are
-skipped, and every Dashboard action exposes a factual accessible label. Reduced Motion and Reduced
-Effects freeze the slow procedural background without removing focus or state feedback.
-
-Server game types are authored in `config/server/game-types.ron`. Each entry owns flat match rules:
-Wipeout uses `kills_to_win`, Hot Zone uses `capture_seconds`, and every entry declares
-`match_duration_seconds`, `countdown_seconds`, and `respawn_seconds`. There is no shared defaults
-block or operator-facing rules profile; startup validates and passes the resolved values to the
-authoritative match worker.
-
-Built-in maps are authored under `content/v4/maps/`. To add one, create
-`content/v4/maps/builtin/<map-key>.ron` and add its stable metadata and admission revision to the
-sorted `content/v4/maps/index.ron`. The build embeds every direct `.ron` document and startup fails
-if the index and embedded source set differ. Shared server-safe definitions live in
-`map_definitions.ron`, semantic objects in `map_objects.ron`, compatibility/fitting data in
-`map_visual_variants.ron`, and theme defaults in `map_themes.ron`. Recipes reference stable IDs,
-never GLB paths; the server lowers semantic placements into the authoritative resolved snapshot,
-while the client maps those stable IDs to its separately packaged visual catalog.
-
-`python3 scripts/network-routed-evidence.py` runs bounded cold routed-process cycles.
-It records the exact
-Result-driven worker lifecycle, per-role RSS, directional public/inner/IPC traffic, bounded routing
-owner-loop latency diagnostics, final route/queue/drop counters, and process cleanup in
-`target/routed-evidence-<UTC timestamp>.json`. The report explicitly marks paired CPU/direct
-bandwidth, full IPC-to-worker latency, packet-only IPC overhead, packet-capture MTU, and paired
-fixed-tick gates unsupported; correlated stop/reap and allocation-to-connected samples remain
-below their required campaign cardinalities. It never fabricates those measurements. Add
-`--keep-artifacts` by invoking `python3 scripts/network-routed-evidence.py --keep-artifacts` to
-retain per-cycle logs.
-
-`BRAWLER_NETWORK_HEADLESS=1 BRAWLER_ROUTED_BIND="[::1]:5000" ./scripts/network-routed.sh` runs the
-same production routed process check over `[::1]`; the
-client derives an IPv6 local socket from the selected `--server` address, or accepts an explicit
-`--local-addr`. On macOS, `./scripts/network-routed-capture.sh target/routed-capture.pcap` runs
-both IPv4 and IPv6 headless smokes under `tcpdump` on `lo0` and parses the resulting classic pcap with
-`scripts/verify-routed-capture.py`. BPF capture permission may require an approved administrator
-session. No capture result is considered evidence unless a real pcap is produced and the parser
-observes IPv4/IPv6 UDP payloads no larger than 1,200 bytes with no IPv4 fragmentation or IPv6
-Fragment header; unavailable or malformed captures stay unsupported.
-
-`python3 scripts/network-paired-evidence.py --pairs 1 --timeout 90 --mode wipeout` runs the bounded
-one-pair M01 comparison smoke. The historical M01 gate used three pairs. It runs the existing
-direct and routed verification launchers sequentially on the same host, source tree, mode, and
-verification rules, requires the exact expected process-role cardinalities, samples every Brawler process's CPU time and RSS, and writes
-`target/paired-evidence-<UTC timestamp>.json`. Aggregate routed CPU must be no more than 20% over
-the direct aggregate when both process series and a correlated common observation interval are
-comparable. Direct server transport bytes are compared with routed supervisor match-worker inner
-ingress/egress bytes independently, with a 10% limit per direction and for the total. Routed public-envelope and mixed packet/control IPC bytes are
-reported as overhead diagnostics and are never compared with direct gameplay bytes. Missing
-comparable samples or common-window checkpoints produce an explicit `unsupported` result. Run
-`python3 -m unittest scripts/test_network_paired_evidence.py` for the parser and threshold-gate
-tests without starting processes.
-
-The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. A normal windowed client
-uses the auto-connect product flow; `--client-id` defaults to 1. `--auto-connect` remains the
-explicit development/network path and requires an explicit `--client-id`. The client also accepts
-`--server`, `--local-addr`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
-`4` Duelist, `5` the default legal custom Pulse), plus bounded automation flags `--headless --exit-after-roster 2
---move-axis X,Y --aim-axis X,Y --aim-dummy --fire --ultimate --simulation-ticks N`. `--combat-demo` enables the
-same authoritative aim-at-dummy/fire loop in a windowed client for a reproducible visual smoke run.
-Use `--window-size WIDTHxHEIGHT` to reproduce a supported visual-check layout.
-For the legacy direct-UDP visual harness, `BRAWLER_NETWORK_SCREENSHOT_DIR=<DIR>` captures the first
-windowed client's scheduled frame through the same built-in screenshot path; set
-`BRAWLER_NETWORK_SCREENSHOT_FIRST=<update>` to capture after countdown/startup.
-Set `BRAWLER_FORCE_PRIMITIVE_WORLD=1` on a windowed client to verify the deterministic primitive
-fallbacks without modifying the packaged optional Kenney assets.
-On macOS, `scripts/macos-client-bundle.sh` creates a temporary addressable `.app` wrapper around the
-already-built client for native visual automation; it prints the wrapper path and does not modify the
-production application composition.
-`--controller-demo` creates a synthetic gamepad only for the windowed controller-path smoke; it
-still uses the normal gamepad sampler and native input buffer, but does not substitute for a
-physical controller.
-`RUST_LOG` controls log filtering, for example `RUST_LOG=brawler=info`. Window titles identify the two clients; structured logs report
-connection outcome and stable `(player_id, network_entity_id)` roster entries. `just e2e` is the
-canonical routed product check. The retained `scripts/network.sh` is the legacy direct-UDP baseline
-until its roadmap retirement gate.
-
-For the supervised combat path, use `BRAWLER_NETWORK_HEADLESS=1 BRAWLER_NETWORK_ASSERT_COMBAT=1
-./scripts/network.sh`. Its legacy combat verifier composes an explicit test-only dummy fixture and
-waits for server-verified shots, hits, damage, defeat, reset, and both client observations; production
-Wipeout composition has no practice dummy. Use `scripts/network-match.sh` for the current four-client
-match, respawn, telemetry, and restart process gate. It defaults to the shortened verification rules;
-set `BRAWLER_NETWORK_WIPEOUT_RULES=production`, raise `BRAWLER_NETWORK_SIMULATION_TICKS`, and set a
-matching `BRAWLER_NETWORK_MATCH_TIMEOUT_SECONDS` for a controlled normal-duration comparison.
-`BRAWLER_NETWORK_PROFILE=local|typical|adverse` applies the corresponding Lightyear receive
-conditioner; `./scripts/network-combat-profiles.sh` repeats all three profiles and reports median/p95
-convergence timings.
-
-The network launcher waits for its own server's readiness signal before starting clients, so a bind
-collision cannot accidentally test a pre-existing server. It supervises the already-built binaries
-directly, so Ctrl-C terminates the actual server/client processes before the launcher exits. It
-remains running when one windowed client closes so the remaining roster can be observed. Restart
-that client with the same individual command and `--client-id`; set
-`BRAWLER_NETWORK_TIMEOUT_SECONDS` to add a bounded windowed-session deadline when needed.
-
-The completed v1 milestones provide movement, combat, authored arenas, Wipeout and Hot Zone,
-bounded brawler builds/abilities, destructible terrain, and closeout diagnostics. At build selection,
-use Left/Right or A/D to choose a preset and Space/Enter
-to confirm; on a controller use the D-pad or left stick and South. On Custom, Up/Down selects one of
-six fields and Left/Right changes its value; Escape or East returns to Runner. In Waiting,
-Space/Enter or South readies the participant, and the same input
-requests the next match after the completed-phase lock. During play, use WASD to move, mouse position
-to aim, mouse-left to fire, and E to use the charged ultimate; Q remains reserved for the future
-active-item slot. A connected controller uses the left stick for movement, right stick for aim,
-right trigger to fire, right bumper for the ultimate, and Start for pause. Hold Tab or controller
-Select for the full roster scoreboard. Pausing (Escape or Start) also opens the local settings
-overlay: Tab or the D-pad cycles calibration and binding rows, brackets or the D-pad adjust values
-(move/aim deadzones, aim commit, trigger thresholds), B or South rebinds the selected row from the
-next key, mouse-button, or controller-button press, I/O toggle Y-axis inversion, and R restores
-the validated defaults; session-local settings shape device input before quantization and never
-reach the server. The HUD shows match phase, score/time/result,
-roster/loadout/readiness, respawn and protection state, health, ammo, ultimate meter/phase, passive
-state, sentry health/lifetime, and cooldown/reload. Camera-projected fighter UI shows relation-colored
-names, rounded relation-aware health, a white health value, and local-only segmented ammunition.
-The arena is reconstructed from the authoritative replicated map snapshot. Its perimeter and cover
-block fighters and weapon delivery, while 3D visuals, audio, and HUD state remain presentation-only.
-The legacy direct-UDP diagnostic script still accepts `BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO=1`,
-weapon presets, controller-demo selection, and `BRAWLER_RENDER_PROFILE=30|60|high` when a focused
-v1 comparison is needed. These are diagnostic parameters rather than everyday development recipes;
-the fixed authoritative simulation remains 60 Hz.
-
-For a focused live movement trace, run
-`BRAWLER_INPUT_TRACE=1 RUST_LOG=brawler=info just run 1`. The trace reports focused-window WASD
-sampling, the Lightyear input target, authoritative server movement, replicated interpolation
-history, and the final client presentation pose only when those states materially change.
-
-Do not use `--all-features` as a supported application build: client and server are independently tested production configurations, while `network-test` is the dedicated separate-app Crossbeam integration configuration. Cargo features are additive.
+These scripts must report unsupported or unavailable evidence honestly. Their historical thresholds,
+campaign cardinalities, environment variables, and accepted results remain in the owning version
+milestones and script tests. Legacy direct-UDP behavior does not define the product shell, current
+match flow, or production hosting topology.
 
 ## Repository conventions
 
-Authoritative authored gameplay data lives under `content/v1/` and is compiled into both roles.
-Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
-recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.
-The active implementation scope is always the next validated milestone file. V4 and V5 are
-complete; V5 was accepted on 2026-08-22 after the responsive Dashboard, connected-loop convergence,
-lifecycle hardening, routed E2E, and native render evidence passed closeout. Deferred release polish
-remains visible in the version roadmaps and root backlog.
+- Bevy's `World` is the runtime gameplay model. Authored definitions, selected builds, resolved
+  match data, mutable ECS state, protocol registration, telemetry, and presentation remain distinct.
+- Dedicated-server builds exclude rendering, windowing, audio, device input, and client assets.
+- Stable protocol and content IDs cross process boundaries; process-local ECS `Entity` identity does
+  not.
+- The current implementation scope, when a version is active, is the next validated milestone file.
+  Deferred work remains in the [canonical candidate index](docs/backlog.md) or the owning version
+  backlog.
+- Checked-in upstream references under `references/` are read-only implementation material unless a
+  snapshot update is explicitly requested.
