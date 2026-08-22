@@ -29,6 +29,11 @@ impl ClientProfileModel {
         self.last_decision.take()
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_snapshot_for_test(&mut self, snapshot: crate::profiles::ProfileSnapshot) {
+        self.snapshot = Some(snapshot);
+    }
+
     pub fn create(&mut self, draft: crate::profiles::BrawlerDraft) -> bool {
         let Some(revision) = self.snapshot.as_ref().map(|snapshot| snapshot.revision) else {
             return false;
@@ -114,6 +119,38 @@ impl ClientProfileModel {
                 expected_profile_revision: profile_revision,
                 brawler_id,
                 expected_brawler_revision: brawler_revision,
+            });
+        true
+    }
+
+    pub fn equip_weapon_parts(
+        &mut self,
+        brawler_id: crate::profiles::SavedBrawlerId,
+        equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
+            crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+    ) -> bool {
+        let Some(snapshot) = self.snapshot.as_ref() else {
+            return false;
+        };
+        let Some(brawler_revision) = snapshot
+            .brawlers
+            .iter()
+            .find(|brawler| brawler.id == brawler_id)
+            .map(|brawler| brawler.revision)
+        else {
+            return false;
+        };
+        let profile_revision = snapshot.revision;
+        let Some(request_id) = self.begin_request() else {
+            return false;
+        };
+        self.outbound
+            .push_back(crate::profiles::ProfileCommand::EquipWeaponParts {
+                request_id,
+                expected_profile_revision: profile_revision,
+                brawler_id,
+                expected_brawler_revision: brawler_revision,
+                equipped_part_ids,
             });
         true
     }

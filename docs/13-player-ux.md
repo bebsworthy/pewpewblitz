@@ -161,9 +161,12 @@ advertised mode, topology, rules, and map pool without claiming which map format
 
 Creation starts from safe defaults, clearly identifies fighter profile and weapon base as permanent,
 and requires confirmation. The brawler editor shows those permanent choices read-only while name,
-ultimate, and the two ordinary passives remain editable. Confirm sends one revision-bound mutation
-to the server-owned profile; Back discards the draft. Pending mutations disable admission and later
-mutations until the authoritative whole-profile outcome arrives.
+ultimate, the two ordinary passives, and four generic weapon-part slots remain editable. Equipment
+opens one child overlay with four numbered slots, the bounded owned inventory, presentation-only
+type labels, signed effects, and a live resolved-weapon preview. Save sends one full revision-bound
+slot replacement; Back discards the draft. Invalid combinations cannot be saved, and an instance
+equipped by another brawler is identified rather than silently moved. Pending mutations disable
+admission and later mutations until the authoritative whole-profile outcome arrives.
 
 Responsive presentation does not change this semantic hierarchy. At an effective UI canvas of at
 least `1000x640`, Dashboard uses the Wide hierarchy with its fighter/build focus and horizontal

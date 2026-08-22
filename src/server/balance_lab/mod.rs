@@ -506,7 +506,7 @@ fn apply_balance_lab_transaction(
 
 fn manifest_selections(
     manifest: &brawler_routing::MatchManifestV1,
-) -> Result<BTreeMap<u64, crate::profiles::MatchBuildSnapshotV2>, String> {
+) -> Result<BTreeMap<u64, crate::profiles::MatchBuildSnapshotV3>, String> {
     let mut selections = BTreeMap::new();
     for (player_id, bytes) in manifest
         .participants
@@ -519,7 +519,7 @@ fn manifest_selections(
                 .map(|row| (row.player_id.get(), &row.build_snapshot)),
         )
     {
-        let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(bytes)
+        let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(bytes)
             .map_err(|_| "invalid admitted build snapshot".to_string())?;
         if selections.insert(player_id, snapshot).is_some() {
             return Err("duplicate admitted player build".into());
@@ -583,15 +583,31 @@ fn validate_snapshot(
                     crate::builds::PassiveDefinitionId(3),
                     crate::builds::PassiveDefinitionId(4),
                 ],
+                equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
                 revision: crate::profiles::ProfileRevision::INITIAL,
             };
-            crate::profiles::MatchBuildSnapshotV2::from_brawler(
+            crate::profiles::MatchBuildSnapshotV3::from_brawler(
                 &brawler,
                 &next_builds,
                 &next_weapons,
                 fighter,
             )
             .map_err(|_| "revised fighter profile or weapon base did not resolve".to_string())?;
+        }
+    }
+    let parts = crate::weapon_parts::WeaponPartCatalog::embedded()?;
+    for definition in &parts.definitions {
+        let modifiers =
+            crate::weapon_parts::aggregate_weapon_part_effects(definition.effects.iter().copied())
+                .map_err(|_| "starter weapon part did not aggregate".to_string())?;
+        for weapon_id in 1..=4 {
+            crate::weapon_parts::resolve_weapon_parts(
+                &next_weapons,
+                fighter,
+                WeaponPresetId(weapon_id),
+                modifiers,
+            )
+            .map_err(|_| "revised weapon base invalidated a starter part".to_string())?;
         }
     }
     Ok((next_builds, next_weapons))
@@ -775,7 +791,7 @@ mod tests {
         fighter: &crate::combat::FighterDefinition,
         fighter_profile_id: u16,
         weapon_base_id: u16,
-    ) -> (crate::profiles::MatchBuildSnapshotV2, ResolvedMatchLoadout) {
+    ) -> (crate::profiles::MatchBuildSnapshotV3, ResolvedMatchLoadout) {
         let identity = fighter_profile_id * 10 + weapon_base_id;
         let brawler = crate::profiles::SavedBrawler {
             id: crate::profiles::SavedBrawlerId::new(u128::from(identity)).unwrap(),
@@ -788,18 +804,19 @@ mod tests {
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
             ],
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: crate::profiles::ProfileRevision::INITIAL,
         };
         let snapshot =
-            crate::profiles::MatchBuildSnapshotV2::from_brawler(&brawler, builds, weapons, fighter)
+            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, builds, weapons, fighter)
                 .unwrap();
         let resolved = snapshot.resolve(builds, weapons, fighter).unwrap();
         (snapshot, resolved)
     }
 
     fn practice_manifest(
-        human: &crate::profiles::MatchBuildSnapshotV2,
-        bot: &crate::profiles::MatchBuildSnapshotV2,
+        human: &crate::profiles::MatchBuildSnapshotV3,
+        bot: &crate::profiles::MatchBuildSnapshotV3,
     ) -> brawler_routing::MatchManifestV1 {
         use brawler_routing::{
             AllocationId, Generation, LobbySessionId, LogicalServerId, ManifestCommon,
@@ -867,6 +884,10 @@ mod tests {
         let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
         let mut numeric = baseline.clone();
         numeric.weapons[0].recipe.fire_cooldown_ticks += 1;
+        let DeliveryMethod::Straight { range, .. } = &mut numeric.weapons[0].recipe.delivery else {
+            panic!("Pulse Sidearm uses straight delivery");
+        };
+        *range = 438.0;
         validate_snapshot(&numeric, &baseline, &builds, &weapons, &fighter).unwrap();
         let mut expanded_brush = baseline.clone();
         expanded_brush.weapons[2].recipe.world_effects =

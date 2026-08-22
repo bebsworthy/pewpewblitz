@@ -12,7 +12,7 @@ pub use authority::{
 };
 pub use model::{
     AccountId, BrawlerDraft, BrawlerEdit, FighterProfileId, MAX_BRAWLERS_PER_PROFILE,
-    MAX_PROFILE_SNAPSHOT_BYTES, MatchBuildSnapshotV2, ProfileCommand, ProfileDecision,
+    MAX_PROFILE_SNAPSHOT_BYTES, MatchBuildSnapshotV3, ProfileCommand, ProfileDecision,
     ProfileModelError, ProfileOutcome, ProfileRevision, ProfileSnapshot, SavedBrawler,
     SavedBrawlerId, WeaponBaseId,
 };

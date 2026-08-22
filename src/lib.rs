@@ -15,6 +15,7 @@ pub mod profiles;
 pub mod protocol;
 pub mod terrain;
 pub mod timing;
+pub mod weapon_parts;
 
 #[cfg(feature = "client")]
 pub mod client;

@@ -93,10 +93,11 @@ fn build_identity(preset_id: BuildPresetId) -> Result<LobbyBuildIdentity, String
             crate::builds::PassiveDefinitionId(3),
             crate::builds::PassiveDefinitionId(4),
         ],
+        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
         revision: crate::profiles::ProfileRevision::INITIAL,
     };
     let snapshot =
-        crate::profiles::MatchBuildSnapshotV2::from_brawler(&brawler, &builds, &weapons, fighter)
+        crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, fighter)
             .map_err(|error| format!("built-in brawler resolution failed: {error:?}"))?;
     let accepted_identity = snapshot.accepted_identity;
     Ok(LobbyBuildIdentity {
@@ -664,7 +665,7 @@ impl LobbyState {
         session: &LobbySession,
         command: &crate::lobby::PracticeStartRequest,
         catalog: &catalog::ResolvedLobbyCatalog,
-        human_snapshot: crate::profiles::MatchBuildSnapshotV2,
+        human_snapshot: crate::profiles::MatchBuildSnapshotV3,
         accepted_build: crate::builds::AcceptedBuildSummary,
     ) -> Result<crate::lobby::ReservationStarted, crate::lobby::PracticeStartRejection> {
         use crate::lobby::PracticeStartRejection as Rejection;
@@ -1555,7 +1556,8 @@ fn profile_command_request_id(command: &crate::profiles::ProfileCommand) -> u64 
         crate::profiles::ProfileCommand::CreateBrawler { request_id, .. }
         | crate::profiles::ProfileCommand::EditBrawler { request_id, .. }
         | crate::profiles::ProfileCommand::SelectBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::DeleteBrawler { request_id, .. } => *request_id,
+        | crate::profiles::ProfileCommand::DeleteBrawler { request_id, .. }
+        | crate::profiles::ProfileCommand::EquipWeaponParts { request_id, .. } => *request_id,
     }
 }
 
@@ -2619,9 +2621,10 @@ mod tests {
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
             ],
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: command.brawler_revision,
         };
-        let snapshot = crate::profiles::MatchBuildSnapshotV2::from_brawler(
+        let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(
             &brawler,
             &builds,
             &weapons,

@@ -280,7 +280,7 @@ pub enum LobbyJoinOutcome {
     },
 }
 
-pub const MAX_LOBBY_WELCOME_BYTES: usize = 32 * 1024;
+pub const MAX_LOBBY_WELCOME_BYTES: usize = 64 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum LobbyJoinRejection {
@@ -721,6 +721,7 @@ impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::combat::WeaponCatalogResource>()
             .add_plugins(crate::builds::BuildContentPlugin)
+            .add_plugins(crate::weapon_parts::WeaponPartContentPlugin)
             .add_plugins(crate::map::MapContentPlugin)
             .add_systems(Startup, initialize_content_fingerprint);
         app.register_message::<MatchHello>()

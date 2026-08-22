@@ -103,10 +103,13 @@ E2E runs choose an unused loopback port by default and may run beside an interac
 Dashboard is the sole authenticated home. The server loads the account's saved-brawler profile
 before admitting the client. New profiles start empty; create a brawler before Play or Practice.
 Each brawler permanently binds one of three fighter profiles and one of four weapon bases, while its
-name, ultimate, and two passives remain server-owned editable data outside queue. The Dashboard menu
-creates, selects, edits, and deletes saved brawlers; deleting requires confirmation. Play enters the
-selected game type's multiplayer queue and Practice fills the remaining roster with inert `Bot N`
-fighters. Queue admission freezes the selected brawler revision for that match.
+name, ultimate, two passives, and four generic weapon-part slots remain server-owned editable data
+outside queue. Every profile receives eight starter part instances once; the brawler editor opens a
+four-slot equipment overlay with signed effects and a live resolved-weapon preview. The Dashboard
+menu creates, selects, edits, and deletes saved brawlers; deleting requires confirmation. Play enters
+the selected game type's multiplayer queue and Practice fills the remaining roster with inert
+`Bot N` fighters. Queue admission freezes the selected brawler revision and resolved part modifiers
+for that match.
 
 Queue cancellation, loading cancellation, confirmed leave, and ordinary no-result return converge
 on Dashboard while the lobby remains valid. Results retains the authoritative outcome and offers

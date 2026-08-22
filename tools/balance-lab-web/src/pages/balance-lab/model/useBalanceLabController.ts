@@ -96,7 +96,7 @@ export function useBalanceLabController() {
     if (!state) return;
     setSubmitting(true);
     try {
-      await restoreBalanceLabDefaults(state.revision);
+      await restoreBalanceLabDefaults(state.revision, state.schemaVersion);
       setError(null);
       await refresh();
     } catch (reason) {

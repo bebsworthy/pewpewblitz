@@ -53,7 +53,7 @@ pub struct QueueTicket {
     pub game_type_configuration_revision: u32,
     pub accepted_build: AcceptedBuildSummary,
     pub resolved_loadout: ResolvedMatchLoadout,
-    pub build_snapshot: crate::profiles::MatchBuildSnapshotV2,
+    pub build_snapshot: crate::profiles::MatchBuildSnapshotV3,
     pub admission_order: u64,
     pub admitted_at_pool_state_revision: u64,
     pub formation_eligible: bool,
@@ -479,7 +479,7 @@ impl QueueState {
         request_id: QueueRequestId,
         command: QueueCommand,
         now_millis: u64,
-        admitted_build: Option<crate::profiles::MatchBuildSnapshotV2>,
+        admitted_build: Option<crate::profiles::MatchBuildSnapshotV3>,
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
         fighters: &FighterDefinitions,
@@ -617,7 +617,7 @@ impl QueueState {
         &mut self,
         session: &LobbySession,
         command: &QueueJoinCommand,
-        admitted_build: Option<crate::profiles::MatchBuildSnapshotV2>,
+        admitted_build: Option<crate::profiles::MatchBuildSnapshotV3>,
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
         fighters: &FighterDefinitions,
@@ -1189,9 +1189,10 @@ mod tests {
                         crate::builds::PassiveDefinitionId(3),
                         crate::builds::PassiveDefinitionId(4),
                     ],
+                    equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
                     revision: join.brawler_revision,
                 };
-                crate::profiles::MatchBuildSnapshotV2::from_brawler(
+                crate::profiles::MatchBuildSnapshotV3::from_brawler(
                     &brawler,
                     &builds,
                     &weapons,

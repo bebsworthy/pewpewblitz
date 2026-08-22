@@ -1047,6 +1047,7 @@ mod tests {
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
             ],
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: crate::profiles::ProfileRevision::INITIAL,
         };
         let resolved = brawler

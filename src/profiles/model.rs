@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, num::NonZeroU64, str::FromStr};
 
 pub const MAX_BRAWLERS_PER_PROFILE: usize = 16;
-pub const MAX_PROFILE_SNAPSHOT_BYTES: usize = 16 * 1024;
+pub const MAX_PROFILE_SNAPSHOT_BYTES: usize = 32 * 1024;
 
 macro_rules! opaque_id {
     ($name:ident) => {
@@ -136,6 +136,10 @@ pub enum ProfileModelError {
     InvalidSelection,
     DuplicateBrawler,
     InvalidCreationOrdinal,
+    TooManyParts,
+    DuplicatePart,
+    InvalidPart,
+    InvalidEquipment,
 }
 
 impl fmt::Display for ProfileModelError {
@@ -169,6 +173,8 @@ pub struct SavedBrawler {
     pub weapon_base_id: WeaponBaseId,
     pub ultimate_id: UltimateDefinitionId,
     pub passive_ids: [PassiveDefinitionId; 2],
+    pub equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
+        crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
     pub revision: ProfileRevision,
 }
 
@@ -179,6 +185,7 @@ pub struct ProfileSnapshot {
     pub next_brawler_ordinal: u64,
     pub selected_brawler_id: Option<SavedBrawlerId>,
     pub brawlers: Vec<SavedBrawler>,
+    pub inventory: Vec<crate::weapon_parts::WeaponPartInstance>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -206,6 +213,14 @@ pub enum ProfileCommand {
         brawler_id: SavedBrawlerId,
         expected_brawler_revision: ProfileRevision,
     },
+    EquipWeaponParts {
+        request_id: u64,
+        expected_profile_revision: ProfileRevision,
+        brawler_id: SavedBrawlerId,
+        expected_brawler_revision: ProfileRevision,
+        equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
+            crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -218,6 +233,9 @@ pub enum ProfileDecision {
     QueueLocked,
     TemporarilyUnavailable,
     StorageFault,
+    MissingPart,
+    PartAlreadyEquipped,
+    IncompatibleWeapon,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -236,6 +254,7 @@ impl ProfileSnapshot {
             next_brawler_ordinal: 1,
             selected_brawler_id: None,
             brawlers: Vec::new(),
+            inventory: Vec::new(),
         }
     }
 
@@ -252,7 +271,7 @@ impl ProfileSnapshot {
 
 /// Immutable V7 loadout handed through routing without account or storage authority.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MatchBuildSnapshotV2 {
+pub struct MatchBuildSnapshotV3 {
     pub schema_version: u8,
     pub brawler_id: SavedBrawlerId,
     pub brawler_revision: ProfileRevision,
@@ -260,11 +279,12 @@ pub struct MatchBuildSnapshotV2 {
     pub weapon_base_id: WeaponBaseId,
     pub ultimate_id: UltimateDefinitionId,
     pub passive_ids: [PassiveDefinitionId; 2],
+    pub weapon_modifiers: crate::weapon_parts::CanonicalWeaponModifiers,
     pub accepted_identity: crate::builds::SelectedBuild,
 }
 
-impl MatchBuildSnapshotV2 {
-    pub const SCHEMA_VERSION: u8 = 2;
+impl MatchBuildSnapshotV3 {
+    pub const SCHEMA_VERSION: u8 = 3;
 
     pub fn from_brawler(
         brawler: &SavedBrawler,
@@ -272,7 +292,35 @@ impl MatchBuildSnapshotV2 {
         weapons: &crate::combat::WeaponCatalog,
         fighter: &crate::combat::FighterDefinition,
     ) -> Result<Self, crate::builds::BuildResolutionError> {
-        let resolved = brawler.resolve_loadout(builds, weapons, fighter)?;
+        Self::from_brawler_and_modifiers(
+            brawler,
+            crate::weapon_parts::CanonicalWeaponModifiers::default(),
+            builds,
+            weapons,
+            fighter,
+        )
+    }
+
+    pub fn from_profile_brawler(
+        profile: &ProfileSnapshot,
+        brawler: &SavedBrawler,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+    ) -> Result<Self, crate::builds::BuildResolutionError> {
+        let modifiers = profile.weapon_modifiers(brawler)?;
+        Self::from_brawler_and_modifiers(brawler, modifiers, builds, weapons, fighter)
+    }
+
+    pub(crate) fn from_brawler_and_modifiers(
+        brawler: &SavedBrawler,
+        weapon_modifiers: crate::weapon_parts::CanonicalWeaponModifiers,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+    ) -> Result<Self, crate::builds::BuildResolutionError> {
+        let resolved =
+            brawler.resolve_loadout_with_modifiers(builds, weapons, fighter, weapon_modifiers)?;
         Ok(Self {
             schema_version: Self::SCHEMA_VERSION,
             brawler_id: brawler.id,
@@ -281,6 +329,7 @@ impl MatchBuildSnapshotV2 {
             weapon_base_id: brawler.weapon_base_id,
             ultimate_id: brawler.ultimate_id,
             passive_ids: brawler.passive_ids,
+            weapon_modifiers,
             accepted_identity: resolved.identity,
         })
     }
@@ -307,7 +356,7 @@ impl MatchBuildSnapshotV2 {
         weapons: &crate::combat::WeaponCatalog,
         fighter: &crate::combat::FighterDefinition,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
-        let resolved = crate::builds::resolve_saved_brawler_recipe(
+        let mut resolved = crate::builds::resolve_saved_brawler_recipe(
             builds,
             weapons,
             fighter,
@@ -316,6 +365,18 @@ impl MatchBuildSnapshotV2 {
             self.ultimate_id,
             self.passive_ids,
         )?;
+        let weapon = crate::weapon_parts::resolve_weapon_parts(
+            weapons,
+            fighter,
+            crate::combat::WeaponPresetId(self.weapon_base_id.0),
+            self.weapon_modifiers,
+        )
+        .map_err(|_| crate::builds::BuildResolutionError::InvalidCombination)?;
+        if self.weapon_modifiers != crate::weapon_parts::CanonicalWeaponModifiers::default() {
+            resolved.identity.recipe_fingerprint =
+                crate::builds::BuildRecipeFingerprint(weapon.recipe_fingerprint.0);
+        }
+        resolved.primary_weapon = weapon;
         if resolved.identity != self.accepted_identity {
             return Err(crate::builds::BuildResolutionError::InvalidCombination);
         }
@@ -359,7 +420,17 @@ impl SavedBrawler {
             self.weapon_base_id,
             self.ultimate_id,
             self.passive_ids,
-        )
+        )?;
+        let mut equipped = std::collections::BTreeSet::new();
+        if self
+            .equipped_part_ids
+            .iter()
+            .flatten()
+            .any(|id| !equipped.insert(*id))
+        {
+            return Err(ProfileModelError::InvalidEquipment);
+        }
+        Ok(())
     }
 
     pub fn resolve_loadout(
@@ -380,6 +451,29 @@ impl SavedBrawler {
             self.passive_ids,
         )
     }
+
+    pub fn resolve_loadout_with_modifiers(
+        &self,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+        modifiers: crate::weapon_parts::CanonicalWeaponModifiers,
+    ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
+        let mut loadout = self.resolve_loadout(builds, weapons, fighter)?;
+        let weapon = crate::weapon_parts::resolve_weapon_parts(
+            weapons,
+            fighter,
+            crate::combat::WeaponPresetId(self.weapon_base_id.0),
+            modifiers,
+        )
+        .map_err(|_| crate::builds::BuildResolutionError::InvalidCombination)?;
+        if modifiers != crate::weapon_parts::CanonicalWeaponModifiers::default() {
+            loadout.identity.recipe_fingerprint =
+                crate::builds::BuildRecipeFingerprint(weapon.recipe_fingerprint.0);
+        }
+        loadout.primary_weapon = weapon;
+        Ok(loadout)
+    }
 }
 
 impl ProfileSnapshot {
@@ -398,11 +492,53 @@ impl ProfileSnapshot {
                 return Err(ProfileModelError::DuplicateBrawler);
             }
         }
+        if self.inventory.len() > crate::weapon_parts::MAX_WEAPON_PARTS_PER_PROFILE {
+            return Err(ProfileModelError::TooManyParts);
+        }
+        let mut part_ids = std::collections::BTreeSet::new();
+        let mut part_ordinals = std::collections::BTreeSet::new();
+        for part in &self.inventory {
+            part.validate()
+                .map_err(|_| ProfileModelError::InvalidPart)?;
+            if !part_ids.insert(part.id) || !part_ordinals.insert(part.inventory_ordinal) {
+                return Err(ProfileModelError::DuplicatePart);
+            }
+        }
+        let mut equipped = std::collections::BTreeSet::new();
+        for brawler in &self.brawlers {
+            for id in brawler.equipped_part_ids.iter().flatten() {
+                if !part_ids.contains(id) || !equipped.insert(*id) {
+                    return Err(ProfileModelError::InvalidEquipment);
+                }
+            }
+        }
         match self.selected_brawler_id {
             Some(selected) if !ids.contains(&selected) => Err(ProfileModelError::InvalidSelection),
             None if !self.brawlers.is_empty() => Err(ProfileModelError::MissingSelection),
             _ => Ok(()),
         }
+    }
+
+    pub fn weapon_modifiers(
+        &self,
+        brawler: &SavedBrawler,
+    ) -> Result<crate::weapon_parts::CanonicalWeaponModifiers, crate::builds::BuildResolutionError>
+    {
+        let effects = brawler
+            .equipped_part_ids
+            .iter()
+            .flatten()
+            .map(|id| {
+                self.inventory
+                    .iter()
+                    .find(|part| part.id == *id)
+                    .ok_or(crate::builds::BuildResolutionError::InvalidCombination)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flat_map(|part| part.effects.iter().copied());
+        crate::weapon_parts::aggregate_weapon_part_effects(effects)
+            .map_err(|_| crate::builds::BuildResolutionError::InvalidCombination)
     }
 }
 

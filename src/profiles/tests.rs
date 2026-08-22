@@ -43,6 +43,7 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
         weapon_base_id: WeaponBaseId(4),
         ultimate_id: UltimateDefinitionId(2),
         passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
+        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
         revision: ProfileRevision::INITIAL,
     };
     let resolved = brawler
@@ -56,13 +57,77 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
     assert_eq!(resolved.total_points, 0);
     assert_eq!(resolved.identity.source_build_preset_id, None);
     let snapshot =
-        MatchBuildSnapshotV2::from_brawler(&brawler, &builds, &weapons, &fighter).unwrap();
-    let decoded = MatchBuildSnapshotV2::decode(&snapshot.encode().unwrap()).unwrap();
+        MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, &fighter).unwrap();
+    let decoded = MatchBuildSnapshotV3::decode(&snapshot.encode().unwrap()).unwrap();
     assert_eq!(decoded, snapshot);
     assert_eq!(
         decoded.resolve(&builds, &weapons, &fighter).unwrap(),
         resolved
     );
+}
+
+#[test]
+fn v3_part_snapshot_stays_inside_the_routing_bound() {
+    let builds = crate::builds::BuildCatalog::embedded().unwrap();
+    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    let brawler = SavedBrawler {
+        id: SavedBrawlerId::new(91).unwrap(),
+        creation_ordinal: 1,
+        name: "Bounded".into(),
+        fighter_profile_id: FighterProfileId(1),
+        weapon_base_id: WeaponBaseId(1),
+        ultimate_id: UltimateDefinitionId(1),
+        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
+        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+        revision: ProfileRevision::INITIAL,
+    };
+    let catalog = crate::weapon_parts::WeaponPartCatalog::embedded().unwrap();
+    let modifiers = crate::weapon_parts::aggregate_weapon_part_effects(
+        catalog
+            .definitions
+            .iter()
+            .flat_map(|definition| definition.effects.iter().copied()),
+    )
+    .unwrap();
+    let snapshot = MatchBuildSnapshotV3::from_brawler_and_modifiers(
+        &brawler, modifiers, &builds, &weapons, &fighter,
+    )
+    .unwrap();
+    assert!(snapshot.encode().is_ok());
+}
+
+#[test]
+fn maximum_profile_inventory_stays_inside_snapshot_bound() {
+    let account = AccountId::new(92).unwrap();
+    let mut profile = ProfileSnapshot::empty(account);
+    profile.inventory = (1_u128..=128)
+        .map(|id| crate::weapon_parts::WeaponPartInstance {
+            id: crate::weapon_parts::WeaponPartInstanceId::new(id).unwrap(),
+            inventory_ordinal: u64::try_from(id).unwrap(),
+            definition_id: crate::weapon_parts::WeaponPartDefinitionId(1),
+            display_name: "x".repeat(64),
+            effects: vec![
+                crate::weapon_parts::WeaponPartEffect::Capacity {
+                    flat: 1,
+                    percent_basis_points: 1,
+                },
+                crate::weapon_parts::WeaponPartEffect::Damage {
+                    flat: 1,
+                    percent_basis_points: 1,
+                },
+                crate::weapon_parts::WeaponPartEffect::FireInterval {
+                    flat_ticks: 1,
+                    percent_basis_points: 1,
+                },
+                crate::weapon_parts::WeaponPartEffect::RefillInterval {
+                    flat_ticks: 1,
+                    percent_basis_points: 1,
+                },
+            ],
+        })
+        .collect();
+    profile.validate_bounded().unwrap();
 }
 
 #[test]
@@ -101,8 +166,20 @@ fn sqlite_profile_crud_is_transactional_and_recovers() {
         .create_brawler(account, first.revision, second_id, draft("Same Name", 3, 4))
         .unwrap();
     assert_eq!(second.brawlers.len(), 2);
+    assert_eq!(second.inventory.len(), 8);
+    let part_id = second.inventory[0].id;
+    let equipped = store
+        .equip_weapon_parts(
+            account,
+            second.revision,
+            first_id,
+            ProfileRevision::INITIAL,
+            [Some(part_id), None, None, None],
+        )
+        .unwrap();
+    assert_eq!(equipped.brawlers[0].equipped_part_ids[0], Some(part_id));
     let selected = store
-        .select_brawler(account, second.revision, second_id)
+        .select_brawler(account, equipped.revision, second_id)
         .unwrap();
     let deleted = store
         .delete_brawler(
@@ -145,6 +222,38 @@ fn sqlite_backup_restores_exact_profile() {
 
 #[cfg(feature = "server")]
 #[test]
+fn sqlite_v1_profile_migrates_and_receives_starter_parts_once() {
+    let database = path("v1-migration");
+    let account = AccountId::new(77).unwrap();
+    {
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE profiles(account_id BLOB PRIMARY KEY CHECK(length(account_id)=16),revision INTEGER NOT NULL CHECK(revision>0),next_brawler_ordinal INTEGER NOT NULL CHECK(next_brawler_ordinal>0));
+                 CREATE TABLE brawlers(account_id BLOB NOT NULL CHECK(length(account_id)=16),brawler_id BLOB NOT NULL CHECK(length(brawler_id)=16),creation_ordinal INTEGER NOT NULL CHECK(creation_ordinal>0),name TEXT NOT NULL CHECK(length(name)<=96),fighter_profile_id INTEGER NOT NULL,weapon_base_id INTEGER NOT NULL,ultimate_id INTEGER NOT NULL,passive_1_id INTEGER NOT NULL,passive_2_id INTEGER NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),PRIMARY KEY(account_id,brawler_id),UNIQUE(account_id,creation_ordinal),FOREIGN KEY(account_id) REFERENCES profiles(account_id) ON DELETE CASCADE);
+                 CREATE TABLE profile_selection(account_id BLOB PRIMARY KEY CHECK(length(account_id)=16),brawler_id BLOB NOT NULL CHECK(length(brawler_id)=16),FOREIGN KEY(account_id,brawler_id) REFERENCES brawlers(account_id,brawler_id) ON DELETE CASCADE);
+                 PRAGMA application_id=1112692556;
+                 PRAGMA user_version=1;",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO profiles(account_id,revision,next_brawler_ordinal) VALUES(?1,1,1)",
+                [account.to_bytes().as_slice()],
+            )
+            .unwrap();
+    }
+    let mut storage = ProfileStorage::open(&database).unwrap();
+    let migrated = storage.load_or_create(account).unwrap();
+    assert_eq!(migrated.revision.get(), 2);
+    assert_eq!(migrated.inventory.len(), 8);
+    assert_eq!(storage.load_or_create(account).unwrap(), migrated);
+    drop(storage);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+#[test]
 fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
     let wrong_application = path("wrong-application");
     {
@@ -171,7 +280,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
             .pragma_update(None, "application_id", 0x4252_574c_i32)
             .unwrap();
         connection
-            .pragma_update(None, "user_version", 2_i32)
+            .pragma_update(None, "user_version", 3_i32)
             .unwrap();
     }
     assert!(ProfileStorage::open(&newer).is_err());
@@ -179,7 +288,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
     let version: i32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     drop(connection);
 
     let corrupt = path("corrupt");
@@ -219,10 +328,10 @@ fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
         Err(ProfileAuthorityError::AccountInUse)
     );
     let (loads, _) = poll_authority(&mut authority);
-    assert_eq!(
-        loads[0].result.as_ref().unwrap(),
-        &ProfileSnapshot::empty(account)
-    );
+    let loaded = loads[0].result.as_ref().unwrap();
+    assert_eq!(loaded.account_id, account);
+    assert!(loaded.brawlers.is_empty());
+    assert_eq!(loaded.inventory.len(), 8);
 
     let create = ProfileCommand::CreateBrawler {
         request_id: 1,

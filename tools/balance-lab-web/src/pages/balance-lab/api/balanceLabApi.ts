@@ -18,17 +18,21 @@ export async function applyBalanceLabSnapshot(
     await fetch("/api/v1/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ schemaVersion: 1, expectedRevision: revision, snapshot }),
+      body: JSON.stringify({
+        schemaVersion: snapshot.schemaVersion,
+        expectedRevision: revision,
+        snapshot,
+      }),
     }),
   );
 }
 
-export async function restoreBalanceLabDefaults(revision: number) {
+export async function restoreBalanceLabDefaults(revision: number, schemaVersion: number) {
   await checked(
     await fetch("/api/v1/restore-defaults", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ schemaVersion: 1, expectedRevision: revision }),
+      body: JSON.stringify({ schemaVersion, expectedRevision: revision }),
     }),
   );
 }

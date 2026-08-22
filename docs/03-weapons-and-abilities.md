@@ -23,7 +23,7 @@ WeaponContentCatalog
 
 PlayerWeaponSelection
   Supported preset identity or bounded typed specification
-  Future permanent weapon-base identity plus four equipped part instances
+  Permanent weapon-base identity plus four equipped part instances
 
 WeaponConfiguration
   Operational recipe plus an approved presentation-profile reference
@@ -86,8 +86,7 @@ WeaponBaseDefinition
 WeaponPartInstance
   Stable player-owned instance identity
   Presentation metadata
-  Bounded generated or authored effect selections
-  Generation/content revision
+  Bounded persisted authored effect selections
 
 EquippedWeaponParts
   Up to four owned part-instance identities
@@ -107,12 +106,12 @@ arbitrary effect values, recipes, presentation assets, or generated names as aut
 Persisted rolls survive balance changes unless an explicit versioned migration changes them; content
 updates never silently reroll owned parts.
 
-Part effects use a closed typed vocabulary over implemented weapon properties and capabilities. The
-vocabulary may include bounded flat or percentage changes to capacity, damage, fire cooldown,
-refill or recharge duration, range, projectile speed, projectile radius, spread, knockback, and
-supported payload or status effects. It must not use string field paths, scripts, arbitrary numeric
-maps, or serialized ECS components. A new effect kind is added only with explicit combination,
-validation, presentation, lifecycle, and verification rules.
+Part effects use a closed typed vocabulary over implemented weapon properties and capabilities. V7
+implements bounded flat or percentage changes to capacity, damage, fire interval, refill/recharge
+interval, semantic reach, and one bounded Slow contribution. It does not yet expose projectile
+speed/radius, spread, knockback, or new payload/status families. The vocabulary must not use string
+field paths, scripts, arbitrary numeric maps, or serialized ECS components. A new effect kind is
+added only with explicit combination, validation, presentation, lifecycle, and verification rules.
 
 Resolution is deterministic and independent of slot position:
 

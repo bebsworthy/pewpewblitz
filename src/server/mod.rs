@@ -742,7 +742,7 @@ fn process_client_hellos(
                                         .fighters
                                         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
                                         .expect("validated standard fighter definition");
-                                    let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(
+                                    let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(
                                         &participant.build_snapshot,
                                     )
                                     .expect("validated manifest build snapshot");

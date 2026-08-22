@@ -220,7 +220,7 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
                     recipe_fingerprint: u64,
                     revision: u16|
      -> Result<(), MatchWorkerManifestError> {
-        let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(snapshot_bytes)
+        let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(snapshot_bytes)
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
         let resolved = snapshot
             .resolve(&builds, &weapons, fighter)
@@ -458,9 +458,10 @@ mod tests {
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
             ],
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: crate::profiles::ProfileRevision::INITIAL,
         };
-        let snapshot = crate::profiles::MatchBuildSnapshotV2::from_brawler(
+        let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(
             &brawler, &builds, &weapons, fighter,
         )
         .unwrap();

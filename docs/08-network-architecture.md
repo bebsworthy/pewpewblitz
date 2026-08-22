@@ -167,15 +167,18 @@ Runtime weapon state
 ```
 
 V7 clients request admission with a selected `SavedBrawlerId` and expected brawler revision. The
-lobby resolves the authored fighter profile, weapon base, ultimate, and passives from its accepted
-profile cache against active catalogs. Invalid, stale, unselected, or mutation-in-flight state does
-not create a queue ticket. The resulting V2 snapshot crosses routing opaquely and contains no
-`AccountId` or database authority.
+lobby resolves the authored fighter profile, weapon base, four or fewer owned part instances,
+ultimate, and passives from its accepted profile cache against active catalogs. Invalid, stale,
+unselected, incompatible, or mutation-in-flight state does not create a queue ticket. The resulting
+V3 snapshot crosses routing opaquely with fixed-order canonical weapon modifiers and the accepted
+resolved identity; it contains no `AccountId`, part-instance metadata, inventory, or database
+authority. The match worker re-resolves and verifies that immutable snapshot before spawning combat.
 
-Per-player recipes are authoritative profile/session data, not part of the global gameplay-content
-fingerprint. The fingerprint covers the shared schema and primitive/base catalogs. The
-server replicates the accepted resolved public configuration so late join and reconnect do not
-depend on every client having a player's custom recipe preinstalled.
+Per-player equipped instances and exact persisted rolls are authoritative profile/session data, not
+part of the global gameplay-content fingerprint. The fingerprint covers the shared schema,
+primitive/base catalogs, and authored weapon-part catalog. The server replicates the accepted
+resolved public configuration so late join and reconnect do not depend on every client having a
+player's inventory preinstalled.
 
 ### Map-recipe and mode authority
 

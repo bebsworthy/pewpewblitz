@@ -171,7 +171,7 @@ Spawned -> ManifestSent -> Ready -> Running -> Draining -> Exited
 ```
 
 The immutable match manifest contains match/game-type identity, protocol/content fingerprints,
-mode, map/seed, rules, topology, accepted participants and opaque immutable V2 loadout snapshots,
+mode, map/seed, rules, topology, accepted participants and opaque immutable V3 loadout snapshots,
 route identities, and declared limits. It contains no account ID, profile cache, or database path.
 The lobby manifest instead contains logical-server identity, its lobby-only profile database path,
 game-type catalog/configuration fingerprints, default-route identity, declared limits, and restart/reconciliation inputs. Each worker

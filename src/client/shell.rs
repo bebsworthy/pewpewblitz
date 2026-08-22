@@ -578,6 +578,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         | ClientOverlay::DashboardMenu
         | ClientOverlay::BrawlerCreation
         | ClientOverlay::BrawlerEditor
+        | ClientOverlay::WeaponEquipment
         | ClientOverlay::DeleteBrawlerConfirmation(_)
         | ClientOverlay::Confirmation(_)
         | ClientOverlay::ChangeServerConfirmation
@@ -941,6 +942,7 @@ fn handle_shell_actions(
                     | ClientOverlay::DashboardMenu
                     | ClientOverlay::BrawlerCreation
                     | ClientOverlay::BrawlerEditor
+                    | ClientOverlay::WeaponEquipment
                     | ClientOverlay::DeleteBrawlerConfirmation(_)
                     | ClientOverlay::Confirmation(_)
                     | ClientOverlay::ChangeServerConfirmation

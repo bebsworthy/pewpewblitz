@@ -65,7 +65,7 @@ fn install_manifest_bots(
         .expect("validated standard fighter definition");
     let mut occupied = Vec::with_capacity(manifest.bots.len());
     for bot in &manifest.bots {
-        let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(&bot.build_snapshot)
+        let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(&bot.build_snapshot)
             .expect("validated bot build snapshot");
         let loadout = snapshot
             .resolve(&builds.0, &weapon_catalog.0, fighter)

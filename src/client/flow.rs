@@ -88,6 +88,7 @@ pub enum ClientOverlay {
     DashboardMenu,
     BrawlerCreation,
     BrawlerEditor,
+    WeaponEquipment,
     DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
     Confirmation(CancelMatchStartConfirmation),
     ChangeServerConfirmation,
@@ -180,12 +181,18 @@ enum FlowUiAction {
     ConfirmCreateBrawler,
     CancelCreateBrawler,
     OpenBrawlerEditor,
+    OpenWeaponEquipment,
     BeginBrawlerNameEdit,
     CycleBrawlerUltimate,
     CycleBrawlerPassiveOne,
     CycleBrawlerPassiveTwo,
     ConfirmBrawlerEdit,
     CancelBrawlerEdit,
+    SelectEquipmentSlot(usize),
+    EquipWeaponPart(crate::weapon_parts::WeaponPartInstanceId),
+    UnequipWeaponPart,
+    ConfirmWeaponEquipment,
+    CancelWeaponEquipment,
     SelectNextBrawler,
     DeleteSelectedBrawler,
     CancelDeleteBrawler,
@@ -264,6 +271,7 @@ enum OverlayCommit {
     DashboardMenu,
     BrawlerCreation,
     BrawlerEditor,
+    WeaponEquipment,
     DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
     Confirmation(CancelMatchStartConfirmation),
     ChangeServerConfirmation,
@@ -295,6 +303,26 @@ struct BrawlerEditDraft {
     name_caret: usize,
     editing_name: bool,
     inline_error: Option<String>,
+}
+
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+struct WeaponEquipmentDraft {
+    brawler_id: Option<crate::profiles::SavedBrawlerId>,
+    equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
+        crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+    selected_slot: usize,
+    inline_error: Option<String>,
+}
+
+impl Default for WeaponEquipmentDraft {
+    fn default() -> Self {
+        Self {
+            brawler_id: None,
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+            selected_slot: 0,
+            inline_error: None,
+        }
+    }
 }
 
 impl Default for BrawlerEditDraft {
@@ -566,6 +594,12 @@ struct BrawlerCreationRoot(BrawlerCreationDraft);
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct BrawlerEditorRoot(BrawlerEditDraft);
 
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct WeaponEquipmentRoot(WeaponEquipmentDraft);
+
+#[derive(Component)]
+struct WeaponEquipmentScrollArea;
+
 #[derive(Component)]
 struct DashboardMenuRoot;
 
@@ -623,12 +657,14 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<super::ClientMatchLoadingModel>()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .init_resource::<crate::combat::WeaponCatalogResource>()
+            .init_resource::<crate::weapon_parts::WeaponPartCatalogResource>()
             .init_resource::<SelectedGameType>()
             .init_resource::<GameTypeSelectionDraft>()
             .init_resource::<DashboardReturnFocus>()
             .init_resource::<DashboardNotice>()
             .init_resource::<BrawlerCreationDraft>()
             .init_resource::<BrawlerEditDraft>()
+            .init_resource::<WeaponEquipmentDraft>()
             .init_resource::<super::ClientProfileModel>()
             .init_resource::<SessionPurpose>()
             .init_resource::<super::ClientMatchResultState>()
@@ -723,6 +759,8 @@ impl Plugin for ClientFlowPlugin {
                     present_dashboard_menu,
                     present_brawler_creation,
                     present_brawler_editor,
+                    scroll_weapon_equipment.before(present_weapon_equipment),
+                    present_weapon_equipment,
                     present_delete_brawler_confirmation,
                 )
                     .in_set(ClientFlowSet::PresentFlow)
@@ -741,7 +779,10 @@ impl Plugin for ClientFlowPlugin {
             .add_systems(OnExit(ClientFlow::Match), exit_match_input);
         app.add_systems(
             PostUpdate,
-            keep_dashboard_focus_visible
+            (
+                keep_dashboard_focus_visible,
+                keep_weapon_equipment_focus_visible,
+            )
                 .after(UiSystems::Layout)
                 .run_if(in_state(ClientFlow::Dashboard)),
         );
@@ -1247,6 +1288,8 @@ fn collect_flow_input(
             FlowUiAction::CancelCreateBrawler
         } else if matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor) {
             FlowUiAction::CancelBrawlerEdit
+        } else if matches!(overlay.as_ref(), ClientOverlay::WeaponEquipment) {
+            FlowUiAction::CancelWeaponEquipment
         } else if matches!(
             overlay.as_ref(),
             ClientOverlay::DeleteBrawlerConfirmation(_)
@@ -1345,6 +1388,7 @@ fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
         | ClientOverlay::Confirmation(_)
         | ClientOverlay::BrawlerCreation
         | ClientOverlay::BrawlerEditor
+        | ClientOverlay::WeaponEquipment
         | ClientOverlay::DeleteBrawlerConfirmation(_)
         | ClientOverlay::DashboardMenu
         | ClientOverlay::ChangeServerConfirmation
@@ -1401,6 +1445,7 @@ fn resolve_flow_action(
         ResMut<DashboardNotice>,
         ResMut<BrawlerCreationDraft>,
         ResMut<BrawlerEditDraft>,
+        ResMut<WeaponEquipmentDraft>,
     ),
     models: (
         ResMut<super::ClientQueueModel>,
@@ -1428,6 +1473,7 @@ fn resolve_flow_action(
         mut dashboard_notice,
         mut creation_draft,
         mut brawler_edit,
+        mut equipment_draft,
     ) = dashboard;
     let (mut editor, builds, weapons, build_path) = build_editor;
     let (
@@ -1465,6 +1511,15 @@ fn resolve_flow_action(
             }
             crate::profiles::ProfileDecision::StorageFault => {
                 "The profile could not be saved safely; owned data was preserved.".to_string()
+            }
+            crate::profiles::ProfileDecision::MissingPart => {
+                "That weapon part is no longer in this inventory.".to_string()
+            }
+            crate::profiles::ProfileDecision::PartAlreadyEquipped => {
+                "That physical part is already equipped on a brawler.".to_string()
+            }
+            crate::profiles::ProfileDecision::IncompatibleWeapon => {
+                "Those parts do not form a valid weapon configuration.".to_string()
             }
         });
     }
@@ -2067,6 +2122,29 @@ fn resolve_flow_action(
                 commit.overlay = Some(OverlayCommit::BrawlerEditor);
             }
         }
+        FlowUiAction::OpenWeaponEquipment => {
+            if queue.membership().is_some()
+                || queue.pending().is_some()
+                || practice.pending()
+                || profile.pending()
+            {
+                return;
+            }
+            let selected = profile.snapshot().and_then(|snapshot| {
+                snapshot
+                    .selected_brawler_id
+                    .and_then(|id| snapshot.brawlers.iter().find(|brawler| brawler.id == id))
+            });
+            if let Some(brawler) = selected {
+                *equipment_draft = WeaponEquipmentDraft {
+                    brawler_id: Some(brawler.id),
+                    equipped_part_ids: brawler.equipped_part_ids,
+                    selected_slot: 0,
+                    inline_error: None,
+                };
+                commit.overlay = Some(OverlayCommit::WeaponEquipment);
+            }
+        }
         FlowUiAction::BeginBrawlerNameEdit => {
             brawler_edit.editing_name = true;
             brawler_edit.name_caret = brawler_edit.name.len();
@@ -2116,6 +2194,51 @@ fn resolve_flow_action(
                 },
             );
             commit.overlay = Some(OverlayCommit::Clear);
+        }
+        FlowUiAction::SelectEquipmentSlot(slot) => {
+            if slot < crate::weapon_parts::WEAPON_PART_SLOT_COUNT {
+                equipment_draft.selected_slot = slot;
+                equipment_draft.inline_error = None;
+            }
+        }
+        FlowUiAction::EquipWeaponPart(part_id) => {
+            let Some(snapshot) = profile.snapshot() else {
+                return;
+            };
+            let Some(brawler_id) = equipment_draft.brawler_id else {
+                return;
+            };
+            if snapshot.brawlers.iter().any(|brawler| {
+                brawler.id != brawler_id && brawler.equipped_part_ids.contains(&Some(part_id))
+            }) {
+                equipment_draft.inline_error =
+                    Some("That physical part is equipped on another brawler.".into());
+                return;
+            }
+            for slot in &mut equipment_draft.equipped_part_ids {
+                if *slot == Some(part_id) {
+                    *slot = None;
+                }
+            }
+            let selected_slot = equipment_draft.selected_slot;
+            equipment_draft.equipped_part_ids[selected_slot] = Some(part_id);
+            equipment_draft.inline_error = None;
+        }
+        FlowUiAction::UnequipWeaponPart => {
+            let selected_slot = equipment_draft.selected_slot;
+            equipment_draft.equipped_part_ids[selected_slot] = None;
+            equipment_draft.inline_error = None;
+        }
+        FlowUiAction::ConfirmWeaponEquipment => {
+            let Some(brawler_id) = equipment_draft.brawler_id else {
+                return;
+            };
+            if profile.equip_weapon_parts(brawler_id, equipment_draft.equipped_part_ids) {
+                commit.overlay = Some(OverlayCommit::Clear);
+            }
+        }
+        FlowUiAction::CancelWeaponEquipment => {
+            commit.overlay = Some(OverlayCommit::BrawlerEditor);
         }
         FlowUiAction::DeleteSelectedBrawler => {
             if queue.membership().is_some()
@@ -2679,6 +2802,7 @@ fn commit_flow(
             OverlayCommit::DashboardMenu => ClientOverlay::DashboardMenu,
             OverlayCommit::BrawlerCreation => ClientOverlay::BrawlerCreation,
             OverlayCommit::BrawlerEditor => ClientOverlay::BrawlerEditor,
+            OverlayCommit::WeaponEquipment => ClientOverlay::WeaponEquipment,
             OverlayCommit::DeleteBrawlerConfirmation(value) => {
                 ClientOverlay::DeleteBrawlerConfirmation(value)
             }
@@ -3639,7 +3763,7 @@ fn spawn_dashboard(
     let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
         snapshot.formation_availability == crate::lobby::FormationAvailability::ProductMatchOccupied
     });
-    let build_accessible = format!("Change brawler: {build_name}, {build_summary}");
+    let build_accessible = format!("Manage brawlers: {build_name}, {build_summary}");
     let game_accessible = format!(
         "Change game type: {}, {game_summary}, {population}",
         game.display_name
@@ -3781,7 +3905,7 @@ fn spawn_dashboard(
                     FlowButton {
                         index: DASHBOARD_BUILD_INDEX,
                         action: if selected_brawler.is_some() {
-                            FlowUiAction::SelectNextBrawler
+                            FlowUiAction::OpenDashboardMenu
                         } else {
                             FlowUiAction::CreateBrawler
                         },
@@ -3816,7 +3940,7 @@ fn spawn_dashboard(
                     FlowButton {
                         index: DASHBOARD_BUILD_INDEX,
                         action: if selected_brawler.is_some() {
-                            FlowUiAction::SelectNextBrawler
+                            FlowUiAction::OpenDashboardMenu
                         } else {
                             FlowUiAction::CreateBrawler
                         },
@@ -3876,7 +4000,7 @@ fn spawn_dashboard(
                             ));
                             details.spawn((
                                 Text::new(if selected_brawler.is_some() {
-                                    "SELECT NEXT BRAWLER"
+                                    "MANAGE BRAWLERS"
                                 } else {
                                     "CREATE BRAWLER"
                                 }),
@@ -4612,7 +4736,11 @@ fn present_brawler_creation(
         });
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    reason = "one cohesive Bevy overlay builder keeps editor layout and navigation indices adjacent"
+)]
 fn present_brawler_editor(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
@@ -4717,10 +4845,390 @@ fn present_brawler_editor(
                         TextColor(Color::srgb(1.0, 0.5, 0.45)),
                     ));
                 }
-                spawn_flow_error_button(panel, 4, FlowUiAction::ConfirmBrawlerEdit, "SAVE CHANGES");
-                spawn_flow_error_button(panel, 5, FlowUiAction::CancelBrawlerEdit, "CANCEL");
+                spawn_flow_error_button(
+                    panel,
+                    4,
+                    FlowUiAction::OpenWeaponEquipment,
+                    "WEAPON EQUIPMENT",
+                );
+                spawn_flow_error_button(panel, 5, FlowUiAction::ConfirmBrawlerEdit, "SAVE CHANGES");
+                spawn_flow_error_button(panel, 6, FlowUiAction::CancelBrawlerEdit, "CANCEL");
             });
         });
+}
+
+fn scroll_weapon_equipment(
+    mut wheel: MessageReader<MouseWheel>,
+    mut areas: Query<&mut ScrollPosition, With<WeaponEquipmentScrollArea>>,
+) {
+    let delta = wheel
+        .read()
+        .map(|event| match event.unit {
+            MouseScrollUnit::Line => event.y * 24.0,
+            MouseScrollUnit::Pixel => event.y,
+        })
+        .sum::<f32>();
+    if delta.abs() <= f32::EPSILON {
+        return;
+    }
+    for mut position in &mut areas {
+        position.0.y = (position.0.y - delta).max(0.0);
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::needless_pass_by_value,
+    reason = "one cohesive Bevy overlay builder renders the four slots, bounded inventory, and live preview"
+)]
+fn present_weapon_equipment(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    draft: Res<WeaponEquipmentDraft>,
+    roots: Query<(Entity, &WeaponEquipmentRoot)>,
+    scroll_areas: Query<&ScrollPosition, With<WeaponEquipmentScrollArea>>,
+    profile: Res<super::ClientProfileModel>,
+    parts: Res<crate::weapon_parts::WeaponPartCatalogResource>,
+    weapons: Res<crate::combat::WeaponCatalogResource>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    if !matches!(overlay.as_ref(), ClientOverlay::WeaponEquipment)
+        || *flow.get() != ClientFlow::Dashboard
+    {
+        for (entity, _) in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    let existing = roots.iter().next();
+    if existing.is_some_and(|(_, root)| root.0 == *draft) {
+        return;
+    }
+    let retained_scroll = scroll_areas.iter().next().cloned().unwrap_or_default();
+    let first_render = existing.is_none();
+    for (entity, _) in &roots {
+        commands.entity(entity).despawn();
+    }
+    if first_render {
+        navigation.selected = draft.selected_slot;
+    }
+    let Some(snapshot) = profile.snapshot() else {
+        return;
+    };
+    let Some(brawler_id) = draft.brawler_id else {
+        return;
+    };
+    let Some(saved) = snapshot.brawlers.iter().find(|item| item.id == brawler_id) else {
+        return;
+    };
+    let mut candidate = snapshot.clone();
+    if let Some(candidate_brawler) = candidate
+        .brawlers
+        .iter_mut()
+        .find(|item| item.id == brawler_id)
+    {
+        candidate_brawler.equipped_part_ids = draft.equipped_part_ids;
+    } else {
+        return;
+    }
+    let Some(candidate_brawler) = candidate.brawlers.iter().find(|item| item.id == brawler_id)
+    else {
+        return;
+    };
+    let resolved_preview =
+        candidate
+            .weapon_modifiers(candidate_brawler)
+            .ok()
+            .and_then(|modifiers| {
+                let fighters = crate::combat::FighterDefinitions::default();
+                crate::weapon_parts::resolve_weapon_parts(
+                    &weapons.0,
+                    &fighters.entries[0],
+                    crate::combat::WeaponPresetId(saved.weapon_base_id.0),
+                    modifiers,
+                )
+                .ok()
+            });
+    let preview_valid = resolved_preview.is_some();
+    let preview = resolved_preview.map_or_else(
+        || "INVALID PART COMBINATION".into(),
+        |weapon| weapon_preview_text(&weapon),
+    );
+
+    commands
+        .spawn((
+            WeaponEquipmentRoot(draft.clone()),
+            DespawnOnExit(ClientFlow::Dashboard),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.015, 0.04, 0.86)),
+            GlobalZIndex(520),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: percent(94),
+                    max_width: px(900),
+                    height: percent(94),
+                    max_height: px(900),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Stretch,
+                    row_gap: px(7),
+                    padding: UiRect::all(px(18)),
+                    border: UiRect::all(px(2)),
+                    border_radius: BorderRadius::all(px(14)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.035, 0.075, 0.14)),
+                BorderColor::all(Color::srgb(0.12, 0.42, 0.7)),
+            ))
+            .with_children(|panel| {
+                spawn_heading(panel, "WEAPON EQUIPMENT");
+                panel.spawn((
+                    Text::new(format!(
+                        "{}\n{}",
+                        weapon_base_name(saved.weapon_base_id),
+                        preview
+                    )),
+                    TextFont::from_font_size(14.0),
+                    TextColor(Color::srgb(0.72, 0.9, 1.0)),
+                ));
+                panel
+                    .spawn((
+                        WeaponEquipmentScrollArea,
+                        retained_scroll,
+                        Node {
+                            width: percent(100),
+                            min_height: px(0),
+                            flex_grow: 1.0,
+                            flex_shrink: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Stretch,
+                            row_gap: px(7),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|scroll| {
+                        for slot in 0..crate::weapon_parts::WEAPON_PART_SLOT_COUNT {
+                            let label = draft.equipped_part_ids[slot]
+                                .and_then(|id| snapshot.inventory.iter().find(|part| part.id == id))
+                                .map_or_else(
+                                    || format!("SLOT {}: EMPTY", slot + 1),
+                                    |part| format!("SLOT {}: {}", slot + 1, part.display_name),
+                                );
+                            spawn_flow_error_button(
+                                scroll,
+                                slot,
+                                FlowUiAction::SelectEquipmentSlot(slot),
+                                &if slot == draft.selected_slot {
+                                    format!("> {label}")
+                                } else {
+                                    label
+                                },
+                            );
+                        }
+                        spawn_flow_error_button(
+                            scroll,
+                            4,
+                            FlowUiAction::UnequipWeaponPart,
+                            "UNEQUIP SELECTED SLOT",
+                        );
+                        scroll.spawn((
+                            Text::new("OWNED PARTS — type labels are presentation only"),
+                            TextFont::from_font_size(14.0),
+                            TextColor(Color::srgb(1.0, 0.82, 0.38)),
+                        ));
+                        for (index, part) in snapshot.inventory.iter().enumerate() {
+                            let presentation = parts
+                                .0
+                                .definition(part.definition_id)
+                                .map_or("Part", |definition| definition.presentation_type.as_str());
+                            let equipped_elsewhere = snapshot.brawlers.iter().find(|brawler| {
+                                brawler.id != brawler_id
+                                    && brawler.equipped_part_ids.contains(&Some(part.id))
+                            });
+                            let availability = equipped_elsewhere
+                                .map(|brawler| format!(" · EQUIPPED BY {}", brawler.name))
+                                .unwrap_or_default();
+                            let effects = part
+                                .effects
+                                .iter()
+                                .map(|effect| weapon_part_effect_text(*effect))
+                                .collect::<Vec<_>>()
+                                .join(" · ");
+                            spawn_flow_error_button(
+                                scroll,
+                                5 + index,
+                                FlowUiAction::EquipWeaponPart(part.id),
+                                &format!(
+                                    "{} [{}] — {}{}",
+                                    part.display_name, presentation, effects, availability
+                                ),
+                            );
+                        }
+                        if let Some(error) = &draft.inline_error {
+                            scroll.spawn((
+                                Text::new(error),
+                                TextFont::from_font_size(14.0),
+                                TextColor(Color::srgb(1.0, 0.5, 0.45)),
+                            ));
+                        }
+                    });
+                let end = 5 + snapshot.inventory.len();
+                spawn_flow_error_button_disabled(
+                    panel,
+                    end,
+                    FlowUiAction::ConfirmWeaponEquipment,
+                    "SAVE EQUIPMENT",
+                    !preview_valid,
+                );
+                spawn_flow_error_button(
+                    panel,
+                    end + 1,
+                    FlowUiAction::CancelWeaponEquipment,
+                    "CANCEL",
+                );
+            });
+        });
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "computed UI bounds are available only after Bevy's layout pass"
+)]
+fn keep_weapon_equipment_focus_visible(
+    overlay: Res<ClientOverlay>,
+    navigation: Res<FlowNavigation>,
+    buttons: Query<(&FlowButton, &ChildOf, &ComputedNode, &UiGlobalTransform)>,
+    mut areas: Query<
+        (
+            Entity,
+            &ComputedNode,
+            &UiGlobalTransform,
+            &mut ScrollPosition,
+        ),
+        With<WeaponEquipmentScrollArea>,
+    >,
+    mut prior: Local<Option<(Entity, usize)>>,
+) {
+    if !matches!(overlay.as_ref(), ClientOverlay::WeaponEquipment) {
+        *prior = None;
+        return;
+    }
+    let Some((area_entity, area_node, area_transform, mut scroll)) = areas.iter_mut().next() else {
+        *prior = None;
+        return;
+    };
+    let focus_key = (area_entity, navigation.selected);
+    if prior.as_ref() == Some(&focus_key) {
+        return;
+    }
+    *prior = Some(focus_key);
+    let Some((_, _, button_node, button_transform)) =
+        buttons.iter().find(|(button, child_of, _, _)| {
+            child_of.parent() == area_entity && button.index == navigation.selected
+        })
+    else {
+        return;
+    };
+    if area_node.is_empty() || button_node.is_empty() {
+        return;
+    }
+    let (_, _, area_center) = area_transform.to_scale_angle_translation();
+    let (_, _, button_center) = button_transform.to_scale_angle_translation();
+    let visible_top = area_center.y - area_node.size().y * 0.5 + 8.0;
+    let visible_bottom = area_center.y + area_node.size().y * 0.5 - 8.0;
+    let button_top = button_center.y - button_node.size().y * 0.5;
+    let button_bottom = button_center.y + button_node.size().y * 0.5;
+    if button_top < visible_top {
+        scroll.0.y = (scroll.0.y - (visible_top - button_top)).max(0.0);
+    } else if button_bottom > visible_bottom {
+        scroll.0.y += button_bottom - visible_bottom;
+    }
+}
+
+fn weapon_part_effect_text(effect: crate::weapon_parts::WeaponPartEffect) -> String {
+    let percent = |value: i16| format!("{:+}%", f32::from(value) / 100.0);
+    match effect {
+        crate::weapon_parts::WeaponPartEffect::Capacity {
+            flat,
+            percent_basis_points,
+        } => format!("capacity {flat:+} {}", percent(percent_basis_points)),
+        crate::weapon_parts::WeaponPartEffect::Damage {
+            flat,
+            percent_basis_points,
+        } => format!("damage {flat:+} {}", percent(percent_basis_points)),
+        crate::weapon_parts::WeaponPartEffect::FireInterval {
+            flat_ticks,
+            percent_basis_points,
+        } => format!(
+            "fire interval {flat_ticks:+}t {}",
+            percent(percent_basis_points)
+        ),
+        crate::weapon_parts::WeaponPartEffect::RefillInterval {
+            flat_ticks,
+            percent_basis_points,
+        } => format!("refill {flat_ticks:+}t {}", percent(percent_basis_points)),
+        crate::weapon_parts::WeaponPartEffect::Reach {
+            flat_milliunits,
+            percent_basis_points,
+        } => format!(
+            "reach {:+.1} {}",
+            f64::from(flat_milliunits) / 1_000.0,
+            percent(percent_basis_points)
+        ),
+        crate::weapon_parts::WeaponPartEffect::Slow {
+            penalty_basis_points,
+            duration_ticks,
+        } => format!(
+            "Slow {:.0}%/{duration_ticks}t",
+            f32::from(penalty_basis_points) / 100.0
+        ),
+    }
+}
+
+fn weapon_preview_text(weapon: &crate::combat::ResolvedWeapon) -> String {
+    let damage = weapon
+        .recipe
+        .payload_bundles
+        .iter()
+        .flat_map(|bundle| &bundle.effects)
+        .find_map(|effect| match effect {
+            crate::combat::PayloadEffectDefinition::Damage { amount, .. } => Some(*amount),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let slow = weapon.recipe.payload_bundles.iter().any(|bundle| {
+        bundle
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, crate::combat::PayloadEffectDefinition::Slow { .. }))
+    });
+    let reach = match weapon.recipe.delivery {
+        crate::combat::DeliveryMethod::Straight { range, .. } => range,
+        crate::combat::DeliveryMethod::Lobbed { distance, .. } => distance,
+        crate::combat::DeliveryMethod::MeleeArc { reach, .. } => reach,
+    };
+    format!(
+        "Capacity {} · Damage {} · Fire {}t · Refill {}t · Reach {:.0}{}",
+        weapon.recipe.economy.capacity(),
+        damage,
+        weapon.recipe.fire_cooldown_ticks,
+        weapon.recipe.economy.refill_ticks(),
+        reach,
+        if slow { " · Slow" } else { "" }
+    )
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -5229,13 +5737,13 @@ fn update_dashboard_live_facts(
                 button.action = if profile_empty {
                     FlowUiAction::CreateBrawler
                 } else {
-                    FlowUiAction::SelectNextBrawler
+                    FlowUiAction::OpenDashboardMenu
                 };
                 let base = current_label
-                    .map_or("Change brawler", |label| label.0.as_str())
+                    .map_or("Manage brawlers", |label| label.0.as_str())
                     .strip_suffix(busy_suffix)
                     .unwrap_or_else(|| {
-                        current_label.map_or("Change brawler", |label| label.0.as_str())
+                        current_label.map_or("Manage brawlers", |label| label.0.as_str())
                     });
                 format!("{base}{}", if admission_pending { busy_suffix } else { "" })
             }
@@ -5942,28 +6450,40 @@ fn spawn_flow_error_button(
     action: FlowUiAction,
     label: &str,
 ) {
-    parent
-        .spawn((
-            Button,
-            FlowButton {
-                index,
-                action,
-                error_action: true,
-                build_editor_action: false,
-            },
-            Node {
-                width: percent(92),
-                min_height: px(44),
-                padding: UiRect::axes(px(12), px(8)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: UiRect::all(px(2)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.16, 0.12, 0.15)),
-            BorderColor::all(Color::NONE),
-        ))
-        .with_child((Text::new(label), TextFont::from_font_size(18.0)));
+    spawn_flow_error_button_disabled(parent, index, action, label, false);
+}
+
+fn spawn_flow_error_button_disabled(
+    parent: &mut ChildSpawnerCommands,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+    disabled: bool,
+) {
+    let mut entity = parent.spawn((
+        Button,
+        FlowButton {
+            index,
+            action,
+            error_action: true,
+            build_editor_action: false,
+        },
+        Node {
+            width: percent(92),
+            min_height: px(44),
+            padding: UiRect::axes(px(12), px(8)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(px(2)),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.16, 0.12, 0.15)),
+        BorderColor::all(Color::NONE),
+    ));
+    if disabled {
+        entity.insert(InteractionDisabled);
+    }
+    entity.with_child((Text::new(label), TextFont::from_font_size(18.0)));
 }
 
 fn spawn_rate_limit_try_again_button(
@@ -6416,6 +6936,31 @@ mod tests {
         }
     }
 
+    fn lobby_membership_with_brawler() -> ClientLobbyMembership {
+        let mut membership = lobby_membership();
+        let brawler_id = crate::profiles::SavedBrawlerId::new(2).unwrap();
+        membership
+            .profile
+            .brawlers
+            .push(crate::profiles::SavedBrawler {
+                id: brawler_id,
+                creation_ordinal: 1,
+                name: "Test Brawler".into(),
+                fighter_profile_id: crate::profiles::FighterProfileId(1),
+                weapon_base_id: crate::profiles::WeaponBaseId(1),
+                ultimate_id: crate::builds::UltimateDefinitionId(1),
+                passive_ids: [
+                    crate::builds::PassiveDefinitionId(3),
+                    crate::builds::PassiveDefinitionId(4),
+                ],
+                equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+                revision: crate::profiles::ProfileRevision::INITIAL,
+            });
+        membership.profile.selected_brawler_id = Some(brawler_id);
+        membership.profile.next_brawler_ordinal = 2;
+        membership
+    }
+
     #[test]
     fn validated_target_freezes_canonical_address_and_normalized_name() {
         let target = validate_target("LOCALHOST", " Cafe\u{301} ").unwrap();
@@ -6485,6 +7030,105 @@ mod tests {
         assert_eq!(
             *app.world().resource::<ClientOverlay>(),
             ClientOverlay::Credits
+        );
+    }
+
+    #[test]
+    fn selected_brawler_cards_open_management_and_reach_equipment() {
+        let mut app = flow_test_app();
+        let membership = lobby_membership_with_brawler();
+        app.world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .set_snapshot_for_test(membership.profile.clone());
+        app.world_mut().spawn((Client, membership));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
+        app.update();
+
+        let preview = {
+            let world = app.world_mut();
+            let mut query = world.query::<(Entity, &DashboardButtonStyle, &FlowButton)>();
+            let mut selected = None;
+            for (entity, style, button) in query.iter(world) {
+                if matches!(
+                    style,
+                    DashboardButtonStyle::Preview | DashboardButtonStyle::Build
+                ) {
+                    assert_eq!(button.action, FlowUiAction::OpenDashboardMenu);
+                    if matches!(style, DashboardButtonStyle::Preview) {
+                        selected = Some(entity);
+                    }
+                }
+            }
+            selected.expect("Dashboard renders its selected-brawler preview")
+        };
+        app.world_mut()
+            .entity_mut(preview)
+            .insert(Interaction::Pressed);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::DashboardMenu
+        );
+        app.update();
+        assert!(
+            visible_text(&mut app)
+                .iter()
+                .any(|text| text == "EDIT SELECTED BRAWLER")
+        );
+
+        press_flow_button(&mut app, &FlowUiAction::OpenBrawlerEditor);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::BrawlerEditor
+        );
+        app.update();
+        press_flow_button(&mut app, &FlowUiAction::OpenWeaponEquipment);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::WeaponEquipment
+        );
+        app.update();
+        let (scroll_area, save_parent, save_disabled) = {
+            let world = app.world_mut();
+            let mut roots = world.query_filtered::<Entity, With<WeaponEquipmentRoot>>();
+            assert_eq!(roots.iter(world).count(), 1);
+            let mut areas = world.query_filtered::<Entity, With<WeaponEquipmentScrollArea>>();
+            let area = areas.single(world).unwrap();
+            let mut buttons = world.query::<(&FlowButton, &ChildOf, Has<InteractionDisabled>)>();
+            let (parent, disabled) = buttons
+                .iter(world)
+                .find(|(button, _, _)| button.action == FlowUiAction::ConfirmWeaponEquipment)
+                .map(|(_, child_of, disabled)| (child_of.parent(), disabled))
+                .expect("equipment Save button is rendered");
+            (area, parent, disabled)
+        };
+        assert_ne!(save_parent, scroll_area, "Save remains in the fixed footer");
+        assert!(!save_disabled, "a valid equipment preview can be saved");
+
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: -2.0,
+            window: Entity::PLACEHOLDER,
+            phase: bevy::input::touch::TouchPhase::Moved,
+        });
+        app.update();
+        assert!(
+            (app.world().get::<ScrollPosition>(scroll_area).unwrap().0.y - 48.0).abs()
+                <= f32::EPSILON
+        );
+
+        press_flow_button(&mut app, &FlowUiAction::ConfirmWeaponEquipment);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
+        );
+        assert!(
+            app.world()
+                .resource::<super::super::ClientProfileModel>()
+                .pending()
         );
     }
 
@@ -6589,7 +7233,7 @@ mod tests {
         assert_eq!(labels.len(), 7);
         assert!(labels.iter().all(|(_, label)| !label.trim().is_empty()));
         assert!(labels.iter().any(|(style, label)| {
-            matches!(style, DashboardButtonStyle::Preview) && label.starts_with("Change brawler:")
+            matches!(style, DashboardButtonStyle::Preview) && label.starts_with("Manage brawlers:")
         }));
         assert!(labels.iter().any(|(style, label)| {
             matches!(style, DashboardButtonStyle::Mode)
@@ -6782,6 +7426,7 @@ mod tests {
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
             ],
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: crate::profiles::ProfileRevision::INITIAL,
         });
         lobby.profile.selected_brawler_id = Some(brawler_id);

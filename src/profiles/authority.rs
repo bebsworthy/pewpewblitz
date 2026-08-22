@@ -1,5 +1,5 @@
 use super::{
-    AccountId, MatchBuildSnapshotV2, ProfileCommand, ProfileDecision, ProfileOutcome,
+    AccountId, MatchBuildSnapshotV3, ProfileCommand, ProfileDecision, ProfileOutcome,
     ProfileSnapshot, ProfileStorageCommand, ProfileStorageError, ProfileStorageExecutor,
     SavedBrawlerId,
 };
@@ -130,7 +130,16 @@ impl ProfileAuthority {
                     account_id,
                 } => {
                     self.pending_accounts.remove(&account_id);
-                    let result = completion.result.map_err(|error| storage_decision(&error));
+                    let result = completion
+                        .result
+                        .map_err(|error| storage_decision(&error))
+                        .and_then(|snapshot| {
+                            if snapshot_catalog_is_valid(&snapshot) {
+                                Ok(snapshot)
+                            } else {
+                                Err(ProfileDecision::StorageFault)
+                            }
+                        });
                     if let Ok(snapshot) = &result {
                         self.active_accounts.insert(account_id, client_key);
                         self.sessions.insert(
@@ -155,11 +164,19 @@ impl ProfileAuthority {
                     request_id,
                     command,
                 } => {
-                    let decision = completion
-                        .result
+                    let result = completion.result.and_then(|snapshot| {
+                        if snapshot_catalog_is_valid(&snapshot) {
+                            Ok(snapshot)
+                        } else {
+                            Err(ProfileStorageError::InvalidData(
+                                super::ProfileModelError::InvalidPart,
+                            ))
+                        }
+                    });
+                    let decision = result
                         .as_ref()
                         .map_or_else(storage_decision, |_| ProfileDecision::Accepted);
-                    let snapshot = completion.result.ok();
+                    let snapshot = result.ok();
                     let outcome = ProfileOutcome {
                         request_id,
                         decision,
@@ -220,6 +237,18 @@ impl ProfileAuthority {
                 ProfileDecision::TemporarilyUnavailable,
             )));
         }
+        if let ProfileCommand::EquipWeaponParts {
+            brawler_id,
+            equipped_part_ids,
+            ..
+        } = &command
+            && !equipment_candidate_is_valid(&session.snapshot, *brawler_id, *equipped_part_ids)
+        {
+            return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
+                &command,
+                ProfileDecision::IncompatibleWeapon,
+            )));
+        }
         let account_id = session.account_id;
         let storage_request_id = self.next_storage_request_id()?;
         let storage_command = translate_command(account_id, storage_request_id, &command)?;
@@ -263,7 +292,7 @@ impl ProfileAuthority {
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
         fighter: &crate::combat::FighterDefinition,
-    ) -> Result<MatchBuildSnapshotV2, ProfileAuthorityError> {
+    ) -> Result<MatchBuildSnapshotV3, ProfileAuthorityError> {
         let session = self
             .sessions
             .get(&client_key)
@@ -281,8 +310,14 @@ impl ProfileAuthority {
                     && session.snapshot.selected_brawler_id == Some(brawler.id)
             })
             .ok_or(ProfileAuthorityError::InvalidRequest)?;
-        MatchBuildSnapshotV2::from_brawler(brawler, builds, weapons, fighter)
-            .map_err(|_| ProfileAuthorityError::InvalidRequest)
+        MatchBuildSnapshotV3::from_profile_brawler(
+            &session.snapshot,
+            brawler,
+            builds,
+            weapons,
+            fighter,
+        )
+        .map_err(|_| ProfileAuthorityError::InvalidRequest)
     }
 
     pub fn remove_client(&mut self, client_key: u64) {
@@ -320,7 +355,8 @@ fn command_request_id(command: &ProfileCommand) -> u64 {
         ProfileCommand::CreateBrawler { request_id, .. }
         | ProfileCommand::EditBrawler { request_id, .. }
         | ProfileCommand::SelectBrawler { request_id, .. }
-        | ProfileCommand::DeleteBrawler { request_id, .. } => *request_id,
+        | ProfileCommand::DeleteBrawler { request_id, .. }
+        | ProfileCommand::EquipWeaponParts { request_id, .. } => *request_id,
     }
 }
 
@@ -378,6 +414,20 @@ fn translate_command(
             brawler_id: *brawler_id,
             expected_brawler_revision: *expected_brawler_revision,
         },
+        ProfileCommand::EquipWeaponParts {
+            expected_profile_revision,
+            brawler_id,
+            expected_brawler_revision,
+            equipped_part_ids,
+            ..
+        } => ProfileStorageCommand::Equip {
+            request_id: storage_request_id,
+            account_id,
+            expected_profile_revision: *expected_profile_revision,
+            brawler_id: *brawler_id,
+            expected_brawler_revision: *expected_brawler_revision,
+            equipped_part_ids: *equipped_part_ids,
+        },
     })
 }
 
@@ -402,9 +452,76 @@ fn storage_decision(error: &ProfileStorageError) -> ProfileDecision {
         ProfileStorageError::StaleRevision => ProfileDecision::StaleRevision,
         ProfileStorageError::MissingBrawler => ProfileDecision::MissingBrawler,
         ProfileStorageError::CapacityReached => ProfileDecision::CapacityReached,
+        ProfileStorageError::MissingPart => ProfileDecision::MissingPart,
+        ProfileStorageError::PartAlreadyEquipped => ProfileDecision::PartAlreadyEquipped,
         ProfileStorageError::QueueFull => ProfileDecision::TemporarilyUnavailable,
         ProfileStorageError::Database(_) | ProfileStorageError::ExecutorStopped => {
             ProfileDecision::StorageFault
         }
     }
+}
+
+fn equipment_candidate_is_valid(
+    snapshot: &ProfileSnapshot,
+    brawler_id: SavedBrawlerId,
+    equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
+        crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+) -> bool {
+    let mut candidate = snapshot.clone();
+    let Some(brawler) = candidate
+        .brawlers
+        .iter_mut()
+        .find(|brawler| brawler.id == brawler_id)
+    else {
+        return false;
+    };
+    brawler.equipped_part_ids = equipped_part_ids;
+    if candidate.validate().is_err() {
+        return false;
+    }
+    let Some(brawler) = candidate.brawlers.iter().find(|item| item.id == brawler_id) else {
+        return false;
+    };
+    let Ok(modifiers) = candidate.weapon_modifiers(brawler) else {
+        return false;
+    };
+    let Ok(weapons) = crate::combat::WeaponCatalog::embedded() else {
+        return false;
+    };
+    let fighters = crate::combat::FighterDefinitions::default();
+    crate::weapon_parts::resolve_weapon_parts(
+        &weapons,
+        &fighters.entries[0],
+        crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
+        modifiers,
+    )
+    .is_ok()
+}
+
+fn snapshot_catalog_is_valid(snapshot: &ProfileSnapshot) -> bool {
+    let Ok(parts) = crate::weapon_parts::WeaponPartCatalog::embedded() else {
+        return false;
+    };
+    if snapshot
+        .inventory
+        .iter()
+        .any(|part| parts.definition(part.definition_id).is_none())
+    {
+        return false;
+    }
+    let Ok(weapons) = crate::combat::WeaponCatalog::embedded() else {
+        return false;
+    };
+    let fighters = crate::combat::FighterDefinitions::default();
+    snapshot.brawlers.iter().all(|brawler| {
+        snapshot.weapon_modifiers(brawler).is_ok_and(|modifiers| {
+            crate::weapon_parts::resolve_weapon_parts(
+                &weapons,
+                &fighters.entries[0],
+                crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
+                modifiers,
+            )
+            .is_ok()
+        })
+    })
 }
