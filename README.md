@@ -71,7 +71,7 @@ just balance-lab
 
 Open <http://127.0.0.1:5123> after entering Practice. Keep the page open while returning to the
 menu; it waits for and reconnects to the next Practice worker. Accepted overrides are validated and
-persisted under `target/balance-lab/session-v1.json`, and **Restore Defaults** removes that local
+persisted under `target/balance-lab/session-v2.json`, and **Restore Defaults** removes that local
 override without changing canonical authored content.
 See the [Balance Lab operator and maintenance guide](./docs/15-balance-lab.md) for validation rules,
 limitations, and the required checklist when fighter or weapon properties change.

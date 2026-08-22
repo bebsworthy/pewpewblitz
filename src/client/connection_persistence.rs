@@ -70,8 +70,32 @@ pub struct RecentServerV1 {
 #[serde(deny_unknown_fields)]
 pub struct ServerIdentityV2 {
     pub logical_server_id: String,
+    #[serde(with = "account_id_hex")]
     pub account_id: crate::profiles::AccountId,
     pub addresses: Vec<String>,
+}
+
+mod account_id_hex {
+    use serde::{Deserialize as _, Deserializer, Serializer};
+    use std::str::FromStr as _;
+
+    pub fn serialize<S>(
+        value: &crate::profiles::AccountId,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<crate::profiles::AccountId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        crate::profiles::AccountId::from_str(&value).map_err(serde::de::Error::custom)
+    }
 }
 
 impl ConnectionsFileV1 {
@@ -356,6 +380,24 @@ mod tests {
         assert_eq!(account, repeated);
         assert_eq!(state.server_identities.len(), 1);
         assert_eq!(state.server_identities[0].addresses.len(), 2);
+    }
+
+    #[test]
+    fn full_width_account_identity_persists_as_canonical_hex() {
+        let path = test_path("account-hex").join("connections.ron");
+        let account_id = crate::profiles::AccountId::new(u128::MAX - 1).unwrap();
+        let mut state = ConnectionsFileV1::empty();
+        state.server_identities.push(ServerIdentityV2 {
+            logical_server_id: "00000000000000000000000000000001".into(),
+            account_id,
+            addresses: vec!["127.0.0.1:5000".into()],
+        });
+
+        save_connections(&path, &state).unwrap();
+        let source = fs::read_to_string(&path).unwrap();
+        assert!(source.contains("account_id: \"fffffffffffffffffffffffffffffffe\""));
+        assert_eq!(load_connections(&path).unwrap(), Some(state));
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     #[test]

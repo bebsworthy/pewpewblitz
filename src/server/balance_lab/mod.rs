@@ -5,8 +5,8 @@ mod persistence;
 
 use crate::{
     builds::{
-        BuildCatalog, BuildCatalogResource, BuildResolutionError, CustomPulseTuning,
-        FighterStatProfiles, ResolvedMatchLoadout, SelectedBuild, resolve_build_recipe,
+        BuildCatalog, BuildCatalogResource, FighterStatProfiles, ResolvedMatchLoadout,
+        SelectedBuild,
     },
     combat::{
         CurrentHealth, DamageFalloff, DeliveryMethod, FighterDefinitions, FiringPattern,
@@ -32,7 +32,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 1;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 2;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -68,19 +68,17 @@ struct WeaponPresetTuning {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct BalanceLabSnapshotV1 {
+struct BalanceLabSnapshotV2 {
     schema_version: u16,
     fighter_profiles: FighterStatProfiles,
-    custom_pulse: CustomPulseTuning,
     weapons: Vec<WeaponPresetTuning>,
 }
 
-impl BalanceLabSnapshotV1 {
+impl BalanceLabSnapshotV2 {
     fn from_catalogs(builds: &BuildCatalog, weapons: &WeaponCatalog) -> Self {
         Self {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             fighter_profiles: builds.fighter_profiles,
-            custom_pulse: builds.custom_pulse,
             weapons: weapons
                 .presets
                 .iter()
@@ -100,7 +98,7 @@ impl BalanceLabSnapshotV1 {
 struct ApplyRequestV1 {
     schema_version: u16,
     expected_revision: u64,
-    snapshot: BalanceLabSnapshotV1,
+    snapshot: BalanceLabSnapshotV2,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -129,22 +127,22 @@ struct BalanceLabStateView {
     schema_version: u16,
     match_id: String,
     revision: BalanceLabRevision,
-    baseline: BalanceLabSnapshotV1,
-    applied: BalanceLabSnapshotV1,
+    baseline: BalanceLabSnapshotV2,
+    applied: BalanceLabSnapshotV2,
     pending: Option<TransactionView>,
     last_transaction: Option<TransactionView>,
 }
 
 #[derive(Clone)]
 struct BalanceLabValidator {
-    baseline: BalanceLabSnapshotV1,
+    baseline: BalanceLabSnapshotV2,
     builds: BuildCatalog,
     weapons: WeaponCatalog,
     fighter: crate::combat::FighterDefinition,
 }
 
 impl BalanceLabValidator {
-    fn validate(&self, candidate: &BalanceLabSnapshotV1) -> Result<(), String> {
+    fn validate(&self, candidate: &BalanceLabSnapshotV2) -> Result<(), String> {
         validate_snapshot(
             candidate,
             &self.baseline,
@@ -169,8 +167,8 @@ enum BalanceLabCommand {
 
 #[derive(Resource)]
 struct BalanceLabRuntime {
-    baseline: BalanceLabSnapshotV1,
-    applied: BalanceLabSnapshotV1,
+    baseline: BalanceLabSnapshotV2,
+    applied: BalanceLabSnapshotV2,
     revision: BalanceLabRevision,
     persistence_path: PathBuf,
     receiver: Mutex<mpsc::Receiver<BalanceLabCommand>>,
@@ -196,7 +194,7 @@ fn start_balance_lab(world: &mut World) {
     };
     let builds = world.resource::<BuildCatalogResource>().0.clone();
     let weapons = world.resource::<WeaponCatalogResource>().0.clone();
-    let baseline = BalanceLabSnapshotV1::from_catalogs(&builds, &weapons);
+    let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
     let fighter = *world
         .resource::<FighterDefinitions>()
         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
@@ -531,8 +529,8 @@ fn manifest_selections(
 }
 
 fn validate_snapshot(
-    candidate: &BalanceLabSnapshotV1,
-    baseline: &BalanceLabSnapshotV1,
+    candidate: &BalanceLabSnapshotV2,
+    baseline: &BalanceLabSnapshotV2,
     current_builds: &BuildCatalog,
     current_weapons: &WeaponCatalog,
     fighter: &crate::combat::FighterDefinition,
@@ -568,56 +566,32 @@ fn validate_snapshot(
     next_weapons.validate()?;
     let mut next_builds = current_builds.clone();
     next_builds.fighter_profiles = candidate.fighter_profiles;
-    next_builds.custom_pulse = candidate.custom_pulse;
     next_builds.validate()?;
-    for preset in &next_builds.presets {
-        resolve_build_recipe(
-            &next_builds,
-            &next_weapons,
-            fighter,
-            preset.recipe,
-            Some(preset.id),
-        )
-        .map_err(|_| "revised preset did not resolve".to_string())?;
-    }
-    for power in [
-        crate::builds::PulsePower::Light,
-        crate::builds::PulsePower::Balanced,
-        crate::builds::PulsePower::Heavy,
-    ] {
-        for reach in [
-            crate::builds::PulseReach::Compact,
-            crate::builds::PulseReach::Standard,
-            crate::builds::PulseReach::Long,
-        ] {
-            for magazine in [
-                crate::builds::PulseMagazine::Quick,
-                crate::builds::PulseMagazine::Standard,
-                crate::builds::PulseMagazine::Expanded,
-            ] {
-                let recipe = crate::builds::BrawlerBuildRecipe {
-                    weapon: crate::builds::WeaponChoice::CustomPulse {
-                        power,
-                        reach,
-                        magazine,
-                    },
-                    ultimate: crate::builds::UltimateDefinitionId(1),
-                    passives: [
-                        crate::builds::PassiveDefinitionId(3),
-                        crate::builds::PassiveDefinitionId(6),
-                    ],
-                };
-                match resolve_build_recipe(&next_builds, &next_weapons, fighter, recipe, None) {
-                    Ok(_) => {}
-                    Err(BuildResolutionError::OverBudget)
-                        if power == crate::builds::PulsePower::Heavy
-                            && reach == crate::builds::PulseReach::Long
-                            && magazine == crate::builds::PulseMagazine::Expanded => {}
-                    Err(_) => {
-                        return Err("revised custom Pulse combination did not resolve".into());
-                    }
-                }
-            }
+    for profile_id in 1..=3 {
+        for weapon_id in 1..=4 {
+            let brawler = crate::profiles::SavedBrawler {
+                id: crate::profiles::SavedBrawlerId::new(
+                    u128::from(profile_id) * 10 + u128::from(weapon_id),
+                )
+                .expect("bounded nonzero test identity"),
+                creation_ordinal: u64::from(profile_id) * 10 + u64::from(weapon_id),
+                name: "Balance candidate".into(),
+                fighter_profile_id: crate::profiles::FighterProfileId(profile_id),
+                weapon_base_id: crate::profiles::WeaponBaseId(weapon_id),
+                ultimate_id: crate::builds::UltimateDefinitionId(1),
+                passive_ids: [
+                    crate::builds::PassiveDefinitionId(3),
+                    crate::builds::PassiveDefinitionId(4),
+                ],
+                revision: crate::profiles::ProfileRevision::INITIAL,
+            };
+            crate::profiles::MatchBuildSnapshotV2::from_brawler(
+                &brawler,
+                &next_builds,
+                &next_weapons,
+                fighter,
+            )
+            .map_err(|_| "revised fighter profile or weapon base did not resolve".to_string())?;
         }
     }
     Ok((next_builds, next_weapons))
@@ -795,24 +769,21 @@ fn publish_result(
 mod tests {
     use super::*;
 
-    fn admitted_preset(
+    fn admitted_brawler(
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
         fighter: &crate::combat::FighterDefinition,
-        id: crate::builds::BuildPresetId,
+        fighter_profile_id: u16,
+        weapon_base_id: u16,
     ) -> (crate::profiles::MatchBuildSnapshotV2, ResolvedMatchLoadout) {
-        let preset = builds.preset(id).unwrap();
-        let weapon = match preset.recipe.weapon {
-            crate::builds::WeaponChoice::Preset(id) => id.0,
-            crate::builds::WeaponChoice::CustomPulse { .. } => 1,
-        };
+        let identity = fighter_profile_id * 10 + weapon_base_id;
         let brawler = crate::profiles::SavedBrawler {
-            id: crate::profiles::SavedBrawlerId::new(u128::from(id.0)).unwrap(),
-            creation_ordinal: u64::from(id.0),
-            name: format!("Lab {}", id.0),
-            fighter_profile_id: crate::profiles::FighterProfileId(1),
-            weapon_base_id: crate::profiles::WeaponBaseId(weapon),
-            ultimate_id: preset.recipe.ultimate,
+            id: crate::profiles::SavedBrawlerId::new(u128::from(identity)).unwrap(),
+            creation_ordinal: u64::from(identity),
+            name: format!("Lab {identity}"),
+            fighter_profile_id: crate::profiles::FighterProfileId(fighter_profile_id),
+            weapon_base_id: crate::profiles::WeaponBaseId(weapon_base_id),
+            ultimate_id: crate::builds::UltimateDefinitionId(1),
             passive_ids: [
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
@@ -870,16 +841,16 @@ mod tests {
                 peer_id: PeerId::new(8).unwrap(),
                 team: 0,
                 display_name: MatchDisplayName::new("Operator").unwrap(),
-                recipe_fingerprint: human.accepted.identity.recipe_fingerprint.0,
-                revision: human.accepted.identity.revision.0,
+                recipe_fingerprint: human.accepted_identity.recipe_fingerprint.0,
+                revision: human.accepted_identity.revision.0,
                 build_snapshot: human.encode().unwrap(),
             }],
             bots: vec![brawler_routing::MatchManifestBot {
                 player_id: brawler_routing::PlayerId::new(9).unwrap(),
                 team: 1,
                 display_name: MatchDisplayName::new("Bot 1").unwrap(),
-                recipe_fingerprint: bot.accepted.identity.recipe_fingerprint.0,
-                revision: bot.accepted.identity.revision.0,
+                recipe_fingerprint: bot.accepted_identity.recipe_fingerprint.0,
+                revision: bot.accepted_identity.revision.0,
                 build_snapshot: bot.encode().unwrap(),
             }],
             heartbeat_ms: 1_000,
@@ -893,7 +864,7 @@ mod tests {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let fighter = FighterDefinitions::default().entries[0];
-        let baseline = BalanceLabSnapshotV1::from_catalogs(&builds, &weapons);
+        let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
         let mut numeric = baseline.clone();
         numeric.weapons[0].recipe.fire_cooldown_ticks += 1;
         validate_snapshot(&numeric, &baseline, &builds, &weapons, &fighter).unwrap();
@@ -918,12 +889,12 @@ mod tests {
 
     #[test]
     fn snapshot_json_uses_versioned_camel_case_envelope() {
-        let snapshot = BalanceLabSnapshotV1::from_catalogs(
+        let snapshot = BalanceLabSnapshotV2::from_catalogs(
             &BuildCatalog::embedded().unwrap(),
             &WeaponCatalog::embedded().unwrap(),
         );
         let json = serde_json::to_string(&snapshot).unwrap();
-        assert!(json.contains("\"schemaVersion\":1"));
+        assert!(json.contains("\"schemaVersion\":2"));
         assert!(json.contains("\"fighterProfiles\""));
         assert!(json.contains("\"displayName\""));
     }
@@ -935,12 +906,10 @@ mod tests {
         let weapons = WeaponCatalog::embedded().unwrap();
         let fighter_definitions = FighterDefinitions::default();
         let fighter = fighter_definitions.entries[0];
-        let (human_snapshot, human_loadout) =
-            admitted_preset(&builds, &weapons, &fighter, crate::builds::BuildPresetId(1));
-        let (bot_snapshot, bot_loadout) =
-            admitted_preset(&builds, &weapons, &fighter, crate::builds::BuildPresetId(2));
+        let (human_snapshot, human_loadout) = admitted_brawler(&builds, &weapons, &fighter, 2, 1);
+        let (bot_snapshot, bot_loadout) = admitted_brawler(&builds, &weapons, &fighter, 3, 2);
         let manifest = practice_manifest(&human_snapshot, &bot_snapshot);
-        let baseline = BalanceLabSnapshotV1::from_catalogs(&builds, &weapons);
+        let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
         let mut candidate = baseline.clone();
         candidate.fighter_profiles.lightweight.maximum_health = 211;
         candidate.fighter_profiles.reinforced.maximum_health = 233;

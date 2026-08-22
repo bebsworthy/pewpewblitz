@@ -83,12 +83,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
-        profile_database_path: args
-            .data_directory
-            .join("profiles.sqlite3")
-            .to_str()
-            .ok_or("profile database path must be valid UTF-8")?
-            .to_string(),
+        profile_database_path: profile_database_path(&args.data_directory)?,
         raw_catalog_fingerprint: raw_catalog_fingerprint(&raw_catalog),
         raw_catalog,
         nonce: random_u128()?,
@@ -135,6 +130,14 @@ fn read_catalog_file(path: &PathBuf) -> Result<Vec<u8>, Box<dyn Error>> {
         return Err("game-type catalog must contain 1..=16384 bytes".into());
     }
     Ok(bytes)
+}
+
+fn profile_database_path(data_directory: &Path) -> Result<String, Box<dyn Error>> {
+    data_directory
+        .join("profiles.sqlite3")
+        .to_str()
+        .map(str::to_string)
+        .ok_or_else(|| "profile database path must be valid UTF-8".into())
 }
 
 /// Write a deliberately small, stable, machine-readable snapshot for local evidence runs.
@@ -315,7 +318,7 @@ fn load_or_create_logical_server_id(
                 .write(true)
                 .create_new(true)
                 .open(&temporary)?;
-            write!(file, "{:032x}\n", id.get())?;
+            writeln!(file, "{:032x}", id.get())?;
             file.sync_all()?;
             match fs::rename(&temporary, &path) {
                 Ok(()) => Ok(id),

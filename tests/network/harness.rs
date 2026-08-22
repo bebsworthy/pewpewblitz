@@ -2,6 +2,9 @@
 
 use super::*;
 
+static PRODUCT_LOBBY_DATABASE_SEQUENCE: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct MismatchedMessage(u8);
 
@@ -176,6 +179,8 @@ impl Harness {
     }
 
     pub(super) fn new_product_lobby(client_count: usize) -> Self {
+        let database_sequence =
+            PRODUCT_LOBBY_DATABASE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let server_config = ServerNetworkConfig {
             transport: NetworkTransport::Crossbeam,
             handshake_timeout: std::time::Duration::from_millis(250),
@@ -206,8 +211,8 @@ impl Harness {
             heartbeat_ms: 100,
             profile_database_path: std::env::temp_dir()
                 .join(format!(
-                    "brawler-network-profiles-{}.sqlite3",
-                    std::process::id()
+                    "brawler-network-profiles-{}-{database_sequence}.sqlite3",
+                    std::process::id(),
                 ))
                 .to_string_lossy()
                 .into_owned(),

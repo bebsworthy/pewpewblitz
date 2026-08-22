@@ -194,6 +194,7 @@ fn send_profile_commands(
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn create_headless_default_brawler(
     config: Res<crate::config::ClientNetworkConfig>,
     mut model: ResMut<ClientProfileModel>,

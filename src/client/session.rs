@@ -779,48 +779,65 @@ fn process_lobby_server_identity(
                     identity.logical_server_id == announcement.logical_server_id
                 });
             if !valid {
+                warn!(
+                    announced_logical_server_id = announcement.logical_server_id,
+                    installed_identity = installed.is_some(),
+                    "lobby server identity announcement conflicted with the active session"
+                );
                 reject_lobby_identity(&mut commands, entity, &mut status, &config, &mut app_exit);
                 continue;
             }
-            let account_id =
-                if identity_state.logical_server_id == Some(announcement.logical_server_id) {
-                    identity_state.account_id
-                } else if let (Some(target), Some(persistence), Some(path)) =
-                    (target, persistence.as_deref_mut(), path.as_deref())
+            let account_id = if identity_state.logical_server_id
+                == Some(announcement.logical_server_id)
+            {
+                identity_state.account_id
+            } else if let (Some(target), Some(persistence), Some(path)) =
+                (target, persistence.as_deref_mut(), path.as_deref())
+            {
+                if failures
+                    .as_deref()
+                    .is_some_and(|failures| failures.connections_failed)
                 {
-                    if failures
-                        .as_deref()
-                        .is_some_and(|failures| failures.connections_failed)
+                    None
+                } else {
+                    let logical_server_id = format!("{:032x}", announcement.logical_server_id);
+                    match persistence
+                        .state
+                        .account_for_server(&logical_server_id, &target.logical_address)
                     {
-                        None
-                    } else {
-                        let logical_server_id = format!("{:032x}", announcement.logical_server_id);
-                        match persistence
-                            .state
-                            .account_for_server(&logical_server_id, &target.logical_address)
-                        {
-                            Ok(account_id) => {
-                                match connection_persistence::save_connections(
-                                    &path.0,
-                                    &persistence.state,
-                                ) {
-                                    Ok(()) => Some(account_id),
-                                    Err(error) => {
-                                        persistence.dirty_error = Some(error);
-                                        None
-                                    }
+                        Ok(account_id) => {
+                            match connection_persistence::save_connections(
+                                &path.0,
+                                &persistence.state,
+                            ) {
+                                Ok(()) => Some(account_id),
+                                Err(error) => {
+                                    warn!(%error, "could not persist the account identity for the announced logical server");
+                                    persistence.dirty_error = Some(error);
+                                    None
                                 }
                             }
-                            Err(error) => {
-                                persistence.dirty_error = Some(error);
-                                None
-                            }
+                        }
+                        Err(error) => {
+                            warn!(%error, "could not bind an account identity to the announced logical server");
+                            persistence.dirty_error = Some(error);
+                            None
                         }
                     }
-                } else {
-                    crate::profiles::AccountId::new(u128::from(config.client_id)).ok()
-                };
+                }
+            } else {
+                crate::profiles::AccountId::new(u128::from(config.client_id)).ok()
+            };
             let Some(account_id) = account_id else {
+                warn!(
+                    has_runtime_target = target.is_some(),
+                    has_persistence = persistence.is_some(),
+                    has_persistence_path = path.is_some(),
+                    local_connections_failed = failures
+                        .as_deref()
+                        .is_some_and(|failures| failures.connections_failed),
+                    "lobby account identity could not be established"
+                );
                 reject_lobby_identity(&mut commands, entity, &mut status, &config, &mut app_exit);
                 continue;
             };
@@ -1411,22 +1428,41 @@ pub(super) fn process_join_outcome(
                         server_name,
                         catalog_revision,
                         game_types,
-                        profile,
+                        profile: *profile,
                     };
-                    if crate::lobby::validate_catalog(&accepted.game_types).is_err()
-                        || crate::lobby::catalog_revision(&accepted.game_types).ok()
-                            != Some(catalog_revision)
+                    let catalog_invalid =
+                        crate::lobby::validate_catalog(&accepted.game_types).is_err();
+                    let catalog_revision_mismatch =
+                        crate::lobby::catalog_revision(&accepted.game_types).ok()
+                            != Some(catalog_revision);
+                    let installed_membership_conflict =
+                        membership.is_some_and(|previous| previous != &accepted);
+                    let batch_membership_conflict = accepted_this_batch
+                        .as_ref()
+                        .is_some_and(|previous| previous != &accepted);
+                    let identity_mismatch = lobby_identity.is_none_or(|identity| {
+                        identity.logical_server_id != logical_server_id
+                            || identity.account_id != accepted.profile.account_id
+                    });
+                    let profile_invalid = accepted.profile.validate_bounded().is_err();
+                    if catalog_invalid
+                        || catalog_revision_mismatch
                         || rejected_this_batch
-                        || membership.is_some_and(|previous| previous != &accepted)
-                        || accepted_this_batch
-                            .as_ref()
-                            .is_some_and(|previous| previous != &accepted)
-                        || lobby_identity.is_none_or(|identity| {
-                            identity.logical_server_id != logical_server_id
-                                || identity.account_id != accepted.profile.account_id
-                        })
-                        || accepted.profile.validate_bounded().is_err()
+                        || installed_membership_conflict
+                        || batch_membership_conflict
+                        || identity_mismatch
+                        || profile_invalid
                     {
+                        warn!(
+                            catalog_invalid,
+                            catalog_revision_mismatch,
+                            rejected_this_batch,
+                            installed_membership_conflict,
+                            batch_membership_conflict,
+                            identity_mismatch,
+                            profile_invalid,
+                            "lobby welcome failed client consistency validation"
+                        );
                         if config.presents_product_shell() {
                             commands
                                 .entity(entity)

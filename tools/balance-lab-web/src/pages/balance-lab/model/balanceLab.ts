@@ -22,7 +22,6 @@ export interface WeaponTuning extends JsonObject {
 export interface BalanceLabSnapshot extends JsonObject {
   schemaVersion: number;
   fighterProfiles: FighterProfiles;
-  customPulse: JsonObject;
   weapons: WeaponTuning[];
 }
 

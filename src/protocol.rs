@@ -273,7 +273,7 @@ pub enum LobbyJoinOutcome {
         catalog_revision: crate::lobby::CatalogRevision,
         #[serde(deserialize_with = "crate::lobby::deserialize_game_types")]
         game_types: Vec<crate::lobby::AdvertisedGameType>,
-        profile: crate::profiles::ProfileSnapshot,
+        profile: Box<crate::profiles::ProfileSnapshot>,
     },
     Rejected {
         reason: LobbyJoinRejection,
@@ -999,9 +999,9 @@ mod tests {
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type.clone(); crate::lobby::MAX_GAME_TYPES + 1],
-            profile: crate::profiles::ProfileSnapshot::empty(
+            profile: Box::new(crate::profiles::ProfileSnapshot::empty(
                 crate::profiles::AccountId::new(1).unwrap(),
-            ),
+            )),
         };
         let bytes = postcard::to_allocvec(&oversized).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
@@ -1013,9 +1013,9 @@ mod tests {
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type],
-            profile: crate::profiles::ProfileSnapshot::empty(
+            profile: Box::new(crate::profiles::ProfileSnapshot::empty(
                 crate::profiles::AccountId::new(1).unwrap(),
-            ),
+            )),
         };
         let bytes = postcard::to_allocvec(&invalid_name).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());

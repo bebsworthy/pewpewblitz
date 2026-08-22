@@ -2,7 +2,7 @@
 
 ## Status
 
-`Implementing`
+`User playtest`
 
 Research and specification planning were authorized on 2026-08-22 after V6 completed and was
 accepted. The user approved starting implementation on 2026-08-22, accepting the five review
@@ -305,9 +305,11 @@ src/profiles/
 
 ### Content resolution and Balance Lab
 
-- Build content exposes three explicit fighter profiles, four weapon bases, two ultimates, and four
-  ordinary passives. It no longer exposes player-facing named build presets, point costs, a budget,
-  Custom Pulse, or the two frame passives.
+- V7 product content exposes three explicit fighter profiles, four weapon bases, two ultimates, and
+  four ordinary passives. The player and Balance Lab no longer expose named build presets, point
+  costs, a budget, Custom Pulse, or the two frame passives. Private legacy definitions may remain
+  temporarily for direct-match diagnostics and historical regression coverage, but cannot enter
+  saved-profile admission or the routed product handoff.
 - Queue admission resolves the saved authored recipe into the existing immutable
   `ResolvedMatchLoadout`. Combat continues to consume resolved fighter stats, weapon, ultimate, and
   passives without account/profile queries.
@@ -350,39 +352,40 @@ src/profiles/
 
 ## Implementation plan
 
-Implementation began on 2026-08-22. The first landed slice is deliberately additive while the
-network/UI cutover is in progress: shared saved-profile types and V2 handoff encoding, explicit
-fighter-profile/weapon-base resolution, the server-only SQLite owner and backup binary, stable
-supervisor identity/data-directory handling, and the client connection-file v1→v2 identity-binding
-migration. The legacy transient build path remains active until the lobby and Dashboard switch as
-one usable vertical slice; its presence during implementation is not the final M01 contract.
+Implementation began on 2026-08-22. The product path now uses the saved-profile model, V2 immutable
+handoff, lobby-owned SQLite authority, stable supervisor/client identities, and the saved-brawler
+Dashboard as one vertical slice. Legacy transient-build definitions remain private compatibility
+scaffolding for direct-match diagnostics and historical tests, but the product Dashboard, queue,
+Practice/multiplayer admission, routing handoff, and Balance Lab do not expose or trust them. This
+keeps M01 focused without making the V7 player flow depend on the obsolete preset/budget model.
 The canonical local multi-client launcher assigns persistent numbered client-data slots so
 simultaneous interactive clients never race on one connection/identity file.
 
 ### 1. Content and shared profile model
 
-- [ ] Reconcile against the accepted final V6 content and Balance Lab behavior.
+- [x] Reconcile against the accepted final V6 content and Balance Lab behavior.
 - [x] Add stable `AccountId`, `SavedBrawlerId`, `FighterProfileId`, and `WeaponBaseId` types with
   bounded wire/storage codecs and redacted or safe diagnostics as appropriate.
-- [ ] Promote Default/Lightweight/Reinforced to creation choices; make the four current weapons
-  canonical bases; remove named presets, point costs/budget, Custom Pulse, and frame passives.
+- [x] Promote Default/Lightweight/Reinforced to creation choices; make the four current weapons
+  canonical bases; remove named presets, point costs/budget, Custom Pulse, and frame passives from
+  the player and Balance Lab surfaces.
 - [x] Add bounded profile/saved-brawler validation and canonical loadout resolution.
-- [ ] Retire legacy local-build loading from the product flow without deleting its file.
+- [x] Retire legacy local-build loading from the product flow without deleting its file.
 
 ### 2. Stable logical-server and client identity
 
 - [x] Add validated supervisor data-directory configuration and atomic stable logical-server ID
   creation/loading.
-- [ ] Extend the lobby manifest/configuration with the lobby-only profile database path and bump its
+- [x] Extend the lobby manifest/configuration with the lobby-only profile database path and bump its
   canonical manifest version/digest tests.
-- [ ] Advance the client connections schema with per-logical-server account bindings, address
+- [x] Advance the client connections schema with per-logical-server account bindings, address
   bootstrap/alias handling, bounded atomic persistence, and corruption preservation.
 
 ### 3. SQLite storage owner
 
 - [x] Add server-only `rusqlite` with the reviewed bundled/backup features and verify the exact lock
   and toolchain compatibility before committing the dependency.
-- [ ] Implement the dedicated bounded storage thread, startup handshake, nonblocking command/result
+- [x] Implement the dedicated bounded storage thread, startup handshake, nonblocking command/result
   pumps, graceful shutdown, and fatal failure signaling.
 - [x] Implement application ID, WAL/foreign-key configuration, schema v1 migration, integrity and
   semantic validation, transactional load-or-create and CRUD, and typed failures.
@@ -390,27 +393,56 @@ simultaneous interactive clients never race on one connection/identity file.
 
 ### 4. Lobby profile authority and protocol
 
-- [ ] Add the pending-profile handshake phase, single-session-per-account rule, accepted cache,
+- [x] Add the pending-profile handshake phase, single-session-per-account rule, accepted cache,
   optimistic revisions, request idempotency, and transactional mutation coordination.
 - [x] Register the reliable ordered profile channel/messages and bump the global protocol.
-- [ ] Replace client-authored queue builds with selected-brawler admission and atomic queue locking.
-- [ ] Define/install the V2 immutable match loadout snapshot and revise opaque routing participant
+- [x] Replace client-authored queue builds with selected-brawler admission and atomic queue locking.
+- [x] Define/install the V2 immutable match loadout snapshot and revise opaque routing participant
   metadata without exposing account identity.
 
 ### 5. Client Dashboard and lifecycle
 
-- [ ] Replace the preset/custom build editor with profile loading, empty-state creation, bounded
+- [x] Replace the preset/custom build editor with profile loading, empty-state creation, bounded
   brawler list, creation, edit, select, and confirmed deletion flows.
-- [ ] Add pending/rejection/queue-lock states and controller-accessible navigation.
-- [ ] Preserve selected brawler and profile convergence across lobby → match → lobby reconnect and
+- [x] Add pending/rejection/queue-lock states and controller-accessible navigation.
+- [x] Preserve selected brawler and profile convergence across lobby → match → lobby reconnect and
   client restart.
 
 ### 6. Balance Lab and documentation reconciliation
 
-- [ ] Adapt the accepted V6 Balance Lab schema, UI, tuning transaction, and tests to the surviving
+- [x] Adapt the accepted V6 Balance Lab schema, UI, tuning transaction, and tests to the surviving
   fighter-profile/weapon-base model.
-- [ ] Update product, weapon/build, UX, networking, server architecture, operator, README, and
+- [x] Update product, weapon/build, UX, networking, server architecture, operator, README, and
   backlog documentation to the implemented contracts and commands.
+
+## Implementation and verification evidence — 2026-08-22
+
+- The lobby now delays welcome until the bounded storage executor returns the validated profile,
+  rejects simultaneous use of one account, owns optimistic profile mutations, freezes the selected
+  brawler at queue admission, and serializes only the V2 immutable loadout into routed match
+  manifests. Match workers receive neither account identity nor storage configuration.
+- The Dashboard starts an empty profile in explicit creation, labels the three fighter profiles and
+  four weapon bases as permanent, and provides server-backed create, select, edit, and confirmed
+  delete flows. Name, ultimate, and the two surviving passives remain editable; mutation and
+  admission controls honor pending and queue-locked state.
+- Client connection schema 2 stores one account binding per logical server and canonical address
+  aliases. The native check exposed that RON cannot encode raw `u128`; account IDs now persist as
+  the specified 32-character lowercase hexadecimal string, with a full-width-ID regression test.
+- Balance Lab schema 2 tunes the three fighter profiles and four weapon bases without Custom Pulse,
+  named presets, point-budget, or frame-passive surfaces. Its server validation re-resolves all
+  twelve fighter/base combinations through the V7 saved-brawler resolver.
+- SQLite startup verifies the exact application/schema IDs, full integrity, foreign keys, and
+  semantic records. Wrong/newer/corrupt stores are preserved and rejected. The online backup
+  command refuses overwrite, validates its result, and the restore test recovers the exact profile.
+- `just check`, `just lint`, and the final `just test` rerun pass every role, warnings-as-errors
+  Clippy, web build, feature isolation, 413 client tests, 330 server/Balance Lab tests, all 82
+  network scenarios, all 14 performance gates, and the renderer-boundary check.
+- Routed `just e2e 2`, `just e2e 4`, and `just e2e 6` each reached one exact Active 1v1, 2v2, and
+  3v3 match respectively through the saved-profile admission path and shut workers down cleanly.
+- Native 1280×720 verification created a Lightweight + Arc Launcher brawler, edited its name and
+  abilities, reconnected with the same client identity, and recovered the exact saved brawler.
+  Native 960×720 verification confirmed the compact empty-profile creation layout and disabled
+  admission state remain readable and usable.
 
 ## Verification plan
 
@@ -462,8 +494,20 @@ simultaneous interactive clients never race on one connection/identity file.
 
 ## User playtest handoff
 
-The eventual playtest must provide the exact canonical server/client commands, a fresh temporary
-logical-server data directory, and one bounded scenario:
+M01 entered user playtest on 2026-08-22 after its canonical gates, routed E2E matrix, and native
+wide/compact checks passed. Start a fresh persistent two-client environment from the repository
+root with:
+
+```bash
+BRAWLER_DEV_DATA_DIR=target/v7-m01-playtest just run 2
+```
+
+The two windows use stable client identities under `target/v7-m01-playtest/clients`, while the
+logical server keeps its identity and profile database under `target/v7-m01-playtest/server`.
+Stopping with Ctrl-C and running the same command again exercises recovery rather than creating a
+new environment.
+
+Use this bounded scenario:
 
 1. Connect with no prior server identity and create two brawlers using different permanent profiles
    and weapon bases, including duplicate display names.

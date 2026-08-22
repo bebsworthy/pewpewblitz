@@ -361,7 +361,7 @@ mod tests {
     use crate::{
         builds::BuildCatalog,
         combat::{FighterDefinitions, WeaponCatalog},
-        server::balance_lab::{BalanceLabRevision, BalanceLabSnapshotV1, BalanceLabValidator},
+        server::balance_lab::{BalanceLabRevision, BalanceLabSnapshotV2, BalanceLabValidator},
     };
     use std::{
         io::Write as _,
@@ -399,12 +399,12 @@ mod tests {
     fn fixture() -> (
         Arc<Mutex<BalanceLabStateView>>,
         BalanceLabValidator,
-        BalanceLabSnapshotV1,
+        BalanceLabSnapshotV2,
     ) {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let fighter = FighterDefinitions::default().entries[0];
-        let baseline = BalanceLabSnapshotV1::from_catalogs(&builds, &weapons);
+        let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
         let state = BalanceLabStateView {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             match_id: u128::MAX.to_string(),
@@ -537,7 +537,7 @@ mod tests {
         let mut invalid = baseline.clone();
         invalid.fighter_profiles.default.maximum_health = 0;
         let body = serde_json::to_vec(&serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
             "expectedRevision": 0,
             "snapshot": invalid,
         }))
@@ -545,7 +545,7 @@ mod tests {
         assert_status(&request(address, "POST", "/api/v1/apply", &body), 422);
 
         let stale_body = serde_json::to_vec(&serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
             "expectedRevision": 99,
             "snapshot": baseline.clone(),
         }))
@@ -553,7 +553,7 @@ mod tests {
         assert_status(&request(address, "POST", "/api/v1/apply", &stale_body), 409);
 
         let body = serde_json::to_vec(&serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
             "expectedRevision": 0,
             "snapshot": baseline,
         }))
@@ -569,9 +569,13 @@ mod tests {
         assert_status(&request(address, "POST", "/api/v1/apply", &body), 409);
 
         state.lock().unwrap().pending = None;
-        let restore = br#"{"schemaVersion":1,"expectedRevision":0}"#;
+        let restore = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
+            "expectedRevision": 0,
+        }))
+        .unwrap();
         assert_status(
-            &request(address, "POST", "/api/v1/restore-defaults", restore),
+            &request(address, "POST", "/api/v1/restore-defaults", &restore),
             202,
         );
         assert!(matches!(

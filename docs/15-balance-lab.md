@@ -3,7 +3,7 @@
 ## Purpose
 
 Balance Lab is a development-only, server-authoritative tuning console for local Practice matches.
-It edits a complete fighter/weapon snapshot, validates it against concrete engine and wire safety
+It edits a complete V7 fighter-profile/weapon-base snapshot, validates it against concrete engine and wire safety
 invariants, persists accepted tuning locally, and applies it by starting a clean authoritative match
 epoch. It does not modify canonical authored content.
 
@@ -21,9 +21,14 @@ Use [Weapons and abilities](./03-weapons-and-abilities.md) and
 5. Use **Revert draft** to discard unapplied edits or **Restore defaults** to remove the persisted
    override and reset to canonical content.
 
-Accepted tuning is stored in `target/balance-lab/session-v1.json`. The page reconnects to later
+Accepted tuning is stored in `target/balance-lab/session-v2.json`. The page reconnects to later
 Practice workers at the same loopback URL, and each worker validates the persisted snapshot before
 installing it. Deleting build artifacts or using **Restore defaults** removes the override.
+
+The current snapshot schema is version 2. It exposes the three permanent fighter profiles and the
+four canonical weapon-base recipes. The retired Custom Pulse axes, named build presets, point
+budget, and frame passives are not Balance Lab surfaces. Apply validation re-resolves the complete
+3×4 fighter-profile/weapon-base matrix before it can reset Practice.
 
 ## Validation principle
 

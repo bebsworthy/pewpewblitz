@@ -1735,7 +1735,7 @@ mod tests {
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 517
+            52 + 493
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),

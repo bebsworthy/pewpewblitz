@@ -154,7 +154,7 @@ pub struct LobbyManifest {
     pub outstanding_allocations: u16,
     pub active_matches: u16,
     pub heartbeat_ms: u32,
-    /// UTF-8 lobby-only SQLite path. The supervisor transports it but never opens it.
+    /// UTF-8 lobby-only `SQLite` path. The supervisor transports it but never opens it.
     pub profile_database_path: String,
     /// Opaque operator configuration. Only the lobby worker parses these bytes.
     pub raw_catalog: Vec<u8>,
@@ -784,7 +784,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 369);
+        assert_eq!(encoded.len(), 363);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])

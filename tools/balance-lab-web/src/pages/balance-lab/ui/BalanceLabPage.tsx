@@ -19,7 +19,7 @@ export function BalanceLabPage() {
     <main>
       <header className="topbar">
         <div>
-          <p className="eyebrow">PewPew Blitz · V6</p>
+          <p className="eyebrow">PewPew Blitz · V7</p>
           <h1>Balance Lab</h1>
           <p>Match {state.matchId} · Applied revision {state.revision}</p>
         </div>
@@ -46,20 +46,10 @@ export function BalanceLabPage() {
 
       <section className="panel">
         <h2>Fighter profiles</h2>
-        <p>Shared resolved health and movement profiles used by every admitted build.</p>
+        <p>Permanent creation profiles used by every saved brawler.</p>
         <NumericTreeEditor
           value={draft.fighterProfiles}
           path={["fighterProfiles"]}
-          onNumber={controller.setNumber}
-        />
-      </section>
-
-      <section className="panel">
-        <h2>Custom Pulse axes</h2>
-        <p>Numeric power, reach, and magazine values for custom Pulse builds.</p>
-        <NumericTreeEditor
-          value={draft.customPulse}
-          path={["customPulse"]}
           onNumber={controller.setNumber}
         />
       </section>
@@ -76,7 +66,7 @@ export function BalanceLabPage() {
             <article className="panel weapon" key={weapon.id}>
               <div className="weapon-heading">
                 <div>
-                  <p className="eyebrow">Preset {weapon.id}</p>
+                  <p className="eyebrow">Weapon base {weapon.id}</p>
                   <h3>{weapon.displayName}</h3>
                 </div>
                 <code>{weapon.key}</code>

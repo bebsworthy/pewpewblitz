@@ -150,17 +150,20 @@ not by itself solve internet reachability, trust, or moderation.
 
 ## Dashboard and selection contract
 
-Dashboard presents the actual selected fighter/build and selected advertised game type. It owns the
-only ordinary Play and Practice actions. Build Editor and Game Type Select are children, not
-alternate hubs: they contain no queue, practice, favorite, server-change, or disconnect controls.
+Dashboard presents the selected saved brawler and selected advertised game type. It owns the only
+ordinary Play and Practice actions. Saved-brawler creation/editing and Game Type Select are child
+flows, not alternate hubs: they contain no queue, practice, favorite, server-change, or disconnect
+controls.
 
 Game Type Select edits a private draft from the current bounded server advertisement. Confirm
 commits an exact current `GameTypeId` and revision; Back discards the draft. The UI describes the
 advertised mode, topology, rules, and map pool without claiming which map formation will choose.
 
-Build Editor edits a local bounded recipe or preset selection and may preview locally resolvable
-values. Confirm commits the local selection used by the next admission request; Back preserves the
-previous selection. The authoritative server still resolves and validates the submitted build.
+Creation starts from safe defaults, clearly identifies fighter profile and weapon base as permanent,
+and requires confirmation. The brawler editor shows those permanent choices read-only while name,
+ultimate, and the two ordinary passives remain editable. Confirm sends one revision-bound mutation
+to the server-owned profile; Back discards the draft. Pending mutations disable admission and later
+mutations until the authoritative whole-profile outcome arrives.
 
 Responsive presentation does not change this semantic hierarchy. At an effective UI canvas of at
 least `1000x640`, Dashboard uses the Wide hierarchy with its fighter/build focus and horizontal
@@ -175,10 +178,10 @@ controller, and accessibility activation feed the same flow-action owner.
 
 ## Admission, queue, and match loading
 
-Play submits the committed game type and build to the connected server's multiplayer admission
-path. Successful admission freezes the server-accepted build snapshot on an immutable queue ticket.
-Editing thereafter requires acknowledged cancellation and a new admission; a pending or accepted
-queue command never reopens an editor as its retry owner.
+Play submits the committed game type plus selected saved-brawler identity and expected revision to
+the connected server's multiplayer admission path. Successful admission freezes the server-resolved
+loadout snapshot on an immutable queue ticket. Editing thereafter requires acknowledged cancellation
+and a new admission; a pending or accepted queue command never reopens an editor as its retry owner.
 
 Each advertised game type has an exact server-owned topology. Its multiplayer pool contains human
 tickets and forms only a complete roster; overflow remains queued. Queue presentation shows the

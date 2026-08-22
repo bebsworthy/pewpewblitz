@@ -4,7 +4,7 @@ set -euo pipefail
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
 balance_lab_addr=${BRAWLER_BALANCE_LAB_ADDR:-127.0.0.1:5123}
-balance_lab_state=${BRAWLER_BALANCE_LAB_STATE:-$project_dir/target/balance-lab/session-v1.json}
+balance_lab_state=${BRAWLER_BALANCE_LAB_STATE:-$project_dir/target/balance-lab/session-v2.json}
 dev_data_dir=${BRAWLER_DEV_DATA_DIR:-$project_dir/target/dev}
 server_data_dir=${BRAWLER_SERVER_DATA_DIR:-$dev_data_dir/server}
 mode=${1:-}

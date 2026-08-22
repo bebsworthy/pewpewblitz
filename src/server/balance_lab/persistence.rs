@@ -1,5 +1,5 @@
 use super::{
-    BalanceLabRevision, BalanceLabSnapshotV1, BalanceLabValidator, SNAPSHOT_SCHEMA_VERSION,
+    BalanceLabRevision, BalanceLabSnapshotV2, BalanceLabValidator, SNAPSHOT_SCHEMA_VERSION,
     validate_snapshot,
 };
 use crate::{builds::BuildCatalog, combat::WeaponCatalog};
@@ -19,12 +19,12 @@ const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 struct PersistedBalanceLabV1 {
     schema_version: u16,
     revision: u64,
-    snapshot: BalanceLabSnapshotV1,
+    snapshot: BalanceLabSnapshotV2,
 }
 
 pub(super) struct LoadedBalanceLab {
     pub(super) revision: BalanceLabRevision,
-    pub(super) snapshot: BalanceLabSnapshotV1,
+    pub(super) snapshot: BalanceLabSnapshotV2,
     pub(super) builds: BuildCatalog,
     pub(super) weapons: WeaponCatalog,
 }
@@ -70,7 +70,7 @@ pub(super) fn load(
 
 pub(super) fn save(
     path: &Path,
-    snapshot: &BalanceLabSnapshotV1,
+    snapshot: &BalanceLabSnapshotV2,
     revision: BalanceLabRevision,
 ) -> Result<(), String> {
     if revision.0 == 0 {
@@ -132,10 +132,10 @@ mod tests {
         }
     }
 
-    fn fixture() -> (BalanceLabValidator, BalanceLabSnapshotV1) {
+    fn fixture() -> (BalanceLabValidator, BalanceLabSnapshotV2) {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
-        let baseline = BalanceLabSnapshotV1::from_catalogs(&builds, &weapons);
+        let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
         let fighter = FighterDefinitions::default().entries[0];
         (
             BalanceLabValidator {

@@ -144,6 +144,56 @@ fn sqlite_backup_restores_exact_profile() {
 }
 
 #[cfg(feature = "server")]
+#[test]
+fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
+    let wrong_application = path("wrong-application");
+    {
+        let connection = rusqlite::Connection::open(&wrong_application).unwrap();
+        connection
+            .pragma_update(None, "application_id", 123_i32)
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 1_i32)
+            .unwrap();
+    }
+    assert!(ProfileStorage::open(&wrong_application).is_err());
+    let connection = rusqlite::Connection::open(&wrong_application).unwrap();
+    let application_id: i32 = connection
+        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .unwrap();
+    assert_eq!(application_id, 123);
+    drop(connection);
+
+    let newer = path("newer-schema");
+    {
+        let connection = rusqlite::Connection::open(&newer).unwrap();
+        connection
+            .pragma_update(None, "application_id", 0x4252_574c_i32)
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 2_i32)
+            .unwrap();
+    }
+    assert!(ProfileStorage::open(&newer).is_err());
+    let connection = rusqlite::Connection::open(&newer).unwrap();
+    let version: i32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+    drop(connection);
+
+    let corrupt = path("corrupt");
+    let bytes = b"not a sqlite database";
+    std::fs::write(&corrupt, bytes).unwrap();
+    assert!(ProfileStorage::open(&corrupt).is_err());
+    assert_eq!(std::fs::read(&corrupt).unwrap(), bytes);
+
+    for file in [wrong_application, newer, corrupt] {
+        std::fs::remove_file(file).unwrap();
+    }
+}
+
+#[cfg(feature = "server")]
 fn poll_authority(
     authority: &mut ProfileAuthority,
 ) -> (Vec<ProfileLoadCompletion>, Vec<(u64, ProfileOutcome)>) {

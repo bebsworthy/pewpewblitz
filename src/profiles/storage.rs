@@ -265,10 +265,24 @@ fn migrate(connection: &mut Connection) -> Result<(), ProfileStorageError> {
 }
 
 fn validate_database(connection: &Connection) -> Result<(), ProfileStorageError> {
-    let integrity: String = connection.pragma_query_value(None, "quick_check", |row| row.get(0))?;
+    let application_id: i32 =
+        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    if application_id != APPLICATION_ID {
+        return Err(ProfileStorageError::Database(
+            "unexpected SQLite application ID".into(),
+        ));
+    }
+    let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != SCHEMA_VERSION {
+        return Err(ProfileStorageError::Database(
+            "unexpected profile schema version".into(),
+        ));
+    }
+    let integrity: String =
+        connection.pragma_query_value(None, "integrity_check", |row| row.get(0))?;
     if integrity != "ok" {
         return Err(ProfileStorageError::Database(format!(
-            "SQLite quick check failed: {integrity}"
+            "SQLite integrity check failed: {integrity}"
         )));
     }
     let foreign_key_fault: Option<i64> = connection
@@ -453,6 +467,10 @@ pub struct ProfileStorageExecutor {
 }
 
 impl ProfileStorageExecutor {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the storage-owner thread keeps its bounded command dispatch visible in one place"
+    )]
     pub fn start(path: PathBuf) -> Result<Self, ProfileStorageError> {
         let (commands, command_rx) = sync_channel(EXECUTOR_BOUND);
         let (result_tx, results) = sync_channel(EXECUTOR_BOUND);

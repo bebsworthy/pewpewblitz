@@ -660,24 +660,18 @@ impl QueueState {
                 false,
             );
         };
-        let fighter = match fighters.get(STANDARD_FIGHTER_DEFINITION) {
-            Some(fighter) => fighter,
-            None => {
-                return (
-                    QueueDecision::Rejected(QueueRejection::TemporarilyUnavailable),
-                    false,
-                );
-            }
+        let Some(fighter) = fighters.get(STANDARD_FIGHTER_DEFINITION) else {
+            return (
+                QueueDecision::Rejected(QueueRejection::TemporarilyUnavailable),
+                false,
+            );
         };
-        let resolved = match build_snapshot.resolve(builds, weapons, fighter) {
-            Ok(resolved) => resolved,
-            Err(_) => {
-                QueueTelemetry::increment(&mut self.telemetry.build_rejections);
-                return (
-                    QueueDecision::Rejected(QueueRejection::InternalBuildResolution),
-                    false,
-                );
-            }
+        let Ok(resolved) = build_snapshot.resolve(builds, weapons, fighter) else {
+            QueueTelemetry::increment(&mut self.telemetry.build_rejections);
+            return (
+                QueueDecision::Rejected(QueueRejection::InternalBuildResolution),
+                false,
+            );
         };
         let admission_order = self.next_admission_order;
         let Some(next_admission_order) = admission_order.checked_add(1) else {

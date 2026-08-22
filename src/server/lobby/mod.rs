@@ -1393,6 +1393,7 @@ fn lobby_receive_hellos(
 
 #[allow(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::type_complexity,
     clippy::needless_pass_by_value,
     reason = "one ordered authority result pump atomically promotes pending sessions and publishes outcomes"
@@ -1485,7 +1486,7 @@ fn process_profile_storage_results(
                 server_name: catalog.server_name.clone(),
                 catalog_revision: catalog.revision,
                 game_types: catalog.game_types.clone(),
-                profile,
+                profile: Box::new(profile),
             });
             publications.initial_pending = true;
         }
@@ -1910,8 +1911,10 @@ fn lobby_enqueue_product_allocation(
 
 #[allow(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::type_complexity,
-    clippy::needless_pass_by_value
+    clippy::needless_pass_by_value,
+    reason = "Practice admission coordinates one bounded authoritative reservation transaction"
 )]
 fn apply_practice_start_requests(
     time: Res<Time<Real>>,

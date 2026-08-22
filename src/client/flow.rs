@@ -86,6 +86,8 @@ pub enum ClientOverlay {
     Credits,
     BuildEditor,
     DashboardMenu,
+    BrawlerCreation,
+    BrawlerEditor,
     DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
     Confirmation(CancelMatchStartConfirmation),
     ChangeServerConfirmation,
@@ -173,9 +175,18 @@ enum FlowUiAction {
     OpenCredits,
     ToggleFavoriteServer,
     CreateBrawler,
+    CycleCreationProfile,
+    CycleCreationWeapon,
+    ConfirmCreateBrawler,
+    CancelCreateBrawler,
+    OpenBrawlerEditor,
+    BeginBrawlerNameEdit,
+    CycleBrawlerUltimate,
+    CycleBrawlerPassiveOne,
+    CycleBrawlerPassiveTwo,
+    ConfirmBrawlerEdit,
+    CancelBrawlerEdit,
     SelectNextBrawler,
-    EditSelectedBrawler,
-    RenameSelectedBrawler,
     DeleteSelectedBrawler,
     CancelDeleteBrawler,
     ConfirmDeleteBrawler,
@@ -251,9 +262,58 @@ enum OverlayCommit {
     Settings,
     Credits,
     DashboardMenu,
+    BrawlerCreation,
+    BrawlerEditor,
     DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
     Confirmation(CancelMatchStartConfirmation),
     ChangeServerConfirmation,
+}
+
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+struct BrawlerCreationDraft {
+    fighter_profile_id: crate::profiles::FighterProfileId,
+    weapon_base_id: crate::profiles::WeaponBaseId,
+}
+
+impl Default for BrawlerCreationDraft {
+    fn default() -> Self {
+        Self {
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+        }
+    }
+}
+
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+struct BrawlerEditDraft {
+    brawler_id: Option<crate::profiles::SavedBrawlerId>,
+    name: String,
+    fighter_profile_id: crate::profiles::FighterProfileId,
+    weapon_base_id: crate::profiles::WeaponBaseId,
+    ultimate_id: crate::builds::UltimateDefinitionId,
+    passive_ids: [crate::builds::PassiveDefinitionId; 2],
+    name_caret: usize,
+    editing_name: bool,
+    inline_error: Option<String>,
+}
+
+impl Default for BrawlerEditDraft {
+    fn default() -> Self {
+        Self {
+            brawler_id: None,
+            name: String::new(),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate_id: crate::builds::UltimateDefinitionId(1),
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+            name_caret: 0,
+            editing_name: false,
+            inline_error: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -500,6 +560,12 @@ struct ChangeServerConfirmationRoot;
 #[derive(Component)]
 struct DeleteBrawlerConfirmationRoot;
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+struct BrawlerCreationRoot(BrawlerCreationDraft);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct BrawlerEditorRoot(BrawlerEditDraft);
+
 #[derive(Component)]
 struct DashboardMenuRoot;
 
@@ -561,6 +627,9 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<GameTypeSelectionDraft>()
             .init_resource::<DashboardReturnFocus>()
             .init_resource::<DashboardNotice>()
+            .init_resource::<BrawlerCreationDraft>()
+            .init_resource::<BrawlerEditDraft>()
+            .init_resource::<super::ClientProfileModel>()
             .init_resource::<SessionPurpose>()
             .init_resource::<super::ClientMatchResultState>()
             .init_resource::<RoutedClientLifecycle>()
@@ -652,6 +721,8 @@ impl Plugin for ClientFlowPlugin {
                     scroll_dashboard.after(apply_dashboard_layout),
                     update_dashboard_live_facts,
                     present_dashboard_menu,
+                    present_brawler_creation,
+                    present_brawler_editor,
                     present_delete_brawler_confirmation,
                 )
                     .in_set(ClientFlowSet::PresentFlow)
@@ -659,7 +730,10 @@ impl Plugin for ClientFlowPlugin {
             )
             .add_systems(OnEnter(ClientFlow::ServerSelect), spawn_server_select)
             .add_systems(OnEnter(ClientFlow::Connecting), spawn_connecting)
-            .add_systems(OnEnter(ClientFlow::Dashboard), spawn_dashboard)
+            .add_systems(
+                OnEnter(ClientFlow::Dashboard),
+                (spawn_dashboard, open_empty_profile_creation).chain(),
+            )
             .add_systems(OnEnter(ClientFlow::GameTypeSelect), spawn_game_type_select)
             .add_systems(OnEnter(ClientFlow::Match), enter_match_input)
             .add_systems(OnEnter(ClientFlow::Results), spawn_results)
@@ -957,6 +1031,7 @@ fn collect_flow_input(
     dashboard_layout: Query<&DashboardLayoutClass, With<DashboardRoot>>,
     mut actions: ResMut<PendingFlowActions>,
     queue: Res<super::ClientQueueModel>,
+    mut brawler_edit: ResMut<BrawlerEditDraft>,
 ) {
     for (button, interaction, disabled) in &buttons {
         if !disabled
@@ -968,6 +1043,63 @@ fn collect_flow_input(
         }
     }
     let pad_pressed = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
+    if matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor) && brawler_edit.editing_name {
+        if keyboard.just_pressed(KeyCode::Home) {
+            brawler_edit.name_caret = 0;
+        } else if keyboard.just_pressed(KeyCode::End) {
+            brawler_edit.name_caret = brawler_edit.name.len();
+        } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
+            brawler_edit.name_caret = previous_caret(
+                &brawler_edit.name,
+                brawler_edit.name_caret,
+                EditingField::Name,
+            );
+        } else if keyboard.just_pressed(KeyCode::ArrowRight) {
+            brawler_edit.name_caret = next_caret(
+                &brawler_edit.name,
+                brawler_edit.name_caret,
+                EditingField::Name,
+            );
+        }
+        for event in keyboard_events.read() {
+            if event.state != ButtonState::Pressed {
+                continue;
+            }
+            if event.key_code == KeyCode::Backspace {
+                let previous = previous_caret(
+                    &brawler_edit.name,
+                    brawler_edit.name_caret,
+                    EditingField::Name,
+                );
+                let caret = brawler_edit.name_caret;
+                brawler_edit.name.replace_range(previous..caret, "");
+                brawler_edit.name_caret = previous;
+            } else if event.key_code == KeyCode::Delete {
+                let next = next_caret(
+                    &brawler_edit.name,
+                    brawler_edit.name_caret,
+                    EditingField::Name,
+                );
+                let caret = brawler_edit.name_caret;
+                brawler_edit.name.replace_range(caret..next, "");
+            } else if let Some(text) = event.text.as_deref() {
+                insert_brawler_name_text(&mut brawler_edit, text);
+            }
+        }
+        if keyboard.just_pressed(KeyCode::Enter) || pad_pressed(GamepadButton::South) {
+            match crate::lobby::normalize_proposed_display_name(&brawler_edit.name) {
+                Ok(name) => {
+                    brawler_edit.name = name;
+                    brawler_edit.editing_name = false;
+                    brawler_edit.inline_error = None;
+                }
+                Err(error) => brawler_edit.inline_error = Some(format!("Invalid name: {error}")),
+            }
+        } else if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
+            brawler_edit.editing_name = false;
+        }
+        return;
+    }
     if let Some(field) = model.editing {
         if keyboard.just_pressed(KeyCode::Home) {
             model.caret = 0;
@@ -1111,6 +1243,10 @@ fn collect_flow_input(
             FlowUiAction::KeepServer
         } else if matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
             FlowUiAction::CloseDashboardMenu
+        } else if matches!(overlay.as_ref(), ClientOverlay::BrawlerCreation) {
+            FlowUiAction::CancelCreateBrawler
+        } else if matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor) {
+            FlowUiAction::CancelBrawlerEdit
         } else if matches!(
             overlay.as_ref(),
             ClientOverlay::DeleteBrawlerConfirmation(_)
@@ -1207,6 +1343,8 @@ fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
     match overlay {
         ClientOverlay::Error(_)
         | ClientOverlay::Confirmation(_)
+        | ClientOverlay::BrawlerCreation
+        | ClientOverlay::BrawlerEditor
         | ClientOverlay::DeleteBrawlerConfirmation(_)
         | ClientOverlay::DashboardMenu
         | ClientOverlay::ChangeServerConfirmation
@@ -1261,6 +1399,8 @@ fn resolve_flow_action(
         ResMut<GameTypeSelectionDraft>,
         ResMut<DashboardReturnFocus>,
         ResMut<DashboardNotice>,
+        ResMut<BrawlerCreationDraft>,
+        ResMut<BrawlerEditDraft>,
     ),
     models: (
         ResMut<super::ClientQueueModel>,
@@ -1281,7 +1421,14 @@ fn resolve_flow_action(
         Res<super::ClientBuildPath>,
     ),
 ) {
-    let (mut selection, mut game_draft, mut dashboard_focus, mut dashboard_notice) = dashboard;
+    let (
+        mut selection,
+        mut game_draft,
+        mut dashboard_focus,
+        mut dashboard_notice,
+        mut creation_draft,
+        mut brawler_edit,
+    ) = dashboard;
     let (mut editor, builds, weapons, build_path) = build_editor;
     let (
         mut queue,
@@ -1295,6 +1442,32 @@ fn resolve_flow_action(
         mut exit,
         local_failures,
     ) = models;
+    if let Some(decision) = profile.take_decision() {
+        dashboard_notice.0 = Some(match decision {
+            crate::profiles::ProfileDecision::Accepted => "Profile saved.".to_string(),
+            crate::profiles::ProfileDecision::InvalidRequest => {
+                "That brawler change is not valid.".to_string()
+            }
+            crate::profiles::ProfileDecision::StaleRevision => {
+                "The profile changed; review it and try again.".to_string()
+            }
+            crate::profiles::ProfileDecision::MissingBrawler => {
+                "That brawler no longer exists.".to_string()
+            }
+            crate::profiles::ProfileDecision::CapacityReached => {
+                "Brawler limit reached (16).".to_string()
+            }
+            crate::profiles::ProfileDecision::QueueLocked => {
+                "Leave the queue before changing a brawler.".to_string()
+            }
+            crate::profiles::ProfileDecision::TemporarilyUnavailable => {
+                "Profile storage is temporarily unavailable; try again.".to_string()
+            }
+            crate::profiles::ProfileDecision::StorageFault => {
+                "The profile could not be saved safely; owned data was preserved.".to_string()
+            }
+        });
+    }
     if let Some(explicit) = actions.explicit.take() {
         match explicit {
             FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer => {
@@ -1781,19 +1954,52 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::CreateBrawler => {
-            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+            if queue.membership().is_some()
+                || queue.pending().is_some()
+                || practice.pending()
+                || profile.pending()
+            {
+                return;
+            }
+            let Some(snapshot) = profile.snapshot() else {
+                return;
+            };
+            if snapshot.brawlers.len() >= crate::profiles::MAX_BRAWLERS_PER_PROFILE {
+                dashboard_notice.0 = Some("Brawler limit reached (16).".to_string());
+                commit.overlay = Some(OverlayCommit::Clear);
+                return;
+            }
+            *creation_draft = BrawlerCreationDraft::default();
+            commit.overlay = Some(OverlayCommit::BrawlerCreation);
+        }
+        FlowUiAction::CycleCreationProfile => {
+            creation_draft.fighter_profile_id.0 = creation_draft.fighter_profile_id.0 % 3 + 1;
+        }
+        FlowUiAction::CycleCreationWeapon => {
+            creation_draft.weapon_base_id.0 = creation_draft.weapon_base_id.0 % 4 + 1;
+        }
+        FlowUiAction::CancelCreateBrawler
+        | FlowUiAction::CancelBrawlerEdit
+        | FlowUiAction::CancelDeleteBrawler => {
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        FlowUiAction::ConfirmCreateBrawler => {
+            if !matches!(overlay.as_ref(), ClientOverlay::BrawlerCreation)
+                || queue.membership().is_some()
+                || queue.pending().is_some()
+                || practice.pending()
+                || profile.pending()
+            {
                 return;
             }
             let Some(snapshot) = profile.snapshot() else {
                 return;
             };
             let ordinal = snapshot.next_brawler_ordinal;
-            let fighter = u16::try_from((ordinal - 1) % 3 + 1).unwrap_or(1);
-            let weapon = u16::try_from((ordinal - 1) % 4 + 1).unwrap_or(1);
             let _ = profile.create(crate::profiles::BrawlerDraft {
                 name: format!("Brawler {ordinal}"),
-                fighter_profile_id: crate::profiles::FighterProfileId(fighter),
-                weapon_base_id: crate::profiles::WeaponBaseId(weapon),
+                fighter_profile_id: creation_draft.fighter_profile_id,
+                weapon_base_id: creation_draft.weapon_base_id,
                 ultimate_id: crate::builds::UltimateDefinitionId(1),
                 passive_ids: [
                     crate::builds::PassiveDefinitionId(3),
@@ -1803,7 +2009,11 @@ fn resolve_flow_action(
             commit.overlay = Some(OverlayCommit::Clear);
         }
         FlowUiAction::SelectNextBrawler => {
-            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+            if queue.membership().is_some()
+                || queue.pending().is_some()
+                || practice.pending()
+                || profile.pending()
+            {
                 return;
             }
             let Some(snapshot) = profile.snapshot() else {
@@ -1826,8 +2036,12 @@ fn resolve_flow_action(
             }
             commit.overlay = Some(OverlayCommit::Clear);
         }
-        FlowUiAction::EditSelectedBrawler => {
-            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+        FlowUiAction::OpenBrawlerEditor => {
+            if queue.membership().is_some()
+                || queue.pending().is_some()
+                || practice.pending()
+                || profile.pending()
+            {
                 return;
             }
             let selected = profile
@@ -1839,69 +2053,76 @@ fn resolve_flow_action(
                 })
                 .cloned();
             if let Some(brawler) = selected {
-                let ultimate_id =
-                    crate::builds::UltimateDefinitionId(if brawler.ultimate_id.0 == 1 {
-                        2
-                    } else {
-                        1
-                    });
-                let passive_ids = if brawler.passive_ids
-                    == [
-                        crate::builds::PassiveDefinitionId(3),
-                        crate::builds::PassiveDefinitionId(4),
-                    ] {
-                    [
-                        crate::builds::PassiveDefinitionId(5),
-                        crate::builds::PassiveDefinitionId(6),
-                    ]
-                } else {
-                    [
-                        crate::builds::PassiveDefinitionId(3),
-                        crate::builds::PassiveDefinitionId(4),
-                    ]
+                *brawler_edit = BrawlerEditDraft {
+                    brawler_id: Some(brawler.id),
+                    name_caret: brawler.name.len(),
+                    name: brawler.name,
+                    fighter_profile_id: brawler.fighter_profile_id,
+                    weapon_base_id: brawler.weapon_base_id,
+                    ultimate_id: brawler.ultimate_id,
+                    passive_ids: brawler.passive_ids,
+                    editing_name: false,
+                    inline_error: None,
                 };
-                let _ = profile.edit(
-                    brawler.id,
-                    crate::profiles::BrawlerEdit {
-                        name: brawler.name.clone(),
-                        ultimate_id,
-                        passive_ids,
-                    },
-                );
+                commit.overlay = Some(OverlayCommit::BrawlerEditor);
             }
-            commit.overlay = Some(OverlayCommit::Clear);
         }
-        FlowUiAction::RenameSelectedBrawler => {
-            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+        FlowUiAction::BeginBrawlerNameEdit => {
+            brawler_edit.editing_name = true;
+            brawler_edit.name_caret = brawler_edit.name.len();
+            brawler_edit.inline_error = None;
+        }
+        FlowUiAction::CycleBrawlerUltimate => {
+            brawler_edit.ultimate_id.0 = brawler_edit.ultimate_id.0 % 2 + 1;
+        }
+        FlowUiAction::CycleBrawlerPassiveOne => {
+            let next = if brawler_edit.passive_ids[0].0 >= 6 {
+                3
+            } else {
+                brawler_edit.passive_ids[0].0 + 1
+            };
+            brawler_edit.passive_ids[0] = crate::builds::PassiveDefinitionId(next);
+            if brawler_edit.passive_ids[0] == brawler_edit.passive_ids[1] {
+                brawler_edit.passive_ids[1] =
+                    crate::builds::PassiveDefinitionId(if next >= 6 { 3 } else { next + 1 });
+            }
+        }
+        FlowUiAction::CycleBrawlerPassiveTwo => {
+            let next = if brawler_edit.passive_ids[1].0 >= 6 {
+                3
+            } else {
+                brawler_edit.passive_ids[1].0 + 1
+            };
+            brawler_edit.passive_ids[1] = crate::builds::PassiveDefinitionId(next);
+            if brawler_edit.passive_ids[0] == brawler_edit.passive_ids[1] {
+                brawler_edit.passive_ids[0] =
+                    crate::builds::PassiveDefinitionId(if next >= 6 { 3 } else { next + 1 });
+            }
+        }
+        FlowUiAction::ConfirmBrawlerEdit => {
+            let Ok(name) = crate::lobby::normalize_proposed_display_name(&brawler_edit.name) else {
+                brawler_edit.inline_error = Some("Enter a valid brawler name.".to_string());
                 return;
-            }
-            let selected = profile
-                .snapshot()
-                .and_then(|snapshot| {
-                    snapshot.selected_brawler_id.and_then(|id| {
-                        snapshot.brawlers.iter().find(|brawler| brawler.id == id)
-                    })
-                })
-                .cloned();
-            if let Some(brawler) = selected {
-                let name = match brawler.name.as_str() {
-                    "Ace" => "Vanguard",
-                    "Vanguard" => "Frost",
-                    _ => "Ace",
-                };
-                let _ = profile.edit(
-                    brawler.id,
-                    crate::profiles::BrawlerEdit {
-                        name: name.into(),
-                        ultimate_id: brawler.ultimate_id,
-                        passive_ids: brawler.passive_ids,
-                    },
-                );
-            }
+            };
+            let Some(brawler_id) = brawler_edit.brawler_id else {
+                return;
+            };
+            let _ = profile.edit(
+                brawler_id,
+                crate::profiles::BrawlerEdit {
+                    name,
+                    ultimate_id: brawler_edit.ultimate_id,
+                    passive_ids: brawler_edit.passive_ids,
+                },
+            );
             commit.overlay = Some(OverlayCommit::Clear);
         }
         FlowUiAction::DeleteSelectedBrawler => {
-            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+            if queue.membership().is_some()
+                || queue.pending().is_some()
+                || practice.pending()
+                || profile.pending()
+            {
                 return;
             }
             let selected = profile
@@ -1910,9 +2131,6 @@ fn resolve_flow_action(
             if let Some(selected) = selected {
                 commit.overlay = Some(OverlayCommit::DeleteBrawlerConfirmation(selected));
             }
-        }
-        FlowUiAction::CancelDeleteBrawler => {
-            commit.overlay = Some(OverlayCommit::Clear);
         }
         FlowUiAction::ConfirmDeleteBrawler => {
             let ClientOverlay::DeleteBrawlerConfirmation(brawler_id) = overlay.as_ref() else {
@@ -2320,6 +2538,19 @@ fn insert_editor_text(model: &mut ServerSelectModel, field: EditingField, text: 
     model.inline_error = None;
 }
 
+fn insert_brawler_name_text(draft: &mut BrawlerEditDraft, text: &str) {
+    let allowed = !text
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'));
+    if !allowed || draft.name.len().saturating_add(text.len()) > 64 {
+        draft.inline_error = Some("Name exceeds this field's bounds".to_string());
+        return;
+    }
+    draft.name.insert_str(draft.name_caret, text);
+    draft.name_caret += text.len();
+    draft.inline_error = None;
+}
+
 fn validate_target(address: &str, name: &str) -> Result<ValidatedConnectionTarget, String> {
     Ok(ValidatedConnectionTarget {
         logical_address: parse_server_address(address)
@@ -2446,6 +2677,8 @@ fn commit_flow(
             OverlayCommit::Settings => ClientOverlay::Settings,
             OverlayCommit::Credits => ClientOverlay::Credits,
             OverlayCommit::DashboardMenu => ClientOverlay::DashboardMenu,
+            OverlayCommit::BrawlerCreation => ClientOverlay::BrawlerCreation,
+            OverlayCommit::BrawlerEditor => ClientOverlay::BrawlerEditor,
             OverlayCommit::DeleteBrawlerConfirmation(value) => {
                 ClientOverlay::DeleteBrawlerConfirmation(value)
             }
@@ -4222,6 +4455,275 @@ fn present_change_server_confirmation(
 }
 
 #[allow(clippy::needless_pass_by_value)]
+fn open_empty_profile_creation(
+    profile: Res<super::ClientProfileModel>,
+    mut overlay: ResMut<ClientOverlay>,
+    mut draft: ResMut<BrawlerCreationDraft>,
+) {
+    if matches!(overlay.as_ref(), ClientOverlay::None)
+        && profile
+            .snapshot()
+            .is_some_and(|snapshot| snapshot.brawlers.is_empty())
+    {
+        *draft = BrawlerCreationDraft::default();
+        *overlay = ClientOverlay::BrawlerCreation;
+    }
+}
+
+const fn fighter_profile_name(id: crate::profiles::FighterProfileId) -> &'static str {
+    match id.0 {
+        1 => "Default",
+        2 => "Lightweight",
+        3 => "Reinforced",
+        _ => "Unknown",
+    }
+}
+
+const fn weapon_base_name(id: crate::profiles::WeaponBaseId) -> &'static str {
+    match id.0 {
+        1 => "Pulse Sidearm",
+        2 => "Scatter Cannon",
+        3 => "Arc Launcher",
+        4 => "Impact Blade",
+        _ => "Unknown",
+    }
+}
+
+const fn ultimate_name(id: crate::builds::UltimateDefinitionId) -> &'static str {
+    match id.0 {
+        1 => "Dash",
+        2 => "Sentry",
+        _ => "Unknown",
+    }
+}
+
+const fn passive_name(id: crate::builds::PassiveDefinitionId) -> &'static str {
+    match id.0 {
+        3 => "Adrenal Response",
+        4 => "Close Quarters",
+        5 => "Quick Cycle",
+        6 => "Tenacity",
+        _ => "Unknown",
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn present_brawler_creation(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    draft: Res<BrawlerCreationDraft>,
+    roots: Query<(Entity, &BrawlerCreationRoot)>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    if !matches!(overlay.as_ref(), ClientOverlay::BrawlerCreation)
+        || *flow.get() != ClientFlow::Dashboard
+    {
+        for (entity, _) in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    if roots.iter().any(|(_, root)| root.0 == *draft) {
+        return;
+    }
+    for (entity, _) in &roots {
+        commands.entity(entity).despawn();
+    }
+    navigation.selected = 0;
+    commands
+        .spawn((
+            BrawlerCreationRoot(*draft),
+            DespawnOnExit(ClientFlow::Dashboard),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.015, 0.04, 0.82)),
+            GlobalZIndex(510),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: percent(88),
+                    max_width: px(620),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(12),
+                    padding: UiRect::all(px(24)),
+                    border: UiRect::all(px(2)),
+                    border_radius: BorderRadius::all(px(14)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.035, 0.075, 0.14)),
+                BorderColor::all(Color::srgb(0.12, 0.42, 0.7)),
+            ))
+            .with_children(|panel| {
+                spawn_heading(panel, "CREATE BRAWLER");
+                panel.spawn((
+                    Text::new(
+                        "Choose carefully: fighter profile and weapon base are permanent after creation.",
+                    ),
+                    TextFont::from_font_size(16.0),
+                    TextColor(Color::srgb(1.0, 0.82, 0.38)),
+                ));
+                spawn_flow_error_button(
+                    panel,
+                    0,
+                    FlowUiAction::CycleCreationProfile,
+                    &format!(
+                        "FIGHTER PROFILE: {}  [PERMANENT]",
+                        fighter_profile_name(draft.fighter_profile_id)
+                    ),
+                );
+                spawn_flow_error_button(
+                    panel,
+                    1,
+                    FlowUiAction::CycleCreationWeapon,
+                    &format!(
+                        "WEAPON BASE: {}  [PERMANENT]",
+                        weapon_base_name(draft.weapon_base_id)
+                    ),
+                );
+                panel.spawn((
+                    Text::new("Name, ultimate, and passives can be changed later."),
+                    TextFont::from_font_size(14.0),
+                    TextColor(Color::srgb(0.72, 0.82, 0.9)),
+                ));
+                spawn_flow_error_button(
+                    panel,
+                    2,
+                    FlowUiAction::ConfirmCreateBrawler,
+                    "CONFIRM CREATION",
+                );
+                spawn_flow_error_button(
+                    panel,
+                    3,
+                    FlowUiAction::CancelCreateBrawler,
+                    "CANCEL",
+                );
+            });
+        });
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn present_brawler_editor(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    draft: Res<BrawlerEditDraft>,
+    roots: Query<(Entity, &BrawlerEditorRoot)>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    if !matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor)
+        || *flow.get() != ClientFlow::Dashboard
+    {
+        for (entity, _) in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    if roots.iter().any(|(_, root)| root.0 == *draft) {
+        return;
+    }
+    for (entity, _) in &roots {
+        commands.entity(entity).despawn();
+    }
+    navigation.selected = 0;
+    let name = if draft.editing_name {
+        let caret = draft.name_caret.min(draft.name.len());
+        format!("{}|{}", &draft.name[..caret], &draft.name[caret..])
+    } else {
+        draft.name.clone()
+    };
+    commands
+        .spawn((
+            BrawlerEditorRoot(draft.clone()),
+            DespawnOnExit(ClientFlow::Dashboard),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.015, 0.04, 0.82)),
+            GlobalZIndex(510),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: percent(90),
+                    max_width: px(660),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(9),
+                    padding: UiRect::all(px(22)),
+                    border: UiRect::all(px(2)),
+                    border_radius: BorderRadius::all(px(14)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.035, 0.075, 0.14)),
+                BorderColor::all(Color::srgb(0.12, 0.42, 0.7)),
+            ))
+            .with_children(|panel| {
+                spawn_heading(panel, "EDIT BRAWLER");
+                panel.spawn((
+                    Text::new(format!(
+                        "PERMANENT: {} · {}",
+                        fighter_profile_name(draft.fighter_profile_id),
+                        weapon_base_name(draft.weapon_base_id)
+                    )),
+                    TextFont::from_font_size(15.0),
+                    TextColor(Color::srgb(1.0, 0.82, 0.38)),
+                ));
+                spawn_flow_error_button(
+                    panel,
+                    0,
+                    FlowUiAction::BeginBrawlerNameEdit,
+                    &format!("NAME: {name}"),
+                );
+                spawn_flow_error_button(
+                    panel,
+                    1,
+                    FlowUiAction::CycleBrawlerUltimate,
+                    &format!("ULTIMATE: {}", ultimate_name(draft.ultimate_id)),
+                );
+                spawn_flow_error_button(
+                    panel,
+                    2,
+                    FlowUiAction::CycleBrawlerPassiveOne,
+                    &format!("PASSIVE 1: {}", passive_name(draft.passive_ids[0])),
+                );
+                spawn_flow_error_button(
+                    panel,
+                    3,
+                    FlowUiAction::CycleBrawlerPassiveTwo,
+                    &format!("PASSIVE 2: {}", passive_name(draft.passive_ids[1])),
+                );
+                if let Some(error) = &draft.inline_error {
+                    panel.spawn((
+                        Text::new(error),
+                        TextFont::from_font_size(14.0),
+                        TextColor(Color::srgb(1.0, 0.5, 0.45)),
+                    ));
+                }
+                spawn_flow_error_button(panel, 4, FlowUiAction::ConfirmBrawlerEdit, "SAVE CHANGES");
+                spawn_flow_error_button(panel, 5, FlowUiAction::CancelBrawlerEdit, "CANCEL");
+            });
+        });
+}
+
+#[allow(clippy::needless_pass_by_value)]
 fn present_delete_brawler_confirmation(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
@@ -4296,7 +4798,12 @@ fn present_delete_brawler_confirmation(
         });
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the bounded menu presenter declares its complete connected Dashboard view"
+)]
 fn present_dashboard_menu(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
@@ -4386,15 +4893,8 @@ fn present_dashboard_menu(
                     spawn_flow_error_button(
                         panel,
                         index,
-                        FlowUiAction::RenameSelectedBrawler,
-                        "RENAME BRAWLER",
-                    );
-                    index += 1;
-                    spawn_flow_error_button(
-                        panel,
-                        index,
-                        FlowUiAction::EditSelectedBrawler,
-                        "SWAP ULTIMATE + PASSIVES",
+                        FlowUiAction::OpenBrawlerEditor,
+                        "EDIT SELECTED BRAWLER",
                     );
                     index += 1;
                     spawn_flow_error_button(
@@ -4610,6 +5110,7 @@ fn queue_population(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::type_complexity,
     reason = "Dashboard presentation reads authenticated lobby and bounded queue resources"
 )]
@@ -6263,11 +6764,28 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn results_replay_uses_the_exact_fresh_lobby_game() {
         let mut app = flow_test_app();
         app.world_mut()
             .insert_resource(super::super::ClientInputContext::Shell);
-        let lobby = lobby_membership();
+        let mut lobby = lobby_membership();
+        let brawler_id = crate::profiles::SavedBrawlerId::new(2).unwrap();
+        lobby.profile.brawlers.push(crate::profiles::SavedBrawler {
+            id: brawler_id,
+            creation_ordinal: 1,
+            name: "Replay Brawler".into(),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate_id: crate::builds::UltimateDefinitionId(1),
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+            revision: crate::profiles::ProfileRevision::INITIAL,
+        });
+        lobby.profile.selected_brawler_id = Some(brawler_id);
+        lobby.profile.next_brawler_ordinal = 2;
         let game_type_id = lobby.game_types[0].id.clone();
         app.world_mut().spawn((
             Client,

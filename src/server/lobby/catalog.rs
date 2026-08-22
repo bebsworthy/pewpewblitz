@@ -266,9 +266,9 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         server_name: server_name.clone(),
         catalog_revision: revision,
         game_types: advertised.clone(),
-        profile: crate::profiles::ProfileSnapshot::empty(
+        profile: Box::new(crate::profiles::ProfileSnapshot::empty(
             crate::profiles::AccountId::new(1).expect("constant account ID is nonzero"),
-        ),
+        )),
     };
     let welcome_bytes = postcard::to_allocvec(&welcome)
         .map_err(|error| format!("lobby welcome encoding failed: {error}"))?;

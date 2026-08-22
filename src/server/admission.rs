@@ -699,7 +699,7 @@ mod tests {
             .resource_mut::<BuildCatalogResource>()
             .0
             .fighter_profiles
-            .lightweight
+            .default
             .maximum_health = 211;
         worker.update();
         let world = worker.world_mut();

@@ -63,6 +63,8 @@ pub enum ProfileMutationSubmission {
     Immediate(ProfileOutcome),
 }
 
+type ProfilePollResult = (Vec<ProfileLoadCompletion>, Vec<(u64, ProfileOutcome)>);
+
 impl ProfileAuthority {
     pub fn start(path: PathBuf) -> Result<Self, ProfileStorageError> {
         Ok(Self {
@@ -99,7 +101,7 @@ impl ProfileAuthority {
                 request_id: storage_request_id,
                 account_id,
             })
-            .map_err(map_submission_error)?;
+            .map_err(|error| map_submission_error(&error))?;
         self.pending_accounts.insert(account_id, client_key);
         self.pending.insert(
             storage_request_id,
@@ -111,10 +113,7 @@ impl ProfileAuthority {
         Ok(())
     }
 
-    pub fn poll_loads(
-        &mut self,
-    ) -> Result<(Vec<ProfileLoadCompletion>, Vec<(u64, ProfileOutcome)>), ProfileAuthorityError>
-    {
+    pub fn poll_loads(&mut self) -> Result<ProfilePollResult, ProfileAuthorityError> {
         let mut loads = Vec::new();
         let mut mutations = Vec::new();
         while let Some(completion) = self
@@ -226,7 +225,7 @@ impl ProfileAuthority {
         let storage_command = translate_command(account_id, storage_request_id, &command)?;
         self.storage
             .try_submit(storage_command)
-            .map_err(map_submission_error)?;
+            .map_err(|error| map_submission_error(&error))?;
         self.sessions
             .get_mut(&client_key)
             .expect("validated session remains installed")
@@ -390,7 +389,7 @@ fn rejected_outcome(command: &ProfileCommand, decision: ProfileDecision) -> Prof
     }
 }
 
-fn map_submission_error(error: ProfileStorageError) -> ProfileAuthorityError {
+fn map_submission_error(error: &ProfileStorageError) -> ProfileAuthorityError {
     match error {
         ProfileStorageError::QueueFull => ProfileAuthorityError::TemporarilyUnavailable,
         _ => ProfileAuthorityError::StorageStopped,

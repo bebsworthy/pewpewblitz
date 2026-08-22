@@ -1035,13 +1035,23 @@ mod tests {
     fn joined_membership(game_type_id: &str, ticket_id: u128) -> crate::lobby::QueueMembership {
         let builds = crate::builds::BuildCatalog::embedded().unwrap();
         let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-        let preset = builds.preset(crate::builds::BuildPresetId(1)).unwrap();
-        let preview = super::super::build_editor::resolve_build_preview(
-            crate::builds::BuildSelection::Preset(preset.id),
-            &builds,
-            &weapons,
-        )
-        .unwrap();
+        let fighter = crate::combat::FighterDefinitions::default().entries[0];
+        let brawler = crate::profiles::SavedBrawler {
+            id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            creation_ordinal: 1,
+            name: "Queue Brawler".into(),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate_id: crate::builds::UltimateDefinitionId(1),
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+            revision: crate::profiles::ProfileRevision::INITIAL,
+        };
+        let resolved = brawler
+            .resolve_loadout(&builds, &weapons, &fighter)
+            .unwrap();
         crate::lobby::QueueMembership {
             ticket_id: crate::lobby::QueueTicketId::new(ticket_id).unwrap(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
@@ -1050,9 +1060,16 @@ mod tests {
             brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
             brawler_revision: crate::profiles::ProfileRevision::INITIAL,
             accepted_build: crate::builds::AcceptedBuildSummary {
-                canonical_recipe: preset.recipe,
-                identity: preview.identity,
-                total_points: preview.total_points,
+                canonical_recipe: crate::builds::BrawlerBuildRecipe {
+                    weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+                    ultimate: crate::builds::UltimateDefinitionId(1),
+                    passives: [
+                        crate::builds::PassiveDefinitionId(3),
+                        crate::builds::PassiveDefinitionId(4),
+                    ],
+                },
+                identity: resolved.identity,
+                total_points: 0,
             },
             admitted_at_pool_state_revision: 2,
         }
@@ -1067,11 +1084,6 @@ mod tests {
             game_type_id: Some(crate::lobby::GameTypeId::new("hot-zone-3v3").unwrap()),
             configuration_revision: Some(1),
         };
-        let _candidate = crate::builds::BuildCandidate {
-            build_revision: crate::builds::BuildRevision(4),
-            selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
-        };
-
         let brawler_id = crate::profiles::SavedBrawlerId::new(1).unwrap();
         let revision = crate::profiles::ProfileRevision::INITIAL;
         assert!(model.start(&selected, brawler_id, revision));
@@ -1190,10 +1202,6 @@ mod tests {
             game_type_id: Some(crate::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
             configuration_revision: Some(1),
         };
-        let _candidate = crate::builds::BuildCandidate {
-            build_revision: crate::builds::BuildRevision(1),
-            selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
-        };
         assert!(model.start_join(
             &selected,
             crate::profiles::SavedBrawlerId::new(1).unwrap(),
@@ -1280,10 +1288,6 @@ mod tests {
             game_type_id: Some(crate::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
             configuration_revision: Some(1),
         };
-        let _candidate = crate::builds::BuildCandidate {
-            build_revision: crate::builds::BuildRevision(1),
-            selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
-        };
         assert!(model.start_join(
             &selected,
             crate::profiles::SavedBrawlerId::new(1).unwrap(),
@@ -1318,10 +1322,6 @@ mod tests {
             catalog_revision: Some(crate::lobby::CatalogRevision([1; 32])),
             game_type_id: Some(crate::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
             configuration_revision: Some(1),
-        };
-        let _candidate = crate::builds::BuildCandidate {
-            build_revision: crate::builds::BuildRevision(1),
-            selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
         };
         assert!(model.start_join(
             &selected,
