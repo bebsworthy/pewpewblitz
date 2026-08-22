@@ -21,8 +21,8 @@ platform.
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M01 — Durable profile and saved-brawler loop |
+| Status | Not started |
+| Current milestone | M02 — Four-slot weapon-part equipment (not started) |
 | Entry gate | Satisfied: V6 completed and was accepted on 2026-08-22; the user authorized M01 implementation and accepted its five specification-review recommendations on 2026-08-22 |
 | Completion gate | A server-owned profile can create and recover a saved brawler with an immutable fighter-profile/weapon-base pair, equip four interchangeable owned parts, enter routed Practice and multiplayer with the correctly resolved immutable loadout, and preserve authority and storage integrity across restart and failure checks |
 
@@ -81,15 +81,15 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
   but never opens profile data; match workers receive immutable snapshots without store access.
 - Persistent account identity, saved-brawler identity, part-instance identity, match `PlayerId`,
   replicated `NetworkEntityId`, routed identity, and process-local Bevy `Entity` remain distinct.
-- M01 research recommends promoting the existing Default, Lightweight, and Reinforced stat profiles
-  into three permanent creation choices on the same fighter body, while removing the two equivalent
-  frame passives. This recommendation remains part of specification review.
+- M01 promoted the existing Default, Lightweight, and Reinforced stat profiles into three permanent
+  creation choices on the same fighter body and removed the two equivalent frame passives from the
+  player-facing passive catalog.
 
 ## Milestone overview
 
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
-| 01 | User playtest | Minimum server-side profile and durable arsenal: create a saved brawler with a permanent fighter-profile/weapon-base pair, select it from the Dashboard, recover it after restart, and enter matches through the existing routed handoff | [Milestone 01](./milestone-01.md) |
+| 01 | Complete | Minimum server-side profile and durable arsenal: create a saved brawler with a permanent fighter-profile/weapon-base pair, select it from the Dashboard, recover it after restart, and enter matches through the existing routed handoff | [Milestone 01](./milestone-01.md) |
 | 02 | Not started | Four-slot weapon-part equipment: receive a bounded starter inventory, equip any four legal owned parts in interchangeable slots, preview the result, persist it, and play the resolved weapon through the existing combat path | Planned boundary: add the first inventory/equipment migration and typed part resolution only after M01 persistence, queue, Dashboard, and match-handoff evidence; create the milestone file then |
 
 ## V7 architecture selected by M01 research

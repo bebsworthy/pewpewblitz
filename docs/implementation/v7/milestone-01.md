@@ -2,7 +2,7 @@
 
 ## Status
 
-`User playtest`
+`Complete`
 
 Research and specification planning were authorized on 2026-08-22 after V6 completed and was
 accepted. The user approved starting implementation on 2026-08-22, accepting the five review
@@ -523,6 +523,20 @@ Requested observations: clarity of the permanent choice, speed of creating anoth
 Dashboard/controller navigation, trust in save/pending/error feedback, and whether the three launch
 profiles feel meaningfully distinct.
 
+## Playtest feedback and acceptance — 2026-08-22
+
+- **Observed:** the user ran the local setup with one client, created a brawler, then launched the
+  two-client setup. The original client slot recovered the previously created brawler.
+- **Disposition:** accepted with no implementation change. This directly confirms that expanding a
+  local run preserves the numbered client slot's account binding and that the server-owned profile
+  remains available rather than being replaced with a fresh local build.
+- **Coverage:** the accepted observation complements the automated client/server restart, storage
+  restore, queue freeze, immutable match handoff, and routed 1v1/2v2/3v3 evidence. No affected code
+  changed after the final canonical verification, so no additional rerun was required.
+
+The user's “seems to work” result accepts the M01 player-visible recovery slice. No feedback item
+was deferred or rejected.
+
 ## Risks and controls
 
 - **V6 overlap:** V7 invalidates parts of the accepted Balance Lab model. M01 updates that tool in
@@ -575,3 +589,26 @@ The user accepted these research recommendations by authorizing M01 implementati
   without retaining obsolete player-build concepts.
 - Canonical checks/tests/E2E, native visual checks, user feedback triage, and the learn-from-errors
   review pass before M01 is marked complete.
+
+## Learn-from-errors review
+
+- **Exercise the actual persistence serializer, not only the in-memory identity model.** The first
+  native run found that RON cannot encode raw `u128`, even though wire, SQLite, and small fixture IDs
+  passed. Persisted opaque IDs now use their canonical hex representation and the regression uses a
+  full-width value.
+- **Headless E2E and native product startup cover different boundaries.** Headless clients use
+  deterministic IDs and do not write the normal connection file. Future identity/profile changes
+  must retain one native fresh-client and reconnect check alongside routed automation.
+- **Fixtures must consume server-issued identities.** Queue integration tests initially assumed
+  saved-brawler ID `1`; V7 intentionally generates opaque IDs. The harness now waits for the
+  authoritative profile and uses its selected brawler ID and revision.
+- **A product cutover need not erase useful compatibility scaffolding in the same milestone.** The
+  named-build implementation remains isolated for direct-match diagnostics and historical tests,
+  while the Dashboard, Balance Lab, profile authority, queue, and routed handoff expose only V7.
+  This kept the player-visible slice complete without broad unrelated test migration.
+- **Stable local client slots are part of the recovery contract.** The accepted one-client to
+  two-client playtest demonstrated that `just run N` can grow a local session without changing the
+  identity of existing numbered clients.
+
+These lessons are specific to Brawler's identity, profile, and local verification boundaries and
+are recorded here rather than generalized into a new project or Codex skill.
