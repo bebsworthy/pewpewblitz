@@ -596,10 +596,20 @@ fn validate_snapshot(
         }
     }
     let parts = crate::weapon_parts::WeaponPartCatalog::embedded()?;
-    for definition in &parts.definitions {
-        let modifiers =
-            crate::weapon_parts::aggregate_weapon_part_effects(definition.effects.iter().copied())
-                .map_err(|_| "starter weapon part did not aggregate".to_string())?;
+    let slot_count = u32::try_from(crate::weapon_parts::WEAPON_PART_SLOT_COUNT)
+        .expect("weapon-part slot count fits u32");
+    for mask in 0_u16..(1_u16 << parts.definitions.len()) {
+        if mask.count_ones() > slot_count {
+            continue;
+        }
+        let effects = parts
+            .definitions
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| mask & (1 << index) != 0)
+            .flat_map(|(_, definition)| definition.effects.iter().copied());
+        let modifiers = crate::weapon_parts::aggregate_weapon_part_effects(effects)
+            .map_err(|_| "starter weapon-part combination did not aggregate".to_string())?;
         for weapon_id in 1..=4 {
             crate::weapon_parts::resolve_weapon_parts(
                 &next_weapons,
@@ -607,7 +617,9 @@ fn validate_snapshot(
                 WeaponPresetId(weapon_id),
                 modifiers,
             )
-            .map_err(|_| "revised weapon base invalidated a starter part".to_string())?;
+            .map_err(|_| {
+                "revised weapon base invalidated a legal starter-part combination".to_string()
+            })?;
         }
     }
     Ok((next_builds, next_weapons))

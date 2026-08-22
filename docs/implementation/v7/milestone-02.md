@@ -2,11 +2,14 @@
 
 ## Status
 
-`User playtest`
+`Complete`
 
 Research and specification planning were authorized on 2026-08-22 after the user accepted the M01
 saved-brawler recovery loop. The user authorized implementation on 2026-08-22, accepting the four
 review recommendations below.
+
+The user accepted the corrected Dashboard management route, scrollable equipment editor, and
+Balance Lab apply flow by closing V7 on 2026-08-23.
 
 ## Player-visible outcome
 
@@ -551,6 +554,12 @@ Automated verification completed on 2026-08-22 from the implementation tree:
   contents; wide/compact equipment interaction and gameplay feel remain the user-playtest gate.
 - After the first user-feedback correction, all 420 client tests and client all-target Clippy
   passed, including the new selected-brawler preview -> management -> editor -> equipment path.
+- Closeout verification on 2026-08-23 passed `just check`, `just lint`, and `just test` after the
+  accepted feedback corrections. Balance Lab candidate validation now exhaustively resolves all
+  163 legal zero-to-four starter-part combinations against all four proposed live weapon bases,
+  rather than checking only individual parts. The previously passing routed 1v1, 2v2, and 3v3 E2E
+  evidence remains applicable because this final correction changes only the development Balance
+  Lab's pre-apply validation.
 
 ## Risks and controls
 
@@ -599,21 +608,21 @@ both prominent brawler targets had been wired directly to `SelectNextBrawler`, w
 no-visible-change server transaction when only one brawler exists. They now open the existing
 brawler-management overlay; that surface owns Create, Select Next, Edit, Delete, and the nested
 weapon-equipment editor. A focused pointer-path regression covers Dashboard preview -> management
--> editor -> equipment. User validation of the corrected route is pending.
+-> editor -> equipment. The user accepted the corrected flow when closing V7 on 2026-08-23.
 
 The follow-up playtest found that the equipment list declared clipped overflow without owning a
 Bevy `ScrollPosition`, leaving Save below the reachable viewport. Implemented now: slots and
 inventory use a bounded mouse/controller-scrollable region, scroll survives draft rebuilds, focused
 inventory controls are kept visible, and Save/Cancel remain in a fixed footer. The regression now
 also proves wheel movement, an enabled fixed Save action for a valid preview, and successful Save
-dispatch. User validation of the corrected layout is pending.
+dispatch. The user accepted the corrected layout when closing V7 on 2026-08-23.
 
 Balance Lab feedback then found every numeric Apply rejected as `unsupported apply schema`. The V7
 server and returned snapshot had advanced to schema 2, while the web client still hardcoded schema
 1 in Apply and Restore envelopes. Implemented now: Apply derives its envelope schema from the
 authoritative draft snapshot and Restore uses the authoritative state schema, removing the duplicate
-frontend version constant. The production TypeScript/Vite build passes; user validation of Apply is
-pending.
+frontend version constant. The production TypeScript/Vite build passes, and the corrected Apply
+flow was accepted as part of the V7 closeout on 2026-08-23.
 
 During verification, automatically equipping starter parts in the headless bootstrap added a
 second asynchronous SQLite mutation before queue admission and starved the tight deterministic
@@ -622,3 +631,11 @@ resolver, persistence, snapshot, and admission tests own part behavior. Reusable
 Dashboard affordances must enter the complete management flow instead of performing an ambiguous
 single mutation, and test-only bootstrap should not expand product state merely to create evidence;
 exercise the owned transaction explicitly at the narrowest verification boundary.
+
+The remaining closeout review identified that Balance Lab validated each starter part separately
+after a base-tuning proposal but did not validate interactions among legal multi-part loadouts. The
+apply guard now enumerates every zero-to-four-part subset before accepting the proposal. Reusable
+lessons: candidate tuning must be checked against legal compositions, not only individual content
+primitives; scrollable Bevy UI must own explicit scroll state rather than rely on clipping alone;
+and protocol envelopes should derive their schema from authoritative state instead of duplicating a
+frontend constant.

@@ -21,8 +21,8 @@ platform.
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M02 — Four-slot weapon-part equipment (user playtest) |
+| Status | Complete |
+| Current milestone | M02 — Four-slot weapon-part equipment (complete) |
 | Entry gate | Satisfied: V6 completed and was accepted on 2026-08-22; the user authorized M01 implementation and accepted its five specification-review recommendations on 2026-08-22 |
 | Completion gate | A server-owned profile can create and recover a saved brawler with an immutable fighter-profile/weapon-base pair, equip four interchangeable owned parts, enter routed Practice and multiplayer with the correctly resolved immutable loadout, and preserve authority and storage integrity across restart and failure checks |
 
@@ -90,7 +90,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
 | 01 | Complete | Minimum server-side profile and durable arsenal: create a saved brawler with a permanent fighter-profile/weapon-base pair, select it from the Dashboard, recover it after restart, and enter matches through the existing routed handoff | [Milestone 01](./milestone-01.md) |
-| 02 | User playtest | Four-slot weapon-part equipment: receive a bounded starter inventory, equip any four legal owned parts in interchangeable slots, preview the result, persist it, and play the resolved weapon through the existing combat path | [Milestone 02](./milestone-02.md) |
+| 02 | Complete | Four-slot weapon-part equipment: receive a bounded starter inventory, equip any four legal owned parts in interchangeable slots, preview the result, persist it, and play the resolved weapon through the existing combat path | [Milestone 02](./milestone-02.md) |
 
 ## V7 architecture selected by M01 research
 
@@ -139,8 +139,21 @@ the existing pure weapon resolver remains the only path into combat. Queue admis
 equipped effects into a compact canonical modifier set, resolves and fingerprints the weapon, and
 hands only those immutable gameplay facts to the match worker. The implemented starter set contains
 eight broadly compatible sidegrades. Profile-wide instance exclusivity, exact persisted rolls, and
-the retained 255-byte routed snapshot bound are accepted and verified; native player feedback is
-the remaining M02 gate.
+the retained 255-byte routed snapshot bound are accepted and verified. The user accepted the
+corrected Dashboard management route, scrollable equipment editor, and Balance Lab apply flow and
+closed V7 on 2026-08-23.
+
+## V7 completion
+
+V7 completed and was accepted on 2026-08-23. M01 delivered the server-owned persistent profile,
+saved-brawler lifecycle, immutable fighter-profile/weapon-base choice, queue freeze, SQLite
+migration/backup/restore path, and routed immutable handoff. M02 delivered the fixed starter
+inventory, four interchangeable part slots, exact persisted rolls, deterministic weapon resolution,
+Dashboard equipment flow, and part-aware match and Balance Lab paths. Closeout incorporated the
+player-reported Dashboard navigation, equipment scrolling/save, and Balance Lab schema corrections;
+canonical checks, lint, tests, routed 1v1/2v2/3v3 evidence, feedback triage, and the learning review
+passed. Deferred authentication, cloud, browser, acquisition, economy, trading, crafting, advanced
+effects, and composited weapon-art work remains backlog rather than implicit V7 scope.
 
 ## Initial V7 backlog
 
