@@ -185,7 +185,7 @@ impl Harness {
         let raw_catalog = include_bytes!("../../config/server/game-types.ron").to_vec();
         let manifest = brawler_routing::LobbyManifest {
             common: brawler_routing::ManifestCommon {
-                manifest_version: 1,
+                manifest_version: 2,
                 role: brawler_routing::WorkerRole::Lobby,
                 logical_server_id: brawler_routing::LogicalServerId::new(1).unwrap(),
                 process_id: brawler_routing::ProcessId::new(2).unwrap(),
@@ -204,6 +204,13 @@ impl Harness {
             outstanding_allocations: 2,
             active_matches: 2,
             heartbeat_ms: 100,
+            profile_database_path: std::env::temp_dir()
+                .join(format!(
+                    "brawler-network-profiles-{}.sqlite3",
+                    std::process::id()
+                ))
+                .to_string_lossy()
+                .into_owned(),
             raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(&raw_catalog),
             raw_catalog,
             nonce: 11,

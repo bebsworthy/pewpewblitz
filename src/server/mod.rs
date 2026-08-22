@@ -742,32 +742,17 @@ fn process_client_hellos(
                                         .fighters
                                         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
                                         .expect("validated standard fighter definition");
-                                    let snapshot = crate::builds::MatchBuildSnapshotV1::decode(
+                                    let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(
                                         &participant.build_snapshot,
                                     )
                                     .expect("validated manifest build snapshot");
-                                    let (recipe, preset_id) = match snapshot.candidate.selection {
-                                        crate::builds::BuildSelection::Preset(id) => (
-                                            content
-                                                .builds
-                                                .0
-                                                .preset(id)
-                                                .expect("validated manifest build preset")
-                                                .recipe,
-                                            Some(id),
-                                        ),
-                                        crate::builds::BuildSelection::Custom(recipe) => {
-                                            (recipe, None)
-                                        }
-                                    };
-                                    let loadout = crate::builds::resolve_build_recipe(
-                                        &content.builds.0,
-                                        &content.weapon_catalog.0,
-                                        fighter,
-                                        recipe,
-                                        preset_id,
-                                    )
-                                    .expect("validated manifest build resolution");
+                                    let loadout = snapshot
+                                        .resolve(
+                                            &content.builds.0,
+                                            &content.weapon_catalog.0,
+                                            fighter,
+                                        )
+                                        .expect("validated manifest build resolution");
                                     (team, Some(loadout))
                                 } else {
                                     let assigned_team = assigned_team(

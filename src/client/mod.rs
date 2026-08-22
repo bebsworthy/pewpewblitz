@@ -14,8 +14,8 @@ use crate::{
     movement::AvianNetworkPlugin,
     protocol::{
         BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
-        Fighter, FighterInput, LobbyHello, LobbyJoinOutcome, MatchCommand, MatchCommandOutcome,
-        MatchCommandRequest, MatchHello, MatchJoinOutcome, MatchJoinRejection,
+        Fighter, FighterInput, LobbyHello, LobbyJoinOutcome, LobbyServerIdentity, MatchCommand,
+        MatchCommandOutcome, MatchCommandRequest, MatchHello, MatchJoinOutcome, MatchJoinRejection,
         MatchLoadingClientAction, MatchLoadingClientMessage, MatchLoadingServerMessage,
         MatchLoadingStatus, MatchRouteGrant, NetworkEntityId, PlayerId, ProtocolFingerprint,
         ProtocolPlugin, SessionChannel,
@@ -63,6 +63,7 @@ mod input;
 pub mod prediction;
 mod presentation;
 pub(crate) mod presentation_3d;
+mod profile;
 mod queue;
 mod routed_udp;
 mod server_select;
@@ -84,6 +85,7 @@ use input::*;
 pub use presentation::ClientPresentationPlugin;
 #[cfg(test)]
 use presentation::{clamp_camera_center, update_client_hud};
+pub use profile::{ClientProfileModel, ClientProfilePlugin};
 pub use queue::{
     ClientMatchLoadingModel, ClientPracticeModel, ClientQueueModel, ClientQueuePlugin,
     PendingQueueCommand,
@@ -227,11 +229,25 @@ pub enum ClientJoinPhase {
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ClientLobbyMembership {
+    pub logical_server_id: u128,
     pub player_id: PlayerId,
     pub accepted_display_name: String,
     pub server_name: String,
     pub catalog_revision: crate::lobby::CatalogRevision,
     pub game_types: Vec<crate::lobby::AdvertisedGameType>,
+    pub profile: crate::profiles::ProfileSnapshot,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+struct ClientLobbyIdentity {
+    logical_server_id: u128,
+    account_id: crate::profiles::AccountId,
+}
+
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+struct ClientProfileIdentityState {
+    logical_server_id: Option<u128>,
+    account_id: Option<crate::profiles::AccountId>,
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]

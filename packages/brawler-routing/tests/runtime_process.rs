@@ -35,7 +35,7 @@ fn launch_lobby_spec() -> WorkerLaunchSpec {
     };
     let manifest = LobbyManifest {
         common: ManifestCommon {
-            manifest_version: 1,
+            manifest_version: 2,
             role: WorkerRole::Lobby,
             logical_server_id: id128(1),
             process_id: registration.process_id,
@@ -54,6 +54,7 @@ fn launch_lobby_spec() -> WorkerLaunchSpec {
         outstanding_allocations: 2,
         active_matches: 1,
         heartbeat_ms: 100,
+        profile_database_path: "profiles.sqlite3".to_string(),
         raw_catalog: b"catalog".to_vec(),
         raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(b"catalog"),
         nonce: 6,
@@ -96,7 +97,6 @@ fn allocation_request() -> AllocateRequestBody {
                 netcode_client_id: id64(301),
                 team: 0,
                 display_name: brawler_routing::MatchDisplayName::new("Player 1").unwrap(),
-                source_build_preset: Some(1),
                 recipe_fingerprint: 11,
                 build_revision: 1,
                 build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[1]).unwrap(),
@@ -107,7 +107,6 @@ fn allocation_request() -> AllocateRequestBody {
                 netcode_client_id: id64(302),
                 team: 1,
                 display_name: brawler_routing::MatchDisplayName::new("Player 2").unwrap(),
-                source_build_preset: Some(2),
                 recipe_fingerprint: 12,
                 build_revision: 1,
                 build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[2]).unwrap(),
@@ -118,7 +117,6 @@ fn allocation_request() -> AllocateRequestBody {
                 netcode_client_id: id64(303),
                 team: 0,
                 display_name: brawler_routing::MatchDisplayName::new("Player 3").unwrap(),
-                source_build_preset: Some(3),
                 recipe_fingerprint: 13,
                 build_revision: 1,
                 build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[3]).unwrap(),
@@ -129,7 +127,6 @@ fn allocation_request() -> AllocateRequestBody {
                 netcode_client_id: id64(304),
                 team: 1,
                 display_name: brawler_routing::MatchDisplayName::new("Player 4").unwrap(),
-                source_build_preset: Some(4),
                 recipe_fingerprint: 14,
                 build_revision: 1,
                 build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[4]).unwrap(),

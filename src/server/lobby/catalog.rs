@@ -260,16 +260,20 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     let revision = catalog_revision(&advertised)
         .map_err(|error| format!("catalog revision failed: {error}"))?;
     let welcome = crate::protocol::LobbyJoinOutcome::Accepted {
+        logical_server_id: 1,
         player_id: crate::protocol::PlayerId(1),
         accepted_display_name: "Brawler-FFFF".to_string(),
         server_name: server_name.clone(),
         catalog_revision: revision,
         game_types: advertised.clone(),
+        profile: crate::profiles::ProfileSnapshot::empty(
+            crate::profiles::AccountId::new(1).expect("constant account ID is nonzero"),
+        ),
     };
     let welcome_bytes = postcard::to_allocvec(&welcome)
         .map_err(|error| format!("lobby welcome encoding failed: {error}"))?;
     if welcome_bytes.len() > crate::protocol::MAX_LOBBY_WELCOME_BYTES {
-        return Err("resolved lobby welcome exceeds 12 KiB".to_string());
+        return Err("resolved lobby welcome exceeds 32 KiB".to_string());
     }
     Ok(ResolvedLobbyCatalog {
         server_name,

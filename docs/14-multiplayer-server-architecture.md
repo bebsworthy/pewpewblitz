@@ -28,8 +28,9 @@ One logical Brawler server consists of:
 
 1. One **supervisor/router process** owning the public UDP socket, routing capabilities, bounded
    route and worker registries, host admission, child handles, and shutdown coordination.
-2. One long-lived **lobby worker process** owning a headless Bevy `App`/`World` and Lightyear
-   authority for game types, sessions, builds, queues, and reservations—not match simulation. It
+2. One long-lived **lobby worker process** owning a headless Bevy `App`/`World`, Lightyear
+   authority for game types, sessions, profiles, queues, and reservations, plus the exclusive
+   bounded SQLite profile-storage executor—not match simulation. It
    requests host admission and match-worker allocation from the supervisor. Embedding the lobby in
    the supervisor is a deviation that must return to specification review with measured evidence;
    it is not the default topology.
@@ -170,9 +171,10 @@ Spawned -> ManifestSent -> Ready -> Running -> Draining -> Exited
 ```
 
 The immutable match manifest contains match/game-type identity, protocol/content fingerprints,
-mode, map/seed, rules, topology, accepted participants/builds, route identities, and declared
-limits. The lobby manifest instead contains logical-server identity, game-type catalog/configuration
-fingerprints, default-route identity, declared limits, and restart/reconciliation inputs. Each worker
+mode, map/seed, rules, topology, accepted participants and opaque immutable V2 loadout snapshots,
+route identities, and declared limits. It contains no account ID, profile cache, or database path.
+The lobby manifest instead contains logical-server identity, its lobby-only profile database path,
+game-type catalog/configuration fingerprints, default-route identity, declared limits, and restart/reconciliation inputs. Each worker
 validates its role-specific manifest completely before reporting readiness or accepting a client.
 
 ## Authority and ownership boundaries

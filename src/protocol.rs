@@ -244,12 +244,19 @@ pub struct MatchHello {
     pub content_fingerprint: GameplayContentFingerprint,
 }
 
+/// Public stable identity announced by a lobby before the client selects its local account key.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LobbyServerIdentity {
+    pub logical_server_id: u128,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct LobbyHello {
     pub protocol_version: u16,
     pub build_version: String,
     pub registry_fingerprint: u64,
     pub content_fingerprint: GameplayContentFingerprint,
+    pub account_id: crate::profiles::AccountId,
     #[serde(deserialize_with = "crate::lobby::deserialize_player_name")]
     pub proposed_display_name: String,
 }
@@ -257,6 +264,7 @@ pub struct LobbyHello {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum LobbyJoinOutcome {
     Accepted {
+        logical_server_id: u128,
         player_id: PlayerId,
         #[serde(deserialize_with = "crate::lobby::deserialize_accepted_player_name")]
         accepted_display_name: String,
@@ -265,13 +273,14 @@ pub enum LobbyJoinOutcome {
         catalog_revision: crate::lobby::CatalogRevision,
         #[serde(deserialize_with = "crate::lobby::deserialize_game_types")]
         game_types: Vec<crate::lobby::AdvertisedGameType>,
+        profile: crate::profiles::ProfileSnapshot,
     },
     Rejected {
         reason: LobbyJoinRejection,
     },
 }
 
-pub const MAX_LOBBY_WELCOME_BYTES: usize = 12 * 1024;
+pub const MAX_LOBBY_WELCOME_BYTES: usize = 32 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum LobbyJoinRejection {
@@ -282,6 +291,9 @@ pub enum LobbyJoinRejection {
     ServerFull,
     InvalidName,
     IdentifierExhausted,
+    InvalidAccount,
+    AccountInUse,
+    StorageUnavailable,
 }
 
 /// A route selector capability delivered over the authenticated lobby session.
@@ -717,6 +729,8 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<LobbyHello>()
             .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<LobbyServerIdentity>()
+            .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<LobbyJoinOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<crate::profiles::ProfileCommand>()
@@ -840,6 +854,7 @@ mod tests {
         assert!(app.is_message_registered::<MatchHello>());
         assert!(app.is_message_registered::<MatchJoinOutcome>());
         assert!(app.is_message_registered::<LobbyHello>());
+        assert!(app.is_message_registered::<LobbyServerIdentity>());
         assert!(app.is_message_registered::<LobbyJoinOutcome>());
         assert!(app.is_message_registered::<crate::lobby::QueueClientMessage>());
         assert!(app.is_message_registered::<crate::lobby::QueueCommandOutcome>());
@@ -978,21 +993,29 @@ mod tests {
             },
         };
         let oversized = LobbyJoinOutcome::Accepted {
+            logical_server_id: 1,
             player_id: PlayerId(1),
             accepted_display_name: "Player One".to_string(),
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type.clone(); crate::lobby::MAX_GAME_TYPES + 1],
+            profile: crate::profiles::ProfileSnapshot::empty(
+                crate::profiles::AccountId::new(1).unwrap(),
+            ),
         };
         let bytes = postcard::to_allocvec(&oversized).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
 
         let invalid_name = LobbyJoinOutcome::Accepted {
+            logical_server_id: 1,
             player_id: PlayerId(1),
             accepted_display_name: "Cafe\u{301}".to_string(),
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type],
+            profile: crate::profiles::ProfileSnapshot::empty(
+                crate::profiles::AccountId::new(1).unwrap(),
+            ),
         };
         let bytes = postcard::to_allocvec(&invalid_name).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());

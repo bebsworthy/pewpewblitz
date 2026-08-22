@@ -84,7 +84,7 @@ fn lobby_spec(mode: &str) -> WorkerLaunchSpec {
     };
     let manifest = LobbyManifest {
         common: ManifestCommon {
-            manifest_version: 1,
+            manifest_version: 2,
             role: WorkerRole::Lobby,
             logical_server_id: id128(LOGICAL_SERVER_ID),
             process_id: registration.process_id,
@@ -103,6 +103,7 @@ fn lobby_spec(mode: &str) -> WorkerLaunchSpec {
         outstanding_allocations: 2,
         active_matches: 2,
         heartbeat_ms: 100,
+        profile_database_path: "profiles.sqlite3".to_string(),
         raw_catalog: b"catalog".to_vec(),
         raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(b"catalog"),
         nonce: 6,
@@ -131,7 +132,6 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
         peer_id: id128(40_000 + worker),
         team: 0,
         display_name: brawler_routing::MatchDisplayName::new("Player").unwrap(),
-        source_build_preset: Some(1),
         recipe_fingerprint: worker_u64,
         revision: 1,
         build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[1]).unwrap(),

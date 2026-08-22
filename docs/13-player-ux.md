@@ -62,8 +62,8 @@ flowchart TD
     Connecting -- "cancel / bounded failure / rejection" --> ServerSelect[Server Select]
     ServerSelect -- connect --> Connecting
 
-    Dashboard -- "Change Brawler" --> BuildEditor[Build Editor child]
-    BuildEditor -- "Confirm / Back" --> Dashboard
+    Dashboard -- "Create / select / edit" --> Arsenal[Saved Brawler controls]
+    Arsenal -- "accepted outcome / Back" --> Dashboard
     Dashboard -- "Change Game" --> GameTypeSelect[Game Type Select child]
     GameTypeSelect -- "Confirm / Back" --> Dashboard
 
@@ -102,15 +102,15 @@ remain explicit.
 |---|---|---|
 | Connecting | Initial or manual lobby connection progress | May expose Cancel, Settings, and Quit; success enters Dashboard |
 | Server Select | Recovery and manual connection | Owns address, display name, favorites, and recents; it does not pretend to be a connected home |
-| Player Dashboard | Sole authenticated home | Owns selected fighter/game summary, Play, Practice, and connected utilities |
+| Player Dashboard | Sole authenticated home | Owns the authoritative saved-brawler list and selection, selected game summary, Play, Practice, and connected utilities |
 | Game Type Select | Dashboard child | Edits one local advertised-game draft; Confirm commits and Back discards |
-| Build Editor | Dashboard child | Edits one bounded local build draft; Confirm commits and Back discards |
+| Saved Brawler controls | Dashboard child/overlay | Sends create, select, mutable edit, and confirmed delete intent; permanent fighter-profile/weapon-base facts are visible but never emitted by edit |
 | Queue | Accepted multiplayer admission | Shows the frozen accepted request and honest pool facts; Cancel awaits acknowledgement |
 | Match Loading | Reserved-match handoff and readiness | Shows server-owned progress and bounded cancellation or return behavior |
 | Match | Authoritative gameplay | Owns world presentation, HUD, non-pausing menu, and scoreboard presentation |
 | Match Complete | Transient result-preservation bridge | Accepts no navigation while lobby return and result capture converge |
 | Results | Completed-match decision | Keeps the authoritative outcome visible and offers exact replay or Dashboard |
-| Dashboard Menu | Connected utility overlay | Owns Credits, favorite-server action, Change Server, and Quit |
+| Dashboard Menu | Connected utility overlay | Owns saved-brawler management, Credits, favorite-server action, Change Server, and Quit |
 | Settings | Local settings surface | Returns to its explicit product-flow or match-menu origin |
 | Credits | Attribution surface | Reached from Dashboard Menu; required attribution derives from the asset manifest |
 | Confirmations | Destructive or membership-changing decisions | Preserve and restore their invoking context deterministically |
@@ -227,9 +227,10 @@ metadata, never identity or authorization. The server applies bounded normalizat
 control validation, and deterministic duplicate handling. A usable generated default lets a
 controller player complete the ordinary flow without text entry.
 
-Settings, favorites, recents, display name, and last-used build are local client data with explicit
+Settings, favorites, recents, display name, and the account binding for each logical server are local client data with explicit
 schema versions, bounded input, atomic replacement, and safe fallback after missing or malformed
-data. Favorites remain explicit; recents remain bounded and automatic. None of this persistence
+data. The retired local build file is neither imported nor rewritten. Favorites remain explicit;
+recents remain bounded and automatic. None of this persistence
 belongs in the dedicated-server feature graph.
 
 V7 adds a fresh server-side persistent arsenal and does not import the locally saved build. An

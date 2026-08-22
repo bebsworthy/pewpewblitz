@@ -17,6 +17,8 @@ use crate::{
     limits::{CONTROL_VERSION_CURRENT, PACKET_VERSION_V1, ROUTE_VERSION_V1},
 };
 
+const MAX_PROFILE_DATABASE_PATH_BYTES: usize = 4_096;
+
 /// Worker role carried by manifests and control bodies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -78,7 +80,7 @@ pub struct ManifestCommon {
 impl ManifestCommon {
     fn validate(self, expected_role: WorkerRole) -> Result<(), CodecError> {
         let expected_version = match expected_role {
-            WorkerRole::Lobby => 1,
+            WorkerRole::Lobby => 2,
             WorkerRole::Match => 3,
         };
         if self.manifest_version != expected_version || self.role != expected_role {
@@ -152,6 +154,8 @@ pub struct LobbyManifest {
     pub outstanding_allocations: u16,
     pub active_matches: u16,
     pub heartbeat_ms: u32,
+    /// UTF-8 lobby-only SQLite path. The supervisor transports it but never opens it.
+    pub profile_database_path: String,
     /// Opaque operator configuration. Only the lobby worker parses these bytes.
     pub raw_catalog: Vec<u8>,
     pub raw_catalog_fingerprint: [u8; 32],
@@ -172,6 +176,7 @@ impl fmt::Debug for LobbyManifest {
             .field("outstanding_allocations", &self.outstanding_allocations)
             .field("active_matches", &self.active_matches)
             .field("heartbeat_ms", &self.heartbeat_ms)
+            .field("profile_database_path", &"[REDACTED]")
             .field("raw_catalog_bytes", &self.raw_catalog.len())
             .field("raw_catalog_fingerprint", &"[REDACTED]")
             .field("nonce", &"[REDACTED]")
@@ -202,6 +207,10 @@ impl LobbyManifest {
         encoder.put_u16(self.outstanding_allocations);
         encoder.put_u16(self.active_matches);
         encoder.put_u32(self.heartbeat_ms);
+        encoder.put_u16(
+            u16::try_from(self.profile_database_path.len()).map_err(|_| CodecError::Oversize)?,
+        );
+        encoder.put_bytes(self.profile_database_path.as_bytes());
         encoder.put_u32(u32::try_from(self.raw_catalog.len()).map_err(|_| CodecError::Oversize)?);
         encoder.put_bytes(&self.raw_catalog);
         encoder.put_bytes(&self.raw_catalog_fingerprint);
@@ -243,6 +252,11 @@ impl LobbyManifest {
         let outstanding_allocations = decoder.u16()?;
         let active_matches = decoder.u16()?;
         let heartbeat_ms = decoder.u32()?;
+        let profile_database_path_length = usize::from(decoder.u16()?);
+        let profile_database_path =
+            core::str::from_utf8(decoder.take(profile_database_path_length)?)
+                .map_err(|_| CodecError::InvalidValue)?
+                .to_string();
         let catalog_length = usize::try_from(decoder.u32()?).map_err(|_| CodecError::Oversize)?;
         if catalog_length == 0 || catalog_length > MAX_LOBBY_CATALOG_BYTES {
             return Err(CodecError::Oversize);
@@ -255,6 +269,7 @@ impl LobbyManifest {
             outstanding_allocations,
             active_matches,
             heartbeat_ms,
+            profile_database_path,
             raw_catalog,
             raw_catalog_fingerprint: decoder
                 .take(32)?
@@ -276,6 +291,9 @@ impl LobbyManifest {
             || self.outstanding_allocations == 0
             || self.active_matches == 0
             || self.heartbeat_ms == 0
+            || self.profile_database_path.is_empty()
+            || self.profile_database_path.len() > MAX_PROFILE_DATABASE_PATH_BYTES
+            || self.profile_database_path.contains('\0')
             || self.raw_catalog.is_empty()
             || self.raw_catalog.len() > MAX_LOBBY_CATALOG_BYTES
             || raw_catalog_fingerprint(&self.raw_catalog) != self.raw_catalog_fingerprint
@@ -369,7 +387,6 @@ pub struct MatchManifestParticipant {
     pub peer_id: PeerId,
     pub team: u8,
     pub display_name: MatchDisplayName,
-    pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub revision: u16,
     pub build_snapshot: MatchBuildSnapshot,
@@ -395,13 +412,6 @@ fn encode_match_participant(encoder: &mut Encoder, participant: &MatchManifestPa
     encoder.put_u8(participant.team);
     encoder.put_u8(u8::try_from(participant.display_name.as_str().len()).expect("bounded"));
     encoder.put_bytes(participant.display_name.as_str().as_bytes());
-    match participant.source_build_preset {
-        None => encoder.put_u8(0),
-        Some(preset) => {
-            encoder.put_u8(1);
-            encoder.put_u16(preset);
-        }
-    }
     encoder.put_u64(participant.recipe_fingerprint);
     encoder.put_u16(participant.revision);
     encoder.put_u8(u8::try_from(participant.build_snapshot.as_bytes().len()).expect("bounded"));
@@ -421,7 +431,6 @@ fn decode_match_participant(
     let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
         .map_err(|_| CodecError::InvalidValue)
         .and_then(MatchDisplayName::new)?;
-    let source_build_preset = decoder.optional(Decoder::u16)?;
     let recipe_fingerprint = decoder.u64()?;
     let revision = decoder.u16()?;
     let build_length = usize::from(decoder.u8()?);
@@ -432,7 +441,6 @@ fn decode_match_participant(
         peer_id,
         team,
         display_name,
-        source_build_preset,
         recipe_fingerprint,
         revision,
         build_snapshot: MatchBuildSnapshot::new(decoder.take(build_length)?)?,
@@ -445,7 +453,6 @@ pub struct MatchManifestBot {
     pub player_id: crate::PlayerId,
     pub team: u8,
     pub display_name: MatchDisplayName,
-    pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub revision: u16,
     pub build_snapshot: MatchBuildSnapshot,
@@ -468,13 +475,6 @@ fn encode_match_bot(encoder: &mut Encoder, bot: &MatchManifestBot) {
     encoder.put_u8(bot.team);
     encoder.put_u8(u8::try_from(bot.display_name.as_str().len()).expect("bounded"));
     encoder.put_bytes(bot.display_name.as_str().as_bytes());
-    match bot.source_build_preset {
-        None => encoder.put_u8(0),
-        Some(preset) => {
-            encoder.put_u8(1);
-            encoder.put_u16(preset);
-        }
-    }
     encoder.put_u64(bot.recipe_fingerprint);
     encoder.put_u16(bot.revision);
     encoder.put_u8(u8::try_from(bot.build_snapshot.as_bytes().len()).expect("bounded"));
@@ -488,7 +488,6 @@ fn decode_match_bot(decoder: &mut Decoder<'_>) -> Result<MatchManifestBot, Codec
     let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
         .map_err(|_| CodecError::InvalidValue)
         .and_then(MatchDisplayName::new)?;
-    let source_build_preset = decoder.optional(Decoder::u16)?;
     let recipe_fingerprint = decoder.u64()?;
     let revision = decoder.u16()?;
     let build_length = usize::from(decoder.u8()?);
@@ -496,7 +495,6 @@ fn decode_match_bot(decoder: &mut Decoder<'_>) -> Result<MatchManifestBot, Codec
         player_id,
         team,
         display_name,
-        source_build_preset,
         recipe_fingerprint,
         revision,
         build_snapshot: MatchBuildSnapshot::new(decoder.take(build_length)?)?,
@@ -727,7 +725,6 @@ mod tests {
             peer_id: id128(u128::from(index) + 30),
             team: u8::try_from(index % 2).unwrap(),
             display_name: MatchDisplayName::new("Player").unwrap(),
-            source_build_preset: Some(u16::try_from(index + 40).unwrap()),
             recipe_fingerprint: index + 50,
             revision: u16::try_from(index + 60).unwrap(),
             build_snapshot: MatchBuildSnapshot::new(&[1, 2, 3]).unwrap(),

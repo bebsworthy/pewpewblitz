@@ -142,3 +142,93 @@ fn sqlite_backup_restores_exact_profile() {
     std::fs::remove_file(database).unwrap();
     std::fs::remove_file(backup).unwrap();
 }
+
+#[cfg(feature = "server")]
+fn poll_authority(
+    authority: &mut ProfileAuthority,
+) -> (Vec<ProfileLoadCompletion>, Vec<(u64, ProfileOutcome)>) {
+    for _ in 0..10_000 {
+        let result = authority.poll_loads().unwrap();
+        if !result.0.is_empty() || !result.1.is_empty() {
+            return result;
+        }
+        std::thread::yield_now();
+    }
+    panic!("profile storage did not complete bounded test work");
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
+    let database = path("authority");
+    let account = AccountId::new(42).unwrap();
+    let mut authority = ProfileAuthority::start(database.clone()).unwrap();
+    authority.begin_load(7, account).unwrap();
+    assert_eq!(
+        authority.begin_load(8, account),
+        Err(ProfileAuthorityError::AccountInUse)
+    );
+    let (loads, _) = poll_authority(&mut authority);
+    assert_eq!(
+        loads[0].result.as_ref().unwrap(),
+        &ProfileSnapshot::empty(account)
+    );
+
+    let create = ProfileCommand::CreateBrawler {
+        request_id: 1,
+        expected_profile_revision: ProfileRevision::INITIAL,
+        draft: draft("Authority", 2, 3),
+    };
+    assert_eq!(
+        authority.submit_command(7, create.clone(), false).unwrap(),
+        ProfileMutationSubmission::Pending
+    );
+    assert_eq!(
+        authority.submit_command(7, create.clone(), false).unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            request_id: 1,
+            decision: ProfileDecision::TemporarilyUnavailable,
+            snapshot: None,
+        })
+    );
+    let (_, outcomes) = poll_authority(&mut authority);
+    assert_eq!(outcomes[0].1.decision, ProfileDecision::Accepted);
+    let snapshot = authority.snapshot(7).unwrap().clone();
+    assert_eq!(snapshot.brawlers.len(), 1);
+    let brawler = snapshot.brawlers[0].clone();
+
+    let replay = authority.submit_command(7, create, false).unwrap();
+    assert!(matches!(
+        replay,
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            decision: ProfileDecision::Accepted,
+            ..
+        })
+    ));
+    let edit = ProfileCommand::EditBrawler {
+        request_id: 2,
+        expected_profile_revision: snapshot.revision,
+        brawler_id: brawler.id,
+        expected_brawler_revision: brawler.revision,
+        edit: BrawlerEdit {
+            name: "Queued edit".into(),
+            ultimate_id: brawler.ultimate_id,
+            passive_ids: brawler.passive_ids,
+        },
+    };
+    assert!(matches!(
+        authority.submit_command(7, edit, true).unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            decision: ProfileDecision::QueueLocked,
+            ..
+        })
+    ));
+    assert_eq!(authority.snapshot(7).unwrap().brawlers[0], brawler);
+
+    authority.remove_client(7);
+    authority.begin_load(8, account).unwrap();
+    let (loads, _) = poll_authority(&mut authority);
+    assert_eq!(loads[0].result.as_ref().unwrap().brawlers[0], brawler);
+    drop(authority);
+    std::fs::remove_file(database).unwrap();
+}

@@ -5,9 +5,8 @@ mod persistence;
 
 use crate::{
     builds::{
-        BuildCatalog, BuildCatalogResource, BuildResolutionError, BuildSelection,
-        CustomPulseTuning, FighterStatProfiles, MatchBuildSnapshotV1, ResolvedMatchLoadout,
-        SelectedBuild, resolve_build_recipe,
+        BuildCatalog, BuildCatalogResource, BuildResolutionError, CustomPulseTuning,
+        FighterStatProfiles, ResolvedMatchLoadout, SelectedBuild, resolve_build_recipe,
     },
     combat::{
         CurrentHealth, DamageFalloff, DeliveryMethod, FighterDefinitions, FiringPattern,
@@ -434,10 +433,7 @@ fn apply_balance_lab_transaction(
             );
             return;
         };
-        let (recipe, preset) = selection_recipe(&next_builds, snapshot);
-        let Ok(loadout) =
-            resolve_build_recipe(&next_builds, &next_weapons, fighter, recipe, preset)
-        else {
+        let Ok(loadout) = snapshot.resolve(&next_builds, &next_weapons, fighter) else {
             reject(
                 runtime,
                 transaction_id,
@@ -512,7 +508,7 @@ fn apply_balance_lab_transaction(
 
 fn manifest_selections(
     manifest: &brawler_routing::MatchManifestV1,
-) -> Result<BTreeMap<u64, MatchBuildSnapshotV1>, String> {
+) -> Result<BTreeMap<u64, crate::profiles::MatchBuildSnapshotV2>, String> {
     let mut selections = BTreeMap::new();
     for (player_id, bytes) in manifest
         .participants
@@ -525,32 +521,13 @@ fn manifest_selections(
                 .map(|row| (row.player_id.get(), &row.build_snapshot)),
         )
     {
-        let snapshot = MatchBuildSnapshotV1::decode(bytes)
+        let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(bytes)
             .map_err(|_| "invalid admitted build snapshot".to_string())?;
         if selections.insert(player_id, snapshot).is_some() {
             return Err("duplicate admitted player build".into());
         }
     }
     Ok(selections)
-}
-
-fn selection_recipe(
-    builds: &BuildCatalog,
-    snapshot: &MatchBuildSnapshotV1,
-) -> (
-    crate::builds::BrawlerBuildRecipe,
-    Option<crate::builds::BuildPresetId>,
-) {
-    match snapshot.candidate.selection {
-        BuildSelection::Preset(id) => (
-            builds
-                .preset(id)
-                .expect("validated admitted preset remains present")
-                .recipe,
-            Some(id),
-        ),
-        BuildSelection::Custom(recipe) => (recipe, None),
-    }
 }
 
 fn validate_snapshot(
@@ -823,30 +800,35 @@ mod tests {
         weapons: &WeaponCatalog,
         fighter: &crate::combat::FighterDefinition,
         id: crate::builds::BuildPresetId,
-    ) -> (MatchBuildSnapshotV1, ResolvedMatchLoadout) {
+    ) -> (crate::profiles::MatchBuildSnapshotV2, ResolvedMatchLoadout) {
         let preset = builds.preset(id).unwrap();
-        let resolved =
-            resolve_build_recipe(builds, weapons, fighter, preset.recipe, Some(id)).unwrap();
-        (
-            MatchBuildSnapshotV1 {
-                schema_version: MatchBuildSnapshotV1::SCHEMA_VERSION,
-                candidate: crate::builds::BuildCandidate {
-                    build_revision: builds.balance_revision,
-                    selection: BuildSelection::Preset(id),
-                },
-                accepted: crate::builds::AcceptedBuildSummary {
-                    canonical_recipe: preset.recipe,
-                    identity: resolved.identity,
-                    total_points: resolved.total_points,
-                },
-            },
-            resolved,
-        )
+        let weapon = match preset.recipe.weapon {
+            crate::builds::WeaponChoice::Preset(id) => id.0,
+            crate::builds::WeaponChoice::CustomPulse { .. } => 1,
+        };
+        let brawler = crate::profiles::SavedBrawler {
+            id: crate::profiles::SavedBrawlerId::new(u128::from(id.0)).unwrap(),
+            creation_ordinal: u64::from(id.0),
+            name: format!("Lab {}", id.0),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(weapon),
+            ultimate_id: preset.recipe.ultimate,
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+            revision: crate::profiles::ProfileRevision::INITIAL,
+        };
+        let snapshot =
+            crate::profiles::MatchBuildSnapshotV2::from_brawler(&brawler, builds, weapons, fighter)
+                .unwrap();
+        let resolved = snapshot.resolve(builds, weapons, fighter).unwrap();
+        (snapshot, resolved)
     }
 
     fn practice_manifest(
-        human: &MatchBuildSnapshotV1,
-        bot: &MatchBuildSnapshotV1,
+        human: &crate::profiles::MatchBuildSnapshotV2,
+        bot: &crate::profiles::MatchBuildSnapshotV2,
     ) -> brawler_routing::MatchManifestV1 {
         use brawler_routing::{
             AllocationId, Generation, LobbySessionId, LogicalServerId, ManifestCommon,
@@ -888,7 +870,6 @@ mod tests {
                 peer_id: PeerId::new(8).unwrap(),
                 team: 0,
                 display_name: MatchDisplayName::new("Operator").unwrap(),
-                source_build_preset: Some(1),
                 recipe_fingerprint: human.accepted.identity.recipe_fingerprint.0,
                 revision: human.accepted.identity.revision.0,
                 build_snapshot: human.encode().unwrap(),
@@ -897,7 +878,6 @@ mod tests {
                 player_id: brawler_routing::PlayerId::new(9).unwrap(),
                 team: 1,
                 display_name: MatchDisplayName::new("Bot 1").unwrap(),
-                source_build_preset: Some(2),
                 recipe_fingerprint: bot.accepted.identity.recipe_fingerprint.0,
                 revision: bot.accepted.identity.revision.0,
                 build_snapshot: bot.encode().unwrap(),

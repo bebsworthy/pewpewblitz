@@ -1,7 +1,7 @@
 //! Shared, bounded queue wire contract.
 
 use crate::{
-    builds::{AcceptedBuildSummary, BUILD_POINT_BUDGET, BuildCandidate},
+    builds::{AcceptedBuildSummary, BUILD_POINT_BUDGET},
     lobby::{CatalogRevision, GameTypeId, MAX_GAME_TYPES},
 };
 use serde::{Deserialize, Deserializer, Serialize, de::SeqAccess, de::Visitor};
@@ -112,7 +112,8 @@ pub struct PracticeStartRequest {
     pub catalog_revision: CatalogRevision,
     pub game_type_id: GameTypeId,
     pub game_type_configuration_revision: u32,
-    pub build: BuildCandidate,
+    pub brawler_id: crate::profiles::SavedBrawlerId,
+    pub brawler_revision: crate::profiles::ProfileRevision,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -178,7 +179,8 @@ pub struct QueueJoinCommand {
     pub catalog_revision: CatalogRevision,
     pub game_type_id: GameTypeId,
     pub game_type_configuration_revision: u32,
-    pub build: BuildCandidate,
+    pub brawler_id: crate::profiles::SavedBrawlerId,
+    pub brawler_revision: crate::profiles::ProfileRevision,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -251,6 +253,8 @@ pub struct QueueMembership {
     pub catalog_revision: CatalogRevision,
     pub game_type_id: GameTypeId,
     pub game_type_configuration_revision: u32,
+    pub brawler_id: crate::profiles::SavedBrawlerId,
+    pub brawler_revision: crate::profiles::ProfileRevision,
     pub accepted_build: AcceptedBuildSummary,
     pub admitted_at_pool_state_revision: u64,
 }
@@ -266,6 +270,8 @@ impl<'de> Deserialize<'de> for QueueMembership {
             catalog_revision: CatalogRevision,
             game_type_id: GameTypeId,
             game_type_configuration_revision: u32,
+            brawler_id: crate::profiles::SavedBrawlerId,
+            brawler_revision: crate::profiles::ProfileRevision,
             accepted_build: AcceptedBuildSummary,
             admitted_at_pool_state_revision: u64,
         }
@@ -283,6 +289,8 @@ impl<'de> Deserialize<'de> for QueueMembership {
             catalog_revision: wire.catalog_revision,
             game_type_id: wire.game_type_id,
             game_type_configuration_revision: wire.game_type_configuration_revision,
+            brawler_id: wire.brawler_id,
+            brawler_revision: wire.brawler_revision,
             accepted_build: wire.accepted_build,
             admitted_at_pool_state_revision: wire.admitted_at_pool_state_revision,
         })

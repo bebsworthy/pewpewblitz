@@ -30,6 +30,7 @@ impl Plugin for ClientNetworkPlugin {
             .add_plugins(ClientCombatPlugin)
             .add_plugins(crate::terrain::ClientTerrainPlugin)
             .add_plugins(ClientQueuePlugin)
+            .add_plugins(ClientProfilePlugin)
             .init_resource::<RosterLogState>()
             .init_resource::<ClientShutdown>()
             .init_resource::<PendingLocalActions>()
@@ -45,6 +46,7 @@ impl Plugin for ClientNetworkPlugin {
             .init_resource::<InputSettingsSelection>()
             .init_resource::<RoutedClientLifecycle>()
             .init_resource::<ClientMatchResultState>()
+            .init_resource::<ClientProfileIdentityState>()
             .init_resource::<crate::diagnostics::ProcessExitClassification>()
             .add_systems(
                 Startup,
@@ -73,6 +75,8 @@ impl Plugin for ClientNetworkPlugin {
                 (
                     connect_spawned_clients,
                     finish_spawned_client_connect,
+                    process_lobby_server_identity,
+                    ApplyDeferred,
                     send_client_hello,
                     process_join_outcome,
                     process_match_route_grant,
@@ -677,15 +681,20 @@ pub(super) fn send_client_hello(
             Option<&mut MessageSender<LobbyHello>>,
             Option<&RoutedClientSession>,
             Option<&RuntimeLobbyTarget>,
+            Option<&ClientLobbyIdentity>,
         ),
         (With<Client>, With<Connected>),
     >,
 ) {
-    for (mut status, match_sender, lobby_sender, routed_session, runtime_target) in query.iter_mut()
+    for (mut status, match_sender, lobby_sender, routed_session, runtime_target, lobby_identity) in
+        query.iter_mut()
     {
         if matches!(status.phase, ClientJoinPhase::Connecting) {
             if routed_session.is_some_and(|session| session.kind == RoutedClientSessionKind::Lobby)
             {
+                let Some(identity) = lobby_identity else {
+                    continue;
+                };
                 let Some(mut sender) = lobby_sender else {
                     continue;
                 };
@@ -694,6 +703,7 @@ pub(super) fn send_client_hello(
                     build_version: config.expected_build_version.clone(),
                     registry_fingerprint: fingerprint.0,
                     content_fingerprint: *content_fingerprint,
+                    account_id: identity.account_id,
                     proposed_display_name: runtime_target.map_or_else(
                         || crate::lobby::generated_display_name(config.client_id),
                         |target| target.proposed_display_name.clone(),
@@ -734,6 +744,110 @@ pub(super) fn send_client_hello(
                 let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
             }
         }
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "the pre-hello identity transaction coordinates one bounded client-local persistence boundary"
+)]
+fn process_lobby_server_identity(
+    mut commands: Commands,
+    config: Res<ClientNetworkConfig>,
+    mut identity_state: ResMut<ClientProfileIdentityState>,
+    mut persistence: Option<ResMut<flow::ConnectionPersistence>>,
+    path: Option<Res<connection_persistence::ClientConnectionsPath>>,
+    failures: Option<Res<flow::ClientLocalLoadFailures>>,
+    mut clients: Query<
+        (
+            Entity,
+            &mut ClientJoinStatus,
+            &mut MessageReceiver<LobbyServerIdentity>,
+            Option<&RuntimeLobbyTarget>,
+            Option<&ClientLobbyIdentity>,
+        ),
+        (With<Client>, With<Connected>, Without<PendingClientConnect>),
+    >,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    for (entity, mut status, mut receiver, target, installed) in &mut clients {
+        for announcement in receiver.receive() {
+            let valid = announcement.logical_server_id != 0
+                && installed.is_none_or(|identity| {
+                    identity.logical_server_id == announcement.logical_server_id
+                });
+            if !valid {
+                reject_lobby_identity(&mut commands, entity, &mut status, &config, &mut app_exit);
+                continue;
+            }
+            let account_id =
+                if identity_state.logical_server_id == Some(announcement.logical_server_id) {
+                    identity_state.account_id
+                } else if let (Some(target), Some(persistence), Some(path)) =
+                    (target, persistence.as_deref_mut(), path.as_deref())
+                {
+                    if failures
+                        .as_deref()
+                        .is_some_and(|failures| failures.connections_failed)
+                    {
+                        None
+                    } else {
+                        let logical_server_id = format!("{:032x}", announcement.logical_server_id);
+                        match persistence
+                            .state
+                            .account_for_server(&logical_server_id, &target.logical_address)
+                        {
+                            Ok(account_id) => {
+                                match connection_persistence::save_connections(
+                                    &path.0,
+                                    &persistence.state,
+                                ) {
+                                    Ok(()) => Some(account_id),
+                                    Err(error) => {
+                                        persistence.dirty_error = Some(error);
+                                        None
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                persistence.dirty_error = Some(error);
+                                None
+                            }
+                        }
+                    }
+                } else {
+                    crate::profiles::AccountId::new(u128::from(config.client_id)).ok()
+                };
+            let Some(account_id) = account_id else {
+                reject_lobby_identity(&mut commands, entity, &mut status, &config, &mut app_exit);
+                continue;
+            };
+            identity_state.logical_server_id = Some(announcement.logical_server_id);
+            identity_state.account_id = Some(account_id);
+            commands.entity(entity).insert(ClientLobbyIdentity {
+                logical_server_id: announcement.logical_server_id,
+                account_id,
+            });
+        }
+    }
+}
+
+fn reject_lobby_identity(
+    commands: &mut Commands,
+    entity: Entity,
+    status: &mut ClientJoinStatus,
+    config: &ClientNetworkConfig,
+    app_exit: &mut MessageWriter<AppExit>,
+) {
+    status.phase = ClientJoinPhase::Disconnected;
+    if config.presents_product_shell() {
+        commands
+            .entity(entity)
+            .insert(ClientLobbyFailure::InvalidWelcome);
+    } else {
+        app_exit.write(AppExit::error());
     }
 }
 
@@ -1198,6 +1312,7 @@ pub(super) fn process_join_outcome(
             Option<&mut MessageReceiver<LobbyJoinOutcome>>,
             Option<&RoutedClientSession>,
             Option<&ClientLobbyMembership>,
+            Option<&ClientLobbyIdentity>,
         ),
         (With<Client>, Without<PendingClientConnect>),
     >,
@@ -1207,8 +1322,15 @@ pub(super) fn process_join_outcome(
     mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
-    for (entity, mut status, match_receiver, lobby_receiver, routed_session, membership) in
-        query.iter_mut()
+    for (
+        entity,
+        mut status,
+        match_receiver,
+        lobby_receiver,
+        routed_session,
+        membership,
+        lobby_identity,
+    ) in query.iter_mut()
     {
         if let Some(mut receiver) = match_receiver {
             for outcome in receiver.receive() {
@@ -1274,18 +1396,22 @@ pub(super) fn process_join_outcome(
         for outcome in receiver.receive() {
             match outcome {
                 LobbyJoinOutcome::Accepted {
+                    logical_server_id,
                     player_id,
                     accepted_display_name,
                     server_name,
                     catalog_revision,
                     game_types,
+                    profile,
                 } => {
                     let accepted = ClientLobbyMembership {
+                        logical_server_id,
                         player_id,
                         accepted_display_name,
                         server_name,
                         catalog_revision,
                         game_types,
+                        profile,
                     };
                     if crate::lobby::validate_catalog(&accepted.game_types).is_err()
                         || crate::lobby::catalog_revision(&accepted.game_types).ok()
@@ -1295,6 +1421,11 @@ pub(super) fn process_join_outcome(
                         || accepted_this_batch
                             .as_ref()
                             .is_some_and(|previous| previous != &accepted)
+                        || lobby_identity.is_none_or(|identity| {
+                            identity.logical_server_id != logical_server_id
+                                || identity.account_id != accepted.profile.account_id
+                        })
+                        || accepted.profile.validate_bounded().is_err()
                     {
                         if config.presents_product_shell() {
                             commands

@@ -100,10 +100,13 @@ E2E runs choose an unused loopback port by default and may run beside an interac
 
 ## Current player flow
 
-Dashboard is the sole authenticated home. Change Brawler and Change Game open child selection
-surfaces with explicit Confirm and Back behavior. Play enters the selected game type's multiplayer
-queue; Practice asks the connected server to allocate an authoritative match with inert `Bot N`
-fighters filling the remaining roster. Neither action launches a server process from the client.
+Dashboard is the sole authenticated home. The server loads the account's saved-brawler profile
+before admitting the client. New profiles start empty; create a brawler before Play or Practice.
+Each brawler permanently binds one of three fighter profiles and one of four weapon bases, while its
+name, ultimate, and two passives remain server-owned editable data outside queue. The Dashboard menu
+creates, selects, edits, and deletes saved brawlers; deleting requires confirmation. Play enters the
+selected game type's multiplayer queue and Practice fills the remaining roster with inert `Bot N`
+fighters. Queue admission freezes the selected brawler revision for that match.
 
 Queue cancellation, loading cancellation, confirmed leave, and ordinary no-result return converge
 on Dashboard while the lobby remains valid. Results retains the authoritative outcome and offers
@@ -178,6 +181,26 @@ contract. Important ownership rules are:
 - `BRAWLER_FORCE_PRIMITIVE_WORLD=1` verifies deterministic meshes inside the sole 3D renderer; it is
   not a renderer or content-mode selector;
 - `RUST_LOG` controls filtering, for example `RUST_LOG=brawler=info`.
+
+## Profile data and backup
+
+The routed supervisor keeps its stable logical-server ID and lobby-owned `profiles.sqlite3` under
+its data directory (`target/dev/server` for `just server` and `just run`). The database uses SQLite
+WAL, foreign keys, transactions, an application ID, and forward-only schema versions. Startup
+rejects corruption or an incompatible schema and never replaces owned data with an empty profile.
+
+Create a stopped-server backup with SQLite's online backup API:
+
+```sh
+cargo run --locked --no-default-features --features server \
+  --bin brawler-profile-admin -- backup \
+  --database target/dev/server/profiles.sqlite3 \
+  --output target/dev/server/profiles-backup.sqlite3
+```
+
+The command refuses to overwrite its output and validates the completed copy. To restore, stop the
+server, preserve the current database together with any `-wal` and `-shm` siblings, copy the
+validated backup into a fresh data directory as `profiles.sqlite3`, and restart the supervisor.
 
 Do not use `--all-features` as a supported application build. Cargo features are additive: client
 and server are independently tested production configurations, while `network-test` is the

@@ -186,7 +186,6 @@ pub struct AllocateParticipant {
     pub netcode_client_id: NetcodeClientId,
     pub team: u8,
     pub display_name: MatchDisplayName,
-    pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub build_revision: u16,
     pub build_snapshot: crate::MatchBuildSnapshot,
@@ -198,7 +197,6 @@ pub struct AllocateBot {
     pub player_id: crate::PlayerId,
     pub team: u8,
     pub display_name: MatchDisplayName,
-    pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub build_revision: u16,
     pub build_snapshot: crate::MatchBuildSnapshot,
@@ -222,7 +220,6 @@ impl fmt::Debug for AllocateParticipant {
             .debug_struct("AllocateParticipant")
             .field("identity", &"[REDACTED]")
             .field("team", &self.team)
-            .field("source_build", &"[REDACTED]")
             .field("build_revision", &self.build_revision)
             .finish_non_exhaustive()
     }
@@ -235,13 +232,6 @@ fn encode_allocate_participant(encoder: &mut Encoder, participant: &AllocatePart
     encoder.put_u8(participant.team);
     encoder.put_u8(u8::try_from(participant.display_name.as_str().len()).expect("bounded"));
     encoder.put_bytes(participant.display_name.as_str().as_bytes());
-    match participant.source_build_preset {
-        None => encoder.put_u8(0),
-        Some(preset) => {
-            encoder.put_u8(1);
-            encoder.put_u16(preset);
-        }
-    }
     encoder.put_u64(participant.recipe_fingerprint);
     encoder.put_u16(participant.build_revision);
     encoder.put_u8(u8::try_from(participant.build_snapshot.as_bytes().len()).expect("bounded"));
@@ -259,7 +249,6 @@ fn decode_allocate_participant(
     let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
         .map_err(|_| CodecError::InvalidValue)
         .and_then(MatchDisplayName::new)?;
-    let source_build_preset = decoder.optional(Decoder::u16)?;
     let recipe_fingerprint = decoder.u64()?;
     let build_revision = decoder.u16()?;
     let build_length = usize::from(decoder.u8()?);
@@ -269,7 +258,6 @@ fn decode_allocate_participant(
         netcode_client_id,
         team,
         display_name,
-        source_build_preset,
         recipe_fingerprint,
         build_revision,
         build_snapshot: crate::MatchBuildSnapshot::new(decoder.take(build_length)?)?,
@@ -281,13 +269,6 @@ fn encode_allocate_bot(encoder: &mut Encoder, bot: &AllocateBot) {
     encoder.put_u8(bot.team);
     encoder.put_u8(u8::try_from(bot.display_name.as_str().len()).expect("bounded"));
     encoder.put_bytes(bot.display_name.as_str().as_bytes());
-    match bot.source_build_preset {
-        None => encoder.put_u8(0),
-        Some(preset) => {
-            encoder.put_u8(1);
-            encoder.put_u16(preset);
-        }
-    }
     encoder.put_u64(bot.recipe_fingerprint);
     encoder.put_u16(bot.build_revision);
     encoder.put_u8(u8::try_from(bot.build_snapshot.as_bytes().len()).expect("bounded"));
@@ -301,7 +282,6 @@ fn decode_allocate_bot(decoder: &mut Decoder<'_>) -> Result<AllocateBot, CodecEr
     let display_name = core::str::from_utf8(decoder.take(display_name_length)?)
         .map_err(|_| CodecError::InvalidValue)
         .and_then(MatchDisplayName::new)?;
-    let source_build_preset = decoder.optional(Decoder::u16)?;
     let recipe_fingerprint = decoder.u64()?;
     let build_revision = decoder.u16()?;
     let build_length = usize::from(decoder.u8()?);
@@ -309,7 +289,6 @@ fn decode_allocate_bot(decoder: &mut Decoder<'_>) -> Result<AllocateBot, CodecEr
         player_id,
         team,
         display_name,
-        source_build_preset,
         recipe_fingerprint,
         build_revision,
         build_snapshot: crate::MatchBuildSnapshot::new(decoder.take(build_length)?)?,
@@ -1438,7 +1417,7 @@ mod tests {
     fn lobby_manifest() -> LobbyManifest {
         LobbyManifest {
             common: ManifestCommon {
-                manifest_version: 1,
+                manifest_version: 2,
                 role: WorkerRole::Lobby,
                 logical_server_id: id128(1),
                 process_id: id128(2),
@@ -1457,6 +1436,7 @@ mod tests {
             outstanding_allocations: 2,
             active_matches: 4,
             heartbeat_ms: 1_000,
+            profile_database_path: "profiles.sqlite3".to_string(),
             raw_catalog: b"catalog".to_vec(),
             raw_catalog_fingerprint: crate::raw_catalog_fingerprint(b"catalog"),
             nonce: 9,
@@ -1473,7 +1453,6 @@ mod tests {
             netcode_client_id: id64(wide + 25),
             team: u8::try_from(index % 2).unwrap(),
             display_name: MatchDisplayName::new("Player").unwrap(),
-            source_build_preset: Some(small),
             recipe_fingerprint: wide + 30,
             build_revision: small,
             build_snapshot: crate::MatchBuildSnapshot::new(&[1, 2, 3]).unwrap(),

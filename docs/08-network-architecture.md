@@ -33,7 +33,8 @@ Client presentation and local feedback
 ### Client responsibilities
 
 - read controller or keyboard/mouse input;
-- request selection of a preset or brawler build using stable identity/revision data;
+- present a caller-supplied development account ID at lobby admission and request profile mutations
+  or selected-brawler admission using stable identity/revision data;
 - send timestamped input commands or input frames;
 - predict local movement later if needed;
 - render the latest authoritative state;
@@ -46,8 +47,8 @@ Client presentation and local feedback
 ### Server responsibilities
 
 - own the match lifecycle and mode rules;
-- retrieve or receive candidate brawler builds, validate their weapon recipes, and create immutable
-  resolved match loadouts;
+- load the server-owned profile, resolve its selected saved brawler, and create immutable resolved
+  match loadouts without accepting client-authored combat values at queue admission;
 - simulate fighter movement and abilities;
 - validate fire commands and cooldowns;
 - perform projectile, hit, damage, and collision resolution;
@@ -153,10 +154,9 @@ Keep these network concepts separate:
 Shared content/rule catalog fingerprint
   proves client/server schema and known primitive compatibility
 
-Candidate brawler build / weapon recipe
-  preset lookup in Milestone 05
-  bounded client proposal in Milestone 08
-  server-side stored arsenal revision when persistence exists
+Selected saved-brawler identity and revision
+  bounded client intent tied to the accepted lobby session
+  resolved against the lobby's server-owned profile snapshot
 
 Resolved match loadout
   created and owned by the server
@@ -166,14 +166,14 @@ Runtime weapon state
   ammo/charges, cooldowns, projectiles, effects; mutated only by server simulation
 ```
 
-Milestone 05 clients request a built-in preset ID; the server loads and resolves the recipe from its
-own catalog instead of trusting client-supplied damage, range, behavior, or payload values. A later
-bounded editor may send a typed recipe proposal, but the server must independently validate known
-primitives, finite/ranged values, supported combinations, budget/slot policy, and—when persistence
-exists—build revision and entitlement. Invalid or stale recipes do not create or mutate a fighter.
+V7 clients request admission with a selected `SavedBrawlerId` and expected brawler revision. The
+lobby resolves the authored fighter profile, weapon base, ultimate, and passives from its accepted
+profile cache against active catalogs. Invalid, stale, unselected, or mutation-in-flight state does
+not create a queue ticket. The resulting V2 snapshot crosses routing opaquely and contains no
+`AccountId` or database authority.
 
-Per-player recipes are authoritative session/build data, not part of the global gameplay-content
-fingerprint. The fingerprint covers the shared schema, primitive catalog, and built-in presets. The
+Per-player recipes are authoritative profile/session data, not part of the global gameplay-content
+fingerprint. The fingerprint covers the shared schema and primitive/base catalogs. The
 server replicates the accepted resolved public configuration so late join and reconnect do not
 depend on every client having a player's custom recipe preinstalled.
 

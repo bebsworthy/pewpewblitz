@@ -10,8 +10,18 @@ pub const MAX_PROFILE_SNAPSHOT_BYTES: usize = 16 * 1024;
 
 macro_rules! opaque_id {
     ($name:ident) => {
-        #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+        #[derive(Serialize, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
         pub struct $name(u128);
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = u128::deserialize(deserializer)?;
+                Self::new(value).map_err(serde::de::Error::custom)
+            }
+        }
 
         impl $name {
             pub fn new(value: u128) -> Result<Self, ProfileModelError> {
@@ -218,6 +228,17 @@ pub struct ProfileOutcome {
 }
 
 impl ProfileSnapshot {
+    #[must_use]
+    pub const fn empty(account_id: AccountId) -> Self {
+        Self {
+            account_id,
+            revision: ProfileRevision::INITIAL,
+            next_brawler_ordinal: 1,
+            selected_brawler_id: None,
+            brawlers: Vec::new(),
+        }
+    }
+
     pub fn validate_bounded(&self) -> Result<(), ProfileModelError> {
         self.validate()?;
         if postcard::to_allocvec(self)

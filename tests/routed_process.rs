@@ -74,7 +74,7 @@ fn lobby_spec() -> WorkerLaunchSpec {
     let process_id = ProcessId::new(LOBBY_PROCESS_ID).unwrap();
     let manifest = LobbyManifest {
         common: ManifestCommon {
-            manifest_version: 1,
+            manifest_version: 2,
             role: WorkerRole::Lobby,
             logical_server_id: LogicalServerId::new(LOGICAL_SERVER_ID).unwrap(),
             process_id,
@@ -93,6 +93,13 @@ fn lobby_spec() -> WorkerLaunchSpec {
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
+        profile_database_path: std::env::temp_dir()
+            .join(format!(
+                "brawler-routed-profiles-{}.sqlite3",
+                std::process::id()
+            ))
+            .to_string_lossy()
+            .into_owned(),
         raw_catalog: include_bytes!("../config/server/game-types.ron").to_vec(),
         raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(include_bytes!(
             "../config/server/game-types.ron"
@@ -125,7 +132,6 @@ fn allocation_request(
             netcode_client_id: NetcodeClientId::new(u64::try_from(base + 101).unwrap()).unwrap(),
             team: 0,
             display_name: brawler_routing::MatchDisplayName::new("Player 1").unwrap(),
-            source_build_preset: build.source_build_preset,
             recipe_fingerprint: build.recipe_fingerprint,
             build_revision: build.build_revision,
             build_snapshot: build.snapshot,
@@ -136,7 +142,6 @@ fn allocation_request(
             netcode_client_id: NetcodeClientId::new(u64::try_from(base + 102).unwrap()).unwrap(),
             team: 1,
             display_name: brawler_routing::MatchDisplayName::new("Player 2").unwrap(),
-            source_build_preset: build.source_build_preset,
             recipe_fingerprint: build.recipe_fingerprint,
             build_revision: build.build_revision,
             build_snapshot: build.snapshot,

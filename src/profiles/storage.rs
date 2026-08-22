@@ -7,7 +7,10 @@ use crate::builds::{PassiveDefinitionId, UltimateDefinitionId};
 use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
+    sync::{
+        Mutex,
+        mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
+    },
     thread::{self, JoinHandle},
 };
 
@@ -445,7 +448,7 @@ pub struct ProfileStorageResult {
 
 pub struct ProfileStorageExecutor {
     commands: SyncSender<ProfileStorageCommand>,
-    results: Receiver<ProfileStorageResult>,
+    results: Mutex<Receiver<ProfileStorageResult>>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -549,7 +552,7 @@ impl ProfileStorageExecutor {
             .map_err(|_| ProfileStorageError::ExecutorStopped)??;
         Ok(Self {
             commands,
-            results,
+            results: Mutex::new(results),
             join: Some(join),
         })
     }
@@ -564,7 +567,11 @@ impl ProfileStorageExecutor {
     }
 
     pub fn try_result(&self) -> Result<Option<ProfileStorageResult>, ProfileStorageError> {
-        match self.results.try_recv() {
+        let results = self
+            .results
+            .lock()
+            .map_err(|_| ProfileStorageError::ExecutorStopped)?;
+        match results.try_recv() {
             Ok(result) => Ok(Some(result)),
             Err(std::sync::mpsc::TryRecvError::Empty) => Ok(None),
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -576,8 +583,26 @@ impl ProfileStorageExecutor {
 
 impl Drop for ProfileStorageExecutor {
     fn drop(&mut self) {
-        let _ = self.commands.send(ProfileStorageCommand::Shutdown);
+        let mut shutdown = ProfileStorageCommand::Shutdown;
+        loop {
+            match self.commands.try_send(shutdown) {
+                Ok(()) | Err(TrySendError::Disconnected(_)) => break,
+                Err(TrySendError::Full(command)) => {
+                    shutdown = command;
+                    if let Ok(results) = self.results.lock() {
+                        while results.try_recv().is_ok() {}
+                    }
+                    thread::yield_now();
+                }
+            }
+        }
         if let Some(join) = self.join.take() {
+            while !join.is_finished() {
+                if let Ok(results) = self.results.lock() {
+                    while results.try_recv().is_ok() {}
+                }
+                thread::yield_now();
+            }
             let _ = join.join();
         }
     }

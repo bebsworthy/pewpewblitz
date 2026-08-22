@@ -31,7 +31,8 @@ impl ClientPracticeModel {
     pub fn start(
         &mut self,
         selected: &super::flow::SelectedGameType,
-        build: crate::builds::BuildCandidate,
+        brawler_id: crate::profiles::SavedBrawlerId,
+        brawler_revision: crate::profiles::ProfileRevision,
     ) -> bool {
         let (Some(catalog_revision), Some(game_type_id), Some(configuration_revision)) = (
             selected.catalog_revision,
@@ -56,7 +57,8 @@ impl ClientPracticeModel {
             catalog_revision,
             game_type_id,
             game_type_configuration_revision: configuration_revision,
-            build,
+            brawler_id,
+            brawler_revision,
         };
         self.pending = Some(request.clone());
         self.outbound.push_back(request);
@@ -231,8 +233,6 @@ impl ClientQueueModel {
         generation: u64,
         lobby: &ClientLobbyMembership,
         game_type_id: &crate::lobby::GameTypeId,
-        build: crate::builds::BuildSelection,
-        build_revision: crate::builds::BuildRevision,
         now: Duration,
     ) -> bool {
         let Some(game) = lobby
@@ -242,6 +242,15 @@ impl ClientQueueModel {
         else {
             return false;
         };
+        let Some(brawler) = lobby.profile.selected_brawler_id.and_then(|id| {
+            lobby
+                .profile
+                .brawlers
+                .iter()
+                .find(|brawler| brawler.id == id)
+        }) else {
+            return false;
+        };
         self.bind_lobby_generation(generation);
         self.start_join(
             &super::flow::SelectedGameType {
@@ -249,10 +258,8 @@ impl ClientQueueModel {
                 game_type_id: Some(game.id.clone()),
                 configuration_revision: Some(game.configuration_revision),
             },
-            crate::builds::BuildCandidate {
-                build_revision,
-                selection: build,
-            },
+            brawler.id,
+            brawler.revision,
             now,
         )
     }
@@ -306,7 +313,8 @@ impl ClientQueueModel {
     pub fn start_join(
         &mut self,
         selected: &super::flow::SelectedGameType,
-        build: crate::builds::BuildCandidate,
+        brawler_id: crate::profiles::SavedBrawlerId,
+        brawler_revision: crate::profiles::ProfileRevision,
         now: Duration,
     ) -> bool {
         let (Some(catalog_revision), Some(game_type_id), Some(configuration_revision)) = (
@@ -321,7 +329,8 @@ impl ClientQueueModel {
                 catalog_revision,
                 game_type_id,
                 game_type_configuration_revision: configuration_revision,
-                build,
+                brawler_id,
+                brawler_revision,
             }),
             now,
         )
@@ -560,20 +569,13 @@ fn outcome_matches_pending(
                 && membership.game_type_id == command.game_type_id
                 && membership.game_type_configuration_revision
                     == command.game_type_configuration_revision
-                && membership.accepted_build.identity.revision == command.build.build_revision
-                && match command.build.selection {
-                    crate::builds::BuildSelection::Preset(id) => {
-                        membership.accepted_build.identity.source_build_preset_id == Some(id)
-                    }
-                    crate::builds::BuildSelection::Custom(recipe) => {
-                        membership
-                            .accepted_build
-                            .identity
-                            .source_build_preset_id
-                            .is_none()
-                            && membership.accepted_build.canonical_recipe == recipe
-                    }
-                }
+                && membership.brawler_id == command.brawler_id
+                && membership.brawler_revision == command.brawler_revision
+                && membership
+                    .accepted_build
+                    .identity
+                    .source_build_preset_id
+                    .is_none()
         }
         (
             crate::lobby::QueueCommand::Cancel(command),
@@ -649,7 +651,6 @@ fn send_practice_messages(
 fn drive_headless_requeue_smoke(
     time: Res<Time<Real>>,
     config: Res<super::ClientNetworkConfig>,
-    builds: Res<crate::builds::BuildCatalogResource>,
     lobbies: Query<(&ClientLobbyMembership, &RoutedClientSession), With<Client>>,
     mut model: ResMut<ClientQueueModel>,
     mut stage: ResMut<HeadlessRequeueSmokeStage>,
@@ -672,18 +673,7 @@ fn drive_headless_requeue_smoke(
     let Some(game_type_id) = model.last_accepted_game_type_id().cloned() else {
         return;
     };
-    let build_selection = match config.build_preset.unwrap_or(1) {
-        5 => crate::builds::BuildSelection::Custom(super::build_editor::default_custom_recipe()),
-        id => crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(id)),
-    };
-    if model.start_requeue_join(
-        session.generation,
-        lobby,
-        &game_type_id,
-        build_selection,
-        builds.0.balance_revision,
-        time.elapsed(),
-    ) {
+    if model.start_requeue_join(session.generation, lobby, &game_type_id, time.elapsed()) {
         *stage = HeadlessRequeueSmokeStage::AwaitingJoined;
     }
 }
@@ -870,7 +860,6 @@ fn send_queue_messages(
 fn drive_headless_queue_smoke(
     time: Res<Time<Real>>,
     config: Res<super::ClientNetworkConfig>,
-    builds: Res<crate::builds::BuildCatalogResource>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut model: ResMut<ClientQueueModel>,
     mut stage: ResMut<HeadlessQueueSmokeStage>,
@@ -915,17 +904,16 @@ fn drive_headless_queue_smoke(
                 game_type_id: Some(game.id.clone()),
                 configuration_revision: Some(game.configuration_revision),
             };
-            let build_selection = match config.build_preset.unwrap_or(1) {
-                5 => crate::builds::BuildSelection::Custom(
-                    super::build_editor::default_custom_recipe(),
-                ),
-                id => crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(id)),
+            let Some(brawler) = lobby.profile.selected_brawler_id.and_then(|id| {
+                lobby
+                    .profile
+                    .brawlers
+                    .iter()
+                    .find(|brawler| brawler.id == id)
+            }) else {
+                return;
             };
-            let candidate = crate::builds::BuildCandidate {
-                build_revision: builds.0.balance_revision,
-                selection: build_selection,
-            };
-            if model.start_join(&selection, candidate, time.elapsed()) {
+            if model.start_join(&selection, brawler.id, brawler.revision, time.elapsed()) {
                 *stage = HeadlessQueueSmokeStage::Joining;
             }
         }
@@ -1018,11 +1006,15 @@ mod tests {
 
     fn membership() -> ClientLobbyMembership {
         ClientLobbyMembership {
+            logical_server_id: 1,
             player_id: crate::protocol::PlayerId(1),
             accepted_display_name: "Player".to_string(),
             server_name: "Server".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game()],
+            profile: crate::profiles::ProfileSnapshot::empty(
+                crate::profiles::AccountId::new(1).unwrap(),
+            ),
         }
     }
 
@@ -1055,6 +1047,8 @@ mod tests {
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_type_id: crate::lobby::GameTypeId::new(game_type_id).unwrap(),
             game_type_configuration_revision: 1,
+            brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            brawler_revision: crate::profiles::ProfileRevision::INITIAL,
             accepted_build: crate::builds::AcceptedBuildSummary {
                 canonical_recipe: preset.recipe,
                 identity: preview.identity,
@@ -1073,14 +1067,16 @@ mod tests {
             game_type_id: Some(crate::lobby::GameTypeId::new("hot-zone-3v3").unwrap()),
             configuration_revision: Some(1),
         };
-        let candidate = crate::builds::BuildCandidate {
+        let _candidate = crate::builds::BuildCandidate {
             build_revision: crate::builds::BuildRevision(4),
             selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
         };
 
-        assert!(model.start(&selected, candidate));
+        let brawler_id = crate::profiles::SavedBrawlerId::new(1).unwrap();
+        let revision = crate::profiles::ProfileRevision::INITIAL;
+        assert!(model.start(&selected, brawler_id, revision));
         assert!(model.pending());
-        assert!(!model.start(&selected, candidate));
+        assert!(!model.start(&selected, brawler_id, revision));
         let request = model.outbound.pop_front().unwrap();
         assert_eq!(request.game_type_id.as_str(), "hot-zone-3v3");
         model.accept_rejection(
@@ -1194,11 +1190,16 @@ mod tests {
             game_type_id: Some(crate::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
             configuration_revision: Some(1),
         };
-        let candidate = crate::builds::BuildCandidate {
+        let _candidate = crate::builds::BuildCandidate {
             build_revision: crate::builds::BuildRevision(1),
             selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
         };
-        assert!(model.start_join(&selected, candidate, Duration::ZERO));
+        assert!(model.start_join(
+            &selected,
+            crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            crate::profiles::ProfileRevision::INITIAL,
+            Duration::ZERO,
+        ));
         let first = model.pending().unwrap().request_id;
         model.update_time(Duration::from_secs(10));
         assert!(model.pending().unwrap().timed_out);
@@ -1233,6 +1234,8 @@ mod tests {
                 catalog_revision: lobby.catalog_revision,
                 game_type_id: lobby.game_types[0].id.clone(),
                 game_type_configuration_revision: 1,
+                brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
+                brawler_revision: crate::profiles::ProfileRevision::INITIAL,
                 accepted_build: crate::builds::AcceptedBuildSummary {
                     canonical_recipe: super::super::build_editor::default_custom_recipe(),
                     identity: crate::builds::SelectedBuild {
@@ -1277,11 +1280,16 @@ mod tests {
             game_type_id: Some(crate::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
             configuration_revision: Some(1),
         };
-        let candidate = crate::builds::BuildCandidate {
+        let _candidate = crate::builds::BuildCandidate {
             build_revision: crate::builds::BuildRevision(1),
             selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
         };
-        assert!(model.start_join(&selected, candidate, Duration::ZERO));
+        assert!(model.start_join(
+            &selected,
+            crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            crate::profiles::ProfileRevision::INITIAL,
+            Duration::ZERO,
+        ));
         let request_id = model.pending().unwrap().request_id;
         model.update_time(Duration::from_secs(10));
         assert!(model.take_timeout_notice());
@@ -1311,11 +1319,16 @@ mod tests {
             game_type_id: Some(crate::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
             configuration_revision: Some(1),
         };
-        let candidate = crate::builds::BuildCandidate {
+        let _candidate = crate::builds::BuildCandidate {
             build_revision: crate::builds::BuildRevision(1),
             selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
         };
-        assert!(model.start_join(&selected, candidate, Duration::ZERO));
+        assert!(model.start_join(
+            &selected,
+            crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            crate::profiles::ProfileRevision::INITIAL,
+            Duration::ZERO,
+        ));
         let request_id = model.pending().unwrap().request_id;
 
         model.accept_outcome(

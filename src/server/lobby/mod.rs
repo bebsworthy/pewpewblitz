@@ -18,14 +18,15 @@ pub(crate) use catalog::resolve_operator_catalog;
 use super::{LobbyControlInbox, LobbyControlOutbox, RoutedPeer, ServerRoleResource};
 use crate::{
     VERSION,
-    builds::{BuildCatalog, BuildPresetId, resolve_build_recipe},
+    builds::{BuildCatalog, BuildPresetId},
     combat::{FighterDefinitions, STANDARD_FIGHTER_DEFINITION, WeaponCatalog},
     config::GameMode,
     content::GameplayContentFingerprint,
     lobby::{duplicate_display_name, normalize_proposed_display_name},
     protocol::{
-        LobbyHello, LobbyJoinOutcome, LobbyJoinRejection, MatchRouteGrant, QueueSnapshotChannel,
-        RouteCapability, SUPPORTED_PROTOCOL_VERSION, SessionChannel,
+        LobbyHello, LobbyJoinOutcome, LobbyJoinRejection, LobbyServerIdentity, MatchRouteGrant,
+        ProfileChannel, QueueSnapshotChannel, RouteCapability, SUPPORTED_PROTOCOL_VERSION,
+        SessionChannel,
     },
 };
 use bevy::prelude::*;
@@ -76,27 +77,33 @@ fn build_identity(preset_id: BuildPresetId) -> Result<LobbyBuildIdentity, String
     let preset = builds
         .preset(preset_id)
         .ok_or_else(|| format!("build preset {} is missing", preset_id.0))?;
-    let resolved = resolve_build_recipe(&builds, &weapons, fighter, preset.recipe, Some(preset.id))
-        .map_err(|error| format!("default build resolution failed: {error:?}"))?;
-    let accepted = crate::builds::AcceptedBuildSummary {
-        canonical_recipe: preset.recipe,
-        identity: resolved.identity,
-        total_points: resolved.total_points,
+    let weapon_base_id = match preset.recipe.weapon {
+        crate::builds::WeaponChoice::Preset(id) => crate::profiles::WeaponBaseId(id.0),
+        crate::builds::WeaponChoice::CustomPulse { .. } => crate::profiles::WeaponBaseId(1),
     };
-    let snapshot = crate::builds::MatchBuildSnapshotV1 {
-        schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
-        candidate: crate::builds::BuildCandidate {
-            build_revision: builds.balance_revision,
-            selection: crate::builds::BuildSelection::Preset(preset.id),
-        },
-        accepted,
-    }
-    .encode()?;
+    let brawler = crate::profiles::SavedBrawler {
+        id: crate::profiles::SavedBrawlerId::new(u128::from(preset_id.0))
+            .map_err(|error| format!("invalid built-in brawler id: {error}"))?,
+        creation_ordinal: u64::from(preset_id.0),
+        name: format!("Bot {}", preset_id.0),
+        fighter_profile_id: crate::profiles::FighterProfileId(1),
+        weapon_base_id,
+        ultimate_id: preset.recipe.ultimate,
+        passive_ids: [
+            crate::builds::PassiveDefinitionId(3),
+            crate::builds::PassiveDefinitionId(4),
+        ],
+        revision: crate::profiles::ProfileRevision::INITIAL,
+    };
+    let snapshot =
+        crate::profiles::MatchBuildSnapshotV2::from_brawler(&brawler, &builds, &weapons, fighter)
+            .map_err(|error| format!("built-in brawler resolution failed: {error:?}"))?;
+    let accepted_identity = snapshot.accepted_identity;
     Ok(LobbyBuildIdentity {
-        source_build_preset: resolved.identity.source_build_preset_id.map(|id| id.0),
-        recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
-        build_revision: resolved.identity.revision.0,
-        snapshot,
+        source_build_preset: None,
+        recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
+        build_revision: accepted_identity.revision.0,
+        snapshot: snapshot.encode()?,
     })
 }
 
@@ -123,7 +130,6 @@ fn practice_bot_rows(
             team,
             display_name: brawler_routing::MatchDisplayName::new(&format!("Bot {}", ordinal + 1))
                 .map_err(|_| Rejection::Internal)?,
-            source_build_preset: build.source_build_preset,
             recipe_fingerprint: build.recipe_fingerprint,
             build_revision: build.build_revision,
             build_snapshot: build.snapshot,
@@ -530,7 +536,6 @@ impl LobbyState {
                         self.accepted_name(session.netcode_client_id)
                             .ok_or(CodecError::InvalidValue)?,
                     )?,
-                    source_build_preset: session.build.source_build_preset,
                     recipe_fingerprint: session.build.recipe_fingerprint,
                     build_revision: session.build.build_revision,
                     build_snapshot: session.build.snapshot,
@@ -609,28 +614,12 @@ impl LobbyState {
                     self.accepted_name(ticket.netcode_client_id)
                         .ok_or(CodecError::InvalidValue)?,
                 )?,
-                source_build_preset: ticket
-                    .accepted_build
-                    .identity
-                    .source_build_preset_id
-                    .map(|id| id.0),
                 recipe_fingerprint: ticket.accepted_build.identity.recipe_fingerprint.0,
                 build_revision: ticket.accepted_build.identity.revision.0,
-                build_snapshot: crate::builds::MatchBuildSnapshotV1 {
-                    schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
-                    candidate: crate::builds::BuildCandidate {
-                        build_revision: ticket.accepted_build.identity.revision,
-                        selection: match ticket.accepted_build.identity.source_build_preset_id {
-                            Some(id) => crate::builds::BuildSelection::Preset(id),
-                            None => crate::builds::BuildSelection::Custom(
-                                ticket.accepted_build.canonical_recipe,
-                            ),
-                        },
-                    },
-                    accepted: ticket.accepted_build,
-                }
-                .encode()
-                .map_err(|_| CodecError::InvalidValue)?,
+                build_snapshot: ticket
+                    .build_snapshot
+                    .encode()
+                    .map_err(|_| CodecError::InvalidValue)?,
             });
         }
         let lobby_session_id = participants
@@ -675,9 +664,8 @@ impl LobbyState {
         session: &LobbySession,
         command: &crate::lobby::PracticeStartRequest,
         catalog: &catalog::ResolvedLobbyCatalog,
-        builds: &BuildCatalog,
-        weapons: &WeaponCatalog,
-        fighters: &FighterDefinitions,
+        human_snapshot: crate::profiles::MatchBuildSnapshotV2,
+        accepted_build: crate::builds::AcceptedBuildSummary,
     ) -> Result<crate::lobby::ReservationStarted, crate::lobby::PracticeStartRejection> {
         use crate::lobby::PracticeStartRejection as Rejection;
         if self.pending.is_some() || self.allocation_completed {
@@ -697,21 +685,13 @@ impl LobbyState {
         if game.configuration_revision != command.game_type_configuration_revision {
             return Err(Rejection::StaleGameConfiguration);
         }
-        let (recipe, resolved) =
-            queue::resolve_candidate(&command.build, builds, weapons, fighters)
-                .map_err(|_| Rejection::InvalidBuild)?;
-        let accepted_build = crate::builds::AcceptedBuildSummary {
-            canonical_recipe: recipe,
-            identity: resolved.identity,
-            total_points: resolved.total_points,
-        };
-        let human_snapshot = crate::builds::MatchBuildSnapshotV1 {
-            schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
-            candidate: command.build,
-            accepted: accepted_build,
+        if human_snapshot.brawler_id != command.brawler_id
+            || human_snapshot.brawler_revision != command.brawler_revision
+        {
+            return Err(Rejection::InvalidBuild);
         }
-        .encode()
-        .map_err(|_| Rejection::Internal)?;
+        let accepted_identity = human_snapshot.accepted_identity;
+        let human_snapshot = human_snapshot.encode().map_err(|_| Rejection::Internal)?;
         let request_id = RequestId::new(self.next_request_id).ok_or(Rejection::Internal)?;
         self.next_request_id = self
             .next_request_id
@@ -734,9 +714,8 @@ impl LobbyState {
                     .ok_or(Rejection::Internal)?,
             )
             .map_err(|_| Rejection::Internal)?,
-            source_build_preset: resolved.identity.source_build_preset_id.map(|id| id.0),
-            recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
-            build_revision: resolved.identity.revision.0,
+            recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
+            build_revision: accepted_identity.revision.0,
             build_snapshot: human_snapshot,
         };
         let bots = practice_bot_rows(game.team_count, game.players_per_team)?;
@@ -1028,6 +1007,7 @@ pub struct LobbyClient {
 pub(crate) enum LobbyScheduleSet {
     BeginLobbyFrame,
     AuthenticateLobbyHellos,
+    ApplyProfileTransactions,
     CollectQueueClientMessages,
     CleanupDisconnectedSessions,
     ApplyQueueTransactions,
@@ -1093,6 +1073,17 @@ struct CollectedQueueMessages {
 struct LobbySessionLosses(BTreeMap<LobbySessionId, NetcodeClientId>);
 
 #[derive(Resource, Default)]
+struct PendingLobbyAdmissions(BTreeMap<u64, PendingLobbyAdmission>);
+
+#[derive(Clone)]
+struct PendingLobbyAdmission {
+    entity: Entity,
+    route_id: RouteId,
+    peer_id: PeerId,
+    hello: LobbyHello,
+}
+
+#[derive(Resource, Default)]
 struct QueueSnapshotPublication {
     initial_pending: bool,
     mutation_pending: bool,
@@ -1130,6 +1121,7 @@ impl Plugin for LobbyPlugin {
             .init_resource::<LobbyControlOutbox>()
             .init_resource::<LobbyQueueFrame>()
             .init_resource::<LobbySessionLosses>()
+            .init_resource::<PendingLobbyAdmissions>()
             .init_resource::<QueueSnapshotPublication>()
             .init_resource::<QueueEvidenceSettings>()
             .init_resource::<ProductFormationState>()
@@ -1140,6 +1132,7 @@ impl Plugin for LobbyPlugin {
                 (
                     LobbyScheduleSet::BeginLobbyFrame,
                     LobbyScheduleSet::AuthenticateLobbyHellos,
+                    LobbyScheduleSet::ApplyProfileTransactions,
                     LobbyScheduleSet::CollectQueueClientMessages,
                     LobbyScheduleSet::CleanupDisconnectedSessions,
                     LobbyScheduleSet::ApplyQueueTransactions,
@@ -1153,6 +1146,13 @@ impl Plugin for LobbyPlugin {
                 (
                     begin_lobby_frame.in_set(LobbyScheduleSet::BeginLobbyFrame),
                     lobby_receive_hellos.in_set(LobbyScheduleSet::AuthenticateLobbyHellos),
+                    (
+                        process_profile_storage_results,
+                        collect_profile_commands,
+                        ApplyDeferred,
+                    )
+                        .chain()
+                        .in_set(LobbyScheduleSet::ApplyProfileTransactions),
                     collect_queue_client_messages
                         .in_set(LobbyScheduleSet::CollectQueueClientMessages),
                     cleanup_disconnected_sessions
@@ -1236,8 +1236,12 @@ fn lobby_client_removed(
     clients: Query<&LobbyClient>,
     losses: Option<ResMut<LobbySessionLosses>>,
     state: Option<ResMut<LobbyState>>,
+    authority: Option<ResMut<crate::profiles::ProfileAuthority>>,
 ) {
     if let Ok(client) = clients.get(trigger.entity) {
+        if let Some(mut authority) = authority {
+            authority.remove_client(client.client_id.get());
+        }
         if let Some(mut losses) = losses {
             losses.0.insert(client.lobby_session_id, client.client_id);
         } else if let Some(mut state) = state {
@@ -1260,6 +1264,8 @@ fn lobby_client_removed(
 fn lobby_netcode_authenticated(
     trigger: On<Add, Connected>,
     peers: Query<(&RemoteId, &RoutedPeer)>,
+    mut identity_senders: Query<&mut MessageSender<LobbyServerIdentity>>,
+    role: Res<ServerRoleResource>,
     mut outbox: ResMut<LobbyControlOutbox>,
 ) {
     let Ok((remote_id, peer)) = peers.get(trigger.entity) else {
@@ -1275,6 +1281,14 @@ fn lobby_netcode_authenticated(
         peer_id: peer.peer_id,
         netcode_client_id,
     });
+    if let (Some(manifest), Ok(mut sender)) = (
+        role.lobby_manifest(),
+        identity_senders.get_mut(trigger.entity),
+    ) {
+        sender.send::<SessionChannel>(LobbyServerIdentity {
+            logical_server_id: manifest.common.logical_server_id.get(),
+        });
+    }
 }
 
 #[allow(
@@ -1293,6 +1307,10 @@ fn initialize_lobby_state(
     let Ok(build) = default_build_identity() else {
         return;
     };
+    let profile_database_path = std::path::PathBuf::from(&manifest.profile_database_path);
+    let profile_authority = crate::profiles::ProfileAuthority::start(profile_database_path)
+        .unwrap_or_else(|error| panic!("profile storage failed to start: {error}"));
+    commands.insert_resource(profile_authority);
     commands.insert_resource(LobbyState::new(manifest, config.game_mode, build));
     commands.insert_resource(QueueState::new(&catalog));
 }
@@ -1303,95 +1321,252 @@ fn initialize_lobby_state(
     reason = "the query is the one bounded lobby authentication transaction"
 )]
 fn lobby_receive_hellos(
-    mut commands: Commands,
-    mut state: ResMut<LobbyState>,
-    mut outbox: ResMut<LobbyControlOutbox>,
-    catalog: Res<catalog::ResolvedLobbyCatalog>,
-    mut publications: ResMut<QueueSnapshotPublication>,
+    state: Res<LobbyState>,
+    mut authority: ResMut<crate::profiles::ProfileAuthority>,
+    mut pending: ResMut<PendingLobbyAdmissions>,
     mut receivers: Query<(
         Entity,
         &RemoteId,
         &mut MessageReceiver<LobbyHello>,
         &mut MessageSender<LobbyJoinOutcome>,
         Option<&RoutedPeer>,
-        Option<&LobbyClient>,
         Has<Connected>,
         Has<Disconnected>,
     )>,
 ) {
-    for (
-        entity,
-        remote_id,
-        mut receiver,
-        mut sender,
-        routed_peer,
-        lobby_client,
-        connected,
-        disconnected,
-    ) in &mut receivers
+    for (entity, remote_id, mut receiver, mut sender, routed_peer, connected, disconnected) in
+        &mut receivers
     {
         if !connected || disconnected {
             continue;
         }
         let messages: Vec<_> = receiver.receive().collect();
         for hello in messages {
-            let netcode_client_id =
-                authenticated_netcode_id(remote_id).and_then(NetcodeClientId::new);
-            let new_session = netcode_client_id
-                .is_some_and(|client_id| state.session_for_client(client_id.get()).is_none());
-            let outcome = match (authenticated_netcode_id(remote_id), routed_peer) {
-                (Some(client_id), Some(peer)) => state
-                    .accept_client(client_id, peer.route_id, peer.peer_id, &hello)
-                    .map_or_else(
-                        |error| LobbyJoinOutcome::Rejected {
-                            reason: error.rejection(),
-                        },
-                        |session| {
-                            if lobby_client.is_none() && new_session {
-                                commands.entity(entity).insert(LobbyClient {
-                                    client_id: session.netcode_client_id,
-                                    lobby_session_id: session.lobby_session_id,
-                                });
-                                let _ = outbox.push_authenticated(LobbyAuthenticatedBody {
-                                    route_id: session.route_id,
-                                    peer_id: session.peer_id,
-                                    lobby_session_id: session.lobby_session_id,
-                                    netcode_client_id: session.netcode_client_id,
-                                });
-                            }
-                            LobbyJoinOutcome::Accepted {
-                                player_id: crate::protocol::PlayerId(session.player_id.get()),
-                                accepted_display_name: state
-                                    .accepted_name(session.netcode_client_id)
-                                    .expect("accepted session owns a name")
-                                    .to_string(),
-                                server_name: catalog.server_name.clone(),
-                                catalog_revision: catalog.revision,
-                                game_types: catalog.game_types.clone(),
-                            }
-                        },
-                    ),
-                (Some(_), None) => LobbyJoinOutcome::Rejected {
-                    reason: LobbySessionError::NotRouted.rejection(),
-                },
-                (None, _) => LobbyJoinOutcome::Rejected {
+            let Some(client_id) = authenticated_netcode_id(remote_id) else {
+                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
                     reason: LobbySessionError::InvalidClientId.rejection(),
-                },
+                });
+                continue;
             };
-            let should_send = match &outcome {
-                LobbyJoinOutcome::Accepted { .. } => {
-                    netcode_client_id.is_some_and(|client_id| state.mark_welcome_sent(client_id))
-                }
-                LobbyJoinOutcome::Rejected { .. } => true,
+            let Some(peer) = routed_peer else {
+                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
+                    reason: LobbySessionError::NotRouted.rejection(),
+                });
+                continue;
             };
-            let accepted = matches!(&outcome, LobbyJoinOutcome::Accepted { .. });
-            if should_send {
-                sender.send::<SessionChannel>(outcome);
-                if accepted {
-                    publications.initial_pending = true;
+            if let Err(error) = state.validate_hello(&hello) {
+                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
+                    reason: error.rejection(),
+                });
+                continue;
+            }
+            if state.session_for_client(client_id).is_some() {
+                continue;
+            }
+            if let Some(existing) = pending.0.get(&client_id) {
+                if existing.hello != hello {
+                    sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
+                        reason: LobbyJoinRejection::InvalidAccount,
+                    });
                 }
+                continue;
+            }
+            match authority.begin_load(client_id, hello.account_id) {
+                Ok(()) => {
+                    pending.0.insert(
+                        client_id,
+                        PendingLobbyAdmission {
+                            entity,
+                            route_id: peer.route_id,
+                            peer_id: peer.peer_id,
+                            hello,
+                        },
+                    );
+                }
+                Err(error) => sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
+                    reason: profile_authority_join_rejection(&error),
+                }),
             }
         }
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::needless_pass_by_value,
+    reason = "one ordered authority result pump atomically promotes pending sessions and publishes outcomes"
+)]
+fn process_profile_storage_results(
+    mut commands: Commands,
+    mut state: ResMut<LobbyState>,
+    mut authority: ResMut<crate::profiles::ProfileAuthority>,
+    mut pending: ResMut<PendingLobbyAdmissions>,
+    mut outbox: ResMut<LobbyControlOutbox>,
+    catalog: Res<catalog::ResolvedLobbyCatalog>,
+    mut publications: ResMut<QueueSnapshotPublication>,
+    mut clients: Query<(
+        &RemoteId,
+        &mut MessageSender<LobbyJoinOutcome>,
+        &mut MessageSender<crate::profiles::ProfileOutcome>,
+        Has<Connected>,
+        Has<Disconnected>,
+    )>,
+) {
+    let (loads, mutations) = authority
+        .poll_loads()
+        .unwrap_or_else(|error| panic!("profile storage executor failed: {error:?}"));
+    for completion in loads {
+        let Some(admission) = pending.0.remove(&completion.client_key) else {
+            authority.remove_client(completion.client_key);
+            continue;
+        };
+        let Ok((remote_id, mut sender, _, connected, disconnected)) =
+            clients.get_mut(admission.entity)
+        else {
+            authority.remove_client(completion.client_key);
+            continue;
+        };
+        if !connected
+            || disconnected
+            || authenticated_netcode_id(remote_id) != Some(completion.client_key)
+        {
+            authority.remove_client(completion.client_key);
+            continue;
+        }
+        let profile = match completion.result {
+            Ok(profile) => profile,
+            Err(decision) => {
+                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
+                    reason: match decision {
+                        crate::profiles::ProfileDecision::StorageFault => {
+                            LobbyJoinRejection::StorageUnavailable
+                        }
+                        _ => LobbyJoinRejection::InvalidAccount,
+                    },
+                });
+                authority.remove_client(completion.client_key);
+                continue;
+            }
+        };
+        let session = match state.accept_client(
+            completion.client_key,
+            admission.route_id,
+            admission.peer_id,
+            &admission.hello,
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
+                    reason: error.rejection(),
+                });
+                authority.remove_client(completion.client_key);
+                continue;
+            }
+        };
+        commands.entity(admission.entity).insert(LobbyClient {
+            client_id: session.netcode_client_id,
+            lobby_session_id: session.lobby_session_id,
+        });
+        let _ = outbox.push_authenticated(LobbyAuthenticatedBody {
+            route_id: session.route_id,
+            peer_id: session.peer_id,
+            lobby_session_id: session.lobby_session_id,
+            netcode_client_id: session.netcode_client_id,
+        });
+        if state.mark_welcome_sent(session.netcode_client_id) {
+            sender.send::<SessionChannel>(LobbyJoinOutcome::Accepted {
+                logical_server_id: state.manifest.common.logical_server_id.get(),
+                player_id: crate::protocol::PlayerId(session.player_id.get()),
+                accepted_display_name: state
+                    .accepted_name(session.netcode_client_id)
+                    .expect("accepted session owns a name")
+                    .to_string(),
+                server_name: catalog.server_name.clone(),
+                catalog_revision: catalog.revision,
+                game_types: catalog.game_types.clone(),
+                profile,
+            });
+            publications.initial_pending = true;
+        }
+    }
+    for (client_key, outcome) in mutations {
+        for (remote_id, _, mut sender, connected, disconnected) in &mut clients {
+            if connected && !disconnected && authenticated_netcode_id(remote_id) == Some(client_key)
+            {
+                sender.send::<ProfileChannel>(outcome.clone());
+                break;
+            }
+        }
+    }
+}
+
+#[allow(
+    clippy::type_complexity,
+    clippy::needless_pass_by_value,
+    reason = "the bounded profile command receiver serializes mutations before queue admission"
+)]
+fn collect_profile_commands(
+    mut authority: ResMut<crate::profiles::ProfileAuthority>,
+    queue: Res<QueueState>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageReceiver<crate::profiles::ProfileCommand>,
+        &mut MessageSender<crate::profiles::ProfileOutcome>,
+        Has<Disconnected>,
+    )>,
+) {
+    for (client, mut receiver, mut sender, disconnected) in &mut clients {
+        if disconnected {
+            continue;
+        }
+        let queue_locked = queue.ticket_for_client(client.client_id).is_some();
+        for command in receiver.receive().take(4) {
+            match authority.submit_command(client.client_id.get(), command.clone(), queue_locked) {
+                Ok(crate::profiles::ProfileMutationSubmission::Pending) => {}
+                Ok(crate::profiles::ProfileMutationSubmission::Immediate(outcome)) => {
+                    sender.send::<ProfileChannel>(outcome);
+                }
+                Err(crate::profiles::ProfileAuthorityError::StorageStopped) => {
+                    panic!("profile storage executor stopped")
+                }
+                Err(error) => sender.send::<ProfileChannel>(crate::profiles::ProfileOutcome {
+                    request_id: profile_command_request_id(&command),
+                    decision: match error {
+                        crate::profiles::ProfileAuthorityError::QueueLocked => {
+                            crate::profiles::ProfileDecision::QueueLocked
+                        }
+                        crate::profiles::ProfileAuthorityError::InvalidRequest
+                        | crate::profiles::ProfileAuthorityError::UnknownSession => {
+                            crate::profiles::ProfileDecision::InvalidRequest
+                        }
+                        _ => crate::profiles::ProfileDecision::TemporarilyUnavailable,
+                    },
+                    snapshot: None,
+                }),
+            }
+        }
+    }
+}
+
+fn profile_command_request_id(command: &crate::profiles::ProfileCommand) -> u64 {
+    match command {
+        crate::profiles::ProfileCommand::CreateBrawler { request_id, .. }
+        | crate::profiles::ProfileCommand::EditBrawler { request_id, .. }
+        | crate::profiles::ProfileCommand::SelectBrawler { request_id, .. }
+        | crate::profiles::ProfileCommand::DeleteBrawler { request_id, .. } => *request_id,
+    }
+}
+
+fn profile_authority_join_rejection(
+    error: &crate::profiles::ProfileAuthorityError,
+) -> LobbyJoinRejection {
+    match error {
+        crate::profiles::ProfileAuthorityError::AccountInUse => LobbyJoinRejection::AccountInUse,
+        crate::profiles::ProfileAuthorityError::StorageStopped => {
+            LobbyJoinRejection::StorageUnavailable
+        }
+        _ => LobbyJoinRejection::InvalidAccount,
     }
 }
 
@@ -1463,6 +1638,7 @@ fn collect_queue_client_messages(
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn cleanup_disconnected_sessions(
     mut state: ResMut<LobbyState>,
+    mut authority: ResMut<crate::profiles::ProfileAuthority>,
     mut outbox: ResMut<LobbyControlOutbox>,
     mut queue: ResMut<QueueState>,
     mut formation: ResMut<ProductFormationState>,
@@ -1476,6 +1652,7 @@ fn cleanup_disconnected_sessions(
 ) {
     let losses = core::mem::take(&mut losses.0);
     for (session_id, client_id) in losses {
+        authority.remove_client(client_id.get());
         frame.eligible.remove(&session_id);
         if formation
             .practice
@@ -1537,6 +1714,7 @@ fn apply_queue_transactions(
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
     fighters: Res<FighterDefinitions>,
+    authority: Res<crate::profiles::ProfileAuthority>,
     mut frame: ResMut<LobbyQueueFrame>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -1574,15 +1752,35 @@ fn apply_queue_transactions(
                 crate::lobby::QueueClientMessage::Command {
                     request_id,
                     command,
-                } => queue.command(
-                    &session,
-                    request_id,
-                    command,
-                    monotonic_millis(),
-                    &builds.0,
-                    &weapons.0,
-                    &fighters,
-                ),
+                } => {
+                    let admitted = match &command {
+                        crate::lobby::QueueCommand::Join(join) => fighters
+                            .get(STANDARD_FIGHTER_DEFINITION)
+                            .and_then(|fighter| {
+                                authority
+                                    .admitted_snapshot(
+                                        session.netcode_client_id.get(),
+                                        join.brawler_id,
+                                        join.brawler_revision,
+                                        &builds.0,
+                                        &weapons.0,
+                                        fighter,
+                                    )
+                                    .ok()
+                            }),
+                        crate::lobby::QueueCommand::Cancel(_) => None,
+                    };
+                    queue.command(
+                        &session,
+                        request_id,
+                        command,
+                        monotonic_millis(),
+                        admitted,
+                        &builds.0,
+                        &weapons.0,
+                        &fighters,
+                    )
+                }
             };
             if result.outcome_ready() {
                 frame.pending_deliveries.insert(session.lobby_session_id);
@@ -1723,6 +1921,7 @@ fn apply_practice_start_requests(
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
     fighters: Res<FighterDefinitions>,
+    authority: Res<crate::profiles::ProfileAuthority>,
     mut formation: ResMut<ProductFormationState>,
     mut clients: Query<(
         &LobbyClient,
@@ -1771,9 +1970,39 @@ fn apply_practice_start_requests(
                 .expect("authenticated lobby client owns session");
             let started = rejection.map_or_else(
                 || {
-                    state.create_practice_request(
-                        &session, &command, &catalog, &builds.0, &weapons.0, &fighters,
-                    )
+                    let snapshot = fighters
+                        .get(STANDARD_FIGHTER_DEFINITION)
+                        .and_then(|fighter| {
+                            authority
+                                .admitted_snapshot(
+                                    session.netcode_client_id.get(),
+                                    command.brawler_id,
+                                    command.brawler_revision,
+                                    &builds.0,
+                                    &weapons.0,
+                                    fighter,
+                                )
+                                .ok()
+                        })
+                        .ok_or(crate::lobby::PracticeStartRejection::InvalidBuild)?;
+                    let fighter = fighters
+                        .get(STANDARD_FIGHTER_DEFINITION)
+                        .ok_or(crate::lobby::PracticeStartRejection::Internal)?;
+                    let resolved = snapshot
+                        .resolve(&builds.0, &weapons.0, fighter)
+                        .map_err(|_| crate::lobby::PracticeStartRejection::InvalidBuild)?;
+                    let accepted = crate::builds::AcceptedBuildSummary {
+                        canonical_recipe: crate::builds::BrawlerBuildRecipe {
+                            weapon: crate::builds::WeaponChoice::Preset(
+                                crate::combat::WeaponPresetId(snapshot.weapon_base_id.0),
+                            ),
+                            ultimate: snapshot.ultimate_id,
+                            passives: snapshot.passive_ids,
+                        },
+                        identity: resolved.identity,
+                        total_points: resolved.total_points,
+                    };
+                    state.create_practice_request(&session, &command, &catalog, snapshot, accepted)
                 },
                 Err,
             );
@@ -2246,7 +2475,7 @@ mod tests {
     fn manifest() -> LobbyManifest {
         LobbyManifest {
             common: ManifestCommon {
-                manifest_version: 1,
+                manifest_version: 2,
                 role: WorkerRole::Lobby,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -2265,6 +2494,13 @@ mod tests {
             outstanding_allocations: 2,
             active_matches: 2,
             heartbeat_ms: 100,
+            profile_database_path: std::env::temp_dir()
+                .join(format!(
+                    "brawler-lobby-profiles-{}.sqlite3",
+                    std::process::id()
+                ))
+                .to_string_lossy()
+                .into_owned(),
             raw_catalog: include_bytes!("../../../config/server/game-types.ron").to_vec(),
             raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(include_bytes!(
                 "../../../config/server/game-types.ron"
@@ -2291,6 +2527,7 @@ mod tests {
             build_version: VERSION.to_string(),
             registry_fingerprint: 7,
             content_fingerprint: GameplayContentFingerprint(8),
+            account_id: crate::profiles::AccountId::new(1).unwrap(),
             proposed_display_name: "Brawler-Test".to_string(),
         }
     }
@@ -2363,21 +2600,50 @@ mod tests {
             catalog_revision: catalog.revision,
             game_type_id: game.id.clone(),
             game_type_configuration_revision: game.configuration_revision,
-            build: crate::builds::BuildCandidate {
-                build_revision: builds.balance_revision,
-                selection: crate::builds::BuildSelection::Preset(BuildPresetId(1)),
+            brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            brawler_revision: crate::profiles::ProfileRevision::INITIAL,
+        };
+        let fighter = FighterDefinitions::default();
+        let definition = builds.preset(BuildPresetId(1)).unwrap();
+        let brawler = crate::profiles::SavedBrawler {
+            id: command.brawler_id,
+            creation_ordinal: 1,
+            name: "Practice".into(),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate_id: definition.recipe.ultimate,
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+            revision: command.brawler_revision,
+        };
+        let snapshot = crate::profiles::MatchBuildSnapshotV2::from_brawler(
+            &brawler,
+            &builds,
+            &weapons,
+            fighter.get(STANDARD_FIGHTER_DEFINITION).unwrap(),
+        )
+        .unwrap();
+        let resolved = snapshot
+            .resolve(
+                &builds,
+                &weapons,
+                fighter.get(STANDARD_FIGHTER_DEFINITION).unwrap(),
+            )
+            .unwrap();
+        let accepted = crate::builds::AcceptedBuildSummary {
+            canonical_recipe: crate::builds::BrawlerBuildRecipe {
+                weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+                ultimate: definition.recipe.ultimate,
+                passives: brawler.passive_ids,
             },
+            identity: resolved.identity,
+            total_points: resolved.total_points,
         };
 
         let started = lobby
-            .create_practice_request(
-                &session,
-                &command,
-                &catalog,
-                &builds,
-                &weapons,
-                &FighterDefinitions::default(),
-            )
+            .create_practice_request(&session, &command, &catalog, snapshot, accepted)
             .unwrap();
         let request = &lobby.pending.as_ref().unwrap().body;
         assert_eq!(started.ticket_id, None);

@@ -86,6 +86,7 @@ pub enum ClientOverlay {
     Credits,
     BuildEditor,
     DashboardMenu,
+    DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
     Confirmation(CancelMatchStartConfirmation),
     ChangeServerConfirmation,
     LeaveConfirmation,
@@ -171,7 +172,13 @@ enum FlowUiAction {
     OpenSettings,
     OpenCredits,
     ToggleFavoriteServer,
-    OpenBuildEditor,
+    CreateBrawler,
+    SelectNextBrawler,
+    EditSelectedBrawler,
+    RenameSelectedBrawler,
+    DeleteSelectedBrawler,
+    CancelDeleteBrawler,
+    ConfirmDeleteBrawler,
     ChooseBuild(usize),
     FocusBuildField(usize),
     ChooseBuildFieldValue {
@@ -243,8 +250,8 @@ enum OverlayCommit {
     Clear,
     Settings,
     Credits,
-    BuildEditor,
     DashboardMenu,
+    DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
     Confirmation(CancelMatchStartConfirmation),
     ChangeServerConfirmation,
 }
@@ -312,9 +319,9 @@ enum EditingField {
 }
 
 #[derive(Resource, Clone, Debug)]
-struct ConnectionPersistence {
-    state: ConnectionsFileV1,
-    dirty_error: Option<String>,
+pub(super) struct ConnectionPersistence {
+    pub(super) state: ConnectionsFileV1,
+    pub(super) dirty_error: Option<String>,
 }
 
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -464,6 +471,12 @@ struct DashboardPlayLabel;
 struct DashboardPracticeLabel;
 
 #[derive(Component)]
+struct DashboardBrawlerNameLabel;
+
+#[derive(Component)]
+struct DashboardBrawlerSummaryLabel;
+
+#[derive(Component)]
 struct QueueStatusLabel;
 
 #[derive(Component)]
@@ -483,6 +496,9 @@ struct LeaveConfirmationRoot;
 
 #[derive(Component)]
 struct ChangeServerConfirmationRoot;
+
+#[derive(Component)]
+struct DeleteBrawlerConfirmationRoot;
 
 #[derive(Component)]
 struct DashboardMenuRoot;
@@ -554,7 +570,6 @@ impl Plugin for ClientFlowPlugin {
                 Startup,
                 (
                     load_connection_state,
-                    load_build_state,
                     ApplyDeferred,
                     start_initial_connection,
                 )
@@ -637,6 +652,7 @@ impl Plugin for ClientFlowPlugin {
                     scroll_dashboard.after(apply_dashboard_layout),
                     update_dashboard_live_facts,
                     present_dashboard_menu,
+                    present_delete_brawler_confirmation,
                 )
                     .in_set(ClientFlowSet::PresentFlow)
                     .before(present_flow),
@@ -762,24 +778,6 @@ fn start_initial_connection(
             ],
         });
         next_flow.set(ClientFlow::ServerSelect);
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are runtime-owned"
-)]
-fn load_build_state(
-    build_path: Res<super::ClientBuildPath>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
-    mut editor: ResMut<super::BuildEditorState>,
-    mut failures: ResMut<ClientLocalLoadFailures>,
-) {
-    match super::load_build(&build_path.0, &builds.0, &weapons.0) {
-        Ok(Some(file)) => editor.loaded_selection = file.selection,
-        Ok(None) => {}
-        Err(_) => failures.build_failed = true,
     }
 }
 
@@ -1113,6 +1111,11 @@ fn collect_flow_input(
             FlowUiAction::KeepServer
         } else if matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
             FlowUiAction::CloseDashboardMenu
+        } else if matches!(
+            overlay.as_ref(),
+            ClientOverlay::DeleteBrawlerConfirmation(_)
+        ) {
+            FlowUiAction::CancelDeleteBrawler
         } else if matches!(overlay.as_ref(), ClientOverlay::Confirmation(_)) {
             FlowUiAction::KeepLoading
         } else {
@@ -1204,6 +1207,7 @@ fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
     match overlay {
         ClientOverlay::Error(_)
         | ClientOverlay::Confirmation(_)
+        | ClientOverlay::DeleteBrawlerConfirmation(_)
         | ClientOverlay::DashboardMenu
         | ClientOverlay::ChangeServerConfirmation
         | ClientOverlay::LeaveConfirmation => button.error_action,
@@ -1263,6 +1267,7 @@ fn resolve_flow_action(
         ResMut<super::ClientPracticeModel>,
         ResMut<super::ClientMatchLoadingModel>,
         ResMut<super::ClientMatchResultState>,
+        ResMut<super::ClientProfileModel>,
         ResMut<RoutedClientLifecycle>,
         ResMut<MatchFailureNotice>,
         ResMut<SessionPurpose>,
@@ -1283,6 +1288,7 @@ fn resolve_flow_action(
         mut practice,
         mut loading,
         mut result_state,
+        mut profile,
         mut routed,
         mut match_failure,
         mut purpose,
@@ -1542,64 +1548,8 @@ fn resolve_flow_action(
                     selection.game_type_id = Some(membership.game_type_id.clone());
                     selection.configuration_revision =
                         Some(membership.game_type_configuration_revision);
-                    let selection_to_save = editor.submitted_selection.unwrap_or_else(|| {
-                        membership
-                            .accepted_build
-                            .identity
-                            .source_build_preset_id
-                            .map_or(
-                                crate::builds::BuildSelection::Custom(
-                                    membership.accepted_build.canonical_recipe,
-                                ),
-                                crate::builds::BuildSelection::Preset,
-                            )
-                    });
-                    let canonical_recipe = match selection_to_save {
-                        crate::builds::BuildSelection::Preset(id) => {
-                            builds.0.preset(id).map(|preset| preset.recipe)
-                        }
-                        crate::builds::BuildSelection::Custom(recipe) => Some(recipe),
-                    };
-                    let local =
-                        super::resolve_build_preview(selection_to_save, &builds.0, &weapons.0);
-                    if canonical_recipe != Some(membership.accepted_build.canonical_recipe)
-                        || local.as_ref().map_or(true, |preview| {
-                            preview.identity != membership.accepted_build.identity
-                                || preview.total_points != membership.accepted_build.total_points
-                        })
-                    {
-                        commit.teardown = true;
-                        fail_to_server_select_with_kind(
-                            &mut commit,
-                            FlowErrorKind::Content,
-                            "The accepted build disagreed with local authenticated content"
-                                .to_string(),
-                            true,
-                        );
-                        return;
-                    }
-                    editor.accept(selection_to_save);
                     commit.next_flow = Some(ClientFlow::Queue);
                     commit.overlay = Some(OverlayCommit::Clear);
-                    let file = super::BuildFileV1::new(
-                        membership.accepted_build.identity.revision,
-                        selection_to_save,
-                    );
-                    if let Err(error) =
-                        super::save_build(&build_path.0, file, &builds.0, &weapons.0)
-                    {
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Persistence,
-                            message: format!(
-                                "Queued successfully, but the build could not be saved: {error}"
-                            ),
-                            return_flow: ClientFlow::Queue,
-                            actions: [
-                                Some(FlowErrorAction::RetrySave),
-                                Some(FlowErrorAction::ContinueWithoutSaving),
-                            ],
-                        });
-                    }
                 }
                 crate::lobby::QueueDecision::Cancelled { .. } => {
                     *purpose = SessionPurpose::Multiplayer;
@@ -1830,12 +1780,146 @@ fn resolve_flow_action(
                 commit.overlay = Some(OverlayCommit::Clear);
             }
         }
-        FlowUiAction::OpenBuildEditor => {
-            if queue.pending().is_some() || practice.pending() {
+        FlowUiAction::CreateBrawler => {
+            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
                 return;
             }
-            editor.open();
-            commit.overlay = Some(OverlayCommit::BuildEditor);
+            let Some(snapshot) = profile.snapshot() else {
+                return;
+            };
+            let ordinal = snapshot.next_brawler_ordinal;
+            let fighter = u16::try_from((ordinal - 1) % 3 + 1).unwrap_or(1);
+            let weapon = u16::try_from((ordinal - 1) % 4 + 1).unwrap_or(1);
+            let _ = profile.create(crate::profiles::BrawlerDraft {
+                name: format!("Brawler {ordinal}"),
+                fighter_profile_id: crate::profiles::FighterProfileId(fighter),
+                weapon_base_id: crate::profiles::WeaponBaseId(weapon),
+                ultimate_id: crate::builds::UltimateDefinitionId(1),
+                passive_ids: [
+                    crate::builds::PassiveDefinitionId(3),
+                    crate::builds::PassiveDefinitionId(4),
+                ],
+            });
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        FlowUiAction::SelectNextBrawler => {
+            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+                return;
+            }
+            let Some(snapshot) = profile.snapshot() else {
+                return;
+            };
+            let next = snapshot
+                .selected_brawler_id
+                .and_then(|selected| {
+                    snapshot
+                        .brawlers
+                        .iter()
+                        .position(|brawler| brawler.id == selected)
+                        .and_then(|index| {
+                            snapshot.brawlers.get((index + 1) % snapshot.brawlers.len())
+                        })
+                })
+                .map(|brawler| brawler.id);
+            if let Some(next) = next {
+                let _ = profile.select(next);
+            }
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        FlowUiAction::EditSelectedBrawler => {
+            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+                return;
+            }
+            let selected = profile
+                .snapshot()
+                .and_then(|snapshot| {
+                    snapshot
+                        .selected_brawler_id
+                        .and_then(|id| snapshot.brawlers.iter().find(|brawler| brawler.id == id))
+                })
+                .cloned();
+            if let Some(brawler) = selected {
+                let ultimate_id =
+                    crate::builds::UltimateDefinitionId(if brawler.ultimate_id.0 == 1 {
+                        2
+                    } else {
+                        1
+                    });
+                let passive_ids = if brawler.passive_ids
+                    == [
+                        crate::builds::PassiveDefinitionId(3),
+                        crate::builds::PassiveDefinitionId(4),
+                    ] {
+                    [
+                        crate::builds::PassiveDefinitionId(5),
+                        crate::builds::PassiveDefinitionId(6),
+                    ]
+                } else {
+                    [
+                        crate::builds::PassiveDefinitionId(3),
+                        crate::builds::PassiveDefinitionId(4),
+                    ]
+                };
+                let _ = profile.edit(
+                    brawler.id,
+                    crate::profiles::BrawlerEdit {
+                        name: brawler.name.clone(),
+                        ultimate_id,
+                        passive_ids,
+                    },
+                );
+            }
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        FlowUiAction::RenameSelectedBrawler => {
+            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+                return;
+            }
+            let selected = profile
+                .snapshot()
+                .and_then(|snapshot| {
+                    snapshot.selected_brawler_id.and_then(|id| {
+                        snapshot.brawlers.iter().find(|brawler| brawler.id == id)
+                    })
+                })
+                .cloned();
+            if let Some(brawler) = selected {
+                let name = match brawler.name.as_str() {
+                    "Ace" => "Vanguard",
+                    "Vanguard" => "Frost",
+                    _ => "Ace",
+                };
+                let _ = profile.edit(
+                    brawler.id,
+                    crate::profiles::BrawlerEdit {
+                        name: name.into(),
+                        ultimate_id: brawler.ultimate_id,
+                        passive_ids: brawler.passive_ids,
+                    },
+                );
+            }
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        FlowUiAction::DeleteSelectedBrawler => {
+            if queue.membership().is_some() || queue.pending().is_some() || practice.pending() {
+                return;
+            }
+            let selected = profile
+                .snapshot()
+                .and_then(|snapshot| snapshot.selected_brawler_id);
+            if let Some(selected) = selected {
+                commit.overlay = Some(OverlayCommit::DeleteBrawlerConfirmation(selected));
+            }
+        }
+        FlowUiAction::CancelDeleteBrawler => {
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        FlowUiAction::ConfirmDeleteBrawler => {
+            let ClientOverlay::DeleteBrawlerConfirmation(brawler_id) = overlay.as_ref() else {
+                return;
+            };
+            let _ = profile.delete(*brawler_id);
+            commit.overlay = Some(OverlayCommit::Clear);
         }
         FlowUiAction::ChooseBuild(index) => {
             editor.selected_choice = index.min(4);
@@ -1887,21 +1971,19 @@ fn resolve_flow_action(
                 return;
             }
             *purpose = SessionPurpose::Multiplayer;
-            let draft = editor.loaded_selection;
-            match super::resolve_build_preview(draft, &builds.0, &weapons.0) {
-                Ok(_) => {
-                    let candidate = crate::builds::BuildCandidate {
-                        build_revision: builds.0.balance_revision,
-                        selection: draft,
-                    };
-                    if queue.start_join(&selection, candidate, time.elapsed()) {
-                        editor.submitted_selection = Some(draft);
-                        editor.inline_error = None;
-                    }
-                }
-                Err(error) => {
-                    editor.inline_error = Some(super::build_editor::build_error_copy(&error));
-                }
+            let selected = membership.iter().next().and_then(|(membership, _, _)| {
+                membership.profile.selected_brawler_id.and_then(|id| {
+                    membership
+                        .profile
+                        .brawlers
+                        .iter()
+                        .find(|brawler| brawler.id == id)
+                })
+            });
+            if let Some(brawler) = selected
+                && queue.start_join(&selection, brawler.id, brawler.revision, time.elapsed())
+            {
+                editor.inline_error = None;
             }
         }
         FlowUiAction::StartPractice => {
@@ -1909,21 +1991,19 @@ fn resolve_flow_action(
                 return;
             }
             *purpose = SessionPurpose::Practice;
-            let draft = editor.loaded_selection;
-            match super::resolve_build_preview(draft, &builds.0, &weapons.0) {
-                Ok(_) => {
-                    let candidate = crate::builds::BuildCandidate {
-                        build_revision: builds.0.balance_revision,
-                        selection: draft,
-                    };
-                    if practice.start(&selection, candidate) {
-                        editor.submitted_selection = Some(draft);
-                        editor.inline_error = None;
-                    }
-                }
-                Err(error) => {
-                    editor.inline_error = Some(super::build_editor::build_error_copy(&error));
-                }
+            let selected = membership.iter().next().and_then(|(membership, _, _)| {
+                membership.profile.selected_brawler_id.and_then(|id| {
+                    membership
+                        .profile
+                        .brawlers
+                        .iter()
+                        .find(|brawler| brawler.id == id)
+                })
+            });
+            if let Some(brawler) = selected
+                && practice.start(&selection, brawler.id, brawler.revision)
+            {
+                editor.inline_error = None;
             }
         }
         FlowUiAction::QueueAgain => {
@@ -1951,11 +2031,16 @@ fn resolve_flow_action(
                 selection.catalog_revision = Some(membership.catalog_revision);
                 selection.game_type_id = Some(game.id.clone());
                 selection.configuration_revision = Some(game.configuration_revision);
-                let candidate = crate::builds::BuildCandidate {
-                    build_revision: builds.0.balance_revision,
-                    selection: editor.loaded_selection,
-                };
-                if !practice.start(&selection, candidate) {
+                let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
+                    membership
+                        .profile
+                        .brawlers
+                        .iter()
+                        .find(|brawler| brawler.id == id)
+                });
+                if selected_brawler
+                    .is_none_or(|brawler| !practice.start(&selection, brawler.id, brawler.revision))
+                {
                     commit.error = Some(FlowError {
                         kind: FlowErrorKind::Practice,
                         message: "The practice connection is unavailable.".to_string(),
@@ -1978,8 +2063,6 @@ fn resolve_flow_action(
                         session.generation,
                         membership,
                         &game_type_id,
-                        editor.loaded_selection,
-                        builds.0.balance_revision,
                         time.elapsed(),
                     );
                     if started {
@@ -2362,8 +2445,10 @@ fn commit_flow(
             OverlayCommit::Clear => ClientOverlay::None,
             OverlayCommit::Settings => ClientOverlay::Settings,
             OverlayCommit::Credits => ClientOverlay::Credits,
-            OverlayCommit::BuildEditor => ClientOverlay::BuildEditor,
             OverlayCommit::DashboardMenu => ClientOverlay::DashboardMenu,
+            OverlayCommit::DeleteBrawlerConfirmation(value) => {
+                ClientOverlay::DeleteBrawlerConfirmation(value)
+            }
             OverlayCommit::Confirmation(value) => ClientOverlay::Confirmation(value),
             OverlayCommit::ChangeServerConfirmation => ClientOverlay::ChangeServerConfirmation,
         };
@@ -3254,9 +3339,7 @@ fn spawn_dashboard(
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut navigation: ResMut<FlowNavigation>,
     mut selection: ResMut<SelectedGameType>,
-    editor: Res<super::BuildEditorState>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
+    profile: Res<super::ClientProfileModel>,
     queue: Res<super::ClientQueueModel>,
     practice: Res<super::ClientPracticeModel>,
     mut purpose: ResMut<SessionPurpose>,
@@ -3293,32 +3376,27 @@ fn spawn_dashboard(
     }
     navigation.selected = return_focus.0.take().unwrap_or(DASHBOARD_PLAY_INDEX);
     let dashboard_notice = notice.0.take();
-    let admission_pending = queue.pending().is_some() || practice.pending();
-
-    let build_name = match editor.loaded_selection {
-        crate::builds::BuildSelection::Preset(id) => builds
-            .0
-            .preset(id)
-            .map_or("Unavailable Brawler", |preset| preset.display_name.as_str()),
-        crate::builds::BuildSelection::Custom(_) => "Custom Brawler",
-    };
-    let build_summary =
-        super::resolve_build_preview(editor.loaded_selection, &builds.0, &weapons.0).map_or_else(
-            |_| "Build unavailable".to_string(),
-            |preview| {
-                let weapon = preview
-                    .lines
-                    .iter()
-                    .find(|line| line.starts_with("Weapon:"))
-                    .and_then(|line| line.strip_prefix("Weapon: "))
-                    .unwrap_or("Weapon unavailable");
-                format!(
-                    "{weapon} · {}/{}",
-                    preview.total_points,
-                    crate::builds::BUILD_POINT_BUDGET
-                )
-            },
-        );
+    let admission_pending = queue.pending().is_some() || practice.pending() || profile.pending();
+    let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
+        membership
+            .profile
+            .brawlers
+            .iter()
+            .find(|brawler| brawler.id == id)
+    });
+    let build_name =
+        selected_brawler.map_or("CREATE YOUR FIRST BRAWLER", |brawler| brawler.name.as_str());
+    let build_summary = selected_brawler.map_or_else(
+        || "Choose a permanent fighter profile and weapon base".to_string(),
+        |brawler| {
+            format!(
+                "Profile {} · Weapon base {} · {} of 16 saved",
+                brawler.fighter_profile_id.0,
+                brawler.weapon_base_id.0,
+                membership.profile.brawlers.len()
+            )
+        },
+    );
     let game_summary = dashboard_game_summary(game);
     let population = if queue.required_snapshot_is_fresh() {
         queue_population(&queue, game)
@@ -3469,7 +3547,11 @@ fn spawn_dashboard(
                     Button,
                     FlowButton {
                         index: DASHBOARD_BUILD_INDEX,
-                        action: FlowUiAction::OpenBuildEditor,
+                        action: if selected_brawler.is_some() {
+                            FlowUiAction::SelectNextBrawler
+                        } else {
+                            FlowUiAction::CreateBrawler
+                        },
                         error_action: false,
                         build_editor_action: false,
                     },
@@ -3500,7 +3582,11 @@ fn spawn_dashboard(
                     AccessibleLabel::new(build_accessible.clone()),
                     FlowButton {
                         index: DASHBOARD_BUILD_INDEX,
-                        action: FlowUiAction::OpenBuildEditor,
+                        action: if selected_brawler.is_some() {
+                            FlowUiAction::SelectNextBrawler
+                        } else {
+                            FlowUiAction::CreateBrawler
+                        },
                         error_action: false,
                         build_editor_action: false,
                     },
@@ -3545,16 +3631,22 @@ fn spawn_dashboard(
                         .with_children(|details| {
                             details.spawn((
                                 Text::new(build_name.to_uppercase()),
+                                DashboardBrawlerNameLabel,
                                 dashboard_font(assets.as_deref(), 24.0),
                                 TextColor(Color::srgb(0.035, 0.12, 0.32)),
                             ));
                             details.spawn((
                                 Text::new(build_summary),
+                                DashboardBrawlerSummaryLabel,
                                 TextFont::from_font_size(12.0),
                                 TextColor(Color::srgb(0.08, 0.18, 0.35)),
                             ));
                             details.spawn((
-                                Text::new("CHANGE BRAWLER"),
+                                Text::new(if selected_brawler.is_some() {
+                                    "SELECT NEXT BRAWLER"
+                                } else {
+                                    "CREATE BRAWLER"
+                                }),
                                 dashboard_font(assets.as_deref(), 15.0),
                                 TextColor(Color::srgb(0.03, 0.36, 0.82)),
                             ));
@@ -3651,7 +3743,7 @@ fn spawn_dashboard(
                         },
                         width: percent(21),
                         primary: false,
-                        disabled: admission_pending,
+                        disabled: admission_pending || selected_brawler.is_none(),
                         assets: assets.as_deref(),
                         icon: assets.as_deref().map(|assets| assets.practice_icon.clone()),
                     },
@@ -3670,7 +3762,9 @@ fn spawn_dashboard(
                         },
                         width: percent(33),
                         primary: true,
-                        disabled: capacity_occupied || admission_pending,
+                        disabled: capacity_occupied
+                            || admission_pending
+                            || selected_brawler.is_none(),
                         assets: assets.as_deref(),
                         icon: assets.as_deref().map(|assets| assets.play_icon.clone()),
                     },
@@ -4128,6 +4222,81 @@ fn present_change_server_confirmation(
 }
 
 #[allow(clippy::needless_pass_by_value)]
+fn present_delete_brawler_confirmation(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    roots: Query<Entity, With<DeleteBrawlerConfirmationRoot>>,
+    profile: Res<super::ClientProfileModel>,
+    mut navigation: ResMut<FlowNavigation>,
+) {
+    let ClientOverlay::DeleteBrawlerConfirmation(brawler_id) = overlay.as_ref() else {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    if !roots.is_empty() || *flow.get() != ClientFlow::Dashboard {
+        return;
+    }
+    let name = profile
+        .snapshot()
+        .and_then(|snapshot| {
+            snapshot
+                .brawlers
+                .iter()
+                .find(|brawler| brawler.id == *brawler_id)
+        })
+        .map_or("this brawler", |brawler| brawler.name.as_str());
+    navigation.selected = 0;
+    commands
+        .spawn((
+            DeleteBrawlerConfirmationRoot,
+            DespawnOnExit(ClientFlow::Dashboard),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.78)),
+            GlobalZIndex(510),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: percent(84),
+                    max_width: px(520),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(12),
+                    padding: UiRect::all(px(24)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.055, 0.08, 0.12)),
+            ))
+            .with_children(|panel| {
+                spawn_heading(panel, "DELETE BRAWLER?");
+                panel.spawn((
+                    Text::new(format!("Delete {name}? This cannot be undone.")),
+                    TextColor(Color::srgb(0.82, 0.88, 0.94)),
+                ));
+                spawn_flow_error_button(
+                    panel,
+                    0,
+                    FlowUiAction::CancelDeleteBrawler,
+                    "KEEP BRAWLER",
+                );
+                spawn_flow_error_button(panel, 1, FlowUiAction::ConfirmDeleteBrawler, "DELETE");
+            });
+        });
+}
+
+#[allow(clippy::needless_pass_by_value)]
 fn present_dashboard_menu(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
@@ -4136,6 +4305,7 @@ fn present_dashboard_menu(
     mut navigation: ResMut<FlowNavigation>,
     memberships: Query<Option<&RuntimeLobbyTarget>, With<Client>>,
     persistence: Res<ConnectionPersistence>,
+    profile: Res<super::ClientProfileModel>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
         for entity in &roots {
@@ -4195,6 +4365,46 @@ fn present_dashboard_menu(
             .with_children(|panel| {
                 spawn_heading(panel, "MENU");
                 let mut index = 0;
+                spawn_flow_error_button(
+                    panel,
+                    index,
+                    FlowUiAction::CreateBrawler,
+                    "CREATE BRAWLER (PERMANENT PROFILE + BASE)",
+                );
+                index += 1;
+                if profile
+                    .snapshot()
+                    .is_some_and(|snapshot| !snapshot.brawlers.is_empty())
+                {
+                    spawn_flow_error_button(
+                        panel,
+                        index,
+                        FlowUiAction::SelectNextBrawler,
+                        "SELECT NEXT BRAWLER",
+                    );
+                    index += 1;
+                    spawn_flow_error_button(
+                        panel,
+                        index,
+                        FlowUiAction::RenameSelectedBrawler,
+                        "RENAME BRAWLER",
+                    );
+                    index += 1;
+                    spawn_flow_error_button(
+                        panel,
+                        index,
+                        FlowUiAction::EditSelectedBrawler,
+                        "SWAP ULTIMATE + PASSIVES",
+                    );
+                    index += 1;
+                    spawn_flow_error_button(
+                        panel,
+                        index,
+                        FlowUiAction::DeleteSelectedBrawler,
+                        "DELETE SELECTED BRAWLER",
+                    );
+                    index += 1;
+                }
                 spawn_flow_error_button(panel, index, FlowUiAction::OpenCredits, "CREDITS");
                 index += 1;
                 if let Some(favorite_label) = favorite_label {
@@ -4410,13 +4620,21 @@ fn update_dashboard_live_facts(
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     queue: Res<super::ClientQueueModel>,
     practice: Res<super::ClientPracticeModel>,
+    profile: Res<super::ClientProfileModel>,
     mut texts: Query<(
         &mut Text,
         Has<DashboardGameSummaryLabel>,
         Has<DashboardPlayLabel>,
         Has<DashboardPracticeLabel>,
+        Has<DashboardBrawlerNameLabel>,
+        Has<DashboardBrawlerSummaryLabel>,
     )>,
-    action_buttons: Query<(Entity, &DashboardButtonStyle, Option<&AccessibleLabel>)>,
+    mut action_buttons: Query<(
+        Entity,
+        &DashboardButtonStyle,
+        &mut FlowButton,
+        Option<&AccessibleLabel>,
+    )>,
 ) {
     if *flow.get() != ClientFlow::Dashboard {
         return;
@@ -4438,15 +4656,40 @@ fn update_dashboard_live_facts(
         "Population updating".to_string()
     };
     let copy = format!("{}\n{population}", dashboard_game_summary(game));
-    for (mut text, is_summary, _, _) in &mut texts {
+    let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
+        membership
+            .profile
+            .brawlers
+            .iter()
+            .find(|brawler| brawler.id == id)
+    });
+    for (mut text, is_summary, _, _, is_brawler_name, is_brawler_summary) in &mut texts {
         if is_summary {
             text.0.clone_from(&copy);
+        } else if is_brawler_name {
+            text.0 = selected_brawler.map_or_else(
+                || "CREATE YOUR FIRST BRAWLER".to_string(),
+                |brawler| brawler.name.to_uppercase(),
+            );
+        } else if is_brawler_summary {
+            text.0 = selected_brawler.map_or_else(
+                || "Choose a permanent fighter profile and weapon base".to_string(),
+                |brawler| {
+                    format!(
+                        "Profile {} · Weapon base {} · {} of 16 saved",
+                        brawler.fighter_profile_id.0,
+                        brawler.weapon_base_id.0,
+                        membership.profile.brawlers.len()
+                    )
+                },
+            );
         }
     }
     let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
         snapshot.formation_availability == crate::lobby::FormationAvailability::ProductMatchOccupied
     });
-    let admission_pending = queue.pending().is_some() || practice.pending();
+    let admission_pending = queue.pending().is_some() || practice.pending() || profile.pending();
+    let profile_empty = selected_brawler.is_none();
     let play_copy = if queue.pending().is_some() {
         "Joining match; Play unavailable"
     } else if capacity_occupied {
@@ -4460,13 +4703,13 @@ fn update_dashboard_live_facts(
         "Practice"
     };
     let busy_suffix = "; unavailable while admission is pending";
-    for (entity, style, current_label) in &action_buttons {
+    for (entity, style, mut button, current_label) in &mut action_buttons {
         let disabled = match style {
             DashboardButtonStyle::Preview
             | DashboardButtonStyle::Build
-            | DashboardButtonStyle::Mode
-            | DashboardButtonStyle::Practice => admission_pending,
-            DashboardButtonStyle::Play => capacity_occupied || admission_pending,
+            | DashboardButtonStyle::Mode => admission_pending,
+            DashboardButtonStyle::Practice => admission_pending || profile_empty,
+            DashboardButtonStyle::Play => capacity_occupied || admission_pending || profile_empty,
             DashboardButtonStyle::Header => false,
         };
         if disabled {
@@ -4482,6 +4725,11 @@ fn update_dashboard_live_facts(
                 if admission_pending { busy_suffix } else { "" }
             ),
             DashboardButtonStyle::Preview | DashboardButtonStyle::Build => {
+                button.action = if profile_empty {
+                    FlowUiAction::CreateBrawler
+                } else {
+                    FlowUiAction::SelectNextBrawler
+                };
                 let base = current_label
                     .map_or("Change brawler", |label| label.0.as_str())
                     .strip_suffix(busy_suffix)
@@ -4500,7 +4748,7 @@ fn update_dashboard_live_facts(
                 .insert(AccessibleLabel::new(next_label));
         }
     }
-    for (mut text, _, is_play_label, is_practice_label) in &mut texts {
+    for (mut text, _, is_play_label, is_practice_label, _, _) in &mut texts {
         if is_play_label {
             text.0 = if queue.pending().is_some() {
                 "JOINING...".to_string()
@@ -5643,7 +5891,9 @@ mod tests {
     }
 
     fn lobby_membership() -> ClientLobbyMembership {
+        let account_id = crate::profiles::AccountId::new(1).unwrap();
         ClientLobbyMembership {
+            logical_server_id: 1,
             player_id: crate::protocol::PlayerId(1),
             accepted_display_name: "Player".to_string(),
             server_name: "Test Lobby".to_string(),
@@ -5661,6 +5911,7 @@ mod tests {
                     active_limit_ticks: 3_600,
                 },
             }],
+            profile: crate::profiles::ProfileSnapshot::empty(account_id),
         }
     }
 
@@ -6202,7 +6453,7 @@ mod tests {
                 .find(|(button, _)| button.index == DASHBOARD_BUILD_INDEX)
                 .map(|(button, disabled)| (button.action.clone(), disabled))
         };
-        assert_eq!(focused_action, Some((FlowUiAction::OpenBuildEditor, false)));
+        assert_eq!(focused_action, Some((FlowUiAction::CreateBrawler, false)));
     }
 
     #[test]
@@ -6341,6 +6592,8 @@ mod tests {
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_type_id: crate::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
             game_type_configuration_revision: 1,
+            brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            brawler_revision: crate::profiles::ProfileRevision::INITIAL,
             accepted_build: crate::builds::AcceptedBuildSummary {
                 canonical_recipe: preset.recipe,
                 identity: crate::builds::SelectedBuild {

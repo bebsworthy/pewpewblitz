@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         brawler_routing::RouteId::new(random_u128()?).ok_or("zero lobby route ID")?;
     let manifest = LobbyManifest {
         common: ManifestCommon {
-            manifest_version: 1,
+            manifest_version: 2,
             role: WorkerRole::Lobby,
             logical_server_id,
             process_id,
@@ -83,6 +83,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
+        profile_database_path: args
+            .data_directory
+            .join("profiles.sqlite3")
+            .to_str()
+            .ok_or("profile database path must be valid UTF-8")?
+            .to_string(),
         raw_catalog_fingerprint: raw_catalog_fingerprint(&raw_catalog),
         raw_catalog,
         nonce: random_u128()?,
@@ -107,10 +113,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_environment("BRAWLER_LOBBY_TRANSITION_DRIVER", "1")
             .with_environment("BRAWLER_LOBBY_TRANSITION_MODE", transition_mode);
     }
-    lobby_spec = lobby_spec.with_environment(
-        "BRAWLER_PROFILE_DATABASE",
-        args.data_directory.join("profiles.sqlite3").as_os_str(),
-    );
     runtime.spawn_worker(lobby_spec)?;
     let stop = runtime.stop_handle();
     ctrlc::set_handler(move || {

@@ -7,7 +7,7 @@
 use super::build_app_with_config;
 use super::build_match_worker_graph;
 use crate::{
-    builds::{BuildCatalog, BuildCatalogResource, resolve_build_recipe},
+    builds::{BuildCatalog, BuildCatalogResource},
     combat::{FighterDefinitions, WeaponCatalogResource},
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
     content::gameplay_content_fingerprint,
@@ -217,28 +217,15 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
         .ok_or(MatchWorkerManifestError::BuildSelectionMismatch)?;
     let validate = |snapshot_bytes: &brawler_routing::MatchBuildSnapshot,
-                    source_build_preset: Option<u16>,
                     recipe_fingerprint: u64,
                     revision: u16|
      -> Result<(), MatchWorkerManifestError> {
-        let snapshot = crate::builds::MatchBuildSnapshotV1::decode(snapshot_bytes)
+        let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(snapshot_bytes)
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
-        let (recipe, source_preset) = match snapshot.candidate.selection {
-            crate::builds::BuildSelection::Preset(preset_id) => {
-                let definition = builds
-                    .preset(preset_id)
-                    .ok_or(MatchWorkerManifestError::BuildSelectionMismatch)?;
-                (definition.recipe, Some(preset_id))
-            }
-            crate::builds::BuildSelection::Custom(recipe) => (recipe, None),
-        };
-        let resolved = resolve_build_recipe(&builds, &weapons, fighter, recipe, source_preset)
+        let resolved = snapshot
+            .resolve(&builds, &weapons, fighter)
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
-        if snapshot.candidate.build_revision != builds.balance_revision
-            || snapshot.accepted.canonical_recipe != recipe
-            || snapshot.accepted.identity != resolved.identity
-            || snapshot.accepted.total_points != resolved.total_points
-            || resolved.identity.source_build_preset_id.map(|id| id.0) != source_build_preset
+        if snapshot.accepted_identity != resolved.identity
             || resolved.identity.recipe_fingerprint.0 != recipe_fingerprint
             || resolved.identity.revision.0 != revision
         {
@@ -249,18 +236,12 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
     for participant in &manifest.participants {
         validate(
             &participant.build_snapshot,
-            participant.source_build_preset,
             participant.recipe_fingerprint,
             participant.revision,
         )?;
     }
     for bot in &manifest.bots {
-        validate(
-            &bot.build_snapshot,
-            bot.source_build_preset,
-            bot.recipe_fingerprint,
-            bot.revision,
-        )?;
+        validate(&bot.build_snapshot, bot.recipe_fingerprint, bot.revision)?;
     }
     Ok(())
 }
@@ -466,9 +447,23 @@ mod tests {
             .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
             .unwrap();
         let preset = builds.preset(BuildPresetId(1)).unwrap();
-        let resolved =
-            resolve_build_recipe(&builds, &weapons, fighter, preset.recipe, Some(preset.id))
-                .unwrap();
+        let brawler = crate::profiles::SavedBrawler {
+            id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            creation_ordinal: 1,
+            name: "Player One".into(),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate_id: preset.recipe.ultimate,
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+            revision: crate::profiles::ProfileRevision::INITIAL,
+        };
+        let snapshot = crate::profiles::MatchBuildSnapshotV2::from_brawler(
+            &brawler, &builds, &weapons, fighter,
+        )
+        .unwrap();
         let map = MapContentCatalog::embedded().unwrap().presets[0].clone();
         let map_preset = map.id.0;
         let map_revision = map.admission_revision;
@@ -509,23 +504,9 @@ mod tests {
                     peer_id: PeerId::new(8).unwrap(),
                     team: 0,
                     display_name: brawler_routing::MatchDisplayName::new("Player One").unwrap(),
-                    source_build_preset: Some(1),
-                    recipe_fingerprint: resolved.identity.recipe_fingerprint.0,
-                    revision: resolved.identity.revision.0,
-                    build_snapshot: crate::builds::MatchBuildSnapshotV1 {
-                        schema_version: crate::builds::MatchBuildSnapshotV1::SCHEMA_VERSION,
-                        candidate: crate::builds::BuildCandidate {
-                            build_revision: builds.balance_revision,
-                            selection: crate::builds::BuildSelection::Preset(preset.id),
-                        },
-                        accepted: crate::builds::AcceptedBuildSummary {
-                            canonical_recipe: preset.recipe,
-                            identity: resolved.identity,
-                            total_points: resolved.total_points,
-                        },
-                    }
-                    .encode()
-                    .unwrap(),
+                    recipe_fingerprint: snapshot.accepted_identity.recipe_fingerprint.0,
+                    revision: snapshot.accepted_identity.revision.0,
+                    build_snapshot: snapshot.encode().unwrap(),
                 };
                 let mut second = base;
                 second.lobby_session_id = LobbySessionId::new(9).unwrap();
@@ -621,7 +602,6 @@ mod tests {
         .unwrap();
         assert_eq!(participant.player_id.get(), 7);
         assert_eq!(participant.team, 0);
-        assert_eq!(participant.source_build_preset, Some(1));
         assert_ne!(participant.recipe_fingerprint, 0);
     }
 
@@ -705,7 +685,6 @@ mod tests {
                 player_id: brawler_routing::PlayerId::new(player_id).unwrap(),
                 team,
                 display_name: brawler_routing::MatchDisplayName::new(name).unwrap(),
-                source_build_preset: template.source_build_preset,
                 recipe_fingerprint: template.recipe_fingerprint,
                 revision: template.revision,
                 build_snapshot: template.build_snapshot,
@@ -808,7 +787,7 @@ mod tests {
         .unwrap();
         let mut lobby = LobbyManifest {
             common: ManifestCommon {
-                manifest_version: 1,
+                manifest_version: 2,
                 role: WorkerRole::Lobby,
                 logical_server_id: LogicalServerId::new(10).unwrap(),
                 process_id: ProcessId::new(11).unwrap(),
@@ -827,6 +806,7 @@ mod tests {
             outstanding_allocations: 2,
             active_matches: 4,
             heartbeat_ms: 1_000,
+            profile_database_path: "profiles.sqlite3".to_string(),
             raw_catalog: include_bytes!("../../config/server/game-types.ron").to_vec(),
             raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(include_bytes!(
                 "../../config/server/game-types.ron"

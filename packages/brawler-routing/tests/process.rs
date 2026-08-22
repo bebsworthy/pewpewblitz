@@ -37,7 +37,7 @@ fn launch_spec(worker_id: u128) -> WorkerLaunchSpec {
     };
     let manifest = LobbyManifest {
         common: ManifestCommon {
-            manifest_version: 1,
+            manifest_version: 2,
             role: WorkerRole::Lobby,
             logical_server_id: id128(1),
             process_id: registration.process_id,
@@ -56,6 +56,7 @@ fn launch_spec(worker_id: u128) -> WorkerLaunchSpec {
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
+        profile_database_path: "profiles.sqlite3".to_string(),
         raw_catalog: b"catalog".to_vec(),
         raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(b"catalog"),
         nonce: 6,

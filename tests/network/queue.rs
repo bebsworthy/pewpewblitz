@@ -72,10 +72,8 @@ fn queue_command_before_lobby_welcome_cannot_create_membership() {
             catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
             game_type_id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
             game_type_configuration_revision: 1,
-            build: brawler::builds::BuildCandidate {
-                build_revision: brawler::builds::BuildRevision(1),
-                selection: BuildSelection::Preset(BuildPresetId(1)),
-            },
+            brawler_id: brawler::profiles::SavedBrawlerId::new(1).unwrap(),
+            brawler_revision: brawler::profiles::ProfileRevision::INITIAL,
         }),
     });
 
@@ -127,11 +125,6 @@ fn start_product_join(harness: &mut Harness, client_index: usize, game_index: us
         .unwrap()
         .clone();
     let game = lobby.game_types[game_index].clone();
-    let revision = harness.clients[client_index]
-        .world()
-        .resource::<brawler::builds::BuildCatalogResource>()
-        .0
-        .balance_revision;
     let selection = brawler::client::SelectedGameType {
         catalog_revision: Some(lobby.catalog_revision),
         game_type_id: Some(game.id),
@@ -143,10 +136,8 @@ fn start_product_join(harness: &mut Harness, client_index: usize, game_index: us
             .resource_mut::<brawler::client::ClientQueueModel>()
             .start_join(
                 &selection,
-                brawler::builds::BuildCandidate {
-                    build_revision: revision,
-                    selection: BuildSelection::Preset(BuildPresetId(1)),
-                },
+                brawler::profiles::SavedBrawlerId::new(1).unwrap(),
+                brawler::profiles::ProfileRevision::INITIAL,
                 std::time::Duration::ZERO,
             )
     );
@@ -187,21 +178,14 @@ fn practice_request_bypasses_queue_and_starts_one_human_three_v_three_reservatio
         game_type_id: Some(game.id.clone()),
         configuration_revision: Some(game.configuration_revision),
     };
-    let revision = harness.clients[0]
-        .world()
-        .resource::<brawler::builds::BuildCatalogResource>()
-        .0
-        .balance_revision;
     assert!(
         harness.clients[0]
             .world_mut()
             .resource_mut::<brawler::client::ClientPracticeModel>()
             .start(
                 &selected,
-                brawler::builds::BuildCandidate {
-                    build_revision: revision,
-                    selection: BuildSelection::Preset(BuildPresetId(1)),
-                },
+                brawler::profiles::SavedBrawlerId::new(1).unwrap(),
+                brawler::profiles::ProfileRevision::INITIAL,
             )
     );
 

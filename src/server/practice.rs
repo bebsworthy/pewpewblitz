@@ -5,7 +5,7 @@
 
 use super::ServerRoleResource;
 use crate::{
-    builds::{AbilityState, BuildCatalogResource, PassiveRuntimeState, resolve_build_recipe},
+    builds::{AbilityState, BuildCatalogResource, PassiveRuntimeState},
     combat::{
         ActiveEffects, AuthoritativeTick, CurrentHealth, FighterDefinitions, SpawnState,
         WeaponCatalogResource, WeaponPhase, WeaponState, default_fighter_runtime,
@@ -65,20 +65,10 @@ fn install_manifest_bots(
         .expect("validated standard fighter definition");
     let mut occupied = Vec::with_capacity(manifest.bots.len());
     for bot in &manifest.bots {
-        let snapshot = crate::builds::MatchBuildSnapshotV1::decode(&bot.build_snapshot)
+        let snapshot = crate::profiles::MatchBuildSnapshotV2::decode(&bot.build_snapshot)
             .expect("validated bot build snapshot");
-        let (recipe, preset) = match snapshot.candidate.selection {
-            crate::builds::BuildSelection::Preset(id) => (
-                builds
-                    .0
-                    .preset(id)
-                    .expect("validated bot build preset")
-                    .recipe,
-                Some(id),
-            ),
-            crate::builds::BuildSelection::Custom(recipe) => (recipe, None),
-        };
-        let loadout = resolve_build_recipe(&builds.0, &weapon_catalog.0, fighter, recipe, preset)
+        let loadout = snapshot
+            .resolve(&builds.0, &weapon_catalog.0, fighter)
             .expect("validated bot build resolution");
         let player_id = PlayerId(bot.player_id.get());
         let network_entity_id = NetworkEntityId(bot.player_id.get());

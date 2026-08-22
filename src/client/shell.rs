@@ -576,6 +576,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         ClientOverlay::None
         | ClientOverlay::BuildEditor
         | ClientOverlay::DashboardMenu
+        | ClientOverlay::DeleteBrawlerConfirmation(_)
         | ClientOverlay::Confirmation(_)
         | ClientOverlay::ChangeServerConfirmation
         | ClientOverlay::LeaveConfirmation => ShellLayer::FlowOwned,
@@ -936,6 +937,7 @@ fn handle_shell_actions(
                     ClientOverlay::Settings | ClientOverlay::Error(_) => ShellControlId::Settings,
                     ClientOverlay::BuildEditor
                     | ClientOverlay::DashboardMenu
+                    | ClientOverlay::DeleteBrawlerConfirmation(_)
                     | ClientOverlay::Confirmation(_)
                     | ClientOverlay::ChangeServerConfirmation
                     | ClientOverlay::LeaveConfirmation

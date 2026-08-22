@@ -180,10 +180,6 @@ impl ConnectionsFileV1 {
         self.favorites.len() != before
     }
 
-    #[allow(
-        dead_code,
-        reason = "used by the V7 server-identity handshake introduced in this active milestone"
-    )]
     pub fn account_for_server(
         &mut self,
         logical_server_id: &str,
@@ -191,6 +187,13 @@ impl ConnectionsFileV1 {
     ) -> Result<crate::profiles::AccountId, String> {
         let logical_server_id = validate_opaque_id(logical_server_id)?;
         let address = canonical_address(address)?;
+        if self.server_identities.iter().any(|identity| {
+            identity.logical_server_id != logical_server_id && identity.addresses.contains(&address)
+        }) {
+            return Err(
+                "server address is already bound to a different logical server".to_string(),
+            );
+        }
         if let Some(identity) = self
             .server_identities
             .iter_mut()
