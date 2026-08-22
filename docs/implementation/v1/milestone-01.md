@@ -23,7 +23,7 @@ This milestone proves application composition and dependency isolation. It does 
 ## Source requirements
 
 - [Engine decision](../../01-engine-decision.md)
-- [Gameplay MVP](../../05-gameplay-mvp.md)
+- [Gameplay MVP](./gameplay-mvp.md)
 - [Network architecture](../../08-network-architecture.md)
 - [Version 1 roadmap](./roadmap.md)
 

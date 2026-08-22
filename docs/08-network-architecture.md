@@ -314,10 +314,11 @@ The implementing milestone must test hidden-before-join, visible-to-hidden despa
 exceptions, two observers with different outcomes, current-state reappearance, late join,
 reconnect, defeat/respawn, hierarchy cleanup, interpolation/prediction cleanup, and absence of
 subject-derived private components/messages while hidden. See
-[Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md#network-interest-management)
-for the complete research catalog and verification list. The exact Lightyear 0.29 behavior is
-demonstrated in the checked-in `references/lightyear/examples/network_visibility/` example and the
-version-pinned [network visibility example](https://github.com/cBournhonesque/lightyear/blob/0.29.0/examples/network_visibility/README.md).
+[Environment gameplay direction](./09-environment-gameplay.md#concealment-gameplay-model) for the
+gameplay questions and presentation-facing verification expectations. The exact Lightyear 0.29
+behavior is demonstrated in the checked-in `references/lightyear/examples/network_visibility/`
+example and the version-pinned
+[network visibility example](https://github.com/cBournhonesque/lightyear/blob/0.29.0/examples/network_visibility/README.md).
 
 ## Status synchronization
 

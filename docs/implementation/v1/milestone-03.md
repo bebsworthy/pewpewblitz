@@ -39,7 +39,7 @@ baseline-versus-predicted comparison can be run under the specified profiles.
 
 - [Product direction](../../00-product-direction.md): combat readability, short feedback cycles,
   content composition, and network-first simulation.
-- [Gameplay MVP](../../05-gameplay-mvp.md): controller-first action mapping, keyboard/mouse parity,
+- [Gameplay MVP](./gameplay-mvp.md): controller-first action mapping, keyboard/mouse parity,
   deadzone and last-valid-aim behavior, server authority, and two-client local play.
 - [Fighter model](../../02-fighter-model.md): movement speed and runtime position/facing remain
   distinct from later authored fighter definitions and selected builds.

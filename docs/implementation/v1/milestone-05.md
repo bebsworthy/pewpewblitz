@@ -43,7 +43,7 @@ for the expanded weapon system.
 - [Weapons and abilities](../../03-weapons-and-abilities.md): input/firing/delivery/collision/
   payload composition; straight and ballistic trajectories; direct, area, knockback, and slow
   payloads; stable presentation references; the first four preset recipes.
-- [Gameplay MVP](../../05-gameplay-mvp.md): four weapon presets, future bounded non-preset
+- [Gameplay MVP](./gameplay-mvp.md): four weapon presets, future bounded non-preset
   configuration, two initial trajectory families,
   controller-first combat, keyboard/mouse parity, readable counterplay, and authoritative outcomes.
 - [Network architecture](../../08-network-architecture.md): clients send selection and fire intent;

@@ -15,8 +15,8 @@ Start with:
    presentation hardening, and V4 closeout evidence.
 4. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
-5. `docs/11-art-and-presentation-direction.md` and `docs/12-sprite-inventory.md` for the current
-   renderer, readability, and asset-family contracts.
+5. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
+   provenance, degradation, and future-art contracts.
 6. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
 7. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
    player-flow and routed-process decisions that V3 preserves.

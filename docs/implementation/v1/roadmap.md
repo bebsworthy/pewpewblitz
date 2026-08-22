@@ -13,7 +13,7 @@ The work is divided into three early gates:
 3. **Gameplay MVP verification — Milestones 01–10.** Hot Zone and quantized destructible terrain
    prove that combat code works across mode rules, mutable map geometry, and the complete supported
    playable-map size range. This gate satisfies the full acceptance scope in
-   [Gameplay MVP](../../05-gameplay-mvp.md).
+   [Gameplay MVP](./gameplay-mvp.md).
 
 Milestone 11 hardens and closes the v1 MVP. Additional mode families and systemic status interactions are future-version candidates, not hidden v1 commitments.
 
@@ -654,7 +654,7 @@ Defer structural collapse, fluids, material simulation, persistent terrain saves
 
 ### Gameplay MVP verification gate
 
-At Milestone 10, verify every acceptance criterion in [Gameplay MVP](../../05-gameplay-mvp.md) against a repeatable test or playtest result. Any criterion intentionally removed from the MVP must be updated there rather than silently ignored here.
+At Milestone 10, verify every acceptance criterion in [Gameplay MVP](./gameplay-mvp.md) against a repeatable test or playtest result. Any criterion intentionally removed from the MVP must be updated there rather than silently ignored here.
 
 ## Milestone 11 — MVP playtest hardening and closeout
 
@@ -733,7 +733,7 @@ These candidates preserve the longer-term design direction without assigning sco
 - **Solo Showdown:** free-for-all placement, loot, and a shrinking boundary; duo/trio variants later.
 - **Systemic status interaction:** one target-owned cold-to-freeze meter contributed to by compatible projectiles and areas.
 - **Advanced projectiles:** bouncing, homing, curved steering, piercing, splitting, boomerang, and delayed behavior.
-- **Environment surfaces and concealment:** tall grass or another concealment region, a spell-created concealment area, speedway and slow surfaces, one readable hazard, and server-owned per-client network visibility following [environment and tile research](../../09-environment-and-tile-ideas.md).
+- **Environment surfaces and concealment:** tall grass or another concealment region, a spell-created concealment area, speedway and slow surfaces, one readable hazard, and server-owned per-client network visibility following the [environment gameplay direction](../../09-environment-gameplay.md).
 - **Player map builder:** edit and preview bounded map recipes using approved presentation, terrain,
   geometry, entity, region, spawn, and mode-anchor catalogs; server validation remains authoritative
   and game modes remain developer-authored.

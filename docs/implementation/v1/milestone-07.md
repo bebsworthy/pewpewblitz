@@ -85,7 +85,7 @@ keeps these contracts intact may be recorded as an implementation/playtest adjus
   existing fighter runtime categories that match cleanup must preserve.
 - [Maps and game modes](../../04-maps-and-game-modes.md): Wipeout rules, team-spawn requirements,
   map/mode separation, and developer-owned executable mode plugins.
-- [Gameplay MVP](../../05-gameplay-mvp.md): 2v2-capable Wipeout, controller and keyboard parity,
+- [Gameplay MVP](./gameplay-mvp.md): 2v2-capable Wipeout, controller and keyboard parity,
   two-to-four-minute match target, telemetry, server authority, and combat gate criteria.
 - [Network architecture](../../08-network-architecture.md): authoritative teams, respawns, scores,
   timers, victory, restart, disconnect handling, durable replicated state, and explicit recovery.

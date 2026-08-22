@@ -97,7 +97,7 @@ during implementation/playtest if recorded and if gameplay semantics remain unch
 
 - [Product direction](../../00-product-direction.md): combat readability, short matches, reusable
   content primitives, meaningful builds, and server-authoritative networking.
-- [Gameplay MVP](../../05-gameplay-mvp.md): Hot Zone must prove that the same fighter, weapon,
+- [Gameplay MVP](./gameplay-mvp.md): Hot Zone must prove that the same fighter, weapon,
   ability, and lifecycle code works under spatial-control rules.
 - [Network architecture](../../08-network-architecture.md): the server owns objectives, scores,
   mode rules, victory, and recovery; map recipes place required anchors but cannot author executable

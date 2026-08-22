@@ -70,13 +70,14 @@ unchanged.
   user-authorable map recipes, and network-first simulation.
 - [Maps and game modes](../../04-maps-and-game-modes.md): map catalog/recipe/preset/resolved/runtime
   separation, map-builder boundary, first-map grammar, and developer-owned mode rules.
-- [Gameplay MVP](../../05-gameplay-mvp.md): one map recipe, four weapon range profiles, controller
+- [Gameplay MVP](./gameplay-mvp.md): one map recipe, four weapon range profiles, controller
   readability, future legal layout changes, and headless authority.
-- [MVP asset shortlist](../../07-mvp-asset-shortlist.md): provisional visual packs, pixel filtering,
-  collision/presentation separation, and provenance requirements.
+- [Art, presentation, and asset specification](../../11-art-and-presentation-direction.md):
+  replaceable presentation, collision/presentation separation, and provenance requirements. The
+  provisional 2D shortlist evaluated by V1 is historical and was retired by V3.
 - [Network architecture](../../08-network-architecture.md): server map resolution, replicated stable
   identity/data, recovery, and no client-authored live map edits.
-- [Environment, surface, and tile ideas](../../09-environment-and-tile-ideas.md): visual/gameplay
+- [Environment gameplay direction](../../09-environment-gameplay.md): visual/gameplay
   separation and the inert Milestone 10 terrain reservation.
 - [Version 1 roadmap](./roadmap.md): Milestone 06 deliverable, scope, verification, and exit criteria.
 - [Milestones 03–05](./milestone-05.md): current bounds/camera/spawn behavior, Avian layers and

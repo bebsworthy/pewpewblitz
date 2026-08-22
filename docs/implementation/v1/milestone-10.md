@@ -1080,7 +1080,7 @@ the next begins.
 - [x] Add bounded Wipeout and Hot Zone real-process terrain profiles under local, typical, and adverse
   network conditions; prove two current clients and recovery convergence.
 - [x] Run the complete canonical verification gate and record exact command/output evidence.
-- [x] Audit every criterion in [Gameplay MVP](../../05-gameplay-mvp.md); link each to a repeatable test
+- [x] Audit every criterion in [Gameplay MVP](./gameplay-mvp.md); link each to a repeatable test
   or playtest observation and update product scope explicitly for any intentionally removed criterion.
 - [x] Set `User playtest` only after automated/process/visual/controller gates pass; provide the
   handoff below and request the listed observations.
@@ -1202,7 +1202,7 @@ the next begins.
 
 ## Gameplay MVP acceptance audit (2026-08-16)
 
-Every criterion from [Gameplay MVP](../../05-gameplay-mvp.md) with its repeatable evidence:
+Every criterion from [Gameplay MVP](./gameplay-mvp.md) with its repeatable evidence:
 
 | Criterion | Repeatable evidence |
 |---|---|

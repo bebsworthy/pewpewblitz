@@ -29,7 +29,7 @@ input networking, prediction, interpolation, collision, combat, teams, or match 
 
 - [Product direction](../../00-product-direction.md)
 - [Engine decision](../../01-engine-decision.md)
-- [Gameplay MVP](../../05-gameplay-mvp.md)
+- [Gameplay MVP](./gameplay-mvp.md)
 - [Network architecture](../../08-network-architecture.md)
 - [Version 1 roadmap](./roadmap.md)
 - [Milestone 01 learn-from-errors review](./milestone-01.md#learn-from-errors)

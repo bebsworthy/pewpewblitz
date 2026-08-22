@@ -1,111 +1,311 @@
-# Engine decision
+# Engine specification
 
-## Recommendation: Bevy 0.19 + Rust
+## Purpose and authority
 
-Given Brawler's network-first architecture and the project's preference for Rust-first, code-driven, testable development, use **Bevy with Rust** rather than Godot/GDScript.
+PewPew Blitz uses **Bevy with Rust** for its client and authoritative gameplay applications. This
+choice is settled. This document defines the enduring engine contract: the supported dependency
+baseline, runtime roles, Bevy application composition, ECS ownership, scheduling, physics,
+networking integration, presentation boundary, headless isolation, and evolution policy.
 
-Bevy is a free, open-source Rust engine under dual MIT/Apache-2.0 licensing. It provides 2D/3D rendering, input, assets, UI, ECS scheduling, and modular plugins. Bevy 0.19 is the current baseline researched for this decision. [Bevy 0.19](https://bevy.org/news/bevy-0-19/) · [Bevy repository](https://github.com/bevyengine/bevy)
+More focused documents own their detailed domains:
 
-The networking baseline is **Lightyear**, not Bevy core. Lightyear currently provides Bevy-native client/server plugins, tick-buffered input networking, replication, client prediction, rollback, interpolation, interest management, lag compensation, and multiple transport options. [Lightyear repository](https://github.com/cBournhonesque/lightyear) · [Lightyear 0.29 documentation](https://docs.rs/lightyear/0.29.0/lightyear/)
+- [Network architecture](./08-network-architecture.md) owns gameplay authority, replication,
+  protocol compatibility, and recovery.
+- [Multiplayer server architecture](./14-multiplayer-server-architecture.md) owns supervisor,
+  worker, routing, IPC, admission, and process lifecycle.
+- [Art, presentation, and asset specification](./11-art-and-presentation-direction.md) owns the visual language
+  and renderer-facing content policy.
+- [Player UX](./13-player-ux.md) owns the product shell, input experience, settings, accessibility,
+  and screen flow.
+- [Map and mode specification](./04-maps-and-game-modes.md) owns map recipes, mode compatibility, terrain,
+  and the player map-builder boundary.
 
-Brawler uses **Avian 2D** for authoritative planar collision and generated terrain colliders.
-The V3 client renders that simulation in 3D; it does not replace Avian with 3D physics.
-[Avian](https://github.com/avianphysics/avian)
+Those documents may refine their owned behavior without weakening the engine boundaries defined
+here. Version milestone specifications record changes and evidence; they do not silently establish
+a second engine composition.
 
-## Why this fits Brawler
+## Supported baseline
 
-- Rust is the primary development language; no separate GDScript language is required.
-- Cargo, `rustc`, `rustfmt`, Clippy, rust-analyzer, and Rust's built-in test ecosystem provide a stronger general-purpose tooling baseline.
-- ECS maps naturally to fighters, projectiles, effects, status meters, objectives, terrain chunks, and replicated entities.
-- Headless server builds can omit rendering plugins while using the same Bevy application model.
-- Gameplay and protocol-registration plugins can be tested in small Bevy `App`/`World` harnesses without opening a window.
-- Lightyear's input, replication, prediction, and rollback features match the authoritative architecture already specified.
-- A code-first workflow is a feature for this project, not a compromise.
+| Concern | Supported baseline |
+|---|---|
+| Language and toolchain | Rust 1.95, edition 2024 |
+| Application and ECS engine | Bevy 0.19.1 |
+| Networking integration | Lightyear 0.29.0 |
+| Authoritative planar physics | Avian 2D 0.7.0 |
+| Initial player platform | macOS client |
+| Server platform | Headless dedicated-server processes; macOS is the local development baseline |
+| Simulation frequency | Fixed 60 Hz |
+| Licenses | Bevy is MIT/Apache-2.0; every additional dependency and shipped asset requires compatible licensing |
 
-## Important caveats
+`Cargo.toml` is the exact build source of truth. The versions above describe the accepted engine
+family and must be reconciled when the manifest changes.
 
-- Bevy has no first-party networking stack. Lightyear is a third-party dependency and should be pinned and upgraded deliberately.
-- Bevy and Lightyear track each other's versions closely. A Bevy upgrade is a coordinated dependency migration, not a casual package update.
-- Bevy has less mature authoring/editor infrastructure than Godot. This is acceptable because Brawler is intentionally code/data-driven, but map and asset authoring tools will be our responsibility.
-- The eventual player map builder should edit a Brawler-owned serializable map recipe and preview
-  it with Bevy; the Bevy `World` or editor UI must not become the only stored map representation.
-- Rust compile times and ECS concepts add upfront complexity.
-- Rust being compiled does not automatically make the game faster. The benefit is predictable control and efficient native execution; actual performance still depends on simulation, rendering, networking, and profiling.
-- The Rust ecosystem is broader than the GDScript ecosystem, but the Bevy-specific ecosystem is smaller than Godot's. Prefer well-maintained dependencies that explicitly support the selected Bevy version, pin them, and keep their plugin/configuration usage localized enough to replace when evidence requires it.
+Bevy, Lightyear, and Avian are exact-version dependencies with default features disabled. An engine
+upgrade is a coordinated migration: verify mutual compatibility, feature graphs, protocol/content
+identity, fixed scheduling, physics integration, client presentation, headless isolation, network
+tests, routed process behavior, and native performance before accepting it. Do not upgrade one of
+these dependencies casually or enable broad default feature sets for convenience.
 
-## Networking stack decision
+## Workspace and runtime roles
 
-Prototype this stack first:
+The workspace has two demonstrated package boundaries:
+
+- the main `brawler` package owns shared gameplay/data modules and composes the client and
+  authoritative server applications;
+- `packages/brawler-routing` owns the transport-neutral route, capability, manifest, IPC, limits,
+  allocation, and supervisor/runtime boundary shared by routed processes.
+
+The production topology contains several process roles:
 
 ```text
-Bevy 0.19
-  + Lightyear 0.29
-  + Avian 2D 0.7
-  + client-only Camera3d / Mesh3d / PBR / GLB animation presentation
-  + evidence-based Cargo targets/features for a client and dedicated server
+windowed client Bevy App/World
+        |
+        | one public UDP endpoint
+        v
+supervisor/router process (no gameplay World)
+        |
+        +-- lobby worker: headless Bevy App/World + Lightyear authority
+        |
+        +-- match worker A: headless Bevy App/World + Lightyear + Avian + gameplay
+        |
+        +-- match worker B: headless Bevy App/World + Lightyear + Avian + gameplay
 ```
 
-V1–V3 validated this stack through independently buildable roles, routed multi-process networking,
-server-authoritative movement/combat/terrain, and a fixed-camera 3D client. `bevy_replicon + Renet`
-remains only a historical fallback option if a future dependency review finds a concrete blocker.
+The supervisor is infrastructure authority, not Bevy gameplay or lobby authority. The lobby worker
+owns authenticated lobby sessions, advertised game types, build selection, queues, and allocation
+requests. Each match worker owns exactly one match's mutable gameplay, mode, map, terrain, physics,
+replication, outcomes, and cleanup. A client owns local session state and presentation of the
+authority to which it is currently connected.
 
-`bevy_replicon` provides server-authoritative replication but no I/O; it must be paired with a transport such as Renet, Renet2, or Quinnet. This is more flexible but leaves prediction and rollback more application-owned. [bevy_replicon](https://docs.rs/bevy_replicon/latest/bevy_replicon/) · [Renet](https://docs.rs/renet/latest/renet/)
+Headless client automation may omit presentation while retaining the Lightyear client and normal
+session/gameplay protocols. It is a verification configuration, not a dedicated server or a
+separate offline simulation.
 
-## Alternatives considered
-
-### Godot 4.x
-
-Godot remains a strong general-purpose engine and is still a valid fallback. Its dedicated 2D workflow, editor, built-in multiplayer API, and asset pipeline provide a faster conventional start. The reasons it is not the current choice are project-specific: GDScript tooling and test organization are less attractive here, C# is intentionally excluded, and the team prefers a Rust/code-first workflow. [Godot license](https://godotengine.org/license/) · [Godot networking](https://docs.godotengine.org/en/stable/tutorials/networking/index.html)
-
-### Defold
-
-Defold is lightweight and strong for 2D deployment, but its workflow and ecosystem are less flexible for a game that may later blend 2D gameplay with 3D presentation or more complex authoring tools.
-
-## Technical guardrails
-
-- Use a fixed simulation tick for combat state updates.
-- Keep gameplay definitions data-driven, but do not introduce a general-purpose ability scripting language yet.
-- Keep rendering, input, and gameplay state separate enough that touch controls can be added later.
-- Design the input layer around abstract actions and support an Xbox-like controller as the primary control scheme; keyboard/mouse is a supported parallel scheme for macOS development and play.
-- Keep aim, fire, ability, interaction, and menu actions independent from physical button bindings so controller layouts can change without gameplay changes.
-- Use collision layers and masks deliberately: fighters, projectiles, terrain, objectives, pickups, and hazards should not be one undifferentiated layer.
-- Implement each mode as focused Bevy rule plugins, resources/components, and scheduled systems rather than branching victory logic through fighter or weapon systems. Do not require a universal mode trait before multiple modes demonstrate the need.
-- Prefer serializable Rust definitions or authored Bevy assets/configuration files for content and focused Bevy systems for behavior.
-- Keep gameplay definitions in serializable Rust data structures or authored data files; do not make the ECS world itself the only source of content definitions.
-- Express the first built-in arena through the same bounded map-recipe schema and server resolver
-  intended for later user-authored maps. Keep server-owned mode implementations separate from
-  user-editable layout data.
-- Keep destructible terrain as a quantized-solidity-to-visual-to-collision subsystem rather than
-  encoding it as visible tile replacement. The authoritative occupancy grid is an internal gameplay
-  representation and does not make presentation tiles authoritative.
-- Queue terrain collision rebuilds between physics frames and rebuild only dirty terrain chunks.
-- Treat the game as a dedicated-server-authoritative networked game from the first gameplay architecture.
-- Clients send input commands and receive authoritative state/events; clients do not authoritatively submit positions, damage, hits, status changes, scores, or terrain changes.
-- Keep client rendering, audio, camera, HUD, device input, and visual assets out of the dedicated-server build and plugin composition.
-- Make offline and host-client testing exercise the same authoritative server systems and validation as a dedicated server; local convenience must not introduce a separate client-authoritative gameplay path.
+Create another package, executable, or public API only for a demonstrated platform, process,
+feature-isolation, compile-time, testing, or reuse boundary. Organize ordinary gameplay concerns as
+focused modules and plugins within the existing package.
 
 ## Bevy application composition
 
+Every Bevy `App` is assembled from role-appropriate base plugins plus cohesive PewPew Blitz
+plugins. A plugin groups systems, components, resources, messages, lifecycle, and schedule
+registration for a recognizable responsibility; it is not required for every type or file.
+
+### Windowed client
+
+The supported player client composes:
+
+- Bevy `DefaultPlugins` with the selected window, assets, nearest-neighbor image sampling, input,
+  rendering, UI, animation, and audio features;
+- Lightyear client plugins and the registered application protocol;
+- shared timing and gameplay schedule definitions needed to consume network state and, where
+  explicitly installed, execute client-side behavior;
+- client session, flow, Dashboard, settings, input, diagnostics, and presentation plugins; and
+- the sole 3D gameplay-world presentation plugin.
+
+Windowed application state, widgets, cameras, render entities, audio instances, input devices, and
+asset handles are client-owned. They never decide an authoritative gameplay outcome.
+
+### Headless client
+
+The headless client replaces `DefaultPlugins` with `MinimalPlugins`, a schedule runner, Bevy states,
+and logging. It retains the client protocol/session composition and may drive bounded automation
+intent through the same application contracts. It must not become an alternative authority path.
+
+### Lobby and match workers
+
+Server workers use `MinimalPlugins`, a fixed schedule runner, Bevy states, logging, Lightyear server
+plugins, protocol registration, diagnostics, and their role-owned plugins. They do not install
+windowing, rendering, UI, audio, device input, or client assets.
+
+A match worker additionally installs authoritative map, movement, match, combat, ability, terrain,
+and exactly one selected game-mode composition. Mode choice occurs during validated application
+construction; a running match does not hot-swap its authoritative mode plugin graph.
+
+The diagram and plugin descriptions are ownership contracts, not a requirement that every concern
+become a separate crate or architectural layer.
+
+## ECS data and authority contract
+
+Bevy's `World` is the runtime model. Use components for entity-scoped state, resources for genuine
+World-scoped state, systems for scheduled behavior, messages or observers for bounded facts and
+lifecycle reactions, and states only for mutually exclusive application phases that benefit from
+Bevy's state machinery.
+
+Keep these concerns distinct even when their Rust types live near one another:
+
+1. developer-authored content and rule definitions;
+2. player-selected recipes or builds;
+3. immutable server-resolved match snapshots;
+4. mutable runtime ECS state;
+5. protocol registration and stable wire shapes;
+6. telemetry, diagnostics, and verification evidence; and
+7. client presentation state.
+
+Authoritative mutation belongs to the lobby or match worker that owns the relevant World. Clients
+send intent, not positions, hits, damage, effects, scores, objective results, or terrain edits.
+Presentation and diagnostics may observe authoritative facts but do not become a second mutation
+path.
+
+Networked state uses stable player, match, definition, placement, projectile, and other domain IDs.
+Process-local Bevy `Entity` identity never crosses the wire. A gameplay component may also be a
+registered replicated component when that is the simplest correct representation; do not create a
+duplicate transport DTO solely to imitate an architectural layer.
+
+## Timing and schedule contract
+
+Authoritative gameplay advances at a fixed 60 Hz from the shared `SIMULATION_TICK`. Wall-clock
+`Update` may coordinate sessions, presentation, and process work, but it must not become a second
+rate-dependent gameplay simulation.
+
+The shared `FixedUpdate` phase orders the high-level gameplay sets as:
+
 ```text
-Authored definitions / Bevy assets
-              ↓
-Authoritative gameplay World
-  components, resources, systems,
-  states, schedules, rule plugins
-              ↕
-Lightyear registration and networking
-  inputs, replicated components, messages
-              ↕
-Client World and presentation
-  replicated/predicted state, rendering,
-  audio, camera, HUD, device input
+Lifecycle
+  -> ApplyDeferred
+  -> Input
+  -> Simulation
+  -> Fire
+  -> Finalize
 ```
 
-Client and server entry points compose the appropriate Bevy base plugins, Brawler plugins, Cargo features, and process-level configuration. Runtime gameplay state lives in the authoritative server `World`; client worlds contain replicated or predicted copies plus local presentation state. A serializable gameplay component may also be a Lightyear-replicated component when that is the simplest correct representation—do not create a duplicate transport DTO solely to satisfy layering.
+The deferred-command boundary after lifecycle must remain explicit so newly spawned, defeated,
+respawned, or removed entities have deterministic visibility before input and simulation. Combat
+resolution continues through the ordered `FixedPostUpdate` sets:
 
-The supported client maps planar simulation coordinates to the X/Z ground plane through one tested
-adapter and renders dedicated owner-linked entities with `Camera3d`, `Mesh3d`, shared materials,
-generated terrain/map meshes, and selected GLB scenes. Menus/HUD and projected fighter overhead
-information remain Bevy UI. The server feature graph excludes all of those presentation families.
+```text
+ProjectileSweep
+  -> Damage
+  -> Lifecycle
+  -> TelemetryAndCues
+  -> Finalize
+  -> advance SimulationTick
+```
 
-The diagram describes responsibilities, not folders or crates. Milestone 01 must compare single-package and small-workspace options using the actual Cargo feature graph. Another package, library target, or public API is justified only by a demonstrated platform, feature-isolation, compile-time, testing, or reuse boundary.
+Focused subsystems may add their own sets and ordering constraints, including physics refresh and
+terrain collision work. Preserve meaningful `.before`, `.after`, `.chain()`, and `ApplyDeferred`
+relationships at the composition point. A refactor must not change ordering or deferred-command
+semantics accidentally; changes require schedule-focused tests.
+
+Time-dependent tests advance Bevy fixed time or run the relevant schedule explicitly. They do not
+wait on wall-clock sleeps to exercise gameplay rules.
+
+## Physics and world coordinates
+
+Avian 2D owns authoritative planar collision. Fighters, projectiles, permanent map geometry, and
+generated terrain colliders use explicit collision layers and filters appropriate to their
+interactions. Objectives, pickups, hazards, and decorative presentation are not implicitly one
+undifferentiated collision family.
+
+Destructible terrain is an authoritative quantized-occupancy subsystem. It rebuilds only dirty
+collision chunks at the explicit physics-safe boundary. Visible meshes, materials, crater edges,
+particles, and debris present terrain state but never define solidity.
+
+The client maps authoritative planar coordinates through one tested adapter onto Bevy's X/Z ground
+plane. Rendering the game in 3D does not introduce 3D gameplay physics, vertical authority, or a
+second coordinate model. A future change to the physics dimensionality or authoritative movement
+plane is an architecture change requiring explicit research and specification review.
+
+## Networking integration
+
+Lightyear supplies Bevy-native client/server lifecycle, input networking, replication,
+interpolation, and transport integration. PewPew Blitz owns its registered application protocol,
+stable identities, compatibility/content handshake, validation, authority rules, and routed
+transport adapter.
+
+The supported gameplay path is dedicated-server authority with replicated and interpolated client
+state. Lightyear capabilities such as prediction, rollback, and lag compensation are not enabled
+merely because the dependency provides them. Owner prediction remains an isolated experimental
+feature, and any production prediction or lag-compensation path requires measured player benefit,
+terrain and collision correctness, explicit lifecycle ownership, protocol verification, and
+acceptance through a future milestone.
+
+The routed transport carries opaque Lightyear datagrams between the public supervisor endpoint and
+the selected lobby or match authority. It does not wrap replication in another snapshot protocol
+or move gameplay decoding into the supervisor. Direct UDP remains an explicitly named diagnostic
+comparison path, not the ordinary product topology.
+
+Protocol registration remains centralized in `protocol.rs`. Application messages follow one global
+compatibility handshake and current schema; do not add per-message versions or compatibility
+decoders without a new validated network decision.
+
+## Client presentation, UI, input, and assets
+
+The supported gameplay-world renderer is 3D. It uses `Camera3d`, meshes, PBR materials, lighting,
+generated map and terrain meshes, GLB scenes, and animation while presenting the authoritative
+planar game. Bevy UI owns the Dashboard, menus, HUD, overlays, and projected fighter information.
+The primitive-world override supplies deterministic fallback meshes inside this same renderer; it
+is not a second renderer or a permanent content mode.
+
+Gameplay emits or replicates presentation-independent state and cues. Client systems resolve those
+facts into models, animation, particles, audio, camera response, controller feedback, and UI.
+Missing, disabled, reduced, or late presentation must not change navigation, networking, saving,
+shutdown, or gameplay outcomes.
+
+Device input is sampled on the client and converted into abstract gameplay and product actions.
+Aim, movement, fire, abilities, interaction, and menu actions remain independent from physical
+bindings. Keyboard/mouse and an Xbox-like controller are supported desktop schemes; later device
+or touch schemes must adapt at this boundary rather than enter gameplay systems.
+
+Client assets are presentation data resolved from stable definition or cue references. The server
+uses gameplay definitions and content fingerprints without loading client meshes, textures, fonts,
+audio, animation, or shaders.
+
+## Content and authoring boundary
+
+Gameplay content is expressed through bounded serializable Rust definitions and authored data
+files. Focused Bevy systems implement behavior; data selects among supported capabilities. Do not
+use executable user scripts, client-selected system names, unbounded numeric maps, or a serialized
+ECS `World` as the authored source of truth.
+
+Built-in and future user-authored maps use the same typed recipe, validation, resolution, and
+runtime-instantiation path. User-editable layout data remains separate from developer-authored
+authoritative mode plugins. Likewise, built-in brawler and weapon presets use the same bounded
+recipe and resolution path as player-authored variations.
+
+Prefer Bevy-native components, resources, systems, messages, assets, states, and UI before adding a
+custom framework. Add a scripting language, editor framework, general command bus, or other engine
+layer only when a concrete player-facing slice demonstrates the need.
+
+## Cargo features and role isolation
+
+The main package's feature graph expresses compile-time execution roles:
+
+- `client` is the default and enables the windowed/player client dependency surface;
+- `server` enables the dedicated-server and worker surface without Bevy presentation features;
+- `network-test` combines the required client/server and in-process transports for integration and
+  performance tests;
+- `process-metrics` is an isolated measurement feature because its recorder is process-global; and
+- `owner-prediction` is an experimental comparison feature, not part of the supported player path.
+
+Keep role-owned modules gated at their ownership boundary. The server graph must not acquire
+windowing, rendering, PBR, scenes, UI, text rendering, audio, gamepad/keyboard/mouse input, or client
+asset dependencies through a convenient shared module. Moving a type or dependency across a role
+boundary requires role-specific compilation and dependency checks.
+
+Runtime `headless` selection controls whether a client installs presentation; it does not replace
+Cargo feature isolation. Conversely, the `server` feature is not a windowed client with rendering
+disabled at runtime.
+
+## Verification and evolution
+
+Engine-facing changes are verified in proportion to the boundary they affect:
+
+- pure rules use focused unit tests;
+- components, resources, lifecycle, states, and schedules use small Bevy `App`/`World` tests;
+- authority and replication use the separate-App network harness;
+- routing and process isolation use the routed process tests and canonical E2E path;
+- client rendering, UI, input, animation, and audio use automated diagnostics plus bounded native
+  visual/controller checks; and
+- feature-boundary changes run client, server, and relevant combined-role compilation checks.
+
+Visual evidence complements automated correctness; it does not replace authority, lifecycle,
+protocol, or schedule tests. Test-only composition should reuse production plugins and schedules
+unless the test explicitly owns a smaller unit boundary.
+
+Reconsider an engine, physics, or networking dependency only when a concrete blocker, unsupported
+platform, unacceptable maintenance burden, correctness failure, or measured product limitation
+justifies the migration cost. Alternative engines and networking stacks are not standing fallback
+architectures. A replacement proposal must specify authority preservation, content migration,
+feature isolation, process topology, verification parity, and player-visible value before changing
+the supported baseline.

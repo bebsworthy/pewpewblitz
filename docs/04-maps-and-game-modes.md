@@ -1,120 +1,174 @@
-# Maps and game modes
+# Map and mode specification
 
-## Map model
+## Purpose and authority
 
-A map recipe should contain:
+This document defines the durable contract for authored maps, server-resolved map snapshots,
+runtime map state, game-mode rules, and their composition into a match. It also defines the bounded
+authoring boundary for a future player-facing map builder.
 
-- playable bounds;
-- static walls and cover;
-- destructible geometry;
-- walkable and blocked surfaces;
-- visual surface/model layers and decorative entity placements through stable presentation IDs;
-- spawn points;
-- mode-required objective points, anchors, or volumes;
-- pickup spawn rules;
-- hazards;
-- visibility or concealment regions;
-- a compatible server-owned mode definition ID and only the bounded map parameters that mode's
-  schema explicitly exposes.
+[Product direction](./00-product-direction.md) owns why player-authored arenas matter.
+[Network architecture](./08-network-architecture.md) owns replication and visibility.
+[Art, presentation, and asset specification](./11-art-and-presentation-direction.md) owns client rendering.
+Version roadmaps and milestones own delivery history, evidence, and temporary implementation stages.
 
-Keep these authoring levels distinct:
+The central rule is:
+
+> A map supplies validated space and mode-compatible layout data. A developer-authored mode supplies
+> executable rules. Neither presentation nor map data becomes gameplay authority.
+
+## Authored, resolved, and runtime layers
+
+Keep these layers distinct:
 
 ```text
-MapContentCatalog       developer-authored tiles, entities, regions, geometry primitives, bounds
-MapRecipe               user-authored arrangement of allowed content
-MapPreset               a named, developer-authored legal recipe
-ResolvedMap             immutable server-validated match snapshot
-MapRuntimeState         spawned entities, active regions, terrain revisions, objective state
-ModeDefinition/Plugin   developer-authored server rules; never authored by the map recipe
+MapContentCatalog          allowed objects, regions, geometry, themes, and authoring limits
+MapRecipe                  one bounded, mode-compatible authored layout
+MapPreset                  a named developer-authored legal recipe
+ResolvedMap                immutable server-validated match snapshot
+MapRuntimeState            instantiated geometry, regions, entities, and terrain revisions
+
+ModeDefinition             stable developer-authored rule identity and map-facing schema
+ModeConfiguration          bounded server-operator values for one advertised game type
+ResolvedMatchComposition   compatible map, mode, topology, capacity, and rules snapshot
+ModeRuntimeState           phase, score, objective progress, timers, and mode-owned participant state
 ```
 
-The first v1 arena is a built-in preset, but it must flow through the same versioned typed recipe
-parser/serializer, validator, resolver, and runtime-instantiation path intended for future
-user-authored maps. Map systems must not branch on the first map's identity, and a serialized ECS
-`World` is not the authored source of truth.
+A serialized ECS `World` is not authored map data. The server lowers a recipe into runtime entities
+and resources; the client independently derives presentation from the resolved snapshot and stable
+presentation IDs.
+
+Each map recipe targets one mode definition because its spawns and objective anchors must satisfy a
+specific schema. A visual arena, semantic object arrangement, or presentation theme may be reused
+across several recipes, but a Wipeout-compatible recipe and a Hot Zone-compatible recipe remain
+independently validated documents. Selecting a map therefore means selecting a compatible recipe,
+not attaching arbitrary rules to an unvalidated scene.
+
+Built-in and future player-authored recipes use the same parser, validator, resolver, and runtime
+installation path. Systems must not branch on a built-in map's identity.
+
+## Map recipe contract
+
+The supported recipe model can express:
+
+- stable recipe identity and revision;
+- playable bounds;
+- camera/presentation bounds that do not alter authoritative collision;
+- a presentation theme and semantic visual-object placements;
+- permanent blocking geometry and walkable space;
+- destructible-terrain reservations and initial occupancy;
+- spawn points and team slots;
+- the compatible mode definition;
+- mode-required point or area anchors;
+- bounded gameplay regions and server-known environment entities supported by the active catalog.
+
+The schema may grow to support additional approved pickups, hazards, concealment regions, movement
+surfaces, and other environment primitives. Adding a catalog capability is an explicit content and
+gameplay decision; unknown fields, IDs, or executable behavior are rejected rather than interpreted
+dynamically.
+
+Presentation and gameplay layers are independent. A visible wall does not block movement unless the
+recipe resolves blocking geometry. A decorative puddle does not slow a fighter unless the recipe
+also references a supported gameplay region. Conversely, invisible authoring helpers may describe
+spawns, objectives, collision, or occupancy without becoming rendered objects.
+
+## Resolution and validation
+
+The authoritative server resolves a candidate recipe before admission can use it. Validation must
+cover at least:
+
+- schema and catalog compatibility;
+- stable identities and allowed references;
+- finite, bounded coordinates, dimensions, orientations, and counts;
+- playable bounds and geometry complexity;
+- collider, region, semantic-object, and entity budgets;
+- spawn count, team capacity, safety, and reachable re-entry space;
+- required mode anchors and rejection of unsupported anchors;
+- mode compatibility and topology intersection;
+- destructible-terrain allocation and mutation ceilings;
+- headless operation without client assets;
+- deterministic identity and content fingerprints needed by admission and recovery.
+
+Resolution produces an immutable `ResolvedMap` and contributes to a
+`ResolvedMatchComposition`. Mutable runtime state never flows back into the authored recipe. A map
+author cannot publish a terrain revision, objective score, fighter position, or other live match
+fact.
+
+Competitive fairness analysis, asset licensing, persistence, publishing, discovery, moderation,
+and version migration are separate product concerns. They may gate whether a valid recipe can be
+distributed or selected, but they must not be hidden inside collision or mode systems.
 
 ## Player map-builder boundary
 
-The eventual map builder may let a user:
+An envisioned map builder may let a player:
 
-- select and arrange approved visual tiles, decals, decorations, and presentation themes;
-- shape playable bounds and place bounded permanent or destructible geometry;
-- place approved props, pickups, hazards, and other map-entity definitions;
-- place and configure supported gameplay regions;
-- place team, free-for-all, or other mode-required spawn points;
-- place objective anchors/volumes required by the selected built-in mode;
-- edit only those sizes, orientations, counts, and parameters exposed by the authoritative catalog.
+- arrange approved themes, surfaces, decorations, and semantic objects;
+- shape bounded playable space and permanent or destructible geometry;
+- place approved environment entities and gameplay regions;
+- place spawn points and team slots supported by the selected mode;
+- place and configure the selected mode's required anchors;
+- edit only parameters and ranges exposed by the authoritative catalog;
+- validate and playtest a candidate recipe before saving or publishing it.
 
-It does not let a user provide Rust, scripts, systems, arbitrary component data, executable rules,
-new game modes, or unrestricted asset/network references. Choosing `Wipeout`, `Hot Zone`,
-`Showdown`, or another supported mode selects a developer-authored server rules plugin and schema;
-the recipe supplies compatible layout data only.
+It does not accept Rust, scripts, systems, arbitrary component data, new game modes, unrestricted
+assets, network references, or executable objective logic. Choosing Wipeout, Hot Zone, or another
+supported mode selects developer-authored rules and a validation schema; the player authors only a
+compatible layout.
 
-Server resolution must validate at least schema/revision compatibility, stable IDs, finite and
-bounded coordinates, map dimensions, geometry complexity, collider/region counts, allowed entity
-and presentation references, spawn safety/counts, required objective anchors, mode compatibility,
-destructible-terrain limits, and performance budgets. Competitive fairness checks, asset upload and
-licensing, persistence, publishing, discovery, moderation, and version migration belong to later
-specifications and must not be folded into collision or mode systems.
+The builder is an external authoring surface, not a second map representation. Editor state may
+include selections, handles, undo history, and invalid intermediate geometry, but only an accepted
+recipe may enter match resolution.
 
-Milestone 06 establishes the typed recipe/resolved/runtime boundaries with one built-in arena and a
-non-preset validation fixture. It does not implement the player-facing editor. A future builder
-edits a candidate recipe; the server remains responsible for accepting and resolving it before a
-match can use it.
+## Runtime ownership
 
-Mode-facing validation grows with implemented modes. Milestone 06 needs only the sandbox/base map
-requirements and a stable place for mode layouts; Milestone 07 adds Wipeout's concrete requirements,
-Milestone 09 adds Hot Zone's, and later modes add their own schemas without making map recipes
-executable or requiring a universal mode trait in advance.
+The authoritative map runtime owns:
 
-## Visual presentation and gameplay regions
+- installed permanent geometry and collision;
+- spawn and mode-anchor indexes derived from the resolved map;
+- gameplay-region and environment-entity instances;
+- destructible occupancy, colliders, revisions, and rebuild work;
+- installation, reset, recovery, and teardown of those map-owned facts.
 
-Visual surfaces, models, and procedural meshes are replaceable client presentation. Authoritative gameplay should be composed from
-geometry, authored regions, runtime environment entities, and destructible-terrain data instead of
-giving every floor tile or wall model a bespoke rule.
+The authoritative mode runtime owns:
 
-- ordinary ground is a walkable surface without a modifier;
-- permanent walls and cover are blocking geometry;
-- destructible terrain uses a chunked quantized occupancy grid and generated collision;
-- speedways, slow ground, hazards, objectives, and concealment are shaped gameplay regions;
-- smoke, temporary walls, and similar ability-created areas are server-owned runtime entities;
-- decorative grass, puddles, decals, and props have no gameplay effect unless map data explicitly
-  associates them with a region or geometry definition.
+- match phase and transition rules;
+- scoring, victory, timeout, and tie behavior;
+- objective progress and mode-specific timers;
+- respawn, elimination, or round policy;
+- mode-specific participant state and outcome summaries.
 
-A user-authored recipe may arrange both visual and gameplay layers, but presentation never implies
-collision or an effect. The recipe must reference each gameplay shape/region explicitly, and the
-headless server resolves those references without loading models, textures, materials, or other
-client assets. The V3 client resolves exact shapes to cached/generated 3D meshes and validated
-presentation profiles; visual height never changes collision or occupancy.
+Mode systems consume stable map indexes and authoritative gameplay outcomes such as defeats or
+objective occupancy. They do not mutate authored recipes. Map systems expose compatible space but
+do not decide what a capture zone scores or when a match ends.
 
-See [Environment, surface, and tile ideas](./09-environment-and-tile-ideas.md) for the future-facing
-catalog, property model, and promotion rules. That catalog is research, not automatic v1 scope.
+Client presentation observes resolved and replicated facts. It may render geometry, terrain,
+objective volumes, timers, scores, and results, but it does not decide collision, occupancy,
+visibility, scoring, or victory.
 
-## Concealment regions
+## Visual presentation and gameplay space
 
-The map model reserves visibility and concealment regions for future tall grass, bushes, smoke,
-darkness, and invisibility effects. All sources should feed one server-owned observer-versus-subject
-visibility decision. Clients do not declare themselves concealed and do not decide which opponents
-they may observe.
+Authoritative gameplay is planar and composed from exact geometry, regions, environment entities,
+and terrain occupancy. Client 3D presentation resolves those facts to cached or generated meshes and
+validated presentation profiles. Visual height, animation, material, lighting, or decorative
+placement never changes authoritative collision or occupancy.
 
-Static concealment geometry can be known to every client; the hidden fighter's live spatial state
-is the secret. The server retains the complete simulation, including bots, and applies per-client
-network visibility before replication. Match/arena rooms are suitable coarse interest partitions,
-while dynamic grass, reveal, and invisibility decisions require per-entity, per-connection
-visibility. Public roster identity must remain separate from cullable live fighter state when both
-behaviors are needed.
+Useful gameplay-space primitives include:
 
-The implementing milestone must define proximity, ally, attack, damage, objective-carrier,
-spectator, projectile, audio, and reappearance rules and verify that related components or messages
-cannot leak the hidden state. See [Network architecture](./08-network-architecture.md#interest-management-and-concealment)
-for the transport contract.
+- ordinary walkable ground;
+- permanent walls and cover;
+- destructible terrain;
+- shaped movement, hazard, and concealment regions;
+- mode-owned objective areas derived from validated anchors;
+- server-owned runtime areas such as smoke or temporary barriers;
+- server-known pickups or interactables when a supported mode or content definition owns them.
 
-## Destructible terrain
+See [Environment gameplay direction](./09-environment-gameplay.md) for the candidate catalog and
+promotion rules. An idea becomes part of this contract only when a concrete feature adopts and
+validates it.
 
-Destruction should not be implemented as replacing individual visible tiles. Brawler will use a
-chunked, quantized occupancy grid that supports readable holes and passages at a deliberately chosen
-gameplay resolution. Grid cells are hidden simulation data; client visuals may present or soften the
-quantized edge without becoming collision truth.
+## Destructible terrain contract
+
+Destructible solidity is a server-owned, chunked, quantized occupancy grid rather than the presence
+of visible tiles:
 
 ```text
 Terrain appearance
@@ -124,190 +178,125 @@ Quantized occupancy grid
 Generated collision
 ```
 
-### Terrain representation
+The supported representation uses 8-world-unit cells, sparse 32×32-cell chunks, and `[u64; 16]`
+occupied/empty bitsets per chunk. Global chunk coordinates use Euclidean floor division, so terrain
+resolution does not vary with map size or destructible-region dimensions.
 
-- Store authoritative terrain solidity as `[u64; 16]` occupied/empty bitsets owned by the server
-  `World`, using 8-world-unit cells and sparse 32×32-cell chunks.
-- Derive global chunk coordinates from world space with Euclidean floor division; the grid resolution
-  does not vary with map or destructible-region dimensions.
-- Convert circular, capsule, rectangular, or authored brushes to integer cell operations so the
-  authoritative result is deterministic.
-- Update dirty client presentation regions independently from authoritative collision generation.
-- Generate bounded collision with one Avian/Parry voxel shape per occupied chunk, reconciling
-  orthogonal-neighbor topology across chunk seams. Do not create one replicated entity per cell.
+Authoritative terrain rules must:
 
-The [v1 Milestone 10 technical specification](./implementation/v1/milestone-10.md) selects and
-budgets the cell size, chunk dimensions, bitset layout, half-cell brush quantization, client image
-updates, voxel collision generation, and collider replacement. Smooth mask carving and
-marching-squares contours remain deferred unless playtest evidence rejects the quantized result.
+- convert supported brushes to deterministic integer cell operations;
+- allocate only chunks intersecting authored destructible regions;
+- rebuild only dirty collision chunks between physics frames;
+- reconcile orthogonal-neighbor topology across chunk seams;
+- generate bounded chunk collision rather than one entity per cell;
+- keep permanent geometry, fighters, projectiles, objectives, pickups, and props separate;
+- recover a current snapshot without replaying unbounded destruction history;
+- provide basic correction when a terrain mutation embeds a fighter.
 
-The initial occupancy state, allowed material/brush profiles, placement bounds, and stable
-terrain-chunk IDs
-are authorable map-recipe data. Runtime destruction, collision regeneration, and terrain revision
-remain server-owned match state; a map author cannot directly publish a runtime revision or crater
-event.
+The current engine bounds playable maps from 1024–4096 units wide and 720–3072 units high.
+Destructible shapes may be up to 2048 units across, with at most four reservations, 221 intersected
+chunks, and 196,608 occupied cells. These are validation limits of the supported format, not targets
+derived from one built-in arena. Any revision must continue bounding allocation, accepted mutation
+work, dirty rebuilds, collision complexity, and recovery bytes.
 
-For a historical reference, [Spell-Splosion](https://github.com/MitchMakesThings/Spell-Splosion)
-demonstrates several Worms-style terrain-destruction techniques in an older Godot project. It remains
-useful alternative evidence for smooth carving, but its mask workflow, engine APIs, and scene
-structure are not Brawler implementation requirements.
+The authoritative server owns occupancy, collision, revisions, and rebuild state. The client owns
+only visual mesh/material state derived from replicated terrain facts. Deformation animation,
+falling debris, layered materials, fluids, structural collapse, persistent deformation, and broader
+bandwidth strategies are envisioned extensions rather than implied behavior of the base grid.
 
-### Chunking
+## Concealment and visibility extension
 
-The occupancy grid is divided into fixed-cell-count implementation chunks. Chunk coordinates are
-derived from world space, so maps and destructible regions may vary in size without changing terrain
-resolution. Allocate only chunks intersecting authored destructible regions; do not allocate a
-whole-map grid when most of the map is permanent terrain. An explosion rebuilds only chunks touched
-by its quantized brush.
+The model reserves concealment regions for tall grass, bushes, smoke, darkness, invisibility, and
+similar mechanics. All sources must feed one server-owned observer-versus-subject visibility
+decision. Clients do not declare themselves concealed or decide which opponents they may observe.
 
-The implementation must support the complete engine-owned playable-size range (currently
-1024–4096 units wide and 720–3072 units high), rather than deriving capacity from the current
-192×192-unit Crossroads reservation. Every otherwise-valid map size may host destructible regions.
-The current limits allow up to four reservations and authored shapes up to 2048 units across. The
-Milestone 10 specification supports those per-region limits while adding aggregate ceilings of 221
-intersected chunks and 196,608 occupied cells.
+Static concealment geometry may be public while a hidden fighter's live spatial state remains
+private. Implementing concealment requires explicit proximity, ally, attack, damage,
+objective-carrier, spectator, projectile, audio, and reappearance rules, plus verification that
+related replication cannot leak hidden state. See
+[Network architecture](./08-network-architecture.md#interest-management-and-concealment).
 
-Engine-owned budgets must bound total allocated destructible cells/chunks, dirty chunks rebuilt per
-fixed tick, generated collision complexity per chunk, recovery snapshot bytes, and destruction work
-accepted per tick. Validation must reject recipes that exceed any new aggregate terrain budget.
-Terrain concurrency derives from the resolved game-mode/map participant capacity, not from the
-current Wipeout implementation's temporary 2v2 limit. The v1 terrain format is verified for up to 24
-simultaneously active fighters and does not encode how they are divided among teams.
+## Match topology and capacity
 
-Stable chunk identity links separate runtime representations:
+Team count and participants per team belong to the resolved mode/map composition, not to global
+constants or terrain. A mode definition declares legal topology and participant ranges. A map proves
+compatible team slots, spawn capacity, playable space, and required anchors. Resolution accepts only
+their intersection and publishes the maximum active-fighter count used by admission and subsystem
+capacity checks.
 
-- **Authoritative server chunk:** occupancy bits, generated collision, terrain revision, and collision
-  dirty/rebuild state.
-- **Client presentation chunk:** visual/material region and visual dirty/upload state derived from
-  replicated terrain state or recovery data.
+Supported routed product game types include exact 1v1, 2v2, and 3v3 Wipeout and Hot Zone matches.
+Ordinary matches are expected to center on 3v3, while the architecture may support larger bounded
+arrangements such as twelve solo fighters, two teams of five, or three teams of three when a concrete
+mode, map, HUD, admission profile, and capacity evidence all allow it. No common subsystem may assume
+exactly two teams or use one advertised topology as an engine-wide ceiling.
 
-The dedicated server does not own or upload terrain textures. A client visual update cannot change authoritative solidity or collision.
-
-### MVP destruction scope
-
-The first destruction milestone includes:
-
-- one clearly marked destructible region in the built-in map plus fixtures covering multiple chunks,
-  separated regions, and the supported map-size extremes;
-- circular explosion brushes;
-- quantized visual holes, passages, and readable crater edges;
-- projectile and fighter collision against the generated terrain;
-- collision regeneration between physics frames;
-- basic unstuck behavior when a fighter is embedded by a terrain change.
-
-The small built-in reservation is a playtest scenario, not a capacity target. Milestone completion
-requires bounded automated and process evidence across the full supported map-size range and at the
-legal destructible-region limits.
-
-Defer terrain deformation animation, falling debris, material layers, fluid behavior, structural collapse, persistent terrain saving, and internet-scale terrain bandwidth optimization. Terrain authority and basic event synchronization remain part of the network architecture.
-
-Keep terrain collision separate from indestructible walls, fighters, projectiles, objectives, pickups, hazards, and decorative props.
-
-## Map grammar
-
-Useful geometry archetypes:
-
-- **open arena:** emphasizes aim and range;
-- **chokepoint arena:** emphasizes area denial and crowd control;
-- **lane arena:** gives teams predictable routes;
-- **cover maze:** enables ambushes and close-range play;
-- **central objective arena:** concentrates conflict at a contested location.
-
-The first test map should be symmetrical and intentionally plain:
-
-- rectangular bounds;
-- two team spawn areas;
-- central open fight area;
-- two side routes;
-- permanent cover;
-- one clearly marked destructible terrain region;
-- no water, bushes, teleporters, or moving hazards.
-
-This makes weapon and build differences easier to observe while providing a contained test area for flexible terrain destruction.
-
-## Match topology and capacity ownership
-
-Team count and participants per team are properties of the selected game-mode and map composition,
-not global constants and not terrain rules. A game-mode definition supplies the legal topology and
-per-team participant ranges. A map supplies compatible team slots, spawn areas/points, playable
-space, and any mode-required anchors. Resolution accepts only their compatible intersection and
-produces the maximum active-fighter count used by admission and subsystem capacity checks.
-
-The current Wipeout/Hot Zone server code supports two teams with at most two participants per team;
-that is an implementation-stage profile, not the engine direction. Common IDs, map indexing,
-networking, terrain, and future mode-neutral systems must not bake in 2v2 or exactly two teams. The
-planned range includes ordinary 3v3 and larger arrangements such as `1v1 × 12`, `2v5 × 2`, and
-`3v3 × 3`. Each concrete game mode still owns whether those topologies make sense for its scoring,
-respawn, objective, HUD, and matchmaking rules.
-
-## Mode inventory
-
-### Showdown
-
-Survival mode. Fighters or teams fight until one remains. A complete implementation typically needs elimination state, optional respawn rules, pickups, and a closing danger area to prevent indefinite matches.
-
-**Map needs:** distributed spawn points, exploration space, cover, pickup locations, and a late-game boundary mechanic.
-
-**Complexity:** high. It combines free-for-all participant tracking, no-respawn elimination, loot progression, and a shrinking playable area.
+## Supported modes
 
 ### Wipeout
 
-Team elimination score mode. Each enemy defeat grants a point; the first team to the target score wins, or the highest score wins when the timer expires. Fighters normally return to the match after a respawn delay.
+Wipeout is a team elimination-score mode. An enemy defeat grants a point; the first team to the
+target wins, or the leading team wins when time expires. Fighters normally re-enter after a
+server-owned respawn delay.
 
-**Map needs:** team spawn areas, safe re-entry routes, enough cover to prevent spawn trapping, and no mandatory objective geometry.
-
-**Complexity:** low. This is the best first complete mode because it validates combat, teams, death, respawn, scoring, and match end.
-
-### Gem Grab
-
-Teams contest periodically spawned collectibles. Carrying the objective creates a risk/reward state: the carrier is valuable, visible, and loses carried items on defeat. A team win requires reaching a threshold and surviving a countdown or hold period.
-
-**Map needs:** a contested central spawn area, routes around the objective, carrier escape paths, and clear pickup/drop readability.
-
-**Complexity:** medium.
-
-### Heist
-
-Teams attack the opposing team's durable objective while defending their own. The match ends when one objective is destroyed or time expires with one objective having more health remaining.
-
-**Map needs:** two objective locations, attack lanes, defensive cover, and routes that support both pushing and returning to defense.
-
-**Complexity:** medium-low. Objective damage may require separate balance rules from fighter damage.
+Its map schema requires compatible team spawns and safe re-entry space but no objective geometry.
+Its runtime owns scores, timeout resolution, respawn policy, victory, and the match summary.
 
 ### Hot Zone
 
-Teams contest one or more capture areas. Progress increases while a team occupies a zone and is paused or contested when both teams are present. The first team to complete the required progress wins; otherwise the leading team wins when time expires.
+Hot Zone is a spatial-control mode. Teams contest one or more capture areas. Server-owned progress
+advances according to occupancy and contest rules; the first team to complete the requirement wins,
+or timeout rules resolve the result.
 
-**Map needs:** one or more capture volumes, approach routes, cover around zones, and enough geometry to make zone entry a decision.
+Its map schema requires bounded capture volumes, compatible spawns, and enough legal surrounding
+space for entry and contest. Its runtime owns occupancy evaluation, progress, contest state, timeout
+resolution, victory, and the match summary.
 
-**Complexity:** medium. Continuous occupancy, progress, simultaneous contesting, and timeout tie handling all need clear rules.
+Together these modes prove that combat, fighter lifecycle, map installation, and common match phases
+are not coupled to one scoring model.
 
-## Recommended implementation order
+## Envisioned mode families
 
-1. **Combat sandbox** — no formal mode; reset quickly after death.
-2. **Wipeout** — validates the full combat loop.
-3. **Hot Zone** — validates the same combat code under continuous spatial progress early.
-4. **Heist** — adds a persistent objective without item ownership.
-5. **Gem Grab** — adds pickups, carrier state, drops, and a win countdown.
-6. **Solo Showdown** — adds exploration, loot, and a shrinking boundary.
-7. **Duo/trio variants** — reuse team and respawn infrastructure.
+These are product candidates, not supported rules merely because their layouts can be described:
 
-Hot Zone is intentionally earlier than its isolated rules complexity would otherwise suggest. It is part of the gameplay MVP verification because it proves that fighter, weapon, ability, and match-lifecycle code is not coupled to elimination scoring. The remaining order is an engineering recommendation, not a statement about which mode is most important to the final game.
+- **Heist:** teams attack an opposing durable objective while defending their own. It adds objective
+  health, attack/defense lanes, and objective-specific damage policy.
+- **Gem Grab:** teams collect and carry a contested resource. It adds spawn cadence, carrier state,
+  drops, visibility pressure, and a threshold/hold win sequence.
+- **Showdown:** solo fighters or teams survive until one remains. It adds elimination, distributed
+  spawning, exploration/loot pressure, and a closing playable boundary.
+
+A new mode is introduced as a complete player-visible loop, not as a generic framework exercise. It
+must define its authoritative rules, configuration, map schema, topology, HUD/results facts,
+admission compatibility, recovery behavior, and verification evidence. Shared match machinery is
+extracted only where implemented modes have genuinely identical ownership and behavior.
 
 ## Bevy mode composition
 
-Keep mode rules out of fighter and weapon systems, but do not require an object-oriented `GameMode` trait. A mode should be composed from the smallest Bevy-native pieces its rules need:
+Mode rules use focused Bevy-native composition rather than an object-oriented universal `GameMode`
+trait:
 
-- a focused rule plugin, such as `WipeoutRulesPlugin` or `HotZoneRulesPlugin`;
-- authored mode configuration and stable definition identity;
-- match-phase state or resources for waiting, countdown, active play, completion, and restart;
-- mode-owned resources/components for scores, objectives, timers, progress, and participant state;
-- fixed-step systems or observers that consume authoritative gameplay facts such as fighter defeat, disconnect, or objective occupancy;
-- client presentation systems that observe replicated mode state and render the scoreboard, timer, objective progress, and results.
+- one focused rule plugin for each supported mode;
+- stable definitions and validated rule resources;
+- common match-phase components and systems only where behavior is truly shared;
+- mode-owned resources/components for scores, objectives, timers, and participant facts;
+- explicit fixed-step ordering around authoritative movement, combat outcomes, occupancy, scoring,
+  and completion;
+- replicated state and cues observed by client HUD and world presentation systems.
 
-Common match lifecycle components, resources, and systems should emerge from implementing Wipeout and be reused by Hot Zone where their behavior is truly identical. Mode-specific rule plugins may use specialized systems. Introduce a shared trait, registry, or generic mode abstraction only after multiple implemented modes demonstrate a concrete need that plugin composition and ECS queries do not already solve.
+Introduce a shared registry, trait, or generic mode layer only after concrete modes demonstrate a
+problem that plugin composition, typed definitions, and ECS queries do not solve.
 
-A mode plugin owns the validation schema for its map-facing requirements. For example, Wipeout may
-require safe team spawns, Hot Zone a bounded capture volume, and Showdown distributed spawns plus a
-boundary-compatible play area. A map recipe supplies these placements but cannot change what they
-mean, how scoring advances, or how victory is decided.
+## Map design principles
+
+Map layouts should produce readable choices rather than visual complexity for its own sake. Useful
+archetypes include open arenas for aim and range, chokepoints for denial, lanes for predictable
+rotations, cover networks for ambushes, and central-objective layouts for concentrated conflict.
+
+Every supported map should:
+
+- give each weapon range profile meaningful opportunities and counterplay;
+- provide safe, legible spawn or re-entry routes appropriate to its mode;
+- make blocking, destructible, hazardous, and objective space visually distinguishable;
+- keep important combat silhouettes and projectiles readable against its theme;
+- avoid accidental dead space or indefinite disengagement;
+- remain valid and bounded under its advertised participant topologies.

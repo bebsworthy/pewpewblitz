@@ -96,7 +96,7 @@ tradeoff direction, and authority contracts remain intact and the change is reco
   M08 attributes, initial loadout slots, in-memory customization, and no persistence/entitlements.
 - [Weapons and abilities](../../03-weapons-and-abilities.md): typed compositional recipes, validation
   layers, payload/runtime separation, two initial ultimates, passive quality bar, and lifecycle rules.
-- [Gameplay MVP](../../05-gameplay-mvp.md): four named builds, two ultimates, four-to-six passives,
+- [Gameplay MVP](./gameplay-mvp.md): four named builds, two ultimates, four-to-six passives,
   one bounded non-preset weapon, controller parity, telemetry, and first-iteration acceptance.
 - [Network architecture](../../08-network-architecture.md): selection as intent, immutable server
   loadouts, authoritative ability/deployable outcomes, stable identities, and recovery.

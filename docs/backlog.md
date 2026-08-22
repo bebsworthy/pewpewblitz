@@ -1,108 +1,160 @@
-# Cross-version product and technical backlog
+# Canonical cross-version candidate index
 
-This file began as the 2026-08-15 post-V1 documentation review and now carries unresolved work
-across the completed V1–V4 roadmaps and active V5 research. A completed version may resolve a row
-without erasing the historical finding; the triage table records that disposition. Future work
-becomes active only when promoted into a researched, user-reviewed version milestone.
+Last reconciled: **2026-08-22**, after accepted V5 closeout.
 
-Deliberate, well-tracked deferrals already recorded in the roadmap's future-version candidate
-backlog, the `FUT-*` rows, or "Explicitly outside v1" are **not** repeated here. Everything below
-is either absent from all of those lists or present only as an unstated assumption.
+This file is the canonical index of unresolved product and technical candidates for future PewPew
+Blitz versions. It provides one place to compare candidates without copying the detailed research,
+specifications, evidence, or historical rationale retained by completed version roadmaps and design
+documents.
 
-## Priority legend
+A candidate is not an implementation commitment or a permanent priority. It becomes active only
+when promoted into the next version roadmap and processed through research and user specification
+review. Completed roadmap rows remain historical sources of truth and are not rewritten from this
+index.
 
-- **P1** — strategic/product gap affecting v1 viability or the immediate next-version plan.
-- **P2** — traceability gap: the design docs defer the feature, but it was never recorded in a
-  backlog, so it is a silent drop rather than a decision.
-- **P3** — environment/system catalog items never dispositioned.
-- **P4** — production hygiene for the shipped MVP; cheap, likely fine to defer, but currently
-  unstated.
+## How to use this index
 
-## P1 — Strategic/product gaps
+- Select future work by current player value, product direction, dependency evidence, and delivery
+  cost—not by the age or identifier of a candidate.
+- Promote the smallest player-visible vertical slice. A parent candidate may produce one focused
+  milestone without committing every capability named by its source documents.
+- Create the next version roadmap and first milestone only when that version is intentionally
+  chosen. Record research, exact scope, architecture, tests, playtest, feedback, and closeout there.
+- Update this index when a candidate is promoted, split, superseded, resolved, rejected, or gains a
+  concrete promotion trigger.
+- Keep catalog-scale idea inventories in their owning design documents. Add a separate candidate
+  here only when it represents a plausible version outcome or a concrete maintenance obligation.
 
-| ID | Item | Description | Source |
+## Candidate states
+
+| State | Meaning |
+|---|---|
+| Candidate | Eligible for future-version research; no order or delivery commitment is assigned |
+| Partially delivered | A useful baseline exists, but a separately valuable remainder is unresolved |
+| Trigger-bound | Revisit only when the stated product, platform, deployment, or evidence condition occurs |
+| Promoted | Owned by an active version roadmap; that roadmap is the implementation scope contract |
+| Resolved | Delivered, superseded, or explicitly closed; retained only in the archive below |
+
+## Player-visible product candidates
+
+| ID | Candidate outcome | State and promotion trigger | Detailed sources and dependencies |
 |---|---|---|---|
-| GAP-NET-INTERNET | Internet play beyond LAN | v1 verifies two local clients; NAT traversal, relay, STUN/TURN, or port-forwarding documentation appears in no milestone, backlog, or the outside-v1 list (only "global hosting" is named). The first thing players will want post-v1. | Review finding; roadmap network policy |
-| GAP-NET-REGISTRY | Server registry/discovery service | A registration endpoint that receives heartbeats from dedicated servers (name, addr, mode, map, players, version, protocol/content fingerprints) and serves a list for a client browse tab, with refresh cadence and stale-server expiry. Distinct from matchmaking; clients must always be able to join by `IP:port` or `hostname(:port)` and favorites are a local TOML list. A registry lists servers but does not solve reachability (NAT/relay) — coordinate with GAP-NET-INTERNET. Heartbeat schema and service scope are undesigned. | Player UX decision, 2026-08-17; `13-player-ux.md` |
-| GAP-COMBAT-SUPPORT | Support/Controller payload family | Healing, healing-reduction, shields, shield-break, stun/root/silence, pull, mark/reveal, damage-over-time, buff/debuff payloads are specified in doc 03 but have no home in M01–11, the future backlog, or outside-v1. Doc 02 names Support as an emergent role. | `03-weapons-and-abilities.md` payloads/effects; `02-fighter-model.md` roles |
-| GAP-ABILITY-ULTIMATES | Remaining ultimate candidates | Temporary personal shield, healing/repair field, area pull/knockback, and short-lived wall placement ultimates are undispositioned (v1 implements only dash + sentry). | `03-weapons-and-abilities.md` ultimate abilities |
-| GAP-ITEM-EQUIPMENT | Collectible equippable items | Add account-owned item instances referencing authored equipment definitions, legal equipment slots, inventory/entitlement validation, and deterministic resolution of stat modifiers, passive effects, and capabilities into the immutable match loadout. Scope must also decide stacking/conflicts/caps, revisions and migrations, acquisition/drops/crafting, rarity/levels/affixes, and inventory UI. Mid-match loot/equipping is a separate feature. | Product direction, 2026-08-15; `02-fighter-model.md` collectible equipment direction; `03-weapons-and-abilities.md` collectible equipment model |
-| GAP-UI-SETTINGS | Settings screen and local persistence | Resolved by V2: product settings overlay, calibration/remapping, validation, and versioned local persistence. | V2 roadmap and closeout |
-| GAP-AUDIO-SETTINGS | Audio settings and music | No music/menu audio is ever named (only placeholder SFX cues in M06/M07) and no master/SFX/music volume controls exist. | Roadmap M06/M11 |
-| GAP-PERF-CLIENT | Client performance targets | Partially resolved by V3: bounded native render-report schema, Apple M3 reference profile, and explicit frame thresholds exist; broader minimum-spec/device coverage remains deferred. | V3 M04 |
-| GAP-MAP-EDITOR | Player-facing map editor | Build a future authoring workflow over the production map/object catalogs: choose a supported mode and background/theme defaults; browse the game-object taxonomy; mix compatible visual variants per placement; set legal bounds; place/move/rotate/duplicate/delete objects, spawns, regions, and mode anchors; show collision and validation overlays; provide bounded undo/redo; save/reopen a versioned map document; and launch it only through authoritative server validation. Keep custom asset upload, publishing, discovery, moderation, and arbitrary game rules separate. Explicitly deferred from V4 on 2026-08-20. | Product direction; V4 scoping decision |
-| GAP-MAP-PROVISIONING | Server-provisioned maps and thin client | Replace the build-embedded full map library on clients with server-side provisioning of the selected versioned map bundle. The client should retain the renderer, UI, primitive fallback, cache, and validation needed to present a match, but should not need every authoritative map recipe compiled into its binary. Scope a selected-map manifest and content hash; transfer/cache of the recipe plus required render-neutral object/theme/variant metadata; referenced visual-asset acquisition or packaged-base-asset policy; loading/readiness/error/reconnect flows; size and trust/signature policy for operator or user-authored content; and compatibility evolution from one whole-library gameplay fingerprint to core protocol/rules compatibility plus the selected map-bundle identity. The server remains authoritative and sends a resolved snapshot for the active instance even when the client has downloaded the source bundle. Coordinate with `GAP-MAP-EDITOR`; explicitly outside V4 M02's built-in document migration. | Product direction, 2026-08-21; follow-up to V4 M02 architecture review |
+| CAND-BOTS | Playable, readable server-hosted opponents in the existing Start Practice flow | Candidate; architecture is ready for a first representative-build vertical slice when bots are selected for the next version | [Bot decision and first-slice contract](./10-bots.md); [V2 explicit bot deferral](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2) |
+| CAND-RELEASE-POLISH | Release-quality controller feel, audio, HUD/combat/terrain readability, balance, match length, and Hot Zone pacing | Candidate; promote before claiming release readiness or when focused playtests identify the next highest-value feel problem | [`POST-V1-RELEASE-POLISH`](./implementation/v1/roadmap.md#v1-backlog); [V2 manual-matrix rows](./implementation/v2/roadmap.md#v2-backlog) |
+| CAND-ARSENAL | Persistent player-owned brawlers, saved build identity/revisions, production build editing, and the minimum account/entitlement boundary needed by that slice | Candidate; promote when long-lived build ownership becomes the selected product outcome | [`FUT-ARSENAL`](./implementation/v1/roadmap.md#v1-backlog); [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md). Collectible equipment is a child slice, not an obligation to add acquisition, crafting, rarity, affixes, and inventory UI together |
+| CAND-COMBAT-CAPABILITIES | One new readable combat/build family, such as support/control payloads, a new ultimate, systemic status interaction, an advanced projectile, or a terrain-destruction carrier | Candidate parent; promote exactly one coherent capability family after choosing its player-visible build tradeoff | [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md); [future-version combat candidates](./implementation/v1/roadmap.md#future-version-candidate-backlog); [`GAP-DESIGN-TERRAIN-RESERVATION`](./implementation/v1/roadmap.md#v1-backlog) |
+| CAND-GAME-MODE | One complete additional authoritative mode with compatible map requirements and a player-visible loop | Candidate parent; select Heist, Gem Grab, Solo Showdown, or another researched mode individually rather than implementing a mode framework | [future-version mode candidates](./implementation/v1/roadmap.md#future-version-candidate-backlog); [maps and modes](./04-maps-and-game-modes.md) |
+| CAND-ENVIRONMENT-GAMEPLAY | One readable environment slice—surface, concealment, hazard, traversal device, interactive geometry, or ability-created region—using server-owned outcomes | Candidate parent; promote one demonstrated gameplay composition and add shared primitives only when that slice needs them | [environment gameplay direction](./09-environment-gameplay.md); [future environment candidate](./implementation/v1/roadmap.md#future-version-candidate-backlog). The first environmental damage author must also revisit `M08-ENV-SOURCE` in the [V1 backlog](./implementation/v1/roadmap.md#v1-backlog) |
+| CAND-MAP-CONTENT | Additional built-in maps or themes that exercise existing recipe, semantic object, variant, and renderer contracts | Partially delivered by V4's second independent map/theme; promote when a concrete gameplay or art-direction need owns another map | [V4 roadmap](./implementation/v4/roadmap.md); [map direction](./04-maps-and-game-modes.md); [`V3-ADDITIONAL-KENNEY-THEMES`](./implementation/v3/roadmap.md#v3-backlog) |
+| CAND-MAP-BUILDER | A player-facing workflow for editing, validating, saving, reopening, and launching bounded map recipes without authoring executable mode rules | Candidate; promote after choosing a deliberately bounded authoring vertical slice. Publishing, discovery, moderation, arbitrary assets, and platform services remain separate decisions | [`FUT-MAP-BUILDER`](./implementation/v1/roadmap.md#v1-backlog); [creator direction](./00-product-direction.md#creator-direction); [V4 storage/object evidence](./implementation/v4/roadmap.md) |
+| CAND-MAP-PROVISIONING | Server-selected map-bundle delivery and caching so clients need not embed the complete map library | Trigger-bound; research before server-hosted custom maps or when built-in library size becomes a measured distribution problem | [V4 M02 map-document architecture](./implementation/v4/milestone-02.md); [network map authority](./08-network-architecture.md#map-recipe-and-mode-authority). Coordinate bundle identity, assets, trust, cache/recovery, and global compatibility as one content-delivery boundary |
+| CAND-ORIGINAL-ART | A coherent original PewPew Blitz production-art replacement or extension for the dashboard, fighters, environments, weapons, animation, and effects | Trigger-bound; promote only with an art-production budget and a coherent replacement target | [`V3-ORIGINAL-ASSETS`](./implementation/v3/roadmap.md#v3-backlog); [`V5-ORIGINAL-DASHBOARD-ART`](./implementation/v5/roadmap.md#initial-v5-backlog); [art, presentation, and asset specification](./11-art-and-presentation-direction.md) |
+| CAND-RELEASE-READINESS | Remaining desktop release work: broader minimum-spec coverage, colorblind palette, explicit resolution/frame-limit/cursor policy, non-Xbox glyph/rumble support, localization decision, packaging/notarization, and battery/thermal behavior | Trigger-bound; split into the smallest required slices when a supported-platform or external-distribution gate is chosen | [V1 explicit release exclusions](./implementation/v1/roadmap.md#explicitly-outside-v1); [player UX settings/accessibility contract](./13-player-ux.md); [V3 performance baseline](./implementation/v3/roadmap.md); [V5 closeout limitations](./implementation/v5/roadmap.md#v5-closeout) |
 
-## P2 — Traceability gaps (deferred by design docs, never backlogged)
+## Network, service, and session candidates
 
-| ID | Item | Description | Source |
+| ID | Candidate outcome | State and promotion trigger | Detailed sources and dependencies |
 |---|---|---|---|
-| GAP-FIGHTER-ATTRS | Deferred fighter attributes | Armor/damage reduction, crits, lifesteal, shield capacity/recharge, knockback/status resistance, regeneration delay/rate, healing-received multiplier, pickup radius, vision radius, objective-interaction attributes, carry capacity, acceleration/turn-rate/movement-while-attacking tuning. | `02-fighter-model.md` attribute inventory, survivability, mobility, weapon performance |
-| GAP-WEAPON-MECH | Additional weapon mechanics | Charge rifle (optional fifth preset), beam/ray delivery and beam-tick firing, trap and turret delivery, melee-dash, burst/radial firing patterns, hold-to-charge/channel/release-to-fire/quick-fire input behaviors, persistent damage/healing/control zones, summon/deployable impact rules. | `03-weapons-and-abilities.md` delivery, firing patterns, input behavior, impact rules |
-| GAP-NET-LAGCOMP | Lag compensation | Named as a real capability in docs 01 and 08 ("after the relevant early gates") but never scheduled or backlogged. | `01-engine-decision.md`; `08-network-architecture.md` |
-| GAP-NET-ROOMS | Coarse interest management (Rooms) — superseded | Resolved by the proposed process-per-match topology: matches no longer share one Lightyear authority, so routes and worker processes provide cross-match isolation. Per-client visibility inside one small match remains an unscheduled measured optimization, not a v2 dependency. | `08-network-architecture.md`; `14-multiplayer-server-architecture.md` superseded direction |
-| GAP-MAPS-BUILTIN | Additional built-in maps | Partially resolved by completed V4 M03: Ashen Court provides the second built-in map/theme proof. Further built-ins remain future content rather than unfinished V4 scope. | `04-maps-and-game-modes.md`; completed V4 roadmap |
-| GAP-COMBAT-DEBRIS | Deferred destruction cosmetics | Terrain deformation animation and falling debris were deferred by doc 04 but omitted from M10's deferral list. | `04-maps-and-game-modes.md` MVP destruction scope |
-| GAP-TERRAIN-BEAM | Terrain-carving laser | Add a beam/laser world effect that erases destructible terrain along a server-resolved, quantized segment/capsule rather than one circular impact brush. Permanent geometry should stop the beam and remain indestructible. Scope deterministic rasterization, endpoint/radius wire data, maximum beam length/cells/chunks, simultaneous-beam budgets, collider batching, recovery compatibility, and matching client carve feedback. | Product idea, 2026-08-16; build on M10 terrain world effects |
-| GAP-FX-PRESENTATION | Richer combat presentation | V3 added bounded 3D muzzle/impact/damage/reset effects, trails, statuses, and debris. Rich authored animation, material-specific impact, and broader VFX remain deferred. | `03-weapons-and-abilities.md`; V3 M03/M04 |
+| CAND-INTERNET-REACHABILITY | Supported play beyond LAN through an explicit port-forwarding, NAT-traversal, relay, or hosted-connectivity policy | Trigger-bound; promote when internet play becomes a supported product target | [V2 hosting deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [network architecture](./08-network-architecture.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
+| CAND-SERVER-DISCOVERY | A bounded server registry with authenticated/current advertisements, expiry, refresh, and client browsing while preserving direct hostname/IP entry and local favorites | Trigger-bound; promote with public multi-server discovery and coordinate with internet reachability because discovery does not make a server reachable | [player UX server-selection direction](./13-player-ux.md); [V2 hosting deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2) |
+| CAND-PREDICTION-LAG-COMP | Measured owner prediction and/or lag compensation that improves supported latency without violating terrain, collision, authority, or readability | Trigger-bound; revisit with a terrain-aware prediction candidate or latency evidence that current authoritative/interpolated play is inadequate | [`M03-PRED`](./implementation/v1/roadmap.md#v1-backlog); [network architecture](./08-network-architecture.md); [local prediction experiment](../src/client/prediction.rs) |
+| CAND-SESSION-CONTINUITY | One explicit continuity feature such as interrupted-match resumption, join-in-progress, or a spectator/observer client | Trigger-bound; promote one feature when continuity, tournament observation, or larger playtest operations demonstrate the need | [`V2-ROUTE-RESUMPTION`](./implementation/v2/roadmap.md#v2-backlog); [V2 explicit deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [player UX](./13-player-ux.md) |
+| CAND-HOSTING-HARDENING | Internet-facing capacity, credentials, security, fleet scheduling, autoscaling, moderation, and administration appropriate to a concrete deployment | Trigger-bound; do not build a generic backend before a public hosting target exists | [`V2-HOSTING-HARDENING`](./implementation/v2/roadmap.md#v2-backlog); [V2 explicit deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
 
-## P3 — Environment catalog items never dispositioned
+Accounts, cloud profiles, social systems, parties, ranked play, currencies, monetization, live
+operations, and mobile controls remain outside the current candidate index unless a future product
+decision promotes a concrete player outcome. `CAND-ARSENAL` may justify only the minimum identity,
+storage, or entitlement boundary its selected slice actually needs.
 
-From `09-environment-and-tile-ideas.md` unless noted. The future backlog entry covers only
-concealment, spell-created concealment, speedway/slow surfaces, and one readable hazard.
+## Trigger-bound technical maintenance
 
-| ID | Item | Description |
+These rows do not compete with player-visible candidates for permanent priority. Promote them when
+their trigger occurs or include them in a version whose changed surface makes the maintenance
+necessary.
+
+| ID | Obligation | Promotion trigger and source |
 |---|---|---|
-| GAP-ENV-SLIPPERY | Slippery surfaces | Ice/oil with friction/retained momentum; noted in doc 09 as higher prediction risk. |
-| GAP-ENV-BENEFICIAL | Beneficial fields | Healing, shield, haste, and energy fields ("content unscheduled"). |
-| GAP-ENV-TACTICAL | Tactical fields | Reveal, silence, anti-heal, projectile-modifier fields. |
-| GAP-ENV-TRAVERSAL | Traversal devices | Jump pads, teleporters, one-way gates. |
-| GAP-ENV-INTERACTIVE | Interactive geometry | Doors, switches, moving cover, retractable walls. |
-| GAP-ENV-HAZARDS | Broader hazard family | Fire, acid, lava, electricity, danger boundary with knockback/team filtering/telegraph — beyond the single backlogged "readable hazard"; doc 04 also implies moving hazards, water, teleporters. |
-| GAP-ENV-WATER | Distinct water compositions | Deep blocking, shallow slowing, damaging, and visual-only puddle types. |
-| GAP-OBJ-DELIVERY | Delivery-point objectives | Pickup areas exist via Gem Grab; delivery-point objective regions are unscheduled. |
-| GAP-ENV-AUTHORING | Authored property model | SurfaceRegionDefinition/MovementProfile/GeometryDefinition composable authoring model beyond v1's needs. |
-| GAP-ENV-CONCEAL-DETAIL | Concealment model details | Proximity/action/damage/objective reveal rules, bot perception of concealed targets, spectator/defeated visibility — implied by the concealment backlog entry but not itemized. |
-| GAP-REGIONS-ABILITY | Ability-created regions | Temporary walls and ability-created smoke/speed fields as generic runtime region entities (temporary walls are not in the concealment entry). |
+| MAINT-ROUTED-HARDENING | Re-measure and optimize routed IPC/egress, MTU, CPU, and capacity behavior | A real deployment target or measured bottleneck; [`V2-ROUTED-HARDENING`](./implementation/v2/roadmap.md#v2-backlog) |
+| MAINT-WINDOWS-IPC | Implement the production Windows named-pipe backend | Windows becomes an active supported target; [`V2-WINDOWS-IPC`](./implementation/v2/roadmap.md#v2-backlog) |
+| MAINT-TRANSPORT-CONTINGENCY | Reconsider bounded worker-port Lightyear UDP instead of routed transport | Only a qualifying routed hard-gate failure and explicit user approval; [`V2-TRANSPORT-CONTINGENCY`](./implementation/v2/roadmap.md#v2-backlog) |
+| MAINT-LEGACY-DIRECT-UDP | Retire the V1 direct-UDP scripts and documentation | Their explicit comparison/debug value is gone; [`V2-V1-DIRECT-UDP-RETIREMENT`](./implementation/v2/roadmap.md#v2-backlog) |
+| MAINT-COMBAT-PROFILES | Repair, replace with routed evidence, or retire the documented legacy `network-combat-profiles` gate | Before relying on it for evidence or when retiring the legacy direct-UDP path; the historical failure predates terrain work and requires fresh reproduction |
+| MAINT-NETWORK-TEST-LINT | Decide and enforce a Clippy policy for the `network-test` test/performance configuration | When test-code warning cleanliness becomes a CI/release gate; current CI runs tests but not a `-D warnings` Clippy gate for this feature |
+| MAINT-LIFECYCLE-SOAK | Re-run simultaneous heterogeneous-mode and repeated completion/requeue bounded-growth campaigns | Host scale, lifecycle changes, or leak evidence; [`V2-M06-LIFECYCLE-SOAK`](./implementation/v2/roadmap.md#v2-backlog) |
 
-## P4 — Production hygiene for the shipped MVP
+## Dependency and scoping rules
 
-| ID | Item | Description | Source |
-|---|---|---|---|
-| GAP-LEGAL-CREDITS | CC-BY attribution credits | Game-icons.net assets require attribution; M06 records a manifest but no user-facing credits file/screen. | `07-mvp-asset-shortlist.md` license checklist |
-| GAP-UI-COLORBLIND | Colorblind/team-readability mode | Team color is a core readability pillar; accessibility deferral exists only in milestone notes, not the roadmap's outside-v1 list. | `05-gameplay-mvp.md` controller usability |
-| GAP-BUILD-NOTARIZE | macOS build handoff | Notarization, app icon, DMG/zip packaging for non-developer playtesters. | Review finding |
-| GAP-MODE-TRAINING | Authoritative practice mode | Resolved by V2 as server-hosted practice through the routed topology with inert bot fillers; autonomous player bots remain a separate future item. | V2 M08; `10-bots.md` |
-| GAP-INPUT-AIMASSIST | Aim assist | Doc 05 allows it "only as an explicit, tunable gameplay rule"; never dispositioned. | `05-gameplay-mvp.md` controller usability |
-| GAP-UI-WINDOW | Window/resolution/vsync settings | User-facing window mode, resolution, frame-limit/vsync options (vsync exists only as an internal dev flag); also mouse cursor capture for KBM borderless play. | Review finding |
-| GAP-AUDIO-FOCUS | Mute/pause on focus loss | Standard macOS app-switching behavior; unaddressed. | Review finding |
-| GAP-I18N | Localization | No "English-only in v1" statement exists; currently an unstated assumption. | Review finding |
-| GAP-INPUT-DEVICES | Non-Xbox gamepads and rumble | PlayStation/Switch Pro glyphs, multi-vendor support; rumble explicitly deferred. | Review finding |
-| GAP-TOOL-SPECTATE | Spectator/observer client | M11 replay/event logs are debug tools; an observer client would help 2v2 playtest verification and is cheap. | Review finding |
-| GAP-PLATFORM-BATTERY | Battery/thermal considerations | Power draw and background-work capping for laptop play sessions. | Review finding |
-| GAP-LEGAL-FONTS | Font licensing | Asset manifest covers game assets; fonts have no license check. | Review finding |
-| GAP-UI-PAUSE-RENAME | Rename "Pause" to in-match menu overlay | Resolved by V2: `ClientInputContext::Menu` and the product overlay communicate that the authoritative match continues; the physical pause/menu action name remains an input label only. | V2 client shell; `13-player-ux.md` |
-| GAP-ORG-TERRAIN-SPLITS | Terrain module decomposition continues past M10 remediation | The 2026-08-16 M10 implementation review noted that `terrain/network.rs` (recovery serving plus wire records) and `terrain/client.rs` (wire driving, presentation, debris, readiness) each mix independently changing lifecycles. M10 remediation extracted `terrain/lifecycle.rs` and fixed the lifecycle defects in place; the remaining splits were deferred to avoid invalidating recorded evidence mid-remediation. | M10 feedback review, 2026-08-16 |
-| GAP-TOOL-COMBATPROFILES | `network-combat-profiles` gate broken | The repeated combat convergence profiles time out with no defeat/reset evidence and zero payload effects landing on the neutral dummy; reproduced identically at the pre-M10 baseline (rebuilt binaries), so it predates M10 terrain. M10's terrain profiles (`just network-terrain`) cover real-process terrain convergence; the defeat-evidence path needs its own fix. | M10 verification, 2026-08-16 |
-| GAP-TOOL-NETTEST-LINT | No Clippy gate for the `network-test` configuration | The 2026-08-17 M10 review round found 11 `unused_qualifications` warnings under `cargo clippy --features network-test --tests`, a configuration the role Clippy gates do not cover; the warnings were fixed, but roughly 30 further pre-existing cast/`too_many_lines` findings remain across the network/performance test files, so a `-D warnings` gate needs a test-code lint policy decision (fix, narrowly allow per item, or scope the gate) rather than a mechanical sweep. | M10 feedback review round 2, 2026-08-17 |
-| GAP-DESIGN-TERRAIN-RESERVATION | Terrain destruction moves to ultimates/special items | The M10 playtest settled the product direction: normal weapons should not destroy walls; destruction is reserved for ultimate moves and special items (for example a thrown bomb), with the Arc Launcher's `DestroyTerrain` acting as the M10 test vehicle. When the real carrier is designed: scope lob landing clearance per recipe (destructible cells become legal landings for `DestroyTerrain` carriers instead of snapping to the near face), decide crater-versus-damage radius legibility (the 48/150 pairing did not read in playtest; 64 is the representable brush ceiling), decide melee-versus-terrain blocking (arcs currently ignore terrain and are unreachable against the 192-unit block only because melee reach is 120), and revisit distinct crater-edge feedback. | M10 user playtest, 2026-08-17 |
+- **Bots:** begin with the server-hosted practice vertical slice. External bot clients, automatic
+  multiplayer substitution, and supervisor-managed bot processes are later decisions.
+- **Arsenal and equipment:** saved brawler identity and owned item instances are distinct. Promote
+  only the acquisition, entitlement, persistence, and UI behavior required by the selected slice.
+- **Combat and environment:** add one player-visible capability before extracting general status,
+  region, summon, payload, or navigation frameworks.
+- **Map builder and provisioning:** the builder can prove bounded authoring over current embedded
+  catalogs; provisioning becomes mandatory only before server-hosted custom-map distribution or a
+  measured thin-client need.
+- **Internet reachability and discovery:** a registry lists servers but does not solve NAT or relay.
+  Specify their deployment and trust boundaries together when both enter scope.
+- **Prediction and lag compensation:** neither is automatically required by internet play. Adopt
+  only after impairment evidence identifies a player-visible problem and the candidate preserves
+  server authority and terrain correctness.
+- **Release readiness:** do not turn the complete platform matrix into one milestone. Promote the
+  smallest platform, accessibility, packaging, or performance gate needed for the intended handoff.
 
-## Triage status
+## Resolved and superseded archive
 
-| ID group | Status | Intended review point |
-|---|---|---|
-| GAP-NET-ROOMS | Resolved 2026-08-17 — superseded by process-per-match routing; no implementation scheduled | Reopen only if one authority later hosts multiple matches or measured within-match visibility requires it |
-| GAP-UI-SETTINGS, GAP-MODE-TRAINING, GAP-UI-PAUSE-RENAME | Resolved by V2 | Reopen only for a new concrete product requirement |
-| GAP-PERF-CLIENT, GAP-FX-PRESENTATION | Partially resolved by V3; remaining scope is stated in each row | Future release/art milestone |
-| GAP-MAPS-BUILTIN | Partially resolved by V4 M03; additional maps remain unscheduled future content | Future content milestones |
-| GAP-MAP-EDITOR, FUT-MAP-BUILDER | Backlogged after removal from V4; no active implementation milestone | Future-version scoping |
-| GAP-MAP-PROVISIONING | Backlogged as the future thin-client map-distribution architecture; V4 continues build-embedded built-ins | Future network/content-delivery version before server-hosted custom maps |
-| All other items | Unscheduled after V3 closeout unless separately promoted | Future-version scoping |
+| Historical item | Resolution and evidence |
+|---|---|
+| Settings screen and local persistence (`GAP-UI-SETTINGS`) | Resolved by V2; V5 retains persisted input, UI scale, reduced motion/effects, master volume, focus mute, fullscreen, and vsync through the dashboard shell. See [V2 roadmap](./implementation/v2/roadmap.md) and [V5 closeout](./implementation/v5/roadmap.md#v5-closeout) |
+| Authoritative practice mode (`GAP-MODE-TRAINING`) | Resolved by V2 with routed server-hosted practice and inert manifest fillers. Playable behavior remains `CAND-BOTS` rather than reopening practice architecture |
+| In-match Pause naming (`GAP-UI-PAUSE-RENAME`) | Resolved by V2: the non-pausing menu context is explicit; the physical pause/menu action remains an input label |
+| Cross-match Lightyear Rooms (`GAP-NET-ROOMS`) | Superseded by completed process-per-match routing. Reopen only for measured within-match visibility or a future multi-match authority |
+| Terrain module ownership (`GAP-ORG-TERRAIN-SPLITS`) | Resolved by V1 M11; presentation, recovery/convergence, lifecycle, and network ownership were split while preserving public API and schedule contracts. See [`M10-ORG-TERRAIN-SPLITS`](./implementation/v1/roadmap.md#v1-backlog) |
+| Baseline client render targets (`GAP-PERF-CLIENT`) | Partially resolved by V3/V5 native frame-time and lifecycle evidence. Broader device/minimum-spec coverage remains under `CAND-RELEASE-READINESS` |
+| Baseline 3D combat presentation (`GAP-FX-PRESENTATION`) | Partially resolved by V3 muzzle, impact, damage, reset, trail, status, and debris work. Rich authored presentation remains under `CAND-ORIGINAL-ART` or a focused combat slice |
+| Additional built-in proof (`GAP-MAPS-BUILTIN`) | Partially resolved by V4 M03 with a second independently embedded map/theme. Further content remains `CAND-MAP-CONTENT` |
+| Credits and asset attribution (`GAP-LEGAL-CREDITS`) | Resolved by V5: Credits is reachable from the Dashboard menu, current Kenney assets are identified as CC0, and full asset license texts ship under `assets/licenses/` |
+| Font licensing (`GAP-LEGAL-FONTS`) | Resolved by V5 with shipped Fira Mono and Lilita One SIL OFL license texts and Credits attribution |
+| Focus-loss audio (`GAP-AUDIO-FOCUS`) | Resolved by persisted mute-when-unfocused behavior; broader audio work remains `CAND-RELEASE-POLISH` |
+| Fullscreen/vsync baseline (`GAP-UI-WINDOW`) | Partially resolved by persisted fullscreen, vsync, and UI-scale settings. Explicit resolution, frame-limit, and cursor-capture policy remains under `CAND-RELEASE-READINESS` |
+| Audio-settings baseline (`GAP-AUDIO-SETTINGS`) | Partially resolved by persisted master volume and focus mute. Separate SFX/music categories and actual music remain optional release-polish slices |
+| V5 dashboard planning rows | Preferred-server policy, factual dashboard information, preview composition, results actions, and branding promotion were resolved by V5 M01–M03. See [V5 backlog and closeout](./implementation/v5/roadmap.md#initial-v5-backlog) |
 
-`GAP-ITEM-EQUIPMENT` elaborates the equipment part of `FUT-ARSENAL`; scope and schedule them
-together, while preserving the distinction between saved brawler/build identity and owned item
-instances. Other existing backlog rows that overlap and should be triaged together include
-`GAP-MAP-EDITOR` now makes the older `FUT-MAP-BUILDER` reference explicit in this root backlog.
-Other overlapping candidates include `M03-PRED` and the roadmap's future-version backlog
-(advanced projectiles, systemic status interaction, environment surfaces and concealment, Heist,
-Gem Grab, and Solo Showdown).
+## Legacy gap-ID mapping
+
+The pre-V5 documentation audit used `GAP-*` identifiers. This table preserves their disposition
+without keeping resolved findings in active candidate tables or duplicating their old descriptions.
+
+| Canonical candidate or archive | Historical IDs |
+|---|---|
+| CAND-INTERNET-REACHABILITY | `GAP-NET-INTERNET` |
+| CAND-SERVER-DISCOVERY | `GAP-NET-REGISTRY` |
+| CAND-COMBAT-CAPABILITIES | `GAP-COMBAT-SUPPORT`, `GAP-ABILITY-ULTIMATES`, `GAP-FIGHTER-ATTRS`, `GAP-WEAPON-MECH`, `GAP-TERRAIN-BEAM`, `GAP-DESIGN-TERRAIN-RESERVATION` |
+| CAND-ARSENAL | `GAP-ITEM-EQUIPMENT`, `FUT-ARSENAL` |
+| CAND-RELEASE-POLISH | `GAP-AUDIO-SETTINGS`, `GAP-UI-COLORBLIND`, `GAP-INPUT-AIMASSIST`, `GAP-INPUT-DEVICES`, `POST-V1-RELEASE-POLISH` |
+| CAND-RELEASE-READINESS | `GAP-PERF-CLIENT`, `GAP-BUILD-NOTARIZE`, `GAP-UI-WINDOW`, `GAP-I18N`, `GAP-PLATFORM-BATTERY` |
+| CAND-MAP-CONTENT | `GAP-MAPS-BUILTIN` |
+| CAND-MAP-BUILDER | `GAP-MAP-EDITOR`, `FUT-MAP-BUILDER` |
+| CAND-MAP-PROVISIONING | `GAP-MAP-PROVISIONING` |
+| CAND-ORIGINAL-ART | `GAP-COMBAT-DEBRIS`, `GAP-FX-PRESENTATION`, `V3-ORIGINAL-ASSETS`, `V5-ORIGINAL-DASHBOARD-ART` |
+| CAND-GAME-MODE | `GAP-OBJ-DELIVERY` plus the Heist, Gem Grab, and Solo Showdown future candidates |
+| CAND-ENVIRONMENT-GAMEPLAY | `GAP-ENV-SLIPPERY`, `GAP-ENV-BENEFICIAL`, `GAP-ENV-TACTICAL`, `GAP-ENV-TRAVERSAL`, `GAP-ENV-INTERACTIVE`, `GAP-ENV-HAZARDS`, `GAP-ENV-WATER`, `GAP-ENV-AUTHORING`, `GAP-ENV-CONCEAL-DETAIL`, `GAP-REGIONS-ABILITY` |
+| CAND-PREDICTION-LAG-COMP | `GAP-NET-LAGCOMP`, `M03-PRED` |
+| CAND-SESSION-CONTINUITY | `GAP-TOOL-SPECTATE`, `V2-ROUTE-RESUMPTION` |
+| Trigger-bound maintenance | `GAP-TOOL-COMBATPROFILES`, `GAP-TOOL-NETTEST-LINT` and the mapped `V2-*` maintenance rows above |
+| Resolved/superseded archive | `GAP-UI-SETTINGS`, `GAP-NET-ROOMS`, `GAP-LEGAL-CREDITS`, `GAP-MODE-TRAINING`, `GAP-AUDIO-FOCUS`, `GAP-LEGAL-FONTS`, `GAP-UI-PAUSE-RENAME`, `GAP-ORG-TERRAIN-SPLITS` |
+
+## Conditional and rejected directions
+
+The following are not active candidates without new evidence or an explicit product decision:
+
+- perspective/free/orbit camera after accepted orthographic play, general 3D physics, vertical
+  gameplay, and advanced rendering without an owned art or performance need—see the
+  [V3 backlog](./implementation/v3/roadmap.md#v3-backlog);
+- a historical internal Brawler-to-PewPew-Blitz repository/crate/config migration without a concrete
+  compatibility or maintenance benefit—see `V5-INTERNAL-NAME-MIGRATION` in the
+  [V5 backlog](./implementation/v5/roadmap.md#initial-v5-backlog);
+- procedural map generation, automatic balance generation, arbitrary user-authored executable mode
+  rules, structural collapse, fluids, and material simulation;
+- generic social, monetization, live-operations, anti-cheat, backend, AI, rendering, UI, or content
+  frameworks before one selected product slice demonstrates the boundary.

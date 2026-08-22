@@ -97,7 +97,7 @@ for that milestone's research.
 
 ## Delivery gates
 
-The detailed implementation sequence is maintained in the [v1 implementation roadmap](./implementation/v1/roadmap.md). This document defines the gameplay scope and acceptance criteria; the roadmap is the source of truth for milestone ordering and progress.
+The detailed implementation sequence is maintained in the [v1 implementation roadmap](./roadmap.md). This document defines the gameplay scope and acceptance criteria; the roadmap is the source of truth for milestone ordering and progress.
 
 There is no separate engine go/no-go spike. The Bevy/Lightyear stack is adopted for the MVP, and v1 Milestones 01–03 provide the practical foundation, connection, replication, and authoritative-movement validation. If those milestones expose a blocking integration problem, resolve it before expanding gameplay content.
 

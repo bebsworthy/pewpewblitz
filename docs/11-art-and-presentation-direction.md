@@ -1,15 +1,40 @@
-# Art and presentation direction
+# Art, presentation, and asset specification
 
-## Status
+## Purpose
 
-V3 completed the gameplay-world migration from sprites and `Mesh2d` to a fixed-camera 3D Bevy
-scene. This document is the current art/presentation contract. The former pixel-art, atlas,
-paper-doll, y-sort, and tile-renderer proposal is retired; its enduring lessons survive here as
-readability, bounded effects, replaceable presentation, and server-isolation rules.
+This document defines Brawler's durable visual direction, presentation ownership, readability
+language, and runtime-asset policy. It describes the established 3D presentation foundation and the
+constraints that future art must preserve; versioned implementation documents record when and how
+individual parts were delivered.
+
+Exact redistributed third-party files, licenses, and provenance belong to `assets/manifest.ron`,
+not to this document. Client environment paths and theme profiles belong to
+`assets/catalogs/environment_visuals.ron`. Shared map-object, theme, and compatible visual-variant
+identities belong to `content/v4/`. Those machine-readable sources may evolve without turning this
+specification into a duplicate inventory.
+
+## Visual direction
+
+Brawler is a stylized, toy-like, fixed-camera arena shooter designed to remain clean and readable at
+match scale. Its visual identity favors:
+
+- recognizable silhouettes and restrained surface detail;
+- matte, graphic materials rather than photorealistic surface variation;
+- calm floors and subordinate environment dressing around the combat space;
+- strong relationship and gameplay-state cues independent of model, theme, or skin color;
+- shallow, restrained shadows that ground objects without hiding their footprints;
+- exact objective boundaries and unmistakable allowed or blocked previews;
+- short, bounded combat effects that communicate outcomes without obscuring actors;
+- a quiet product shell that gives the selected brawler and current action clear hierarchy.
+
+Curated third-party models, audio, fonts, icons, and source art provide the established production
+foundation. They are replaceable presentation, not Brawler's permanent identity. Future original
+art should build a coherent PewPew Blitz identity while preserving gameplay proportions, anchors,
+relation semantics, authoritative-shape agreement, accessibility, and degraded fallbacks.
 
 ## Presentation model
 
-Brawler is a 3D-presented game with planar authoritative gameplay:
+Brawler presents authoritative planar gameplay through a client-owned 3D scene:
 
 ```text
 server-owned gameplay                  client-owned presentation
@@ -19,30 +44,56 @@ resolved 2D map shapes            ->   exact-footprint 3D/procedural geometry
 replicated combat state/cues      ->   animation, effects, audio, projected UI
 ```
 
-The camera is fixed, tilted, and uses restrained perspective. There is no player orbit,
-authoritative height, jumping, or walkable wall top. The depth buffer replaces 2D painter
-ordering; render height and animation never feed back into simulation.
+The gameplay camera is fixed, tilted, and uses restrained perspective. There is no player orbit,
+authoritative height, jumping, or walkable wall top. The depth buffer owns visual occlusion; render
+height, animation, particles, audio, and UI never feed back into simulation.
 
-Screen-space menus, HUD, settings, and overlays remain Bevy UI on the UI camera. Fighter overhead
-information is also Bevy UI, projected from a 3D point above each fighter so names and values stay
-crisp without reintroducing `Text2d` into the gameplay world.
+Presentation reads authoritative or replicated facts and resolves stable presentation identities.
+Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or
+material handles, client-local entity identities, render height, or other renderer details.
 
-## Visual character
+## Presentation surfaces and ownership
 
-The first-release direction is stylized, toy-like, clean, and readable at match scale:
+### Gameplay world
 
-- simple silhouettes and restrained surface detail;
-- matte materials rather than photorealistic metal/roughness variation;
-- calm floors and subordinate neutral cover;
-- strong team/relationship accents independent of model or skin color;
-- shallow, restrained shadows that provide grounding without hiding footprints;
-- exact objective boundaries and unmistakable blocked/invalid previews;
-- short, bounded combat effects that communicate outcomes without obscuring actors.
+`WorldPresentationPlugin` owns the sole gameplay-world renderer:
 
-Kenney Mini Characters, Blaster Kit, and Mini Arena provide the current CC0 foundation. They are
-replaceable presentation, not a claim of final visual identity. Original models, materials,
-animations, and VFX should preserve the same proportions, anchors, relation language, and
-gameplay-shape agreement.
+- the gameplay `Camera3d`, fixed projection, lighting, and selected MSAA;
+- the tested simulation-XY to render-XZ conversion;
+- map, terrain, fighter, projectile, sentry, objective, preview, status, debris, and cue visuals;
+- imported-scene readiness, deterministic primitive fallback, animation, and weapon attachment;
+- render-only entity reconciliation, cleanup, and final pose writes after interpolation;
+- projection anchors for fighter overhead Bevy UI;
+- optional bounded native render diagnostics.
+
+Replicated gameplay entities remain presentation-neutral. Render entities carry explicit owner
+links and reconcile idempotently across spawn, replacement, restart, reconnect, and late asset
+readiness. Final transforms are written after Lightyear interpolation and Avian writeback, before
+transform propagation; projected UI follows propagation.
+
+### Player Dashboard preview
+
+The Dashboard owns a separate client-only brawler preview, its camera, lighting, entities, and
+lifecycle. It may reuse the supported fighter model, attached weapon, idle animation, presentation
+profile, and primitive fallback, but it does not instantiate a gameplay fighter, decide build
+legality, or share entity ownership with the gameplay-world renderer.
+
+### Bevy UI
+
+Screen-space product flow, Dashboard, selection surfaces, HUD, results, settings, accessibility,
+and overlays remain Bevy UI on UI-owned cameras. Fighter names, health, and local ammunition are
+also Bevy UI projected from propagated gameplay-world anchors; they are not world-space text and do
+not own the facts they display.
+
+UI branding, fonts, icons, and shaders are optional client assets with bounded fallback behavior.
+Navigation, focus, saving, networking, recovery, and shutdown must remain functional when a visual
+asset or custom shader is unavailable.
+
+### Audio
+
+Client audio presents bounded gameplay and product cues. Missing or late audio degrades to silence
+and cannot delay authority, navigation, match readiness, or cleanup. Playback limits prevent cue
+bursts from becoming an unbounded entity or channel lifecycle.
 
 ## Readability language
 
@@ -53,120 +104,163 @@ gameplay-shape agreement.
 - enemies use red;
 - the ring is a flat, unlit, non-shadow-receiving annulus slightly above the ground;
 - a small arrowhead integrated into the ring communicates facing without protruding from the body;
-- skins and imported materials may not override these relation cues.
+- imported materials, environment themes, and future skins may not override these relation cues.
 
 The imported character's model-space forward direction is corrected once at its visual root. The
-weapon attaches inside that corrected hierarchy, and animation-specific transforms stay below it.
-A sphere at the authoritative body radius remains the deterministic fallback and geometry aid.
+weapon attaches inside that corrected hierarchy, and animation-specific transforms remain below
+it. A sphere matching the authoritative body radius is the deterministic fighter fallback and a
+geometry-verification aid.
 
 ### Overhead information
 
 Each live fighter has a camera-projected overhead cluster:
 
 - player name centered above the health bar and colored by relation;
-- current health centered in white, slightly overlapping the rounded bar;
+- current health centered in white over the rounded bar;
 - green health fill for the controlled fighter and allies, red for enemies;
 - a compact segmented ammunition row only for the controlled fighter, with one segment per
   authoritative shot capacity;
 - no reserved ammunition-row height for allies or enemies;
-- defeated and off-screen fighters hide their cluster.
+- no cluster for defeated or off-screen fighters.
 
-This UI reads replicated state only. It does not own health, ammunition, defeat, names, or team
+The cluster reads replicated state only. It never owns health, ammunition, defeat, names, or team
 assignment.
 
 ### Combat and objectives
 
-- straight projectiles are compact travel-aligned cylinders; lobbed projectiles are spheres with a
-  presentation-only vertical arc;
-- previews and telegraphs use shape-exact procedural meshes and distinguish allowed from blocked;
-- Hot Zone uses a procedural fill plus boundary annulus, not a decal or authored floor model;
-- slow, knockback, dash, sentry, impact, damage, defeat, and reset feedback remain visibly distinct;
-- reduced-effects mode decreases redundant debris/effect size, lifetime, and count but never hides
-  required state such as objectives, previews, projectiles, status, or relation identity.
+- straight projectiles use compact travel-aligned geometry;
+- lobbed projectiles may use a presentation-only vertical arc while retaining authoritative ground
+  position;
+- previews and telegraphs use shape-exact procedural geometry and distinguish allowed from blocked;
+- objective boundaries remain precise and cannot depend on a decorative model or decal;
+- slow, knockback, dash, deployable, impact, damage, defeat, and reset feedback remain distinct;
+- reduced-effects mode decreases redundant effect size, lifetime, and count but never hides required
+  objectives, previews, projectiles, statuses, or relationship identity.
 
-## Environment and geometry
+## Environments, themes, and geometry
 
-Visual footprints must agree with authoritative 2D shapes:
+Visual footprints must agree with authoritative planar shapes:
 
-- rectangles become cuboids with presentation-only height;
+- rectangles become cuboids or validated imported models with presentation-only height;
 - circles become cylinders or generated circular geometry;
-- floors use calm cached tiles or generated surfaces;
+- floors use calm generated or cached surfaces;
 - destructible terrain builds chunk-owned meshes from replicated occupied cells and updates dirty
   chunks in place;
-- arbitrary/dynamic shapes use primitives or generated meshes instead of forcing an approximate
-  imported prop;
-- imported environment GLBs are used only where their pivot, orientation, scale, and footprint are
-  validated against a real presentation profile.
+- arbitrary or dynamic shapes use primitives/generated meshes rather than an approximate prop;
+- imported environment scenes require a validated pivot, orientation, scale, footprint, and
+  compatible visual profile.
 
-Occlusion should first be solved with camera elevation, wall height, material value, and map
-composition. Selective fade, outlines, x-ray rendering, decals, and custom pipelines require a
-future evidence-backed specification; none is part of the V3 foundation.
+A map theme provides client-owned ground, edge, lighting, palette, material, and default visual
+choices. It is not a baked map image or style lock. An authored placement may select another
+compatible stable visual variant, but neither the theme nor the model decides collision,
+destructibility, health, terrain occupancy, or other gameplay behavior.
 
-## Asset and animation pipeline
+The client resolves shared stable theme and visual-variant IDs through its environment catalog.
+Asset paths, tints, transforms, and fallbacks remain client-only and do not contribute renderer
+details to the gameplay protocol. Presentation reconciliation keys include the accepted map
+instance, recipe fingerprint, and theme so replacement cannot retain stale geometry or materials.
 
-GLB is the preferred shipped model format because it carries mesh, material, hierarchy, skin, and
-animation data in one Bevy-supported asset. Runtime files retain a pack namespace and relative
-texture dependencies. Only selected assets are copied from `external_assets/` into `assets/` and
-entered in the provenance manifest.
+Occlusion should first be solved through camera elevation, wall height, material value, and map
+composition. Selective fade, outlines, x-ray rendering, decals, or custom gameplay-world pipelines
+require evidence that these simpler controls are insufficient.
 
-The current Mini Character contract expects named idle, walk, holding, shoot, and die clips. Bevy
-animation clips may omit channels; when leaving defeat, the client restores the imported bind pose
-before starting the live loop so root/leg transforms cannot remain in the death pose. Weapon grip
-and model-forward corrections belong to presentation constants/profiles, not gameplay rotation.
+## Asset forms
 
-Primitive and generated mesh assets are cached and shared. Generation-owned meshes are explicitly
-removed on map replacement; terrain chunks mutate their owned mesh rather than allocating on every
-revision. Do not create a unique mesh or material asset per fighter, projectile, tile, or effect.
+Choose the smallest representation that preserves readability and authoritative-shape agreement:
 
-## Rendering architecture
+- imported GLB scenes for recognizable props, animated characters, and attached weapons;
+- cached Bevy primitives for exact, repeated, or highly dynamic shapes;
+- generated meshes for resolved perimeter geometry, terrain chunks, procedural rings, and other
+  topology derived from authoritative state;
+- Bevy UI for product flow, HUD, overlays, and projected fighter information;
+- image, font, audio, and shader assets for bounded client presentation with explicit degradation.
 
-`WorldPresentationPlugin` owns the sole gameplay-world renderer. Its responsibilities are:
+GLB is the preferred shipped model format because it carries meshes, materials, hierarchy, skins,
+and animation in one Bevy-supported asset. Each imported family retains its pack namespace and
+relative texture layout. Common texture filenames must not be flattened across packs.
 
-- one `Camera3d`, fixed perspective projection, ambient light, directional light, and selected MSAA;
-- the tested simulation-XY to render-XZ conversion API;
-- map, terrain, fighter, projectile, sentry, objective, preview, status, debris, and cue visuals;
-- GLB readiness, imported-scene promotion, deterministic primitive fallback, animation, and weapon
-  attachment;
-- render-only entity ownership, reconciliation, cleanup, and final pose writes after interpolation;
-- camera projection of fighter overhead Bevy UI;
-- optional bounded native render diagnostics.
+Animation clips may omit channels. Leaving defeat restores the imported bind pose before starting
+a live loop so root or limb transforms cannot remain in a defeat pose. Grip, forward-axis, scale,
+and anchor corrections belong to presentation profiles/constants rather than gameplay rotation.
 
-Replicated gameplay entities remain presentation-neutral. Render entities carry an owner link and
-are reconciled idempotently. Final transforms are written after Lightyear interpolation and Avian
-writeback, before transform propagation; projected UI runs after propagation. Complex mutable
-queries must encode disjoint marker filters or use a `ParamSet`, and schedule-initialization tests
-must validate query access—not only compile it.
+Primitive meshes and materials are cached and shared. Generation-owned meshes have explicit
+removal ownership; terrain chunks mutate owned meshes instead of allocating on every revision. A
+unique mesh or material per fighter, projectile, tile, prop, or effect is not an accepted default.
 
-## Server, protocol, and asset boundaries
+## Asset sources and provenance
 
-- the server and routed workers contain no cameras, meshes, materials, images, models, animation,
-  audio, windowing, or device-input dependencies;
-- protocol state remains planar and never carries `Transform`, `Vec3`, entity IDs local to a
-  process, mesh/material handles, model-node names, or render height;
-- gameplay emits stable state and cues; presentation resolves them to client assets and effects;
-- every shipped third-party asset has exact provenance in `assets/manifest.ron` and retained
-  license text where required;
-- `BRAWLER_FORCE_PRIMITIVE_WORLD=1` is a degradation/verification path inside the 3D renderer, not
-  a renderer choice and not a return to 2D.
+The asset boundary has four distinct sources:
+
+| Source | Responsibility |
+|---|---|
+| `external_assets/` and `inspiration/` | Source material and retained concepts; not scanned or packaged as runtime content |
+| `assets/manifest.ron` | Exact shipped third-party file inventory, provenance, license, requiredness, and fallback |
+| `assets/catalogs/` | Client-owned paths, transforms, material values, theme profiles, and degradation mappings |
+| `content/` | Stable server/client-neutral gameplay, map, theme, object, and compatible visual-variant identities |
+
+Only assets owned by a current gameplay, map, product-shell, accessibility, or presentation use are
+promoted into `assets/`. Availability in a source pack is not sufficient. Preview renders, source
+archives, FBX/OBJ alternatives, overview images, and authoring metadata remain source-only unless a
+specific runtime use is accepted.
+
+Every redistributed third-party file must have exact provenance in the manifest and retained
+license text where required. Original replacements should also preserve their source masters and
+document the export pipeline needed to reproduce runtime derivatives.
+
+## Asset admission checklist
+
+A presentation asset or family is admitted only when:
+
+1. a current gameplay, map, UI, audio, branding, or presentation owner requires it;
+2. any third-party source permits redistribution and the manifest records its exact provenance;
+3. its runtime format and dependency paths preserve a stable pack or product namespace;
+4. orientation, scale, pivot, footprint, material response, animation, and real-size readability
+   are verified in the supported client rather than inferred from a preview;
+5. optional or shape-critical content has a deterministic, usable fallback;
+6. missing and late readiness cannot block authority, navigation, or crash the client;
+7. repeated spawn, screen transition, map replacement, restart, and reconnect release owned
+   entities and generated assets;
+8. loading and handles remain client-owned, while shared definitions reference stable IDs only;
+9. the dedicated-server feature graph remains free of rendering, windowing, image, scene,
+   animation, audio, device-input, shader, and client-asset dependencies;
+10. tests and native checks are proportional to the lifecycle, readability, and performance risk.
+
+## Server, protocol, and degradation boundaries
+
+- dedicated servers and routed workers contain no cameras, meshes, materials, images, models,
+  animation, audio, windowing, shaders, device input, or client assets;
+- protocol state remains planar and never exposes process-local ECS entity identity;
+- gameplay emits stable state and cues; client presentation resolves them to assets and effects;
+- optional presentation failure cannot alter authoritative timing, collision, damage, status,
+  scoring, admission, or results;
+- `BRAWLER_FORCE_PRIMITIVE_WORLD=1` is a degradation and verification path within the sole 3D
+  gameplay renderer, not a renderer choice or parallel content mode;
+- primitive degradation preserves gameplay footprints, relationship cues, objectives, and distinct
+  theme readability even when imported scenes are unavailable.
 
 ## Performance and verification
 
-The baseline strategy is deliberately simple: cached meshes/materials, chunked terrain, bounded
-transients, four-sample MSAA, one directional light, restrained shadows, and Bevy's normal culling.
-Instancing, LOD, GPU particles, bloom, deferred rendering, and custom pipelines require measured
-need.
+The baseline remains deliberately simple: cached meshes and materials, chunked terrain, bounded
+transients, restrained shadows, limited lighting, and Bevy's normal culling. Instancing, LOD, GPU
+particles, bloom, deferred rendering, or custom gameplay-world pipelines require measured need.
 
-Automated verification covers coordinate mapping, exact footprints, projectile origins, lifecycle
-cleanup, animation recovery, marker relation colors, overhead layout/query safety, reduced-effects
-bounds, source retirement, server feature isolation, and fixed-tick capacity. Native visual checks
-cover both modes, supported aspect ratios, imported and primitive fallback paths, defeat/respawn,
-terrain mutation, objectives, and representative combat density.
+Automated verification should cover coordinate conversion, exact footprints, projectile origins,
+asset/catalog validation, lifecycle cleanup, animation recovery, relationship colors, projected-UI
+query safety, reduced-effects bounds, degraded fallbacks, and server feature isolation. Native
+checks should exercise supported modes, maps/themes, aspect ratios and UI scales, imported and
+fallback paths, Dashboard preview, defeat/respawn, terrain mutation, objectives, and representative
+combat density.
 
-## Deferred art work
+## Envisioned direction
 
-- original environment, fighter, weapon, material, animation, VFX, icon, and branding production;
-- additional map-theme defaults promoted from the available Kenney packs; themes guide ground,
-  edge, lighting, palette, and default object variants but do not prohibit mixed styles;
-- skin selection, replication, entitlement, and accessibility validation;
-- game-object and model/weapon variant catalogs with per-placement compatible visual overrides;
-- advanced occlusion treatments or rendering features justified by later playtests.
+- a coherent original PewPew Blitz environment, fighter, weapon, animation, VFX, UI, icon,
+  branding, and audio language that can replace or extend the current licensed foundation;
+- additional themes and compatible visual families promoted only for concrete map needs;
+- skin selection and replication with entitlement, contrast, silhouette, and relationship-cue
+  validation;
+- additional presentation profiles for genuinely supported fighter and weapon forms;
+- advanced occlusion or rendering treatments justified by playtest and performance evidence.
+
+These extensions must preserve the same authority, stable-identity, fallback, lifecycle,
+readability, and server-isolation contracts. They do not justify a second gameplay renderer or a
+generic asset framework in advance of a demonstrated use.

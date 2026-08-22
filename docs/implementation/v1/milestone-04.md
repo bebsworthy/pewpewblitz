@@ -39,7 +39,7 @@ are explicitly deferred by user approval and are not represented as passed.
 - [Weapons and abilities](../../03-weapons-and-abilities.md): weapon composition, straight
   projectiles, collision and payload separation, stable presentation cue IDs, and pulse-sidearm
   role.
-- [Gameplay MVP](../../05-gameplay-mvp.md): fire, damage, defeat/reset, health bar, hit/defeat
+- [Gameplay MVP](./gameplay-mvp.md): fire, damage, defeat/reset, health bar, hit/defeat
   feedback, controller-first controls, and server authority.
 - [Network architecture](../../08-network-architecture.md): clients send intent; the server owns
   firing, projectiles, hits, damage, defeat, and reset; durable state uses replicated components
