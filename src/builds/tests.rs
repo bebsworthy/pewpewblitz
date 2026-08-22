@@ -297,6 +297,30 @@ fn catalog_rejects_count_identity_cost_and_cross_reference_mutations() {
 }
 
 #[test]
+fn catalog_rejects_non_finite_and_out_of_policy_balance_values() {
+    let (builds, _, _) = catalogs();
+    let mut invalid = builds.clone();
+    invalid.fighter_profiles.lightweight.movement_speed = f32::NAN;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.fighter_profiles.reinforced.maximum_health = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.custom_pulse.long.range = f32::INFINITY;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.custom_pulse.heavy.fire_cooldown_ticks = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds;
+    invalid.custom_pulse.expanded.capacity = 33;
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
 fn candidate_budget_boundaries_are_exact_and_overflow_fails_closed() {
     let (builds, weapons, fighter) = catalogs();
     let recipe = |weapon: u16, ultimate: u16, passives: [u16; 2]| BrawlerBuildRecipe {

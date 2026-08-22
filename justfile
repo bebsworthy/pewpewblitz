@@ -8,6 +8,10 @@ help:
 server:
     ./scripts/dev.sh server
 
+# Run the routed server with the loopback V6 Practice Balance Lab enabled.
+balance-lab:
+    ./scripts/dev.sh balance-lab
+
 # Open one interactive product client against the local routed server.
 client:
     ./scripts/dev.sh client
@@ -21,13 +25,13 @@ fmt:
     cargo fmt --all
 
 # Check every independently buildable role.
-check: _check-routing _check-client _check-server _check-network
+check: _check-routing _check-client _check-server _check-network _check-balance-lab
 
 # Run formatting, Clippy, and dedicated-server isolation checks.
-lint: _fmt-check _clippy-routing _clippy-client _clippy-server _server-features _v3-world-presentation
+lint: _fmt-check _balance-lab-web _clippy-routing _clippy-client _clippy-server _clippy-balance-lab _server-features _v3-world-presentation
 
 # Run all deterministic Rust test suites, including the performance gates.
-test: _test-routing _test-client _test-server _test-network _test-performance
+test: _test-routing _test-client _test-server _test-balance-lab _test-network _test-performance
 
 # Run a real-process product match with 2, 4, or 6 clients (default: 2).
 e2e clients="2":
@@ -59,6 +63,13 @@ _check-network:
 _check-routing:
     cargo check --locked -p brawler-routing --all-targets
 
+_balance-lab-web:
+    npm ci --prefix tools/balance-lab-web
+    npm run --prefix tools/balance-lab-web build
+
+_check-balance-lab: _balance-lab-web
+    cargo check --locked --no-default-features --features balance-lab --all-targets
+
 _clippy-routing:
     cargo clippy --locked -p brawler-routing --all-targets -- -D warnings
 
@@ -67,6 +78,9 @@ _clippy-client:
 
 _clippy-server:
     cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings
+
+_clippy-balance-lab:
+    cargo clippy --locked --no-default-features --features balance-lab --all-targets -- -D warnings
 
 _server-features:
     ./scripts/check-server-features.sh
@@ -79,6 +93,10 @@ _test-client:
 
 _test-server:
     cargo test --locked --no-default-features --features server --all-targets
+
+_test-balance-lab:
+    cargo test --locked --no-default-features --features balance-lab --all-targets
+    cargo test --locked --no-default-features --features network-test,balance-lab --test network builds::revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values -- --test-threads=1
 
 _test-network:
     cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1

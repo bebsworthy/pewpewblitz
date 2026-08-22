@@ -42,6 +42,7 @@ use avian2d::prelude::{
 use bevy::{
     app::{ScheduleRunnerPlugin, TerminalCtrlCHandlerPlugin},
     ecs::error::{FallbackErrorHandler, error},
+    ecs::system::SystemParam,
     log::LogPlugin,
     prelude::*,
     state::app::StatesPlugin,
@@ -66,6 +67,8 @@ use std::{
 };
 
 mod admission;
+#[cfg(feature = "balance-lab")]
+mod balance_lab;
 mod lobby;
 mod practice;
 mod routed_worker;
@@ -571,6 +574,14 @@ fn initialize_sessions(
     }
 }
 
+#[derive(SystemParam)]
+struct ServerHelloContent<'w> {
+    fighters: Res<'w, crate::combat::FighterDefinitions>,
+    weapons: Res<'w, crate::combat::WeaponDefinitions>,
+    builds: Res<'w, crate::builds::BuildCatalogResource>,
+    weapon_catalog: Res<'w, WeaponCatalogResource>,
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -588,8 +599,7 @@ fn process_client_hellos(
     resolved_map: Res<ResolvedMap>,
     movement_tuning: Res<MovementTuning>,
     lifecycle_rules: Res<MatchLifecycleRules>,
-    fighters: Res<crate::combat::FighterDefinitions>,
-    weapons: Res<crate::combat::WeaponDefinitions>,
+    content: ServerHelloContent,
     mut ids: ResMut<NextSessionIds>,
     mut diagnostics: Option<ResMut<crate::diagnostics::ProcessDiagnosticsState>>,
     mut receivers: Query<(
@@ -728,11 +738,8 @@ fn process_client_hellos(
                                     worker_participant.as_ref()
                                 {
                                     let team = TeamId(participant.team);
-                                    let builds = crate::builds::BuildCatalog::embedded()
-                                        .expect("validated match-worker build catalog");
-                                    let weapons_catalog = crate::combat::WeaponCatalog::embedded()
-                                        .expect("validated match-worker weapon catalog");
-                                    let fighter = fighters
+                                    let fighter = content
+                                        .fighters
                                         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
                                         .expect("validated standard fighter definition");
                                     let snapshot = crate::builds::MatchBuildSnapshotV1::decode(
@@ -741,7 +748,9 @@ fn process_client_hellos(
                                     .expect("validated manifest build snapshot");
                                     let (recipe, preset_id) = match snapshot.candidate.selection {
                                         crate::builds::BuildSelection::Preset(id) => (
-                                            builds
+                                            content
+                                                .builds
+                                                .0
                                                 .preset(id)
                                                 .expect("validated manifest build preset")
                                                 .recipe,
@@ -752,8 +761,8 @@ fn process_client_hellos(
                                         }
                                     };
                                     let loadout = crate::builds::resolve_build_recipe(
-                                        &builds,
-                                        &weapons_catalog,
+                                        &content.builds.0,
+                                        &content.weapon_catalog.0,
                                         fighter,
                                         recipe,
                                         preset_id,
@@ -801,7 +810,11 @@ fn process_client_hellos(
                                 let spawn_position = spawn_point.position;
                                 let spawn_facing = spawn_point.facing;
                                 let (fighter_definition, team, mut health, mut weapon) =
-                                    default_fighter_runtime(assigned_team, &fighters, &weapons);
+                                    default_fighter_runtime(
+                                        assigned_team,
+                                        &content.fighters,
+                                        &content.weapons,
+                                    );
                                 if let Some(loadout) = manifest_loadout.as_ref() {
                                     health = CurrentHealth(loadout.fighter_stats.maximum_health);
                                     weapon = WeaponState {
@@ -1144,8 +1157,7 @@ fn detect_product_countdown_departure(
         gate.countdown_observed = true;
         return;
     }
-    if gate.countdown_observed
-        && matches!(state.phase, MatchPhase::Waiting)
+    if failed_initial_countdown(&gate, state.phase)
         && !gate.start_failure_emitted
         && let Some(outbox) = outbox.as_mut()
     {
@@ -1157,6 +1169,13 @@ fn detect_product_countdown_departure(
         gate.start_failure_emitted = true;
         gate.terminal_failure = true;
     }
+}
+
+/// A return to Waiting is a routed start failure only before the worker has announced its first
+/// activation. Later gameplay epochs deliberately pass through Waiting during an authoritative
+/// Balance Lab reset and must keep the existing worker and client session alive.
+fn failed_initial_countdown(gate: &MatchLoadingGate, phase: MatchPhase) -> bool {
+    gate.countdown_observed && !gate.activated_emitted && matches!(phase, MatchPhase::Waiting)
 }
 
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
@@ -1453,6 +1472,8 @@ fn build_authoritative_app(
             crate::diagnostics::ProcessDiagnosticsPlugin,
             practice::InertPracticeBotPlugin,
         ));
+    #[cfg(feature = "balance-lab")]
+    app.add_plugins(balance_lab::BalanceLabPlugin);
     if let Some(path) =
         crate::diagnostics::ProcessDiagnosticsSettings::default().failure_record_path()
     {

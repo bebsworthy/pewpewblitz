@@ -5,10 +5,10 @@
 
 use super::ServerRoleResource;
 use crate::{
-    builds::{AbilityState, BuildCatalog, PassiveRuntimeState, resolve_build_recipe},
+    builds::{AbilityState, BuildCatalogResource, PassiveRuntimeState, resolve_build_recipe},
     combat::{
         ActiveEffects, AuthoritativeTick, CurrentHealth, FighterDefinitions, SpawnState,
-        WeaponCatalog, WeaponPhase, WeaponState, default_fighter_runtime,
+        WeaponCatalogResource, WeaponPhase, WeaponState, default_fighter_runtime,
     },
     map::{MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
     matchplay::{
@@ -49,17 +49,17 @@ fn install_manifest_bots(
     definitions: (
         Res<FighterDefinitions>,
         Res<crate::combat::WeaponDefinitions>,
+        Res<BuildCatalogResource>,
+        Res<WeaponCatalogResource>,
     ),
 ) {
-    let (fighters, weapons) = definitions;
+    let (fighters, weapons, builds, weapon_catalog) = definitions;
     let Some(manifest) = role.manifest() else {
         return;
     };
     let Ok(match_state) = roots.single() else {
         return;
     };
-    let builds = BuildCatalog::embedded().expect("validated match-worker build catalog");
-    let weapon_catalog = WeaponCatalog::embedded().expect("validated match-worker weapon catalog");
     let fighter = fighters
         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
         .expect("validated standard fighter definition");
@@ -70,6 +70,7 @@ fn install_manifest_bots(
         let (recipe, preset) = match snapshot.candidate.selection {
             crate::builds::BuildSelection::Preset(id) => (
                 builds
+                    .0
                     .preset(id)
                     .expect("validated bot build preset")
                     .recipe,
@@ -77,7 +78,7 @@ fn install_manifest_bots(
             ),
             crate::builds::BuildSelection::Custom(recipe) => (recipe, None),
         };
-        let loadout = resolve_build_recipe(&builds, &weapon_catalog, fighter, recipe, preset)
+        let loadout = resolve_build_recipe(&builds.0, &weapon_catalog.0, fighter, recipe, preset)
             .expect("validated bot build resolution");
         let player_id = PlayerId(bot.player_id.get());
         let network_entity_id = NetworkEntityId(bot.player_id.get());

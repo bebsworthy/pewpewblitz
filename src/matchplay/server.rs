@@ -189,11 +189,27 @@ impl PendingMatchRestart {
         self.0
     }
 
+    #[cfg(feature = "balance-lab")]
+    pub(crate) fn stage(&mut self, slot: PendingMatchRestartSlot) -> bool {
+        if self.0.is_some() {
+            return false;
+        }
+        self.0 = Some(slot);
+        true
+    }
+
     /// In-crate test staging for the environment-reset transaction.
     #[cfg(test)]
     pub(crate) fn stage_for_test(&mut self, slot: PendingMatchRestartSlot) {
         self.0 = Some(slot);
     }
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum RestartBuildPolicy {
+    #[default]
+    Reconfirm,
+    Retain,
 }
 
 #[derive(Resource, Debug)]
@@ -245,7 +261,7 @@ impl NextMatchId {
         self.0 = self.0.max(next);
     }
 
-    fn allocate(&mut self) -> MatchId {
+    pub(crate) fn allocate(&mut self) -> MatchId {
         let id = MatchId(self.0.max(1));
         self.0 =
             id.0.checked_add(1)
@@ -340,6 +356,7 @@ impl Plugin for AuthoritativeMatchPlugin {
             .init_resource::<MatchOutcomeDiagnostics>()
             .init_resource::<ModeRuleOutcome>()
             .init_resource::<PendingMatchRestart>()
+            .init_resource::<RestartBuildPolicy>()
             .init_resource::<PriorMatchPositions>()
             .init_resource::<KnownMatchRoster>()
             .init_resource::<RestartCleanupEpoch>()
@@ -789,7 +806,7 @@ fn resolve_pregame_outcomes(
     clippy::too_many_arguments,
     clippy::type_complexity
 )]
-fn prepare_match_restart(
+pub(crate) fn prepare_match_restart(
     tick: Res<SimulationTick>,
     mut ids: ResMut<NextMatchId>,
     mut restart: ResMut<PendingMatchRestart>,
@@ -831,6 +848,7 @@ fn commit_match_restart(
     mut commands: Commands,
     mut restart: ResMut<PendingMatchRestart>,
     mut outcomes: ResMut<ModeRuleOutcome>,
+    mut build_policy: ResMut<RestartBuildPolicy>,
     fighter_definitions: Res<FighterDefinitions>,
     weapon_definitions: Res<WeaponDefinitions>,
     mut roots: Query<(&mut MatchState, &mut MatchClock), With<MatchRoot>>,
@@ -852,9 +870,11 @@ fn commit_match_restart(
     if state.match_id != slot.previous_id {
         return;
     }
+    let retain_builds = *build_policy == RestartBuildPolicy::Retain;
+    *build_policy = RestartBuildPolicy::Reconfirm;
     for (entity, mut participant) in &mut participants {
         participant.match_id = slot.next_id;
-        participant.ready = false;
+        participant.ready = retain_builds;
         participant.restart_ready = false;
         commands.entity(entity).insert(MatchMember(slot.next_id));
         complete_fighter_lifecycle(&mut commands, entity);
@@ -894,8 +914,16 @@ fn commit_match_restart(
         commands.entity(entity).insert((
             crate::builds::AbilityState::default(),
             crate::builds::PassiveRuntimeState::default(),
-            crate::builds::SelectingBuild,
         ));
+        if retain_builds {
+            commands
+                .entity(entity)
+                .remove::<crate::builds::SelectingBuild>();
+        } else {
+            commands
+                .entity(entity)
+                .insert(crate::builds::SelectingBuild);
+        }
     }
     state.match_id = slot.next_id;
     state.phase = MatchPhase::Waiting;

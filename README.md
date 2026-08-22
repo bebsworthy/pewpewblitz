@@ -55,6 +55,20 @@ Dashboard; cancellation or bounded connection failure opens Server Select. Press
 One client is sufficient for Practice. Multiplayer game types form only their exact advertised
 human roster, so the default First Blood path requires two clients.
 
+For the development-only V6 Balance Lab, start the tuning-enabled routed server, connect one
+ordinary client, and enter Practice:
+
+```sh
+just balance-lab
+```
+
+Open <http://127.0.0.1:5123> after entering Practice. Keep the page open while returning to the
+menu; it waits for and reconnects to the next Practice worker. Accepted overrides are validated and
+persisted under `target/balance-lab/session-v1.json`, and **Restore Defaults** removes that local
+override without changing canonical authored content.
+See the [Balance Lab operator and maintenance guide](./docs/15-balance-lab.md) for validation rules,
+limitations, and the required checklist when fighter or weapon properties change.
+
 ## Canonical commands
 
 Run `just` to list the supported everyday surface.
@@ -62,6 +76,7 @@ Run `just` to list the supported everyday surface.
 | Command | Purpose |
 |---|---|
 | `just server` | Start the routed supervisor and production lobby on localhost |
+| `just balance-lab` | Build and start the development-only Practice Balance Lab topology |
 | `just client` | Open one interactive product client against the local server |
 | `just run <N>` | Build once, start the routed server, and open exactly 1–16 interactive clients |
 | `just fmt` | Format all Rust sources |

@@ -192,6 +192,12 @@ justified.
 
 ## Fighter lifecycle
 
+Any change to fighter profiles, resolved fighter properties, build resolution, or build-derived
+runtime state must review and update the development
+[Balance Lab](./15-balance-lab.md#required-maintenance-contract) in the same change, or explicitly
+document why that property is intentionally unavailable there. This includes snapshot exposure,
+validation, apply/reset initialization, replication, and focused verification.
+
 The resolved match loadout remains immutable for the active selection. Mutable state derived from it
 must have explicit initialization, reset, and cleanup rules:
 

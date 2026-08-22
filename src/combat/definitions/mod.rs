@@ -666,7 +666,10 @@ impl WeaponConfiguration {
             if !finite_range(radius, crate::terrain::TERRAIN_CELL_SIZE_WORLD, max_radius)
                 || ((radius / half_cell).round() * half_cell - radius).abs() > 1.0e-4
             {
-                return Err("invalid terrain brush radius".to_string());
+                return Err(format!(
+                    "terrain brush radius exceeds an engine safety boundary: expected {}..={max_radius} in {half_cell}-unit terrain-grid steps",
+                    crate::terrain::TERRAIN_CELL_SIZE_WORLD
+                ));
             }
             let single_lobbed = matches!(recipe.delivery, DeliveryMethod::Lobbed { .. })
                 && matches!(recipe.firing, FiringPattern::Single);

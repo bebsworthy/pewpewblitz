@@ -767,7 +767,7 @@ impl Plugin for ProtocolPlugin {
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
-fn initialize_content_fingerprint(
+pub(crate) fn initialize_content_fingerprint(
     weapons: Res<crate::combat::WeaponCatalogResource>,
     maps: Res<crate::map::MapCatalogResource>,
     builds: Res<crate::builds::BuildCatalogResource>,

@@ -181,7 +181,8 @@ pub fn quantize_brush(center: Vec2, radius_world: f32) -> Option<TerrainBrush> {
     if (radius_world - units * TERRAIN_SUBCELL_SIZE_WORLD).abs() > 1.0e-4 {
         return None;
     }
-    if !(2.0..=16.0).contains(&units) {
+    let max_units = MAX_TERRAIN_BRUSH_RADIUS_WORLD / TERRAIN_SUBCELL_SIZE_WORLD;
+    if !(2.0..=max_units).contains(&units) {
         return None;
     }
     Some(TerrainBrush {

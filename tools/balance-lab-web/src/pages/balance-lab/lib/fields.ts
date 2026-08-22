@@ -1,0 +1,48 @@
+export function fieldLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+type NumericPath = (string | number)[];
+
+function isTerrainBrushRadius(path: NumericPath) {
+  return String(path.at(-1)) === "radius" && path.some((part) => part === "world_effects");
+}
+
+export function numberSpec(key: string, value: number, path: NumericPath) {
+  const lower = key.toLowerCase();
+  const integer = Number.isInteger(value);
+  if (isTerrainBrushRadius(path)) return { min: 8, max: 128, step: 4 };
+  if (lower.includes("multiplier") || lower.includes("scale")) {
+    return { min: 0, max: 2, step: 0.01 };
+  }
+  if (lower.includes("angle")) return { min: 1, max: 180, step: 0.5 };
+  if (lower.includes("health") || lower.includes("damage")) {
+    return { min: 1, max: 1000, step: 1 };
+  }
+  if (lower === "movement_speed") {
+    return { min: 80, max: 1200, step: integer ? 1 : 0.1 };
+  }
+  if (lower.includes("capacity")) return { min: 1, max: 32, step: 1 };
+  if (lower.includes("target") || lower.includes("count")) {
+    return { min: 1, max: 16, step: 1 };
+  }
+  if (lower.includes("tick")) return { min: 1, max: 3600, step: 1 };
+  if (lower.includes("speed") || lower.includes("range") || lower.includes("distance")) {
+    return { min: 1, max: 4096, step: integer ? 1 : 0.1 };
+  }
+  if (lower.includes("radius")) return { min: 1, max: 512, step: integer ? 1 : 0.1 };
+  return { min: 0, max: Math.max(100, Math.ceil(value * 2)), step: integer ? 1 : 0.1 };
+}
+
+export function constraintHint(path: NumericPath) {
+  return isTerrainBrushRadius(path)
+    ? "Engine safety: 8–128 world units, aligned to the 4-unit terrain grid."
+    : null;
+}
+
+export function secondsFor(key: string, value: number) {
+  return key.toLowerCase().includes("tick") ? `${(value / 60).toFixed(2)} s` : null;
+}

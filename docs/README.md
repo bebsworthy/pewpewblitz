@@ -58,6 +58,8 @@ delivery status and evidence.
 - [Multi-process server architecture](./14-multiplayer-server-architecture.md) — supervisor,
   single-port routed transport, lobby and isolated match workers, IPC, connection handoff, failure,
   and security contracts.
+- [Balance Lab guide](./15-balance-lab.md) — local operator workflow, validation philosophy,
+  persistence, limitations, and the required maintenance checklist for fighter and weapon changes.
 - [Research sources](./06-research-sources.md) — external references used to establish the original
   product and technical baseline.
 
@@ -81,6 +83,7 @@ and closeout learning.
 | V3 | Client-side 3D gameplay-world presentation migration while retaining planar authoritative simulation | [V3 roadmap](./implementation/v3/roadmap.md) |
 | V4 | Independent map documents, semantic object placement, reusable themes, and second-map proof | [V4 roadmap](./implementation/v4/roadmap.md) |
 | V5 | Auto-connect, Player Dashboard, connected-loop convergence, responsive presentation, and lifecycle hardening | [V5 roadmap](./implementation/v5/roadmap.md) |
+| V6 | Development-only, server-authoritative Practice Balance Lab for rapid fighter and weapon tuning | [V6 roadmap](./implementation/v6/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

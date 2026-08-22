@@ -26,8 +26,8 @@ pub const TERRAIN_WORDS_PER_CHUNK: usize = 16;
 pub const MAX_TERRAIN_CHUNKS: usize = 221;
 /// Maximum initially occupied cells across every destructible reservation.
 pub const MAX_TERRAIN_CELLS: usize = 196_608;
-/// Maximum authored terrain brush radius in world units.
-pub const MAX_TERRAIN_BRUSH_RADIUS_WORLD: f32 = 64.0;
+/// Maximum terrain brush radius that still touches at most four 256-unit chunks.
+pub const MAX_TERRAIN_BRUSH_RADIUS_WORLD: f32 = 128.0;
 /// A brush smaller than one chunk diameter touches at most four chunks.
 pub const MAX_TERRAIN_BRUSH_CHUNKS: usize = 4;
 /// Terrain concurrency ceiling independent of team topology.

@@ -113,8 +113,8 @@ fn brush_quantization_round_trips_to_canonical_world_values() {
     // Half-cell boundaries round deterministically (half away from zero).
     let brush = quantize_brush(Vec2::new(2.0, 2.0), 8.0).expect("legal brush quantizes");
     assert_eq!(brush.center_half_cells_x, 1);
-    let brush = quantize_brush(Vec2::new(6.0, 6.0), 64.0).expect("legal brush quantizes");
-    assert_eq!(brush.radius_half_cells, 16);
+    let brush = quantize_brush(Vec2::new(6.0, 6.0), 128.0).expect("legal brush quantizes");
+    assert_eq!(brush.radius_half_cells, 32);
 
     assert!(quantize_brush(Vec2::new(f32::NAN, 0.0), 48.0).is_none());
     assert!(quantize_brush(Vec2::new(0.0, f32::INFINITY), 48.0).is_none());
@@ -124,13 +124,36 @@ fn brush_quantization_round_trips_to_canonical_world_values() {
         "radius below one cell"
     );
     assert!(
-        quantize_brush(Vec2::new(0.0, 0.0), 68.0).is_none(),
+        quantize_brush(Vec2::new(0.0, 0.0), 132.0).is_none(),
         "radius above engine ceiling"
     );
     assert!(
         quantize_brush(Vec2::new(0.0, 0.0), 50.0).is_none(),
         "radius must be a half-cell multiple"
     );
+}
+
+#[test]
+fn maximum_brush_radius_cannot_span_more_than_four_chunks() {
+    let radius_half_cells = (MAX_TERRAIN_BRUSH_RADIUS_WORLD / TERRAIN_SUBCELL_SIZE_WORLD) as u16;
+    let period_half_cells = (TERRAIN_CHUNK_SIDE_WORLD / TERRAIN_SUBCELL_SIZE_WORLD) as i16;
+    for center_half_cells_y in 0..period_half_cells {
+        for center_half_cells_x in 0..period_half_cells {
+            let brush = TerrainBrush {
+                center_half_cells_x,
+                center_half_cells_y,
+                radius_half_cells,
+            };
+            let ((x_min, x_max), (y_min, y_max)) = brush_cell_range(brush);
+            let x_chunks = floor_div(x_max, TERRAIN_CHUNK_SIDE_CELLS as i32)
+                - floor_div(x_min, TERRAIN_CHUNK_SIDE_CELLS as i32)
+                + 1;
+            let y_chunks = floor_div(y_max, TERRAIN_CHUNK_SIDE_CELLS as i32)
+                - floor_div(y_min, TERRAIN_CHUNK_SIDE_CELLS as i32)
+                + 1;
+            assert!(x_chunks * y_chunks <= MAX_TERRAIN_BRUSH_CHUNKS as i32);
+        }
+    }
 }
 
 #[test]

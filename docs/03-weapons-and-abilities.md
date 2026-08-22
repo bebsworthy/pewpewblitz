@@ -78,6 +78,12 @@ definition.
 
 ## Validation and resolution
 
+Any change to weapon properties, recipe primitives, validation, resolution, fingerprints, or
+weapon-derived runtime state must review and update the development
+[Balance Lab](./15-balance-lab.md#required-maintenance-contract) in the same change, or explicitly
+document why the capability is intentionally unavailable there. The lab must expose balance choices
+while retaining only named engine, bounded-work, deterministic-geometry, and wire-safety limits.
+
 Weapon resolution is deterministic and separates three concerns even when one cohesive module owns
 them:
 

@@ -40,6 +40,8 @@ pub(crate) use server::{
     PendingModeRuleOutcome, clear_combat_facts, initialize_match_root, offer_mode_rule_outcome,
     prepare_mode_rule_facts, record_match_telemetry,
 };
+#[cfg(feature = "balance-lab")]
+pub(crate) use server::{NextMatchId, RestartBuildPolicy, prepare_match_restart};
 pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
 #[cfg(any(feature = "server", test))]
 pub(crate) use telemetry::MatchTelemetryContext;

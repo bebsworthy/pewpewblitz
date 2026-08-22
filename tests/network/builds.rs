@@ -47,6 +47,85 @@ fn custom(power: PulsePower, reach: PulseReach, magazine: PulseMagazine) -> Braw
     }
 }
 
+#[cfg(feature = "balance-lab")]
+#[test]
+fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values() {
+    let canonical_builds = brawler::builds::BuildCatalog::embedded().unwrap();
+    let canonical_weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
+    let fighter = FighterDefinitions::default().entries[0];
+    let canonical = brawler::builds::resolve_build_recipe(
+        &canonical_builds,
+        &canonical_weapons,
+        &fighter,
+        canonical_builds.presets[0].recipe,
+        Some(BuildPresetId(1)),
+    )
+    .unwrap();
+
+    let mut harness = Harness::new(1);
+    harness.clients[0]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .build_preset = Some(1);
+    harness.step_until(|harness| harness.client_is_active(0) && harness.selection_is_complete(0));
+    let server_entity = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<Entity, (With<Fighter>, Without<TestDummy>)>();
+        query.single(world).unwrap()
+    };
+    {
+        let world = harness.server.world_mut();
+        let mut builds = world.resource_mut::<brawler::builds::BuildCatalogResource>();
+        builds.0.fighter_profiles.default.maximum_health = 222;
+        builds.0.fighter_profiles.default.movement_speed = 444.0;
+        builds.0.fighter_profiles.lightweight.maximum_health = 222;
+        builds.0.fighter_profiles.lightweight.movement_speed = 444.0;
+        builds.0.fighter_profiles.reinforced.maximum_health = 222;
+        builds.0.fighter_profiles.reinforced.movement_speed = 444.0;
+        let mut weapons = world.resource_mut::<brawler::combat::WeaponCatalogResource>();
+        weapons.0.presets[0]
+            .configuration
+            .recipe
+            .fire_cooldown_ticks += 1;
+    }
+    let server_loadout = brawler::builds::resolve_build_recipe(
+        &harness
+            .server
+            .world()
+            .resource::<brawler::builds::BuildCatalogResource>()
+            .0,
+        &harness
+            .server
+            .world()
+            .resource::<brawler::combat::WeaponCatalogResource>()
+            .0,
+        &fighter,
+        canonical_builds.presets[0].recipe,
+        Some(BuildPresetId(1)),
+    )
+    .unwrap();
+    harness
+        .server
+        .world_mut()
+        .entity_mut(server_entity)
+        .insert(server_loadout.clone());
+    assert_eq!(server_loadout.identity, canonical.identity);
+    assert_ne!(
+        server_loadout.primary_weapon.recipe_fingerprint,
+        canonical.primary_weapon.recipe_fingerprint
+    );
+    assert_eq!(server_loadout.fighter_stats.maximum_health, 222);
+    assert_eq!(server_loadout.fighter_stats.movement_speed, 444.0);
+
+    harness.step_until(|harness| {
+        let entity = harness.controlled_entity(0);
+        harness.clients[0]
+            .world()
+            .get::<ResolvedMatchLoadout>(entity)
+            .is_some_and(|loadout| loadout == &server_loadout)
+    });
+}
+
 fn active_sentry_fixture() -> (Harness, Entity, brawler::abilities::SentryIdentity) {
     let mut harness = Harness::new_match(2);
     harness.clients[0]

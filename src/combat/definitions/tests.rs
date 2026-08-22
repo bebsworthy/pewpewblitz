@@ -229,7 +229,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
 
     // A policy ceiling wider than the engine ceiling rejects during catalog validation.
     let mut catalog = WeaponCatalog::embedded().unwrap();
-    catalog.recipe_policy.max_terrain_brush_radius = 128.0;
+    catalog.recipe_policy.max_terrain_brush_radius = 132.0;
     assert!(
         catalog
             .validate()

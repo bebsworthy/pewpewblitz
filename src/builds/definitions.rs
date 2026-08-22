@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 1;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 1;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 2;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -23,10 +23,50 @@ pub const BUILD_POINT_BUDGET: u8 = 12;
 pub struct BuildCatalog {
     pub schema_version: u16,
     pub balance_revision: BuildRevision,
+    pub fighter_profiles: FighterStatProfiles,
+    pub custom_pulse: CustomPulseTuning,
     pub weapon_costs: Vec<WeaponPointCost>,
     pub ultimates: Vec<UltimateDefinition>,
     pub passives: Vec<PassiveDefinition>,
     pub presets: Vec<BuildPresetDefinition>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct FighterStatProfiles {
+    pub default: ResolvedFighterStats,
+    pub lightweight: ResolvedFighterStats,
+    pub reinforced: ResolvedFighterStats,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulsePowerTuning {
+    pub damage: u16,
+    pub fire_cooldown_ticks: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct PulseReachTuning {
+    pub speed: f32,
+    pub range: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulseMagazineTuning {
+    pub capacity: u8,
+    pub refill_ticks: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct CustomPulseTuning {
+    pub light: PulsePowerTuning,
+    pub balanced: PulsePowerTuning,
+    pub heavy: PulsePowerTuning,
+    pub compact: PulseReachTuning,
+    pub standard: PulseReachTuning,
+    pub long: PulseReachTuning,
+    pub quick: PulseMagazineTuning,
+    pub standard_magazine: PulseMagazineTuning,
+    pub expanded: PulseMagazineTuning,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -82,6 +122,7 @@ impl BuildCatalog {
         if self.schema_version != BUILD_CATALOG_SCHEMA_VERSION || self.balance_revision.0 == 0 {
             return Err("unsupported build catalog schema/revision".into());
         }
+        self.validate_tuning()?;
         if self.weapon_costs.len() != 4
             || self.ultimates.len() != 2
             || self.passives.len() != 6
@@ -169,6 +210,64 @@ impl BuildCatalog {
         }
         if postcard::to_allocvec(self).map_or(true, |bytes| bytes.len() > 16 * 1024) {
             return Err("build catalog exceeds engine size ceiling".into());
+        }
+        Ok(())
+    }
+
+    fn validate_tuning(&self) -> Result<(), String> {
+        for (name, profile) in [
+            ("default", self.fighter_profiles.default),
+            ("lightweight", self.fighter_profiles.lightweight),
+            ("reinforced", self.fighter_profiles.reinforced),
+        ] {
+            if profile.maximum_health == 0
+                || profile.maximum_health > 1_000
+                || !profile.movement_speed.is_finite()
+                || !(80.0..=1_200.0).contains(&profile.movement_speed)
+            {
+                return Err(format!(
+                    "invalid {name} fighter stat profile: health must be 1..=1000 and movement speed must be 80..=1200"
+                ));
+            }
+        }
+        for power in [
+            self.custom_pulse.light,
+            self.custom_pulse.balanced,
+            self.custom_pulse.heavy,
+        ] {
+            if power.damage == 0
+                || power.damage > 1_000
+                || power.fire_cooldown_ticks == 0
+                || power.fire_cooldown_ticks > 3_600
+            {
+                return Err("invalid custom Pulse power tuning".into());
+            }
+        }
+        for reach in [
+            self.custom_pulse.compact,
+            self.custom_pulse.standard,
+            self.custom_pulse.long,
+        ] {
+            if !reach.speed.is_finite()
+                || !reach.range.is_finite()
+                || !(1.0..=4_096.0).contains(&reach.speed)
+                || !(1.0..=4_096.0).contains(&reach.range)
+            {
+                return Err("invalid custom Pulse reach tuning".into());
+            }
+        }
+        for magazine in [
+            self.custom_pulse.quick,
+            self.custom_pulse.standard_magazine,
+            self.custom_pulse.expanded,
+        ] {
+            if magazine.capacity == 0
+                || magazine.capacity > 32
+                || magazine.refill_ticks == 0
+                || magazine.refill_ticks > 3_600
+            {
+                return Err("invalid custom Pulse magazine tuning".into());
+            }
         }
         Ok(())
     }
@@ -286,20 +385,11 @@ pub fn resolve_build_recipe(
         return Err(BuildResolutionError::OverBudget);
     }
     let fighter_stats = if has_lightweight {
-        ResolvedFighterStats {
-            maximum_health: 85,
-            movement_speed: 360.0,
-        }
+        catalog.fighter_profiles.lightweight
     } else if has_reinforced {
-        ResolvedFighterStats {
-            maximum_health: 120,
-            movement_speed: 288.0,
-        }
+        catalog.fighter_profiles.reinforced
     } else {
-        ResolvedFighterStats {
-            maximum_health: 100,
-            movement_speed: 320.0,
-        }
+        catalog.fighter_profiles.default
     };
     let mut canonical_passives = recipe.passives;
     canonical_passives.sort();
@@ -401,26 +491,26 @@ fn resolve_weapon_choice(
                 .ok_or(BuildResolutionError::ResolutionFailed)?
                 .configuration
                 .clone();
-            let (damage, cooldown, power_cost) = match power {
-                PulsePower::Light => (20, 9, 0),
-                PulsePower::Balanced => (25, 12, 0),
-                PulsePower::Heavy => (30, 15, 1),
+            let (power_tuning, power_cost) = match power {
+                PulsePower::Light => (catalog.custom_pulse.light, 0),
+                PulsePower::Balanced => (catalog.custom_pulse.balanced, 0),
+                PulsePower::Heavy => (catalog.custom_pulse.heavy, 1),
             };
-            let (speed, range, reach_cost) = match reach {
-                PulseReach::Compact => (1020.0, 750.0, 0),
-                PulseReach::Standard => (900.0, 900.0, 0),
-                PulseReach::Long => (780.0, 1050.0, 1),
+            let (reach_tuning, reach_cost) = match reach {
+                PulseReach::Compact => (catalog.custom_pulse.compact, 0),
+                PulseReach::Standard => (catalog.custom_pulse.standard, 0),
+                PulseReach::Long => (catalog.custom_pulse.long, 1),
             };
-            let lifetime = projectile_lifetime_ticks(range, speed)?;
-            let (capacity, refill_ticks, magazine_cost) = match magazine {
-                PulseMagazine::Quick => (4, 42, 0),
-                PulseMagazine::Standard => (6, 60, 0),
-                PulseMagazine::Expanded => (8, 78, 1),
+            let lifetime = projectile_lifetime_ticks(reach_tuning.range, reach_tuning.speed)?;
+            let (magazine_tuning, magazine_cost) = match magazine {
+                PulseMagazine::Quick => (catalog.custom_pulse.quick, 0),
+                PulseMagazine::Standard => (catalog.custom_pulse.standard_magazine, 0),
+                PulseMagazine::Expanded => (catalog.custom_pulse.expanded, 1),
             };
-            configuration.recipe.fire_cooldown_ticks = cooldown;
+            configuration.recipe.fire_cooldown_ticks = power_tuning.fire_cooldown_ticks;
             configuration.recipe.economy = WeaponEconomy::Magazine {
-                capacity,
-                refill_ticks,
+                capacity: magazine_tuning.capacity,
+                refill_ticks: magazine_tuning.refill_ticks,
             };
             if let DeliveryMethod::Straight {
                 speed: value_speed,
@@ -429,14 +519,14 @@ fn resolve_weapon_choice(
                 ..
             } = &mut configuration.recipe.delivery
             {
-                *value_speed = speed;
-                *value_range = range;
+                *value_speed = reach_tuning.speed;
+                *value_range = reach_tuning.range;
                 *value_lifetime = lifetime;
             }
             for bundle in &mut configuration.recipe.payload_bundles {
                 for effect in &mut bundle.effects {
                     if let PayloadEffectDefinition::Damage { amount, .. } = effect {
-                        *amount = damage;
+                        *amount = power_tuning.damage;
                     }
                 }
             }

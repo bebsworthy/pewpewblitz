@@ -1,0 +1,43 @@
+export type JsonObject = { [key: string]: JsonValue };
+export type JsonValue = null | boolean | number | string | JsonObject | JsonValue[];
+
+export interface FighterStats extends JsonObject {
+  maximum_health: number;
+  movement_speed: number;
+}
+
+export interface FighterProfiles extends JsonObject {
+  default: FighterStats;
+  lightweight: FighterStats;
+  reinforced: FighterStats;
+}
+
+export interface WeaponTuning extends JsonObject {
+  id: number;
+  key: string;
+  displayName: string;
+  recipe: JsonObject;
+}
+
+export interface BalanceLabSnapshot extends JsonObject {
+  schemaVersion: number;
+  fighterProfiles: FighterProfiles;
+  customPulse: JsonObject;
+  weapons: WeaponTuning[];
+}
+
+export interface TransactionView {
+  id: number;
+  status: "pending" | "applied" | "rejected";
+  message: string;
+}
+
+export interface BalanceLabState {
+  schemaVersion: number;
+  matchId: string;
+  revision: number;
+  baseline: BalanceLabSnapshot;
+  applied: BalanceLabSnapshot;
+  pending: TransactionView | null;
+  lastTransaction: TransactionView | null;
+}

@@ -715,26 +715,35 @@ mod tests {
         value.common.content_fingerprint = content.0;
 
         let mut worker = build_match_worker_app(config, value).unwrap();
+        worker
+            .world_mut()
+            .resource_mut::<BuildCatalogResource>()
+            .0
+            .fighter_profiles
+            .lightweight
+            .maximum_health = 211;
         worker.update();
         let world = worker.world_mut();
         let mut query = world.query_filtered::<(
             &crate::matchplay::FighterDisplayName,
+            &crate::combat::CurrentHealth,
             Has<lightyear::prelude::ControlledBy>,
             Has<lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>>,
         ), With<crate::protocol::Fighter>>();
         let rows = query
             .iter(world)
-            .map(|(name, controlled, has_neutral_input)| {
-                (name.0.clone(), controlled, has_neutral_input)
+            .map(|(name, health, controlled, has_neutral_input)| {
+                (name.0.clone(), health.0, controlled, has_neutral_input)
             })
             .collect::<Vec<_>>();
 
         assert_eq!(rows.len(), 3);
-        assert!(rows.iter().all(|(_, controlled, _)| !controlled));
-        assert!(rows.iter().all(|(_, _, has_input)| *has_input));
+        assert!(rows.iter().all(|(_, health, _, _)| *health == 211));
+        assert!(rows.iter().all(|(_, _, controlled, _)| !controlled));
+        assert!(rows.iter().all(|(_, _, _, has_input)| *has_input));
         let mut names = rows
             .iter()
-            .map(|(name, _, _)| name.as_str())
+            .map(|(name, _, _, _)| name.as_str())
             .collect::<Vec<_>>();
         names.sort_unstable();
         assert_eq!(names, vec!["Bot 1", "Bot 2", "Bot 3"]);

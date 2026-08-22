@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     config::{GameMode, MatchRulesProfile},
-    matchplay::{MatchId as GameplayMatchId, MatchPhase, MatchRoot, MatchState},
+    matchplay::{MatchPhase, MatchRoot, MatchState},
     protocol::DEVELOPMENT_PRIVATE_KEY,
 };
 use bevy::{app::AppExit, prelude::*};
@@ -597,6 +597,16 @@ fn canonical_match_result(state: &MatchState) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// Encode the completed gameplay epoch as the result of the supervisor-owned allocation. A
+/// Balance Lab reset advances the internal gameplay match ID without replacing that allocation,
+/// so the two IDs are intentionally allowed to differ.
+fn canonical_allocation_result(
+    state: &MatchState,
+    _allocation_match_id: brawler_routing::MatchId,
+) -> Option<Vec<u8>> {
+    canonical_match_result(state)
+}
+
 /// Emit exactly one result after the authoritative match root first becomes Completed. This is
 /// in Last so the completed state is final for the frame and the result is queued before the
 /// worker's control flush; a supervisor Stop can therefore only arrive after Result.
@@ -614,10 +624,7 @@ fn worker_control_emit_result(
     let Ok(match_state) = roots.single() else {
         return;
     };
-    if GameplayMatchId(match_id.get()) != match_state.match_id {
-        return;
-    }
-    let Some(result) = canonical_match_result(match_state) else {
+    let Some(result) = canonical_allocation_result(match_state, match_id) else {
         return;
     };
     let Ok(body) = brawler_routing::ResultBody::new(match_id, allocation_id, result) else {
@@ -1510,7 +1517,7 @@ mod tests {
     #[test]
     fn canonical_completed_result_is_versioned_and_stable() {
         let state = MatchState {
-            match_id: GameplayMatchId(9),
+            match_id: crate::matchplay::MatchId(9),
             mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
             phase: MatchPhase::Completed {
                 completed_at_tick: 12,
@@ -1533,6 +1540,13 @@ mod tests {
                 ..state
             })
             .is_none()
+        );
+
+        let allocation_match_id = brawler_routing::MatchId::new(4).unwrap();
+        assert_ne!(state.match_id.0, allocation_match_id.get());
+        assert_eq!(
+            canonical_allocation_result(&state, allocation_match_id),
+            Some(first)
         );
     }
 }

@@ -1,6 +1,22 @@
 (
-    schema_version: 1,
+    schema_version: 2,
     balance_revision: BuildRevision(1),
+    fighter_profiles: (
+        default: (maximum_health: 100, movement_speed: 320.0),
+        lightweight: (maximum_health: 85, movement_speed: 360.0),
+        reinforced: (maximum_health: 120, movement_speed: 288.0),
+    ),
+    custom_pulse: (
+        light: (damage: 20, fire_cooldown_ticks: 9),
+        balanced: (damage: 25, fire_cooldown_ticks: 12),
+        heavy: (damage: 30, fire_cooldown_ticks: 15),
+        compact: (speed: 1020.0, range: 750.0),
+        standard: (speed: 900.0, range: 900.0),
+        long: (speed: 780.0, range: 1050.0),
+        quick: (capacity: 4, refill_ticks: 42),
+        standard_magazine: (capacity: 6, refill_ticks: 60),
+        expanded: (capacity: 8, refill_ticks: 78),
+    ),
     weapon_costs: [
         (weapon_id: WeaponPresetId(1), point_cost: 4),
         (weapon_id: WeaponPresetId(2), point_cost: 5),

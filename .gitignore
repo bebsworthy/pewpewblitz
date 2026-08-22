@@ -4,6 +4,8 @@
 /target/
 # Isolated cargo cache for metrics-enabled measurement builds.
 /target-metrics/
+/tools/balance-lab-web/node_modules/
+/tools/balance-lab-web/dist/
 .DS_Store
 __pycache__/
 *.py[cod]

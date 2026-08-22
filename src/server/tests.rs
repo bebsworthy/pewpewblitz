@@ -151,6 +151,32 @@ fn app_exit_is_forwarded_after_update_producers_run() {
 }
 
 #[test]
+fn waiting_after_activation_is_not_a_routed_start_failure() {
+    let initial_departure = MatchLoadingGate {
+        countdown_observed: true,
+        ..default()
+    };
+    assert!(failed_initial_countdown(
+        &initial_departure,
+        MatchPhase::Waiting
+    ));
+
+    let reset_after_activation = MatchLoadingGate {
+        countdown_observed: true,
+        activated_emitted: true,
+        ..default()
+    };
+    assert!(!failed_initial_countdown(
+        &reset_after_activation,
+        MatchPhase::Waiting
+    ));
+    assert!(!failed_initial_countdown(
+        &reset_after_activation,
+        MatchPhase::Countdown { starts_at_tick: 10 }
+    ));
+}
+
+#[test]
 fn checkpoint_reports_fail_closed_on_missing_or_altered_state() {
     let snapshot = CombatStateSnapshot {
         authoritative_tick: 7,

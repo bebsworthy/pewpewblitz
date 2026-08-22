@@ -3,14 +3,16 @@ set -euo pipefail
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
+balance_lab_addr=${BRAWLER_BALANCE_LAB_ADDR:-127.0.0.1:5123}
+balance_lab_state=${BRAWLER_BALANCE_LAB_STATE:-$project_dir/target/balance-lab/session-v1.json}
 mode=${1:-}
 
 usage() {
-    printf '%s\n' 'usage: scripts/dev.sh server | client | run <client-count>' >&2
+    printf '%s\n' 'usage: scripts/dev.sh server | balance-lab | client | run <client-count>' >&2
 }
 
 case "$mode" in
-    server | client) ;;
+    server | balance-lab | client) ;;
     run)
         client_count=${2:-}
         case "$client_count" in
@@ -34,6 +36,13 @@ cd "$project_dir"
 
 build_server() {
     cargo build --locked --bin brawler-server --no-default-features --features server
+    cargo build --locked -p brawler-routing --bin brawler-supervisor
+}
+
+build_balance_lab() {
+    npm ci --prefix "$project_dir/tools/balance-lab-web"
+    npm run --prefix "$project_dir/tools/balance-lab-web" build
+    cargo build --locked --bin brawler-server --no-default-features --features balance-lab
     cargo build --locked -p brawler-routing --bin brawler-supervisor
 }
 
@@ -66,6 +75,15 @@ case "$mode" in
         build_server
         supervisor_args
         exec target/debug/brawler-supervisor "${SUPERVISOR_ARGS[@]}"
+        ;;
+    balance-lab)
+        build_balance_lab
+        supervisor_args
+        BRAWLER_BALANCE_LAB=1 \
+            BRAWLER_BALANCE_LAB_ASSETS="$project_dir/tools/balance-lab-web/dist" \
+            BRAWLER_BALANCE_LAB_ADDR="$balance_lab_addr" \
+            BRAWLER_BALANCE_LAB_STATE="$balance_lab_state" \
+            exec target/debug/brawler-supervisor "${SUPERVISOR_ARGS[@]}"
         ;;
     client)
         build_client
