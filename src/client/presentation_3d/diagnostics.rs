@@ -28,6 +28,7 @@ const REPORT_FIELDS: &[&str] = &[
     "window_width",
     "window_height",
     "render_profile",
+    "measurement_context",
     "fallback",
     "reduced_effects",
     "warmup_seconds",
@@ -62,6 +63,10 @@ const REPORT_FIELDS: &[&str] = &[
     "mesh_asset_terminal",
     "material_asset_high_water",
     "material_asset_terminal",
+    "image_asset_high_water",
+    "image_asset_terminal",
+    "dashboard_owned_high_water",
+    "dashboard_owned_terminal",
     "map_instance_id",
     "map_recipe_id",
     "mode_definition_id",
@@ -83,6 +88,24 @@ struct HighWater {
     sentries: usize,
     meshes: usize,
     materials: usize,
+    images: usize,
+    dashboard_owned: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RenderMeasurementContext {
+    Dashboard,
+    #[default]
+    Gameplay,
+}
+
+impl RenderMeasurementContext {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Dashboard => "dashboard",
+            Self::Gameplay => "gameplay",
+        }
+    }
 }
 
 type MeasuredMap = (
@@ -110,8 +133,11 @@ struct RenderMeasurementState {
     high: HighWater,
     current: HighWater,
     measured_map: Option<MeasuredMap>,
+    context: Option<RenderMeasurementContext>,
     written: bool,
 }
+
+type DashboardOwnedFilter = Or<(With<flow::DashboardRoot>, With<dashboard::DashboardOwned>)>;
 
 #[derive(SystemParam)]
 struct RenderEvidenceQueries<'w, 's> {
@@ -126,6 +152,8 @@ struct RenderEvidenceQueries<'w, 's> {
     sentries: Query<'w, 's, (), With<crate::abilities::Sentry>>,
     meshes: Res<'w, Assets<Mesh>>,
     materials: Res<'w, Assets<StandardMaterial>>,
+    images: Res<'w, Assets<Image>>,
+    dashboard_owned: Query<'w, 's, (), DashboardOwnedFilter>,
 }
 
 pub(super) struct RenderMeasurementPlugin(pub(crate) crate::config::RenderMeasurementConfig);
@@ -144,6 +172,7 @@ impl Plugin for RenderMeasurementPlugin {
             high: HighWater::default(),
             current: HighWater::default(),
             measured_map: None,
+            context: None,
             written: false,
         })
         .add_systems(Last, sample_and_finalize_render_measurement);
@@ -162,6 +191,7 @@ fn sample_and_finalize_render_measurement(
     diagnostics: Res<DiagnosticsStore>,
     assets: Option<Res<assets::ClientAssetReadiness>>,
     map_readiness: Option<Res<crate::map::ClientMapReadiness>>,
+    flow: Option<Res<State<ClientFlow>>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     adapter: Option<Res<RenderAdapterInfo>>,
     system: Option<Res<SystemInfo>>,
@@ -174,10 +204,14 @@ fn sample_and_finalize_render_measurement(
     if state.written {
         return;
     }
-    let ready = assets
-        .is_some_and(|value| !matches!(*value, assets::ClientAssetReadiness::Loading))
-        && map_readiness
-            .is_some_and(|value| matches!(*value, crate::map::ClientMapReadiness::Ready));
+    let assets_ready =
+        assets.is_some_and(|value| !matches!(*value, assets::ClientAssetReadiness::Loading));
+    let dashboard_ready = flow
+        .as_deref()
+        .is_some_and(|flow| *flow.get() == ClientFlow::Dashboard);
+    let gameplay_ready =
+        map_readiness.is_some_and(|value| matches!(*value, crate::map::ClientMapReadiness::Ready));
+    let ready = assets_ready && (dashboard_ready || gameplay_ready);
     // Readiness starts the bounded window; later match teardown must not restart it. Keeping the
     // original anchor makes the report cover the product match and its routed return-to-lobby
     // lifecycle instead of waiting forever once the measured match completes.
@@ -185,6 +219,13 @@ fn sample_and_finalize_render_measurement(
         return;
     }
     let now = time.elapsed();
+    if state.context.is_none() && ready {
+        state.context = Some(if dashboard_ready {
+            RenderMeasurementContext::Dashboard
+        } else {
+            RenderMeasurementContext::Gameplay
+        });
+    }
     let ready_at = *state.ready_at.get_or_insert(now);
     if let Some(map) = maps.iter().max_by_key(|map| map.identity.instance_id) {
         state.measured_map = Some(measured_map(map));
@@ -205,6 +246,8 @@ fn sample_and_finalize_render_measurement(
         sentries: evidence.sentries.iter().count(),
         meshes: evidence.meshes.len(),
         materials: evidence.materials.len(),
+        images: evidence.images.len(),
+        dashboard_owned: evidence.dashboard_owned.iter().count(),
     };
     let current = state.current;
     update_high_water(&mut state.high, current);
@@ -261,6 +304,8 @@ fn update_high_water(high: &mut HighWater, current: HighWater) {
     high.sentries = high.sentries.max(current.sentries);
     high.meshes = high.meshes.max(current.meshes);
     high.materials = high.materials.max(current.materials);
+    high.images = high.images.max(current.images);
+    high.dashboard_owned = high.dashboard_owned.max(current.dashboard_owned);
 }
 
 fn percentile(sorted: &[f64], percentage: usize) -> f64 {
@@ -269,6 +314,28 @@ fn percentile(sorted: &[f64], percentage: usize) -> f64 {
     }
     let index = ((sorted.len() - 1) * percentage).div_ceil(100);
     sorted[index.min(sorted.len() - 1)]
+}
+
+fn render_measurement_failure(
+    sample_count: usize,
+    p95: f64,
+    p99: f64,
+    over_25: usize,
+    over_100: usize,
+) -> Option<&'static str> {
+    if sample_count < 1_200 {
+        Some("sample_count")
+    } else if p95 > 18.5 {
+        Some("frame_p95_ms")
+    } else if p99 > 25.0 {
+        Some("frame_p99_ms")
+    } else if over_100 > 0 {
+        Some("frames_over_100_ms")
+    } else if over_25.saturating_mul(100) > sample_count {
+        Some("frames_over_25_ms")
+    } else {
+        None
+    }
 }
 
 fn compose_report(
@@ -289,19 +356,7 @@ fn compose_report(
     let over_25 = samples.iter().filter(|value| **value > 25.0).count();
     let over_50 = samples.iter().filter(|value| **value > 50.0).count();
     let over_100 = samples.iter().filter(|value| **value > 100.0).count();
-    let failed = if samples.len() < 1_200 {
-        Some("sample_count")
-    } else if p95 > 18.5 {
-        Some("frame_p95_ms")
-    } else if p99 > 25.0 {
-        Some("frame_p99_ms")
-    } else if over_100 > 0 {
-        Some("frames_over_100_ms")
-    } else if over_25.saturating_mul(100) > samples.len() {
-        Some("frames_over_25_ms")
-    } else {
-        None
-    };
+    let failed = render_measurement_failure(samples.len(), p95, p99, over_25, over_100);
     let (width, height) = window.map_or((0, 0), |window| {
         (window.physical_width(), window.physical_height())
     });
@@ -318,8 +373,9 @@ fn compose_report(
     let mode_id =
         measured_map.map_or_else(|| "unknown".to_string(), |value| format!("{:?}", value.2));
     let theme_id = measured_map.map_or(0, |value| value.3.0);
+    let context = state.context.unwrap_or_default().name();
     format!(
-        "schema=2\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nterrain_chunk_high_water={}\nterrain_chunk_terminal={}\ndebris_high_water={}\ndebris_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nresult={}\nfirst_failure={}\n",
+        "schema=3\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nterrain_chunk_high_water={}\nterrain_chunk_terminal={}\ndebris_high_water={}\ndebris_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nresult={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -330,6 +386,7 @@ fn compose_report(
         width,
         height,
         RenderProfile::from_env().name(),
+        context,
         if fallback == ImportedWorldFallbackPolicy::ForcePrimitive {
             "primitive"
         } else {
@@ -368,6 +425,10 @@ fn compose_report(
         state.current.meshes,
         state.high.materials,
         state.current.materials,
+        state.high.images,
+        state.current.images,
+        state.high.dashboard_owned,
+        state.current.dashboard_owned,
         map_id,
         recipe_id,
         mode_id,

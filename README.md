@@ -62,7 +62,10 @@ local process tree.
 clients at 1280×720, records a bounded 10-second warm-up plus 30-second measurement, and writes
 `target/v3-render-evidence.txt` without overwriting an existing report. Set
 `BRAWLER_RENDER_MODE=hot-zone` to target the exact Hot Zone 2v2 game type with two additional
-headless roster clients, or pass a different report path.
+headless roster clients, or pass a different report path. Render-report schema 3 identifies
+`measurement_context=gameplay` for this route and `measurement_context=dashboard` when an
+interactive release client settles on its authenticated Dashboard; both contexts include bounded
+Image counts, and Dashboard reports also include explicitly owned preview/UI roots.
 
 `just test` owns all deterministic Rust suites, including routing, client, server, network, and
 performance tests. `just e2e` runs the shortest real-process product path with two clients and First
@@ -72,10 +75,19 @@ commands and scripts remain available for diagnostics, but they are deliberately
 top-level `just` recipes. E2E runs choose an unused loopback port by default, so they can run beside
 an interactive server; set `BRAWLER_ROUTED_BIND` only when a fixed test address is required.
 
-Normal client startup opens the product Title without connecting. Play opens Server Select for
-multiplayer; Practice uses the same server connection and advertised game types but immediately
-starts a server-hosted authoritative match with inert `Bot N` fighters filling the roster. Neither
-path launches server processes from the client. The first-run address is `127.0.0.1:5000`.
+Normal client startup immediately attempts the explicit `--server`, otherwise the most recent
+successful server, otherwise `127.0.0.1:5000`. A successful connection opens the Player Dashboard;
+cancel or failure opens Server Select. Dashboard owns Change Brawler, Change Game, multiplayer
+Play, and Practice. Practice uses the connected server and selected advertised game type to start a
+server-hosted authoritative match with inert `Bot N` fighters filling the roster. Neither path
+launches server processes from the client.
+
+The Dashboard preserves its accepted three-card Wide composition when effective UI space is at
+least `1000x640`. Below either threshold it becomes a vertically scrollable Compact composition;
+the threshold uses logical window size divided by the persisted UI scale. Arrow keys, WASD, and the
+controller D-pad navigate spatially, focused actions are scrolled into view, disabled actions are
+skipped, and every Dashboard action exposes a factual accessible label. Reduced Motion and Reduced
+Effects freeze the slow procedural background without removing focus or state feedback.
 
 Server game types are authored in `config/server/game-types.ron`. Each entry owns flat match rules:
 Wipeout uses `kills_to_win`, Hot Zone uses `capture_seconds`, and every entry declares
@@ -127,9 +139,9 @@ comparable samples or common-window checkpoints produce an explicit `unsupported
 tests without starting processes.
 
 The server accepts `--bind`, `--max-clients`, and `--handshake-timeout-ms`. A normal windowed client
-starts at the controller-friendly Title screen and does not connect; `--client-id` defaults to 1 in
-that offline shell. `--auto-connect` selects the established development/network path and requires
-an explicit `--client-id`. The client also accepts `--server`, `--local-addr`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
+uses the auto-connect product flow; `--client-id` defaults to 1. `--auto-connect` remains the
+explicit development/network path and requires an explicit `--client-id`. The client also accepts
+`--server`, `--local-addr`, and `--build-preset 1..5` (`1` Runner, `2` Bruiser, `3` Controller,
 `4` Duelist, `5` the default legal custom Pulse), plus bounded automation flags `--headless --exit-after-roster 2
 --move-axis X,Y --aim-axis X,Y --aim-dummy --fire --ultimate --simulation-ticks N`. `--combat-demo` enables the
 same authoritative aim-at-dummy/fire loop in a windowed client for a reproducible visual smoke run.
@@ -206,7 +218,7 @@ Do not use `--all-features` as a supported application build: client and server 
 Authoritative authored gameplay data lives under `content/v1/` and is compiled into both roles.
 Client-only runtime art/audio lives under `assets/brawler/`; exact source and CC0 provenance are
 recorded in `assets/manifest.ron` with retained source license texts under `assets/licenses/`.
-The active implementation scope is always the next validated milestone file. V4 is complete; V5
-research defines the next proposed product-shell work, while production implementation still waits
-for user validation of its milestone specification. Deferred release polish remains visible in the
-completed version roadmaps and root backlog.
+The active implementation scope is always the next validated milestone file. V4 and V5 are
+complete; V5 was accepted on 2026-08-22 after the responsive Dashboard, connected-loop convergence,
+lifecycle hardening, routed E2E, and native render evidence passed closeout. Deferred release polish
+remains visible in the version roadmaps and root backlog.

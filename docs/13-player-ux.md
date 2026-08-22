@@ -9,6 +9,23 @@ language below records the design as reviewed; the V2 roadmap and milestones con
 implementation evidence. V3 subsequently replaced gameplay-world presentation without changing
 this player-flow boundary.
 
+V5 supersedes the V2 navigation shell without rewriting this historical authority record. Normal
+startup now auto-connects and enters the Player Dashboard; Server Select is the recovery/manual
+connection surface. Game Type Select and Build Editor are Dashboard children with Confirm/Back.
+Dashboard Play and Practice are the only ordinary admission initiators. Queue/loading cancellation,
+confirmed leave, and no-result lobby return converge on Dashboard, while Results exposes only exact
+fresh-catalog replay and Dashboard. The current map is maintained in
+[PewPew Blitz screen-flow audit](./screen-flow-map.md); any Title-first or Game-Select-hub language
+below describes the completed V2 baseline, not the V5 product flow.
+
+V5 M03 hardens that current shell across the validated desktop window/UI-scale range. The Dashboard
+uses the accepted Wide hierarchy when effective UI space is at least `1000x640` and a vertically
+scrollable Compact hierarchy below either threshold. It keeps the actual gameplay model and preview
+target alive while resizing, follows keyboard/gamepad focus through the compact scroll, skips
+disabled targets, exposes factual accessible labels, and freezes the procedural field under Reduced
+Motion or Reduced Effects. These rules are presentation-only and do not alter session, admission,
+or gameplay authority.
+
 In this document, **matchmaking** means direct-connect, server-local, skill-free queueing: the
 player first joins a known server, selects one of its game types, and the server forms matches from
 that game type's pool. V2 does not include global or cross-server matchmaking, ELO/rank, parties,

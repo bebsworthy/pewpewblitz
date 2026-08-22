@@ -28,8 +28,8 @@ allocates a worker, and match workers still own gameplay and outcomes.
 
 ## User-requested direction
 
-The following direction was accepted and delivered through M01; M02 now completes its connected
-child-screen and return-loop implications:
+The following direction was accepted and delivered through M01 and M02; M03 now hardens and closes
+the complete connected product loop:
 
 1. Remove the standalone Title screen from the ordinary launch path.
 2. Auto-connect to one last/default/preferred server and show Connecting during the attempt.
@@ -53,10 +53,10 @@ child-screen and return-loop implications:
 
 | Field | Value |
 |---|---|
-| Status | Researching |
-| Current milestone | M02 — Dashboard-owned selection and connected-loop convergence |
-| Entry gate | Satisfied: V5 M01 was accepted and completed on 2026-08-21 |
-| Completion gate | Normal launch, connected hub, selection, queue/practice, match exit, recovery, settings, controller/pointer navigation, and native presentation form one accepted dashboard-centered loop |
+| Status | Complete |
+| Current milestone | None — V5 completed on 2026-08-22 |
+| Entry gate | Satisfied: V5 M02 was accepted and completed on 2026-08-22 |
+| Completion gate | Satisfied: normal launch, connected hub, selection, queue/practice, match exit, recovery, settings, input navigation, and native presentation form one accepted dashboard-centered loop |
 
 Allowed statuses are `Not started`, `Researching`, `Specification review`, `Implementing`,
 `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`.
@@ -66,8 +66,8 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
 | 01 | Complete | Auto-connect launch and a functional Player Dashboard showing the current brawler, game type, server/session identity, Play, Practice, and utilities | [milestone-01.md](./milestone-01.md) |
-| 02 | Researching | Dashboard-owned brawler/game selection and a match/queue/results loop whose ordinary exits converge on the dashboard | [milestone-02.md](./milestone-02.md) |
-| 03 | Not started | Responsive visual, input, accessibility, recovery, lifecycle, and native-performance hardening plus V5 closeout | Create when M02 is complete |
+| 02 | Complete | Dashboard-owned brawler/game selection and a match/queue/results loop whose ordinary exits converge on the dashboard | [milestone-02.md](./milestone-02.md) |
+| 03 | Complete | Responsive visual, input, accessibility, recovery, lifecycle, and native-performance hardening plus V5 closeout | [milestone-03.md](./milestone-03.md) |
 
 ## Ordering rationale and milestone gates
 
@@ -164,5 +164,18 @@ canonical client/server/routing checks pass; user feedback and the learning revi
 | V5-PREVIEW-COMPOSITION | Dedicated Bevy 0.19 UI viewport using the actual presentation model/weapon/idle and a separately owned lifecycle | Resolved in M01 specification |
 | V5-RESULTS-ACTIONS | Decide exact Play Again/Practice Again/Dashboard behavior and recovery when the previous selection is stale | M02 specification |
 | V5-BRANDING-PROMOTION | Clean and promote `inspiration/logo2.png` as the loading lockup and `inspiration/wordmark.png` as the compact header mark, preserving transparent masters and verifying real-size rendering | M01 implementation |
-| V5-ORIGINAL-DASHBOARD-ART | Replace remaining functional layout/materials and generated concept icons with original polished PewPew Blitz UI art | Defer until the interaction hierarchy is accepted |
+| V5-ORIGINAL-DASHBOARD-ART | Replace the accepted licensed functional UI set with one bespoke original PewPew Blitz art pack | Deferred outside V5; specify later only with an art-production budget and coherent replacement target |
 | V5-INTERNAL-NAME-MIGRATION | Decide whether repository/crate/module/config identifiers should ever move from the historical Brawler name | Outside the display-name change; specify separately only if worthwhile |
+
+## V5 closeout
+
+V5 completed and was accepted on 2026-08-22. M01 established deterministic auto-connect and the
+factual Player Dashboard using the PewPew Blitz brand and actual gameplay model. M02 made brawler
+and game-type selection Dashboard children and converged queue, loading, match exit, and Results on
+the connected home. M03 added effective-space responsive layouts, spatial focus, factual accessible
+labels, recovery/lifecycle hardening, and Dashboard/gameplay native render evidence.
+
+Canonical tests, server feature isolation, routed 1v1/2v2/3v3 E2E, and the locked native frame-time
+thresholds passed. The closeout accepts physical-controller and subjective maximum-size/scale
+observations as unevidenced limitations rather than claimed passes. Bespoke original Dashboard art
+and any historical internal Brawler-name migration remain explicitly outside V5.

@@ -770,6 +770,9 @@ pub(super) fn send_build_selection_request(
     statuses: Query<&ClientJoinStatus, With<Client>>,
     mut senders: Query<&mut MessageSender<BuildSelectionRequest>, With<Client>>,
 ) {
+    if config.presents_product_shell() {
+        return;
+    }
     if config.transport == NetworkTransport::RoutedUdp && routed.phase != RoutedClientPhase::Match {
         return;
     }
@@ -1013,6 +1016,7 @@ pub(super) fn crossbeam_transport(config: &ClientNetworkConfig) -> bool {
 )]
 #[allow(clippy::too_many_lines)]
 pub(super) fn update_build_selection_overlay(
+    config: Res<ClientNetworkConfig>,
     state: Res<BuildSelectionState>,
     catalog: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
@@ -1020,6 +1024,12 @@ pub(super) fn update_build_selection_overlay(
     fighters: Query<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>,
     mut overlay: Query<(&mut Text, &mut Visibility), With<BuildSelectionText>>,
 ) {
+    if config.presents_product_shell() {
+        for (_, mut visibility) in &mut overlay {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
     let selecting = fighters.iter().next().is_some();
     let preset = catalog.0.presets.get(state.current_index);
     let current = preset.map_or("Custom Pulse", |preset| preset.display_name.as_str());

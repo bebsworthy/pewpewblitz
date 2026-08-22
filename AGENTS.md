@@ -7,19 +7,22 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the completed independently
+2. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
+   responsive Player Dashboard, connected-loop convergence, recovery/lifecycle hardening, and V5
+   closeout evidence.
+3. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the completed independently
    embedded map documents, semantic object placement, two reusable themes, routed admission,
    presentation hardening, and V4 closeout evidence.
-3. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
+4. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
-4. `docs/11-art-and-presentation-direction.md` and `docs/12-sprite-inventory.md` for the current
+5. `docs/11-art-and-presentation-direction.md` and `docs/12-sprite-inventory.md` for the current
    renderer, readability, and asset-family contracts.
-5. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-6. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
+6. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
+7. `docs/13-player-ux.md` and `docs/14-multiplayer-server-architecture.md` for the completed V2
    player-flow and routed-process decisions that V3 preserves.
-7. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
+8. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
    baseline and closeout evidence.
-8. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
+9. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
    verification evidence, deferred release polish, and the direct-UDP comparison baseline.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
@@ -36,7 +39,10 @@ and its learning review. V4 M01 completed after its accepted first presentation 
 review. V4 M02 completed on 2026-08-21 after canonical verification and a user playtest confirmed
 that the storage migration preserved the accepted presentation. V4 M03 and V4 completed on
 2026-08-21 after Ashen Court and the second theme passed canonical/native verification, the
-detached-overhead feedback fix was accepted, and the learning review was recorded.
+detached-overhead feedback fix was accepted, and the learning review was recorded. V5 completed and
+was accepted on 2026-08-22 after auto-connect, the responsive Player Dashboard, connected-loop
+convergence, recovery/lifecycle hardening, routed 1v1/2v2/3v3 E2E, and native Dashboard/gameplay
+render evidence passed closeout.
 
 ## Technical stack
 

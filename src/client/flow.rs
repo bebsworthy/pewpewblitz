@@ -21,7 +21,8 @@ use bevy::{
     },
     prelude::*,
     tasks::{IoTaskPool, Task, block_on, poll_once},
-    ui::{InteractionDisabled, ScrollPosition},
+    ui::{InteractionDisabled, ScrollPosition, UiScale, UiSystems},
+    window::PrimaryWindow,
 };
 use lightyear::prelude::client::{Client, Disconnect};
 use lightyear::prelude::{Unlink, UnlinkReason};
@@ -40,7 +41,16 @@ const BUILD_EDITOR_FIELD_BASE: usize = 2_010;
 const BUILD_EDITOR_OPTION_BASE: usize = 2_030;
 const BUILD_EDITOR_JOIN_INDEX: usize = 2_100;
 const BUILD_EDITOR_BACK_INDEX: usize = 2_101;
-const BUILD_EDITOR_DISCONNECT_INDEX: usize = 2_102;
+const GAME_TYPE_CONFIRM_INDEX: usize = 1_000;
+const GAME_TYPE_BACK_INDEX: usize = 1_001;
+const DASHBOARD_PLAY_INDEX: usize = 0;
+const DASHBOARD_PRACTICE_INDEX: usize = 1;
+const DASHBOARD_GAME_INDEX: usize = 2;
+const DASHBOARD_BUILD_INDEX: usize = 3;
+const DASHBOARD_SETTINGS_INDEX: usize = 4;
+const DASHBOARD_MENU_INDEX: usize = 5;
+const DASHBOARD_COMPACT_WIDTH: f32 = 1_000.0;
+const DASHBOARD_COMPACT_HEIGHT: f32 = 640.0;
 
 #[derive(States, Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum ClientFlow {
@@ -48,7 +58,7 @@ pub enum ClientFlow {
     Connecting,
     ServerSelect,
     Dashboard,
-    GameSelect,
+    GameTypeSelect,
     Queue,
     MatchLoading,
     Match,
@@ -148,8 +158,9 @@ enum FlowUiAction {
     DismissError,
     JoinSaved(String),
     RemoveFavorite(String),
-    SelectGame(usize),
-    ToggleFavorite,
+    SelectGameTypeDraft(usize),
+    ConfirmGameType,
+    CancelGameType,
     Disconnect,
     RequestChangeServer,
     OpenDashboardMenu,
@@ -159,6 +170,7 @@ enum FlowUiAction {
     Quit,
     OpenSettings,
     OpenCredits,
+    ToggleFavoriteServer,
     OpenBuildEditor,
     ChooseBuild(usize),
     FocusBuildField(usize),
@@ -177,7 +189,8 @@ enum FlowUiAction {
     KeepLoading,
     ConfirmCancelMatchStart,
     QueueAgain,
-    ChangeGame,
+    OpenGameTypeSelect,
+    ReturnToDashboard,
     KeepPlaying,
     ConfirmLeaveMatch,
 }
@@ -349,9 +362,36 @@ pub struct SelectedGameType {
     pub configuration_revision: Option<u32>,
 }
 
+#[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
+struct GameTypeSelectionDraft {
+    selected_index: Option<usize>,
+    unavailable_previous: bool,
+}
+
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+struct DashboardReturnFocus(Option<usize>);
+
+#[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
+struct DashboardNotice(Option<String>);
+
 #[derive(Resource, Default)]
 struct FlowNavigation {
     selected: usize,
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum DashboardLayoutClass {
+    #[default]
+    Wide,
+    Compact,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DashboardNavigationDirection {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 #[derive(Resource, Default)]
@@ -359,6 +399,25 @@ struct MatchFailureNotice(bool);
 
 #[derive(Component)]
 struct FlowRoot;
+
+#[derive(Component)]
+pub(super) struct DashboardRoot;
+
+#[derive(Component, Clone, Copy)]
+enum DashboardLayoutRole {
+    Root,
+    Header,
+    Wordmark,
+    Identity,
+    HeaderSpacer,
+    Center,
+    Preview,
+    Build,
+    ActionRow,
+    Mode,
+    UtilityButton { wide_width: f32 },
+    UtilityLabel { has_icon: bool },
+}
 
 #[derive(Component, Clone, Debug)]
 struct FlowButton {
@@ -390,12 +449,6 @@ struct BuildEditorRenderKey {
     custom_recipe: crate::builds::BrawlerBuildRecipe,
     focused_field: super::BuildEditorField,
     inline_error: Option<String>,
-    game_type_id: Option<crate::lobby::GameTypeId>,
-    game_name: String,
-    joining: bool,
-    capacity_occupied: bool,
-    practice: bool,
-    select_only: bool,
 }
 
 #[derive(Component)]
@@ -405,10 +458,10 @@ struct GamePopulationLabel(usize);
 struct DashboardGameSummaryLabel;
 
 #[derive(Component)]
-struct DashboardPlayButton;
+struct DashboardPlayLabel;
 
 #[derive(Component)]
-struct DashboardPlayLabel;
+struct DashboardPracticeLabel;
 
 #[derive(Component)]
 struct QueueStatusLabel;
@@ -489,6 +542,9 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<crate::builds::BuildCatalogResource>()
             .init_resource::<crate::combat::WeaponCatalogResource>()
             .init_resource::<SelectedGameType>()
+            .init_resource::<GameTypeSelectionDraft>()
+            .init_resource::<DashboardReturnFocus>()
+            .init_resource::<DashboardNotice>()
             .init_resource::<SessionPurpose>()
             .init_resource::<super::ClientMatchResultState>()
             .init_resource::<RoutedClientLifecycle>()
@@ -576,18 +632,29 @@ impl Plugin for ClientFlowPlugin {
             )
             .add_systems(
                 Update,
-                (update_dashboard_live_facts, present_dashboard_menu)
+                (
+                    apply_dashboard_layout,
+                    scroll_dashboard.after(apply_dashboard_layout),
+                    update_dashboard_live_facts,
+                    present_dashboard_menu,
+                )
                     .in_set(ClientFlowSet::PresentFlow)
                     .before(present_flow),
             )
             .add_systems(OnEnter(ClientFlow::ServerSelect), spawn_server_select)
             .add_systems(OnEnter(ClientFlow::Connecting), spawn_connecting)
             .add_systems(OnEnter(ClientFlow::Dashboard), spawn_dashboard)
-            .add_systems(OnEnter(ClientFlow::GameSelect), spawn_game_select)
+            .add_systems(OnEnter(ClientFlow::GameTypeSelect), spawn_game_type_select)
             .add_systems(OnEnter(ClientFlow::Match), enter_match_input)
             .add_systems(OnEnter(ClientFlow::Results), spawn_results)
             .add_systems(OnExit(ClientFlow::Results), clear_results)
             .add_systems(OnExit(ClientFlow::Match), exit_match_input);
+        app.add_systems(
+            PostUpdate,
+            keep_dashboard_focus_visible
+                .after(UiSystems::Layout)
+                .run_if(in_state(ClientFlow::Dashboard)),
+        );
         app.add_systems(OnEnter(ClientFlow::Queue), spawn_queue);
         app.add_systems(OnEnter(ClientFlow::MatchLoading), spawn_match_loading);
     }
@@ -739,7 +806,7 @@ fn observe_session(
     mut resolver: ResMut<ResolverState>,
     memberships: Query<(Entity, &ClientLobbyMembership), With<Client>>,
     failures: Query<&ClientLobbyFailure, With<Client>>,
-    statuses: Query<&ClientJoinStatus, (With<Client>, With<RoutedClientSession>)>,
+    statuses: Query<(&ClientJoinStatus, &RoutedClientSession), With<Client>>,
     match_states: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
     mut actions: ResMut<PendingFlowActions>,
     mut queue: ResMut<super::ClientQueueModel>,
@@ -779,9 +846,11 @@ fn observe_session(
     }
     if *flow.get() == ClientFlow::Match
         && memberships.iter().next().is_some()
-        && statuses
-            .iter()
-            .any(|status| matches!(status.phase, ClientJoinPhase::LobbyActive { .. }))
+        && statuses.iter().any(|(status, session)| {
+            session.kind == super::RoutedClientSessionKind::Lobby
+                && session.generation == routed.generation
+                && matches!(status.phase, ClientJoinPhase::LobbyActive { .. })
+        })
     {
         actions.session = Some(SessionObservation::FreshLobbyReturn);
         return;
@@ -789,9 +858,11 @@ fn observe_session(
     if *flow.get() == ClientFlow::Match
         && routed.phase == RoutedClientPhase::Match
         && result_state.context.is_none()
-        && statuses
-            .iter()
-            .any(|status| matches!(status.phase, ClientJoinPhase::Disconnected))
+        && statuses.iter().any(|(status, session)| {
+            session.kind == super::RoutedClientSessionKind::Match
+                && session.generation == routed.generation
+                && matches!(status.phase, ClientJoinPhase::Disconnected)
+        })
     {
         actions.session = Some(SessionObservation::MatchFailed);
         return;
@@ -815,12 +886,16 @@ fn observe_session(
     }
     if matches!(
         *flow.get(),
-        ClientFlow::Dashboard | ClientFlow::GameSelect | ClientFlow::Queue
+        ClientFlow::Dashboard
+            | ClientFlow::GameTypeSelect
+            | ClientFlow::Queue
+            | ClientFlow::Results
     ) {
-        if statuses
-            .iter()
-            .any(|status| matches!(status.phase, ClientJoinPhase::Disconnected))
-        {
+        if statuses.iter().any(|(status, session)| {
+            session.kind == super::RoutedClientSessionKind::Lobby
+                && session.generation == routed.generation
+                && matches!(status.phase, ClientJoinPhase::Disconnected)
+        }) {
             actions.session = Some(SessionObservation::UnexpectedLoss);
         } else if queue.take_timeout_notice() {
             actions.session = Some(SessionObservation::QueueTimedOut);
@@ -839,11 +914,11 @@ fn observe_session(
     }
     let disconnected = statuses
         .iter()
-        .any(|status| matches!(status.phase, ClientJoinPhase::Disconnected));
+        .any(|(status, _)| matches!(status.phase, ClientJoinPhase::Disconnected));
     if memberships.iter().next().is_some()
         && statuses
             .iter()
-            .any(|status| matches!(status.phase, ClientJoinPhase::LobbyActive { .. }))
+            .any(|(status, _)| matches!(status.phase, ClientJoinPhase::LobbyActive { .. }))
     {
         actions.session = Some(accepted_observation(time.elapsed(), &pending, disconnected));
         return;
@@ -853,7 +928,7 @@ fn observe_session(
         actions.session = Some(observation_for_expiry(expiry));
         return;
     }
-    if let Some(status) = statuses.iter().next() {
+    if let Some((status, _)) = statuses.iter().next() {
         if matches!(status.phase, ClientJoinPhase::AwaitingOutcome) {
             pending.stage = ConnectionStage::JoiningLobby;
         }
@@ -881,6 +956,7 @@ fn collect_flow_input(
     path: Res<ClientConnectionsPath>,
     mut navigation: ResMut<FlowNavigation>,
     buttons: Query<(&FlowButton, &Interaction, Has<InteractionDisabled>)>,
+    dashboard_layout: Query<&DashboardLayoutClass, With<DashboardRoot>>,
     mut actions: ResMut<PendingFlowActions>,
     queue: Res<super::ClientQueueModel>,
 ) {
@@ -967,20 +1043,49 @@ fn collect_flow_input(
         .map(|(button, _, _)| button.index)
         .collect::<Vec<_>>();
     available.sort_unstable();
+    available.dedup();
     if !available.is_empty() {
-        let position = available
-            .iter()
-            .position(|index| *index == navigation.selected)
-            .unwrap_or(0);
-        if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
-            || pad_pressed(GamepadButton::DPadDown)
-        {
-            navigation.selected = available[(position + 1).min(available.len() - 1)];
-        }
-        if keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
-            || pad_pressed(GamepadButton::DPadUp)
-        {
-            navigation.selected = available[position.saturating_sub(1)];
+        if *flow.get() == ClientFlow::Dashboard && matches!(*overlay, ClientOverlay::None) {
+            navigation.selected = repair_dashboard_focus(navigation.selected, &available);
+            let direction = if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
+                || pad_pressed(GamepadButton::DPadDown)
+            {
+                Some(DashboardNavigationDirection::Down)
+            } else if keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
+                || pad_pressed(GamepadButton::DPadUp)
+            {
+                Some(DashboardNavigationDirection::Up)
+            } else if keyboard.any_just_pressed([KeyCode::ArrowLeft, KeyCode::KeyA])
+                || pad_pressed(GamepadButton::DPadLeft)
+            {
+                Some(DashboardNavigationDirection::Left)
+            } else if keyboard.any_just_pressed([KeyCode::ArrowRight, KeyCode::KeyD])
+                || pad_pressed(GamepadButton::DPadRight)
+            {
+                Some(DashboardNavigationDirection::Right)
+            } else {
+                None
+            };
+            if let Some(direction) = direction {
+                let class = dashboard_layout.iter().next().copied().unwrap_or_default();
+                navigation.selected =
+                    dashboard_focus_neighbor(class, navigation.selected, direction, &available);
+            }
+        } else {
+            let position = available
+                .iter()
+                .position(|index| *index == navigation.selected)
+                .unwrap_or(0);
+            if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
+                || pad_pressed(GamepadButton::DPadDown)
+            {
+                navigation.selected = available[(position + 1).min(available.len() - 1)];
+            }
+            if keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
+                || pad_pressed(GamepadButton::DPadUp)
+            {
+                navigation.selected = available[position.saturating_sub(1)];
+            }
         }
     }
     if (keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
@@ -1008,13 +1113,15 @@ fn collect_flow_input(
             FlowUiAction::KeepServer
         } else if matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
             FlowUiAction::CloseDashboardMenu
+        } else if matches!(overlay.as_ref(), ClientOverlay::Confirmation(_)) {
+            FlowUiAction::KeepLoading
         } else {
             match *flow.get() {
                 ClientFlow::Connecting => FlowUiAction::Cancel,
-                ClientFlow::GameSelect => FlowUiAction::ChangeGame,
-                ClientFlow::Queue | ClientFlow::MatchLoading | ClientFlow::Results => {
-                    FlowUiAction::Disconnect
-                }
+                ClientFlow::GameTypeSelect => FlowUiAction::CancelGameType,
+                ClientFlow::Queue => FlowUiAction::CancelQueue,
+                ClientFlow::MatchLoading => FlowUiAction::RequestCancelMatchStart,
+                ClientFlow::Results => FlowUiAction::ReturnToDashboard,
                 ClientFlow::Match => {
                     if matches!(overlay.as_ref(), ClientOverlay::LeaveConfirmation) {
                         FlowUiAction::KeepPlaying
@@ -1028,6 +1135,69 @@ fn collect_flow_input(
         };
         queue_ui_action(&mut actions, action);
     }
+}
+
+fn repair_dashboard_focus(current: usize, available: &[usize]) -> usize {
+    if available.contains(&current) {
+        return current;
+    }
+    [
+        DASHBOARD_PLAY_INDEX,
+        DASHBOARD_PRACTICE_INDEX,
+        DASHBOARD_GAME_INDEX,
+        DASHBOARD_BUILD_INDEX,
+        DASHBOARD_SETTINGS_INDEX,
+        DASHBOARD_MENU_INDEX,
+    ]
+    .into_iter()
+    .find(|index| available.contains(index))
+    .unwrap_or(current)
+}
+
+fn dashboard_focus_neighbor(
+    class: DashboardLayoutClass,
+    current: usize,
+    direction: DashboardNavigationDirection,
+    available: &[usize],
+) -> usize {
+    let raw_neighbor = |index| match direction {
+        DashboardNavigationDirection::Left => match index {
+            DASHBOARD_PLAY_INDEX => Some(DASHBOARD_PRACTICE_INDEX),
+            DASHBOARD_PRACTICE_INDEX => Some(DASHBOARD_GAME_INDEX),
+            DASHBOARD_MENU_INDEX => Some(DASHBOARD_SETTINGS_INDEX),
+            _ => None,
+        },
+        DashboardNavigationDirection::Right => match index {
+            DASHBOARD_GAME_INDEX => Some(DASHBOARD_PRACTICE_INDEX),
+            DASHBOARD_PRACTICE_INDEX => Some(DASHBOARD_PLAY_INDEX),
+            DASHBOARD_SETTINGS_INDEX => Some(DASHBOARD_MENU_INDEX),
+            _ => None,
+        },
+        DashboardNavigationDirection::Up => match (class, index) {
+            (DashboardLayoutClass::Compact, DASHBOARD_PLAY_INDEX) => Some(DASHBOARD_PRACTICE_INDEX),
+            (DashboardLayoutClass::Compact, DASHBOARD_PRACTICE_INDEX) => Some(DASHBOARD_GAME_INDEX),
+            (_, DASHBOARD_PLAY_INDEX | DASHBOARD_PRACTICE_INDEX | DASHBOARD_GAME_INDEX) => {
+                Some(DASHBOARD_BUILD_INDEX)
+            }
+            (_, DASHBOARD_BUILD_INDEX) => Some(DASHBOARD_SETTINGS_INDEX),
+            _ => None,
+        },
+        DashboardNavigationDirection::Down => match (class, index) {
+            (_, DASHBOARD_SETTINGS_INDEX | DASHBOARD_MENU_INDEX) => Some(DASHBOARD_BUILD_INDEX),
+            (_, DASHBOARD_BUILD_INDEX) => Some(DASHBOARD_GAME_INDEX),
+            (DashboardLayoutClass::Compact, DASHBOARD_GAME_INDEX) => Some(DASHBOARD_PRACTICE_INDEX),
+            (DashboardLayoutClass::Compact, DASHBOARD_PRACTICE_INDEX) => Some(DASHBOARD_PLAY_INDEX),
+            _ => None,
+        },
+    };
+    let mut candidate = current;
+    while let Some(next) = raw_neighbor(candidate) {
+        if available.contains(&next) {
+            return next;
+        }
+        candidate = next;
+    }
+    current
 }
 
 fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
@@ -1082,7 +1252,12 @@ fn resolve_flow_action(
     >,
     path: Res<ClientConnectionsPath>,
     overlay: Res<ClientOverlay>,
-    mut selection: ResMut<SelectedGameType>,
+    dashboard: (
+        ResMut<SelectedGameType>,
+        ResMut<GameTypeSelectionDraft>,
+        ResMut<DashboardReturnFocus>,
+        ResMut<DashboardNotice>,
+    ),
     models: (
         ResMut<super::ClientQueueModel>,
         ResMut<super::ClientPracticeModel>,
@@ -1094,11 +1269,15 @@ fn resolve_flow_action(
         MessageWriter<AppExit>,
         Res<ClientLocalLoadFailures>,
     ),
-    mut editor: ResMut<super::BuildEditorState>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
-    build_path: Res<super::ClientBuildPath>,
+    build_editor: (
+        ResMut<super::BuildEditorState>,
+        Res<crate::builds::BuildCatalogResource>,
+        Res<crate::combat::WeaponCatalogResource>,
+        Res<super::ClientBuildPath>,
+    ),
 ) {
+    let (mut selection, mut game_draft, mut dashboard_focus, mut dashboard_notice) = dashboard;
+    let (mut editor, builds, weapons, build_path) = build_editor;
     let (
         mut queue,
         mut practice,
@@ -1114,6 +1293,7 @@ fn resolve_flow_action(
         match explicit {
             FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer => {
                 commit.teardown = true;
+                commit.overlay = Some(OverlayCommit::Clear);
                 commit.next_flow = Some(if *purpose == SessionPurpose::Practice {
                     *purpose = SessionPurpose::Multiplayer;
                     ClientFlow::ServerSelect
@@ -1121,16 +1301,15 @@ fn resolve_flow_action(
                     ClientFlow::ServerSelect
                 });
                 *selection = SelectedGameType::default();
+                *game_draft = GameTypeSelectionDraft::default();
+                dashboard_notice.0 = None;
                 result_state.context = None;
                 editor.close_without_acceptance();
             }
             FlowUiAction::CancelBuildEditor => {
                 editor.close_without_acceptance();
                 commit.overlay = Some(OverlayCommit::Clear);
-                commit.focus_index = membership
-                    .iter()
-                    .next()
-                    .map(|(membership, _, _)| membership.game_types.len());
+                commit.focus_index = Some(DASHBOARD_BUILD_INDEX);
             }
             _ => {}
         }
@@ -1165,6 +1344,7 @@ fn resolve_flow_action(
                         commit.error = Some(error);
                     }
                     *selection = SelectedGameType::default();
+                    dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
                     commit.next_flow = Some(ClientFlow::Dashboard);
                 }
             }
@@ -1233,6 +1413,10 @@ fn resolve_flow_action(
             SessionObservation::UnexpectedLoss => {
                 commit.teardown = true;
                 *selection = SelectedGameType::default();
+                *game_draft = GameTypeSelectionDraft::default();
+                dashboard_notice.0 = None;
+                result_state.context = None;
+                editor.close_without_acceptance();
                 fail_to_server_select(
                     &mut commit,
                     "The lobby connection was lost unexpectedly".to_string(),
@@ -1299,16 +1483,19 @@ fn resolve_flow_action(
                     selection.game_type_id = Some(game.id.clone());
                     selection.configuration_revision = Some(game.configuration_revision);
                 }
-                commit.next_flow = Some(if result_state.context.is_some() {
+                let destination = if result_state.context.is_some() {
                     ClientFlow::Results
                 } else {
-                    ClientFlow::GameSelect
-                });
+                    *purpose = SessionPurpose::Multiplayer;
+                    dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
+                    ClientFlow::Dashboard
+                };
+                commit.next_flow = Some(destination);
                 if core::mem::take(&mut match_failure.0) {
                     commit.error = Some(FlowError {
                         kind: FlowErrorKind::Connection,
                         message: "The match server stopped unexpectedly".to_string(),
-                        return_flow: ClientFlow::GameSelect,
+                        return_flow: ClientFlow::Dashboard,
                         actions: [Some(FlowErrorAction::Back), None],
                     });
                 }
@@ -1320,12 +1507,28 @@ fn resolve_flow_action(
                 let _ = routed.request_return_to_lobby();
             }
             SessionObservation::PracticeRejected(reason) => {
-                commit.error = Some(FlowError {
-                    kind: FlowErrorKind::Practice,
-                    message: practice_rejection_copy(reason).to_string(),
-                    return_flow: ClientFlow::GameSelect,
-                    actions: [Some(FlowErrorAction::Back), None],
-                });
+                if matches!(
+                    reason,
+                    crate::lobby::PracticeStartRejection::StaleCatalog
+                        | crate::lobby::PracticeStartRejection::StaleGameConfiguration
+                        | crate::lobby::PracticeStartRejection::UnknownGameType
+                ) {
+                    commit.teardown = true;
+                    fail_to_server_select_with_kind(
+                        &mut commit,
+                        FlowErrorKind::Content,
+                        "The lobby content changed incompatibly; reconnect to obtain a fresh game list"
+                            .to_string(),
+                        true,
+                    );
+                } else {
+                    commit.error = Some(FlowError {
+                        kind: FlowErrorKind::Practice,
+                        message: practice_rejection_copy(reason).to_string(),
+                        return_flow: *flow.get(),
+                        actions: [Some(FlowErrorAction::Back), None],
+                    });
+                }
             }
             SessionObservation::CountdownObserved => {
                 commit.next_flow = Some(ClientFlow::Match);
@@ -1399,32 +1602,27 @@ fn resolve_flow_action(
                     }
                 }
                 crate::lobby::QueueDecision::Cancelled { .. } => {
-                    commit.next_flow = Some(ClientFlow::GameSelect);
+                    *purpose = SessionPurpose::Multiplayer;
+                    dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
+                    commit.next_flow = Some(ClientFlow::Dashboard);
                     commit.overlay = Some(OverlayCommit::Clear);
                 }
                 crate::lobby::QueueDecision::Rejected(reason) => match reason {
                     crate::lobby::QueueRejection::IncompatiblePassives => {
-                        editor.inline_error = Some(
-                            "Lightweight Frame and Reinforced Frame cannot be combined".to_string(),
-                        );
-                        editor.focused_field = super::BuildEditorField::PassiveTwo;
-                        commit.focus_index = Some(build_editor_field_focus_index(
-                            super::BuildEditorField::PassiveTwo,
-                        ));
-                        if !editor.is_open {
-                            editor.is_open = true;
-                        }
-                        commit.overlay = Some(OverlayCommit::BuildEditor);
+                        commit.error = Some(FlowError {
+                            kind: FlowErrorKind::Queue,
+                            message: "The selected passives are incompatible".to_string(),
+                            return_flow: *flow.get(),
+                            actions: [Some(FlowErrorAction::Back), None],
+                        });
                     }
                     crate::lobby::QueueRejection::OverBudget { used, budget } => {
-                        editor.inline_error = Some(format!("Build uses {used} of {budget} points"));
-                        editor.focused_field = editor
-                            .last_edited_field
-                            .unwrap_or(super::BuildEditorField::Power);
-                        commit.focus_index =
-                            Some(build_editor_field_focus_index(editor.focused_field));
-                        editor.is_open = true;
-                        commit.overlay = Some(OverlayCommit::BuildEditor);
+                        commit.error = Some(FlowError {
+                            kind: FlowErrorKind::Queue,
+                            message: format!("The selected build uses {used} of {budget} points"),
+                            return_flow: *flow.get(),
+                            actions: [Some(FlowErrorAction::Back), None],
+                        });
                     }
                     crate::lobby::QueueRejection::StaleCatalog
                     | crate::lobby::QueueRejection::StaleGameConfiguration
@@ -1587,49 +1785,53 @@ fn resolve_flow_action(
                 commit.refresh_server_select = Some(2);
             }
         }
-        FlowUiAction::SelectGame(index) => {
-            if let Some((membership, _, _)) = membership.iter().next()
-                && let Some(game_type) = membership.game_types.get(index)
+        FlowUiAction::SelectGameTypeDraft(index) => {
+            if membership
+                .iter()
+                .next()
+                .is_some_and(|(membership, _, _)| index < membership.game_types.len())
             {
-                selection.catalog_revision = Some(membership.catalog_revision);
-                selection.game_type_id = Some(game_type.id.clone());
-                selection.configuration_revision = Some(game_type.configuration_revision);
-                if *flow.get() == ClientFlow::GameSelect {
-                    commit.next_flow = Some(ClientFlow::Dashboard);
-                }
+                game_draft.selected_index = Some(index);
             }
         }
-        FlowUiAction::ToggleFavorite => {
-            if let Some((membership, target, _)) = membership.iter().next() {
-                let Some(target) = target else {
-                    return;
-                };
-                if persistence
+        FlowUiAction::ConfirmGameType => {
+            if let Some((membership, _, _)) = membership.iter().next()
+                && accept_game_type_draft(&game_draft, membership, &mut selection)
+            {
+                dashboard_focus.0 = Some(DASHBOARD_GAME_INDEX);
+                commit.next_flow = Some(ClientFlow::Dashboard);
+            }
+        }
+        FlowUiAction::CancelGameType => {
+            *game_draft = GameTypeSelectionDraft::default();
+            dashboard_focus.0 = Some(DASHBOARD_GAME_INDEX);
+            commit.next_flow = Some(ClientFlow::Dashboard);
+        }
+        FlowUiAction::ToggleFavoriteServer => {
+            if let Some((membership, Some(target), _)) = membership.iter().next() {
+                let removed = persistence
                     .state
                     .favorites
                     .iter()
                     .any(|favorite| favorite.address == target.logical_address)
-                {
-                    persistence.state.remove_favorite(&target.logical_address);
-                } else if let Err(error) = persistence
-                    .state
-                    .add_favorite(&membership.server_name, &target.logical_address)
+                    && persistence.state.remove_favorite(&target.logical_address);
+                if !removed
+                    && let Err(error) = persistence
+                        .state
+                        .add_favorite(&membership.server_name, &target.logical_address)
                 {
                     persistence.dirty_error = Some(error);
                     return;
                 }
                 if let Err(error) = save_connections(&path.0, &persistence.state) {
                     persistence.dirty_error = Some(error);
+                    return;
                 }
+                commit.overlay = Some(OverlayCommit::Clear);
             }
         }
         FlowUiAction::OpenBuildEditor => {
-            if *purpose != SessionPurpose::Practice
-                && queue.snapshot().is_some_and(|snapshot| {
-                    snapshot.formation_availability
-                        == crate::lobby::FormationAvailability::ProductMatchOccupied
-                })
-            {
+            if queue.pending().is_some() || practice.pending() {
                 return;
             }
             editor.open();
@@ -1660,6 +1862,7 @@ fn resolve_flow_action(
                 Ok(_) => {
                     editor.accept(draft);
                     commit.overlay = Some(OverlayCommit::Clear);
+                    commit.focus_index = Some(DASHBOARD_BUILD_INDEX);
                     let file = super::BuildFileV1::new(builds.0.balance_revision, draft);
                     if let Err(error) =
                         super::save_build(&build_path.0, file, &builds.0, &weapons.0)
@@ -1680,12 +1883,11 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::JoinQueue => {
-            let draft = if *flow.get() == ClientFlow::Dashboard {
-                *purpose = SessionPurpose::Multiplayer;
-                editor.loaded_selection
-            } else {
-                editor.selection(&builds.0)
-            };
+            if *flow.get() != ClientFlow::Dashboard || practice.pending() {
+                return;
+            }
+            *purpose = SessionPurpose::Multiplayer;
+            let draft = editor.loaded_selection;
             match super::resolve_build_preview(draft, &builds.0, &weapons.0) {
                 Ok(_) => {
                     let candidate = crate::builds::BuildCandidate {
@@ -1703,12 +1905,11 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::StartPractice => {
-            let draft = if *flow.get() == ClientFlow::Dashboard {
-                *purpose = SessionPurpose::Practice;
-                editor.loaded_selection
-            } else {
-                editor.selection(&builds.0)
-            };
+            if *flow.get() != ClientFlow::Dashboard || queue.pending().is_some() {
+                return;
+            }
+            *purpose = SessionPurpose::Practice;
+            let draft = editor.loaded_selection;
             match super::resolve_build_preview(draft, &builds.0, &weapons.0) {
                 Ok(_) => {
                     let candidate = crate::builds::BuildCandidate {
@@ -1726,7 +1927,30 @@ fn resolve_flow_action(
             }
         }
         FlowUiAction::QueueAgain => {
+            let exact_game_type_id = result_state
+                .context
+                .as_ref()
+                .and_then(|context| context.game_type_id.clone());
             if *purpose == SessionPurpose::Practice {
+                let Some((membership, _, _)) = membership.iter().find(|(_, _, session)| {
+                    session.kind == super::RoutedClientSessionKind::Lobby
+                        && session.generation == routed.generation
+                }) else {
+                    return;
+                };
+                let Some(game_type_id) = exact_game_type_id else {
+                    return;
+                };
+                let Some(game) = membership
+                    .game_types
+                    .iter()
+                    .find(|game| game.id == game_type_id)
+                else {
+                    return;
+                };
+                selection.catalog_revision = Some(membership.catalog_revision);
+                selection.game_type_id = Some(game.id.clone());
+                selection.configuration_revision = Some(game.configuration_revision);
                 let candidate = crate::builds::BuildCandidate {
                     build_revision: builds.0.balance_revision,
                     selection: editor.loaded_selection,
@@ -1741,20 +1965,14 @@ fn resolve_flow_action(
                 }
                 return;
             }
-            let current_lobby = membership
-                .iter()
-                .find(|(_, _, session)| session.kind == super::RoutedClientSessionKind::Lobby);
+            let current_lobby = membership.iter().find(|(_, _, session)| {
+                session.kind == super::RoutedClientSessionKind::Lobby
+                    && session.generation == routed.generation
+            });
             if let Some((_, _, session)) = current_lobby {
                 queue.bind_lobby_generation(session.generation);
             }
-            let game_type_id = result_state
-                .context
-                .as_ref()
-                .and_then(|context| context.game_type_id.clone())
-                .or_else(|| result_state.last_accepted_game_type_id.clone())
-                .or_else(|| queue.last_accepted_game_type_id().cloned())
-                .or_else(|| selection.game_type_id.clone());
-            let started = current_lobby.zip(game_type_id).is_some_and(
+            let started = current_lobby.zip(exact_game_type_id).is_some_and(
                 |((membership, _, session), game_type_id)| {
                     let started = queue.start_requeue_join(
                         session.generation,
@@ -1785,13 +2003,29 @@ fn resolve_flow_action(
                 });
             }
         }
-        FlowUiAction::ChangeGame => {
+        FlowUiAction::OpenGameTypeSelect => {
+            if queue.pending().is_some() || practice.pending() {
+                return;
+            }
+            if let Some((membership, _, _)) = membership.iter().next() {
+                let selected_index = selection.game_type_id.as_ref().and_then(|selected| {
+                    membership
+                        .game_types
+                        .iter()
+                        .position(|game| game.id == *selected)
+                });
+                game_draft.selected_index =
+                    selected_index.or_else(|| (!membership.game_types.is_empty()).then_some(0));
+                game_draft.unavailable_previous =
+                    selection.game_type_id.is_some() && selected_index.is_none();
+                commit.next_flow = Some(ClientFlow::GameTypeSelect);
+            }
+        }
+        FlowUiAction::ReturnToDashboard => {
             result_state.context = None;
-            commit.next_flow = Some(if *flow.get() == ClientFlow::GameSelect {
-                ClientFlow::Dashboard
-            } else {
-                ClientFlow::GameSelect
-            });
+            *purpose = SessionPurpose::Multiplayer;
+            dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
+            commit.next_flow = Some(ClientFlow::Dashboard);
         }
         FlowUiAction::KeepPlaying | FlowUiAction::KeepLoading => {
             commit.overlay = Some(OverlayCommit::Clear);
@@ -1807,16 +2041,12 @@ fn resolve_flow_action(
         }
         FlowUiAction::RetryQueue => {
             if queue.retry_pending(time.elapsed()) {
-                commit.overlay = queue
-                    .pending()
-                    .map(|pending| queue_recovery_overlay(&pending.command));
+                commit.overlay = Some(OverlayCommit::Clear);
             }
         }
         FlowUiAction::TryAgainQueue => {
             if queue.try_again_after_rate_limit(time.elapsed()) {
-                commit.overlay = queue
-                    .pending()
-                    .map(|pending| queue_recovery_overlay(&pending.command));
+                commit.overlay = Some(OverlayCommit::Clear);
             }
         }
         FlowUiAction::RequestCancelMatchStart => {
@@ -1841,6 +2071,23 @@ fn resolve_flow_action(
     let _ = flow;
 }
 
+fn accept_game_type_draft(
+    draft: &GameTypeSelectionDraft,
+    membership: &ClientLobbyMembership,
+    selection: &mut SelectedGameType,
+) -> bool {
+    let Some(game_type) = draft
+        .selected_index
+        .and_then(|index| membership.game_types.get(index))
+    else {
+        return false;
+    };
+    selection.catalog_revision = Some(membership.catalog_revision);
+    selection.game_type_id = Some(game_type.id.clone());
+    selection.configuration_revision = Some(game_type.configuration_revision);
+    true
+}
+
 const fn practice_rejection_copy(reason: crate::lobby::PracticeStartRejection) -> &'static str {
     match reason {
         crate::lobby::PracticeStartRejection::StaleCatalog
@@ -1859,17 +2106,6 @@ const fn practice_rejection_copy(reason: crate::lobby::PracticeStartRejection) -
         }
         crate::lobby::PracticeStartRejection::Internal => "The server could not start practice.",
     }
-}
-
-fn queue_recovery_overlay(command: &crate::lobby::QueueCommand) -> OverlayCommit {
-    match command {
-        crate::lobby::QueueCommand::Join(_) => OverlayCommit::BuildEditor,
-        crate::lobby::QueueCommand::Cancel(_) => OverlayCommit::Clear,
-    }
-}
-
-const fn build_editor_field_focus_index(field: super::BuildEditorField) -> usize {
-    BUILD_EDITOR_FIELD_BASE + field.index()
 }
 
 fn fail_to_server_select(commit: &mut FlowCommit, message: String, retryable: bool) {
@@ -2521,17 +2757,12 @@ fn present_build_editor_overlay(
     editor: Res<super::BuildEditorState>,
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
-    selection: Res<SelectedGameType>,
-    queue: Res<super::ClientQueueModel>,
-    practice: Res<super::ClientPracticeModel>,
-    purpose: Res<SessionPurpose>,
-    memberships: Query<&ClientLobbyMembership, With<Client>>,
     roots: Query<(Entity, &ScrollPosition), With<BuildEditorRoot>>,
     mut navigation: ResMut<FlowNavigation>,
     mut rendered: Local<Option<BuildEditorRenderKey>>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::BuildEditor)
-        || !matches!(*flow.get(), ClientFlow::Dashboard | ClientFlow::GameSelect)
+        || *flow.get() != ClientFlow::Dashboard
     {
         for (entity, _) in &roots {
             commands.entity(entity).despawn();
@@ -2539,32 +2770,11 @@ fn present_build_editor_overlay(
         *rendered = None;
         return;
     }
-    let is_practice = *purpose == SessionPurpose::Practice;
-    let select_only = *flow.get() == ClientFlow::Dashboard;
-    let joining = if is_practice {
-        practice.pending()
-    } else {
-        queue
-            .pending()
-            .is_some_and(|pending| matches!(pending.command, crate::lobby::QueueCommand::Join(_)))
-    };
-    let capacity_occupied = !is_practice
-        && queue.snapshot().is_some_and(|snapshot| {
-            snapshot.formation_availability
-                == crate::lobby::FormationAvailability::ProductMatchOccupied
-        });
-    let game_name = selected_game_name(&selection, memberships.iter().next()).to_string();
     let render_key = BuildEditorRenderKey {
         selected_choice: editor.selected_choice,
         custom_recipe: editor.custom_recipe,
         focused_field: editor.focused_field,
         inline_error: editor.inline_error.clone(),
-        game_type_id: selection.game_type_id.clone(),
-        game_name: game_name.clone(),
-        joining,
-        capacity_occupied,
-        practice: is_practice,
-        select_only,
     };
     if !roots.is_empty() && rendered.as_ref() == Some(&render_key) {
         return;
@@ -2606,10 +2816,6 @@ fn present_build_editor_overlay(
         ))
         .with_children(|root| {
             spawn_heading(root, "BUILD EDITOR");
-            root.spawn((
-                Text::new(format!("Game: {game_name}")),
-                TextColor(Color::srgb(0.75, 0.85, 0.92)),
-            ));
             for (index, preset) in builds.0.presets.iter().enumerate() {
                 let points = super::resolve_build_preview(
                     crate::builds::BuildSelection::Preset(preset.id),
@@ -2725,67 +2931,19 @@ fn present_build_editor_overlay(
             spawn_build_editor_button(
                 root,
                 BUILD_EDITOR_JOIN_INDEX,
-                if select_only {
-                    FlowUiAction::SaveBuild
-                } else if is_practice {
-                    FlowUiAction::StartPractice
-                } else {
-                    FlowUiAction::JoinQueue
-                },
-                if select_only {
-                    "SELECT BRAWLER"
-                } else if joining {
-                    if is_practice {
-                        "STARTING..."
-                    } else {
-                        "JOINING..."
-                    }
-                } else if is_practice {
-                    "START PRACTICE"
-                } else {
-                    "JOIN QUEUE"
-                },
-                (!select_only && joining)
-                    || preview.is_err()
-                    || (!select_only && capacity_occupied),
+                FlowUiAction::SaveBuild,
+                "SELECT BRAWLER",
+                preview.is_err(),
             );
             spawn_build_editor_button(
                 root,
                 BUILD_EDITOR_BACK_INDEX,
                 FlowUiAction::CancelBuildEditor,
                 "BACK",
-                joining,
+                false,
             );
-            if !select_only {
-                spawn_build_editor_button(
-                    root,
-                    BUILD_EDITOR_DISCONNECT_INDEX,
-                    FlowUiAction::Disconnect,
-                    "DISCONNECT",
-                    false,
-                );
-            }
         });
     *rendered = Some(render_key);
-}
-
-fn selected_game_name<'a>(
-    selection: &SelectedGameType,
-    membership: Option<&'a ClientLobbyMembership>,
-) -> &'a str {
-    let Some(selected) = selection.game_type_id.as_ref() else {
-        return "No game selected";
-    };
-    membership
-        .and_then(|membership| {
-            membership
-                .game_types
-                .iter()
-                .find(|game| game.id == *selected)
-        })
-        .map_or("Selected game unavailable", |game| {
-            game.display_name.as_str()
-        })
 }
 
 fn scroll_build_editor(
@@ -2875,7 +3033,7 @@ const fn custom_field_name(field: super::BuildEditorField) -> &'static str {
 }
 
 const fn is_build_editor_focus_index(index: usize) -> bool {
-    index >= BUILD_EDITOR_CHOICE_BASE && index <= BUILD_EDITOR_DISCONNECT_INDEX
+    index >= BUILD_EDITOR_CHOICE_BASE && index <= BUILD_EDITOR_BACK_INDEX
 }
 
 fn spawn_build_editor_button(
@@ -2998,7 +3156,7 @@ fn flow_error_action_button(action: FlowErrorAction) -> (FlowUiAction, &'static 
     match action {
         FlowErrorAction::RetryConnection => (FlowUiAction::Retry, "RETRY"),
         FlowErrorAction::EditName => (FlowUiAction::EditName, "EDIT NAME"),
-        FlowErrorAction::Back => (FlowUiAction::DismissError, "CHOOSE SERVER"),
+        FlowErrorAction::Back => (FlowUiAction::DismissError, "BACK"),
         FlowErrorAction::RetrySave => (FlowUiAction::RetrySave, "RETRY SAVE"),
         FlowErrorAction::ContinueWithoutSaving => (
             FlowUiAction::ContinueWithoutSaving,
@@ -3100,11 +3258,17 @@ fn spawn_dashboard(
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
     queue: Res<super::ClientQueueModel>,
+    practice: Res<super::ClientPracticeModel>,
+    mut purpose: ResMut<SessionPurpose>,
+    mut return_focus: ResMut<DashboardReturnFocus>,
+    mut notice: ResMut<DashboardNotice>,
     assets: Option<Res<super::ClientAssetHandles>>,
 ) {
     let Some(membership) = memberships.iter().next() else {
         return;
     };
+    *purpose = SessionPurpose::Multiplayer;
+    let previous_game_type = selection.game_type_id.clone();
     let selected_index = selection
         .game_type_id
         .as_ref()
@@ -3121,7 +3285,15 @@ fn spawn_dashboard(
     selection.catalog_revision = Some(membership.catalog_revision);
     selection.game_type_id = Some(game.id.clone());
     selection.configuration_revision = Some(game.configuration_revision);
-    navigation.selected = 0;
+    if previous_game_type.is_some() && previous_game_type.as_ref() != Some(&game.id) {
+        notice.0 = Some(format!(
+            "The previous game is unavailable. {} is now selected.",
+            game.display_name
+        ));
+    }
+    navigation.selected = return_focus.0.take().unwrap_or(DASHBOARD_PLAY_INDEX);
+    let dashboard_notice = notice.0.take();
+    let admission_pending = queue.pending().is_some() || practice.pending();
 
     let build_name = match editor.loaded_selection {
         crate::builds::BuildSelection::Preset(id) => builds
@@ -3156,300 +3328,354 @@ fn spawn_dashboard(
     let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
         snapshot.formation_availability == crate::lobby::FormationAvailability::ProductMatchOccupied
     });
+    let build_accessible = format!("Change brawler: {build_name}, {build_summary}");
+    let game_accessible = format!(
+        "Change game type: {}, {game_summary}, {population}",
+        game.display_name
+    );
 
     commands
         .spawn((
             FlowRoot,
+            DashboardRoot,
+            DashboardLayoutRole::Root,
+            DashboardLayoutClass::Wide,
             DespawnOnExit(ClientFlow::Dashboard),
             dashboard_root_node(),
+            ScrollPosition::default(),
             BackgroundColor(Color::NONE),
             GlobalZIndex(410),
         ))
         .with_children(|root| {
-            root.spawn((Node {
-                width: percent(100),
-                display: Display::Flex,
-                align_items: AlignItems::Center,
-                column_gap: px(10),
-                padding: UiRect::axes(px(18), px(6)),
-                ..default()
-            },))
-                .with_children(|header| {
-                    if let Some(assets) = assets.as_deref() {
-                        header.spawn((
-                            ImageNode::new(assets.wordmark.clone()),
-                            Node {
-                                width: px(220),
-                                height: auto(),
-                                ..default()
-                            },
-                        ));
-                    } else {
-                        header.spawn((
-                            Text::new("PEWPEW BLITZ"),
-                            dashboard_font(assets.as_deref(), 32.0),
-                            TextColor(Color::srgb(0.28, 0.92, 1.0)),
-                        ));
-                    }
-                    header
-                        .spawn((
-                            Node {
-                                min_width: px(240),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect::axes(px(14), px(7)),
-                                border: UiRect::all(px(1)),
-                                border_radius: BorderRadius::all(px(11)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.035, 0.12, 0.24, 0.92)),
-                            BorderColor::all(Color::srgba(0.15, 0.5, 0.8, 0.45)),
-                        ))
-                        .with_children(|identity| {
-                            identity.spawn((
-                                Text::new(&membership.accepted_display_name),
-                                dashboard_font(assets.as_deref(), 22.0),
-                                TextColor(Color::WHITE),
-                            ));
-                            identity.spawn((
-                                Text::new(format!("SERVER: {}  ONLINE", membership.server_name)),
-                                TextFont::from_font_size(12.0),
-                                TextColor(Color::srgb(0.2, 0.9, 0.72)),
-                            ));
-                        });
-                    header.spawn((Node {
-                        flex_grow: 1.0,
-                        ..default()
-                    },));
-                    spawn_dashboard_button(
-                        header,
-                        4,
-                        FlowUiAction::OpenSettings,
-                        DashboardButtonPresentation {
-                            label: "SETTINGS",
-                            width: px(112),
-                            primary: false,
-                            disabled: false,
-                            assets: assets.as_deref(),
-                            icon: assets.as_deref().map(|assets| assets.settings_icon.clone()),
-                        },
-                    );
-                    spawn_dashboard_button(
-                        header,
-                        5,
-                        FlowUiAction::OpenDashboardMenu,
-                        DashboardButtonPresentation {
-                            label: "MENU",
-                            width: px(92),
-                            primary: false,
-                            disabled: false,
-                            assets: assets.as_deref(),
-                            icon: assets.as_deref().map(|assets| assets.menu_icon.clone()),
-                        },
-                    );
-                });
-            root.spawn((Node {
-                width: percent(100),
-                flex_grow: 1.0,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                row_gap: px(5),
-                ..default()
-            },))
-                .with_children(|center| {
-                    center.spawn((
-                        DashboardPreviewHost,
-                        DashboardButtonStyle::Preview,
-                        Button,
-                        FlowButton {
-                            index: 3,
-                            action: FlowUiAction::OpenBuildEditor,
-                            error_action: false,
-                            build_editor_action: false,
-                        },
+            root.spawn((
+                DashboardLayoutRole::Header,
+                Node {
+                    width: percent(100),
+                    display: Display::Flex,
+                    align_items: AlignItems::Center,
+                    column_gap: px(10),
+                    padding: UiRect::axes(px(18), px(6)),
+                    ..default()
+                },
+            ))
+            .with_children(|header| {
+                if let Some(assets) = assets.as_deref() {
+                    header.spawn((
+                        DashboardLayoutRole::Wordmark,
+                        ImageNode::new(assets.wordmark.clone()),
                         Node {
-                            width: percent(54),
-                            max_width: px(650),
-                            min_height: px(280),
-                            max_height: px(470),
-                            flex_grow: 1.0,
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::End,
-                            border: UiRect::all(px(2)),
-                            border_radius: BorderRadius::all(px(24)),
-                            overflow: Overflow::clip(),
+                            width: px(220),
+                            height: auto(),
                             ..default()
                         },
-                        BackgroundColor(Color::NONE),
-                        BorderColor::all(Color::NONE),
                     ));
-                    center
-                        .spawn((
-                            Button,
-                            DashboardBuildCard,
-                            DashboardButtonStyle::Build,
-                            FlowButton {
-                                index: 3,
-                                action: FlowUiAction::OpenBuildEditor,
-                                error_action: false,
-                                build_editor_action: false,
-                            },
-                            Node {
-                                width: percent(30),
-                                max_width: px(365),
-                                min_height: px(104),
-                                column_gap: px(12),
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                padding: UiRect::axes(px(12), px(8)),
-                                border: UiRect::all(px(2)),
-                                border_radius: BorderRadius::all(px(14)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.91, 0.95, 1.0)),
-                            BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
-                            BoxShadow::new(
-                                Color::srgba(0.0, 0.02, 0.08, 0.65),
-                                px(0),
-                                px(5),
-                                px(0),
-                                px(3),
-                            ),
-                        ))
-                        .with_children(|card| {
-                            spawn_dashboard_icon_well(
-                                card,
-                                assets.as_deref().map(|assets| assets.build_icon.clone()),
-                                52.0,
-                                31.0,
-                                Color::srgb(0.05, 0.34, 0.82),
-                            );
-                            card.spawn((Node {
-                                flex_direction: FlexDirection::Column,
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },))
-                                .with_children(|details| {
-                                    details.spawn((
-                                        Text::new(build_name.to_uppercase()),
-                                        dashboard_font(assets.as_deref(), 24.0),
-                                        TextColor(Color::srgb(0.035, 0.12, 0.32)),
-                                    ));
-                                    details.spawn((
-                                        Text::new(build_summary),
-                                        TextFont::from_font_size(12.0),
-                                        TextColor(Color::srgb(0.08, 0.18, 0.35)),
-                                    ));
-                                    details.spawn((
-                                        Text::new("CHANGE BRAWLER"),
-                                        dashboard_font(assets.as_deref(), 15.0),
-                                        TextColor(Color::srgb(0.03, 0.36, 0.82)),
-                                    ));
-                                });
+                } else {
+                    header.spawn((
+                        DashboardLayoutRole::Wordmark,
+                        Text::new("PEWPEW BLITZ"),
+                        dashboard_font(assets.as_deref(), 32.0),
+                        TextColor(Color::srgb(0.28, 0.92, 1.0)),
+                    ));
+                }
+                header
+                    .spawn((
+                        DashboardLayoutRole::Identity,
+                        AccessibleLabel::new(format!(
+                            "Player {}, server {}, online",
+                            membership.accepted_display_name, membership.server_name
+                        )),
+                        Node {
+                            min_width: px(240),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::axes(px(14), px(7)),
+                            border: UiRect::all(px(1)),
+                            border_radius: BorderRadius::all(px(11)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.035, 0.12, 0.24, 0.92)),
+                        BorderColor::all(Color::srgba(0.15, 0.5, 0.8, 0.45)),
+                    ))
+                    .with_children(|identity| {
+                        identity.spawn((
+                            Text::new(&membership.accepted_display_name),
+                            dashboard_font(assets.as_deref(), 22.0),
+                            TextColor(Color::WHITE),
+                        ));
+                        identity.spawn((
+                            Text::new(format!("SERVER: {}  ONLINE", membership.server_name)),
+                            TextFont::from_font_size(12.0),
+                            TextColor(Color::srgb(0.2, 0.9, 0.72)),
+                        ));
+                    });
+                header.spawn((
+                    DashboardLayoutRole::HeaderSpacer,
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                ));
+                spawn_dashboard_button(
+                    header,
+                    DASHBOARD_SETTINGS_INDEX,
+                    FlowUiAction::OpenSettings,
+                    DashboardButtonPresentation {
+                        label: "SETTINGS",
+                        width: px(112),
+                        primary: false,
+                        disabled: false,
+                        assets: assets.as_deref(),
+                        icon: assets.as_deref().map(|assets| assets.settings_icon.clone()),
+                    },
+                );
+                spawn_dashboard_button(
+                    header,
+                    DASHBOARD_MENU_INDEX,
+                    FlowUiAction::OpenDashboardMenu,
+                    DashboardButtonPresentation {
+                        label: "MENU",
+                        width: px(92),
+                        primary: false,
+                        disabled: false,
+                        assets: assets.as_deref(),
+                        icon: assets.as_deref().map(|assets| assets.menu_icon.clone()),
+                    },
+                );
+            });
+            if let Some(message) = dashboard_notice {
+                root.spawn((
+                    Text::new(message),
+                    TextFont::from_font_size(13.0),
+                    TextColor(Color::srgb(1.0, 0.86, 0.48)),
+                ));
+            }
+            root.spawn((
+                DashboardLayoutRole::Center,
+                Node {
+                    width: percent(100),
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    row_gap: px(5),
+                    ..default()
+                },
+            ))
+            .with_children(|center| {
+                let mut preview_button = center.spawn((
+                    DashboardPreviewHost,
+                    DashboardLayoutRole::Preview,
+                    DashboardButtonStyle::Preview,
+                    AccessibleLabel::new(build_accessible.clone()),
+                    Button,
+                    FlowButton {
+                        index: DASHBOARD_BUILD_INDEX,
+                        action: FlowUiAction::OpenBuildEditor,
+                        error_action: false,
+                        build_editor_action: false,
+                    },
+                    Node {
+                        width: percent(54),
+                        max_width: px(650),
+                        min_height: px(280),
+                        max_height: px(470),
+                        flex_grow: 1.0,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::End,
+                        border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(24)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(Color::NONE),
+                    BorderColor::all(Color::NONE),
+                ));
+                if admission_pending {
+                    preview_button.insert(InteractionDisabled);
+                }
+                let mut build_button = center.spawn((
+                    Button,
+                    DashboardBuildCard,
+                    DashboardLayoutRole::Build,
+                    DashboardButtonStyle::Build,
+                    AccessibleLabel::new(build_accessible.clone()),
+                    FlowButton {
+                        index: DASHBOARD_BUILD_INDEX,
+                        action: FlowUiAction::OpenBuildEditor,
+                        error_action: false,
+                        build_editor_action: false,
+                    },
+                    Node {
+                        width: percent(30),
+                        max_width: px(365),
+                        min_height: px(104),
+                        column_gap: px(12),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        padding: UiRect::axes(px(12), px(8)),
+                        border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(14)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.91, 0.95, 1.0)),
+                    BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
+                    BoxShadow::new(
+                        Color::srgba(0.0, 0.02, 0.08, 0.65),
+                        px(0),
+                        px(5),
+                        px(0),
+                        px(3),
+                    ),
+                ));
+                if admission_pending {
+                    build_button.insert(InteractionDisabled);
+                }
+                build_button.with_children(|card| {
+                    spawn_dashboard_icon_well(
+                        card,
+                        assets.as_deref().map(|assets| assets.build_icon.clone()),
+                        52.0,
+                        31.0,
+                        Color::srgb(0.05, 0.34, 0.82),
+                    );
+                    card.spawn((Node {
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },))
+                        .with_children(|details| {
+                            details.spawn((
+                                Text::new(build_name.to_uppercase()),
+                                dashboard_font(assets.as_deref(), 24.0),
+                                TextColor(Color::srgb(0.035, 0.12, 0.32)),
+                            ));
+                            details.spawn((
+                                Text::new(build_summary),
+                                TextFont::from_font_size(12.0),
+                                TextColor(Color::srgb(0.08, 0.18, 0.35)),
+                            ));
+                            details.spawn((
+                                Text::new("CHANGE BRAWLER"),
+                                dashboard_font(assets.as_deref(), 15.0),
+                                TextColor(Color::srgb(0.03, 0.36, 0.82)),
+                            ));
                         });
                 });
-            root.spawn((Node {
-                width: percent(94),
-                max_width: px(1180),
-                display: Display::Flex,
-                flex_direction: FlexDirection::Row,
-                column_gap: px(12),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Stretch,
-                ..default()
-            },))
-                .with_children(|actions| {
-                    actions
-                        .spawn((
-                            Button,
-                            DashboardModeCard,
-                            DashboardButtonStyle::Mode,
-                            FlowButton {
-                                index: 2,
-                                action: FlowUiAction::ChangeGame,
-                                error_action: false,
-                                build_editor_action: false,
-                            },
-                            Node {
-                                width: percent(44),
-                                min_height: px(104),
-                                column_gap: px(14),
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                padding: UiRect::axes(px(18), px(10)),
-                                border: UiRect::all(px(3)),
-                                border_radius: BorderRadius::all(px(16)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.92, 0.95, 1.0)),
-                            BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
-                            BoxShadow::new(
-                                Color::srgba(0.0, 0.02, 0.08, 0.65),
-                                px(0),
-                                px(5),
-                                px(0),
-                                px(3),
-                            ),
-                        ))
-                        .with_children(|card| {
-                            spawn_dashboard_icon_well(
-                                card,
-                                assets.as_deref().map(|assets| assets.mode_icon.clone()),
-                                68.0,
-                                42.0,
-                                Color::srgb(0.05, 0.34, 0.82),
-                            );
-                            card.spawn((Node {
-                                flex_direction: FlexDirection::Column,
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },))
-                                .with_children(|details| {
-                                    details.spawn((
-                                        Text::new(game.display_name.to_uppercase()),
-                                        dashboard_font(assets.as_deref(), 28.0),
-                                        TextColor(Color::srgb(0.035, 0.12, 0.32)),
-                                    ));
-                                    details.spawn((
-                                        Text::new(format!("{game_summary}\n{population}")),
-                                        DashboardGameSummaryLabel,
-                                        TextFont::from_font_size(12.0),
-                                        TextColor(Color::srgb(0.08, 0.18, 0.35)),
-                                        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
-                                    ));
-                                });
+            });
+            root.spawn((
+                DashboardLayoutRole::ActionRow,
+                Node {
+                    width: percent(94),
+                    max_width: px(1180),
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(12),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Stretch,
+                    ..default()
+                },
+            ))
+            .with_children(|actions| {
+                let mut mode_button = actions.spawn((
+                    Button,
+                    DashboardModeCard,
+                    DashboardLayoutRole::Mode,
+                    DashboardButtonStyle::Mode,
+                    AccessibleLabel::new(game_accessible),
+                    FlowButton {
+                        index: DASHBOARD_GAME_INDEX,
+                        action: FlowUiAction::OpenGameTypeSelect,
+                        error_action: false,
+                        build_editor_action: false,
+                    },
+                    Node {
+                        width: percent(44),
+                        min_height: px(104),
+                        column_gap: px(14),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        padding: UiRect::axes(px(18), px(10)),
+                        border: UiRect::all(px(3)),
+                        border_radius: BorderRadius::all(px(16)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.92, 0.95, 1.0)),
+                    BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
+                    BoxShadow::new(
+                        Color::srgba(0.0, 0.02, 0.08, 0.65),
+                        px(0),
+                        px(5),
+                        px(0),
+                        px(3),
+                    ),
+                ));
+                if admission_pending {
+                    mode_button.insert(InteractionDisabled);
+                }
+                mode_button.with_children(|card| {
+                    spawn_dashboard_icon_well(
+                        card,
+                        assets.as_deref().map(|assets| assets.mode_icon.clone()),
+                        68.0,
+                        42.0,
+                        Color::srgb(0.05, 0.34, 0.82),
+                    );
+                    card.spawn((Node {
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },))
+                        .with_children(|details| {
+                            details.spawn((
+                                Text::new(game.display_name.to_uppercase()),
+                                dashboard_font(assets.as_deref(), 28.0),
+                                TextColor(Color::srgb(0.035, 0.12, 0.32)),
+                            ));
+                            details.spawn((
+                                Text::new(format!("{game_summary}\n{population}")),
+                                DashboardGameSummaryLabel,
+                                TextFont::from_font_size(12.0),
+                                TextColor(Color::srgb(0.08, 0.18, 0.35)),
+                                TextLayout::new(Justify::Left, LineBreak::WordBoundary),
+                            ));
                         });
-                    spawn_dashboard_button(
-                        actions,
-                        1,
-                        FlowUiAction::StartPractice,
-                        DashboardButtonPresentation {
-                            label: "PRACTICE",
-                            width: percent(21),
-                            primary: false,
-                            disabled: false,
-                            assets: assets.as_deref(),
-                            icon: assets.as_deref().map(|assets| assets.practice_icon.clone()),
-                        },
-                    );
-                    spawn_dashboard_button(
-                        actions,
-                        0,
-                        FlowUiAction::JoinQueue,
-                        DashboardButtonPresentation {
-                            label: if capacity_occupied {
-                                "MATCH IN PROGRESS"
-                            } else {
-                                "PLAY"
-                            },
-                            width: percent(33),
-                            primary: true,
-                            disabled: capacity_occupied,
-                            assets: assets.as_deref(),
-                            icon: assets.as_deref().map(|assets| assets.play_icon.clone()),
-                        },
-                    );
                 });
+                spawn_dashboard_button(
+                    actions,
+                    DASHBOARD_PRACTICE_INDEX,
+                    FlowUiAction::StartPractice,
+                    DashboardButtonPresentation {
+                        label: if practice.pending() {
+                            "STARTING..."
+                        } else {
+                            "PRACTICE"
+                        },
+                        width: percent(21),
+                        primary: false,
+                        disabled: admission_pending,
+                        assets: assets.as_deref(),
+                        icon: assets.as_deref().map(|assets| assets.practice_icon.clone()),
+                    },
+                );
+                spawn_dashboard_button(
+                    actions,
+                    DASHBOARD_PLAY_INDEX,
+                    FlowUiAction::JoinQueue,
+                    DashboardButtonPresentation {
+                        label: if queue.pending().is_some() {
+                            "JOINING..."
+                        } else if capacity_occupied {
+                            "MATCH IN PROGRESS"
+                        } else {
+                            "PLAY"
+                        },
+                        width: percent(33),
+                        primary: true,
+                        disabled: capacity_occupied || admission_pending,
+                        assets: assets.as_deref(),
+                        icon: assets.as_deref().map(|assets| assets.play_icon.clone()),
+                    },
+                );
+            });
         });
 }
 
@@ -3498,48 +3724,39 @@ fn dashboard_game_summary(game: &crate::lobby::AdvertisedGameType) -> String {
     clippy::needless_pass_by_value,
     reason = "the bounded game-select root renders the complete catalog card contract"
 )]
-fn spawn_game_select(
+fn spawn_game_type_select(
     mut commands: Commands,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut navigation: ResMut<FlowNavigation>,
-    mut selection: ResMut<SelectedGameType>,
+    draft: Res<GameTypeSelectionDraft>,
     queue: Res<super::ClientQueueModel>,
-    purpose: Res<SessionPurpose>,
 ) {
     let Some(membership) = memberships.iter().next() else {
         return;
     };
-    let selected_index = selection
-        .game_type_id
-        .as_ref()
-        .and_then(|selected| {
-            membership
-                .game_types
-                .iter()
-                .position(|game| game.id == *selected)
-        })
-        .unwrap_or(0);
+    let selected_index = draft.selected_index.unwrap_or(0);
     navigation.selected = selected_index;
-    if let Some(selected) = membership.game_types.get(selected_index) {
-        selection.catalog_revision = Some(membership.catalog_revision);
-        selection.game_type_id = Some(selected.id.clone());
-        selection.configuration_revision = Some(selected.configuration_revision);
-    }
     let map_catalog = crate::map::MapContentCatalog::embedded().ok();
     commands
         .spawn((
             FlowRoot,
-            DespawnOnExit(ClientFlow::GameSelect),
+            DespawnOnExit(ClientFlow::GameTypeSelect),
             flow_root_node(),
             BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
             GlobalZIndex(410),
         ))
         .with_children(|root| {
-            spawn_heading(root, &membership.server_name);
+            spawn_heading(root, "SELECT GAME TYPE");
             root.spawn(Text::new(format!(
-                "SIGNED IN AS {}",
-                membership.accepted_display_name
+                "{} · {}",
+                membership.server_name, membership.accepted_display_name
             )));
+            if draft.unavailable_previous {
+                root.spawn((
+                    Text::new("Your previous game is no longer available. Choose a replacement."),
+                    TextColor(Color::srgb(1.0, 0.72, 0.28)),
+                ));
+            }
             for (index, game_type) in membership.game_types.iter().enumerate() {
                 let mode_name =
                     if game_type.mode_definition_id == crate::map::WIPEOUT_MODE_DEFINITION {
@@ -3585,7 +3802,7 @@ fn spawn_game_select(
                 spawn_flow_button(
                     root,
                     index,
-                    FlowUiAction::SelectGame(index),
+                    FlowUiAction::SelectGameTypeDraft(index),
                     &format!(
                         "{} | {mode_name} | {}v{} | {map_names} | {rules}",
                         game_type.display_name,
@@ -3596,49 +3813,24 @@ fn spawn_game_select(
                 );
                 root.spawn((
                     GamePopulationLabel(index),
-                    Text::new(if *purpose == SessionPurpose::Practice {
-                        format!(
-                            "Starts immediately with {} inert bots",
-                            game_type.players_per_team as usize * 2 - 1
-                        )
-                    } else {
-                        queue_population(&queue, game_type)
-                    }),
+                    Text::new(queue_population(&queue, game_type)),
                     TextFont::from_font_size(15.0),
                     TextColor(Color::srgb(0.68, 0.78, 0.86)),
                 ));
             }
-            let offset = membership.game_types.len();
-            let capacity_occupied = *purpose != SessionPurpose::Practice
-                && queue.snapshot().is_some_and(|snapshot| {
-                    snapshot.formation_availability
-                        == crate::lobby::FormationAvailability::ProductMatchOccupied
-                });
-            spawn_flow_button(
+            spawn_flow_button_disabled(
                 root,
-                offset,
-                FlowUiAction::OpenBuildEditor,
-                if capacity_occupied {
-                    "MATCH IN PROGRESS"
-                } else if *purpose == SessionPurpose::Practice {
-                    "BUILD & START PRACTICE"
-                } else {
-                    "BUILD & JOIN"
-                },
+                GAME_TYPE_CONFIRM_INDEX,
+                FlowUiAction::ConfirmGameType,
+                "CONFIRM",
                 None,
+                draft.selected_index.is_none(),
             );
             spawn_flow_button(
                 root,
-                offset + 1,
-                FlowUiAction::ToggleFavorite,
-                "FAVORITE / UNFAVORITE CURRENT SERVER",
-                None,
-            );
-            spawn_flow_button(
-                root,
-                offset + 2,
-                FlowUiAction::Disconnect,
-                "DISCONNECT",
+                GAME_TYPE_BACK_INDEX,
+                FlowUiAction::CancelGameType,
+                "BACK",
                 None,
             );
         });
@@ -3678,7 +3870,6 @@ fn spawn_queue(
                 TextLayout::new(Justify::Center, LineBreak::WordBoundary),
             ));
             spawn_queue_cancel_button(root);
-            spawn_flow_button(root, 1, FlowUiAction::Disconnect, "DISCONNECT", None);
         });
 }
 
@@ -3716,7 +3907,6 @@ fn spawn_match_loading(
                 "CANCEL MATCH START",
                 None,
             );
-            spawn_flow_button(root, 1, FlowUiAction::Disconnect, "DISCONNECT", None);
         });
 }
 
@@ -3944,6 +4134,8 @@ fn present_dashboard_menu(
     overlay: Res<ClientOverlay>,
     roots: Query<Entity, With<DashboardMenuRoot>>,
     mut navigation: ResMut<FlowNavigation>,
+    memberships: Query<Option<&RuntimeLobbyTarget>, With<Client>>,
+    persistence: Res<ConnectionPersistence>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
         for entity in &roots {
@@ -3955,6 +4147,18 @@ fn present_dashboard_menu(
         return;
     }
     navigation.selected = 0;
+    let favorite_label = memberships.iter().flatten().next().map(|target| {
+        if persistence
+            .state
+            .favorites
+            .iter()
+            .any(|favorite| favorite.address == target.logical_address)
+        {
+            "REMOVE FAVORITE"
+        } else {
+            "FAVORITE SERVER"
+        }
+    });
     commands
         .spawn((
             DashboardMenuRoot,
@@ -3990,15 +4194,27 @@ fn present_dashboard_menu(
             ))
             .with_children(|panel| {
                 spawn_heading(panel, "MENU");
-                spawn_flow_error_button(panel, 0, FlowUiAction::OpenCredits, "CREDITS");
+                let mut index = 0;
+                spawn_flow_error_button(panel, index, FlowUiAction::OpenCredits, "CREDITS");
+                index += 1;
+                if let Some(favorite_label) = favorite_label {
+                    spawn_flow_error_button(
+                        panel,
+                        index,
+                        FlowUiAction::ToggleFavoriteServer,
+                        favorite_label,
+                    );
+                    index += 1;
+                }
                 spawn_flow_error_button(
                     panel,
-                    1,
+                    index,
                     FlowUiAction::RequestChangeServer,
                     "CHANGE SERVER",
                 );
-                spawn_flow_error_button(panel, 2, FlowUiAction::Quit, "QUIT");
-                spawn_flow_error_button(panel, 3, FlowUiAction::CloseDashboardMenu, "BACK");
+                index += 1;
+                spawn_flow_error_button(panel, index, FlowUiAction::Quit, "QUIT");
+                spawn_flow_error_button(panel, index + 1, FlowUiAction::CloseDashboardMenu, "BACK");
             });
         });
 }
@@ -4057,10 +4273,22 @@ fn spawn_results(
     result_state: Res<super::ClientMatchResultState>,
     mut navigation: ResMut<FlowNavigation>,
     purpose: Res<SessionPurpose>,
+    routed: Res<RoutedClientLifecycle>,
+    memberships: Query<(&ClientLobbyMembership, &RoutedClientSession), With<Client>>,
 ) {
     let Some(context) = result_state.context.as_ref() else {
         return;
     };
+    let replay_available = context.game_type_id.as_ref().is_some_and(|game_type_id| {
+        memberships.iter().any(|(membership, session)| {
+            session.kind == super::RoutedClientSessionKind::Lobby
+                && session.generation == routed.generation
+                && membership
+                    .game_types
+                    .iter()
+                    .any(|game| &game.id == game_type_id)
+        })
+    });
     navigation.selected = 0;
     let outcome = match context.result {
         crate::matchplay::MatchResult::TeamVictory { team } => {
@@ -4118,29 +4346,27 @@ fn spawn_results(
                     TextLayout::new(Justify::Center, LineBreak::WordBoundary),
                 ));
             }
-            spawn_flow_button(
+            if !replay_available {
+                root.spawn((
+                    Text::new("The previous game is not available on this server."),
+                    TextColor(Color::srgb(1.0, 0.72, 0.28)),
+                ));
+            }
+            spawn_flow_button_disabled(
                 root,
                 0,
                 FlowUiAction::QueueAgain,
-                if *purpose == SessionPurpose::Practice {
+                if !replay_available {
+                    "REPLAY UNAVAILABLE"
+                } else if *purpose == SessionPurpose::Practice {
+                    "PRACTICE AGAIN"
+                } else {
                     "PLAY AGAIN"
-                } else {
-                    "QUEUE AGAIN"
                 },
                 None,
+                !replay_available,
             );
-            spawn_flow_button(root, 1, FlowUiAction::ChangeGame, "CHANGE GAME", None);
-            spawn_flow_button(
-                root,
-                2,
-                FlowUiAction::Disconnect,
-                if *purpose == SessionPurpose::Practice {
-                    "EXIT PRACTICE"
-                } else {
-                    "DISCONNECT"
-                },
-                None,
-            );
+            spawn_flow_button(root, 1, FlowUiAction::ReturnToDashboard, "DASHBOARD", None);
         });
 }
 
@@ -4173,6 +4399,8 @@ fn queue_population(
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
     reason = "Dashboard presentation reads authenticated lobby and bounded queue resources"
 )]
 fn update_dashboard_live_facts(
@@ -4181,12 +4409,14 @@ fn update_dashboard_live_facts(
     selection: Res<SelectedGameType>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     queue: Res<super::ClientQueueModel>,
+    practice: Res<super::ClientPracticeModel>,
     mut texts: Query<(
         &mut Text,
         Has<DashboardGameSummaryLabel>,
         Has<DashboardPlayLabel>,
+        Has<DashboardPracticeLabel>,
     )>,
-    play_buttons: Query<Entity, With<DashboardPlayButton>>,
+    action_buttons: Query<(Entity, &DashboardButtonStyle, Option<&AccessibleLabel>)>,
 ) {
     if *flow.get() != ClientFlow::Dashboard {
         return;
@@ -4208,7 +4438,7 @@ fn update_dashboard_live_facts(
         "Population updating".to_string()
     };
     let copy = format!("{}\n{population}", dashboard_game_summary(game));
-    for (mut text, is_summary, _) in &mut texts {
+    for (mut text, is_summary, _, _) in &mut texts {
         if is_summary {
             text.0.clone_from(&copy);
         }
@@ -4216,19 +4446,74 @@ fn update_dashboard_live_facts(
     let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
         snapshot.formation_availability == crate::lobby::FormationAvailability::ProductMatchOccupied
     });
-    for entity in &play_buttons {
-        if capacity_occupied {
+    let admission_pending = queue.pending().is_some() || practice.pending();
+    let play_copy = if queue.pending().is_some() {
+        "Joining match; Play unavailable"
+    } else if capacity_occupied {
+        "Match in progress; Play unavailable"
+    } else {
+        "Play"
+    };
+    let practice_copy = if practice.pending() {
+        "Starting practice; Practice unavailable"
+    } else {
+        "Practice"
+    };
+    let busy_suffix = "; unavailable while admission is pending";
+    for (entity, style, current_label) in &action_buttons {
+        let disabled = match style {
+            DashboardButtonStyle::Preview
+            | DashboardButtonStyle::Build
+            | DashboardButtonStyle::Mode
+            | DashboardButtonStyle::Practice => admission_pending,
+            DashboardButtonStyle::Play => capacity_occupied || admission_pending,
+            DashboardButtonStyle::Header => false,
+        };
+        if disabled {
             commands.entity(entity).insert(InteractionDisabled);
         } else {
             commands.entity(entity).remove::<InteractionDisabled>();
         }
+        let next_label = match style {
+            DashboardButtonStyle::Mode => format!(
+                "Change game type: {}, {}, {population}{}",
+                game.display_name,
+                dashboard_game_summary(game),
+                if admission_pending { busy_suffix } else { "" }
+            ),
+            DashboardButtonStyle::Preview | DashboardButtonStyle::Build => {
+                let base = current_label
+                    .map_or("Change brawler", |label| label.0.as_str())
+                    .strip_suffix(busy_suffix)
+                    .unwrap_or_else(|| {
+                        current_label.map_or("Change brawler", |label| label.0.as_str())
+                    });
+                format!("{base}{}", if admission_pending { busy_suffix } else { "" })
+            }
+            DashboardButtonStyle::Practice => practice_copy.to_string(),
+            DashboardButtonStyle::Play => play_copy.to_string(),
+            DashboardButtonStyle::Header => continue,
+        };
+        if current_label.is_none_or(|current| current.0 != next_label) {
+            commands
+                .entity(entity)
+                .insert(AccessibleLabel::new(next_label));
+        }
     }
-    for (mut text, _, is_play_label) in &mut texts {
+    for (mut text, _, is_play_label, is_practice_label) in &mut texts {
         if is_play_label {
-            text.0 = if capacity_occupied {
+            text.0 = if queue.pending().is_some() {
+                "JOINING...".to_string()
+            } else if capacity_occupied {
                 "MATCH IN PROGRESS".to_string()
             } else {
                 "PLAY".to_string()
+            };
+        } else if is_practice_label {
+            text.0 = if practice.pending() {
+                "STARTING...".to_string()
+            } else {
+                "PRACTICE".to_string()
             };
         }
     }
@@ -4378,6 +4663,251 @@ fn flow_root_node() -> Node {
     }
 }
 
+fn dashboard_layout_class(
+    logical_width: f32,
+    logical_height: f32,
+    ui_scale: f32,
+) -> DashboardLayoutClass {
+    let scale = ui_scale.max(0.01);
+    let effective_width = logical_width / scale;
+    let effective_height = logical_height / scale;
+    if effective_width < DASHBOARD_COMPACT_WIDTH || effective_height < DASHBOARD_COMPACT_HEIGHT {
+        DashboardLayoutClass::Compact
+    } else {
+        DashboardLayoutClass::Wide
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "one change-driven pass applies the closed Wide/Compact dashboard node contract"
+)]
+fn apply_dashboard_layout(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    scale: Option<Res<UiScale>>,
+    mut roots: Query<(&mut DashboardLayoutClass, &mut ScrollPosition), With<DashboardRoot>>,
+    mut nodes: Query<(
+        &mut Node,
+        &DashboardLayoutRole,
+        Option<&DashboardButtonStyle>,
+    )>,
+) {
+    let Some(window) = windows.iter().next() else {
+        return;
+    };
+    let next = dashboard_layout_class(
+        window.resolution.width(),
+        window.resolution.height(),
+        scale.as_deref().map_or(1.0, |scale| scale.0),
+    );
+    let Some((mut current, mut scroll)) = roots.iter_mut().next() else {
+        return;
+    };
+    if *current == next {
+        return;
+    }
+    *current = next;
+    if next == DashboardLayoutClass::Wide {
+        scroll.0 = Vec2::ZERO;
+    }
+    for (mut node, role, style) in &mut nodes {
+        apply_dashboard_layout_node(&mut node, *role, style.copied(), next);
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the closed role match keeps the complete Wide/Compact layout contract reviewable"
+)]
+fn apply_dashboard_layout_node(
+    node: &mut Node,
+    role: DashboardLayoutRole,
+    style: Option<DashboardButtonStyle>,
+    class: DashboardLayoutClass,
+) {
+    let compact = class == DashboardLayoutClass::Compact;
+    match role {
+        DashboardLayoutRole::Root => {
+            node.row_gap = px(if compact { 8 } else { 5 });
+            node.padding = if compact {
+                UiRect::axes(px(8), px(6))
+            } else {
+                UiRect::axes(px(16), px(8))
+            };
+            node.overflow = if compact {
+                Overflow::scroll_y()
+            } else {
+                Overflow::clip()
+            };
+        }
+        DashboardLayoutRole::Header => {
+            node.column_gap = px(if compact { 6 } else { 10 });
+            node.padding = if compact {
+                UiRect::axes(px(4), px(4))
+            } else {
+                UiRect::axes(px(18), px(6))
+            };
+        }
+        DashboardLayoutRole::Wordmark => {
+            node.width = px(if compact { 105 } else { 220 });
+        }
+        DashboardLayoutRole::Identity => {
+            node.min_width = if compact { auto() } else { px(240) };
+            node.flex_grow = if compact { 1.0 } else { 0.0 };
+            node.flex_shrink = if compact { 1.0 } else { 0.0 };
+            node.padding = if compact {
+                UiRect::axes(px(8), px(5))
+            } else {
+                UiRect::axes(px(14), px(7))
+            };
+        }
+        DashboardLayoutRole::HeaderSpacer => {
+            node.display = if compact {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        }
+        DashboardLayoutRole::Center => {
+            node.flex_grow = if compact { 0.0 } else { 1.0 };
+            node.justify_content = if compact {
+                JustifyContent::FlexStart
+            } else {
+                JustifyContent::Center
+            };
+            node.row_gap = px(if compact { 8 } else { 5 });
+        }
+        DashboardLayoutRole::Preview => {
+            node.width = percent(if compact { 90 } else { 54 });
+            node.max_width = px(if compact { 520 } else { 650 });
+            node.min_height = px(if compact { 180 } else { 280 });
+            node.max_height = px(if compact { 220 } else { 470 });
+            node.flex_grow = if compact { 0.0 } else { 1.0 };
+        }
+        DashboardLayoutRole::Build => {
+            node.width = percent(if compact { 94 } else { 30 });
+            node.max_width = px(if compact { 700 } else { 365 });
+            node.min_height = px(if compact { 88 } else { 104 });
+        }
+        DashboardLayoutRole::ActionRow => {
+            node.flex_direction = if compact {
+                FlexDirection::Column
+            } else {
+                FlexDirection::Row
+            };
+            node.column_gap = px(if compact { 0 } else { 12 });
+            node.row_gap = px(if compact { 8 } else { 0 });
+        }
+        DashboardLayoutRole::Mode => {
+            node.width = percent(if compact { 100 } else { 44 });
+            node.min_height = px(if compact { 94 } else { 104 });
+        }
+        DashboardLayoutRole::UtilityButton { wide_width } => {
+            node.width = px(if compact { 48.0 } else { wide_width });
+            node.min_height = px(42);
+            node.padding = UiRect::axes(px(if compact { 6 } else { 12 }), px(7));
+        }
+        DashboardLayoutRole::UtilityLabel { has_icon } => {
+            node.display = if compact && has_icon {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        }
+    }
+    match style {
+        Some(DashboardButtonStyle::Practice) => {
+            node.width = percent(if compact { 100 } else { 21 });
+            node.min_height = px(if compact { 80 } else { 104 });
+        }
+        Some(DashboardButtonStyle::Play) => {
+            node.width = percent(if compact { 100 } else { 33 });
+            node.min_height = px(if compact { 88 } else { 104 });
+        }
+        _ => {}
+    }
+}
+
+fn scroll_dashboard(
+    mut wheel: MessageReader<MouseWheel>,
+    mut roots: Query<(&DashboardLayoutClass, &mut ScrollPosition), With<DashboardRoot>>,
+) {
+    let delta = wheel
+        .read()
+        .map(|event| match event.unit {
+            MouseScrollUnit::Line => event.y * 24.0,
+            MouseScrollUnit::Pixel => event.y,
+        })
+        .sum::<f32>();
+    if delta.abs() <= f32::EPSILON {
+        return;
+    }
+    for (class, mut position) in &mut roots {
+        if *class == DashboardLayoutClass::Compact {
+            position.0.y = (position.0.y - delta).max(0.0);
+        }
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "computed UI bounds are available only after Bevy's layout pass"
+)]
+fn keep_dashboard_focus_visible(
+    navigation: Res<FlowNavigation>,
+    buttons: Query<(&FlowButton, &ComputedNode, &UiGlobalTransform)>,
+    mut roots: Query<
+        (
+            Entity,
+            &DashboardLayoutClass,
+            &ComputedNode,
+            &UiGlobalTransform,
+            &mut ScrollPosition,
+        ),
+        With<DashboardRoot>,
+    >,
+    mut prior: Local<Option<(Entity, DashboardLayoutClass, usize)>>,
+) {
+    let Some((root_entity, class, _, _, _)) = roots.iter_mut().next() else {
+        *prior = None;
+        return;
+    };
+    let focus_key = (root_entity, *class, navigation.selected);
+    if prior.as_ref() == Some(&focus_key) {
+        return;
+    }
+    *prior = Some(focus_key);
+    let mut focused_top = f32::MAX;
+    let mut focused_bottom = f32::MIN;
+    let mut found = false;
+    for (button, node, transform) in &buttons {
+        if button.index != navigation.selected || node.is_empty() {
+            continue;
+        }
+        let (_, _, center) = transform.to_scale_angle_translation();
+        found = true;
+        focused_top = focused_top.min(center.y - node.size().y * 0.5);
+        focused_bottom = focused_bottom.max(center.y + node.size().y * 0.5);
+    }
+    if !found {
+        return;
+    }
+    for (_, class, root_node, root_transform, mut scroll) in &mut roots {
+        if *class != DashboardLayoutClass::Compact || root_node.is_empty() {
+            continue;
+        }
+        let (_, _, center) = root_transform.to_scale_angle_translation();
+        let half_height = root_node.size().y * 0.5;
+        let visible_top = center.y - half_height + 8.0;
+        let visible_bottom = center.y + half_height - 8.0;
+        if focused_top < visible_top {
+            scroll.0.y = (scroll.0.y - (visible_top - focused_top)).max(0.0);
+        } else if focused_bottom > visible_bottom {
+            scroll.0.y += focused_bottom - visible_bottom;
+        }
+    }
+}
+
 fn dashboard_root_node() -> Node {
     Node {
         width: percent(100),
@@ -4446,6 +4976,14 @@ struct DashboardButtonPresentation<'a> {
     icon: Option<Handle<Image>>,
 }
 
+#[derive(Clone, Copy)]
+enum DashboardButtonContentKind {
+    Play,
+    Practice,
+    Utility { has_icon: bool },
+    Other,
+}
+
 const fn dashboard_button_icon_size(is_play: bool, is_practice: bool) -> f32 {
     if is_play {
         42.0
@@ -4472,9 +5010,18 @@ fn spawn_dashboard_button(
     } = presentation;
     let is_play = matches!(action, FlowUiAction::JoinQueue);
     let is_practice = matches!(action, FlowUiAction::StartPractice);
+    let is_utility = matches!(
+        action,
+        FlowUiAction::OpenSettings | FlowUiAction::OpenDashboardMenu
+    );
+    let has_icon = icon.is_some();
+    let utility_width = matches!(action, FlowUiAction::OpenSettings)
+        .then_some(112.0)
+        .or_else(|| matches!(action, FlowUiAction::OpenDashboardMenu).then_some(92.0));
     let icon_size = dashboard_button_icon_size(is_play, is_practice);
     let mut button = parent.spawn((
         Button,
+        AccessibleLabel::new(label),
         FlowButton {
             index,
             action,
@@ -4507,52 +5054,79 @@ fn spawn_dashboard_button(
         ),
     ));
     if is_play {
-        button.insert((DashboardPlayButton, DashboardButtonStyle::Play));
+        button.insert(DashboardButtonStyle::Play);
     } else if is_practice {
         button.insert(DashboardButtonStyle::Practice);
     } else {
         button.insert(DashboardButtonStyle::Header);
     }
+    if let Some(wide_width) = utility_width {
+        button.insert(DashboardLayoutRole::UtilityButton { wide_width });
+    }
     if disabled {
         button.insert(InteractionDisabled);
     }
+    let content_kind = if is_play {
+        DashboardButtonContentKind::Play
+    } else if is_practice {
+        DashboardButtonContentKind::Practice
+    } else if is_utility {
+        DashboardButtonContentKind::Utility { has_icon }
+    } else {
+        DashboardButtonContentKind::Other
+    };
     button.with_children(|button| {
-        if let Some(icon) = icon {
-            button.spawn((
-                ImageNode::new(icon),
-                Node {
-                    width: px(icon_size),
-                    height: px(icon_size),
-                    ..default()
-                },
-            ));
-        }
-        let mut text = button.spawn((
-            Text::new(label),
-            dashboard_font(
-                assets,
-                if primary {
-                    38.0
-                } else if is_practice {
-                    24.0
-                } else {
-                    15.0
-                },
-            ),
-            TextColor(if primary || is_practice {
-                if primary {
-                    Color::WHITE
-                } else {
-                    Color::srgb(0.04, 0.2, 0.55)
-                }
-            } else {
-                Color::srgb(0.9, 0.95, 1.0)
-            }),
+        spawn_dashboard_button_contents(button, label, assets, icon, icon_size, content_kind);
+    });
+}
+
+fn spawn_dashboard_button_contents(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    assets: Option<&super::ClientAssetHandles>,
+    icon: Option<Handle<Image>>,
+    icon_size: f32,
+    kind: DashboardButtonContentKind,
+) {
+    if let Some(icon) = icon {
+        parent.spawn((
+            ImageNode::new(icon),
+            Node {
+                width: px(icon_size),
+                height: px(icon_size),
+                ..default()
+            },
         ));
-        if is_play {
+    }
+    let font_size = match kind {
+        DashboardButtonContentKind::Play => 38.0,
+        DashboardButtonContentKind::Practice => 24.0,
+        DashboardButtonContentKind::Utility { .. } | DashboardButtonContentKind::Other => 15.0,
+    };
+    let color = match kind {
+        DashboardButtonContentKind::Play => Color::WHITE,
+        DashboardButtonContentKind::Practice => Color::srgb(0.04, 0.2, 0.55),
+        DashboardButtonContentKind::Utility { .. } | DashboardButtonContentKind::Other => {
+            Color::srgb(0.9, 0.95, 1.0)
+        }
+    };
+    let mut text = parent.spawn((
+        Text::new(label),
+        dashboard_font(assets, font_size),
+        TextColor(color),
+    ));
+    match kind {
+        DashboardButtonContentKind::Play => {
             text.insert(DashboardPlayLabel);
         }
-    });
+        DashboardButtonContentKind::Practice => {
+            text.insert(DashboardPracticeLabel);
+        }
+        DashboardButtonContentKind::Utility { has_icon } => {
+            text.insert(DashboardLayoutRole::UtilityLabel { has_icon });
+        }
+        DashboardButtonContentKind::Other => {}
+    }
 }
 
 fn spawn_heading(parent: &mut ChildSpawnerCommands, text: &str) {
@@ -4569,6 +5143,17 @@ fn spawn_flow_button(
     action: FlowUiAction,
     label: &str,
     field: Option<FieldLabel>,
+) {
+    spawn_flow_button_disabled(parent, index, action, label, field, false);
+}
+
+fn spawn_flow_button_disabled(
+    parent: &mut ChildSpawnerCommands,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+    field: Option<FieldLabel>,
+    disabled: bool,
 ) {
     let mut entity = parent.spawn((
         Button,
@@ -4591,6 +5176,9 @@ fn spawn_flow_button(
         BackgroundColor(Color::srgb(0.09, 0.14, 0.2)),
         BorderColor::all(Color::NONE),
     ));
+    if disabled {
+        entity.insert(InteractionDisabled);
+    }
     entity.with_children(|button| {
         let mut text = button.spawn((Text::new(label), TextFont::from_font_size(18.0)));
         if let Some(field) = field {
@@ -4767,7 +5355,7 @@ fn present_flow(
     flow: Res<State<ClientFlow>>,
     model: Res<ServerSelectModel>,
     navigation: Res<FlowNavigation>,
-    selection: Res<SelectedGameType>,
+    game_draft: Res<GameTypeSelectionDraft>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     pending: Option<Res<PendingConnection>>,
     mut buttons: Query<(
@@ -4805,13 +5393,7 @@ fn present_flow(
     {
         let focused = button.index == navigation.selected;
         let selected_game = match button.action {
-            FlowUiAction::SelectGame(index) => {
-                memberships.iter().next().is_some_and(|membership| {
-                    membership.game_types.get(index).is_some_and(|game_type| {
-                        selection.game_type_id.as_ref() == Some(&game_type.id)
-                    })
-                })
-            }
+            FlowUiAction::SelectGameTypeDraft(index) => game_draft.selected_index == Some(index),
             _ => false,
         };
         let selected_build = matches!(
@@ -4923,6 +5505,110 @@ mod tests {
         app
     }
 
+    #[test]
+    fn dashboard_layout_class_uses_effective_ui_space() {
+        assert_eq!(
+            dashboard_layout_class(1280.0, 720.0, 1.0),
+            DashboardLayoutClass::Wide
+        );
+        assert_eq!(
+            dashboard_layout_class(1280.0, 720.0, 1.4),
+            DashboardLayoutClass::Compact
+        );
+        assert_eq!(
+            dashboard_layout_class(640.0, 360.0, 0.8),
+            DashboardLayoutClass::Compact
+        );
+        assert_eq!(
+            dashboard_layout_class(1000.0, 640.0, 1.0),
+            DashboardLayoutClass::Wide
+        );
+        assert_eq!(
+            dashboard_layout_class(999.0, 640.0, 1.0),
+            DashboardLayoutClass::Compact
+        );
+    }
+
+    #[test]
+    fn dashboard_spatial_navigation_matches_wide_and_compact_layouts() {
+        let all = [
+            DASHBOARD_PLAY_INDEX,
+            DASHBOARD_PRACTICE_INDEX,
+            DASHBOARD_GAME_INDEX,
+            DASHBOARD_BUILD_INDEX,
+            DASHBOARD_SETTINGS_INDEX,
+            DASHBOARD_MENU_INDEX,
+        ];
+        assert_eq!(
+            dashboard_focus_neighbor(
+                DashboardLayoutClass::Wide,
+                DASHBOARD_PLAY_INDEX,
+                DashboardNavigationDirection::Left,
+                &all,
+            ),
+            DASHBOARD_PRACTICE_INDEX
+        );
+        assert_eq!(
+            dashboard_focus_neighbor(
+                DashboardLayoutClass::Wide,
+                DASHBOARD_PRACTICE_INDEX,
+                DashboardNavigationDirection::Up,
+                &all,
+            ),
+            DASHBOARD_BUILD_INDEX
+        );
+        assert_eq!(
+            dashboard_focus_neighbor(
+                DashboardLayoutClass::Compact,
+                DASHBOARD_GAME_INDEX,
+                DashboardNavigationDirection::Down,
+                &all,
+            ),
+            DASHBOARD_PRACTICE_INDEX
+        );
+        assert_eq!(
+            dashboard_focus_neighbor(
+                DashboardLayoutClass::Compact,
+                DASHBOARD_PLAY_INDEX,
+                DashboardNavigationDirection::Up,
+                &all,
+            ),
+            DASHBOARD_PRACTICE_INDEX
+        );
+    }
+
+    #[test]
+    fn dashboard_navigation_skips_disabled_targets_and_repairs_focus() {
+        let available = [
+            DASHBOARD_GAME_INDEX,
+            DASHBOARD_BUILD_INDEX,
+            DASHBOARD_SETTINGS_INDEX,
+            DASHBOARD_MENU_INDEX,
+        ];
+        assert_eq!(
+            dashboard_focus_neighbor(
+                DashboardLayoutClass::Wide,
+                DASHBOARD_PLAY_INDEX,
+                DashboardNavigationDirection::Left,
+                &available,
+            ),
+            DASHBOARD_GAME_INDEX
+        );
+        assert_eq!(
+            repair_dashboard_focus(DASHBOARD_PLAY_INDEX, &available),
+            DASHBOARD_GAME_INDEX
+        );
+        assert_eq!(
+            dashboard_focus_neighbor(
+                DashboardLayoutClass::Wide,
+                DASHBOARD_SETTINGS_INDEX,
+                DashboardNavigationDirection::Left,
+                &available,
+            ),
+            DASHBOARD_SETTINGS_INDEX
+        );
+    }
+
     fn count_flow_roots(app: &mut App) -> usize {
         let world = app.world_mut();
         let mut query = world.query_filtered::<Entity, With<FlowRoot>>();
@@ -4939,6 +5625,21 @@ mod tests {
         let world = app.world_mut();
         let mut query = world.query::<&Text>();
         query.iter(world).map(|text| text.0.clone()).collect()
+    }
+
+    fn press_flow_button(app: &mut App, action: &FlowUiAction) {
+        let entity = {
+            let world = app.world_mut();
+            let mut query = world.query::<(Entity, &FlowButton)>();
+            query
+                .iter(world)
+                .find_map(|(entity, button)| (&button.action == action).then_some(entity))
+                .unwrap_or_else(|| panic!("missing rendered flow button for {action:?}"))
+        };
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(Interaction::Pressed);
+        app.update();
     }
 
     fn lobby_membership() -> ClientLobbyMembership {
@@ -4995,6 +5696,120 @@ mod tests {
     }
 
     #[test]
+    fn rendered_server_select_connect_button_starts_connection() {
+        let mut app = flow_test_app();
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::ServerSelect);
+        app.update();
+
+        press_flow_button(&mut app, &FlowUiAction::Connect);
+
+        assert!(app.world().contains_resource::<PendingConnection>());
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<ClientFlow>>().get(),
+            ClientFlow::Connecting
+        );
+    }
+
+    #[test]
+    fn rendered_dashboard_menu_buttons_dispatch_their_actions() {
+        let mut app = flow_test_app();
+        app.world_mut().spawn((Client, lobby_membership()));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
+        app.update();
+
+        press_flow_button(&mut app, &FlowUiAction::OpenDashboardMenu);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::DashboardMenu
+        );
+        app.update();
+
+        press_flow_button(&mut app, &FlowUiAction::OpenCredits);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::Credits
+        );
+    }
+
+    #[test]
+    fn change_server_confirmation_clears_before_server_select_connect() {
+        let mut app = flow_test_app();
+        app.world_mut().spawn((
+            Client,
+            lobby_membership(),
+            RoutedClientSession {
+                generation: 1,
+                kind: super::super::RoutedClientSessionKind::Lobby,
+            },
+            RuntimeLobbyTarget {
+                logical_address: "127.0.0.1:5000".to_string(),
+                proposed_display_name: "Player".to_string(),
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
+        app.update();
+
+        press_flow_button(&mut app, &FlowUiAction::OpenDashboardMenu);
+        app.update();
+        press_flow_button(&mut app, &FlowUiAction::RequestChangeServer);
+        app.update();
+        press_flow_button(&mut app, &FlowUiAction::ConfirmChangeServer);
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<State<ClientFlow>>().get(),
+            ClientFlow::ServerSelect
+        );
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
+        );
+
+        press_flow_button(&mut app, &FlowUiAction::Connect);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<ClientFlow>>().get(),
+            ClientFlow::Connecting
+        );
+    }
+
+    #[test]
+    fn dashboard_menu_omits_favorite_without_a_real_server_target() {
+        let mut app = flow_test_app();
+        let clients = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<Entity, With<Client>>();
+            query.iter(world).collect::<Vec<_>>()
+        };
+        for entity in clients {
+            app.world_mut().despawn(entity);
+        }
+        app.world_mut().spawn((Client, lobby_membership()));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
+        app.update();
+
+        press_flow_button(&mut app, &FlowUiAction::OpenDashboardMenu);
+        app.update();
+
+        let world = app.world_mut();
+        let mut query = world.query::<&FlowButton>();
+        assert!(
+            !query
+                .iter(world)
+                .any(|button| button.action == FlowUiAction::ToggleFavoriteServer)
+        );
+    }
+
+    #[test]
     fn dashboard_mode_card_separates_title_and_pool_without_claiming_a_selected_map() {
         let game = lobby_membership().game_types.remove(0);
         let summary = dashboard_game_summary(&game);
@@ -5002,6 +5817,36 @@ mod tests {
         assert!(summary.contains("First to"));
         assert!(summary.contains("Map pool:"));
         assert!(!summary.contains("Selected map"));
+    }
+
+    #[test]
+    fn dashboard_actions_have_explicit_fact_based_accessible_labels() {
+        let mut app = flow_test_app();
+        app.world_mut().spawn((Client, lobby_membership()));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
+        app.update();
+
+        let world = app.world_mut();
+        let mut query = world.query::<(&DashboardButtonStyle, &AccessibleLabel)>();
+        let labels = query
+            .iter(world)
+            .map(|(style, label)| (*style, label.0.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(labels.len(), 7);
+        assert!(labels.iter().all(|(_, label)| !label.trim().is_empty()));
+        assert!(labels.iter().any(|(style, label)| {
+            matches!(style, DashboardButtonStyle::Preview) && label.starts_with("Change brawler:")
+        }));
+        assert!(labels.iter().any(|(style, label)| {
+            matches!(style, DashboardButtonStyle::Mode)
+                && label.contains("Map pool:")
+                && !label.contains("Selected map")
+        }));
+        assert!(labels.iter().any(|(style, label)| {
+            matches!(style, DashboardButtonStyle::Play) && label == "Play"
+        }));
     }
 
     #[test]
@@ -5052,15 +5897,18 @@ mod tests {
     }
 
     #[test]
-    fn flow_has_the_m04_queue_state() {
+    fn flow_has_the_v5_connected_state_set() {
         let states = [
-            ClientFlow::Dashboard,
-            ClientFlow::ServerSelect,
             ClientFlow::Connecting,
-            ClientFlow::GameSelect,
+            ClientFlow::ServerSelect,
+            ClientFlow::Dashboard,
+            ClientFlow::GameTypeSelect,
             ClientFlow::Queue,
+            ClientFlow::MatchLoading,
+            ClientFlow::Match,
+            ClientFlow::Results,
         ];
-        assert_eq!(states.len(), 5);
+        assert_eq!(states.len(), 8);
     }
 
     #[test]
@@ -5089,7 +5937,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
-            .set(ClientFlow::GameSelect);
+            .set(ClientFlow::GameTypeSelect);
         app.update();
         assert_eq!(
             *app.world().resource::<super::super::ClientInputContext>(),
@@ -5149,19 +5997,22 @@ mod tests {
                 disconnect_requested: false,
             },
         ));
+        app.world_mut()
+            .resource_mut::<RoutedClientLifecycle>()
+            .generation = 3;
         app.update();
         app.update();
 
         assert_eq!(
             *app.world().resource::<State<ClientFlow>>().get(),
-            ClientFlow::GameSelect
+            ClientFlow::Dashboard
         );
         assert!(app.world().get_entity(completion_root).is_err());
         assert_eq!(count_flow_roots(&mut app), 1);
     }
 
     #[test]
-    fn results_queue_again_uses_the_fresh_lobby_catalog_when_selection_was_cleared() {
+    fn results_replay_uses_the_exact_fresh_lobby_game() {
         let mut app = flow_test_app();
         app.world_mut()
             .insert_resource(super::super::ClientInputContext::Shell);
@@ -5196,7 +6047,7 @@ mod tests {
         ));
         app.world_mut()
             .resource_mut::<RoutedClientLifecycle>()
-            .generation = 4;
+            .generation = 3;
         {
             let mut result = app
                 .world_mut()
@@ -5205,7 +6056,7 @@ mod tests {
             result.context = Some(super::super::ClientMatchResultContext {
                 result: crate::matchplay::MatchResult::Draw,
                 local_team: None,
-                game_type_id: None,
+                game_type_id: Some(game_type_id.clone()),
                 game_name: None,
                 final_score: None,
             });
@@ -5226,7 +6077,7 @@ mod tests {
                 .resource::<SelectedGameType>()
                 .game_type_id
                 .as_ref(),
-            None
+            Some(&game_type_id)
         );
 
         app.world_mut()
@@ -5258,7 +6109,7 @@ mod tests {
         app.world_mut().spawn((Client, lobby_membership()));
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
-            .set(ClientFlow::GameSelect);
+            .set(ClientFlow::Dashboard);
         app.update();
         app.world_mut()
             .resource_mut::<super::super::BuildEditorState>()
@@ -5321,7 +6172,7 @@ mod tests {
         ));
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
-            .set(ClientFlow::GameSelect);
+            .set(ClientFlow::Dashboard);
         app.update();
         app.world_mut()
             .resource_mut::<super::super::BuildEditorState>()
@@ -5339,13 +6190,16 @@ mod tests {
             *app.world().resource::<ClientOverlay>(),
             ClientOverlay::None
         );
-        assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
+        assert_eq!(
+            app.world().resource::<FlowNavigation>().selected,
+            DASHBOARD_BUILD_INDEX
+        );
         let focused_action = {
             let world = app.world_mut();
             let mut query = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
             query
                 .iter(world)
-                .find(|(button, _)| button.index == 1)
+                .find(|(button, _)| button.index == DASHBOARD_BUILD_INDEX)
                 .map(|(button, disabled)| (button.action.clone(), disabled))
         };
         assert_eq!(focused_action, Some((FlowUiAction::OpenBuildEditor, false)));
@@ -5368,9 +6222,13 @@ mod tests {
             configuration_revision: Some(second.configuration_revision),
         };
 
+        *app.world_mut().resource_mut::<GameTypeSelectionDraft>() = GameTypeSelectionDraft {
+            selected_index: Some(1),
+            unavailable_previous: false,
+        };
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
-            .set(ClientFlow::GameSelect);
+            .set(ClientFlow::GameTypeSelect);
         app.update();
 
         assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
@@ -5384,62 +6242,94 @@ mod tests {
     }
 
     #[test]
-    fn correctable_rejection_focus_indices_name_the_actual_field_controls() {
+    fn game_type_child_drafts_then_discards_or_confirms() {
+        let mut lobby = lobby_membership();
+        let first = lobby.game_types[0].clone();
+        let mut second = first.clone();
+        second.id = crate::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
+        second.configuration_revision = 2;
+        second.display_name = "Hot Zone 2v2".to_string();
+        second.mode_definition_id = crate::map::HOT_ZONE_MODE_DEFINITION;
+        lobby.game_types.push(second.clone());
+        let mut selection = SelectedGameType {
+            catalog_revision: Some(lobby.catalog_revision),
+            game_type_id: Some(first.id.clone()),
+            configuration_revision: Some(first.configuration_revision),
+        };
+        let draft = GameTypeSelectionDraft {
+            selected_index: Some(1),
+            unavailable_previous: false,
+        };
+
+        // Merely editing or discarding the draft cannot mutate the accepted selection.
+        assert_eq!(selection.game_type_id.as_ref(), Some(&first.id));
+        let discarded = GameTypeSelectionDraft::default();
+        assert_eq!(discarded.selected_index, None);
+        assert_eq!(selection.game_type_id.as_ref(), Some(&first.id));
+
+        assert!(accept_game_type_draft(&draft, &lobby, &mut selection));
+        assert_eq!(selection.game_type_id.as_ref(), Some(&second.id));
         assert_eq!(
-            build_editor_field_focus_index(super::super::BuildEditorField::Power),
-            BUILD_EDITOR_FIELD_BASE
+            selection.configuration_revision,
+            Some(second.configuration_revision)
         );
-        assert_eq!(
-            build_editor_field_focus_index(super::super::BuildEditorField::PassiveTwo),
-            BUILD_EDITOR_FIELD_BASE + 5
-        );
+        assert!(!accept_game_type_draft(
+            &GameTypeSelectionDraft::default(),
+            &lobby,
+            &mut selection
+        ));
     }
 
     #[test]
-    fn reopening_editor_preserves_authoritative_corrective_focus() {
+    fn results_disable_replay_when_the_exact_game_disappears() {
         let mut app = flow_test_app();
-        app.world_mut().spawn((Client, lobby_membership()));
+        app.world_mut().spawn((
+            Client,
+            lobby_membership(),
+            RoutedClientSession {
+                generation: 4,
+                kind: super::super::RoutedClientSessionKind::Lobby,
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<RoutedClientLifecycle>()
+            .generation = 4;
+        app.world_mut()
+            .resource_mut::<super::super::ClientMatchResultState>()
+            .context = Some(super::super::ClientMatchResultContext {
+            result: crate::matchplay::MatchResult::Draw,
+            local_team: None,
+            game_type_id: Some(crate::lobby::GameTypeId::new("retired-mode").unwrap()),
+            game_name: Some("Retired Mode".to_string()),
+            final_score: None,
+        });
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
-            .set(ClientFlow::GameSelect);
+            .set(ClientFlow::Results);
         app.update();
 
-        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
-            kind: FlowErrorKind::Queue,
-            message: "Queue admission is taking longer than expected".to_string(),
-            return_flow: ClientFlow::GameSelect,
-            actions: [
-                Some(FlowErrorAction::RetryQueue),
-                Some(FlowErrorAction::Disconnect),
-            ],
-        });
-        app.update();
-        assert_eq!(count_error_roots(&mut app), 1);
-
-        let corrective_index =
-            build_editor_field_focus_index(super::super::BuildEditorField::PassiveTwo);
-        {
-            let mut editor = app
-                .world_mut()
-                .resource_mut::<super::super::BuildEditorState>();
-            editor.selected_choice = 4;
-            editor.focused_field = super::super::BuildEditorField::PassiveTwo;
-            editor.is_open = true;
-        }
-        app.world_mut().resource_mut::<FlowNavigation>().selected = corrective_index;
-        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BuildEditor;
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<FlowNavigation>().selected,
-            corrective_index
+        let (replay_disabled, dashboard_disabled) = {
+            let world = app.world_mut();
+            let mut query = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
+            let replay = query
+                .iter(world)
+                .find(|(button, _)| button.action == FlowUiAction::QueueAgain)
+                .map(|(_, disabled)| disabled)
+                .unwrap();
+            let dashboard = query
+                .iter(world)
+                .find(|(button, _)| button.action == FlowUiAction::ReturnToDashboard)
+                .map(|(_, disabled)| disabled)
+                .unwrap();
+            (replay, dashboard)
+        };
+        assert!(replay_disabled);
+        assert!(!dashboard_disabled);
+        assert!(
+            visible_text(&mut app)
+                .iter()
+                .any(|text| text.contains("previous game is not available"))
         );
-        let world = app.world_mut();
-        let mut query = world.query::<&FlowButton>();
-        assert!(query.iter(world).any(|button| {
-            button.index == corrective_index
-                && matches!(button.action, FlowUiAction::FocusBuildField(5))
-        }));
     }
 
     #[test]
@@ -5471,31 +6361,6 @@ mod tests {
         assert!(copy.contains("Wipeout 2v2"));
         assert!(copy.contains(&preset.display_name));
         assert!(copy.contains("Updating queue"));
-    }
-
-    #[test]
-    fn queue_recovery_restores_the_command_owner_and_editor_uses_advertised_name() {
-        let lobby = lobby_membership();
-        let selection = SelectedGameType {
-            catalog_revision: Some(lobby.catalog_revision),
-            game_type_id: Some(lobby.game_types[0].id.clone()),
-            configuration_revision: Some(1),
-        };
-        assert_eq!(selected_game_name(&selection, Some(&lobby)), "Wipeout 2v2");
-        let join = crate::lobby::QueueCommand::Join(crate::lobby::QueueJoinCommand {
-            catalog_revision: lobby.catalog_revision,
-            game_type_id: lobby.game_types[0].id.clone(),
-            game_type_configuration_revision: 1,
-            build: crate::builds::BuildCandidate {
-                build_revision: crate::builds::BuildRevision(1),
-                selection: crate::builds::BuildSelection::Preset(crate::builds::BuildPresetId(1)),
-            },
-        });
-        let cancel = crate::lobby::QueueCommand::Cancel(crate::lobby::QueueCancelCommand {
-            ticket_id: crate::lobby::QueueTicketId::new(1).unwrap(),
-        });
-        assert_eq!(queue_recovery_overlay(&join), OverlayCommit::BuildEditor);
-        assert_eq!(queue_recovery_overlay(&cancel), OverlayCommit::Clear);
     }
 
     #[test]

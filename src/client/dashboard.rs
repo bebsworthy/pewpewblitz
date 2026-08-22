@@ -23,6 +23,9 @@ struct DashboardPreviewTarget(Handle<Image>);
 struct DashboardBackgroundTarget(Handle<DashboardBackgroundMaterial>);
 
 #[derive(Component)]
+pub(super) struct DashboardOwned;
+
+#[derive(Component)]
 struct DashboardBackground;
 
 #[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
@@ -97,6 +100,7 @@ fn ensure_dashboard_background(
         return;
     }
     commands.spawn((
+        DashboardOwned,
         DashboardBackground,
         DespawnOnExit(ClientFlow::Dashboard),
         Node {
@@ -117,6 +121,7 @@ fn ensure_dashboard_background(
         glow: Vec4::new(0.5, 0.41, 0.13, 0.2),
     });
     commands.spawn((
+        DashboardOwned,
         DashboardBackground,
         DespawnOnExit(ClientFlow::Dashboard),
         Node {
@@ -149,12 +154,21 @@ fn update_dashboard_background(
     let Some(mut material) = materials.get_mut(&target.0) else {
         return;
     };
-    material.time_motion.x = if settings.reduced_motion {
-        5.0
+    let (time, motion) = dashboard_motion(
+        time.elapsed_secs(),
+        settings.reduced_motion,
+        settings.reduced_combat_effects,
+    );
+    material.time_motion.x = time;
+    material.time_motion.y = motion;
+}
+
+fn dashboard_motion(time: f32, reduced_motion: bool, reduced_effects: bool) -> (f32, f32) {
+    if reduced_motion || reduced_effects {
+        (5.0, 0.0)
     } else {
-        time.elapsed_secs()
-    };
-    material.time_motion.y = if settings.reduced_motion { 0.0 } else { 1.0 };
+        (time, 1.0)
+    }
 }
 
 #[allow(
@@ -189,6 +203,7 @@ fn spawn_dashboard_preview(
     let layer = RenderLayers::layer(DASHBOARD_RENDER_LAYER);
     let camera = commands
         .spawn((
+            DashboardOwned,
             DashboardPreviewCamera,
             DespawnOnExit(ClientFlow::Dashboard),
             Camera3d::default(),
@@ -213,6 +228,7 @@ fn spawn_dashboard_preview(
     spawn_dashboard_preview_lights(&mut commands, &layer);
     let root = commands
         .spawn((
+            DashboardOwned,
             DashboardPreviewRoot,
             DespawnOnExit(ClientFlow::Dashboard),
             Transform::default(),
@@ -255,6 +271,7 @@ fn spawn_dashboard_preview(
 
 fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers) {
     commands.spawn((
+        DashboardOwned,
         DespawnOnExit(ClientFlow::Dashboard),
         DirectionalLight {
             illuminance: 9_000.0,
@@ -265,6 +282,7 @@ fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers)
         layer.clone(),
     ));
     commands.spawn((
+        DashboardOwned,
         DespawnOnExit(ClientFlow::Dashboard),
         PointLight {
             color: Color::srgb(1.0, 0.82, 0.68),
@@ -277,6 +295,7 @@ fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers)
         layer.clone(),
     ));
     commands.spawn((
+        DashboardOwned,
         DespawnOnExit(ClientFlow::Dashboard),
         PointLight {
             color: Color::srgb(0.05, 0.72, 0.92),
@@ -429,5 +448,68 @@ fn release_dashboard_background_target(
     if let Some(target) = target {
         materials.remove(target.0.id());
         commands.remove_resource::<DashboardBackgroundTarget>();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reduced_motion_or_effects_freezes_the_dashboard_shader() {
+        assert_eq!(dashboard_motion(12.0, false, false), (12.0, 1.0));
+        assert_eq!(dashboard_motion(12.0, true, false), (5.0, 0.0));
+        assert_eq!(dashboard_motion(12.0, false, true), (5.0, 0.0));
+    }
+
+    #[test]
+    fn repeated_dashboard_target_cleanup_returns_assets_to_baseline() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<Assets<DashboardBackgroundMaterial>>()
+            .add_systems(
+                Update,
+                (
+                    release_dashboard_preview_target,
+                    release_dashboard_background_target,
+                ),
+            );
+        let image_baseline = app.world().resource::<Assets<Image>>().len();
+        let material_baseline = app
+            .world()
+            .resource::<Assets<DashboardBackgroundMaterial>>()
+            .len();
+        for _ in 0..25 {
+            let image = app
+                .world_mut()
+                .resource_mut::<Assets<Image>>()
+                .add(Image::default());
+            let material = app
+                .world_mut()
+                .resource_mut::<Assets<DashboardBackgroundMaterial>>()
+                .add(DashboardBackgroundMaterial {
+                    time_motion: Vec4::ZERO,
+                    palette_dark: Vec4::ZERO,
+                    palette_light: Vec4::ZERO,
+                    glow: Vec4::ZERO,
+                });
+            app.world_mut()
+                .insert_resource(DashboardPreviewTarget(image));
+            app.world_mut()
+                .insert_resource(DashboardBackgroundTarget(material));
+            app.update();
+            assert!(!app.world().contains_resource::<DashboardPreviewTarget>());
+            assert!(!app.world().contains_resource::<DashboardBackgroundTarget>());
+            assert_eq!(
+                app.world().resource::<Assets<Image>>().len(),
+                image_baseline
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<Assets<DashboardBackgroundMaterial>>()
+                    .len(),
+                material_baseline
+            );
+        }
     }
 }

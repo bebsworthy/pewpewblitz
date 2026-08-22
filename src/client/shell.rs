@@ -1,11 +1,10 @@
-//! Functional windowed product shell: title, one overlay, focus, settings draft, and errors.
+//! Functional windowed product overlays: focus, settings draft, credits, and errors.
 
 use super::flow::ClientFlowSet;
 use super::flow::ClientLocalLoadFailures;
 use super::{
     ClientFlow, ClientInputContext, ClientOverlay, FlowError, FlowErrorAction, FlowErrorKind,
     InputCaptureConsumed, InputSettingsField, InputSettingsSelection, InputSettingsText,
-    SessionPurpose,
     settings::{
         ClientInputSettings,
         persistence::{
@@ -35,7 +34,7 @@ const CREDITS: &str = "PewPew Blitz 0.1.0\n\nBuilt with Bevy 0.19 (MIT OR Apache
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ErrorReturn {
-    Title,
+    ProductFlow,
     Settings,
 }
 
@@ -57,7 +56,7 @@ struct ShellState {
 impl Default for ShellState {
     fn default() -> Self {
         Self {
-            return_target: ErrorReturn::Title,
+            return_target: ErrorReturn::ProductFlow,
             kind: LocalSettingsErrorKind::Load,
             message: String::new(),
         }
@@ -80,13 +79,6 @@ struct NavigationLatch {
 struct NavigationDirty(Option<ShellControlId>);
 
 #[derive(Component)]
-#[allow(
-    dead_code,
-    reason = "retained temporarily for V2 shell regression fixtures during V5 M01"
-)]
-struct TitleRoot;
-
-#[derive(Component)]
 struct OverlayRoot;
 
 #[derive(Component)]
@@ -102,7 +94,6 @@ struct EntranceAnimation {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellLayer {
-    Title,
     Settings,
     Credits,
     Error,
@@ -111,23 +102,8 @@ enum ShellLayer {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellControlId {
-    #[allow(
-        dead_code,
-        reason = "retained for V2 title regression fixtures during V5 M01"
-    )]
-    Play,
-    #[allow(
-        dead_code,
-        reason = "retained for V2 title regression fixtures during V5 M01"
-    )]
-    Practice,
     Settings,
     Credits,
-    #[allow(
-        dead_code,
-        reason = "retained for V2 title regression fixtures during V5 M01"
-    )]
-    Quit,
     PreviousField,
     NextField,
     Decrease,
@@ -154,32 +130,7 @@ enum ShellControlId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellAction {
-    #[allow(
-        dead_code,
-        reason = "retained for V2 title regression fixtures during V5 M01"
-    )]
-    Play,
-    #[allow(
-        dead_code,
-        reason = "retained for V2 title regression fixtures during V5 M01"
-    )]
-    Practice,
-    #[allow(
-        dead_code,
-        reason = "retained for shell settings regression fixtures during V5 M01"
-    )]
-    OpenSettings,
     OpenMatchSettings,
-    #[allow(
-        dead_code,
-        reason = "retained for V2 title regression fixtures during V5 M01"
-    )]
-    OpenCredits,
-    #[allow(
-        dead_code,
-        reason = "retained for V2 title regression fixtures during V5 M01"
-    )]
-    Quit,
     PreviousField,
     NextField,
     Decrease,
@@ -207,7 +158,7 @@ enum ShellAction {
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum SettingsReturnTarget {
     #[default]
-    Title,
+    ProductFlow,
     MatchMenu,
 }
 
@@ -237,7 +188,6 @@ impl Plugin for ClientShellPlugin {
             .init_resource::<InputCaptureConsumed>()
             .init_resource::<super::MatchSettingsRequest>()
             .init_resource::<SettingsReturnTarget>()
-            .init_resource::<SessionPurpose>()
             .add_systems(Startup, load_persistent_settings)
             .add_systems(OnEnter(ClientFlow::Dashboard), enter_dashboard_shell)
             .add_systems(
@@ -287,7 +237,7 @@ fn load_persistent_settings(
         Ok(None) => {}
         Err(error) => {
             failures.settings_failed = true;
-            state.return_target = ErrorReturn::Title;
+            state.return_target = ErrorReturn::ProductFlow;
             state.kind = LocalSettingsErrorKind::Load;
             state.message = error.to_string();
         }
@@ -324,7 +274,7 @@ fn present_flow_requested_overlay(
     }
     match overlay.as_ref() {
         ClientOverlay::Settings => {
-            *settings_return = SettingsReturnTarget::Title;
+            *settings_return = SettingsReturnTarget::ProductFlow;
             if input_draft.is_none() {
                 commands.insert_resource(InputSettingsDraft(*active_input));
             }
@@ -373,74 +323,6 @@ fn panel_node() -> Node {
         border_radius: BorderRadius::all(px(12)),
         ..default()
     }
-}
-
-#[allow(
-    dead_code,
-    reason = "retained temporarily for V2 shell regression fixtures during V5 M01"
-)]
-fn spawn_title(commands: &mut Commands) {
-    commands
-        .spawn((
-            TitleRoot,
-            DespawnOnExit(ClientFlow::Dashboard),
-            root_node(),
-            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
-            GlobalZIndex(400),
-            EntranceAnimation { elapsed: 0.0 },
-            UiTransform::from_translation(Val2::new(px(0), px(18))),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Text::new("BRAWLER"),
-                TextFont::from_font_size(56.0),
-                TextColor(Color::srgb(0.25, 0.9, 1.0)),
-            ));
-            root.spawn((
-                Text::new("AUTHOR YOUR FIGHTER. OWN THE ARENA."),
-                TextFont::from_font_size(16.0),
-                TextColor(Color::srgb(0.7, 0.78, 0.86)),
-                Node {
-                    margin: UiRect::bottom(px(18)),
-                    ..default()
-                },
-            ));
-            spawn_button(
-                root,
-                "PLAY",
-                ShellControlId::Play,
-                Some(ShellAction::Play),
-                ShellLayer::Title,
-            );
-            spawn_button(
-                root,
-                "PRACTICE",
-                ShellControlId::Practice,
-                Some(ShellAction::Practice),
-                ShellLayer::Title,
-            );
-            spawn_button(
-                root,
-                "SETTINGS",
-                ShellControlId::Settings,
-                Some(ShellAction::OpenSettings),
-                ShellLayer::Title,
-            );
-            spawn_button(
-                root,
-                "CREDITS",
-                ShellControlId::Credits,
-                Some(ShellAction::OpenCredits),
-                ShellLayer::Title,
-            );
-            spawn_button(
-                root,
-                "QUIT",
-                ShellControlId::Quit,
-                Some(ShellAction::Quit),
-                ShellLayer::Title,
-            );
-        });
 }
 
 fn spawn_overlay(
@@ -688,11 +570,11 @@ fn spawn_button(
 
 fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
     match overlay {
-        ClientOverlay::None => ShellLayer::Title,
         ClientOverlay::Settings => ShellLayer::Settings,
         ClientOverlay::Credits => ShellLayer::Credits,
         ClientOverlay::Error(_) => ShellLayer::Error,
-        ClientOverlay::BuildEditor
+        ClientOverlay::None
+        | ClientOverlay::BuildEditor
         | ClientOverlay::DashboardMenu
         | ClientOverlay::Confirmation(_)
         | ClientOverlay::ChangeServerConfirmation
@@ -843,36 +725,16 @@ fn handle_shell_actions(
     mut active_input: ResMut<ClientInputSettings>,
     mut active_shell: ResMut<ClientShellSettings>,
     mut dirty: ResMut<NavigationDirty>,
-    flow_state: (
-        ResMut<NextState<ClientFlow>>,
-        ResMut<SessionPurpose>,
-        ResMut<ClientOverlay>,
-    ),
+    mut client_overlay: ResMut<ClientOverlay>,
     mut context: ResMut<ClientInputContext>,
     mut settings_return: ResMut<SettingsReturnTarget>,
-    mut exit: MessageWriter<AppExit>,
 ) {
-    let (mut next_flow, mut purpose, mut client_overlay) = flow_state;
     let actions = core::mem::take(&mut pending.0);
     for action in actions {
         match action {
-            ShellAction::Play => {
-                *purpose = SessionPurpose::Multiplayer;
-                *client_overlay = ClientOverlay::None;
-                next_flow.set(ClientFlow::ServerSelect);
-            }
-            ShellAction::Practice => {
-                *purpose = SessionPurpose::Practice;
-                *client_overlay = ClientOverlay::None;
-                next_flow.set(ClientFlow::ServerSelect);
-            }
-            ShellAction::OpenSettings | ShellAction::OpenMatchSettings => {
-                *settings_return = if action == ShellAction::OpenMatchSettings {
-                    *context = ClientInputContext::Shell;
-                    SettingsReturnTarget::MatchMenu
-                } else {
-                    SettingsReturnTarget::Title
-                };
+            ShellAction::OpenMatchSettings => {
+                *context = ClientInputContext::Shell;
+                *settings_return = SettingsReturnTarget::MatchMenu;
                 *client_overlay = ClientOverlay::Settings;
                 commands.insert_resource(InputSettingsDraft(*active_input));
                 commands.insert_resource(ShellSettingsDraft(*active_shell));
@@ -880,15 +742,6 @@ fn handle_shell_actions(
                 despawn_overlays(&mut commands, &roots);
                 spawn_settings(&mut commands);
                 dirty.0 = Some(ShellControlId::PreviousField);
-            }
-            ShellAction::OpenCredits => {
-                *client_overlay = ClientOverlay::Credits;
-                despawn_overlays(&mut commands, &roots);
-                spawn_credits(&mut commands);
-                dirty.0 = Some(ShellControlId::CreditsBack);
-            }
-            ShellAction::Quit => {
-                exit.write(AppExit::Success);
             }
             ShellAction::PreviousField => selection.field = selection.field.previous(),
             ShellAction::NextField => selection.field = selection.field.next(),
@@ -1113,7 +966,7 @@ fn restore_match_menu_after_settings(
     if *target == SettingsReturnTarget::MatchMenu && matches!(overlay.as_ref(), ClientOverlay::None)
     {
         *context = ClientInputContext::Menu;
-        *target = SettingsReturnTarget::Title;
+        *target = SettingsReturnTarget::ProductFlow;
     }
 }
 
@@ -1450,10 +1303,6 @@ mod tests {
     use crate::client::settings::ui::adjust_input_settings_from_pause_keys;
     use bevy::input_focus::directional_navigation::NavNeighbor;
 
-    fn spawn_legacy_title_fixture(mut commands: Commands) {
-        spawn_title(&mut commands);
-    }
-
     fn shell_test_app(path: std::path::PathBuf) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1483,15 +1332,19 @@ mod tests {
                 adjust_input_settings_from_pause_keys.in_set(ClientSettingsUiSet::Capture),
             )
             .add_plugins(ClientShellPlugin);
-        app.add_systems(OnEnter(ClientFlow::Dashboard), spawn_legacy_title_fixture);
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
             .set(ClientFlow::Dashboard);
         app
     }
 
+    fn request_settings(app: &mut App) {
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Settings;
+        app.update();
+    }
+
     #[test]
-    fn shell_startup_exposes_practice_and_overlay_replaces_navigation_root() {
+    fn dashboard_overlay_request_builds_settings_navigation() {
         let path = std::env::temp_dir().join(format!(
             "brawler-m02-shell-missing-{}-settings.ron",
             std::process::id()
@@ -1503,26 +1356,7 @@ mod tests {
             *app.world().resource::<ClientInputContext>(),
             ClientInputContext::Shell
         );
-        let focus = app.world().resource::<InputFocus>().get().unwrap();
-        assert_eq!(
-            app.world().get::<ShellButton>(focus).unwrap().id,
-            ShellControlId::Play
-        );
-        let practice_is_enabled = {
-            let world = app.world_mut();
-            let mut query = world.query::<&ShellButton>();
-            query
-                .iter(world)
-                .find(|button| button.id == ShellControlId::Practice)
-                .is_some_and(|button| button.action == Some(ShellAction::Practice))
-        };
-        assert!(practice_is_enabled);
-
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         assert_eq!(
             *app.world().resource::<ClientOverlay>(),
             ClientOverlay::Settings
@@ -1542,11 +1376,7 @@ mod tests {
         let mut app = shell_test_app(path.clone());
         app.update();
 
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         app.world_mut()
             .resource_mut::<InputSettingsDraft>()
             .0
@@ -1558,11 +1388,7 @@ mod tests {
         app.update();
         assert!(!app.world().resource::<ClientInputSettings>().invert_aim_y);
 
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         app.world_mut()
             .resource_mut::<InputSettingsDraft>()
             .0
@@ -1604,36 +1430,6 @@ mod tests {
     }
 
     #[test]
-    fn controller_dpad_selects_practice_and_south_activates_once() {
-        let path = std::env::temp_dir().join(format!(
-            "brawler-m02-shell-controller-{}-settings.ron",
-            std::process::id()
-        ));
-        let mut app = shell_test_app(path);
-        app.update();
-        let mut gamepad = Gamepad::default();
-        gamepad.digital_mut().press(GamepadButton::DPadDown);
-        gamepad.digital_mut().press(GamepadButton::South);
-        app.world_mut().spawn(gamepad);
-
-        app.update();
-        assert_eq!(
-            *app.world().resource::<SessionPurpose>(),
-            SessionPurpose::Practice
-        );
-        assert_eq!(
-            *app.world().resource::<ClientOverlay>(),
-            ClientOverlay::None
-        );
-        let overlay_count = {
-            let world = app.world_mut();
-            let mut query = world.query_filtered::<Entity, With<OverlayRoot>>();
-            query.iter(world).count()
-        };
-        assert_eq!(overlay_count, 0);
-    }
-
-    #[test]
     fn spatial_navigation_uses_cardinal_layout_neighbors() {
         let mut world = World::new();
         let settings = world.spawn_empty().id();
@@ -1667,42 +1463,6 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_keyboard_and_left_stick_move_title_focus() {
-        let keyboard_path = std::env::temp_dir().join(format!(
-            "brawler-m02-shell-horizontal-keyboard-{}-settings.ron",
-            std::process::id()
-        ));
-        let mut keyboard_app = shell_test_app(keyboard_path);
-        keyboard_app.update();
-        keyboard_app
-            .world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ArrowRight);
-        keyboard_app.update();
-        let focus = keyboard_app.world().resource::<InputFocus>().get().unwrap();
-        assert_eq!(
-            keyboard_app.world().get::<ShellButton>(focus).unwrap().id,
-            ShellControlId::Practice
-        );
-
-        let stick_path = std::env::temp_dir().join(format!(
-            "brawler-m02-shell-horizontal-stick-{}-settings.ron",
-            std::process::id()
-        ));
-        let mut stick_app = shell_test_app(stick_path);
-        stick_app.update();
-        let mut gamepad = Gamepad::default();
-        gamepad.analog_mut().set(GamepadAxis::LeftStickX, 1.0);
-        stick_app.world_mut().spawn(gamepad);
-        stick_app.update();
-        let focus = stick_app.world().resource::<InputFocus>().get().unwrap();
-        assert_eq!(
-            stick_app.world().get::<ShellButton>(focus).unwrap().id,
-            ShellControlId::Practice
-        );
-    }
-
-    #[test]
     fn escape_and_controller_east_cancel_product_rebind_without_changing_the_draft() {
         let path = std::env::temp_dir().join(format!(
             "brawler-m02-shell-rebind-cancel-{}-settings.ron",
@@ -1710,11 +1470,7 @@ mod tests {
         ));
         let mut app = shell_test_app(path);
         app.update();
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         app.world_mut()
             .resource_mut::<InputSettingsSelection>()
             .field = InputSettingsField::Keyboard(crate::client::KeyboardAction::Ultimate);
@@ -1778,11 +1534,7 @@ mod tests {
         ));
         let mut app = shell_test_app(path);
         app.update();
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         app.world_mut()
             .resource_mut::<InputSettingsSelection>()
             .field = InputSettingsField::Keyboard(crate::client::KeyboardAction::Ultimate);
@@ -1816,11 +1568,7 @@ mod tests {
         ));
         let mut app = shell_test_app(path);
         app.update();
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         app.world_mut()
             .resource_mut::<InputSettingsSelection>()
             .field = InputSettingsField::Gamepad(crate::client::GamepadAction::Ultimate);
@@ -1869,11 +1617,7 @@ mod tests {
         let path = blocker.join("settings.ron");
         let mut app = shell_test_app(path);
         app.update();
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         app.world_mut()
             .resource_mut::<InputSettingsDraft>()
             .0
@@ -1936,11 +1680,7 @@ mod tests {
         let path = blocker.join("settings.ron");
         let mut app = shell_test_app(path.clone());
         app.update();
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&blocker, "blocks settings directory").unwrap();
         app.world_mut()
@@ -1971,11 +1711,7 @@ mod tests {
         ));
         let mut app = shell_test_app(path);
         app.update();
-        app.world_mut()
-            .resource_mut::<PendingActions>()
-            .0
-            .push(ShellAction::OpenSettings);
-        app.update();
+        request_settings(&mut app);
         app.world_mut()
             .resource_mut::<ShellSettingsDraft>()
             .0
@@ -2014,7 +1750,7 @@ mod tests {
 
     #[test]
     fn active_layer_traps_focus_to_the_visible_overlay() {
-        assert_eq!(active_layer(&ClientOverlay::None), ShellLayer::Title);
+        assert_eq!(active_layer(&ClientOverlay::None), ShellLayer::FlowOwned);
         assert_eq!(active_layer(&ClientOverlay::Settings), ShellLayer::Settings);
         assert_eq!(active_layer(&ClientOverlay::Credits), ShellLayer::Credits);
         assert_eq!(
