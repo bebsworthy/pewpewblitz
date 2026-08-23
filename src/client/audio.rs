@@ -106,7 +106,8 @@ fn play_ability_audio(
                 sounds.push((SoundKind::ChargeReady, handles.ready.clone(), 1.25));
             }
             crate::builds::AbilityPhase::Charging
-            | crate::builds::AbilityPhase::Deployed { .. } => {}
+            | crate::builds::AbilityPhase::Deployed { .. }
+            | crate::builds::AbilityPhase::Cloaked { .. } => {}
         }
     }
     if passives
@@ -452,6 +453,10 @@ fn combat_sound(cue: &CombatCue) -> Option<(SoundKind, u64)> {
         | CombatCue::Damage { .. }
         | CombatCue::Defeat { .. }
         | CombatCue::Reset { .. } => None,
+        CombatCue::SelfCloakActivated { event_id, .. }
+        | CombatCue::RevealScanActivated { event_id, .. }
+        | CombatCue::ForcedRevealApplied { event_id, .. } => Some((SoundKind::Ready, event_id.0)),
+        CombatCue::SelfCloakEnded { event_id, .. } => Some((SoundKind::Impact, event_id.0)),
     }
 }
 

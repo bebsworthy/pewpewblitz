@@ -296,10 +296,15 @@ mod tests {
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local PewPew Blitz");
-        assert_eq!(catalog.game_types.len(), 5);
+        assert_eq!(catalog.game_types.len(), 6);
         let tidal = &catalog.game_types[2];
         assert_eq!(tidal.display_name, "Tidal Garden 2v2");
         assert_eq!(tidal.map_preset_ids, vec![MapPresetId(4)]);
+        let hot_zone_one_vs_one = &catalog.game_types[4];
+        assert_eq!(hot_zone_one_vs_one.id.as_str(), "hot-zone-1v1");
+        assert_eq!(hot_zone_one_vs_one.display_name, "Hot Zone 1v1");
+        assert_eq!(hot_zone_one_vs_one.map_preset_ids, vec![MapPresetId(2)]);
+        assert_eq!(hot_zone_one_vs_one.players_per_team, 1);
         let first_blood = catalog.game_types.last().unwrap();
         assert_eq!(first_blood.display_name, "First Blood");
         assert_eq!(first_blood.configuration_revision, 2);
@@ -324,9 +329,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0xf9, 0x23, 0x28, 0xe0, 0xf1, 0x49, 0xc2, 0x66, 0x8f, 0x67, 0xa6, 0x17, 0x55, 0x0a,
-                0x7b, 0xbe, 0x80, 0x64, 0x96, 0x15, 0xf5, 0x49, 0xca, 0x9e, 0x70, 0x53, 0x35, 0xfd,
-                0x71, 0xa3, 0x85, 0x63,
+                0x26, 0x1d, 0x86, 0x1a, 0x59, 0x6f, 0x73, 0x8c, 0x62, 0xaa, 0xb2, 0x9a, 0x59, 0xd6,
+                0x77, 0x79, 0x43, 0x70, 0x4a, 0x4d, 0xf5, 0x10, 0xc4, 0xf4, 0x84, 0x2d, 0xba, 0x68,
+                0x59, 0x0b, 0x1e, 0x8b,
             ]
         );
     }

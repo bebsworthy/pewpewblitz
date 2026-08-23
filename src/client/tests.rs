@@ -86,11 +86,11 @@ fn client_config_defaults_to_loopback_and_validates_roster_target() {
 fn headless_custom_build_and_cover_lane_movement_are_bounded() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;
-    config.build_preset = Some(5);
+    config.build_preset = Some(7);
     assert!(config.validate().is_ok());
-    config.build_preset = Some(6);
+    config.build_preset = Some(8);
     assert!(config.validate().is_err());
-    config.build_preset = Some(5);
+    config.build_preset = Some(7);
     config.window_size = Some((960, 540));
     assert!(config.validate().is_ok());
     config.window_size = Some((639, 540));
@@ -554,6 +554,160 @@ fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
         None,
     )
     .expect("arc launcher loadout resolves")
+}
+
+fn resolved_reveal_scan_loadout() -> crate::builds::ResolvedMatchLoadout {
+    let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
+    let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    crate::builds::resolve_build_recipe(
+        &build_catalog,
+        &weapons,
+        &fighter,
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
+            ultimate: crate::builds::UltimateDefinitionId(4),
+            passives: [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(6),
+            ],
+        },
+        None,
+    )
+    .expect("reveal scan loadout resolves")
+}
+
+fn targeted_input_test_app(loadout: crate::builds::ResolvedMatchLoadout) -> App {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<PendingLocalActions>()
+        .init_resource::<ClientInputContext>()
+        .insert_resource(ClientPlayableGate(true))
+        .add_systems(Update, resolve_targeted_ultimate_input);
+    app.world_mut().spawn((
+        Fighter,
+        Controlled,
+        loadout,
+        crate::builds::AbilityState {
+            charge: crate::abilities::ULTIMATE_CHARGE_MAX,
+            phase: crate::builds::AbilityPhase::Ready,
+        },
+    ));
+    app
+}
+
+#[test]
+fn reveal_scan_uses_ultimate_to_arm_and_primary_fire_to_confirm() {
+    let loadout = resolved_reveal_scan_loadout();
+    let ultimate_id = loadout.ultimate.id;
+    let mut app = targeted_input_test_app(loadout);
+
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = FighterInput::ULTIMATE | FighterInput::PRIMARY_FIRE;
+    app.update();
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert!(pending.targeted_ultimate.is_targeting(ultimate_id));
+    assert_eq!(
+        pending.held_buttons & (FighterInput::ULTIMATE | FighterInput::PRIMARY_FIRE),
+        0
+    );
+    assert_eq!(pending.latched_buttons & FighterInput::ULTIMATE, 0);
+
+    // Holding primary from the arming frame cannot confirm the second phase.
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = FighterInput::PRIMARY_FIRE;
+    app.update();
+    assert!(
+        app.world()
+            .resource::<PendingLocalActions>()
+            .targeted_ultimate
+            .is_targeting(ultimate_id)
+    );
+
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = 0;
+    app.update();
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = FighterInput::PRIMARY_FIRE;
+    app.update();
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert!(!pending.targeted_ultimate.is_targeting(ultimate_id));
+    assert_eq!(pending.held_buttons & FighterInput::PRIMARY_FIRE, 0);
+    assert_ne!(pending.latched_buttons & FighterInput::ULTIMATE, 0);
+
+    // The same physical confirmation press remains consumed until it is released, even after
+    // targeting has closed and before replicated ability state acknowledges the activation.
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = FighterInput::PRIMARY_FIRE;
+    app.update();
+    assert_eq!(
+        app.world().resource::<PendingLocalActions>().held_buttons & FighterInput::PRIMARY_FIRE,
+        0
+    );
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = 0;
+    app.update();
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = FighterInput::PRIMARY_FIRE;
+    app.update();
+    assert_ne!(
+        app.world().resource::<PendingLocalActions>().held_buttons & FighterInput::PRIMARY_FIRE,
+        0
+    );
+}
+
+#[test]
+fn targeted_ultimate_can_cancel_and_immediate_ultimates_still_pass_through() {
+    let scan = resolved_reveal_scan_loadout();
+    let scan_id = scan.ultimate.id;
+    let mut app = targeted_input_test_app(scan);
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = FighterInput::ULTIMATE;
+    app.update();
+    assert!(
+        app.world()
+            .resource::<PendingLocalActions>()
+            .targeted_ultimate
+            .is_targeting(scan_id)
+    );
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = 0;
+    app.update();
+    {
+        let mut pending = app.world_mut().resource_mut::<PendingLocalActions>();
+        pending.cancel_pressed = true;
+    }
+    app.update();
+    assert!(
+        !app.world()
+            .resource::<PendingLocalActions>()
+            .targeted_ultimate
+            .is_targeting(scan_id)
+    );
+
+    let mut immediate = targeted_input_test_app(resolved_arc_launcher_loadout());
+    immediate
+        .world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .held_buttons = FighterInput::ULTIMATE;
+    immediate.update();
+    assert_ne!(
+        immediate
+            .world()
+            .resource::<PendingLocalActions>()
+            .held_buttons
+            & FighterInput::ULTIMATE,
+        0
+    );
 }
 
 #[test]

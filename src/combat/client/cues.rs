@@ -147,7 +147,11 @@ pub(crate) fn receive_combat_cues(
                 | CombatCue::Impact { event_id, .. }
                 | CombatCue::Damage { event_id, .. }
                 | CombatCue::Defeat { event_id, .. }
-                | CombatCue::Reset { event_id, .. } => *event_id,
+                | CombatCue::Reset { event_id, .. }
+                | CombatCue::SelfCloakActivated { event_id, .. }
+                | CombatCue::SelfCloakEnded { event_id, .. }
+                | CombatCue::RevealScanActivated { event_id, .. }
+                | CombatCue::ForcedRevealApplied { event_id, .. } => *event_id,
             };
             if !remember_combat_event(&mut recent, event_id) {
                 continue;

@@ -15,7 +15,9 @@ pub fn apply_charge(state: AbilityState, dealt_damage: u16, received_damage: u16
     .expect("ultimate charge is capped to a u16 constant");
     let phase = match state.phase {
         AbilityPhase::Charging | AbilityPhase::Ready => settled_ability_phase(charge),
-        active @ (AbilityPhase::Dashing { .. } | AbilityPhase::Deployed { .. }) => active,
+        active @ (AbilityPhase::Dashing { .. }
+        | AbilityPhase::Deployed { .. }
+        | AbilityPhase::Cloaked { .. }) => active,
     };
     AbilityState { charge, phase }
 }

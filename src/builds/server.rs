@@ -224,7 +224,9 @@ pub fn process_build_selection(
                                 ))
                                 .remove::<crate::combat::SelectingBuild>()
                                 .remove::<crate::abilities::DashRuntime>()
-                                .remove::<crate::abilities::UltimateInputLatch>();
+                                .remove::<crate::abilities::UltimateInputLatch>()
+                                .remove::<crate::abilities::UltimateGeneration>()
+                                .remove::<crate::concealment::ForcedRevealSources>();
                             if let Some(preset_id) = legacy_preset {
                                 telemetry.record_selection(
                                     preset_id,

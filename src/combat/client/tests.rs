@@ -122,7 +122,7 @@ fn headless_exit_waits_for_required_combat_evidence() {
 }
 
 #[test]
-fn combat_hud_reports_replicated_reload_and_defeat_state() {
+fn combat_hud_reports_replicated_reload_and_defeat_without_reveal_text() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<WeaponDefinitions>()
@@ -150,6 +150,10 @@ fn combat_hud_reports_replicated_reload_and_defeat_state() {
         PlayerId(1),
         CurrentHealth(42),
         AuthoritativeTick(10),
+        crate::concealment::ConcealmentPresentationState {
+            revealed_until_tick: 130,
+            ..default()
+        },
         WeaponState {
             ammo: 0,
             phase: WeaponPhase::Reloading { ready_at_tick: 25 },

@@ -41,7 +41,7 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
         name: "Fast Brawler".into(),
         fighter_profile_id: FighterProfileId(2),
         weapon_base_id: WeaponBaseId(4),
-        ultimate_id: UltimateDefinitionId(2),
+        ultimate_id: UltimateDefinitionId(4),
         passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
         equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
         revision: ProfileRevision::INITIAL,
@@ -55,6 +55,10 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
         Some(crate::combat::WeaponPresetId(4))
     );
     assert_eq!(resolved.total_points, 0);
+    assert_eq!(
+        resolved.ultimate.kind,
+        crate::builds::UltimateKind::RevealScan
+    );
     assert_eq!(resolved.identity.source_build_preset_id, None);
     let snapshot =
         MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, &fighter).unwrap();

@@ -14,8 +14,10 @@ fn catalogs() -> (
 }
 
 #[test]
-fn embedded_catalog_resolves_four_legal_named_builds() {
+fn embedded_catalog_resolves_six_legal_named_builds_and_new_ultimate_parameters() {
     let (builds, weapons, fighter) = catalogs();
+    assert_eq!(builds.presets.len(), 6);
+    assert_eq!(builds.ultimates.len(), 4);
     for preset in &builds.presets {
         let resolved =
             resolve_build_recipe(&builds, &weapons, &fighter, preset.recipe, Some(preset.id))
@@ -23,6 +25,20 @@ fn embedded_catalog_resolves_four_legal_named_builds() {
         assert!(resolved.total_points <= 12);
         assert_eq!(resolved.identity.source_build_preset_id, Some(preset.id));
     }
+    assert_eq!(
+        builds.ultimate(UltimateDefinitionId(3)).unwrap().parameters,
+        UltimateParameters::SelfCloak {
+            duration_ticks: 360
+        }
+    );
+    assert_eq!(
+        builds.ultimate(UltimateDefinitionId(4)).unwrap().parameters,
+        UltimateParameters::RevealScan {
+            maximum_range_milliunits: 640_000,
+            radius_milliunits: 192_000,
+            reveal_ticks: 300,
+        }
+    );
 }
 
 #[test]

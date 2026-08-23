@@ -91,6 +91,10 @@ pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, res
         .remove::<ActiveCombatant>()
         .remove::<crate::abilities::DashRuntime>()
         .remove::<crate::abilities::UltimateInputLatch>()
+        .remove::<crate::concealment::ForcedRevealSources>()
+        .remove::<crate::concealment::ConcealmentRevealDeadlines>()
+        .remove::<crate::concealment::TerrainConcealmentMembership>()
+        .remove::<crate::concealment::ConcealmentPresentationState>()
         .remove::<crate::combat::ExternalMotion>()
         .remove::<crate::combat::KnockbackFeedback>();
     if reset.active {
@@ -108,6 +112,10 @@ pub(crate) fn complete_fighter_lifecycle(commands: &mut Commands, entity: Entity
         .remove::<ActiveCombatant>()
         .remove::<crate::abilities::DashRuntime>()
         .remove::<crate::abilities::UltimateInputLatch>()
+        .remove::<crate::concealment::ForcedRevealSources>()
+        .remove::<crate::concealment::ConcealmentRevealDeadlines>()
+        .remove::<crate::concealment::TerrainConcealmentMembership>()
+        .remove::<crate::concealment::ConcealmentPresentationState>()
         .remove::<RespawnState>()
         .remove::<SpawnProtection>()
         .remove::<crate::combat::ExternalMotion>()

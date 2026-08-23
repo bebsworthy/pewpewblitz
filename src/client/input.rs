@@ -312,6 +312,92 @@ pub(super) fn sample_local_input(
     }
 }
 
+/// Converts a targeted ultimate's physical two-phase interaction into the existing one-tick
+/// authoritative ultimate intent. Immediate ultimates pass through unchanged.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+pub(super) fn resolve_targeted_ultimate_input(
+    mut pending: ResMut<PendingLocalActions>,
+    context: Res<ClientInputContext>,
+    playable: Res<ClientPlayableGate>,
+    config: Option<Res<ClientNetworkConfig>>,
+    controlled: Query<
+        (
+            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::AbilityState,
+            Has<crate::combat::Defeated>,
+            Has<SelectingBuild>,
+        ),
+        (With<Fighter>, With<Controlled>),
+    >,
+) {
+    let raw_buttons = pending.held_buttons;
+    let rising_buttons = raw_buttons & !pending.targeted_ultimate.previous_raw_buttons;
+    pending.targeted_ultimate.previous_raw_buttons = raw_buttons;
+    if raw_buttons & FighterInput::PRIMARY_FIRE == 0 {
+        pending.targeted_ultimate.primary_suppressed_until_release = false;
+    } else if pending.targeted_ultimate.primary_suppressed_until_release {
+        pending.held_buttons &= !FighterInput::PRIMARY_FIRE;
+    }
+
+    // Headless automation writes a fully formed authoritative test intent in the following
+    // system and deliberately bypasses product device interaction modes.
+    if config.is_some_and(|config| config.headless) {
+        pending.targeted_ultimate.armed_for = None;
+        return;
+    }
+
+    let Ok((loadout, ability, defeated, selecting)) = controlled.single() else {
+        pending.targeted_ultimate.armed_for = None;
+        pending.latched_buttons &= !FighterInput::ULTIMATE;
+        return;
+    };
+    if loadout.ultimate.kind.activation_style() != crate::builds::UltimateActivationStyle::Targeted
+    {
+        pending.targeted_ultimate.armed_for = None;
+        return;
+    }
+
+    // A targeted ultimate never reaches authority directly from its physical ultimate button.
+    // Only a primary-fire confirmation below emits the existing ultimate intent.
+    pending.held_buttons &= !FighterInput::ULTIMATE;
+    let eligible = playable.0
+        && matches!(*context, ClientInputContext::Gameplay)
+        && !defeated
+        && !selecting
+        && matches!(ability.phase, crate::builds::AbilityPhase::Ready);
+    if !eligible {
+        pending.targeted_ultimate.armed_for = None;
+        pending.latched_buttons &= !FighterInput::ULTIMATE;
+        return;
+    }
+
+    let ultimate_pressed = rising_buttons & FighterInput::ULTIMATE != 0;
+    let primary_pressed = rising_buttons & FighterInput::PRIMARY_FIRE != 0;
+    if pending.targeted_ultimate.is_targeting(loadout.ultimate.id) {
+        // Targeting owns primary fire so confirmation cannot also fire the weapon.
+        pending.held_buttons &= !FighterInput::PRIMARY_FIRE;
+        if pending.cancel_pressed || ultimate_pressed {
+            pending.targeted_ultimate.armed_for = None;
+        } else if primary_pressed {
+            pending.latched_buttons |= FighterInput::ULTIMATE;
+            pending.targeted_ultimate.armed_for = None;
+            // The confirmation press remains physically held for at least one render frame.
+            // Keep consuming it until release so network acknowledgement latency cannot turn the
+            // same click or trigger pull into a primary shot on the following frame.
+            pending.targeted_ultimate.primary_suppressed_until_release = true;
+        }
+    } else if ultimate_pressed {
+        pending.targeted_ultimate.armed_for = Some(loadout.ultimate.id);
+        // A simultaneous or already-held primary press cannot confirm or fire; release and press
+        // again makes the two phases unambiguous on mouse and analog-trigger input.
+        pending.held_buttons &= !FighterInput::PRIMARY_FIRE;
+    }
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,

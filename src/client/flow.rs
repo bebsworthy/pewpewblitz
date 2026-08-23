@@ -178,6 +178,7 @@ enum FlowUiAction {
     CreateBrawler,
     CycleCreationProfile,
     CycleCreationWeapon,
+    CycleCreationUltimate,
     ConfirmCreateBrawler,
     CancelCreateBrawler,
     OpenBrawlerEditor,
@@ -281,6 +282,7 @@ enum OverlayCommit {
 struct BrawlerCreationDraft {
     fighter_profile_id: crate::profiles::FighterProfileId,
     weapon_base_id: crate::profiles::WeaponBaseId,
+    ultimate: crate::builds::UltimateDefinitionId,
 }
 
 impl Default for BrawlerCreationDraft {
@@ -288,6 +290,7 @@ impl Default for BrawlerCreationDraft {
         Self {
             fighter_profile_id: crate::profiles::FighterProfileId(1),
             weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate: crate::builds::UltimateDefinitionId(1),
         }
     }
 }
@@ -2033,6 +2036,16 @@ fn resolve_flow_action(
         FlowUiAction::CycleCreationWeapon => {
             creation_draft.weapon_base_id.0 = creation_draft.weapon_base_id.0 % 4 + 1;
         }
+        FlowUiAction::CycleCreationUltimate => {
+            let current = builds
+                .0
+                .ultimates
+                .iter()
+                .position(|definition| definition.id == creation_draft.ultimate)
+                .unwrap_or(0);
+            creation_draft.ultimate =
+                builds.0.ultimates[(current + 1) % builds.0.ultimates.len()].id;
+        }
         FlowUiAction::CancelCreateBrawler
         | FlowUiAction::CancelBrawlerEdit
         | FlowUiAction::CancelDeleteBrawler => {
@@ -2055,7 +2068,7 @@ fn resolve_flow_action(
                 name: format!("Brawler {ordinal}"),
                 fighter_profile_id: creation_draft.fighter_profile_id,
                 weapon_base_id: creation_draft.weapon_base_id,
-                ultimate_id: crate::builds::UltimateDefinitionId(1),
+                ultimate_id: creation_draft.ultimate,
                 passive_ids: [
                     crate::builds::PassiveDefinitionId(3),
                     crate::builds::PassiveDefinitionId(4),
@@ -2151,7 +2164,14 @@ fn resolve_flow_action(
             brawler_edit.inline_error = None;
         }
         FlowUiAction::CycleBrawlerUltimate => {
-            brawler_edit.ultimate_id.0 = brawler_edit.ultimate_id.0 % 2 + 1;
+            let index = builds
+                .0
+                .ultimates
+                .iter()
+                .position(|definition| definition.id == brawler_edit.ultimate_id)
+                .unwrap_or(0);
+            brawler_edit.ultimate_id =
+                builds.0.ultimates[(index + 1) % builds.0.ultimates.len()].id;
         }
         FlowUiAction::CycleBrawlerPassiveOne => {
             let next = if brawler_edit.passive_ids[0].0 >= 6 {
@@ -2263,11 +2283,11 @@ fn resolve_flow_action(
             commit.overlay = Some(OverlayCommit::Clear);
         }
         FlowUiAction::ChooseBuild(index) => {
-            editor.selected_choice = index.min(4);
+            editor.selected_choice = index.min(builds.0.presets.len());
             editor.inline_error = None;
         }
         FlowUiAction::FocusBuildField(index) => {
-            editor.selected_choice = 4;
+            editor.selected_choice = builds.0.presets.len();
             editor.focused_field = super::BuildEditorField::from_index(index);
             editor.inline_error = None;
         }
@@ -2275,8 +2295,9 @@ fn resolve_flow_action(
             field_index,
             value_index,
         } => {
-            editor.selected_choice = 4;
+            editor.selected_choice = builds.0.presets.len();
             editor.set_field_value(
+                &builds.0,
                 super::BuildEditorField::from_index(field_index),
                 value_index,
             );
@@ -3275,12 +3296,12 @@ fn present_build_editor_overlay(
             }
             spawn_build_editor_button(
                 root,
-                BUILD_EDITOR_CHOICE_BASE + 4,
-                FlowUiAction::ChooseBuild(4),
+                BUILD_EDITOR_CHOICE_BASE + builds.0.presets.len(),
+                FlowUiAction::ChooseBuild(builds.0.presets.len()),
                 "CUSTOM — edit all six fields below",
                 false,
             );
-            if editor.selected_choice == 4 {
+            if editor.selected_choice == builds.0.presets.len() {
                 for index in 0..6 {
                     spawn_build_editor_button(
                         root,
@@ -3299,7 +3320,9 @@ fn present_build_editor_overlay(
                     Text::new(format!("OPTIONS — {}", custom_field_name(field))),
                     TextColor(Color::srgb(0.25, 0.9, 1.0)),
                 ));
-                for value_index in 0..super::build_editor::custom_field_option_count(field) {
+                for value_index in
+                    0..super::build_editor::custom_field_option_count(field, &builds.0)
+                {
                     let Some(option) = super::build_editor::custom_field_option_label(
                         field,
                         value_index,
@@ -3308,7 +3331,7 @@ fn present_build_editor_overlay(
                         continue;
                     };
                     let detail = editor
-                        .selection_with_field_value(field, value_index)
+                        .selection_with_field_value(field, value_index, &builds.0)
                         .map_or_else(
                             || "Unavailable".to_string(),
                             |alternative| {
@@ -4617,6 +4640,8 @@ const fn ultimate_name(id: crate::builds::UltimateDefinitionId) -> &'static str 
     match id.0 {
         1 => "Dash",
         2 => "Sentry",
+        3 => "Self Cloak",
+        4 => "Reveal Scan",
         _ => "Unknown",
     }
 }
@@ -4723,12 +4748,18 @@ fn present_brawler_creation(
                 spawn_flow_error_button(
                     panel,
                     2,
+                    FlowUiAction::CycleCreationUltimate,
+                    &format!("ULTIMATE: {}", ultimate_name(draft.ultimate)),
+                );
+                spawn_flow_error_button(
+                    panel,
+                    3,
                     FlowUiAction::ConfirmCreateBrawler,
                     "CONFIRM CREATION",
                 );
                 spawn_flow_error_button(
                     panel,
-                    3,
+                    4,
                     FlowUiAction::CancelCreateBrawler,
                     "CANCEL",
                 );
@@ -7525,9 +7556,14 @@ mod tests {
             .resource_mut::<NextState<ClientFlow>>()
             .set(ClientFlow::Dashboard);
         app.update();
+        let builds = app
+            .world()
+            .resource::<crate::builds::BuildCatalogResource>()
+            .0
+            .clone();
         app.world_mut()
             .resource_mut::<super::super::BuildEditorState>()
-            .open();
+            .open(&builds);
         *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BuildEditor;
         app.update();
 
@@ -7556,7 +7592,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<super::super::BuildEditorState>()
-            .selected_choice = 4;
+            .selected_choice = builds.presets.len();
         app.update();
         let rebuilt = {
             let world = app.world_mut();
@@ -7588,9 +7624,14 @@ mod tests {
             .resource_mut::<NextState<ClientFlow>>()
             .set(ClientFlow::Dashboard);
         app.update();
+        let builds = app
+            .world()
+            .resource::<crate::builds::BuildCatalogResource>()
+            .0
+            .clone();
         app.world_mut()
             .resource_mut::<super::super::BuildEditorState>()
-            .open();
+            .open(&builds);
         *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BuildEditor;
         app.update();
         assert!(app.world().resource::<FlowNavigation>().selected >= BUILD_EDITOR_CHOICE_BASE);

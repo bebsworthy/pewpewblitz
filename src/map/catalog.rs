@@ -20,7 +20,7 @@ pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 4;
 pub const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const CROSSROADS_ADMISSION_REVISION: u16 = 5;
 pub const CROSSROADS_HOT_ZONE_PRESET: MapPresetId = MapPresetId(2);
-pub const CROSSROADS_HOT_ZONE_ADMISSION_REVISION: u16 = 2;
+pub const CROSSROADS_HOT_ZONE_ADMISSION_REVISION: u16 = 3;
 pub const ASHEN_COURT_PRESET: MapPresetId = MapPresetId(3);
 pub const ASHEN_COURT_ADMISSION_REVISION: u16 = 2;
 pub const TIDAL_GARDEN_PRESET: MapPresetId = MapPresetId(4);
@@ -1824,6 +1824,21 @@ mod tests {
         );
         assert_eq!(resolved.static_colliders.len(), 6);
         assert_eq!(resolved.dynamic_placements.len(), 36);
+        let grass = resolved
+            .snapshot
+            .placements
+            .iter()
+            .filter(|placement| placement.asset_id == TALL_GRASS_ASSET)
+            .map(|placement| placement.cell)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(grass.len(), 30);
+        assert_eq!(
+            grass
+                .iter()
+                .map(|cell| MapCell::new(resolved.snapshot.dimensions.width - 1 - cell.x, cell.y))
+                .collect::<BTreeSet<_>>(),
+            grass
+        );
         assert_eq!(resolved.snapshot.mode_anchors.len(), 1);
         let objective = resolved.objective_zone.unwrap();
         assert_eq!(objective.anchor_id, ModeAnchorId(1));

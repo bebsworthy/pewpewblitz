@@ -10,7 +10,7 @@ use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     gltf::Gltf,
     light::{GlobalAmbientLight, NotShadowCaster, NotShadowReceiver},
-    math::primitives::Annulus,
+    math::primitives::{Annulus, Circle},
     mesh::Indices,
     render::render_resource::PrimitiveTopology,
     ui::UiSystems,
@@ -45,6 +45,8 @@ const LOBBED_PROJECTILE_LAUNCH_HEIGHT: f32 = 20.0;
 const STRAIGHT_PROJECTILE_CATCH_UP_MULTIPLIER: f32 = 3.0;
 const FIGHTER_RING_INNER_RADIUS: f32 = 18.0;
 const FIGHTER_RING_OUTER_RADIUS: f32 = 22.0;
+const HOT_ZONE_RING_WIDTH: f32 = 10.0;
+const GROUND_AREA_HEIGHT: f32 = 1.0;
 const FIGHTER_FACING_TIP_RADIUS: f32 = 28.0;
 const FIGHTER_FACING_HALF_ANGLE: f32 = 0.22;
 const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
@@ -62,6 +64,7 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) sentry_base: Handle<Mesh>,
     pub(crate) sentry_body: Handle<Mesh>,
     pub(crate) ground_ring: Handle<Mesh>,
+    pub(crate) area_ring: Handle<Mesh>,
     pub(crate) effect_sphere: Handle<Mesh>,
 }
 
@@ -73,10 +76,14 @@ pub(crate) struct Material3dAssets {
     pub(crate) marker_ally: Handle<StandardMaterial>,
     pub(crate) marker_enemy: Handle<StandardMaterial>,
     pub(crate) neutral: Handle<StandardMaterial>,
+    pub(crate) zone_fill: Handle<StandardMaterial>,
+    pub(crate) zone_boundary: Handle<StandardMaterial>,
     pub(crate) preview: Handle<StandardMaterial>,
     pub(crate) preview_blocked: Handle<StandardMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
     pub(crate) status_knockback: Handle<StandardMaterial>,
+    pub(crate) status_reveal: Handle<StandardMaterial>,
+    pub(crate) scan_area: Handle<StandardMaterial>,
     pub(crate) effect_muzzle: Handle<StandardMaterial>,
     pub(crate) effect_impact: Handle<StandardMaterial>,
     pub(crate) effect_damage: Handle<StandardMaterial>,
@@ -381,6 +388,7 @@ fn setup_3d_foundation(
             FIGHTER_RING_INNER_RADIUS,
             FIGHTER_RING_OUTER_RADIUS,
         )),
+        area_ring: meshes.add(Annulus::new(0.93, 1.0)),
         effect_sphere: meshes.add(Sphere::new(1.0)),
     };
     let matte = |color: Color| StandardMaterial {
@@ -408,6 +416,18 @@ fn setup_3d_foundation(
             ..default()
         }),
         neutral: materials.add(matte(Color::srgb(0.72, 0.76, 0.82))),
+        zone_fill: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.2, 0.5, 0.95, 0.30),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        zone_boundary: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.82, 0.2),
+            emissive: LinearRgba::new(1.2, 0.8, 0.08, 1.0),
+            unlit: true,
+            ..default()
+        }),
         preview: materials.add(StandardMaterial {
             base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
             alpha_mode: AlphaMode::Blend,
@@ -429,6 +449,18 @@ fn setup_3d_foundation(
         status_knockback: materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.55, 0.18, 0.82),
             alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        status_reveal: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.12, 0.72),
+            emissive: LinearRgba::new(2.2, 0.03, 0.8, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        scan_area: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.12, 0.72),
+            emissive: LinearRgba::new(1.8, 0.04, 0.7, 1.0),
             unlit: true,
             ..default()
         }),
@@ -550,6 +582,7 @@ fn reconcile_3d_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     primitives: Res<Primitive3dAssets>,
+    presentation_materials: Res<Material3dAssets>,
     theme_materials: Res<environment_assets::EnvironmentThemeMaterialCatalog>,
     grid_catalog: Res<crate::map::MapCatalogResource>,
     map_visuals: Option<Res<environment_assets::MapVisualCatalog>>,
@@ -627,7 +660,9 @@ fn reconcile_3d_map(
         );
         materialize_map_static_visuals(
             &mut commands,
+            &mut meshes,
             &primitives,
+            &presentation_materials,
             environment_materials,
             marker,
             grid_snapshot,
@@ -642,7 +677,9 @@ fn reconcile_3d_map(
 #[allow(clippy::too_many_arguments)]
 fn materialize_map_static_visuals(
     commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
     primitives: &Primitive3dAssets,
+    presentation_materials: &Material3dAssets,
     materials: &environment_assets::EnvironmentThemeMaterials,
     marker: crate::map::MapPresentationMember,
     snapshot: &crate::map::ResolvedMapSnapshot,
@@ -743,6 +780,73 @@ fn materialize_map_static_visuals(
         marker,
         snapshot.dimensions.bounds(),
     );
+    materialize_hot_zone_objective(commands, meshes, presentation_materials, marker, snapshot);
+}
+
+fn hot_zone_visual_geometry(snapshot: &crate::map::ResolvedMapSnapshot) -> Option<(Vec2, f32)> {
+    snapshot.mode_anchors.iter().find_map(|anchor| {
+        let crate::map::MapModeAnchorKind::HotZoneCircle {
+            center_vertex,
+            radius_cells,
+        } = anchor.kind;
+        snapshot
+            .dimensions
+            .vertex_world(center_vertex)
+            .map(|center| {
+                (
+                    center,
+                    f32::from(radius_cells) * crate::map::MAP_CELL_SIZE_WORLD,
+                )
+            })
+    })
+}
+
+fn materialize_hot_zone_objective(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &Material3dAssets,
+    marker: crate::map::MapPresentationMember,
+    snapshot: &crate::map::ResolvedMapSnapshot,
+) {
+    let Some((center, radius)) = hot_zone_visual_geometry(snapshot) else {
+        return;
+    };
+    let rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
+    let fill_mesh = meshes.add(Circle::new(radius));
+    commands.spawn((
+        marker,
+        V3ZoneFill,
+        Mesh3d(fill_mesh.clone()),
+        GeneratedMapMesh(fill_mesh),
+        MeshMaterial3d(materials.zone_fill.clone()),
+        NotShadowCaster,
+        NotShadowReceiver,
+        Transform {
+            translation: ground_position(center) + Vec3::Y * GROUND_AREA_HEIGHT,
+            rotation,
+            ..default()
+        },
+        Name::new("Hot Zone objective fill"),
+    ));
+    let boundary_mesh = meshes.add(Annulus::new(
+        (radius - HOT_ZONE_RING_WIDTH * 0.5).max(0.0),
+        radius + HOT_ZONE_RING_WIDTH * 0.5,
+    ));
+    commands.spawn((
+        marker,
+        V3ZoneBoundary,
+        Mesh3d(boundary_mesh.clone()),
+        GeneratedMapMesh(boundary_mesh),
+        MeshMaterial3d(materials.zone_boundary.clone()),
+        NotShadowCaster,
+        NotShadowReceiver,
+        Transform {
+            translation: ground_position(center) + Vec3::Y * (GROUND_AREA_HEIGHT + 0.4),
+            rotation,
+            ..default()
+        },
+        Name::new("Hot Zone objective boundary"),
+    ));
 }
 
 fn spawn_map_border(
@@ -1204,6 +1308,19 @@ fn tint_3d_zone(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crossroads_hot_zone_anchor_materializes_at_exact_world_scale() {
+        let resolved = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(crate::map::MapPresetId(2), crate::map::MapInstanceId(1))
+            .unwrap();
+
+        assert_eq!(
+            hot_zone_visual_geometry(&resolved.snapshot),
+            Some((Vec2::ZERO, 5.0 * crate::map::MAP_CELL_SIZE_WORLD))
+        );
+    }
 
     #[test]
     fn imported_character_front_aligns_with_fighter_root_facing() {

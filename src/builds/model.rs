@@ -92,7 +92,7 @@ pub struct MatchBuildSnapshotV1 {
 }
 
 impl MatchBuildSnapshotV1 {
-    pub const SCHEMA_VERSION: u8 = 2;
+    pub const SCHEMA_VERSION: u8 = 3;
 
     pub fn encode(self) -> Result<brawler_routing::MatchBuildSnapshot, String> {
         let bytes = postcard::to_allocvec(&self)
@@ -144,6 +144,46 @@ pub struct RevealProximityModifier {
 pub enum UltimateKind {
     Dash,
     Sentry,
+    SelfCloak,
+    RevealScan,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UltimateActivationStyle {
+    Immediate,
+    Targeted,
+}
+
+impl UltimateKind {
+    #[must_use]
+    pub const fn activation_style(self) -> UltimateActivationStyle {
+        match self {
+            Self::Dash | Self::Sentry | Self::SelfCloak => UltimateActivationStyle::Immediate,
+            Self::RevealScan => UltimateActivationStyle::Targeted,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UltimateParameters {
+    Dash,
+    Sentry,
+    SelfCloak {
+        duration_ticks: u64,
+    },
+    RevealScan {
+        maximum_range_milliunits: u32,
+        radius_milliunits: u32,
+        reveal_ticks: u64,
+    },
+}
+
+/// Convert bounded authored thousandths to world units without a lossy wide-integer cast.
+#[must_use]
+pub fn world_units_from_milliunits(value: u32) -> Option<f32> {
+    let whole = u16::try_from(value / 1_000).ok()?;
+    let remainder = u16::try_from(value % 1_000).expect("milliunit remainder fits u16");
+    Some(f32::from(whole) + f32::from(remainder) / 1_000.0)
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,6 +191,7 @@ pub struct ResolvedUltimate {
     pub id: UltimateDefinitionId,
     pub kind: UltimateKind,
     pub point_cost: u8,
+    pub parameters: UltimateParameters,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,6 +231,11 @@ pub enum AbilityPhase {
     },
     Deployed {
         deployable_id: DeployableId,
+        expires_at_tick: u64,
+    },
+    Cloaked {
+        generation: u64,
+        activated_at_tick: u64,
         expires_at_tick: u64,
     },
 }

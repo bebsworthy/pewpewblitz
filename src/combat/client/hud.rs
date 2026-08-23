@@ -18,6 +18,7 @@ pub struct BuildSelectionText;
 #[allow(clippy::too_many_lines)]
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     clippy::type_complexity,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
 )]
@@ -57,6 +58,7 @@ pub(crate) fn update_combat_hud(
         ),
         With<crate::abilities::Sentry>,
     >,
+    pending: Option<Res<crate::client::PendingLocalActions>>,
 ) {
     let Some((
         player_id,
@@ -132,13 +134,33 @@ pub(crate) fn update_combat_hud(
     let ultimate = ability.map_or_else(
         || "ULT --".to_string(),
         |ability| {
+            let is_targeting = loadout.is_some_and(|loadout| {
+                pending.as_ref().is_some_and(|pending| {
+                    pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
+                })
+            });
             let phase = match ability.phase {
+                crate::builds::AbilityPhase::Ready if is_targeting => {
+                    "TARGETING - FIRE TO CONFIRM / CANCEL TO EXIT"
+                }
                 crate::builds::AbilityPhase::Charging => "charging",
                 crate::builds::AbilityPhase::Ready => "READY",
                 crate::builds::AbilityPhase::Dashing { .. } => "DASHING",
                 crate::builds::AbilityPhase::Deployed { .. } => "DEPLOYED",
+                crate::builds::AbilityPhase::Cloaked { .. } => "CLOAKED",
             };
-            format!("ULT {:>3}% {phase}", ability.charge / 10)
+            let remaining = match (ability.phase, authoritative_tick) {
+                (
+                    crate::builds::AbilityPhase::Cloaked {
+                        expires_at_tick, ..
+                    },
+                    Some(now),
+                ) => {
+                    format!(" {}s", expires_at_tick.saturating_sub(now.0).div_ceil(60))
+                }
+                _ => String::new(),
+            };
+            format!("ULT {:>3}% {phase}{remaining}", ability.charge / 10)
         },
     );
     let _ = passive_state;

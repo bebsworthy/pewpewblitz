@@ -284,7 +284,7 @@ pub struct MatchBuildSnapshotV3 {
 }
 
 impl MatchBuildSnapshotV3 {
-    pub const SCHEMA_VERSION: u8 = 4;
+    pub const SCHEMA_VERSION: u8 = 5;
 
     pub fn from_brawler(
         brawler: &SavedBrawler,
@@ -561,7 +561,7 @@ fn validate_mutable_recipe(
     ultimate: UltimateDefinitionId,
     passives: [PassiveDefinitionId; 2],
 ) -> Result<(), ProfileModelError> {
-    if !(1..=2).contains(&ultimate.0) {
+    if !(1..=4).contains(&ultimate.0) {
         return Err(ProfileModelError::UnknownUltimate);
     }
     if !passives.iter().all(|id| (3..=6).contains(&id.0)) {

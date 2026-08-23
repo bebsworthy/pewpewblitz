@@ -1,6 +1,6 @@
 (
-    schema_version: 3,
-    balance_revision: BuildRevision(1),
+    schema_version: 4,
+    balance_revision: BuildRevision(2),
     fighter_profiles: (
         default: (maximum_health: 100, movement_speed: 320.0, reveal_proximity_radius: 160.0),
         lightweight: (maximum_health: 85, movement_speed: 360.0, reveal_proximity_radius: 192.0),
@@ -24,8 +24,10 @@
         (weapon_id: WeaponPresetId(4), point_cost: 4),
     ],
     ultimates: [
-        (id: UltimateDefinitionId(1), key: "dash", display_name: "Dash", kind: Dash, point_cost: 3),
-        (id: UltimateDefinitionId(2), key: "sentry", display_name: "Sentry", kind: Sentry, point_cost: 4),
+        (id: UltimateDefinitionId(1), key: "dash", display_name: "Dash", kind: Dash, point_cost: 3, parameters: Dash),
+        (id: UltimateDefinitionId(2), key: "sentry", display_name: "Sentry", kind: Sentry, point_cost: 4, parameters: Sentry),
+        (id: UltimateDefinitionId(3), key: "self-cloak", display_name: "Self Cloak", kind: SelfCloak, point_cost: 4, parameters: SelfCloak(duration_ticks: 360)),
+        (id: UltimateDefinitionId(4), key: "reveal-scan", display_name: "Reveal Scan", kind: RevealScan, point_cost: 4, parameters: RevealScan(maximum_range_milliunits: 640000, radius_milliunits: 192000, reveal_ticks: 300)),
     ],
     passives: [
         (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2),
@@ -40,5 +42,7 @@
         (id: BuildPresetId(2), key: "bruiser", display_name: "Bruiser", recipe: (weapon: Preset(WeaponPresetId(2)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(2), PassiveDefinitionId(6)))),
         (id: BuildPresetId(3), key: "controller", display_name: "Controller", recipe: (weapon: Preset(WeaponPresetId(3)), ultimate: UltimateDefinitionId(2), passives: (PassiveDefinitionId(5), PassiveDefinitionId(6)))),
         (id: BuildPresetId(4), key: "duelist", display_name: "Duelist", recipe: (weapon: Preset(WeaponPresetId(4)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(4), PassiveDefinitionId(1)))),
+        (id: BuildPresetId(5), key: "infiltrator", display_name: "Infiltrator", recipe: (weapon: Preset(WeaponPresetId(1)), ultimate: UltimateDefinitionId(3), passives: (PassiveDefinitionId(4), PassiveDefinitionId(6)))),
+        (id: BuildPresetId(6), key: "tracker", display_name: "Tracker", recipe: (weapon: Preset(WeaponPresetId(2)), ultimate: UltimateDefinitionId(4), passives: (PassiveDefinitionId(5), PassiveDefinitionId(6)))),
     ],
 )

@@ -522,12 +522,20 @@ pub(super) fn cleanup_disconnected_projectiles(
 }
 
 #[cfg(feature = "server")]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 pub(super) fn send_combat_cues(
     mut outbox: ResMut<CombatOutbox>,
     mut telemetry: ResMut<CombatTelemetry>,
     visibility: Res<crate::concealment::ObserverVisibilityCache>,
-    fighters: Query<(Entity, &NetworkEntityId), With<Fighter>>,
+    fighters: Query<
+        (Entity, &NetworkEntityId),
+        (
+            With<Fighter>,
+            With<crate::builds::AbilityState>,
+            With<crate::matchplay::ActiveCombatant>,
+            With<Replicate>,
+        ),
+    >,
     mut senders: Query<(Entity, &mut lightyear::prelude::MessageSender<CombatCue>), With<LinkOf>>,
 ) {
     // Deferred effect cues can be created after a later target's damage cue. Keep the retained
@@ -581,9 +589,15 @@ fn combat_cue_subjects(cue: &CombatCue) -> Vec<NetworkEntityId> {
         | CombatCue::Defeat { source, target, .. } => source
             .and_then(damage_source_fighter)
             .map_or_else(|| vec![*target], |source| vec![source, *target]),
-        CombatCue::FighterReset { target, .. } | CombatCue::Reset { target, .. } => vec![*target],
+        CombatCue::FighterReset { target, .. }
+        | CombatCue::Reset { target, .. }
+        | CombatCue::ForcedRevealApplied { target, .. } => vec![*target],
         CombatCue::SentryFired { owner, target, .. } => vec![*owner, *target],
         CombatCue::DeployableRemoved { owner, .. } => vec![*owner],
+        CombatCue::SelfCloakActivated { source, .. } | CombatCue::SelfCloakEnded { source, .. } => {
+            vec![*source]
+        }
+        CombatCue::RevealScanActivated { .. } => Vec::new(),
     }
 }
 

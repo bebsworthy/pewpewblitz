@@ -52,6 +52,10 @@ pub enum CombatCueKind {
     Damage,
     Defeat,
     Reset,
+    SelfCloakActivated,
+    SelfCloakEnded,
+    RevealScanActivated,
+    ForcedRevealApplied,
 }
 
 impl CombatCueKind {
@@ -73,6 +77,10 @@ impl CombatCueKind {
             Self::Damage => "damage",
             Self::Defeat => "defeat",
             Self::Reset => "reset",
+            Self::SelfCloakActivated => "self_cloak_activated",
+            Self::SelfCloakEnded => "self_cloak_ended",
+            Self::RevealScanActivated => "reveal_scan_activated",
+            Self::ForcedRevealApplied => "forced_reveal_applied",
         }
     }
 
@@ -94,9 +102,22 @@ impl CombatCueKind {
             "damage" => Some(Self::Damage),
             "defeat" => Some(Self::Defeat),
             "reset" => Some(Self::Reset),
+            "self_cloak_activated" => Some(Self::SelfCloakActivated),
+            "self_cloak_ended" => Some(Self::SelfCloakEnded),
+            "reveal_scan_activated" => Some(Self::RevealScanActivated),
+            "forced_reveal_applied" => Some(Self::ForcedRevealApplied),
             _ => None,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SelfCloakEndReason {
+    Expired,
+    Attack,
+    Damage,
+    Defeated,
+    Lifecycle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -257,6 +278,36 @@ pub enum CombatCue {
         target: NetworkEntityId,
         position: WorldPoint,
     },
+    SelfCloakActivated {
+        event_id: CombatEventId,
+        tick: u64,
+        source: NetworkEntityId,
+        generation: u64,
+        expires_at_tick: u64,
+    },
+    SelfCloakEnded {
+        event_id: CombatEventId,
+        tick: u64,
+        source: NetworkEntityId,
+        generation: u64,
+        reason: SelfCloakEndReason,
+    },
+    RevealScanActivated {
+        event_id: CombatEventId,
+        tick: u64,
+        revealing_team: crate::combat::TeamId,
+        center: WorldPoint,
+        radius_milliunits: u32,
+        expires_at_tick: u64,
+    },
+    ForcedRevealApplied {
+        event_id: CombatEventId,
+        tick: u64,
+        target: NetworkEntityId,
+        revealing_team: crate::combat::TeamId,
+        source_generation: u64,
+        expires_at_tick: u64,
+    },
 }
 
 #[must_use]
@@ -279,6 +330,16 @@ pub fn combat_cue_key(cue: &CombatCue) -> CombatCueKey {
         CombatCue::Damage { event_id, .. } => (CombatCueKind::Damage, *event_id),
         CombatCue::Defeat { event_id, .. } => (CombatCueKind::Defeat, *event_id),
         CombatCue::Reset { event_id, .. } => (CombatCueKind::Reset, *event_id),
+        CombatCue::SelfCloakActivated { event_id, .. } => {
+            (CombatCueKind::SelfCloakActivated, *event_id)
+        }
+        CombatCue::SelfCloakEnded { event_id, .. } => (CombatCueKind::SelfCloakEnded, *event_id),
+        CombatCue::RevealScanActivated { event_id, .. } => {
+            (CombatCueKind::RevealScanActivated, *event_id)
+        }
+        CombatCue::ForcedRevealApplied { event_id, .. } => {
+            (CombatCueKind::ForcedRevealApplied, *event_id)
+        }
     };
     CombatCueKey { kind, event_id }
 }

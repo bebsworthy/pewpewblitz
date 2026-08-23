@@ -545,7 +545,11 @@ fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
             | CombatCue::Damage { event_id, .. }
             | CombatCue::Defeat { event_id, .. }
             | CombatCue::DeployableRemoved { event_id, .. }
-            | CombatCue::Reset { event_id, .. } => event_id.0,
+            | CombatCue::Reset { event_id, .. }
+            | CombatCue::SelfCloakActivated { event_id, .. }
+            | CombatCue::SelfCloakEnded { event_id, .. }
+            | CombatCue::RevealScanActivated { event_id, .. }
+            | CombatCue::ForcedRevealApplied { event_id, .. } => event_id.0,
         })
         .collect();
     assert!(

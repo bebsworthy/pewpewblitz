@@ -587,8 +587,12 @@ pub(super) fn authoritative_composed_fire(
         let recipe = &resolved.recipe;
         advance_composed_weapon_state(&mut state, recipe, tick.0);
         let input = action.map_or(FighterInput::default(), |value| value.0);
+        let targeted_ultimate_requested = input.gameplay_buttons & FighterInput::ULTIMATE != 0
+            && loadout.ultimate.kind.activation_style()
+                == crate::builds::UltimateActivationStyle::Targeted;
         let held = !input_should_neutralize(tick.0, freshness.last_fresh_tick, 12)
             && input.is_valid()
+            && !targeted_ultimate_requested
             && input.gameplay_buttons & FighterInput::PRIMARY_FIRE != 0;
         if !held || !matches!(state.phase, WeaponPhase::Ready) {
             if held && state.ammo == 0 && matches!(state.phase, WeaponPhase::Ready) {

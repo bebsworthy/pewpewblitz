@@ -12,7 +12,7 @@
             id: MapPresetId(2),
             key: "crossroads-facility-hot-zone",
             display_name: "Crossroads Facility (Hot Zone)",
-            admission_revision: 2,
+            admission_revision: 3,
             document: "builtin/crossroads-facility-hot-zone.ron",
         ),
         (

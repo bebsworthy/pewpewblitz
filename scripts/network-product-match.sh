@@ -102,7 +102,7 @@ supervisor_pid=$!
 
 index=1
 while [ "$index" -le "$client_count" ]; do
-    preset=$((1 + (index - 1) % 5))
+    preset=$((1 + (index - 1) % 6))
     if [ "$headless" = 1 ]; then
         if [ "$requeue_smoke" = 1 ]; then
             if [ "$index" -eq 1 ]; then aim_axis=1,0; else aim_axis=-1,0; fi

@@ -60,7 +60,8 @@ impl Plugin for ClientNetworkPlugin {
                 (
                     update_controller_demo_gamepad,
                     sample_local_input,
-                    apply_headless_input.after(sample_local_input),
+                    resolve_targeted_ultimate_input,
+                    apply_headless_input,
                 )
                     .chain()
                     .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
@@ -950,7 +951,10 @@ pub(super) fn send_build_selection_request(
         || gamepads
             .iter()
             .any(|gamepad| gamepad.just_pressed(GamepadButton::East));
-    if cancel && state.current_index == 4 {
+    let preset_count = catalog.0.presets.len();
+    let custom_index = preset_count;
+    let selection_count = preset_count + 1;
+    if cancel && state.current_index == custom_index {
         state.current_index = 0;
         state.custom_field = 0;
         return;
@@ -971,20 +975,20 @@ pub(super) fn send_build_selection_request(
     let (analog_left, analog_right, analog_up, analog_down) =
         editor_axis_edges(Vec2::new(stick_x, stick_y), analog_x_ready, analog_y_ready);
     if left || analog_left {
-        if state.current_index == 4 {
+        if state.current_index == custom_index {
             edit_custom_recipe(&mut state, -1);
         } else {
-            state.current_index = (state.current_index + 4) % 5;
+            state.current_index = (state.current_index + selection_count - 1) % selection_count;
         }
     } else if right || analog_right {
-        if state.current_index == 4 {
+        if state.current_index == custom_index {
             edit_custom_recipe(&mut state, 1);
         } else {
-            state.current_index = (state.current_index + 1) % 5;
+            state.current_index = (state.current_index + 1) % selection_count;
         }
-    } else if state.current_index == 4 && (up || analog_up) {
+    } else if state.current_index == custom_index && (up || analog_up) {
         state.custom_field = (state.custom_field + 5) % 6;
-    } else if state.current_index == 4 && (down || analog_down) {
+    } else if state.current_index == custom_index && (down || analog_down) {
         state.custom_field = (state.custom_field + 1) % 6;
     }
     let confirm = keyboard
@@ -1006,7 +1010,7 @@ pub(super) fn send_build_selection_request(
         return;
     }
     if let Some(preset) = config.build_preset {
-        state.current_index = usize::from(preset.saturating_sub(1).min(4));
+        state.current_index = usize::from(preset.saturating_sub(1)).min(custom_index);
     }
     state.next_request_id = state.next_request_id.saturating_add(1).max(1);
     let request = BuildSelectionRequest {
@@ -1113,7 +1117,7 @@ fn edit_custom_recipe(state: &mut BuildSelectionState, delta: i8) {
         }
         3 => {
             state.custom_recipe.ultimate =
-                UltimateDefinitionId(step(state.custom_recipe.ultimate.0, 2));
+                UltimateDefinitionId(step(state.custom_recipe.ultimate.0, 4));
         }
         4 => {
             state.custom_recipe.passives[0] =

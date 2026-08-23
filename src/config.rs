@@ -406,9 +406,9 @@ impl ClientNetworkConfig {
         }
         if self
             .build_preset
-            .is_some_and(|preset| !(1..=5).contains(&preset))
+            .is_some_and(|preset| !(1..=7).contains(&preset))
         {
-            return Err("--build-preset must be between 1 and 5 (5 selects custom)".to_string());
+            return Err("--build-preset must be between 1 and 7 (7 selects custom)".to_string());
         }
         if self.window_size.is_some_and(|(width, height)| {
             !(640..=3_840).contains(&width) || !(360..=2_160).contains(&height)

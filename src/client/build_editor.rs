@@ -78,12 +78,16 @@ impl Default for BuildEditorState {
 }
 
 impl BuildEditorState {
-    pub fn open(&mut self) {
+    pub fn open(&mut self, catalog: &crate::builds::BuildCatalog) {
         self.selected_choice = match self.loaded_selection {
-            crate::builds::BuildSelection::Preset(id) => usize::from(id.0.saturating_sub(1).min(3)),
+            crate::builds::BuildSelection::Preset(id) => catalog
+                .presets
+                .iter()
+                .position(|preset| preset.id == id)
+                .unwrap_or(0),
             crate::builds::BuildSelection::Custom(recipe) => {
                 self.custom_recipe = recipe;
-                4
+                catalog.presets.len()
             }
         };
         if !matches!(
@@ -123,8 +127,8 @@ impl BuildEditorState {
         self.inline_error = None;
     }
 
-    pub fn move_choice(&mut self, delta: i8) {
-        self.selected_choice = wrap(self.selected_choice, 5, delta);
+    pub fn move_choice(&mut self, catalog: &crate::builds::BuildCatalog, delta: i8) {
+        self.selected_choice = wrap(self.selected_choice, catalog.presets.len() + 1, delta);
     }
 
     pub fn move_field(&mut self, delta: i8) {
@@ -132,10 +136,9 @@ impl BuildEditorState {
             BuildEditorField::from_index(wrap(self.focused_field.index(), 6, delta));
     }
 
-    pub fn edit_focused(&mut self, delta: i8) {
+    pub fn edit_focused(&mut self, catalog: &crate::builds::BuildCatalog, delta: i8) {
         use crate::builds::{
-            PassiveDefinitionId, PulseMagazine, PulsePower, PulseReach, UltimateDefinitionId,
-            WeaponChoice,
+            PassiveDefinitionId, PulseMagazine, PulsePower, PulseReach, WeaponChoice,
         };
         let WeaponChoice::CustomPulse {
             mut power,
@@ -163,12 +166,13 @@ impl BuildEditorState {
                 magazine = cycle_value(magazine, &values, delta);
             }
             BuildEditorField::Ultimate => {
+                let current = catalog
+                    .ultimates
+                    .iter()
+                    .position(|definition| definition.id == self.custom_recipe.ultimate)
+                    .unwrap_or(0);
                 self.custom_recipe.ultimate =
-                    if self.custom_recipe.ultimate == UltimateDefinitionId(1) {
-                        UltimateDefinitionId(2)
-                    } else {
-                        UltimateDefinitionId(1)
-                    };
+                    catalog.ultimates[wrap(current, catalog.ultimates.len(), delta)].id;
             }
             BuildEditorField::PassiveOne | BuildEditorField::PassiveTwo => {
                 let index = usize::from(matches!(self.focused_field, BuildEditorField::PassiveTwo));
@@ -187,9 +191,16 @@ impl BuildEditorState {
         self.inline_error = None;
     }
 
-    pub fn set_field_value(&mut self, field: BuildEditorField, value_index: usize) {
+    pub fn set_field_value(
+        &mut self,
+        catalog: &crate::builds::BuildCatalog,
+        field: BuildEditorField,
+        value_index: usize,
+    ) {
         self.focused_field = field;
-        if let Some(recipe) = recipe_with_field_value(self.custom_recipe, field, value_index) {
+        if let Some(recipe) =
+            recipe_with_field_value(self.custom_recipe, field, value_index, catalog)
+        {
             self.custom_recipe = recipe;
             self.last_edited_field = Some(field);
             self.inline_error = None;
@@ -201,17 +212,21 @@ impl BuildEditorState {
         &self,
         field: BuildEditorField,
         value_index: usize,
+        catalog: &crate::builds::BuildCatalog,
     ) -> Option<crate::builds::BuildSelection> {
-        recipe_with_field_value(self.custom_recipe, field, value_index)
+        recipe_with_field_value(self.custom_recipe, field, value_index, catalog)
             .map(crate::builds::BuildSelection::Custom)
     }
 }
 
 #[must_use]
-pub const fn custom_field_option_count(field: BuildEditorField) -> usize {
+pub fn custom_field_option_count(
+    field: BuildEditorField,
+    catalog: &crate::builds::BuildCatalog,
+) -> usize {
     match field {
         BuildEditorField::Power | BuildEditorField::Reach | BuildEditorField::Magazine => 3,
-        BuildEditorField::Ultimate => 2,
+        BuildEditorField::Ultimate => catalog.ultimates.len(),
         BuildEditorField::PassiveOne | BuildEditorField::PassiveTwo => 6,
     }
 }
@@ -247,11 +262,9 @@ fn recipe_with_field_value(
     mut recipe: crate::builds::BrawlerBuildRecipe,
     field: BuildEditorField,
     value_index: usize,
+    catalog: &crate::builds::BuildCatalog,
 ) -> Option<crate::builds::BrawlerBuildRecipe> {
-    use crate::builds::{
-        PassiveDefinitionId, PulseMagazine, PulsePower, PulseReach, UltimateDefinitionId,
-        WeaponChoice,
-    };
+    use crate::builds::{PassiveDefinitionId, PulseMagazine, PulsePower, PulseReach, WeaponChoice};
     let WeaponChoice::CustomPulse {
         mut power,
         mut reach,
@@ -281,8 +294,7 @@ fn recipe_with_field_value(
             .copied()?;
         }
         BuildEditorField::Ultimate => {
-            recipe.ultimate =
-                UltimateDefinitionId(u16::try_from(value_index.checked_add(1)?).ok()?);
+            recipe.ultimate = catalog.ultimates.get(value_index)?.id;
         }
         BuildEditorField::PassiveOne | BuildEditorField::PassiveTwo => {
             let slot = usize::from(matches!(field, BuildEditorField::PassiveTwo));
@@ -631,6 +643,12 @@ fn ultimate_description(kind: crate::builds::UltimateKind) -> &'static str {
     match kind {
         crate::builds::UltimateKind::Dash => "burst forward and interrupt on collision",
         crate::builds::UltimateKind::Sentry => "deploy a temporary automatic sentry",
+        crate::builds::UltimateKind::SelfCloak => {
+            "become invisible until time, attack, or damage ends it"
+        }
+        crate::builds::UltimateKind::RevealScan => {
+            "reveal every hostile in a targeted area to your team"
+        }
     }
 }
 
@@ -690,12 +708,12 @@ mod tests {
         let builds = crate::builds::BuildCatalog::embedded().unwrap();
         let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
         let mut editor = BuildEditorState::default();
-        editor.open();
-        editor.selected_choice = 4;
-        editor.edit_focused(1);
+        editor.open(&builds);
+        editor.selected_choice = builds.presets.len();
+        editor.edit_focused(&builds, 1);
         let edited = editor.custom_recipe;
-        editor.move_choice(-1);
-        editor.move_choice(1);
+        editor.move_choice(&builds, -1);
+        editor.move_choice(&builds, 1);
         assert_eq!(editor.custom_recipe, edited);
         assert!(resolve_build_preview(editor.selection(&builds), &builds, &weapons).is_ok());
     }
@@ -788,25 +806,25 @@ mod tests {
         let builds = crate::builds::BuildCatalog::embedded().unwrap();
         let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
         let mut editor = BuildEditorState {
-            selected_choice: 4,
+            selected_choice: builds.presets.len(),
             ..BuildEditorState::default()
         };
         for field_index in 0..6 {
             let field = BuildEditorField::from_index(field_index);
-            for value_index in 0..custom_field_option_count(field) {
+            for value_index in 0..custom_field_option_count(field, &builds) {
                 let label = custom_field_option_label(field, value_index, &builds).unwrap();
                 assert!(label.contains("pt"));
                 assert!(
                     editor
-                        .selection_with_field_value(field, value_index)
+                        .selection_with_field_value(field, value_index, &builds)
                         .is_some()
                 );
-                editor.set_field_value(field, value_index);
+                editor.set_field_value(&builds, field, value_index);
                 assert_eq!(editor.last_edited_field, Some(field));
             }
         }
-        editor.set_field_value(BuildEditorField::PassiveOne, 0);
-        editor.set_field_value(BuildEditorField::PassiveTwo, 0);
+        editor.set_field_value(&builds, BuildEditorField::PassiveOne, 0);
+        editor.set_field_value(&builds, BuildEditorField::PassiveTwo, 0);
         assert_eq!(
             resolve_build_preview(editor.selection(&builds), &builds, &weapons),
             Err(crate::builds::BuildResolutionError::InvalidCombination)

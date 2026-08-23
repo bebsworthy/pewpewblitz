@@ -151,7 +151,9 @@ pub struct ActiveAttackTrackers {
 }
 
 /// Sandbox affiliation used by the direct-hit policy.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[derive(
+    Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Reflect,
+)]
 pub struct TeamId(pub u8);
 
 /// Integer authoritative health.

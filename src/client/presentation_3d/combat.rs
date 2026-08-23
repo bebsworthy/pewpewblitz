@@ -98,6 +98,7 @@ pub(super) struct StatusVisual3d(StatusKind);
 enum StatusKind {
     Slow,
     Knockback,
+    Reveal,
 }
 
 #[derive(Component)]
@@ -113,6 +114,7 @@ pub(super) struct WeaponPreviewVisual3d {
 #[derive(Component)]
 pub(super) struct CombatEffect3d {
     timer: Timer,
+    expires_at_tick: Option<u64>,
     order: u64,
 }
 
@@ -240,19 +242,39 @@ pub(super) fn reconcile_combat_visuals(
         }
     }
 
-    if previews.iter().count() == 0 {
-        for slot in 0..u8::try_from(MAX_PREVIEW_SEGMENTS).expect("preview slot bound fits u8") {
-            commands.spawn((
-                WeaponPreviewVisual3d { slot },
-                Mesh3d(primitives.unit_cuboid.clone()),
-                MeshMaterial3d(materials.preview.clone()),
-                NotShadowCaster,
-                Transform::default(),
-                Visibility::Hidden,
-                Name::new("V3 weapon preview slot"),
-            ));
-        }
+    ensure_targeting_previews(&mut commands, &primitives, &materials, &previews);
+}
+
+fn ensure_targeting_previews(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    previews: &Query<&WeaponPreviewVisual3d>,
+) {
+    if !previews.is_empty() {
+        return;
     }
+    for slot in 0..u8::try_from(MAX_PREVIEW_SEGMENTS).expect("preview slot bound fits u8") {
+        commands.spawn((
+            WeaponPreviewVisual3d { slot },
+            Mesh3d(primitives.unit_cuboid.clone()),
+            MeshMaterial3d(materials.preview.clone()),
+            NotShadowCaster,
+            Transform::default(),
+            Visibility::Hidden,
+            Name::new("V3 weapon preview slot"),
+        ));
+    }
+    commands.spawn((
+        WeaponPreviewVisual3d { slot: u8::MAX },
+        Mesh3d(primitives.area_ring.clone()),
+        MeshMaterial3d(materials.preview.clone()),
+        NotShadowCaster,
+        NotShadowReceiver,
+        Transform::default(),
+        Visibility::Hidden,
+        Name::new("V9 Reveal Scan targeting ring"),
+    ));
 }
 
 fn update_ground_markers(
@@ -314,6 +336,7 @@ pub(super) fn update_fighter_concealment_visuals(
             && fighter_is_visually_concealed(
                 concealment,
                 tick.map_or(0, |authoritative_tick| authoritative_tick.0),
+                controlled_team,
             );
         for descendant in children.iter_descendants(root) {
             let Ok((entity, mut material, binding)) = body_materials.get_mut(descendant) else {
@@ -351,9 +374,14 @@ pub(super) fn update_fighter_concealment_visuals(
 fn fighter_is_visually_concealed(
     state: Option<&crate::concealment::ConcealmentPresentationState>,
     current_tick: u64,
+    observer_team: Option<crate::combat::TeamId>,
 ) -> bool {
     state.is_some_and(|state| {
-        state.inside_concealing_terrain && current_tick >= state.revealed_until_tick
+        (state.inside_concealing_terrain || current_tick < state.self_cloaked_until_tick)
+            && current_tick >= state.revealed_until_tick
+            && !state.forced_reveals.iter().any(|reveal| {
+                Some(reveal.team) == observer_team && current_tick < reveal.expires_at_tick
+            })
     })
 }
 
@@ -858,7 +886,10 @@ pub(super) fn update_combat_visual_state(
             Option<&crate::combat::ActiveEffects>,
             Option<&crate::combat::KnockbackFeedback>,
             Option<&crate::builds::AbilityState>,
-            Option<&crate::builds::ResolvedMatchLoadout>,
+            (
+                Option<&crate::builds::ResolvedMatchLoadout>,
+                Option<&crate::concealment::ConcealmentPresentationState>,
+            ),
             &crate::combat::TeamId,
             Option<&crate::matchplay::FighterDisplayName>,
             Option<&crate::combat::WeaponState>,
@@ -921,7 +952,7 @@ pub(super) fn update_combat_visual_state(
         effects,
         knockback,
         ability,
-        loadout,
+        (loadout, concealment),
         team,
         display_name,
         weapon,
@@ -936,6 +967,16 @@ pub(super) fn update_combat_visual_state(
             },
             |value| value.fighter_stats.maximum_health,
         );
+        // Forced reveal is a public status wherever the subject is otherwise legally present.
+        // Observer-specific entity visibility still prevents this marker leaking a hidden target.
+        let revealed = concealment
+            .zip(authoritative_tick)
+            .is_some_and(|(state, now)| {
+                state
+                    .forced_reveals
+                    .iter()
+                    .any(|reveal| now.0 < reveal.expires_at_tick)
+            });
         fighter_data.insert(
             entity,
             (
@@ -947,6 +988,7 @@ pub(super) fn update_combat_visual_state(
                 display_name.map_or("Player", |name| name.0.as_str()),
                 weapon.map_or(0, |state| state.ammo),
                 loadout.map_or(0, |value| value.primary_weapon.recipe.economy.capacity()),
+                revealed,
             ),
         );
         if defeated.is_none() {
@@ -959,6 +1001,9 @@ pub(super) fn update_combat_visual_state(
             }
             if knockback.is_some() {
                 desired_status.insert((entity, StatusKind::Knockback));
+            }
+            if revealed {
+                desired_status.insert((entity, StatusKind::Reveal));
             }
         }
         let dashing = ability.is_some_and(|value| {
@@ -993,12 +1038,13 @@ pub(super) fn update_combat_visual_state(
             (false, None) => {}
         }
         if is_controlled {
-            controlled = loadout.map(|loadout| (position.0, rotation.as_radians(), loadout));
+            controlled =
+                loadout.map(|loadout| (position.0, rotation.as_radians(), loadout, ability));
         }
     }
 
     for (owner, mut overhead, mut visibility) in &mut overhead_roots {
-        let Some((_, current, maximum, defeated, relation, name, ammo, capacity)) =
+        let Some((_, current, maximum, defeated, relation, name, ammo, capacity, _revealed)) =
             fighter_data.get(&owner.0)
         else {
             *visibility = Visibility::Hidden;
@@ -1016,8 +1062,9 @@ pub(super) fn update_combat_visual_state(
             color.0 = overhead_health_color(*relation);
         }
         if let Ok((mut text, mut color)) = overhead_texts.get_mut(overhead.player_name) {
-            if text.0 != *name {
-                text.0 = (*name).to_string();
+            let display = (*name).to_string();
+            if text.0 != display {
+                text.0 = display;
             }
             color.0 = overhead_name_color(*relation);
         }
@@ -1087,13 +1134,19 @@ pub(super) fn update_combat_visual_state(
             MeshMaterial3d(match kind {
                 StatusKind::Slow => materials.status_slow.clone(),
                 StatusKind::Knockback => materials.status_knockback.clone(),
+                StatusKind::Reveal => materials.status_reveal.clone(),
             }),
             NotShadowCaster,
+            NotShadowReceiver,
             Transform {
                 translation: ground_position(*position)
                     + Vec3::Y * if kind == StatusKind::Slow { 2.0 } else { 3.0 },
                 rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
-                scale: Vec3::splat(if kind == StatusKind::Slow { 1.15 } else { 0.8 }),
+                scale: Vec3::splat(match kind {
+                    StatusKind::Slow => 1.15,
+                    StatusKind::Knockback => 0.8,
+                    StatusKind::Reveal => 1.8,
+                }),
             },
             Name::new("V3 durable combat status"),
         ));
@@ -1102,19 +1155,73 @@ pub(super) fn update_combat_visual_state(
     let map = maps
         .iter()
         .max_by_key(|(snapshot, _)| snapshot.identity.instance_id);
-    let segments = match (map, controlled) {
-        (Some((map, state)), Some((origin, facing, loadout))) => preview_segments(
-            origin,
-            facing,
-            pending.aim_distance,
-            &loadout.primary_weapon,
-            map,
-            state,
-            &map_catalog.0,
-        ),
-        _ => Vec::new(),
+    let scan_preview = match (map, controlled) {
+        (Some((map, _)), Some((origin, facing, loadout, Some(ability))))
+            if loadout.ultimate.kind == crate::builds::UltimateKind::RevealScan
+                && pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
+                && matches!(ability.phase, crate::builds::AbilityPhase::Ready) =>
+        {
+            let crate::builds::UltimateParameters::RevealScan {
+                maximum_range_milliunits,
+                radius_milliunits,
+                ..
+            } = loadout.ultimate.parameters
+            else {
+                unreachable!()
+            };
+            crate::builds::world_units_from_milliunits(maximum_range_milliunits)
+                .and_then(|maximum_range| {
+                    crate::abilities::reveal_scan_center(
+                        origin,
+                        Vec2::from_angle(facing),
+                        pending.aim_axis,
+                        pending.aim_distance,
+                        maximum_range,
+                        map.dimensions.bounds(),
+                    )
+                })
+                .zip(crate::builds::world_units_from_milliunits(
+                    radius_milliunits,
+                ))
+                .map(|(center, radius)| (origin, center, radius))
+        }
+        _ => None,
+    };
+    let segments = if let Some((origin, center, _)) = scan_preview {
+        let delta = center - origin;
+        vec![(
+            origin.midpoint(center),
+            delta.y.atan2(delta.x),
+            Vec2::new(delta.length(), 3.0),
+            Color::srgba(0.3, 0.95, 1.0, 0.45),
+        )]
+    } else {
+        match (map, controlled) {
+            (Some((map, state)), Some((origin, facing, loadout, _))) => preview_segments(
+                origin,
+                facing,
+                pending.aim_distance,
+                &loadout.primary_weapon,
+                map,
+                state,
+                &map_catalog.0,
+            ),
+            _ => Vec::new(),
+        }
     };
     for (slot, mut transform, mut visibility, mut material) in &mut previews {
+        if slot.slot == u8::MAX {
+            let Some((_, center, radius)) = scan_preview else {
+                *visibility = Visibility::Hidden;
+                continue;
+            };
+            *visibility = Visibility::Inherited;
+            transform.translation = ground_position(center) + Vec3::Y * PREVIEW_HEIGHT;
+            transform.rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
+            transform.scale = Vec3::splat(radius);
+            material.0 = materials.preview.clone();
+            continue;
+        }
         let Some((center, angle, size, color)) = segments.get(usize::from(slot.slot)) else {
             *visibility = Visibility::Hidden;
             continue;
@@ -1146,9 +1253,11 @@ pub(super) fn consume_combat_cues(
     owners: Query<(Entity, &NetworkEntityId), With<Fighter>>,
     mut visuals: Query<(&CombatVisualOwner, &mut V3FighterVisual)>,
     effects: Query<(Entity, &CombatEffect3d)>,
+    authoritative_ticks: Query<&AuthoritativeTick>,
     mut sequence: Local<CombatEffectSequence>,
 ) {
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
+    let current_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for DeduplicatedCombatCue(cue) in cues.read() {
         if let crate::combat::CombatCue::AttackAccepted { source, .. } = cue
             && let Some((owner, _)) = owners.iter().find(|(_, id)| **id == *source)
@@ -1168,19 +1277,79 @@ pub(super) fn consume_combat_cues(
             commands.entity(oldest).despawn();
         }
         sequence.0 = sequence.0.saturating_add(1);
+        let scan_pulse = matches!(cue, crate::combat::CombatCue::RevealScanActivated { .. });
+        let (lifetime, expires_at_tick) = combat_effect_lifetime(cue, current_tick, reduced);
+        let transform = if scan_pulse {
+            Transform {
+                translation: ground_position(position) + Vec3::Y * PREVIEW_HEIGHT,
+                rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+                scale: Vec3::splat(scale),
+            }
+        } else {
+            Transform::from_translation(ground_position(position) + Vec3::Y * (scale * 0.45))
+                .with_scale(Vec3::splat(scale * if reduced { 0.65 } else { 1.0 }))
+        };
         commands.spawn((
             CombatEffect3d {
-                timer: Timer::from_seconds(if reduced { 0.10 } else { 0.18 }, TimerMode::Once),
+                timer: Timer::new(lifetime, TimerMode::Once),
+                expires_at_tick,
                 order: sequence.0,
             },
-            Mesh3d(primitives.effect_sphere.clone()),
+            Mesh3d(if scan_pulse {
+                primitives.area_ring.clone()
+            } else {
+                primitives.effect_sphere.clone()
+            }),
             MeshMaterial3d(material),
             NotShadowCaster,
-            Transform::from_translation(ground_position(position) + Vec3::Y * (scale * 0.45))
-                .with_scale(Vec3::splat(scale * if reduced { 0.65 } else { 1.0 })),
-            Name::new("V3 bounded combat cue effect"),
+            NotShadowReceiver,
+            transform,
+            Name::new(if scan_pulse {
+                "V9 active Reveal Scan area"
+            } else {
+                "V3 bounded combat cue effect"
+            }),
         ));
     }
+}
+
+fn reveal_ring_remaining_duration(
+    activated_at_tick: u64,
+    expires_at_tick: u64,
+    observed_tick: Option<u64>,
+) -> Duration {
+    let remaining_ticks = expires_at_tick.saturating_sub(
+        observed_tick
+            .unwrap_or(activated_at_tick)
+            .max(activated_at_tick),
+    );
+    let whole_seconds = remaining_ticks / crate::timing::SIMULATION_TICK_HZ;
+    let subsecond_ticks = u32::try_from(remaining_ticks % crate::timing::SIMULATION_TICK_HZ)
+        .expect("subsecond tick remainder fits u32");
+    Duration::from_secs(whole_seconds)
+        .saturating_add(crate::timing::SIMULATION_TICK.saturating_mul(subsecond_ticks))
+}
+
+fn combat_effect_lifetime(
+    cue: &crate::combat::CombatCue,
+    current_tick: Option<u64>,
+    reduced: bool,
+) -> (Duration, Option<u64>) {
+    if let crate::combat::CombatCue::RevealScanActivated {
+        tick,
+        expires_at_tick,
+        ..
+    } = cue
+    {
+        return (
+            reveal_ring_remaining_duration(*tick, *expires_at_tick, current_tick),
+            Some(*expires_at_tick),
+        );
+    }
+    (
+        Duration::from_secs_f32(if reduced { 0.10 } else { 0.18 }),
+        None,
+    )
 }
 
 fn cue_effect(
@@ -1206,11 +1375,23 @@ fn cue_effect(
         C::FighterReset { position, .. } => {
             Some((position.as_vec2(), materials.effect_muzzle.clone(), 16.0))
         }
+        C::RevealScanActivated {
+            center,
+            radius_milliunits,
+            ..
+        } => Some((
+            center.as_vec2(),
+            materials.scan_area.clone(),
+            crate::builds::world_units_from_milliunits(*radius_milliunits).unwrap_or(0.0),
+        )),
         C::Muzzle { .. }
         | C::Impact { .. }
         | C::Damage { .. }
         | C::Defeat { .. }
-        | C::Reset { .. } => None,
+        | C::Reset { .. }
+        | C::SelfCloakActivated { .. }
+        | C::SelfCloakEnded { .. }
+        | C::ForcedRevealApplied { .. } => None,
     }
 }
 
@@ -1221,11 +1402,17 @@ fn cue_effect(
 pub(super) fn cleanup_combat_effects(
     mut commands: Commands,
     time: Res<Time<Real>>,
+    authoritative_ticks: Query<&AuthoritativeTick>,
     mut effects: Query<(Entity, &mut CombatEffect3d)>,
 ) {
+    let current_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for (entity, mut effect) in &mut effects {
         effect.timer.tick(time.delta());
-        if effect.timer.is_finished() {
+        let authoritative_expiry = effect
+            .expires_at_tick
+            .zip(current_tick)
+            .is_some_and(|(expires_at_tick, now)| now >= expires_at_tick);
+        if authoritative_expiry || effect.timer.is_finished() {
             commands.entity(entity).despawn();
         }
     }
@@ -1334,20 +1521,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fighter_alpha_signifier_tracks_concealment_and_exclusive_reveal_deadline() {
-        let concealed = crate::concealment::ConcealmentPresentationState {
+    fn reveal_area_lifetime_tracks_authoritative_effect_deadline() {
+        assert_eq!(
+            reveal_ring_remaining_duration(100, 400, Some(100)),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            reveal_ring_remaining_duration(100, 400, Some(400)),
+            Duration::ZERO
+        );
+    }
+
+    fn terrain_concealed_state(
+        revealed_until_tick: u64,
+    ) -> crate::concealment::ConcealmentPresentationState {
+        crate::concealment::ConcealmentPresentationState {
             inside_concealing_terrain: true,
-            revealed_until_tick: 12,
-        };
-        assert!(!fighter_is_visually_concealed(Some(&concealed), 11));
-        assert!(fighter_is_visually_concealed(Some(&concealed), 12));
-        assert!(!fighter_is_visually_concealed(None, 12));
+            revealed_until_tick,
+            ..default()
+        }
+    }
+
+    #[test]
+    fn fighter_alpha_signifier_tracks_concealment_and_exclusive_reveal_deadline() {
+        let concealed = terrain_concealed_state(12);
+        assert!(!fighter_is_visually_concealed(
+            Some(&concealed),
+            11,
+            Some(crate::combat::TeamId(1))
+        ));
+        assert!(fighter_is_visually_concealed(
+            Some(&concealed),
+            12,
+            Some(crate::combat::TeamId(1))
+        ));
+        assert!(!fighter_is_visually_concealed(
+            None,
+            12,
+            Some(crate::combat::TeamId(1))
+        ));
         assert!(!fighter_is_visually_concealed(
             Some(&crate::concealment::ConcealmentPresentationState {
                 inside_concealing_terrain: false,
                 revealed_until_tick: 0,
+                ..default()
             }),
             12,
+            Some(crate::combat::TeamId(1)),
         ));
     }
 
@@ -1392,10 +1612,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Fighter,
-                crate::concealment::ConcealmentPresentationState {
-                    inside_concealing_terrain: true,
-                    revealed_until_tick: 0,
-                },
+                terrain_concealed_state(0),
                 AuthoritativeTick(8),
                 crate::combat::TeamId(1),
                 Controlled,
@@ -1418,10 +1635,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Fighter,
-                crate::concealment::ConcealmentPresentationState {
-                    inside_concealing_terrain: true,
-                    revealed_until_tick: 0,
-                },
+                terrain_concealed_state(0),
                 AuthoritativeTick(8),
                 crate::combat::TeamId(2),
             ))

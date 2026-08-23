@@ -2,7 +2,7 @@ use super::{
     BrawlerBuildRecipe, BuildPresetId, BuildRecipeFingerprint, BuildRevision, PassiveDefinitionId,
     PassiveKind, PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout,
     ResolvedPassive, ResolvedUltimate, RevealProximityModifier, SelectedBuild,
-    UltimateDefinitionId, UltimateKind, WeaponChoice,
+    UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
 };
 use crate::combat::{
     DeliveryMethod, FighterDefinition, PayloadEffectDefinition, WeaponCatalog, WeaponConfiguration,
@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 3;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 3;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 4;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 4;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -87,6 +87,7 @@ pub struct UltimateDefinition {
     pub display_name: String,
     pub kind: UltimateKind,
     pub point_cost: u8,
+    pub parameters: UltimateParameters,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -129,12 +130,12 @@ impl BuildCatalog {
         }
         self.validate_tuning()?;
         if self.weapon_costs.len() != 4
-            || self.ultimates.len() != 2
+            || self.ultimates.len() != 4
             || self.passives.len() != 6
-            || self.presets.len() != 4
+            || self.presets.len() != 6
         {
             return Err(
-                "M08 requires four weapon costs, two ultimates, six passives, and four presets"
+                "V9 M02 requires four weapon costs, four ultimates, six passives, and six presets"
                     .into(),
             );
         }
@@ -155,20 +156,7 @@ impl BuildCatalog {
         {
             return Err("weapon point costs do not match the M08 content contract".into());
         }
-        let expected_ultimates = [
-            (UltimateDefinitionId(1), UltimateKind::Dash, 3),
-            (UltimateDefinitionId(2), UltimateKind::Sentry, 4),
-        ];
-        if !self
-            .ultimates
-            .iter()
-            .zip(expected_ultimates)
-            .all(|(definition, expected)| {
-                (definition.id, definition.kind, definition.point_cost) == expected
-            })
-        {
-            return Err("ultimate inventory does not match the M08 engine contract".into());
-        }
+        validate_ultimate_inventory(&self.ultimates)?;
         let expected_passives = [
             (PassiveDefinitionId(1), PassiveKind::LightweightFrame, 2),
             (PassiveDefinitionId(2), PassiveKind::ReinforcedFrame, 2),
@@ -285,6 +273,11 @@ impl BuildCatalog {
         self.presets.iter().find(|definition| definition.id == id)
     }
 
+    #[must_use]
+    pub fn ultimate(&self, id: UltimateDefinitionId) -> Option<&UltimateDefinition> {
+        self.ultimates.iter().find(|definition| definition.id == id)
+    }
+
     pub fn canonical_fingerprint_material(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
         postcard::to_allocvec(&(BUILD_FINGERPRINT_FORMAT_VERSION, self))
@@ -296,6 +289,79 @@ impl BuildCatalog {
             &self.canonical_fingerprint_material()?,
         )))
     }
+}
+
+fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(), String> {
+    let expected = [
+        (
+            UltimateDefinitionId(1),
+            UltimateKind::Dash,
+            3,
+            UltimateParameters::Dash,
+        ),
+        (
+            UltimateDefinitionId(2),
+            UltimateKind::Sentry,
+            4,
+            UltimateParameters::Sentry,
+        ),
+        (
+            UltimateDefinitionId(3),
+            UltimateKind::SelfCloak,
+            4,
+            UltimateParameters::SelfCloak {
+                duration_ticks: 360,
+            },
+        ),
+        (
+            UltimateDefinitionId(4),
+            UltimateKind::RevealScan,
+            4,
+            UltimateParameters::RevealScan {
+                maximum_range_milliunits: 640_000,
+                radius_milliunits: 192_000,
+                reveal_ticks: 300,
+            },
+        ),
+    ];
+    if !definitions
+        .iter()
+        .zip(expected)
+        .all(|(definition, expected)| {
+            (
+                definition.id,
+                definition.kind,
+                definition.point_cost,
+                definition.parameters,
+            ) == expected
+        })
+    {
+        return Err("ultimate inventory does not match the V9 M02 engine contract".into());
+    }
+    if definitions.iter().any(|definition| {
+        !matches!(
+            (definition.kind, definition.parameters),
+            (UltimateKind::Dash, UltimateParameters::Dash)
+                | (UltimateKind::Sentry, UltimateParameters::Sentry)
+                | (
+                    UltimateKind::SelfCloak,
+                    UltimateParameters::SelfCloak {
+                        duration_ticks: 1..=3_600
+                    }
+                )
+                | (
+                    UltimateKind::RevealScan,
+                    UltimateParameters::RevealScan {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        radius_milliunits: 1..=2_048_000,
+                        reveal_ticks: 1..=3_600,
+                    }
+                )
+        )
+    }) {
+        return Err("ultimate kind and parameters do not match engine bounds".into());
+    }
+    Ok(())
 }
 
 /// Resolve one reveal radius from bounded, deterministic authored modifier units.
@@ -466,6 +532,7 @@ fn resolve_build_recipe_inner(
         id: ultimate_definition.id,
         kind: ultimate_definition.kind,
         point_cost: ultimate_definition.point_cost,
+        parameters: ultimate_definition.parameters,
     };
     let (primary_weapon, _weapon_points) =
         resolve_weapon_choice(catalog, weapons, fighter, recipe.weapon)?;

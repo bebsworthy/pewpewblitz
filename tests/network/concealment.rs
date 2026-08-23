@@ -157,3 +157,165 @@ fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
         .push(damage_fact(1));
     harness.step_until(|harness| harness.client_ids(0).len() == 2);
 }
+
+#[test]
+fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
+    let mut harness = Harness::new_tidal_garden(2);
+    harness.clients[0]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .build_preset = Some(6);
+    harness.clients[1]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .build_preset = Some(5);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.selection_is_complete(0)
+            && harness.selection_is_complete(1)
+    });
+    let (observer, subject, subject_id) = {
+        let mut query = harness.server.world_mut().query_filtered::<(
+            Entity,
+            &NetworkEntityId,
+            &TeamId,
+            &lightyear::prelude::ControlledBy,
+        ), With<Fighter>>();
+        let values: Vec<_> = query
+            .iter(harness.server.world())
+            .map(|(entity, id, team, controlled)| (controlled.owner, entity, *id, *team))
+            .collect();
+        let observer = values
+            .iter()
+            .find(|value| value.0 == harness.server_links[0])
+            .unwrap();
+        let subject = values
+            .iter()
+            .find(|value| value.0 == harness.server_links[1])
+            .unwrap();
+        (observer.1, subject.1, subject.2)
+    };
+    harness
+        .server
+        .world_mut()
+        .entity_mut(observer)
+        .insert((
+            Position::from_xy(0.0, 0.0),
+            brawler::builds::AbilityState {
+                charge: 1_000,
+                phase: brawler::builds::AbilityPhase::Ready,
+            },
+        ))
+        .remove::<brawler::matchplay::SpawnProtection>();
+    harness.server.world_mut().entity_mut(subject).insert((
+        Position::from_xy(0.0, 0.0),
+        brawler::builds::AbilityState {
+            charge: 1_000,
+            phase: brawler::builds::AbilityPhase::Ready,
+        },
+    ));
+    harness
+        .server
+        .world_mut()
+        .entity_mut(subject)
+        .remove::<brawler::matchplay::SpawnProtection>();
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.set_controlled_input(1, FighterInput::default());
+    harness.step();
+    harness.set_controlled_input(
+        1,
+        FighterInput::from_axes(Vec2::ZERO, None, FighterInput::ULTIMATE),
+    );
+    harness.step_until(|harness| {
+        matches!(
+            harness
+                .server
+                .world()
+                .get::<brawler::builds::AbilityState>(subject)
+                .map(|ability| ability.phase),
+            Some(brawler::builds::AbilityPhase::Cloaked { .. })
+        )
+    });
+    let cloak_expiry = match harness
+        .server
+        .world()
+        .get::<brawler::builds::AbilityState>(subject)
+        .unwrap()
+        .phase
+    {
+        brawler::builds::AbilityPhase::Cloaked {
+            expires_at_tick, ..
+        } => expires_at_tick,
+        phase => panic!("expected active cloak, got {phase:?}"),
+    };
+    harness.set_controlled_input(1, FighterInput::default());
+    harness.step_until(|harness| {
+        !harness
+            .client_ids(0)
+            .iter()
+            .any(|(_, id)| *id == subject_id)
+    });
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes_with_aim_distance(
+            Vec2::ZERO,
+            Some(Vec2::X),
+            Some(0.0),
+            FighterInput::ULTIMATE | FighterInput::PRIMARY_FIRE,
+        ),
+    );
+    let observer_ammo = harness
+        .server
+        .world()
+        .get::<WeaponState>(observer)
+        .expect("scanner weapon state")
+        .ammo;
+    harness.step_until(|harness| {
+        harness
+            .client_ids(0)
+            .iter()
+            .any(|(_, id)| *id == subject_id)
+    });
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<WeaponState>(observer)
+            .expect("scanner weapon state after confirmation")
+            .ammo,
+        observer_ammo,
+        "Reveal Scan confirmation must not also fire the primary weapon"
+    );
+    harness.set_controlled_input(0, FighterInput::default());
+    let forced_reveal_expiry = harness
+        .server
+        .world()
+        .get::<brawler::concealment::ForcedRevealSources>(subject)
+        .and_then(|sources| sources.0.first())
+        .map(|source| source.expires_at_tick)
+        .expect("accepted scan installs its durable reveal source");
+    assert!(
+        forced_reveal_expiry < cloak_expiry,
+        "scan reveal must expire while the accepted cloak remains active"
+    );
+    while harness.server.world().resource::<SimulationTick>().0 < forced_reveal_expiry + 10 {
+        harness.step();
+    }
+    let final_tick = harness.server.world().resource::<SimulationTick>().0;
+    let final_phase = harness
+        .server
+        .world()
+        .get::<brawler::builds::AbilityState>(subject)
+        .map(|ability| ability.phase);
+    let final_sources = harness
+        .server
+        .world()
+        .get::<brawler::concealment::ForcedRevealSources>(subject)
+        .cloned();
+    let visible_ids = harness.client_ids(0);
+    assert!(
+        !visible_ids.iter().any(|(_, id)| *id == subject_id),
+        "subject stayed visible at tick {final_tick}; cloak={final_phase:?} sources={final_sources:?} ids={visible_ids:?}"
+    );
+}

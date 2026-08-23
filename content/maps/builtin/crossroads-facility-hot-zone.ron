@@ -1,6 +1,6 @@
 (
     recipe_id: MapRecipeId(2),
-    revision: 4,
+    revision: 5,
     recipe_version: 3,
     mode_definition_id: ModeDefinitionId(3),
     presentation_theme_id: MapPresentationThemeId(1),
@@ -28,6 +28,10 @@
         (first_placement_id: MapPlacementId(73), min: (x: 9, y: 15), width: 2, height: 6, asset_id: MapAssetId(2), quarter_turns: 0),
         (first_placement_id: MapPlacementId(85), min: (x: 45, y: 15), width: 2, height: 6, asset_id: MapAssetId(3), quarter_turns: 0),
         (first_placement_id: MapPlacementId(100), min: (x: 25, y: 15), width: 6, height: 6, asset_id: MapAssetId(4), quarter_turns: 0),
+        (first_placement_id: MapPlacementId(140), min: (x: 22, y: 16), width: 3, height: 5, asset_id: MapAssetId(8), quarter_turns: 0),
+        (first_placement_id: MapPlacementId(155), min: (x: 31, y: 16), width: 3, height: 5, asset_id: MapAssetId(8), quarter_turns: 0),
+        (first_placement_id: MapPlacementId(170), min: (x: 22, y: 16), width: 3, height: 5, asset_id: MapAssetId(5), quarter_turns: 0),
+        (first_placement_id: MapPlacementId(185), min: (x: 31, y: 16), width: 3, height: 5, asset_id: MapAssetId(5), quarter_turns: 0),
     ],
     mode_anchors: [
         (placement_id: MapPlacementId(400), anchor_id: ModeAnchorId(1), kind: HotZoneCircle(center_vertex: (x: 28, y: 18), radius_cells: 5)),

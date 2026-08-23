@@ -21,8 +21,9 @@ pub use model::{
     BuildPresetId, BuildRecipeFingerprint, BuildRevision, BuildSelection, DeployableId,
     MatchBuildSnapshotV1, PassiveDefinitionId, PassiveKind, PassiveRuntimeState, PulseMagazine,
     PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive,
-    ResolvedUltimate, RevealProximityModifier, SelectedBuild, SelectingBuild, UltimateDefinitionId,
-    UltimateKind, WeaponChoice,
+    ResolvedUltimate, RevealProximityModifier, SelectedBuild, SelectingBuild,
+    UltimateActivationStyle, UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
+    world_units_from_milliunits,
 };
 #[cfg(feature = "server")]
 pub use telemetry::{BuildSelectionTelemetryRecord, BuildTelemetry};

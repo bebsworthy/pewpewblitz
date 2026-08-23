@@ -3,6 +3,8 @@
 mod charge;
 mod dash;
 mod passives;
+mod reveal_scan;
+mod self_cloak;
 mod sentry;
 mod telemetry;
 
@@ -21,6 +23,9 @@ pub use passives::{
     ADRENAL_DURATION_TICKS, ADRENAL_REARM_TICKS, apply_close_quarters_damage,
     apply_quick_cycle_ticks, apply_tenacity_ticks,
 };
+pub use reveal_scan::reveal_scan_center;
+#[cfg(feature = "server")]
+pub(crate) use self_cloak::UltimateGeneration;
 pub use sentry::{
     SENTRY_ACQUISITION_INTERVAL_TICKS, SENTRY_ACQUISITION_RANGE, SENTRY_FIRE_INTERVAL_TICKS,
     SENTRY_LIFETIME_TICKS, SENTRY_MAXIMUM_HEALTH, SENTRY_PLACEMENT_OFFSETS, SENTRY_RADIUS, Sentry,
@@ -63,7 +68,13 @@ impl Plugin for ServerAbilityPlugin {
             .add_message::<SentryCleanupRequest>()
             .add_systems(
                 FixedUpdate,
-                (dash::activate_dash, sentry::activate_sentry, ApplyDeferred)
+                (
+                    dash::activate_dash,
+                    sentry::activate_sentry,
+                    self_cloak::activate_self_cloak,
+                    reveal_scan::activate_reveal_scan,
+                    ApplyDeferred,
+                )
                     .chain()
                     .in_set(AbilitySet::Activation),
             )
@@ -84,6 +95,7 @@ impl Plugin for ServerAbilityPlugin {
                 (
                     charge::observe_primary_damage_charge,
                     passives::observe_passive_triggers,
+                    self_cloak::resolve_self_cloak_lifecycle,
                     telemetry::observe_ability_outcomes,
                 )
                     .chain()

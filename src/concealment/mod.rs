@@ -1,57 +1,15 @@
-//! Server-owned terrain concealment and observer-specific replication relevance.
+//! Server-owned concealment composition and observer-specific replication relevance.
 
+mod model;
+pub use model::*;
+
+#[cfg(feature = "server")]
+mod network;
+#[cfg(feature = "server")]
+mod telemetry;
+
+#[cfg(feature = "server")]
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
-
-pub const ATTACK_REVEAL_TICKS: u64 = 90;
-pub const DAMAGE_REVEAL_TICKS: u64 = 120;
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TerrainConcealmentMembership {
-    pub map_instance_id: crate::map::MapInstanceId,
-    pub placement_id: crate::map::MapPlacementId,
-}
-
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ConcealmentRevealDeadlines {
-    /// A deadline is active while `current_tick < deadline`.
-    pub attack_until_tick: u64,
-    pub damage_until_tick: u64,
-}
-
-/// Replicated only with an already-permitted fighter for owner/ally/revealed presentation.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ConcealmentPresentationState {
-    pub inside_concealing_terrain: bool,
-    pub revealed_until_tick: u64,
-}
-
-#[must_use]
-pub fn reveal_lock_active(tick: u64, deadlines: ConcealmentRevealDeadlines) -> bool {
-    tick < deadlines.attack_until_tick || tick < deadlines.damage_until_tick
-}
-
-#[must_use]
-#[allow(
-    clippy::fn_params_excessive_bools,
-    reason = "the observer rule is an explicit six-input truth table covered at its boundaries"
-)]
-pub fn observer_can_see(
-    allied_or_self: bool,
-    observer_alive: bool,
-    subject_concealed: bool,
-    subject_reveal_locked: bool,
-    distance_squared: f32,
-    reveal_radius: f32,
-) -> bool {
-    allied_or_self
-        || !subject_concealed
-        || subject_reveal_locked
-        || (observer_alive
-            && distance_squared.is_finite()
-            && reveal_radius.is_finite()
-            && distance_squared <= reveal_radius * reveal_radius)
-}
 
 #[cfg(feature = "server")]
 mod server {
@@ -59,7 +17,13 @@ mod server {
         clippy::wildcard_imports,
         reason = "the role-owned module composes the shared concealment contract"
     )]
-    use super::*;
+    use super::{
+        network::{
+            ObserverVisibilityCache, QueuedVisibilityTransitions, apply_queued_observer_visibility,
+        },
+        telemetry::{ConcealmentTelemetry, VisibilityTransitionReason, VisibilityTransitionRecord},
+        *,
+    };
     use crate::{
         combat::{
             CombatCue, CombatOutbox, CombatOutcomeFacts, CombatOutcomeKind, Defeated, TeamId,
@@ -70,58 +34,13 @@ mod server {
         timing::SimulationTick,
     };
     use avian2d::prelude::Position;
-    use lightyear::prelude::{ControlledBy, Replicate, ReplicationSystems, VisibilityExt};
-    use std::collections::{HashMap, HashSet};
+    use lightyear::prelude::{ControlledBy, Replicate, ReplicationSystems};
+    use std::collections::HashSet;
 
     #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
     pub enum ConcealmentSet {
-        Resolve,
-    }
-
-    #[derive(Resource, Default)]
-    pub(crate) struct ObserverVisibilityCache(HashMap<(Entity, Entity), bool>);
-
-    const MAX_CONCEALMENT_TRANSITIONS: usize = 2_048;
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum VisibilityTransitionReason {
-        SelfOrAlly,
-        PublicOrOutsideTerrain,
-        RevealLock,
-        Proximity,
-        TerrainConcealment,
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct VisibilityTransitionRecord {
-        pub tick: u64,
-        pub observer_team: TeamId,
-        pub subject: NetworkEntityId,
-        pub visible: bool,
-        pub reason: VisibilityTransitionReason,
-    }
-
-    #[derive(Resource, Default, Debug)]
-    pub struct ConcealmentTelemetry {
-        pub transitions: Vec<VisibilityTransitionRecord>,
-        pub dropped_transitions: u64,
-    }
-
-    impl ConcealmentTelemetry {
-        fn record(&mut self, transition: VisibilityTransitionRecord) {
-            if self.transitions.len() < MAX_CONCEALMENT_TRANSITIONS {
-                self.transitions.push(transition);
-            } else {
-                self.dropped_transitions = self.dropped_transitions.saturating_add(1);
-            }
-        }
-    }
-
-    impl ObserverVisibilityCache {
-        #[must_use]
-        pub(crate) fn permits(&self, connection: Entity, subject: Entity) -> bool {
-            self.0.get(&(connection, subject)).copied().unwrap_or(false)
-        }
+        ResolveSources,
+        DecideObservers,
     }
 
     pub struct ServerConcealmentPlugin;
@@ -129,30 +48,42 @@ mod server {
     impl Plugin for ServerConcealmentPlugin {
         fn build(&self, app: &mut App) {
             app.init_resource::<ObserverVisibilityCache>()
-                .init_resource::<ConcealmentTelemetry>()
-                .configure_sets(
-                    FixedPostUpdate,
-                    ConcealmentSet::Resolve
-                        .after(crate::combat::CombatSet::Damage)
-                        .before(crate::combat::CombatSet::TelemetryAndCues),
+                .init_resource::<QueuedVisibilityTransitions>()
+                .init_resource::<ConcealmentTelemetry>();
+            configure_concealment_schedule(app);
+            app.add_systems(
+                FixedPostUpdate,
+                (resolve_membership_and_reveal_locks, ApplyDeferred)
+                    .chain()
+                    .in_set(ConcealmentSet::ResolveSources),
+            )
+            .add_systems(
+                FixedPostUpdate,
+                decide_observer_visibility.in_set(ConcealmentSet::DecideObservers),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_public_participant_projections,
+                    apply_queued_observer_visibility,
+                    ApplyDeferred,
                 )
-                .add_systems(
-                    FixedPostUpdate,
-                    (resolve_membership_and_reveal_locks, ApplyDeferred)
-                        .chain()
-                        .in_set(ConcealmentSet::Resolve),
-                )
-                .add_systems(
-                    PostUpdate,
-                    (
-                        sync_public_participant_projections,
-                        apply_observer_visibility,
-                        ApplyDeferred,
-                    )
-                        .chain()
-                        .before(ReplicationSystems::Send),
-                );
+                    .chain()
+                    .before(ReplicationSystems::Send),
+            );
         }
+    }
+
+    pub(super) fn configure_concealment_schedule(app: &mut App) {
+        app.configure_sets(
+            FixedPostUpdate,
+            (
+                ConcealmentSet::ResolveSources.after(crate::abilities::AbilitySet::ObserveOutcomes),
+                ConcealmentSet::DecideObservers
+                    .after(ConcealmentSet::ResolveSources)
+                    .before(crate::combat::CombatSet::TelemetryAndCues),
+            ),
+        );
     }
 
     #[allow(clippy::type_complexity, clippy::needless_pass_by_value)]
@@ -253,6 +184,8 @@ mod server {
                 &Position,
                 Option<&TerrainConcealmentMembership>,
                 Option<&ConcealmentRevealDeadlines>,
+                &crate::builds::AbilityState,
+                Option<&ForcedRevealSources>,
                 Has<Defeated>,
             ),
             With<Fighter>,
@@ -277,7 +210,17 @@ mod server {
             })
             .collect();
 
-        for (entity, network_id, position, prior_membership, prior_deadlines, defeated) in &fighters
+        let active_sources: HashSet<_> = fighters.iter().map(|(_, id, ..)| id.0).collect();
+        for (
+            entity,
+            network_id,
+            position,
+            prior_membership,
+            prior_deadlines,
+            ability,
+            forced,
+            defeated,
+        ) in &fighters
         {
             let membership = (!defeated)
                 .then_some(map.as_ref())
@@ -307,14 +250,43 @@ mod server {
             if deadlines != prior_deadlines.copied().unwrap_or_default() {
                 commands.entity(entity).insert(deadlines);
             }
-            commands
-                .entity(entity)
-                .insert(ConcealmentPresentationState {
+            let mut forced = forced.cloned().unwrap_or_default();
+            forced.0.retain(|source| {
+                tick.0 < source.expires_at_tick
+                    && active_sources.contains(&source.source_network_id.0)
+            });
+            let mut effective = std::collections::BTreeMap::new();
+            for source in &forced.0 {
+                effective
+                    .entry(source.revealing_team)
+                    .and_modify(|deadline: &mut u64| {
+                        *deadline = (*deadline).max(source.expires_at_tick);
+                    })
+                    .or_insert(source.expires_at_tick);
+            }
+            let self_cloaked_until_tick = match ability.phase {
+                crate::builds::AbilityPhase::Cloaked {
+                    expires_at_tick, ..
+                } if !defeated && tick.0 < expires_at_tick => expires_at_tick,
+                _ => 0,
+            };
+            commands.entity(entity).insert((
+                forced,
+                ConcealmentPresentationState {
                     inside_concealing_terrain: membership.is_some(),
+                    self_cloaked_until_tick,
                     revealed_until_tick: deadlines
                         .attack_until_tick
                         .max(deadlines.damage_until_tick),
-                });
+                    forced_reveals: effective
+                        .into_iter()
+                        .map(|(team, expires_at_tick)| TeamRevealDeadline {
+                            team,
+                            expires_at_tick,
+                        })
+                        .collect(),
+                },
+            ));
         }
     }
 
@@ -349,7 +321,7 @@ mod server {
         })
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     struct FighterView {
         entity: Entity,
         team: TeamId,
@@ -358,16 +330,22 @@ mod server {
         reveal_radius: f32,
         connection: Option<Entity>,
         alive: bool,
-        concealed: bool,
+        concealment: ConcealmentSources,
+        forced_reveals: Vec<TeamRevealDeadline>,
         reveal_locked: bool,
     }
 
-    #[allow(clippy::type_complexity, clippy::needless_pass_by_value)]
-    fn apply_observer_visibility(
-        mut commands: Commands,
+    #[allow(
+        clippy::type_complexity,
+        clippy::needless_pass_by_value,
+        clippy::too_many_lines,
+        reason = "the observer-decision coordinator materializes one bounded all-pairs snapshot"
+    )]
+    fn decide_observer_visibility(
         tick: Res<SimulationTick>,
         mut cache: ResMut<ObserverVisibilityCache>,
         mut telemetry: ResMut<ConcealmentTelemetry>,
+        mut queued: ResMut<QueuedVisibilityTransitions>,
         fighters: Query<
             (
                 Entity,
@@ -380,6 +358,8 @@ mod server {
                 Has<ActiveCombatant>,
                 Option<&TerrainConcealmentMembership>,
                 Option<&ConcealmentRevealDeadlines>,
+                &crate::builds::AbilityState,
+                Option<&ForcedRevealSources>,
             ),
             (With<Fighter>, With<Replicate>),
         >,
@@ -398,6 +378,8 @@ mod server {
                     active,
                     membership,
                     deadlines,
+                    ability,
+                    forced,
                 )| FighterView {
                     entity,
                     team: *team,
@@ -407,7 +389,24 @@ mod server {
                         .map_or(160.0, |value| value.fighter_stats.reveal_proximity_radius),
                     connection: controlled.map(|value| value.owner),
                     alive: !defeated && active,
-                    concealed: membership.is_some() && !defeated,
+                    concealment: match (
+                        membership.is_some() && !defeated,
+                        matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if !defeated && tick.0 < expires_at_tick),
+                    ) {
+                        (false, false) => ConcealmentSources::None,
+                        (true, false) => ConcealmentSources::Terrain,
+                        (false, true) => ConcealmentSources::SelfCloak,
+                        (true, true) => ConcealmentSources::TerrainAndSelfCloak,
+                    },
+                    forced_reveals: forced.map_or_else(Vec::new, |sources| {
+                        let mut deadlines = std::collections::BTreeMap::new();
+                        for source in &sources.0 {
+                            if tick.0 < source.expires_at_tick {
+                                deadlines.entry(source.revealing_team).and_modify(|deadline: &mut u64| *deadline = (*deadline).max(source.expires_at_tick)).or_insert(source.expires_at_tick);
+                            }
+                        }
+                        deadlines.into_iter().map(|(team, expires_at_tick)| TeamRevealDeadline { team, expires_at_tick }).collect()
+                    }),
                     reveal_locked: deadlines
                         .is_some_and(|value| reveal_lock_active(tick.0, *value)),
                 },
@@ -424,29 +423,41 @@ mod server {
                 let allied_or_self =
                     observer.entity == subject.entity || observer.team == subject.team;
                 let distance_squared = observer.position.distance_squared(subject.position);
-                let visible = observer_can_see(
-                    allied_or_self,
-                    observer.alive,
-                    subject.concealed,
-                    subject.reveal_locked,
+                let visible = observer_can_see(ObserverVisibilityInput {
+                    relation: if allied_or_self {
+                        ObserverRelation::SelfOrAlly
+                    } else {
+                        ObserverRelation::Enemy
+                    },
+                    observer_alive: observer.alive,
+                    concealment: subject.concealment,
+                    forced_revealed: subject.forced_reveals.iter().any(|reveal| {
+                        reveal.team == observer.team && tick.0 < reveal.expires_at_tick
+                    }),
+                    subject_reveal_locked: subject.reveal_locked,
                     distance_squared,
-                    observer.reveal_radius,
-                );
+                    reveal_radius: observer.reveal_radius,
+                });
                 if cache.0.get(&key).copied() == Some(visible) {
                     continue;
                 }
                 cache.0.insert(key, visible);
-                let reason = if allied_or_self {
-                    VisibilityTransitionReason::SelfOrAlly
-                } else if !subject.concealed {
-                    VisibilityTransitionReason::PublicOrOutsideTerrain
-                } else if subject.reveal_locked {
-                    VisibilityTransitionReason::RevealLock
-                } else if visible {
-                    VisibilityTransitionReason::Proximity
-                } else {
-                    VisibilityTransitionReason::TerrainConcealment
-                };
+                let reason =
+                    if allied_or_self {
+                        VisibilityTransitionReason::SelfOrAlly
+                    } else if subject.forced_reveals.iter().any(|reveal| {
+                        reveal.team == observer.team && tick.0 < reveal.expires_at_tick
+                    }) {
+                        VisibilityTransitionReason::RevealLock
+                    } else if subject.concealment == ConcealmentSources::None {
+                        VisibilityTransitionReason::PublicOrOutsideTerrain
+                    } else if subject.reveal_locked {
+                        VisibilityTransitionReason::RevealLock
+                    } else if visible {
+                        VisibilityTransitionReason::Proximity
+                    } else {
+                        VisibilityTransitionReason::TerrainConcealment
+                    };
                 telemetry.record(VisibilityTransitionRecord {
                     tick: tick.0,
                     observer_team: observer.team,
@@ -454,11 +465,7 @@ mod server {
                     visible,
                     reason,
                 });
-                if visible {
-                    commands.gain_visibility(subject.entity, connection);
-                } else {
-                    commands.lose_visibility(subject.entity, connection);
-                }
+                queued.0.push((subject.entity, connection, visible));
             }
         }
         cache.0.retain(|key, _| current.contains(key));
@@ -466,50 +473,9 @@ mod server {
 }
 
 #[cfg(feature = "server")]
-pub(crate) use server::ObserverVisibilityCache;
+pub(crate) use network::ObserverVisibilityCache;
 #[cfg(feature = "server")]
 pub use server::{ConcealmentSet, ServerConcealmentPlugin};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn distance_equality_reveals_and_defeated_observer_has_no_enemy_permission() {
-        assert!(observer_can_see(
-            false,
-            true,
-            true,
-            false,
-            160.0_f32.powi(2),
-            160.0
-        ));
-        assert!(!observer_can_see(
-            false,
-            true,
-            true,
-            false,
-            160.01_f32.powi(2),
-            160.0
-        ));
-        assert!(!observer_can_see(false, false, true, false, 0.0, 160.0));
-        assert!(observer_can_see(
-            true,
-            false,
-            true,
-            false,
-            f32::INFINITY,
-            160.0
-        ));
-    }
-
-    #[test]
-    fn reveal_deadline_end_tick_is_exclusive() {
-        let deadlines = ConcealmentRevealDeadlines {
-            attack_until_tick: 12,
-            damage_until_tick: 10,
-        };
-        assert!(reveal_lock_active(11, deadlines));
-        assert!(!reveal_lock_active(12, deadlines));
-    }
-}
+mod tests;

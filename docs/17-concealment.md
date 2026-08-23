@@ -170,9 +170,11 @@ must nevertheless be visually and audibly legible after the server accepts them.
   available without exposing current hidden pose or subject-derived spatial facts.
 - Objective carriers are ineligible for concealment in the first implementation. A future mode may
   opt in only with an explicit carrier visibility rule and playtest evidence.
-- Defeat, respawn, match restart, map replacement, disconnect, worker shutdown, and source-owner
-  removal clear source membership, reveal locks, forced reveal, and observer-pair caches owned by
-  the ending lifecycle.
+- Defeat consumes the fighter's Self Cloak but does not cancel a Reveal Scan that it already cast;
+  canceling an accepted scan on caster defeat would create forbidden post-acceptance counterplay.
+  Subject respawn clears that subject's forced-reveal records. Match restart, map/match replacement,
+  disconnect or source-owner removal, worker shutdown, and teardown clear remaining source records,
+  reveal locks, and observer-pair caches owned by the ending lifecycle.
 
 ## Terrain contract
 

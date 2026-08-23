@@ -93,6 +93,14 @@ pub enum AbilityTelemetryKind {
         reason: SentryCleanupReason,
         lifetime_ticks: u64,
     },
+    SelfCloakAccepted,
+    SelfCloakEnded {
+        reason: crate::combat::SelfCloakEndReason,
+        active_ticks: u64,
+    },
+    RevealScanAccepted {
+        targets: u16,
+    },
     AbilityDamage(u16),
     AbilityTarget,
     AbilityDefeat,
@@ -119,6 +127,11 @@ pub struct AbilityTelemetry {
     pub accepts: u64,
     pub dash_uses: u64,
     pub sentry_uses: u64,
+    pub self_cloak_uses: u64,
+    pub self_cloak_active_ticks: u64,
+    pub self_cloak_end_reasons: BTreeMap<crate::combat::SelfCloakEndReason, u64>,
+    pub reveal_scan_uses: u64,
+    pub reveal_scan_targets: u64,
     pub sentry_shots: u64,
     pub wasted_charge: u64,
     pub ready_to_use_delay_ticks: u64,
@@ -244,6 +257,35 @@ impl AbilityTelemetry {
                 *uses = uses.saturating_add(1);
                 self.record_ready_to_use_delay(record.owner_network_id, record.tick);
             }
+            AbilityTelemetryKind::SelfCloakAccepted => {
+                self.accepts = self.accepts.saturating_add(1);
+                self.self_cloak_uses = self.self_cloak_uses.saturating_add(1);
+                *self
+                    .uses_by_owner
+                    .entry(record.owner_network_id)
+                    .or_default() += 1;
+                self.record_ready_to_use_delay(record.owner_network_id, record.tick);
+            }
+            AbilityTelemetryKind::SelfCloakEnded {
+                reason,
+                active_ticks,
+            } => {
+                self.self_cloak_active_ticks =
+                    self.self_cloak_active_ticks.saturating_add(active_ticks);
+                let count = self.self_cloak_end_reasons.entry(reason).or_default();
+                *count = count.saturating_add(1);
+            }
+            AbilityTelemetryKind::RevealScanAccepted { targets } => {
+                self.accepts = self.accepts.saturating_add(1);
+                self.reveal_scan_uses = self.reveal_scan_uses.saturating_add(1);
+                self.reveal_scan_targets =
+                    self.reveal_scan_targets.saturating_add(u64::from(targets));
+                *self
+                    .uses_by_owner
+                    .entry(record.owner_network_id)
+                    .or_default() += 1;
+                self.record_ready_to_use_delay(record.owner_network_id, record.tick);
+            }
             AbilityTelemetryKind::SentrySpawned(deployable_id) => {
                 self.sentries.insert(
                     deployable_id,
@@ -350,6 +392,10 @@ impl AbilityTelemetry {
     }
 
     #[must_use]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one field-by-field snapshot delta keeps every bounded telemetry aggregate auditable"
+    )]
     pub(crate) fn delta_since(&self, start: &Self, active_started_at_tick: u64) -> Self {
         let mut delta = Self {
             dropped_records: self.dropped_records.saturating_sub(start.dropped_records),
@@ -357,6 +403,14 @@ impl AbilityTelemetry {
             accepts: self.accepts.saturating_sub(start.accepts),
             dash_uses: self.dash_uses.saturating_sub(start.dash_uses),
             sentry_uses: self.sentry_uses.saturating_sub(start.sentry_uses),
+            self_cloak_uses: self.self_cloak_uses.saturating_sub(start.self_cloak_uses),
+            self_cloak_active_ticks: self
+                .self_cloak_active_ticks
+                .saturating_sub(start.self_cloak_active_ticks),
+            reveal_scan_uses: self.reveal_scan_uses.saturating_sub(start.reveal_scan_uses),
+            reveal_scan_targets: self
+                .reveal_scan_targets
+                .saturating_sub(start.reveal_scan_targets),
             sentry_shots: self.sentry_shots.saturating_sub(start.sentry_shots),
             wasted_charge: self.wasted_charge.saturating_sub(start.wasted_charge),
             ready_to_use_delay_ticks: self
@@ -428,6 +482,8 @@ impl AbilityTelemetry {
         );
         delta.sentry_cleanup_reasons =
             count_map_delta(&self.sentry_cleanup_reasons, &start.sentry_cleanup_reasons);
+        delta.self_cloak_end_reasons =
+            count_map_delta(&self.self_cloak_end_reasons, &start.self_cloak_end_reasons);
         delta.sentries = self
             .sentries
             .iter()

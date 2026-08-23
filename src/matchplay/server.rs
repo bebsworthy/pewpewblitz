@@ -692,10 +692,13 @@ fn activate_started_match(
                 active: true,
             },
         );
-        commands.entity(entity).insert((
-            crate::builds::AbilityState::default(),
-            crate::builds::PassiveRuntimeState::default(),
-        ));
+        commands
+            .entity(entity)
+            .insert((
+                crate::builds::AbilityState::default(),
+                crate::builds::PassiveRuntimeState::default(),
+            ))
+            .remove::<crate::abilities::UltimateGeneration>();
     }
 }
 
@@ -905,10 +908,13 @@ fn commit_match_restart(
                 active: false,
             },
         );
-        commands.entity(entity).insert((
-            crate::builds::AbilityState::default(),
-            crate::builds::PassiveRuntimeState::default(),
-        ));
+        commands
+            .entity(entity)
+            .insert((
+                crate::builds::AbilityState::default(),
+                crate::builds::PassiveRuntimeState::default(),
+            ))
+            .remove::<crate::abilities::UltimateGeneration>();
         if retain_builds {
             commands
                 .entity(entity)

@@ -56,6 +56,11 @@ fn charge_uses_exact_damage_multipliers_caps_and_becomes_ready() {
             deployable_id: crate::builds::DeployableId(4),
             expires_at_tick: 20,
         },
+        AbilityPhase::Cloaked {
+            generation: 1,
+            activated_at_tick: 4,
+            expires_at_tick: 20,
+        },
     ] {
         let active = AbilityState { charge: 0, phase };
         assert_eq!(
@@ -71,6 +76,23 @@ fn charge_uses_exact_damage_multipliers_caps_and_becomes_ready() {
             AbilityPhase::Ready,
         );
     }
+}
+
+#[test]
+fn reveal_scan_targeting_uses_current_aim_distance_and_clamps_center() {
+    let bounds = crate::map::AxisAlignedMapRect {
+        min: Vec2::new(-100.0, -80.0),
+        max: Vec2::new(100.0, 80.0),
+    };
+    assert_eq!(
+        reveal_scan_center(Vec2::ZERO, Vec2::X, Some(Vec2::Y), Some(40.0), 64.0, bounds),
+        Some(Vec2::new(0.0, 40.0))
+    );
+    assert_eq!(
+        reveal_scan_center(Vec2::new(90.0, 0.0), Vec2::X, None, None, 64.0, bounds),
+        Some(Vec2::new(100.0, 0.0))
+    );
+    assert!(reveal_scan_center(Vec2::NAN, Vec2::X, None, None, 64.0, bounds).is_none());
 }
 
 #[test]
@@ -387,6 +409,15 @@ fn ability_telemetry_archives_typed_dash_sentry_passive_and_delay_evidence() {
             lifetime_ticks: 60,
         },
     );
+    record(180, AbilityTelemetryKind::SelfCloakAccepted);
+    record(
+        210,
+        AbilityTelemetryKind::SelfCloakEnded {
+            reason: crate::combat::SelfCloakEndReason::Attack,
+            active_ticks: 30,
+        },
+    );
+    record(220, AbilityTelemetryKind::RevealScanAccepted { targets: 3 });
 
     assert_eq!(telemetry.ready_to_use_delay_ticks, 12);
     assert_eq!(telemetry.concurrent_sentry_high_water, 1);
@@ -398,6 +429,14 @@ fn ability_telemetry_archives_typed_dash_sentry_passive_and_delay_evidence() {
     assert_eq!(telemetry.sentries[&deployable].damage, 25);
     assert_eq!(telemetry.passive_modified_amounts[&passive], 3);
     assert_eq!(telemetry.passive_unused_triggers[&passive], 1);
+    assert_eq!(telemetry.self_cloak_uses, 1);
+    assert_eq!(telemetry.self_cloak_active_ticks, 30);
+    assert_eq!(
+        telemetry.self_cloak_end_reasons[&crate::combat::SelfCloakEndReason::Attack],
+        1
+    );
+    assert_eq!(telemetry.reveal_scan_uses, 1);
+    assert_eq!(telemetry.reveal_scan_targets, 3);
 
     let archived = telemetry.delta_since(&AbilityTelemetry::default(), 100);
     assert_eq!(
@@ -407,6 +446,8 @@ fn ability_telemetry_archives_typed_dash_sentry_passive_and_delay_evidence() {
     assert_eq!(archived.concurrent_sentry_high_water, 1);
     assert_eq!(archived.ability_damage_by_owner[&owner], 25);
     assert_eq!(archived.ability_targets_by_owner[&owner], 1);
+    assert_eq!(archived.self_cloak_active_ticks, 30);
+    assert_eq!(archived.reveal_scan_targets, 3);
 }
 
 #[cfg(feature = "server")]

@@ -415,6 +415,22 @@ pub struct PendingLocalActions {
     pub scoreboard_held: bool,
     pub action_indicator: u16,
     pub input_settings_revision: u32,
+    pub(crate) targeted_ultimate: TargetedUltimateInput,
+}
+
+/// Local-only arming state for ultimates whose authoritative activation needs an aim-point
+/// confirmation. Entering this mode never spends charge or sends gameplay intent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TargetedUltimateInput {
+    armed_for: Option<crate::builds::UltimateDefinitionId>,
+    previous_raw_buttons: u8,
+    primary_suppressed_until_release: bool,
+}
+
+impl TargetedUltimateInput {
+    pub(crate) fn is_targeting(self, id: crate::builds::UltimateDefinitionId) -> bool {
+        self.armed_for == Some(id)
+    }
 }
 
 #[derive(Resource, Debug)]
@@ -453,6 +469,7 @@ impl Default for PendingLocalActions {
             scoreboard_held: false,
             action_indicator: 0,
             input_settings_revision: 0,
+            targeted_ultimate: TargetedUltimateInput::default(),
         }
     }
 }
