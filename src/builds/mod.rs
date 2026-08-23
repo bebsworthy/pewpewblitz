@@ -7,6 +7,7 @@ pub(crate) mod server;
 #[cfg(feature = "server")]
 mod telemetry;
 
+pub use definitions::resolve_reveal_proximity_radius;
 pub use definitions::{
     BUILD_CATALOG_SCHEMA_VERSION, BUILD_FINGERPRINT_FORMAT_VERSION, BUILD_POINT_BUDGET,
     BuildCatalog, BuildCatalogResource, BuildContentPlugin, BuildPresetDefinition,
@@ -20,8 +21,8 @@ pub use model::{
     BuildPresetId, BuildRecipeFingerprint, BuildRevision, BuildSelection, DeployableId,
     MatchBuildSnapshotV1, PassiveDefinitionId, PassiveKind, PassiveRuntimeState, PulseMagazine,
     PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive,
-    ResolvedUltimate, SelectedBuild, SelectingBuild, UltimateDefinitionId, UltimateKind,
-    WeaponChoice,
+    ResolvedUltimate, RevealProximityModifier, SelectedBuild, SelectingBuild, UltimateDefinitionId,
+    UltimateKind, WeaponChoice,
 };
 #[cfg(feature = "server")]
 pub use telemetry::{BuildSelectionTelemetryRecord, BuildTelemetry};

@@ -182,6 +182,7 @@ impl Plugin for WorldPresentationPlugin {
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
+            .init_resource::<combat::ConcealedMaterialVariants>()
             .insert_resource(GlobalAmbientLight {
                 color: Color::srgb(0.72, 0.78, 0.9),
                 brightness: 350.0,
@@ -198,6 +199,7 @@ impl Plugin for WorldPresentationPlugin {
                     reconcile_dynamic_map_visuals,
                     combat::reconcile_combat_visuals,
                     upgrade_fighters_to_imported_models,
+                    combat::update_fighter_concealment_visuals,
                     combat::consume_combat_cues,
                     combat::update_combat_visual_state,
                     update_character_animation,

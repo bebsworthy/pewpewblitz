@@ -376,6 +376,7 @@ impl Plugin for ServerNetworkPlugin {
             )
             .add_plugins((
                 ServerCombatPlugin,
+                crate::concealment::ServerConcealmentPlugin,
                 crate::abilities::ServerAbilityPlugin,
                 RoutedWorkerPlugin,
             ));

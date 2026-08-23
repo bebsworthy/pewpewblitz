@@ -18,9 +18,9 @@ spectator mode, or unrelated environment capabilities.
 
 | Field | Value |
 |---|---|
-| Status | Specification review |
-| Current milestone | M01 — Observer-specific visibility and terrain concealment |
-| Entry gate | Pending: V8 M04 closeout and user acceptance. V9 research/specification may be reviewed while V8 completes; production implementation must not begin until V8 is `Complete` and the user approves M01 |
+| Status | Not started |
+| Current milestone | M02 — Self cloak and reveal scan |
+| Entry gate | Satisfied: V8 M04/V8 completed and the user approved V9 M01 implementation on 2026-08-23 |
 | Completion gate | Terrain, self-cloak, allied concealment area, proximity, attack/damage reveal, and reveal scan use one server-owned observer decision; unauthorized clients receive no hidden live spatial state or subject-derived leaks; all lifecycle, routed, impairment, capacity, native, feedback, and learning gates pass |
 
 Allowed statuses are `Not started`, `Researching`, `Specification review`, `Implementing`,
@@ -58,7 +58,7 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
-| 01 | Specification review | One accepted map contains real concealing terrain: allies remain visible, sufficiently distant enemies disappear at the network boundary, and the observer's resolved reveal-proximity attribute determines close reveal | [milestone-01.md](./milestone-01.md) |
+| 01 | Complete | One accepted map contains real concealing terrain: allies remain visible, sufficiently distant enemies disappear at the network boundary, and the observer's resolved reveal-proximity attribute determines close reveal | [milestone-01.md](./milestone-01.md) |
 | 02 | Not started | Self-cloak and reveal-scan ultimates form one complete build/counter pair with attack, damage, charge, targeting, HUD, cue, recovery, and balance behavior | Create after M01 evidence and acceptance |
 | 03 | Not started | A public targeted allied concealment field hides its caster and teammates through the same observer rule; V9 closes with full cross-source, lifecycle, security, performance, and playtest evidence | Create after M02 evidence and acceptance |
 
@@ -66,16 +66,17 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 
 ### M01 — Observer-specific visibility and terrain concealment
 
-M01 proves the hard security boundary before adding ability variants. One dedicated map asset and
-one accepted recipe exercise placement resolution, authoritative overlap, per-observer proximity,
-Lightyear while-visible despawn/reappearance, cue filtering, client cleanup, late join, reconnect,
-restart, and map replacement. The fighter attribute is resolved through the real V7 profile/build
-pipeline so later bonuses and maluses do not require a second contract.
+M01 proves the hard security boundary before adding ability variants. The existing `TALL_GRASS`
+map asset deliberately gains concealment, and its accepted Tidal Garden recipe exercises placement
+resolution, authoritative overlap, per-observer proximity, Lightyear while-visible
+despawn/reappearance, cue filtering, client cleanup, late join, reconnect, restart, and map
+replacement. The fighter attribute is resolved through the real V7 profile/build pipeline so later
+bonuses and maluses do not require a second contract.
 
 Gate:
 
-- one dedicated terrain identity has explicit server-known concealment and honest normal/fallback
-  presentation;
+- `TALL_GRASS` has explicit server-known concealment and honest normal/fallback presentation, with
+  the semantic change carried by revised schema/catalog/content identity;
 - self and allies retain the fighter while two hostile observers can receive different current
   spatial results according to their resolved proximity radii;
 - an unauthorized client never receives a hidden-before-relevance fighter and loses a previously

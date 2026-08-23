@@ -2,16 +2,17 @@
 
 ## Status
 
-**Specification review.** Research and this specification were prepared on 2026-08-23 at the
-user's request. Production implementation is gated on V8 M04 reaching `Complete` and explicit user
-approval of this milestone.
+**Complete.** Research and this specification were prepared on 2026-08-23. V8 M04/V8 completed,
+the user approved production implementation, implementation plus automated verification completed,
+and the user accepted both the core concealment behavior and the requested hidden-fighter alpha
+signifier on 2026-08-23.
 
 ## Player-visible outcome
 
-Tidal Garden receives a deliberately distinct dense-bush terrain identity. A living fighter inside
-the bush remains visible to itself and allies but disappears for enemy fighters outside their own
+Tidal Garden's existing tall grass becomes real concealing terrain. A living fighter inside the
+grass remains visible to itself and allies but disappears for enemy fighters outside their own
 resolved reveal-proximity radius. Moving close reveals the hidden fighter only to that observer;
-moving away conceals it again. Accepted attacks and positive applied damage reveal a bush occupant
+moving away conceals it again. Accepted attacks and positive applied damage reveal a grass occupant
 to every enemy for bounded authored durations.
 
 The terrain boundary remains public and readable in imported and primitive-fallback presentation.
@@ -58,12 +59,13 @@ in historical snapshots. M01 preserves the one current immutable loadout path.
 
 ### Which map should prove the rule?
 
-Tidal Garden already demonstrates vegetation, water, shaped boundaries, and 2v2 routing, but its
-`TALL_GRASS` was deliberately accepted as non-concealing in V8. M01 does not silently change that
-identity. It adds a visually denser `DENSE_BUSH` feature with a distinct map-asset/gameplay/visual
-identity and replaces only a reviewed subset of Tidal Garden vegetation cells. The remaining tall
-grass stays honestly non-concealing. The map recipe and game-type/content revisions change
-normally and the altered routes receive a new native playtest.
+Tidal Garden already demonstrates vegetation, water, shaped boundaries, and 2v2 routing. Its
+`TALL_GRASS` was accepted as non-concealing in V8 because complete concealment did not exist yet,
+not because non-concealment was intended as the asset's permanent identity. M01 deliberately adds
+the missing server-known capability to `TALL_GRASS`; it does not create a parallel dense-bush asset.
+The layout can remain unchanged while schema/catalog/content identity and current gameplay
+documentation change normally. Every map containing tall grass is revalidated, and Tidal Garden
+receives a new native gameplay/readability playtest.
 
 ### When can attack and damage safely reveal?
 
@@ -120,8 +122,9 @@ local change.
   remain an optional broad partition, not the gameplay decision.
 - **Retained hidden entities:** preserve last-known remotely inspectable state and contradict the
   security outcome.
-- **Change current tall grass in place:** rewrites an accepted V8 gameplay identity and makes the
-  same asset silently mean different things across content revisions.
+- **Add a parallel dense-bush asset:** duplicates the established vegetation identity, leaves
+  `TALL_GRASS` misleadingly inert after the missing concealment system exists, and creates an
+  unnecessary visual distinction for one intended terrain rule.
 - **Add every concealment source in M01:** mixes the network/privacy proof with two new ultimate
   families and a runtime area before the foundation is accepted.
 - **Line-of-sight proximity:** adds geometry vision and wall semantics before playtest demonstrates
@@ -144,11 +147,14 @@ M01 extends the current production schemas directly:
   and tests include reveal proximity;
 - `MapGameplayProfile` gains only the explicit concealment capability required by M01, preferably a
   bounded enum/option rather than an independent boolean;
-- `DENSE_BUSH` gains stable map-asset, gameplay-profile, visual-profile, and display identities;
-- Tidal Garden replaces a reviewed subset of `TALL_GRASS` placements with `DENSE_BUSH`; existing
-  `TALL_GRASS` remains non-concealing;
-- relevant schema, recipe, catalog, game-type, content, and protocol fingerprints/revisions change
-  through the one global compatibility path.
+- the existing `TALL_GRASS` map asset keeps its stable map-asset and visual identities but is
+  rebound to a new explicit concealing gameplay profile; V8's shared inert pass/pass profile is not
+  mutated because ground, rubble, and other non-concealing assets also reference it;
+- Tidal Garden keeps its authored tall-grass placements unless implementation playtest identifies
+  a concrete layout problem; every affected map is revalidated under the new rule;
+- relevant schema, catalog, content, and protocol fingerprints/revisions change through the one
+  global compatibility path; recipe or game-type revisions change only if their owned authored
+  inputs change.
 
 Code-owned validation rejects non-finite/non-positive base or resolved radii, out-of-range flat or
 percentage modifiers, overflow, invalid concealment shapes, and aggregate concealment placements
@@ -198,8 +204,8 @@ public lifecycle view after authoritative transitions; clients cannot author it.
 
 ### Terrain membership
 
-The V8 resolver derives a bounded concealment shape for every `DENSE_BUSH` placement from its
-validated footprint. A server system evaluates living fighter centers against current active bush
+The V8 resolver derives a bounded concealment shape for every `TALL_GRASS` placement from its
+validated footprint. A server system evaluates living fighter centers against current active grass
 shapes after authoritative movement and map mutation are current. Equal-boundary behavior is
 inclusive and covered by exact-distance tests.
 
@@ -214,7 +220,7 @@ For M01, a subject is concealed from an enemy observer exactly when:
 
 ```text
 observer is a living active combatant
-and subject is alive and inside active DENSE_BUSH
+and subject is alive and inside active TALL_GRASS
 and no unexpired attack/damage reveal deadline exists
 and planar_distance(observer, subject) > observer.reveal_proximity_radius
 ```
@@ -320,13 +326,14 @@ The client removes/despawns an unauthorized remote fighter through replication. 
 must also remove interpolation remnants, imported/primitive model hierarchy, projected health/name
 UI, aim indicators, shadows, trails, status visuals, selection/target markers, and spatial audio.
 
-The local owner and allies see a readable concealment treatment and the bush boundary. An enemy
+The local owner and allies see a readable concealment treatment and the grass boundary. An enemy
 crossing into reveal distance sees the current fighter state reappear without replaying hidden
 motion. Leaving reveal distance removes it without an exact last-position marker. Attack/damage
 reveal receives a bounded public transition cue only after permitted state is current.
 
-`DENSE_BUSH` must remain distinct from non-concealing tall grass in imported and
-`BRAWLER_FORCE_PRIMITIVE_WORLD=1` modes and under reduced effects. Color alone is insufficient.
+`TALL_GRASS` must communicate its newly implemented concealing role in imported and
+`BRAWLER_FORCE_PRIMITIVE_WORLD=1` modes and under reduced effects. The public boundary and permitted
+ally/owner state cannot depend on color alone.
 
 ### Recovery and lifecycle
 
@@ -347,8 +354,8 @@ reveal receives a bounded public transition cue only after permitted state is cu
 
 M01 derives pair capacity from `ResolvedMatchCapacity.maximum_active_fighters`. At current 3v3 the
 ordered pair count is small, but validation and memory ceilings use the resolved maximum rather than
-literal six. The milestone pins ceilings for bush placements, transitions per tick, queued per-link
-cues, cached pairs, and telemetry records before implementation.
+literal six. The milestone pins ceilings for concealing-grass placements, transitions per tick,
+queued per-link cues, cached pairs, and telemetry records before implementation.
 
 Telemetry records stable subject/source identity, observing team or permitted aggregate, transition
 reason, tick, duration, proximity band, attack/damage reveal, and bounded drops without emitting
@@ -357,27 +364,101 @@ reveals, attacks from concealment, damage breaks, and re-conceal delay.
 
 ## Implementation checklist
 
-- [ ] Re-audit the post-V8 production map, fighter/loadout, cue, replication, roster, HUD, sentry,
+- [x] Re-audit the post-V8 production map, fighter/loadout, cue, replication, roster, HUD, sentry,
   prediction/interpolation, audio, diagnostic, and Balance Lab consumers.
-- [ ] Add resolved reveal proximity, validation, canonical modifier math/fixtures, fingerprints,
+- [x] Add resolved reveal proximity, validation, canonical modifier math/fixtures, fingerprints,
   snapshots, preview, and Balance Lab support.
-- [ ] Add `DENSE_BUSH` gameplay/map/visual identities and a reviewed Tidal Garden revision while
-  preserving non-concealing `TALL_GRASS`.
-- [ ] Implement bounded terrain membership and exact planar proximity rules.
-- [ ] Add accepted-attack and positive-damage reveal facts/deadlines.
-- [ ] Add the focused server concealment composition, deterministic observer decision, transition
+- [x] Rebind `TALL_GRASS` to a new explicit concealing gameplay profile, preserve the shared inert
+  profile for ground/rubble/other assets, revise all required schema/catalog/content identities,
+  and revalidate every affected map without adding a parallel bush asset.
+- [x] Implement bounded terrain membership and exact planar proximity rules.
+- [x] Add accepted-attack and positive-damage reveal facts/deadlines.
+- [x] Add the focused server concealment composition, deterministic observer decision, transition
   cache, lifecycle cleanup, and telemetry.
-- [ ] Split public participant projection from cullable spatial fighter and migrate roster/HUD
+- [x] Split public participant projection from cullable spatial fighter and migrate roster/HUD
   consumers.
-- [ ] Configure ordinary per-link Lightyear loss/gain with explicit ordering and deferred boundary.
-- [ ] Replace global cue fan-out with deny-by-default per-connection filtering and complete the cue,
+- [x] Configure ordinary per-link Lightyear loss/gain with explicit ordering and deferred boundary.
+- [x] Replace global cue fan-out with deny-by-default per-connection filtering and complete the cue,
   hierarchy, projectile, sentry, audio, UI, telemetry, and diagnostic audit.
-- [ ] Implement owner/ally/boundary/reveal presentation and stale-client cleanup in normal,
+- [x] Implement owner/ally/boundary/reveal presentation and stale-client cleanup in normal,
   reduced-effects, and primitive fallback modes.
-- [ ] Update protocol/content revisions, schemas, root/current specifications, commands, fixtures,
+- [x] Update protocol/content revisions, schemas, root/current specifications, commands, fixtures,
   evidence parsing, and developer orientation required by changed production behavior.
-- [ ] Run the verification plan, deliver the native/security playtest, triage feedback, rerun
+- [x] Run the verification plan, deliver the native/security playtest, triage feedback, rerun
   affected checks, and complete the learn-from-errors review.
+
+### Implementation progress — 2026-08-23
+
+- Reveal proximity is now immutable resolved fighter data. Initial Balance Lab/profile values are
+  160 world units for default, 192 for lightweight, and 128 for reinforced; these are provisional
+  playtest inputs, not final balance claims.
+- Canonical modifier resolution uses bounded flat milliunits and percentage basis points, applies
+  percentage then flat adjustment, clamps to 32..=1024 world units, and rounds once to thousandths.
+- Build catalog/fingerprint, routed immutable match snapshot, profile match snapshot, and Balance
+  Lab snapshot versions advanced through their existing fail-closed compatibility paths.
+- `TALL_GRASS` retains `MapAssetId(8)` and visual profile 33 but now references dedicated gameplay
+  profile 8 with `HideOccupants`. Shared inert profile 1 remains non-concealing.
+- Map catalog/fingerprint schemas advanced; all embedded maps re-resolve under validation, including
+  the 40 existing Tidal Garden grass placements and the concealment-placement ceiling.
+- Focused evidence: `cargo check --all-targets`; `cargo test --lib builds::tests` (10 passed);
+  `cargo test --lib map::catalog::tests` (13 passed); `cargo test --lib profiles::tests` (4
+  passed); `cargo test --no-default-features --features balance-lab --lib
+  server::balance_lab` (10 passed); Balance Lab web `npm run typecheck`.
+- Authority/replication is implemented in `src/concealment.rs`: fixed-post membership and reveal
+  facts precede observer decisions, and PostUpdate gain/loss plus its deferred boundary precedes
+  `ReplicationSystems::Send`. Ordinary loss is used; retained/always-present modes are absent.
+- Attack reveal is 90 ticks and positive-damage reveal is 120 ticks, both with exclusive end
+  deadlines. Zero-damage outcomes and non-accepted attacks produce no lock.
+- Spatial fighters are per-link cullable while `PublicParticipantState` remains independently
+  replicated. The client roster reads only that public projection.
+- Combat cues are classified and filtered per link from final fighter visibility. Sentry acquisition
+  and continued fire reject a concealed target outside the owner's reveal radius.
+- Permitted concealed fighters receive `ConcealmentPresentationState`. For the local fighter and
+  allies, while concealment is active, imported fighter/equipment materials and the primitive
+  fallback preserve their colors at 52% source alpha with `AlphaMode::Blend`, allowing the actual
+  terrain to show through; ordinary team/local ground markers remain opaque. A proximity-revealed
+  enemy remains opaque. Reveal locks and terrain exit restore the exact original material handles.
+  Ordinary replicated despawn removes the complete fighter presentation hierarchy.
+- Bounded server-only transition telemetry records stable subject identity, observer team, reason,
+  tick, and visibility without secret positions.
+
+### Cue/privacy audit
+
+| Family | Subject policy |
+|---|---|
+| Attack, muzzle, delivery, lob, impact | Source must be visible; accepted attack establishes its reveal lock first |
+| Melee, damage, effect, defeat | Every referenced fighter source/target must be visible; positive damage reveals target first |
+| Sentry fire | Owner and target must be visible; authority also rejects concealed acquisition |
+| Reset | Reset fighter must be visible under current lifecycle state |
+| Deployable removal | Owner must be visible; no hidden owner-derived spatial cue is sent |
+| Unknown future variant | Rust exhaustiveness requires an explicit policy before compilation succeeds |
+
+### Verification evidence — 2026-08-23
+
+- `just check` passed every client/server/network/Balance Lab feature graph and web build.
+- `just lint` passed formatting, web build, all Clippy `-D warnings` roles, server feature isolation,
+  V3 renderer isolation, and V8 legacy-map cleanup.
+- `just test` passed routing, 347 client tests, 269 server tests, 279 Balance Lab tests, the full
+  78-scenario network suite, both 25-match restart soaks, and 11 performance gates.
+- Focused two-client Tidal Garden security test passed: distant grass occupant absent from the
+  enemy client World, present for its owner, both public projections retained, exact-radius
+  reappearance, retreat re-concealment, accepted-attack reveal, zero-damage non-reveal, and
+  positive-damage reveal.
+- Affected alpha-signifier verification passed: 12 focused combat-presentation tests, including
+  exclusive reveal-deadline switching, cached alpha material construction, and exact original-handle
+  restoration; canonical `just check` and `just lint` also passed after the feedback change.
+
+## User playtest handoff
+
+Build and start the routed product with `just run`. In the Dashboard choose **Tidal Garden 2v2**;
+use additional `just client` terminals for human observers if desired. Compare Default (160),
+Lightweight (192), and Reinforced (128) fighter profiles.
+
+Please verify the seven observations in the native/security playtest section below, especially
+that tall-grass boundaries read clearly, allies remain visible, distant enemies disappear without
+stale nameplates/shadows/audio, proximity feels understandable, and shooting/damage reveal windows
+feel readable. Repeat once with reduced effects and once with
+`BRAWLER_FORCE_PRIMITIVE_WORLD=1 just client`.
 
 ## Verification plan
 
@@ -385,7 +466,8 @@ reveals, attacks from concealment, damage breaks, and re-conceal delay.
 
 - Fighter bases and positive/negative modifier fixtures resolve finite bounded proximity radii with
   deterministic flat/percentage/clamp/round order.
-- Dense bush resolves only from its explicit profile; tall grass remains non-concealing.
+- Tall grass resolves concealment only from its explicit revised gameplay profile; appearance alone
+  never grants the rule.
 - Membership boundaries, exact `distance == radius`, stable ordering, latest-deadline refresh,
   ally/self permissions, objective-carrier exclusion, and pair truth tables pass.
 - Invalid values, aggregate placements, modifier overflow, schema revisions, and fingerprints fail
@@ -397,7 +479,7 @@ reveals, attacks from concealment, damage breaks, and re-conceal delay.
   filtering, and applied deferred visibility precede replication send.
 - Rejected attack, miss, zero damage, and duplicate facts do not reveal or extend deadlines.
 - Accepted attack and positive damage reveal on the exact tick and concealment resumes only after
-  the latest deadline expires while the fighter remains in bush.
+  the latest deadline expires while the fighter remains in grass.
 - Defeat, respawn, restart, placement removal/replacement, map teardown, and disconnect clear only
   their owned state.
 - Sentry targeting and any server observation adapter cannot acquire a concealed hostile.
@@ -431,7 +513,7 @@ than inventing substitutes. At minimum the evidence set must include:
 
 The handoff must provide one command path and ask the user to verify:
 
-1. dense bush and ordinary tall grass are visually distinct;
+1. tall grass clearly communicates its newly implemented concealing role and public boundary;
 2. allies remain visible while a distant enemy disappears;
 3. approaching reveals only the approaching enemy and retreating conceals again;
 4. the selected fighter's reveal-proximity value produces an understandable distance difference;
@@ -445,8 +527,8 @@ state was absent. The user is not asked to infer security from visuals.
 ## Exit criteria
 
 - V8 is complete and the user approves this specification before implementation;
-- one dedicated terrain identity and one accepted Tidal Garden revision exercise real server-owned
-  concealment without changing non-concealing tall grass in place;
+- the existing `TALL_GRASS` identity and accepted Tidal Garden layout exercise real server-owned
+  concealment through an explicit revised gameplay profile and content identity;
 - reveal proximity is a resolved observer fighter attribute with bounded positive/negative modifier
   support and maintained Balance Lab coverage;
 - public participant and cullable spatial state are correctly separated;
@@ -459,8 +541,43 @@ state was absent. The user is not asked to infer security from visuals.
 
 ## Feedback review
 
-Pending specification approval and implementation playtest.
+- Accepted on 2026-08-23: the core terrain-concealment behavior works in the native playtest.
+- Implemented on 2026-08-23: while a fighter is actively concealed from distant enemies, keep its
+  ordinary team/local ground marker and render its locally controlled/allied visible body with alpha
+  blending so the actual terrain shows through. A proximity-revealed enemy stays opaque. Apply the
+  treatment to imported character materials, attached equipment, and the primitive fallback without
+  changing replication visibility or exposing a fighter to an unauthorized client. The
+  implementation uses 52% source alpha and restores original handles exactly on reveal or terrain
+  exit.
+- Accepted on 2026-08-23: the 52% alpha treatment provides the requested readable hidden-fighter
+  signifier. M01 needs no further presentation adjustment.
 
 ## Learn-from-errors review
 
-Pending implementation, verification, and feedback review.
+Completed on 2026-08-23.
+
+- Mistake: the initial specification treated V8 acceptance of non-concealing tall grass as a durable
+  design choice and proposed a parallel dense-bush asset. Cause: it inferred intent from behavior
+  that existed only because concealment had not been implemented. Prevention: when promoting a
+  backlog capability, distinguish an explicit negative product decision from a placeholder behavior
+  caused by the capability's absence; preserve stable content identity when the user confirms the
+  intended semantic evolution.
+- Mistake: the first local concealment cue reused the slow-status ground-marker material. Cause: it
+  optimized for an already available visual handle instead of preserving one meaning per visual
+  language. Prevention: do not overload status colors for unrelated gameplay state; use a dedicated
+  material transition and retain the team/orientation marker's established meaning.
+- Correction made before handoff: alpha treatment must be relative to the controlled fighter's team.
+  A hostile fighter visible through proximity is revealed to that client and therefore remains
+  opaque, while the local fighter and allies receive the concealment signifier. Prevention: include
+  observer relation in tests for every observer-specific presentation state, not only in authority
+  tests.
+- Reusable success: separating always-public participant projection from cullable spatial fighter
+  state made ordinary Lightyear visibility loss usable without breaking the roster. Per-link cue
+  filtering and sentry targeting then consumed the same authoritative observer decision instead of
+  creating presentation-only secrecy paths.
+- Reusable success: cached cloned `StandardMaterial` variants cover imported descendants, attached
+  equipment, and primitive fallbacks without mutating shared assets, while retaining exact original
+  handles makes reveal and terrain-exit restoration deterministic.
+- No new Codex skill was created: the lessons are currently specific to Brawler's accepted content
+  semantics and concealment presentation. They are recorded here and in the durable concealment
+  specification; recurrence across milestones would justify extracting a reusable project skill.

@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 3;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 4;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 3;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 3;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 4;
 pub const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const CROSSROADS_ADMISSION_REVISION: u16 = 5;
 pub const CROSSROADS_HOT_ZONE_PRESET: MapPresetId = MapPresetId(2);
@@ -175,6 +175,12 @@ pub enum MapInteractionBehavior {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapConcealmentBehavior {
+    None,
+    HideOccupants,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapPlacementParameterKind {
     None,
     PlayerSpawn,
@@ -189,6 +195,7 @@ pub struct MapGameplayProfile {
     pub collider_shape: MapColliderShape,
     pub destruction: MapDestructionBehavior,
     pub interaction: MapInteractionBehavior,
+    pub concealment: MapConcealmentBehavior,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -896,6 +903,18 @@ fn resolve_grid_recipe(
     if placements.len() > 512 {
         return Err("grid map exceeds the expanded placement ceiling".to_string());
     }
+    let concealment_placement_count = placements
+        .iter()
+        .filter(|placement| {
+            catalog
+                .asset(placement.asset_id)
+                .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
+                .is_some_and(|profile| profile.concealment == MapConcealmentBehavior::HideOccupants)
+        })
+        .count();
+    if concealment_placement_count > 128 {
+        return Err("grid map exceeds the concealment placement ceiling".to_string());
+    }
     let mut ids = BTreeSet::new();
     let mut occupied: BTreeMap<(MapCell, MapAssetSlot), MapPlacementId> = BTreeMap::new();
     let mut spawn_ordinals = BTreeSet::new();
@@ -1518,6 +1537,17 @@ fn validate_asset_profile(
         && profile.collider_shape == MapColliderShape::None;
     let blocks = profile.player_collision == PlayerCollision::Block
         || profile.projectile_collision == ProjectileCollision::BlockAndConsume;
+    let concealment_is_consistent = match profile.concealment {
+        MapConcealmentBehavior::None => true,
+        MapConcealmentBehavior::HideOccupants => {
+            asset.slot == MapAssetSlot::Feature
+                && profile.player_collision == PlayerCollision::Pass
+                && profile.projectile_collision == ProjectileCollision::Pass
+                && profile.collider_shape == MapColliderShape::None
+                && profile.destruction == MapDestructionBehavior::Indestructible
+                && profile.interaction == MapInteractionBehavior::None
+        }
+    };
     let collider_is_consistent = match profile.collider_shape {
         MapColliderShape::None => !blocks,
         MapColliderShape::FootprintRectangle => blocks,
@@ -1573,7 +1603,7 @@ fn validate_asset_profile(
             profile.interaction == MapInteractionBehavior::None && asset.surface_tag.is_none()
         }
     };
-    (valid && collider_is_consistent)
+    (valid && collider_is_consistent && concealment_is_consistent)
         .then_some(())
         .ok_or_else(|| format!("asset {} contradicts its slot/gameplay profile", asset.key))
 }
@@ -1707,6 +1737,20 @@ mod tests {
     #[test]
     fn tidal_garden_resolves_exact_authored_counts_and_mirrored_footprints() {
         let catalog = MapContentCatalog::embedded().unwrap();
+        let tall_grass = catalog.asset(TALL_GRASS_ASSET).unwrap();
+        let tall_grass_profile = catalog.profile(tall_grass.gameplay_profile_id).unwrap();
+        assert_eq!(
+            tall_grass_profile.concealment,
+            MapConcealmentBehavior::HideOccupants
+        );
+        assert_ne!(tall_grass.gameplay_profile_id, MapGameplayProfileId(1));
+        assert_eq!(
+            catalog
+                .profile(MapGameplayProfileId(1))
+                .unwrap()
+                .concealment,
+            MapConcealmentBehavior::None
+        );
         let resolved = catalog
             .resolve_preset(TIDAL_GARDEN_PRESET, MapInstanceId(8))
             .unwrap();

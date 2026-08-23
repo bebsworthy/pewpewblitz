@@ -653,10 +653,21 @@ including whether it occurs in imported assets, primitive fallback, or both.
 
 ## Feedback review
 
-Pending user playtest feedback. Specification approval, implementation, automated verification,
-routed E2E, and imported/primitive native evidence are complete.
+The user accepted the V8 closeout on 2026-08-23 and reported no additional map, collision,
+topology, imported/fallback, or presentation change. M04 therefore required no feedback code change
+or affected verification rerun beyond the already completed canonical, routed, and native evidence.
 
 ## Learn-from-errors review
 
-Pending user playtest and feedback review; closeout learning will be recorded before M04/V8 become
-`Complete`.
+M04 confirmed three reusable lessons:
+
+- a hard schema cutover needs one explicit zero-match inventory plus clean generated-input evidence;
+  passing behavior tests alone does not prove the old production path is gone;
+- shared inert gameplay profiles must be audited before later capabilities mutate their meaning;
+  a future asset-specific behavior should use an explicit profile rather than widening every asset
+  that happens to share the old profile;
+- native evidence should distinguish a transient harness/deferred-command warning from an accepted
+  gameplay regression and keep that limitation visible until the owning schedule changes.
+
+No recurring tool failure or missing general-purpose workflow justified creating another project
+skill during closeout.

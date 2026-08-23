@@ -1,5 +1,5 @@
 (
-    schema_version: 3,
+    schema_version: 4,
     assets: [
         (
             id: MapAssetId(1), key: "ground", display_name: "Ground", slot: Surface,
@@ -52,7 +52,7 @@
         ),
         (
             id: MapAssetId(8), key: "tall-grass", display_name: "Tall Grass", slot: Feature,
-            gameplay_profile_id: MapGameplayProfileId(1), visual_profile_id: MapVisualProfileId(33),
+            gameplay_profile_id: MapGameplayProfileId(8), visual_profile_id: MapVisualProfileId(33),
             footprint_cells: (width: 1, height: 1),
             allowed_quarter_turns: 15, surface_tag: None,
             allowed_surface_tags: [MapSurfaceTagId(2)], parameter_kind: None,

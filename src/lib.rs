@@ -3,6 +3,7 @@
 pub mod abilities;
 pub mod builds;
 pub mod combat;
+pub mod concealment;
 pub mod config;
 pub mod content;
 pub mod diagnostics;

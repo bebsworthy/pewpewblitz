@@ -14,6 +14,7 @@ const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
 const FIGHTER_BODY_WORLD_HEIGHT: f32 = 24.0;
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const MAX_EFFECTS: usize = 96;
+const CONCEALED_FIGHTER_ALPHA: f32 = 0.52;
 
 #[derive(Component)]
 pub(super) struct SentryVisual3d;
@@ -44,9 +45,21 @@ type FighterPresentationQuery<'w, 's> = Query<
         &'static Position,
         &'static crate::combat::TeamId,
         Has<Controlled>,
+        Option<&'static crate::concealment::ConcealmentPresentationState>,
     ),
     With<Fighter>,
 >;
+
+#[derive(Component)]
+pub(super) struct FighterConcealmentMaterial {
+    normal: Handle<StandardMaterial>,
+    concealed: Handle<StandardMaterial>,
+}
+
+#[derive(Resource, Default)]
+pub(super) struct ConcealedMaterialVariants {
+    handles: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
+}
 
 type GroundMarkerQuery<'w, 's> = Query<
     'w,
@@ -147,11 +160,11 @@ pub(super) fn reconcile_combat_visuals(
     let overhead_roots = unique_roots(&mut commands, &overhead_visuals);
     let controlled_team = fighters
         .iter()
-        .find_map(|(_, _, team, controlled)| controlled.then_some(*team));
+        .find_map(|(_, _, team, controlled, _)| controlled.then_some(*team));
 
     update_ground_markers(&fighters, &mut ground_markers, controlled_team, &materials);
 
-    for (owner, position, team, controlled) in &fighters {
+    for (owner, position, team, controlled, _) in &fighters {
         if !fighter_roots.contains_key(&owner) {
             spawn_fighter(
                 &mut commands,
@@ -249,7 +262,7 @@ fn update_ground_markers(
     materials: &Material3dAssets,
 ) {
     for (marker, mut material) in ground_markers {
-        if let Ok((_, _, team, controlled)) = fighters.get(marker.owner) {
+        if let Ok((_, _, team, controlled, _)) = fighters.get(marker.owner) {
             let desired = ground_marker_material(
                 ground_marker_relation(*team, controlled, controlled_team),
                 materials,
@@ -259,6 +272,111 @@ fn update_ground_markers(
             }
         }
     }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "the presentation pass discovers material-bearing descendants across imported and fallback fighter hierarchies"
+)]
+pub(super) fn update_fighter_concealment_visuals(
+    mut commands: Commands,
+    roots: Query<(Entity, &CombatVisualOwner), With<V3FighterVisual>>,
+    children: Query<&Children>,
+    fighters: Query<
+        (
+            Option<&crate::concealment::ConcealmentPresentationState>,
+            Option<&AuthoritativeTick>,
+            &crate::combat::TeamId,
+            Has<Controlled>,
+        ),
+        With<Fighter>,
+    >,
+    mut body_materials: Query<
+        (
+            Entity,
+            &mut MeshMaterial3d<StandardMaterial>,
+            Option<&FighterConcealmentMaterial>,
+        ),
+        Without<FighterGroundMarker3d>,
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut variants: ResMut<ConcealedMaterialVariants>,
+) {
+    let controlled_team = fighters
+        .iter()
+        .find_map(|(_, _, team, controlled)| controlled.then_some(*team));
+    for (root, owner) in &roots {
+        let Ok((concealment, tick, team, _)) = fighters.get(owner.0) else {
+            continue;
+        };
+        let concealed = controlled_team == Some(*team)
+            && fighter_is_visually_concealed(
+                concealment,
+                tick.map_or(0, |authoritative_tick| authoritative_tick.0),
+            );
+        for descendant in children.iter_descendants(root) {
+            let Ok((entity, mut material, binding)) = body_materials.get_mut(descendant) else {
+                continue;
+            };
+            if let Some(binding) = binding {
+                let desired = if concealed {
+                    &binding.concealed
+                } else {
+                    &binding.normal
+                };
+                if material.0 != *desired {
+                    material.0 = desired.clone();
+                }
+                continue;
+            }
+
+            let normal = material.0.clone();
+            let Some(concealed_material) =
+                concealed_material_variant(&normal, &mut materials, &mut variants)
+            else {
+                continue;
+            };
+            if concealed {
+                material.0 = concealed_material.clone();
+            }
+            commands.entity(entity).insert(FighterConcealmentMaterial {
+                normal,
+                concealed: concealed_material,
+            });
+        }
+    }
+}
+
+fn fighter_is_visually_concealed(
+    state: Option<&crate::concealment::ConcealmentPresentationState>,
+    current_tick: u64,
+) -> bool {
+    state.is_some_and(|state| {
+        state.inside_concealing_terrain && current_tick >= state.revealed_until_tick
+    })
+}
+
+fn concealed_material_variant(
+    source: &Handle<StandardMaterial>,
+    materials: &mut Assets<StandardMaterial>,
+    variants: &mut ConcealedMaterialVariants,
+) -> Option<Handle<StandardMaterial>> {
+    if let Some(handle) = variants.handles.get(&source.id()) {
+        return Some(handle.clone());
+    }
+    let mut material = materials.get(source)?.clone();
+    let color = material.base_color.to_srgba();
+    material.base_color = Color::srgba(
+        color.red,
+        color.green,
+        color.blue,
+        color.alpha * CONCEALED_FIGHTER_ALPHA,
+    );
+    material.alpha_mode = AlphaMode::Blend;
+    let handle = materials.add(material);
+    variants.handles.insert(source.id(), handle.clone());
+    Some(handle)
 }
 
 fn unique_roots<T: Component>(
@@ -1214,6 +1332,157 @@ pub(super) fn write_combat_visual_poses(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fighter_alpha_signifier_tracks_concealment_and_exclusive_reveal_deadline() {
+        let concealed = crate::concealment::ConcealmentPresentationState {
+            inside_concealing_terrain: true,
+            revealed_until_tick: 12,
+        };
+        assert!(!fighter_is_visually_concealed(Some(&concealed), 11));
+        assert!(fighter_is_visually_concealed(Some(&concealed), 12));
+        assert!(!fighter_is_visually_concealed(None, 12));
+        assert!(!fighter_is_visually_concealed(
+            Some(&crate::concealment::ConcealmentPresentationState {
+                inside_concealing_terrain: false,
+                revealed_until_tick: 0,
+            }),
+            12,
+        ));
+    }
+
+    #[test]
+    fn concealed_material_preserves_color_and_blends_at_bounded_alpha() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let source = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.2, 0.4, 0.8, 0.9),
+            ..default()
+        });
+        let mut variants = ConcealedMaterialVariants::default();
+        let concealed = concealed_material_variant(&source, &mut materials, &mut variants).unwrap();
+        let color = materials.get(&concealed).unwrap().base_color.to_srgba();
+        for (actual, expected) in [color.red, color.green, color.blue]
+            .into_iter()
+            .zip([0.2, 0.4, 0.8])
+        {
+            assert!((actual - expected).abs() < f32::EPSILON);
+        }
+        assert!((color.alpha - 0.9 * CONCEALED_FIGHTER_ALPHA).abs() < f32::EPSILON);
+        assert_eq!(
+            materials.get(&concealed).unwrap().alpha_mode,
+            AlphaMode::Blend
+        );
+        assert_eq!(
+            concealed_material_variant(&source, &mut materials, &mut variants).unwrap(),
+            concealed
+        );
+    }
+
+    #[test]
+    fn fighter_body_restores_its_exact_material_during_reveal() {
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<ConcealedMaterialVariants>()
+            .add_systems(Update, update_fighter_concealment_visuals);
+        let normal = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        let owner = app
+            .world_mut()
+            .spawn((
+                Fighter,
+                crate::concealment::ConcealmentPresentationState {
+                    inside_concealing_terrain: true,
+                    revealed_until_tick: 0,
+                },
+                AuthoritativeTick(8),
+                crate::combat::TeamId(1),
+                Controlled,
+            ))
+            .id();
+        let root = app
+            .world_mut()
+            .spawn((
+                CombatVisualOwner(owner),
+                V3FighterVisual {
+                    last_position: Vec2::ZERO,
+                    moving: false,
+                    shoot_seconds: 0.0,
+                },
+            ))
+            .id();
+        let body = app.world_mut().spawn(MeshMaterial3d(normal.clone())).id();
+        app.world_mut().entity_mut(root).add_child(body);
+        let enemy = app
+            .world_mut()
+            .spawn((
+                Fighter,
+                crate::concealment::ConcealmentPresentationState {
+                    inside_concealing_terrain: true,
+                    revealed_until_tick: 0,
+                },
+                AuthoritativeTick(8),
+                crate::combat::TeamId(2),
+            ))
+            .id();
+        let enemy_root = app
+            .world_mut()
+            .spawn((
+                CombatVisualOwner(enemy),
+                V3FighterVisual {
+                    last_position: Vec2::ZERO,
+                    moving: false,
+                    shoot_seconds: 0.0,
+                },
+            ))
+            .id();
+        let enemy_body = app.world_mut().spawn(MeshMaterial3d(normal.clone())).id();
+        app.world_mut().entity_mut(enemy_root).add_child(enemy_body);
+
+        app.update();
+        let concealed = app
+            .world()
+            .get::<MeshMaterial3d<StandardMaterial>>(body)
+            .unwrap()
+            .0
+            .clone();
+        assert_ne!(concealed, normal);
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(enemy_body)
+                .unwrap()
+                .0,
+            normal,
+            "a proximity-revealed enemy must not look locally concealed"
+        );
+
+        app.world_mut()
+            .get_mut::<crate::concealment::ConcealmentPresentationState>(owner)
+            .unwrap()
+            .revealed_until_tick = 10;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(body)
+                .unwrap()
+                .0,
+            normal
+        );
+
+        app.world_mut()
+            .get_mut::<AuthoritativeTick>(owner)
+            .unwrap()
+            .0 = 10;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(body)
+                .unwrap()
+                .0,
+            concealed
+        );
+    }
 
     #[test]
     fn combat_visual_state_queries_are_runtime_disjoint() {

@@ -522,10 +522,13 @@ pub(super) fn cleanup_disconnected_projectiles(
 }
 
 #[cfg(feature = "server")]
+#[allow(clippy::needless_pass_by_value)]
 pub(super) fn send_combat_cues(
     mut outbox: ResMut<CombatOutbox>,
     mut telemetry: ResMut<CombatTelemetry>,
-    mut senders: Query<&mut lightyear::prelude::MessageSender<CombatCue>, With<LinkOf>>,
+    visibility: Res<crate::concealment::ObserverVisibilityCache>,
+    fighters: Query<(Entity, &NetworkEntityId), With<Fighter>>,
+    mut senders: Query<(Entity, &mut lightyear::prelude::MessageSender<CombatCue>), With<LinkOf>>,
 ) {
     // Deferred effect cues can be created after a later target's damage cue. Keep the retained
     // process evidence in the same event order as the wire batch sent to clients.
@@ -534,10 +537,53 @@ pub(super) fn send_combat_cues(
         .sort_by_key(|cue| combat_cue_key(cue).event_id.0);
     let mut cues = std::mem::take(&mut outbox.0);
     cues.sort_by_key(|cue| combat_cue_key(cue).event_id.0);
-    for mut sender in &mut senders {
+    let fighter_entities: HashMap<_, _> = fighters
+        .iter()
+        .map(|(entity, network_id)| (network_id.0, entity))
+        .collect();
+    for (connection, mut sender) in &mut senders {
         for cue in &cues {
-            sender.send::<crate::protocol::CombatChannel>(cue.clone());
+            if combat_cue_subjects(cue).into_iter().all(|subject| {
+                fighter_entities
+                    .get(&subject.0)
+                    .is_none_or(|entity| visibility.permits(connection, *entity))
+            }) {
+                sender.send::<crate::protocol::CombatChannel>(cue.clone());
+            }
         }
+    }
+}
+
+#[cfg(feature = "server")]
+fn damage_source_fighter(source: DamageSource) -> Option<NetworkEntityId> {
+    match source {
+        DamageSource::PlayerWeapon { fighter_id, .. }
+        | DamageSource::Ultimate { fighter_id, .. }
+        | DamageSource::Deployable { fighter_id, .. } => Some(fighter_id),
+        DamageSource::Environment { .. } => None,
+    }
+}
+
+#[cfg(feature = "server")]
+fn combat_cue_subjects(cue: &CombatCue) -> Vec<NetworkEntityId> {
+    match cue {
+        CombatCue::AttackAccepted { source, .. }
+        | CombatCue::DeliveryImpact { source, .. }
+        | CombatCue::LobLanded { source, .. }
+        | CombatCue::Muzzle { source, .. }
+        | CombatCue::Impact { source, .. } => vec![*source],
+        CombatCue::MeleeContact { source, target, .. } => vec![*source, *target],
+        CombatCue::DamageApplied { source, target, .. }
+        | CombatCue::EffectApplied { source, target, .. }
+        | CombatCue::Damage { source, target, .. } => damage_source_fighter(*source)
+            .map_or_else(|| vec![*target], |source| vec![source, *target]),
+        CombatCue::FighterDefeated { source, target, .. }
+        | CombatCue::Defeat { source, target, .. } => source
+            .and_then(damage_source_fighter)
+            .map_or_else(|| vec![*target], |source| vec![source, *target]),
+        CombatCue::FighterReset { target, .. } | CombatCue::Reset { target, .. } => vec![*target],
+        CombatCue::SentryFired { owner, target, .. } => vec![*owner, *target],
+        CombatCue::DeployableRemoved { owner, .. } => vec![*owner],
     }
 }
 

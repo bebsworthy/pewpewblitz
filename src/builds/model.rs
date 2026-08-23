@@ -92,7 +92,7 @@ pub struct MatchBuildSnapshotV1 {
 }
 
 impl MatchBuildSnapshotV1 {
-    pub const SCHEMA_VERSION: u8 = 1;
+    pub const SCHEMA_VERSION: u8 = 2;
 
     pub fn encode(self) -> Result<brawler_routing::MatchBuildSnapshot, String> {
         let bytes = postcard::to_allocvec(&self)
@@ -126,6 +126,18 @@ pub struct SelectingBuild;
 pub struct ResolvedFighterStats {
     pub maximum_health: u16,
     pub movement_speed: f32,
+    /// Observer-owned distance at which an enemy's terrain concealment is revealed.
+    pub reveal_proximity_radius: f32,
+}
+
+/// Canonical bonus/malus input applied while resolving reveal proximity.
+///
+/// Flat values use thousandths of one world unit and percentage values use basis points so
+/// content and persistence never depend on platform-specific floating-point inputs.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RevealProximityModifier {
+    pub flat_milliunits: i32,
+    pub percent_basis_points: i16,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

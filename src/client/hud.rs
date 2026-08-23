@@ -162,20 +162,7 @@ fn update_readiness_hud(
     matches: Query<(&MatchState, Option<&crate::matchplay::WipeoutState>), With<MatchRoot>>,
     hot_zones: Query<&crate::matchplay::HotZoneState, With<MatchRoot>>,
     clocks: Query<&crate::matchplay::MatchClock, With<MatchRoot>>,
-    participants: Query<
-        (
-            &PlayerId,
-            &TeamId,
-            &crate::matchplay::FighterDisplayName,
-            &MatchParticipant,
-            Option<&crate::builds::SelectedBuild>,
-            Option<&crate::builds::ResolvedMatchLoadout>,
-            Option<&RespawnState>,
-            Option<&SpawnProtection>,
-            Option<&crate::combat::Defeated>,
-        ),
-        With<Fighter>,
-    >,
+    participants: Query<&crate::matchplay::PublicParticipantState>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
     mut readiness_text: Query<
         (&mut Text, &mut Visibility),
@@ -405,19 +392,7 @@ fn format_match_time(remaining_ticks: u64) -> String {
 fn sync_roster_and_collect_phase_facts<'a>(
     state: Option<MatchState>,
     local_player: Option<u64>,
-    participants: impl Iterator<
-        Item = (
-            &'a PlayerId,
-            &'a TeamId,
-            &'a crate::matchplay::FighterDisplayName,
-            &'a MatchParticipant,
-            Option<&'a crate::builds::SelectedBuild>,
-            Option<&'a crate::builds::ResolvedMatchLoadout>,
-            Option<&'a RespawnState>,
-            Option<&'a SpawnProtection>,
-            Option<&'a crate::combat::Defeated>,
-        ),
-    >,
+    participants: impl Iterator<Item = &'a crate::matchplay::PublicParticipantState>,
     roster: &mut MatchRosterPresentation,
 ) -> PhasePresentationFacts {
     let Some(state) = state else {
@@ -433,43 +408,42 @@ fn sync_roster_and_collect_phase_facts<'a>(
         entry.connected = false;
     }
     let mut facts = PhasePresentationFacts::default();
-    for (player, team, display_name, participant, build, loadout, respawn, protection, defeated) in
-        participants
-    {
+    for public in participants {
+        let player = public.player_id;
+        let team = public.team_id;
+        let participant = public.participant;
         if participant.match_id != state.match_id {
             continue;
         }
         facts.participant_count += 1;
-        facts.ready_count += usize::from(participant.ready && build.is_some());
+        facts.ready_count += usize::from(participant.ready && public.selected);
         facts.restart_ready_count += usize::from(participant.restart_ready);
         if local_player == Some(player.0) {
             facts.local_ready = participant.ready;
             facts.local_restart_ready = participant.restart_ready;
-            facts.local_selected = build.is_some();
+            facts.local_selected = public.selected;
         }
         roster.entries.insert(
             player.0,
             CachedRosterEntry {
-                team: *team,
-                display_name: display_name.0.clone(),
-                weapon_preset: loadout.and_then(|loadout| {
-                    loadout
-                        .primary_weapon
-                        .source_preset_id
-                        .map(|preset| preset.0)
-                }),
-                status: if let Some(respawn) = respawn {
-                    CachedRosterStatus::Respawning(respawn.respawn_at_tick)
-                } else if let Some(protection) = protection {
-                    CachedRosterStatus::Protected(protection.expires_at_tick)
-                } else if defeated.is_some() {
-                    CachedRosterStatus::Defeated
-                } else if participant.restart_ready {
-                    CachedRosterStatus::RestartReady
-                } else if participant.ready {
-                    CachedRosterStatus::Ready
-                } else {
-                    CachedRosterStatus::Alive
+                team,
+                display_name: public.display_name.clone(),
+                weapon_preset: public.weapon_preset_id,
+                status: match public.status {
+                    crate::matchplay::PublicParticipantStatus::Alive => CachedRosterStatus::Alive,
+                    crate::matchplay::PublicParticipantStatus::Ready => CachedRosterStatus::Ready,
+                    crate::matchplay::PublicParticipantStatus::RestartReady => {
+                        CachedRosterStatus::RestartReady
+                    }
+                    crate::matchplay::PublicParticipantStatus::Defeated => {
+                        CachedRosterStatus::Defeated
+                    }
+                    crate::matchplay::PublicParticipantStatus::Respawning { respawn_at_tick } => {
+                        CachedRosterStatus::Respawning(respawn_at_tick)
+                    }
+                    crate::matchplay::PublicParticipantStatus::Protected { expires_at_tick } => {
+                        CachedRosterStatus::Protected(expires_at_tick)
+                    }
                 },
                 connected: true,
             },

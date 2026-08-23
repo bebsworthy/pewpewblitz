@@ -284,7 +284,7 @@ pub struct MatchBuildSnapshotV3 {
 }
 
 impl MatchBuildSnapshotV3 {
-    pub const SCHEMA_VERSION: u8 = 3;
+    pub const SCHEMA_VERSION: u8 = 4;
 
     pub fn from_brawler(
         brawler: &SavedBrawler,

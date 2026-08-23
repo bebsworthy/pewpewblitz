@@ -32,7 +32,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 2;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 3;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -926,8 +926,9 @@ mod tests {
             &WeaponCatalog::embedded().unwrap(),
         );
         let json = serde_json::to_string(&snapshot).unwrap();
-        assert!(json.contains("\"schemaVersion\":2"));
+        assert!(json.contains(&format!("\"schemaVersion\":{SNAPSHOT_SCHEMA_VERSION}")));
         assert!(json.contains("\"fighterProfiles\""));
+        assert!(json.contains("\"reveal_proximity_radius\""));
         assert!(json.contains("\"displayName\""));
     }
 

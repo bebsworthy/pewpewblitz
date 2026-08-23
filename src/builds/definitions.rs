@@ -1,8 +1,8 @@
 use super::{
     BrawlerBuildRecipe, BuildPresetId, BuildRecipeFingerprint, BuildRevision, PassiveDefinitionId,
     PassiveKind, PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout,
-    ResolvedPassive, ResolvedUltimate, SelectedBuild, UltimateDefinitionId, UltimateKind,
-    WeaponChoice,
+    ResolvedPassive, ResolvedUltimate, RevealProximityModifier, SelectedBuild,
+    UltimateDefinitionId, UltimateKind, WeaponChoice,
 };
 use crate::combat::{
     DeliveryMethod, FighterDefinition, PayloadEffectDefinition, WeaponCatalog, WeaponConfiguration,
@@ -13,11 +13,16 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 2;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 2;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 3;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 3;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
+pub const MIN_REVEAL_PROXIMITY_RADIUS: f32 = 32.0;
+pub const MAX_REVEAL_PROXIMITY_RADIUS: f32 = 1_024.0;
+pub const MAX_REVEAL_PROXIMITY_FLAT_MILLIUNITS: i32 = 512_000;
+pub const MIN_REVEAL_PROXIMITY_PERCENT_BASIS_POINTS: i16 = -9_000;
+pub const MAX_REVEAL_PROXIMITY_PERCENT_BASIS_POINTS: i16 = 20_000;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct BuildCatalog {
@@ -224,9 +229,12 @@ impl BuildCatalog {
                 || profile.maximum_health > 1_000
                 || !profile.movement_speed.is_finite()
                 || !(80.0..=1_200.0).contains(&profile.movement_speed)
+                || !profile.reveal_proximity_radius.is_finite()
+                || !(MIN_REVEAL_PROXIMITY_RADIUS..=MAX_REVEAL_PROXIMITY_RADIUS)
+                    .contains(&profile.reveal_proximity_radius)
             {
                 return Err(format!(
-                    "invalid {name} fighter stat profile: health must be 1..=1000 and movement speed must be 80..=1200"
+                    "invalid {name} fighter stat profile: health, movement speed, or reveal proximity is outside engine bounds"
                 ));
             }
         }
@@ -288,6 +296,41 @@ impl BuildCatalog {
             &self.canonical_fingerprint_material()?,
         )))
     }
+}
+
+/// Resolve one reveal radius from bounded, deterministic authored modifier units.
+///
+/// Percentage applies to the base first, the flat term applies second, and the result is clamped
+/// before being rounded once to thousandths of a world unit.
+pub fn resolve_reveal_proximity_radius(
+    base_radius: f32,
+    modifier: RevealProximityModifier,
+) -> Result<f32, String> {
+    if !base_radius.is_finite() || base_radius <= 0.0 {
+        return Err("reveal proximity base radius must be finite and positive".to_string());
+    }
+    if modifier.flat_milliunits.unsigned_abs() > MAX_REVEAL_PROXIMITY_FLAT_MILLIUNITS.unsigned_abs()
+        || !(MIN_REVEAL_PROXIMITY_PERCENT_BASIS_POINTS..=MAX_REVEAL_PROXIMITY_PERCENT_BASIS_POINTS)
+            .contains(&modifier.percent_basis_points)
+    {
+        return Err("reveal proximity modifier exceeds engine bounds".to_string());
+    }
+    let percentage = 1.0 + f64::from(modifier.percent_basis_points) / 10_000.0;
+    let flat = f64::from(modifier.flat_milliunits) / 1_000.0;
+    let resolved = (f64::from(base_radius) * percentage + flat).clamp(
+        f64::from(MIN_REVEAL_PROXIMITY_RADIUS),
+        f64::from(MAX_REVEAL_PROXIMITY_RADIUS),
+    );
+    let rounded = (resolved * 1_000.0).round() / 1_000.0;
+    if !rounded.is_finite() || rounded <= 0.0 {
+        return Err("resolved reveal proximity radius is invalid".to_string());
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "the value is clamped to 32..=1024 and rounded to authored f32 precision"
+    )]
+    let rounded = rounded as f32;
+    Ok(rounded)
 }
 
 fn validate_metadata<T>(

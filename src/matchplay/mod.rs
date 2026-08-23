@@ -29,8 +29,9 @@ pub(crate) use lifecycle::{
 };
 pub use model::{
     ActiveCombatant, FighterDisplayName, MatchClock, MatchId, MatchMember, MatchParticipant,
-    MatchPhase, MatchResult, MatchRoot, MatchState, ResolvedMatchCapacity, RespawnState,
-    SpawnProtection, TeamSlotCapacity,
+    MatchPhase, MatchResult, MatchRoot, MatchState, PublicParticipantState,
+    PublicParticipantStatus, ResolvedMatchCapacity, RespawnState, SpawnProtection,
+    TeamSlotCapacity,
 };
 #[cfg(feature = "server")]
 pub use server::{

@@ -621,19 +621,46 @@ pub(crate) fn tick_sentries(
             &crate::combat::TeamId,
             Option<&crate::combat::Defeated>,
             Option<&crate::matchplay::ActiveCombatant>,
+            Option<&crate::concealment::TerrainConcealmentMembership>,
+            Option<&crate::concealment::ConcealmentRevealDeadlines>,
         ),
         With<crate::protocol::Fighter>,
     >,
-    mut owners: Query<(Entity, &NetworkEntityId), With<crate::protocol::Fighter>>,
+    mut owners: Query<
+        (
+            Entity,
+            &NetworkEntityId,
+            &avian2d::prelude::Position,
+            &crate::builds::ResolvedMatchLoadout,
+        ),
+        With<crate::protocol::Fighter>,
+    >,
 ) {
     use avian2d::prelude::{Collider, CollisionLayers};
     use bevy::math::Dir2;
     use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
     for (entity, position, identity, mut runtime) in &mut sentries {
+        let owner_view = owners
+            .iter()
+            .find(|(_, id, _, _)| **id == identity.owner_network_id)
+            .map(|(_, _, position, loadout)| {
+                (position.0, loadout.fighter_stats.reveal_proximity_radius)
+            });
         if runtime.begin_acquisition_if_due(tick.0) {
             runtime.set_target(stable_sentry_target(fighters.iter().filter_map(
-                |(target_position, target_id, team, defeated, active)| {
+                |(target_position, target_id, team, defeated, active, concealed, deadlines)| {
                     if *team == identity.team_id || defeated.is_some() || active.is_none() {
+                        return None;
+                    }
+                    if concealed.is_some()
+                        && !deadlines.is_some_and(|value| {
+                            crate::concealment::reveal_lock_active(tick.0, *value)
+                        })
+                        && owner_view.is_none_or(|(owner_position, reveal_radius)| {
+                            owner_position.distance_squared(target_position.0)
+                                > reveal_radius * reveal_radius
+                        })
+                    {
                         return None;
                     }
                     let delta = target_position.0 - position.0;
@@ -665,13 +692,23 @@ pub(crate) fn tick_sentries(
         let Some(target_id) = runtime.target() else {
             continue;
         };
-        let Some((target_position, _, _, _, _)) =
-            fighters.iter().find(|(_, id, _, defeated, active)| {
+        let Some((target_position, _, _, _, _, concealed, deadlines)) =
+            fighters.iter().find(|(_, id, _, defeated, active, _, _)| {
                 **id == target_id && defeated.is_none() && active.is_some()
             })
         else {
             continue;
         };
+        if concealed.is_some()
+            && !deadlines
+                .is_some_and(|value| crate::concealment::reveal_lock_active(tick.0, *value))
+            && owner_view.is_none_or(|(owner_position, reveal_radius)| {
+                owner_position.distance_squared(target_position.0) > reveal_radius * reveal_radius
+            })
+        {
+            runtime.set_target(None);
+            continue;
+        }
         let delta = target_position.0 - position.0;
         let Some(direction) = delta.try_normalize() else {
             continue;
@@ -680,7 +717,7 @@ pub(crate) fn tick_sentries(
             continue;
         };
         let mut fighter_owner = None;
-        for (owner_entity, owner_id) in &mut owners {
+        for (owner_entity, owner_id, _, _) in &mut owners {
             if *owner_id == identity.owner_network_id {
                 fighter_owner = Some(owner_entity);
                 commands

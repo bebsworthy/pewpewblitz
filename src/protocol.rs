@@ -44,7 +44,7 @@ use crate::map::{
 };
 use crate::matchplay::{
     FighterDisplayName, HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker,
-    MatchState, RespawnState, SpawnProtection, WipeoutState,
+    MatchState, PublicParticipantState, RespawnState, SpawnProtection, WipeoutState,
 };
 use crate::timing::SIMULATION_TICK;
 
@@ -52,7 +52,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 21;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 22;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -659,6 +659,8 @@ fn register_queue_protocol(app: &mut App) {
 
 fn register_replicated_components(app: &mut App) {
     app.component::<Fighter>().replicate_once();
+    app.component::<crate::concealment::ConcealmentPresentationState>()
+        .replicate();
     app.component::<MatchRootMarker>().replicate_once();
     app.component::<MatchState>().replicate();
     app.component::<MatchClock>().replicate();
@@ -666,6 +668,7 @@ fn register_replicated_components(app: &mut App) {
     app.component::<HotZoneState>().replicate();
     app.component::<MatchParticipant>().replicate();
     app.component::<FighterDisplayName>().replicate_once();
+    app.component::<PublicParticipantState>().replicate();
     app.component::<RespawnState>().replicate();
     app.component::<SpawnProtection>().replicate();
     app.component::<MapRoot>().replicate_once();

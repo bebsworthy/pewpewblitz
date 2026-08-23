@@ -80,6 +80,8 @@ mod combat_projectiles;
 mod combat_pulse;
 #[path = "network/combat_recovery.rs"]
 mod combat_recovery;
+#[path = "network/concealment.rs"]
+mod concealment;
 #[path = "network/lifecycle.rs"]
 mod lifecycle;
 #[path = "network/lifecycle_roster.rs"]

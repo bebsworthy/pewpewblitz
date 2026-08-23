@@ -192,9 +192,9 @@ private. Implementing concealment requires explicit proximity, ally, attack, dam
 objective-carrier, spectator, projectile, audio, and reappearance rules, plus verification that
 related replication cannot leak hidden state. See
 [Network architecture](./08-network-architecture.md#interest-management-and-concealment) and the
-[V9 concealment and reveal specification](./17-concealment.md). V9 M01 adds one explicit
-concealing-bush capability without changing the accepted non-concealing tall-grass identity in
-place.
+[V9 concealment and reveal specification](./17-concealment.md). V9 M01 deliberately promotes the
+existing `TALL_GRASS` identity into concealing terrain now that the required observer-specific
+privacy rule is being implemented.
 
 ## Match topology and capacity
 

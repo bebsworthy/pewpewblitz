@@ -1,5 +1,5 @@
 (
-    schema_version: 3,
+    schema_version: 4,
     gameplay_profiles: [
         (
             id: MapGameplayProfileId(1),
@@ -8,6 +8,7 @@
             collider_shape: None,
             destruction: Indestructible,
             interaction: None,
+            concealment: None,
         ),
         (
             id: MapGameplayProfileId(2),
@@ -16,6 +17,7 @@
             collider_shape: FootprintRectangle,
             destruction: Indestructible,
             interaction: None,
+            concealment: None,
         ),
         (
             id: MapGameplayProfileId(3),
@@ -24,6 +26,7 @@
             collider_shape: FootprintRectangle,
             destruction: RemoveOnMapDestruction,
             interaction: None,
+            concealment: None,
         ),
         (
             id: MapGameplayProfileId(4),
@@ -32,6 +35,7 @@
             collider_shape: None,
             destruction: Indestructible,
             interaction: PlayerSpawn,
+            concealment: None,
         ),
         (
             id: MapGameplayProfileId(5),
@@ -40,6 +44,7 @@
             collider_shape: FootprintRectangle,
             destruction: Indestructible,
             interaction: None,
+            concealment: None,
         ),
         (
             id: MapGameplayProfileId(6),
@@ -48,6 +53,7 @@
             collider_shape: FootprintRectangle,
             destruction: ReplaceOnMapDestruction(MapAssetId(14)),
             interaction: None,
+            concealment: None,
         ),
         (
             id: MapGameplayProfileId(7),
@@ -56,6 +62,16 @@
             collider_shape: Circle(radius_world_units: 28),
             destruction: Indestructible,
             interaction: None,
+            concealment: None,
+        ),
+        (
+            id: MapGameplayProfileId(8),
+            player_collision: Pass,
+            projectile_collision: Pass,
+            collider_shape: None,
+            destruction: Indestructible,
+            interaction: None,
+            concealment: HideOccupants,
         ),
     ],
 )

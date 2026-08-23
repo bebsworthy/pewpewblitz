@@ -25,8 +25,8 @@ grammar but are not shipped, traced, or copied as authored maps.
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M04 — Legacy eradication, hardening, and closeout |
+| Status | Complete |
+| Current milestone | V8 complete; V9 M01 is next |
 | Entry gate | Satisfied: M03 completed and the user authorized M04 implementation on 2026-08-23 |
 | Completion gate | Every built-in and proof map uses the one sparse-grid `MapAssetId` pipeline; required surface/feature/destruction behavior and any shipped concealment are authoritative and recoverable; all canonical and native checks pass; the user accepts the converted maps; the superseded production system has zero remaining source/content/runtime references |
 
@@ -64,6 +64,8 @@ The version-level proposal is:
 M01 research and specification preparation were authorized on 2026-08-22. V7 completed and the
 user approved M01 implementation on 2026-08-23. M02 completed after the user accepted Tidal Garden,
 the coarse whole-cell destruction rule, and honestly non-concealing tall grass on 2026-08-23.
+M04 and V8 completed on 2026-08-23 after the user accepted the final hard-cutover closeout with no
+additional map, collision, topology, imported/fallback, or presentation change requested.
 
 ## Milestone overview
 
@@ -72,7 +74,7 @@ the coarse whole-cell destruction rule, and honestly non-concealing tall grass o
 | 01 | Complete | One routed Crossroads Wipeout match authored, resolved, collided, destroyed, rendered, restarted, and recovered exclusively through the new sparse-grid map and unified map-asset catalogs | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Original Tidal Garden 2v2 proof with shaped water, honestly non-concealing vegetation, adjacency presentation, multi-cell barriers, and deterministic rubble replacement | [milestone-02.md](./milestone-02.md) |
 | 03 | Complete | All existing Wipeout and Hot Zone built-ins converted with accepted gameplay/presentation parity through one new map pool | [milestone-03.md](./milestone-03.md) |
-| 04 | User playtest | V8 hard cutover and closeout: domain-organized production content, no old production map system, and accepted converted/proof maps | [milestone-04.md](./milestone-04.md) |
+| 04 | Complete | V8 hard cutover and closeout: domain-organized production content, no old production map system, and accepted converted/proof maps | [milestone-04.md](./milestone-04.md) |
 
 ## Ordering rationale and milestone gates
 

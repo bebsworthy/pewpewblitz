@@ -4,6 +4,7 @@ export type JsonValue = null | boolean | number | string | JsonObject | JsonValu
 export interface FighterStats extends JsonObject {
   maximum_health: number;
   movement_speed: number;
+  reveal_proximity_radius: number;
 }
 
 export interface FighterProfiles extends JsonObject {

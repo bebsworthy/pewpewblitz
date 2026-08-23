@@ -8,9 +8,7 @@ use crate::{
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
-    matchplay::{
-        MatchParticipant, MatchPhase, MatchRoot, MatchState, RespawnState, SpawnProtection,
-    },
+    matchplay::{MatchParticipant, MatchPhase, MatchRoot, MatchState},
     movement::AvianNetworkPlugin,
     protocol::{
         BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,

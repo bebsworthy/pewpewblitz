@@ -109,6 +109,10 @@ accepted attack or applied damage, and the reveal-scan ultimate.
 | Self cloak | Accepted ultimate with unexpired source | Consume cloak permanently | Consume cloak permanently | No proximity reveal | Attack, damage, deadline, defeat, reset, or teardown |
 | Allied area | Living friendly fighter overlaps the public active field; includes caster | Reveal all enemies for `M` ticks | Reveal all enemies for `N` ticks | Observer-specific reveal | Exit, field expiry/removal, defeat, reset, or teardown |
 
+V9 M01 initially authors `M = 90` ticks (1.5 seconds) and `N = 120` ticks (2 seconds) at 60 Hz.
+These are Balance Lab/playtest values and may change through ordinary balance revision without
+changing the reveal-lock semantics. A deadline is active while `current_tick < deadline`.
+
 `M`, `N`, source durations, radii, ranges, charge rules, and cooldowns are bounded authored balance
 values. `M` and `N` may differ. If multiple temporary locks exist, the effective deadline is the
 latest deadline; durations do not add.
@@ -173,10 +177,15 @@ must nevertheless be visually and audibly legible after the server accepts them.
 ## Terrain contract
 
 A concealing terrain asset uses an explicit server-known concealment capability referenced by its
-`MapGameplayProfileId`. Visual appearance never grants concealment. The initial asset is one
-dedicated grass or bush identity on one accepted built-in/proof recipe; existing non-concealing
-`TALL_GRASS` remains honest unless it is deliberately converted and every affected map is
-revalidated.
+`MapGameplayProfileId`. Visual appearance never grants concealment. V9 deliberately promotes the
+existing `TALL_GRASS` identity from V8's non-concealing presentation proof into real concealing
+terrain. V8 accepted it as non-concealing only because observer-specific concealment did not yet
+exist; that historical behavior is not a permanent identity constraint. `TALL_GRASS` keeps its
+stable map-asset and visual identities but is rebound from V8's shared inert pass/pass profile to a
+new explicit concealing gameplay profile. The shared profile is not mutated because ground, rubble,
+and other non-concealing assets also reference it. The V9 schema, catalog, content fingerprint,
+gameplay description, and every affected map/playtest are revised together so the semantic change
+is explicit rather than a compatibility accident.
 
 The resolved map derives bounded concealment volumes from placed footprints. Runtime membership is
 server-owned and updates from authoritative fighter position. Destruction or replacement removes

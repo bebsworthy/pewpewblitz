@@ -128,6 +128,29 @@ pub struct MatchParticipant {
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct FighterDisplayName(pub String);
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublicParticipantStatus {
+    Alive,
+    Ready,
+    RestartReady,
+    Defeated,
+    Respawning { respawn_at_tick: u64 },
+    Protected { expires_at_tick: u64 },
+}
+
+/// Always-public roster projection kept separate from the cullable spatial fighter.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PublicParticipantState {
+    pub player_id: crate::protocol::PlayerId,
+    pub fighter_network_id: crate::protocol::NetworkEntityId,
+    pub team_id: TeamId,
+    pub display_name: String,
+    pub participant: MatchParticipant,
+    pub selected: bool,
+    pub weapon_preset_id: Option<u16>,
+    pub status: PublicParticipantStatus,
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RespawnState {
     pub respawn_at_tick: u64,

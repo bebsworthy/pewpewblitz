@@ -308,6 +308,14 @@ fn catalog_rejects_non_finite_and_out_of_policy_balance_values() {
     assert!(invalid.validate().is_err());
 
     let mut invalid = builds.clone();
+    invalid.fighter_profiles.default.reveal_proximity_radius = f32::NAN;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.fighter_profiles.default.reveal_proximity_radius = 0.0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
     invalid.custom_pulse.long.range = f32::INFINITY;
     assert!(invalid.validate().is_err());
 
@@ -318,6 +326,57 @@ fn catalog_rejects_non_finite_and_out_of_policy_balance_values() {
     let mut invalid = builds;
     invalid.custom_pulse.expanded.capacity = 33;
     assert!(invalid.validate().is_err());
+}
+
+#[test]
+#[allow(
+    clippy::float_cmp,
+    reason = "canonical thousandth rounding is the contract under test"
+)]
+fn reveal_proximity_resolution_supports_bounded_bonus_malus_and_single_rounding() {
+    assert_eq!(
+        resolve_reveal_proximity_radius(
+            160.0,
+            RevealProximityModifier {
+                flat_milliunits: 12_345,
+                percent_basis_points: 1_250,
+            },
+        )
+        .unwrap(),
+        192.345
+    );
+    assert_eq!(
+        resolve_reveal_proximity_radius(
+            160.0,
+            RevealProximityModifier {
+                flat_milliunits: -20_000,
+                percent_basis_points: -2_500,
+            },
+        )
+        .unwrap(),
+        100.0
+    );
+    assert_eq!(
+        resolve_reveal_proximity_radius(
+            32.0,
+            RevealProximityModifier {
+                flat_milliunits: -512_000,
+                percent_basis_points: -9_000,
+            },
+        )
+        .unwrap(),
+        32.0
+    );
+    assert!(
+        resolve_reveal_proximity_radius(
+            160.0,
+            RevealProximityModifier {
+                flat_milliunits: 0,
+                percent_basis_points: 20_001,
+            },
+        )
+        .is_err()
+    );
 }
 
 #[test]

@@ -25,6 +25,9 @@ export function numberSpec(key: string, value: number, path: NumericPath) {
   if (lower === "movement_speed") {
     return { min: 80, max: 1200, step: integer ? 1 : 0.1 };
   }
+  if (lower === "reveal_proximity_radius") {
+    return { min: 32, max: 1024, step: integer ? 1 : 0.1 };
+  }
   if (lower.includes("capacity")) return { min: 1, max: 32, step: 1 };
   if (lower.includes("target") || lower.includes("count")) {
     return { min: 1, max: 16, step: 1 };
