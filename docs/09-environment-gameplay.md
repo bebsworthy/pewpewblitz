@@ -178,10 +178,12 @@ The first concealment specification must explicitly decide:
 - how late join, reconnect, defeat, respawn, interpolation, and any future prediction behave at
   visibility transitions.
 
-A reasonable research hypothesis is that owners and allies retain visibility, opponents lose it
-unless an explicit proximity or reveal rule succeeds, attacking reveals for a short validated
-duration, and a mode may declare an objective-carrier override. These are candidate semantics, not
-accepted balance or implementation requirements.
+The [concealment and reveal specification](./17-concealment.md) now fixes the promoted V9 semantics:
+owners and allies retain visibility; terrain and allied fields use the observing fighter's resolved
+proximity radius; accepted attacks and positive applied damage create global reveal locks and
+consume self cloak; reveal scan forces team-wide visibility; and objective carriers are initially
+ineligible. Exact numeric balance values remain unselected and belong to V9 implementation evidence
+and playtest.
 
 The [network architecture](./08-network-architecture.md#interest-management-and-concealment) owns
 the exact Lightyear visibility mechanism, public-participant versus private-spatial split, hierarchy

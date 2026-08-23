@@ -156,7 +156,8 @@ presence in this inventory.
 Vision and concealment are authoritative information rules, not rendering preferences. When
 implemented, the server derives visibility for each observer and subject and uses network interest
 management to withhold secret live spatial state. See
-[Environment gameplay direction](./09-environment-gameplay.md#concealment-gameplay-model).
+[Concealment and reveal specification](./17-concealment.md), including V9's resolved
+observer-owned reveal-proximity attribute and bounded bonus/malus contract.
 
 ## Target-owned status state
 

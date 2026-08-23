@@ -40,6 +40,9 @@ delivery status and evidence.
 - [Environment gameplay direction](./09-environment-gameplay.md) — established environment
   boundaries, focused candidate families, promotion rules, lifecycle questions, concealment, and
   presentation constraints.
+- [Concealment and reveal specification](./17-concealment.md) — V9's observer-specific terrain,
+  self-cloak, allied-area, proximity, attack/damage reveal, reveal-scan, privacy, and verification
+  contract.
 - [Bots](./10-bots.md) — server-hosted practice-controller decision, bounded policy contract,
   integration seams, first playable slice, and deferred hosting alternatives.
 - [Art, presentation, and asset specification](./11-art-and-presentation-direction.md) — visual
@@ -89,6 +92,7 @@ and closeout learning.
 | V6 | Development-only, server-authoritative Practice Balance Lab for rapid fighter and weapon tuning | [V6 roadmap](./implementation/v6/roadmap.md) |
 | V7 | Persistent server-owned player profiles, saved brawlers, weapon bases, and four-slot weapon-part equipment | [V7 roadmap](./implementation/v7/roadmap.md) |
 | V8 | Sparse-grid maps, unified map-asset/gameplay/visual catalogs, full built-in conversion, and retirement of the old production map system | [V8 roadmap](./implementation/v8/roadmap.md) |
+| V9 | Authoritative observer-specific concealment, terrain/proximity proof, cloak/reveal ultimate pair, and allied concealment field | [V9 roadmap](./implementation/v9/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

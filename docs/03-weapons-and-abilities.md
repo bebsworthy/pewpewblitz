@@ -381,6 +381,14 @@ Possible future ultimate families include shielding, healing or repair fields, a
 knockback, and temporary wall placement. Each should be introduced as a complete readable gameplay
 slice rather than as unused framework capacity.
 
+V9 promotes two additional ultimate families: a self cloak that is permanently consumed by an
+accepted attack or positive applied damage, and an instant targeted reveal scan that applies a
+team-wide forced-reveal deadline to hostile fighters in its accepted area. A later V9 milestone adds
+a public allied concealment field. Their shared observer-specific rule, proximity exclusions,
+attack/damage locks, counter relationship, privacy boundary, and staging are owned by the
+[Concealment and reveal specification](./17-concealment.md) and
+[V9 roadmap](./implementation/v9/roadmap.md).
+
 ## Active-item extension
 
 Active items are not part of the supported loadout. Candidate capabilities include a short speed

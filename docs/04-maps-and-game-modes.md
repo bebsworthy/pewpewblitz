@@ -191,7 +191,10 @@ Static concealment geometry may be public while a hidden fighter's live spatial 
 private. Implementing concealment requires explicit proximity, ally, attack, damage,
 objective-carrier, spectator, projectile, audio, and reappearance rules, plus verification that
 related replication cannot leak hidden state. See
-[Network architecture](./08-network-architecture.md#interest-management-and-concealment).
+[Network architecture](./08-network-architecture.md#interest-management-and-concealment) and the
+[V9 concealment and reveal specification](./17-concealment.md). V9 M01 adds one explicit
+concealing-bush capability without changing the accepted non-concealing tall-grass identity in
+place.
 
 ## Match topology and capacity
 
