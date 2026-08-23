@@ -82,7 +82,7 @@ correction.
 ## Authority and feedback
 
 The client samples intent and presents replicated facts. The authoritative match worker validates
-and resolves movement, attacks, abilities, collision, terrain mutation, damage, status, defeat,
+and resolves movement, attacks, abilities, collision, map mutation, damage, status, defeat,
 objectives, scoring, and victory.
 
 Presentation may predict or interpolate where the network architecture explicitly permits it, but

@@ -35,7 +35,7 @@ One logical Brawler server consists of:
    the supervisor is a deviation that must return to specification review with measured evidence;
    it is not the default topology.
 3. One **worker process per active match**. Each worker owns one headless Bevy `App`/`World`, one
-   Lightyear server, one mode/map/terrain/physics instance, authoritative gameplay, replication,
+   Lightyear server, one mode/map/physics instance, authoritative gameplay, replication,
    recovery, telemetry, and terminal result.
 4. One **public UDP endpoint**. The supervisor routes opaque Lightyear packets between clients and
    lobby/match authority over dedicated framed IPC.

@@ -113,7 +113,7 @@ use lightyear::prelude::server::{NetcodeServer, Stopped};
 use lightyear::prelude::{InterpolationTarget, LinkOf, NetworkTarget, Replicate};
 
 #[cfg(feature = "server")]
-use crate::movement::{DESTRUCTIBLE_TERRAIN_LAYER, INDESTRUCTIBLE_TERRAIN_LAYER};
+use crate::movement::{DESTRUCTIBLE_MAP_LAYER, STATIC_MAP_LAYER};
 use crate::protocol::{Fighter, NetworkEntityId, PlayerId};
 #[cfg(feature = "server")]
 use crate::timing::SimulationTick;

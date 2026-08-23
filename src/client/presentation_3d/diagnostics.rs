@@ -49,10 +49,10 @@ const REPORT_FIELDS: &[&str] = &[
     "visual_root_terminal",
     "effect_high_water",
     "effect_terminal",
-    "terrain_chunk_high_water",
-    "terrain_chunk_terminal",
-    "debris_high_water",
-    "debris_terminal",
+    "map_member_high_water",
+    "map_member_terminal",
+    "dynamic_map_visuals_high_water",
+    "dynamic_map_visuals_terminal",
     "fighter_high_water",
     "fighter_terminal",
     "projectile_high_water",
@@ -81,8 +81,8 @@ struct HighWater {
     mesh_entities: usize,
     visual_roots: usize,
     effects: usize,
-    terrain_chunks: usize,
-    debris: usize,
+    map_members: usize,
+    dynamic_map_visuals: usize,
     fighters: usize,
     projectiles: usize,
     sentries: usize,
@@ -145,8 +145,8 @@ struct RenderEvidenceQueries<'w, 's> {
     mesh_entities: Query<'w, 's, (), With<Mesh3d>>,
     visual_roots: Query<'w, 's, (), With<CombatVisualOwner>>,
     effects: Query<'w, 's, (), With<combat::CombatEffect3d>>,
-    terrain_chunks: Query<'w, 's, (), With<crate::terrain::client::TerrainChunkVisual>>,
-    debris: Query<'w, 's, (), With<crate::terrain::client::presentation::TerrainDebris>>,
+    map_members: Query<'w, 's, (), With<crate::map::MapPresentationMember>>,
+    dynamic_map_visuals: Query<'w, 's, (), With<DynamicMapVisual>>,
     fighters: Query<'w, 's, (), With<Fighter>>,
     projectiles: Query<'w, 's, (), With<crate::combat::Projectile>>,
     sentries: Query<'w, 's, (), With<crate::abilities::Sentry>>,
@@ -239,8 +239,8 @@ fn sample_and_finalize_render_measurement(
         mesh_entities: evidence.mesh_entities.iter().count(),
         visual_roots: evidence.visual_roots.iter().count(),
         effects: evidence.effects.iter().count(),
-        terrain_chunks: evidence.terrain_chunks.iter().count(),
-        debris: evidence.debris.iter().count(),
+        map_members: evidence.map_members.iter().count(),
+        dynamic_map_visuals: evidence.dynamic_map_visuals.iter().count(),
         fighters: evidence.fighters.iter().count(),
         projectiles: evidence.projectiles.iter().count(),
         sentries: evidence.sentries.iter().count(),
@@ -297,8 +297,8 @@ fn update_high_water(high: &mut HighWater, current: HighWater) {
     high.mesh_entities = high.mesh_entities.max(current.mesh_entities);
     high.visual_roots = high.visual_roots.max(current.visual_roots);
     high.effects = high.effects.max(current.effects);
-    high.terrain_chunks = high.terrain_chunks.max(current.terrain_chunks);
-    high.debris = high.debris.max(current.debris);
+    high.map_members = high.map_members.max(current.map_members);
+    high.dynamic_map_visuals = high.dynamic_map_visuals.max(current.dynamic_map_visuals);
     high.fighters = high.fighters.max(current.fighters);
     high.projectiles = high.projectiles.max(current.projectiles);
     high.sentries = high.sentries.max(current.sentries);
@@ -375,7 +375,7 @@ fn compose_report(
     let theme_id = measured_map.map_or(0, |value| value.3.0);
     let context = state.context.unwrap_or_default().name();
     format!(
-        "schema=3\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nterrain_chunk_high_water={}\nterrain_chunk_terminal={}\ndebris_high_water={}\ndebris_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nresult={}\nfirst_failure={}\n",
+        "schema=3\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nresult={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -411,10 +411,10 @@ fn compose_report(
         state.current.visual_roots,
         state.high.effects,
         state.current.effects,
-        state.high.terrain_chunks,
-        state.current.terrain_chunks,
-        state.high.debris,
-        state.current.debris,
+        state.high.map_members,
+        state.current.map_members,
+        state.high.dynamic_map_visuals,
+        state.current.dynamic_map_visuals,
         state.high.fighters,
         state.current.fighters,
         state.high.projectiles,

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::combat::client::{DeduplicatedCombatCue, MAX_PREVIEW_SEGMENTS, preview_segments};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 const PREVIEW_HEIGHT: f32 = 2.5;
 const OVERHEAD_WORLD_HEIGHT: f32 = 86.0;
@@ -719,9 +719,15 @@ pub(super) fn update_combat_visual_state(
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     definitions: Res<crate::combat::FighterDefinitions>,
-    maps: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
+    maps: Query<
+        (
+            &crate::map::ResolvedMapSnapshot,
+            &crate::map::MapDynamicState,
+        ),
+        With<crate::map::MapRoot>,
+    >,
+    map_catalog: Res<crate::map::MapCatalogResource>,
     pending: Res<PendingLocalActions>,
-    convergence: Option<Res<crate::terrain::ClientTerrainConvergence>>,
     fighters: Query<
         (
             Entity,
@@ -975,18 +981,18 @@ pub(super) fn update_combat_visual_state(
         ));
     }
 
-    let no_terrain = BTreeMap::new();
-    let map = maps.iter().max_by_key(|map| map.identity.instance_id);
+    let map = maps
+        .iter()
+        .max_by_key(|(snapshot, _)| snapshot.identity.instance_id);
     let segments = match (map, controlled) {
-        (Some(map), Some((origin, facing, loadout))) => preview_segments(
+        (Some((map, state)), Some((origin, facing, loadout))) => preview_segments(
             origin,
             facing,
             pending.aim_distance,
             &loadout.primary_weapon,
             map,
-            convergence
-                .as_deref()
-                .map_or(&no_terrain, |value| value.chunks()),
+            state,
+            &map_catalog.0,
         ),
         _ => Vec::new(),
     };

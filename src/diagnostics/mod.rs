@@ -2,7 +2,7 @@
 //!
 //! Everything in this module is observational. Diagnostics may read ECS and network state and
 //! write local reports or overlay UI, but never mutate gameplay, validation, authority,
-//! replication targets, match results, or terrain.
+//! replication targets, match results, or map dynamics.
 
 mod failure;
 #[cfg(feature = "client")]
@@ -25,21 +25,21 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// The only closeout schema revision produced or accepted by this build. Revision 2 adds
-/// the gameplay-aggregate block (match/mode, build, ability, weapon, and terrain
+/// the gameplay-aggregate block (match/mode, build, ability, weapon, and map dynamics
 /// summaries) to revision 1's manifest, process, transport, and evidence fields, so the
 /// consolidated report ties the gameplay subsystems to the run identity instead of
 /// carrying process/network measurements alone.
 /// The only closeout schema revision produced or accepted by this build. Revision 3 adds
 /// the mode-aggregate fields (mode identity plus the typed Wipeout/Hot Zone summaries),
 /// the observed-checkpoint count distinct from the declared scenario contract, the
-/// terrain no-op brush counter, and includes the declared scenario counts in the shared
+/// map-destruction no-op brush counter, and includes the declared scenario counts in the shared
 /// run identity.
 pub const CLOSEOUT_SCHEMA_VERSION: u16 = 3;
 
 /// Upper bound on manifest identity strings; rejects oversized or runaway scripted fields.
 pub const MAX_IDENTITY_BYTES: usize = 96;
 
-/// Upper bound on manifest participants; matches the engine's 24-fighter terrain capacity.
+/// Upper bound on manifest participants; matches the engine's 24-fighter map capacity.
 pub const MAX_MANIFEST_PARTICIPANTS: usize = 24;
 
 /// Upper bound on closeout report lines before the report itself is rejected as malformed:
@@ -233,8 +233,8 @@ impl RunManifestV1 {
 /// The gameplay-aggregate block of one closeout report: the bounded telemetry summaries
 /// the process consolidated at terminal observation. The authoritative
 /// match/mode/weapon/ability aggregates and build selections exist only in the server
-/// process, while terrain aggregates exist in both roles (the client records its own
-/// convergence facts), so a client legitimately reports zeros outside terrain.
+/// process, while map-destruction aggregates exist in both roles (the client records its own
+/// convergence facts), so a client legitimately reports zeros outside map dynamics.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GameplayAggregatesV1 {
     /// Completed matches recorded by this process's match telemetry.
@@ -273,19 +273,19 @@ pub struct GameplayAggregatesV1 {
     pub emitted_deliveries: u64,
     pub attacks_with_hostile_contact: u64,
     pub hostile_damage: u64,
-    pub terrain_requested_brushes: u64,
-    pub terrain_applied_brushes: u64,
-    pub terrain_no_op_brushes: u64,
-    pub terrain_rejected_brushes: u64,
-    pub terrain_deferred_brushes: u64,
-    pub terrain_cells_erased: u64,
+    pub map_destruction_requested: u64,
+    pub map_destruction_applied: u64,
+    pub map_destruction_no_ops: u64,
+    pub map_destruction_rejected: u64,
+    pub map_destruction_deferred: u64,
+    pub map_placements_changed: u64,
 }
 
 impl GameplayAggregatesV1 {
     /// Enforce the block's semantic contract: aggregates only reference matches the
     /// process completed, a completed match carries a result label plus exactly one
     /// complete and internally consistent mode summary, weapon contact cannot exceed
-    /// accepted attacks, and terminal terrain brush outcomes stay inside the
+    /// accepted attacks, and terminal map-destruction outcomes stay inside the
     /// submitted-brush count.
     fn validate(&self) -> Result<(), String> {
         if self.matches_completed == 0 {
@@ -323,13 +323,14 @@ impl GameplayAggregatesV1 {
         // admission or collider budget is re-queued and later counted in exactly one of
         // the applied, no-op, or rejected terminal buckets.
         if self
-            .terrain_applied_brushes
-            .saturating_add(self.terrain_no_op_brushes)
-            .saturating_add(self.terrain_rejected_brushes)
-            > self.terrain_requested_brushes
+            .map_destruction_applied
+            .saturating_add(self.map_destruction_no_ops)
+            .saturating_add(self.map_destruction_rejected)
+            > self.map_destruction_requested
         {
             return Err(
-                "closeout terrain terminal brush outcomes exceed the submitted brushes".to_string(),
+                "closeout map-destruction terminal outcomes exceed the submitted requests"
+                    .to_string(),
             );
         }
         Ok(())
@@ -494,14 +495,14 @@ impl GameplayAggregatesV1 {
             ),
             format!("hostile_damage={}", self.hostile_damage),
             format!(
-                "terrain_requested_brushes={}",
-                self.terrain_requested_brushes
+                "map_destruction_requested={}",
+                self.map_destruction_requested
             ),
-            format!("terrain_applied_brushes={}", self.terrain_applied_brushes),
-            format!("terrain_no_op_brushes={}", self.terrain_no_op_brushes),
-            format!("terrain_rejected_brushes={}", self.terrain_rejected_brushes),
-            format!("terrain_deferred_brushes={}", self.terrain_deferred_brushes),
-            format!("terrain_cells_erased={}", self.terrain_cells_erased),
+            format!("map_destruction_applied={}", self.map_destruction_applied),
+            format!("map_destruction_no_ops={}", self.map_destruction_no_ops),
+            format!("map_destruction_rejected={}", self.map_destruction_rejected),
+            format!("map_destruction_deferred={}", self.map_destruction_deferred),
+            format!("map_placements_changed={}", self.map_placements_changed),
         ]
     }
 
@@ -567,16 +568,16 @@ impl GameplayAggregatesV1 {
                 "u64",
             )?,
             hostile_damage: parse_typed_field(lines, "hostile_damage", "u64")?,
-            terrain_requested_brushes: parse_typed_field(
+            map_destruction_requested: parse_typed_field(
                 lines,
-                "terrain_requested_brushes",
+                "map_destruction_requested",
                 "u64",
             )?,
-            terrain_applied_brushes: parse_typed_field(lines, "terrain_applied_brushes", "u64")?,
-            terrain_no_op_brushes: parse_typed_field(lines, "terrain_no_op_brushes", "u64")?,
-            terrain_rejected_brushes: parse_typed_field(lines, "terrain_rejected_brushes", "u64")?,
-            terrain_deferred_brushes: parse_typed_field(lines, "terrain_deferred_brushes", "u64")?,
-            terrain_cells_erased: parse_typed_field(lines, "terrain_cells_erased", "u64")?,
+            map_destruction_applied: parse_typed_field(lines, "map_destruction_applied", "u64")?,
+            map_destruction_no_ops: parse_typed_field(lines, "map_destruction_no_ops", "u64")?,
+            map_destruction_rejected: parse_typed_field(lines, "map_destruction_rejected", "u64")?,
+            map_destruction_deferred: parse_typed_field(lines, "map_destruction_deferred", "u64")?,
+            map_placements_changed: parse_typed_field(lines, "map_placements_changed", "u64")?,
         })
     }
 }
@@ -619,7 +620,7 @@ pub struct CloseoutReportV1 {
     pub dropped_messages: u64,
     pub rejected_connections: u64,
     pub error_count: u64,
-    /// Consolidated build, ability, match/mode, weapon, and terrain summaries.
+    /// Consolidated build, ability, match/mode, weapon, and map dynamics summaries.
     pub gameplay: GameplayAggregatesV1,
 }
 
@@ -835,12 +836,12 @@ const REPORT_REQUIRED_KEYS: [&str; 82] = [
     "emitted_deliveries",
     "attacks_with_hostile_contact",
     "hostile_damage",
-    "terrain_requested_brushes",
-    "terrain_applied_brushes",
-    "terrain_no_op_brushes",
-    "terrain_rejected_brushes",
-    "terrain_deferred_brushes",
-    "terrain_cells_erased",
+    "map_destruction_requested",
+    "map_destruction_applied",
+    "map_destruction_no_ops",
+    "map_destruction_rejected",
+    "map_destruction_deferred",
+    "map_placements_changed",
 ];
 
 /// Report fields whose values are bounded identity strings. The reader enforces the same
@@ -1175,7 +1176,7 @@ fn enforce_closeout_terminal_gate(
 /// endpoint, every endpoint exiting clean with zero dropped messages, rejections, errors,
 /// and divergence, and one checkpoint digest across endpoints that carries real evidence
 /// exactly when `expect_checkpoint_evidence` says the run profile records checkpoints
-/// (combat-assert runs do; movement, terrain, and match profiles do not). When
+/// (combat-assert runs do; movement, map, and match profiles do not). When
 /// `declared_checkpoint_requirement` carries the asserted preset's required checkpoint
 /// count, every report's declared `checkpoint_count` must equal it and its observed
 /// checkpoints must cover it, so a launcher declaration that drifted from the preset

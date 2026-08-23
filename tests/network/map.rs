@@ -2,94 +2,23 @@
 
 use super::*;
 
-fn maximum_policy_resolved_map(
-    catalog: &brawler::map::MapContentCatalog,
-    instance_id: MapInstanceId,
-) -> ResolvedMap {
-    let mut recipe = catalog.presets[0].recipe.clone();
-    recipe.recipe_id = brawler::map::MapRecipeId(99);
-    recipe.revision = 1;
-    let initial_geometry = recipe
-        .objects
-        .iter()
-        .filter(|placement| placement.object_definition_id == MapObjectDefinitionId(1))
-        .count();
-    let initial_entities = recipe
-        .objects
-        .iter()
-        .filter(|placement| placement.object_definition_id.0 >= 100)
-        .count();
-    for index in initial_geometry..catalog.policy.max_geometry {
-        recipe.objects.push(MapObjectPlacement {
-            placement_id: MapPlacementId(1_000 + u32::try_from(index).unwrap()),
-            object_definition_id: MapObjectDefinitionId(1),
-            visual_variant_id: Some(MapVisualVariantId(1)),
-            position: Vec2::new(0.0, 480.0),
-            rotation: 0.0,
-            footprint_override: Some(MapShape::Rectangle {
-                half_extents: Vec2::splat(4.0),
-            }),
-        });
-    }
-    for index in initial_entities..catalog.policy.max_entities {
-        recipe.objects.push(MapObjectPlacement {
-            placement_id: MapPlacementId(2_000 + u32::try_from(index).unwrap()),
-            object_definition_id: MapObjectDefinitionId(100),
-            visual_variant_id: Some(MapVisualVariantId(11)),
-            position: Vec2::new(0.0, 400.0),
-            rotation: 0.0,
-            footprint_override: None,
-        });
-    }
-    assert_eq!(initial_geometry, 6);
-    assert_eq!(initial_entities, 4);
-    while recipe.regions.len() < 4 {
-        let index = recipe.regions.len();
-        let column = index % 2;
-        let row = index / 2;
-        recipe.regions.push(MapRegionPlacement {
-            placement_id: MapPlacementId(3_000 + u32::try_from(index).unwrap()),
-            region_id: RegionId(u16::try_from(index + 1).unwrap()),
-            profile_id: RegionProfileId(1),
-            presentation_profile_id: MapPresentationProfileId(3),
-            position: Vec2::new(240.0 + 80.0 * column as f32, 400.0 + 80.0 * row as f32),
-            rotation: 0.0,
-            shape: MapShape::Circle { radius: 8.0 },
-        });
-    }
-    for team_slot in 0..=1 {
-        let x = if team_slot == 0 { -768.0 } else { 768.0 };
-        let facing = if team_slot == 0 {
-            0.0
-        } else {
-            -std::f32::consts::PI
-        };
-        for y in [-224.0, -32.0, 160.0, 352.0] {
-            let index = recipe.spawn_points.len();
-            recipe.spawn_points.push(TeamSpawnPoint {
-                placement_id: MapPlacementId(4_000 + u32::try_from(index).unwrap()),
-                spawn_point_id: SpawnPointId(100 + u16::try_from(index).unwrap()),
-                team_slot,
-                position: Vec2::new(x, y),
-                facing,
-            });
-        }
-    }
-    brawler::map::resolve_map_recipe(
-        &recipe,
-        None,
-        instance_id,
-        catalog,
-        &MapLayoutRequirements::wipeout(),
-        brawler::map::EngineMapLimits::default(),
-    )
-    .unwrap()
-}
-
 fn client_snapshot(harness: &mut Harness, index: usize) -> Option<ResolvedMapSnapshot> {
     let world = harness.clients[index].world_mut();
     let mut query = world.query_filtered::<&ResolvedMapSnapshot, With<MapRoot>>();
     query.iter(world).next().cloned()
+}
+
+fn client_grid_state(
+    harness: &mut Harness,
+    index: usize,
+) -> Option<(ResolvedMapSnapshot, MapDynamicState)> {
+    let world = harness.clients[index].world_mut();
+    let mut query =
+        world.query_filtered::<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>();
+    query
+        .iter(world)
+        .next()
+        .map(|(snapshot, state)| (snapshot.clone(), state.clone()))
 }
 
 #[test]
@@ -100,14 +29,17 @@ fn two_clients_receive_identical_map_snapshot_without_authoritative_colliders() 
             && harness.client_is_active(1)
             && client_snapshot(harness, 0).is_some()
             && client_snapshot(harness, 1).is_some()
+            && client_grid_state(harness, 0).is_some()
+            && client_grid_state(harness, 1).is_some()
     });
     let first = client_snapshot(&mut harness, 0).unwrap();
     let second = client_snapshot(&mut harness, 1).unwrap();
+    let first_grid = client_grid_state(&mut harness, 0).unwrap();
+    let second_grid = client_grid_state(&mut harness, 1).unwrap();
     assert_eq!(first, second);
+    assert_eq!(first_grid, second_grid);
     assert_eq!(first.identity.instance_id, MapInstanceId(1));
-    assert_eq!(first.geometry.len(), 6);
-    assert_eq!(first.spawn_points.len(), 8);
-    assert!(first.visual_instances.is_empty());
+    assert!(!first.placements.is_empty());
     for client in &mut harness.clients {
         let world = client.world_mut();
         let mut walls = world.query_filtered::<Entity, With<ArenaWall>>();
@@ -115,7 +47,7 @@ fn two_clients_receive_identical_map_snapshot_without_authoritative_colliders() 
     }
     let world = harness.server.world_mut();
     assert_eq!(world.resource::<ResolvedMap>().snapshot, first);
-    assert_eq!(world.query::<&MapInstanceMember>().iter(world).count(), 10);
+    assert!(world.query::<&MapInstanceMember>().iter(world).count() >= 4);
 }
 
 #[test]
@@ -138,11 +70,7 @@ fn late_join_and_map_root_replacement_converge_from_durable_state() {
         .0
         .clone();
     let replacement = catalog
-        .resolve_preset(
-            ArenaPresetId(1),
-            MapInstanceId(2),
-            &MapLayoutRequirements::wipeout(),
-        )
+        .resolve_preset(ArenaPresetId(1), MapInstanceId(2))
         .unwrap();
     install_resolved_map(harness.server.world_mut(), replacement).unwrap();
     harness.step_until(|harness| {
@@ -157,6 +85,110 @@ fn late_join_and_map_root_replacement_converge_from_durable_state() {
         let instances: Vec<_> = roots.iter(world).copied().collect();
         assert_eq!(instances, vec![MapInstanceId(2)]);
     }
+}
+
+#[test]
+fn map_cover_destruction_converges_for_connected_and_late_joining_clients() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0) && client_grid_state(harness, 0).is_some()
+    });
+
+    harness.inject_map_destruction(900, (0.0, 0.0), 40.0);
+    harness.step_until(|harness| {
+        client_grid_state(harness, 0)
+            .is_some_and(|(_, state)| state.revision == 1 && !state.terminal_states.is_empty())
+    });
+    let first = client_grid_state(&mut harness, 0).unwrap();
+    assert_eq!(first.1.generation, 1);
+    assert!(
+        first
+            .1
+            .terminal_states
+            .windows(2)
+            .all(|pair| pair[0].placement_id < pair[1].placement_id)
+    );
+
+    harness.add_client(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(1)
+            && client_grid_state(harness, 1).is_some_and(|state| state == first)
+    });
+    assert_eq!(client_grid_state(&mut harness, 1), Some(first));
+}
+
+#[test]
+fn tidal_barrier_replacement_converges_for_connected_and_late_joining_clients() {
+    let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+    let resolved = catalog
+        .resolve_preset(brawler::map::TIDAL_GARDEN_PRESET, MapInstanceId(1))
+        .unwrap();
+    let placement = resolved
+        .dynamic_placements
+        .iter()
+        .find(|placement| placement.placement_id == MapPlacementId(302))
+        .unwrap();
+    let center = brawler::map::placement_world_center(
+        resolved.snapshot.dimensions,
+        catalog.asset(placement.asset_id).unwrap(),
+        placement,
+    );
+    let mut harness = Harness::new_tidal_garden(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0) && client_grid_state(harness, 0).is_some()
+    });
+
+    harness.inject_map_destruction(901, (center.x, center.y), 1.0);
+    harness.step_until(|harness| {
+        client_grid_state(harness, 0).is_some_and(|(_, state)| {
+            state.terminal_states
+                == vec![brawler::map::MapPlacementTransition {
+                    placement_id: MapPlacementId(302),
+                    outcome: brawler::map::MapPlacementOutcome::ReplacedWith(
+                        brawler::map::RUBBLE_ASSET,
+                    ),
+                }]
+        })
+    });
+    let first = client_grid_state(&mut harness, 0).unwrap();
+
+    harness.add_client(2);
+    harness.step_until(|harness| {
+        harness.client_is_active(1)
+            && client_grid_state(harness, 1).is_some_and(|state| state == first)
+    });
+}
+
+#[test]
+fn hot_zone_and_ashen_snapshots_converge_from_canonical_content() {
+    let mut hot_zone = Harness::new_hot_zone_match(1);
+    hot_zone.step_until(|harness| {
+        harness.client_is_active(0) && client_grid_state(harness, 0).is_some()
+    });
+    let (hot_zone_snapshot, _) = client_grid_state(&mut hot_zone, 0).unwrap();
+    assert_eq!(
+        hot_zone_snapshot.identity.source_preset_id,
+        Some(ArenaPresetId(2))
+    );
+    assert_eq!(hot_zone_snapshot.mode_anchors.len(), 1);
+
+    let mut ashen = Harness::new_ashen_court(1);
+    ashen.step_until(|harness| {
+        harness.client_is_active(0) && client_grid_state(harness, 0).is_some()
+    });
+    let (ashen_snapshot, _) = client_grid_state(&mut ashen, 0).unwrap();
+    assert_eq!(
+        ashen_snapshot.identity.source_preset_id,
+        Some(ArenaPresetId(3))
+    );
+    assert_eq!(ashen_snapshot.placements.len(), 108);
+    assert!(ashen_snapshot.mode_anchors.is_empty());
+
+    ashen.add_client(2);
+    ashen.step_until(|harness| {
+        harness.client_is_active(1)
+            && client_grid_state(harness, 1).is_some_and(|(snapshot, _)| snapshot == ashen_snapshot)
+    });
 }
 
 #[test]
@@ -195,12 +227,7 @@ fn client_local_snapshot_edit_has_no_authoritative_map_path() {
         .clone();
     let client_world = harness.clients[0].world_mut();
     let mut query = client_world.query_filtered::<&mut ResolvedMapSnapshot, With<MapRoot>>();
-    query
-        .single_mut(client_world)
-        .unwrap()
-        .playable_bounds
-        .min
-        .x = -4_000.0;
+    query.single_mut(client_world).unwrap().dimensions.width = 128;
     for _ in 0..30 {
         harness.step();
     }
@@ -210,112 +237,6 @@ fn client_local_snapshot_edit_has_no_authoritative_map_path() {
     );
     assert_eq!(
         harness.server.world().resource::<PlayableBounds>().0,
-        authoritative.playable_bounds
+        authoritative.dimensions.bounds()
     );
-}
-
-#[test]
-fn maximum_policy_snapshot_converges_over_impaired_real_udp() {
-    for impairment_profile in [
-        NetworkImpairmentProfile::Typical,
-        NetworkImpairmentProfile::Adverse,
-    ] {
-        let server_config = ServerNetworkConfig {
-            bind_addr: "127.0.0.1:0".parse().unwrap(),
-            impairment_profile,
-            client_timeout: std::time::Duration::from_mins(2),
-            ..Default::default()
-        };
-        let mut server = App::new();
-        server.insert_resource(server_config).add_plugins((
-            MinimalPlugins,
-            StatesPlugin,
-            ServerPlugins {
-                tick_duration: SIMULATION_TICK,
-            },
-            GameplayPlugin,
-            ProtocolPlugin,
-            AvianNetworkPlugin,
-            AuthoritativeMapPlugin,
-            AuthoritativeMovementPlugin,
-            ServerNetworkPlugin,
-        ));
-        let catalog = server.world().resource::<MapCatalogResource>().0.clone();
-        let maximum = maximum_policy_resolved_map(&catalog, MapInstanceId(1));
-        let maximum_snapshot = maximum.snapshot.clone();
-        let encoded_size = postcard::to_allocvec(&maximum_snapshot).unwrap().len();
-        assert_eq!(maximum_snapshot.geometry.len(), catalog.policy.max_geometry);
-        assert!(maximum_snapshot.visual_instances.is_empty());
-        assert_eq!(maximum_snapshot.entities.len(), catalog.policy.max_entities);
-        assert!(encoded_size > 1_200 && encoded_size <= 64 * 1_024);
-        println!(
-            "maximum-policy map snapshot: profile={} bytes={encoded_size} geometry={} visuals={} entities={}",
-            impairment_profile.name(),
-            maximum_snapshot.geometry.len(),
-            maximum_snapshot.visual_instances.len(),
-            maximum_snapshot.entities.len(),
-        );
-        install_resolved_map(server.world_mut(), maximum).unwrap();
-        server.finish();
-        server.cleanup();
-        let mut now = Instant::now();
-        server.insert_resource(TimeUpdateStrategy::ManualInstant(now));
-        server.update();
-        now += SIMULATION_TICK;
-        server.insert_resource(TimeUpdateStrategy::ManualInstant(now));
-        server.update();
-        let server_addr = {
-            let world = server.world_mut();
-            let mut endpoints = world.query_filtered::<&LocalAddr, With<NetcodeServer>>();
-            endpoints.iter(world).next().unwrap().0
-        };
-
-        let mut client_config = ClientNetworkConfig::new(1);
-        client_config.server_addr = server_addr;
-        client_config.headless = true;
-        client_config.impairment_profile = impairment_profile;
-        client_config.connect_timeout = std::time::Duration::from_mins(2);
-        let mut client = App::new();
-        client.insert_resource(client_config).add_plugins((
-            MinimalPlugins,
-            StatesPlugin,
-            lightyear::prelude::client::ClientPlugins {
-                tick_duration: SIMULATION_TICK,
-            },
-            GameplayPlugin,
-            ProtocolPlugin,
-            AvianNetworkPlugin,
-            ClientNetworkPlugin,
-        ));
-        client.finish();
-        client.cleanup();
-
-        let mut converged = false;
-        // The impaired transport retransmits at its own cadence; the Adverse profile
-        // needs roughly double the Typical bound before a full fragmented snapshot is
-        // reliably delivered, so the margin keeps the test sensitive but not flaky.
-        let tick_bound = match impairment_profile {
-            NetworkImpairmentProfile::Local | NetworkImpairmentProfile::Typical => 3_600,
-            NetworkImpairmentProfile::Adverse => 7_200,
-        };
-        for _ in 0..tick_bound {
-            now += SIMULATION_TICK;
-            client.insert_resource(TimeUpdateStrategy::ManualInstant(now));
-            client.update();
-            server.insert_resource(TimeUpdateStrategy::ManualInstant(now));
-            server.update();
-            std::thread::yield_now();
-            let world = client.world_mut();
-            let mut snapshots = world.query_filtered::<&ResolvedMapSnapshot, With<MapRoot>>();
-            if snapshots.iter(world).next() == Some(&maximum_snapshot) {
-                converged = true;
-                break;
-            }
-        }
-        assert!(
-            converged,
-            "{encoded_size}-byte maximum snapshot did not converge under {} impairment",
-            impairment_profile.name(),
-        );
-    }
 }

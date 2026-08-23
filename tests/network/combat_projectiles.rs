@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn projectile_filters_allied_fighters_and_consumes_on_terrain() {
+fn projectile_filters_allied_fighters_and_consumes_on_map_collision() {
     let mut harness = Harness::new(2);
     harness.step_until(|harness| {
         harness.client_is_active(0)

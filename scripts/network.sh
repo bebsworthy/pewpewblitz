@@ -5,7 +5,6 @@ network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5000}"
 game_mode="${BRAWLER_NETWORK_GAME_MODE:-wipeout}"
 headless="${BRAWLER_NETWORK_HEADLESS:-0}"
 combat_assert="${BRAWLER_NETWORK_ASSERT_COMBAT:-0}"
-terrain_assert="${BRAWLER_NETWORK_ASSERT_TERRAIN:-0}"
 windowed_combat_demo="${BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO:-0}"
 windowed_controller_demo="${BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO:-0}"
 screenshot_dir="${BRAWLER_NETWORK_SCREENSHOT_DIR:-}"
@@ -34,8 +33,6 @@ if [[ -z "$network_timeout_seconds" ]]; then
     if [[ "$headless" == "1" ]]; then
         if [[ "$combat_assert" == "1" ]]; then
             network_timeout_seconds=60
-        elif [[ "$terrain_assert" == "1" ]]; then
-            network_timeout_seconds=45
         else
             network_timeout_seconds=30
         fi
@@ -57,20 +54,6 @@ if [[ -n "$simulation_ticks" ]] && ! [[ "$simulation_ticks" =~ ^[1-9][0-9]*$ ]];
 fi
 if [[ "$headless" != "0" && "$headless" != "1" ]]; then
     printf 'brawler network: BRAWLER_NETWORK_HEADLESS must be 0 or 1\n' >&2
-    exit 2
-fi
-if [[ "$terrain_assert" != "0" && "$terrain_assert" != "1" ]]; then
-    printf 'brawler network: BRAWLER_NETWORK_ASSERT_TERRAIN must be 0 or 1\n' >&2
-    exit 2
-fi
-if [[ "$terrain_assert" == "1" && "$headless" != "1" ]]; then
-    printf 'brawler network: BRAWLER_NETWORK_ASSERT_TERRAIN requires BRAWLER_NETWORK_HEADLESS=1\n' >&2
-    exit 2
-fi
-if [[ "$terrain_assert" == "1" \
-    && ( "${BRAWLER_NETWORK_WEAPON_PRESET:-3}" != "3" \
-        || "${BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO:-${BRAWLER_NETWORK_WEAPON_PRESET:-3}}" != "3" ) ]]; then
-    printf 'brawler network: BRAWLER_NETWORK_ASSERT_TERRAIN requires the Arc Launcher (preset 3) terrain world effect\n' >&2
     exit 2
 fi
 if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" ]]; then
@@ -122,9 +105,6 @@ client_done=()
 ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-server-ready.XXXXXX")"
 movement_ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-movement-ready.XXXXXX")"
 rm -f "$movement_ready_file"
-terrain_ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-terrain-ready.XXXXXX")"
-rm -f "$terrain_ready_file"
-terrain_report_file="${BRAWLER_NETWORK_TERRAIN_REPORT_FILE:-}"
 combat_ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-combat-ready.XXXXXX")"
 rm -f "$combat_ready_file"
 combat_client_ready_dir="${BRAWLER_NETWORK_COMBAT_READY_DIR:-}"
@@ -191,7 +171,6 @@ cleanup() {
     stop_child "$server_pid" "$signal"
     rm -f "$ready_file"
     rm -f "$movement_ready_file"
-    rm -f "$terrain_ready_file"
     rm -f "$combat_ready_file"
     if [[ "$combat_client_ready_dir_owned" -eq 1 ]]; then
         rmdir "$combat_client_ready_dir" 2>/dev/null || true
@@ -212,7 +191,7 @@ validate_closeout_reports() {
     # including source revision and the canonical participant/build assignment, clean
     # exits, zero drops/rejections/errors, and cross-endpoint digest agreement) instead
     # of a launcher-side subset that can drift from the writer. Combat-assert runs must
-    # carry nonzero checkpoint digests; movement/terrain/match profiles record no combat
+    # carry nonzero checkpoint digests; movement and match profiles record no combat
     # checkpoints, so their digests must be zero. Combat-assert runs also pass the
     # asserted weapon preset so the gate re-derives and enforces the declared checkpoint
     # requirement.
@@ -267,8 +246,6 @@ if [[ -n "$diagnostics_dir" ]]; then
         if [[ "$combat_assert" == "1" ]]; then
             scripted_actions=6
             declared_checkpoints="$($server_binary required-checkpoint-count "${BRAWLER_NETWORK_WEAPON_PRESET:-}")"
-        elif [[ "$terrain_assert" == "1" ]]; then
-            scripted_actions=6
         else
             scripted_actions=4
         fi
@@ -313,31 +290,10 @@ if [[ "$headless" == "1" ]]; then
             server_env+=("BRAWLER_NETWORK_COMBAT_REPORT_FILE=$combat_report_file")
         fi
     else
-        if [[ "$terrain_assert" != "1" ]]; then
-            server_env+=(
-                "BRAWLER_NETWORK_ASSERT_MOVEMENT=1"
-                "BRAWLER_NETWORK_MOVEMENT_READY_FILE=$movement_ready_file"
-            )
-        fi
-    fi
-    if [[ "$terrain_assert" == "1" ]]; then
         server_env+=(
-            "BRAWLER_NETWORK_ASSERT_TERRAIN=1"
-            "BRAWLER_NETWORK_TERRAIN_READY_FILE=$terrain_ready_file"
-            "BRAWLER_NETWORK_TERRAIN_TEST_DUMMY=1"
+            "BRAWLER_NETWORK_ASSERT_MOVEMENT=1"
+            "BRAWLER_NETWORK_MOVEMENT_READY_FILE=$movement_ready_file"
         )
-        if [[ -n "$diagnostics_dir" ]]; then
-            # The terrain assertion can complete before the clients' 900-tick clean-exit
-            # budget. Keep the server alive long enough for both endpoint reports rather
-            # than turning its expected disconnect into shutdown-incomplete evidence.
-            server_env+=("BRAWLER_SERVER_EXIT_AFTER_VERIFICATION_MIN_TICKS=1050")
-        fi
-        if [[ -n "${BRAWLER_NETWORK_TERRAIN_TARGET_REVISION:-}" ]]; then
-            server_env+=("BRAWLER_NETWORK_TERRAIN_TARGET_REVISION=$BRAWLER_NETWORK_TERRAIN_TARGET_REVISION")
-        fi
-        if [[ -n "$terrain_report_file" ]]; then
-            server_env+=("BRAWLER_NETWORK_TERRAIN_REPORT_FILE=$terrain_report_file")
-        fi
     fi
 fi
 
@@ -380,13 +336,7 @@ if [[ "$headless" == "1" ]]; then
     else
         # Outlast the production countdown (180 ticks) plus travel so the movement
         # assertion observes real displacement instead of racing client shutdown.
-        # Terrain profiles keep walking longer so Arc Launcher lobbed deliveries
-        # crater the central destructible block during the approach.
-        if [[ "$terrain_assert" == "1" ]]; then
-            client_args+=(--headless --exit-after-roster 2 --simulation-ticks 900)
-        else
-            client_args+=(--headless --exit-after-roster 2 --simulation-ticks 600)
-        fi
+        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 600)
     fi
 fi
 
@@ -424,16 +374,8 @@ if [[ "$headless" == "1" ]]; then
             client_two_args+=(--move-axis -1,0 --aim-dummy)
         fi
     else
-        if [[ "$terrain_assert" == "1" ]]; then
-            # Both Arc Launcher clients walk toward the terrain-profile practice target and
-            # lob at it; the aimed landing sits just south of the central destructible block,
-            # so every delivered brush erases real cells regardless of spawn lane or phase.
-            client_one_args+=(--move-axis 1,0 --aim-dummy --fire)
-            client_two_args+=(--move-axis -1,0 --aim-dummy --fire)
-        else
-            client_one_args+=(--move-axis 1,0 --aim-axis 0,1)
-            client_two_args+=(--move-axis -1,0 --aim-axis 0,-1)
-        fi
+        client_one_args+=(--move-axis 1,0 --aim-axis 0,1)
+        client_two_args+=(--move-axis -1,0 --aim-axis 0,-1)
     fi
 fi
 
@@ -474,7 +416,7 @@ for index in $(seq 1 "$client_count"); do
             if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
                 args+=(--build-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
             fi
-            if [[ "$headless" == "1" && "$combat_assert" != "1" && "$terrain_assert" != "1" ]]; then
+            if [[ "$headless" == "1" && "$combat_assert" != "1" ]]; then
                 args+=(--headless --exit-after-roster "$client_count" --simulation-ticks 600)
             fi
             envs=(env)
@@ -546,13 +488,6 @@ while :; do
                 exit 0
             fi
             printf 'brawler network: clients finished before combat assertion completed; waiting for server evidence\n' >&2
-        elif [[ "$terrain_assert" == "1" ]]; then
-            if [[ -s "$terrain_ready_file" ]]; then
-                wait_for_server_closeout
-                validate_closeout_reports
-                exit 0
-            fi
-            printf 'brawler network: clients finished before terrain assertion completed; waiting for server evidence\n' >&2
         elif [[ -s "$movement_ready_file" ]]; then
             wait_for_server_closeout
             validate_closeout_reports
@@ -568,9 +503,6 @@ while :; do
             if [[ -n "$combat_report_file" && -f "$combat_report_file" ]]; then
                 cat "$combat_report_file" >&2
             fi
-        fi
-        if [[ "$terrain_assert" == "1" && -n "$terrain_report_file" && -f "$terrain_report_file" ]]; then
-            cat "$terrain_report_file" >&2
         fi
         client_status="server=$server_done"
         if [[ "${#client_pids[@]}" -gt 0 ]]; then

@@ -42,7 +42,7 @@ pub struct EngineWeaponLimits {
     pub max_speed: f32,
     pub max_distance: f32,
     pub max_world_effects_per_delivery: u8,
-    pub max_terrain_brush_radius: f32,
+    pub max_map_destruction_radius: f32,
 }
 
 impl Default for EngineWeaponLimits {
@@ -66,7 +66,7 @@ impl Default for EngineWeaponLimits {
             max_speed: 4_096.0,
             max_distance: 4_096.0,
             max_world_effects_per_delivery: 1,
-            max_terrain_brush_radius: crate::terrain::MAX_TERRAIN_BRUSH_RADIUS_WORLD,
+            max_map_destruction_radius: 128.0,
         }
     }
 }
@@ -111,21 +111,21 @@ pub enum RecipientPolicyKind {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum WorldEffectKind {
-    DestroyTerrain,
+    DestroyMap,
 }
 
 /// A delivery-level world effect. World effects fire once per committed delivery at the
 /// delivery position; they are not applied per fighter target.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum WorldEffectDefinition {
-    DestroyTerrain { radius: f32 },
+    DestroyMap { radius: f32 },
 }
 
 impl WorldEffectDefinition {
     #[must_use]
     pub fn kind(&self) -> WorldEffectKind {
         match self {
-            Self::DestroyTerrain { .. } => WorldEffectKind::DestroyTerrain,
+            Self::DestroyMap { .. } => WorldEffectKind::DestroyMap,
         }
     }
 }
@@ -154,7 +154,7 @@ pub struct WeaponRecipePolicy {
     pub max_angle_degrees: f32,
     pub max_targets_per_delivery: u8,
     pub max_world_effects_per_delivery: u8,
-    pub max_terrain_brush_radius: f32,
+    pub max_map_destruction_radius: f32,
 }
 
 impl Default for WeaponRecipePolicy {
@@ -196,7 +196,7 @@ impl Default for WeaponRecipePolicy {
             max_angle_degrees: 180.0,
             max_targets_per_delivery: 16,
             max_world_effects_per_delivery: 1,
-            max_terrain_brush_radius: 64.0,
+            max_map_destruction_radius: 64.0,
         }
     }
 }
@@ -210,7 +210,7 @@ pub struct WeaponCatalog {
 
 impl WeaponCatalog {
     pub fn embedded() -> Result<Self, String> {
-        let catalog: Self = ron::from_str(include_str!("../../../content/v1/weapons.ron"))
+        let catalog: Self = ron::from_str(include_str!("../../../content/catalogs/weapons.ron"))
             .map_err(|error| format!("embedded weapon catalog parse failed: {error}"))?;
         catalog.validate()?;
         Ok(catalog)
@@ -382,7 +382,7 @@ pub enum TargetSelection {
     Direct,
     Area {
         radius: f32,
-        terrain_occlusion: bool,
+        map_occlusion: bool,
         max_targets: u8,
     },
 }
@@ -658,17 +658,13 @@ impl WeaponConfiguration {
             return Err("too many world effects per delivery".to_string());
         }
         for effect in &recipe.world_effects {
-            let WorldEffectDefinition::DestroyTerrain { radius } = *effect;
+            let WorldEffectDefinition::DestroyMap { radius } = *effect;
             let max_radius = policy
-                .max_terrain_brush_radius
-                .min(limits.max_terrain_brush_radius);
-            let half_cell = crate::terrain::TERRAIN_SUBCELL_SIZE_WORLD;
-            if !finite_range(radius, crate::terrain::TERRAIN_CELL_SIZE_WORLD, max_radius)
-                || ((radius / half_cell).round() * half_cell - radius).abs() > 1.0e-4
-            {
+                .max_map_destruction_radius
+                .min(limits.max_map_destruction_radius);
+            if !finite_range(radius, 0.0, max_radius) || radius == 0.0 {
                 return Err(format!(
-                    "terrain brush radius exceeds an engine safety boundary: expected {}..={max_radius} in {half_cell}-unit terrain-grid steps",
-                    crate::terrain::TERRAIN_CELL_SIZE_WORLD
+                    "map destruction radius exceeds an engine safety boundary: expected 0..={max_radius}"
                 ));
             }
             let single_lobbed = matches!(recipe.delivery, DeliveryMethod::Lobbed { .. })
@@ -801,9 +797,9 @@ fn validate_policy(policy: &WeaponRecipePolicy, limits: EngineWeaponLimits) -> R
         || policy.max_world_effects_per_delivery == 0
         || policy.max_world_effects_per_delivery > limits.max_world_effects_per_delivery
         || !finite_range(
-            policy.max_terrain_brush_radius,
+            policy.max_map_destruction_radius,
             0.0,
-            limits.max_terrain_brush_radius,
+            limits.max_map_destruction_radius,
         )
     {
         return Err("weapon recipe policy exceeds engine limits".to_string());
@@ -905,8 +901,8 @@ fn limits_within_engine_ceiling(limits: EngineWeaponLimits) -> bool {
         && limits.max_distance.is_finite()
         && limits.max_distance <= ceiling.max_distance
         && limits.max_world_effects_per_delivery <= ceiling.max_world_effects_per_delivery
-        && limits.max_terrain_brush_radius.is_finite()
-        && limits.max_terrain_brush_radius <= ceiling.max_terrain_brush_radius
+        && limits.max_map_destruction_radius.is_finite()
+        && limits.max_map_destruction_radius <= ceiling.max_map_destruction_radius
 }
 fn valid_display_name(value: &str) -> bool {
     !value.is_empty() && value.len() <= 48 && value.chars().all(|character| !character.is_control())

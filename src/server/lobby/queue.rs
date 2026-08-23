@@ -1719,9 +1719,14 @@ mod tests {
     fn exact_six_player_catalog_entry_forms_balanced_3v3() {
         let catalog = catalog();
         let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(1));
+        let pool = catalog
+            .game_types
+            .iter()
+            .position(|game| game.id.as_str() == "hot-zone-3v3")
+            .unwrap();
         for value in 1..=6 {
             let player = session(value);
-            submit(&mut queue, player, 1, join_pool(&catalog, 2, 1), 0);
+            submit(&mut queue, player, 1, join_pool(&catalog, pool, 1), 0);
             queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
         }
         let reservation = queue

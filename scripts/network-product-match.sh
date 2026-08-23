@@ -9,6 +9,7 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
 timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-60}
 players_per_team=${BRAWLER_PRODUCT_PLAYERS_PER_TEAM:-2}
+game_type=${BRAWLER_PRODUCT_GAME_TYPE:-}
 headless=${BRAWLER_NETWORK_HEADLESS:-1}
 requeue_smoke=${BRAWLER_PRODUCT_REQUEUE_SMOKE:-0}
 case "$headless" in
@@ -117,14 +118,26 @@ while [ "$index" -le "$client_count" ]; do
                 --simulation-ticks 4000 \
                 --build-preset 1 &
         else
-            target/debug/brawler-client \
-                --client-id $((5000 + index)) \
-                --server "$bind_addr" \
-                --transport routed-udp \
-                --auto-connect \
-                --headless \
-                "$match_flag" \
-                --build-preset "$preset" &
+            if [ -n "$game_type" ]; then
+                target/debug/brawler-client \
+                    --client-id $((5000 + index)) \
+                    --server "$bind_addr" \
+                    --transport routed-udp \
+                    --auto-connect \
+                    --headless \
+                    "$match_flag" \
+                    --product-game-type "$game_type" \
+                    --build-preset "$preset" &
+            else
+                target/debug/brawler-client \
+                    --client-id $((5000 + index)) \
+                    --server "$bind_addr" \
+                    --transport routed-udp \
+                    --auto-connect \
+                    --headless \
+                    "$match_flag" \
+                    --build-preset "$preset" &
+            fi
         fi
     else
         target/debug/brawler-client \

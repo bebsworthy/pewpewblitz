@@ -340,11 +340,10 @@ pub(super) fn observe_manifest_participants(
 
 /// Consolidate the bounded gameplay telemetry summaries into the terminal observation
 /// state, so the consolidated report ties the run to its build, ability, match/mode, and
-/// terrain observations instead of process/network measurements alone. The authoritative
+/// map observations instead of process/network measurements alone. The authoritative
 /// match, build, and ability telemetry resources exist only in the server process; both
-/// roles own terrain telemetry (the client records its convergence facts). Reading them
-/// here — while the process still owns the resources — keeps report finalization free of
-/// gameplay-query parameters.
+/// roles observe the same canonical map state. Reading aggregates here — while the process still
+/// owns the resources — keeps report finalization free of gameplay-query parameters.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
@@ -353,7 +352,7 @@ pub(super) fn observe_gameplay_aggregates(
     mut state: ResMut<ProcessDiagnosticsState>,
     match_telemetry: Option<Res<crate::matchplay::MatchTelemetry>>,
     #[cfg(feature = "server")] build_telemetry: Option<Res<crate::builds::BuildTelemetry>>,
-    terrain_telemetry: Option<Res<crate::terrain::telemetry::TerrainTelemetry>>,
+    #[cfg(feature = "server")] map_telemetry: Option<Res<crate::map::MapDynamicTelemetry>>,
 ) {
     let mut gameplay = GameplayAggregatesV1::default();
     #[cfg(feature = "server")]
@@ -369,6 +368,13 @@ pub(super) fn observe_gameplay_aggregates(
         .unwrap_or(u32::MAX);
         gameplay.build_dropped_records = builds.dropped_records;
     }
+    #[cfg(feature = "server")]
+    if let Some(map) = map_telemetry.as_deref() {
+        gameplay.map_destruction_requested = map.destruction_requests;
+        gameplay.map_destruction_applied = map.destruction_applied;
+        gameplay.map_destruction_no_ops = map.destruction_no_ops;
+        gameplay.map_placements_changed = map.placements_changed;
+    }
     if let Some(matches) = match_telemetry.as_deref() {
         gameplay.matches_completed = u32::try_from(
             u64::try_from(matches.summaries.len())
@@ -379,15 +385,6 @@ pub(super) fn observe_gameplay_aggregates(
         if let Some(summary) = matches.summaries.back() {
             consolidate_match_summary(summary, &mut gameplay);
         }
-    }
-    if let Some(terrain) = terrain_telemetry.as_deref() {
-        let aggregates = &terrain.aggregates;
-        gameplay.terrain_requested_brushes = aggregates.requested_brushes;
-        gameplay.terrain_applied_brushes = aggregates.applied_brushes;
-        gameplay.terrain_no_op_brushes = aggregates.no_op_brushes;
-        gameplay.terrain_rejected_brushes = aggregates.rejected_brushes;
-        gameplay.terrain_deferred_brushes = aggregates.deferred_brushes;
-        gameplay.terrain_cells_erased = aggregates.cells_erased;
     }
     state.gameplay = gameplay;
 }

@@ -5,10 +5,7 @@ use crate::{
         AdvertisedGameType, AdvertisedRulesSummary, CatalogRevision, GameTypeId, MAX_GAME_TYPES,
         MAX_MAPS_PER_GAME_TYPE, catalog_revision, validate_catalog, validate_presentation_name,
     },
-    map::{
-        HOT_ZONE_MODE_DEFINITION, MapContentCatalog, MapInstanceId, MapLayoutRequirements,
-        MapPresetId, WIPEOUT_MODE_DEFINITION,
-    },
+    map::{HOT_ZONE_MODE_DEFINITION, MapInstanceId, MapPresetId, WIPEOUT_MODE_DEFINITION},
     matchplay::{HotZoneRules, MatchLifecycleRules, WipeoutRules},
 };
 use bevy::prelude::Resource;
@@ -95,8 +92,8 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         ));
     }
 
-    let maps = MapContentCatalog::embedded()?;
-    let map_admission_revisions = maps
+    let maps = crate::map::MapContentCatalog::embedded()?;
+    let map_admission_revisions: BTreeMap<_, _> = maps
         .presets
         .iter()
         .map(|preset| (preset.id, preset.admission_revision))
@@ -147,70 +144,73 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             ));
         }
 
-        let (mode_definition_id, requirements, objective_target, rules_summary) =
-            match entry.mode.as_str() {
-                "wipeout" if entry.capture_seconds == 0 => {
-                    let target_score = entry.kills_to_win;
-                    WipeoutRules { target_score }.validate().map_err(|error| {
-                        format!("game type {} has invalid objective: {error}", id.as_str())
-                    })?;
-                    (
-                        WIPEOUT_MODE_DEFINITION,
-                        MapLayoutRequirements::wipeout(),
+        let (mode_definition_id, objective_target, rules_summary) = match entry.mode.as_str() {
+            "wipeout" if entry.capture_seconds == 0 => {
+                let target_score = entry.kills_to_win;
+                WipeoutRules { target_score }.validate().map_err(|error| {
+                    format!("game type {} has invalid objective: {error}", id.as_str())
+                })?;
+                (
+                    WIPEOUT_MODE_DEFINITION,
+                    target_score,
+                    AdvertisedRulesSummary::Wipeout {
                         target_score,
-                        AdvertisedRulesSummary::Wipeout {
-                            target_score,
-                            active_limit_ticks: match_duration_ticks,
-                        },
-                    )
-                }
-                "hot-zone" if entry.kills_to_win == 0 => {
-                    let capture_seconds = entry.capture_seconds;
-                    let target_progress_ticks = u16::try_from(seconds_to_ticks(capture_seconds)?)
-                        .map_err(|_| {
+                        active_limit_ticks: match_duration_ticks,
+                    },
+                )
+            }
+            "hot-zone" if entry.kills_to_win == 0 => {
+                let capture_seconds = entry.capture_seconds;
+                let target_progress_ticks = u16::try_from(seconds_to_ticks(capture_seconds)?)
+                    .map_err(|_| {
                         format!("game type {} capture duration is too long", id.as_str())
                     })?;
-                    HotZoneRules {
-                        target_progress_ticks,
-                    }
-                    .validate_with(&entry_lifecycle)
-                    .map_err(|error| {
-                        format!("game type {} has invalid objective: {error}", id.as_str())
-                    })?;
-                    (
-                        HOT_ZONE_MODE_DEFINITION,
-                        MapLayoutRequirements::hot_zone(),
-                        target_progress_ticks,
-                        AdvertisedRulesSummary::HotZone {
-                            target_progress_ticks,
-                            active_limit_ticks: match_duration_ticks,
-                        },
-                    )
+                HotZoneRules {
+                    target_progress_ticks,
                 }
-                _ => {
-                    return Err(format!(
-                        "game type {} has an unknown mode or mismatched objective",
-                        id.as_str()
-                    ));
-                }
-            };
+                .validate_with(&entry_lifecycle)
+                .map_err(|error| {
+                    format!("game type {} has invalid objective: {error}", id.as_str())
+                })?;
+                (
+                    HOT_ZONE_MODE_DEFINITION,
+                    target_progress_ticks,
+                    AdvertisedRulesSummary::HotZone {
+                        target_progress_ticks,
+                        active_limit_ticks: match_duration_ticks,
+                    },
+                )
+            }
+            _ => {
+                return Err(format!(
+                    "game type {} has an unknown mode or mismatched objective",
+                    id.as_str()
+                ));
+            }
+        };
 
         let mut map_ids = Vec::with_capacity(entry.maps.len());
         let mut unique_maps = BTreeSet::new();
         for key in entry.maps {
-            let preset = maps
-                .presets
-                .iter()
-                .find(|preset| preset.key == key)
+            let preset = maps.presets.iter().find(|preset| preset.key == key);
+            let preset_id = preset
+                .map(|preset| preset.id)
                 .ok_or_else(|| format!("game type {} has an unknown map key {key}", id.as_str()))?;
-            if !unique_maps.insert(preset.id) {
+            if !unique_maps.insert(preset_id) {
                 return Err(format!(
                     "game type {} contains a duplicate map",
                     id.as_str()
                 ));
             }
-            let snapshot = maps
-                .resolve_preset(preset.id, MapInstanceId(1), &requirements)
+            let preset = preset.expect("resolved preset exists");
+            if preset.recipe.mode_definition_id != mode_definition_id {
+                return Err(format!(
+                    "game type {} map {key} is incompatible with its mode",
+                    id.as_str()
+                ));
+            }
+            let resolved = maps
+                .resolve_preset(preset.id, MapInstanceId(1))
                 .map_err(|error| {
                     format!(
                         "game type {} map {key} is incompatible: {error}",
@@ -225,14 +225,16 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 })
                 .ok_or_else(|| format!("game type {} has invalid capacity", id.as_str()))?;
             capacity
-                .validate_against_map(&snapshot.snapshot)
+                .validate_against_spawn_catalog(&crate::map::SpawnPointCatalog(
+                    resolved.spawn_points_by_team,
+                ))
                 .map_err(|error| {
                     format!(
                         "game type {} map {key} lacks topology capacity: {error}",
                         id.as_str()
                     )
                 })?;
-            map_ids.push(MapPresetId(preset.id.0));
+            map_ids.push(preset_id);
         }
 
         game_rules.insert(
@@ -294,8 +296,11 @@ mod tests {
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local PewPew Blitz");
-        assert_eq!(catalog.game_types.len(), 4);
-        let first_blood = &catalog.game_types[3];
+        assert_eq!(catalog.game_types.len(), 5);
+        let tidal = &catalog.game_types[2];
+        assert_eq!(tidal.display_name, "Tidal Garden 2v2");
+        assert_eq!(tidal.map_preset_ids, vec![MapPresetId(4)]);
+        let first_blood = catalog.game_types.last().unwrap();
         assert_eq!(first_blood.display_name, "First Blood");
         assert_eq!(first_blood.configuration_revision, 2);
         assert_eq!(first_blood.map_preset_ids, vec![MapPresetId(3)]);
@@ -319,9 +324,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0x7b, 0xd1, 0xef, 0x3b, 0x3c, 0xd1, 0xe0, 0xc1, 0x8d, 0x6c, 0x5e, 0xb1, 0x5a, 0xdb,
-                0x52, 0x3b, 0xa9, 0xe1, 0x4f, 0x88, 0x4e, 0x92, 0xaf, 0x11, 0x68, 0xfb, 0x17, 0x9e,
-                0x87, 0xac, 0xb4, 0xaa,
+                0xf9, 0x23, 0x28, 0xe0, 0xf1, 0x49, 0xc2, 0x66, 0x8f, 0x67, 0xa6, 0x17, 0x55, 0x0a,
+                0x7b, 0xbe, 0x80, 0x64, 0x96, 0x15, 0xf5, 0x49, 0xca, 0x9e, 0x70, 0x53, 0x35, 0xfd,
+                0x71, 0xa3, 0x85, 0x63,
             ]
         );
     }

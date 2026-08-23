@@ -13,6 +13,8 @@ mod wipeout;
 #[cfg(feature = "server")]
 pub use hot_zone::HotZoneModePlugin;
 #[cfg(feature = "server")]
+pub(crate) use hot_zone::ResolvedObjectiveZone;
+#[cfg(feature = "server")]
 pub use hot_zone::hot_zone_setup_for_composition;
 pub use hot_zone::{
     HOT_ZONE_NEAR_COMBAT_EXPANSION, HOT_ZONE_RULES_REVISION, HotZoneRules, HotZoneState,
@@ -41,9 +43,11 @@ pub(crate) use server::{
     prepare_mode_rule_facts, record_match_telemetry,
 };
 #[cfg(feature = "balance-lab")]
-pub(crate) use server::{NextMatchId, RestartBuildPolicy, prepare_match_restart};
+pub(crate) use server::{
+    NextMatchId, PendingMatchRestartSlot, RestartBuildPolicy, prepare_match_restart,
+};
 pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
-#[cfg(any(feature = "server", test))]
+#[cfg(feature = "server")]
 pub(crate) use telemetry::MatchTelemetryContext;
 pub use telemetry::{
     MatchOutcomeDiagnostics, MatchParticipantSummary, MatchSummary, MatchTelemetry, ModeSummary,
@@ -127,7 +131,7 @@ pub(crate) fn configure_match_schedule(app: &mut bevy::prelude::App) {
 }
 
 /// Register one environment-reset system into the common restart transaction between
-/// mode reset and commit. Environment owners (terrain) reset synchronously here so no
+/// mode reset and commit. Map dynamics reset synchronously here so no
 /// downstream system observes a new match with old environment state.
 #[cfg(feature = "server")]
 pub(crate) fn register_environment_reset_system<S, Marker>(app: &mut bevy::prelude::App, system: S)
@@ -142,7 +146,5 @@ where
 }
 
 #[cfg(feature = "server")]
-pub(crate) use server::PendingMatchRestartSlot;
-
 #[cfg(test)]
 mod tests;

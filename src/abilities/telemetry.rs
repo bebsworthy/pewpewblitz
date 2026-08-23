@@ -76,7 +76,7 @@ pub enum AbilityTelemetryKind {
     DashTravel {
         requested_distance_milli: u32,
         actual_distance_milli: u32,
-        terrain_truncated: bool,
+        map_collision_truncated: bool,
     },
     DashContact,
     DashInterrupted(DashInterruptionReason),
@@ -126,7 +126,7 @@ pub struct AbilityTelemetry {
     pub rejections_by_reason: BTreeMap<AbilityRejectionReason, u64>,
     pub dash_requested_distance_milli_by_owner: BTreeMap<crate::protocol::NetworkEntityId, u64>,
     pub dash_actual_distance_milli_by_owner: BTreeMap<crate::protocol::NetworkEntityId, u64>,
-    pub dash_terrain_truncations_by_owner: BTreeMap<crate::protocol::NetworkEntityId, u64>,
+    pub dash_map_collision_truncations_by_owner: BTreeMap<crate::protocol::NetworkEntityId, u64>,
     pub dash_contacts_by_owner: BTreeMap<crate::protocol::NetworkEntityId, u64>,
     pub dash_interruptions_by_owner: BTreeMap<crate::protocol::NetworkEntityId, u64>,
     pub ability_damage_by_owner: BTreeMap<crate::protocol::NetworkEntityId, u64>,
@@ -206,7 +206,7 @@ impl AbilityTelemetry {
             AbilityTelemetryKind::DashTravel {
                 requested_distance_milli,
                 actual_distance_milli,
-                terrain_truncated,
+                map_collision_truncated,
             } => {
                 add_owner_total(
                     &mut self.dash_requested_distance_milli_by_owner,
@@ -218,9 +218,9 @@ impl AbilityTelemetry {
                     record.owner_network_id,
                     u64::from(actual_distance_milli),
                 );
-                if terrain_truncated {
+                if map_collision_truncated {
                     add_owner_total(
-                        &mut self.dash_terrain_truncations_by_owner,
+                        &mut self.dash_map_collision_truncations_by_owner,
                         record.owner_network_id,
                         1,
                     );
@@ -384,9 +384,9 @@ impl AbilityTelemetry {
             &self.dash_actual_distance_milli_by_owner,
             &start.dash_actual_distance_milli_by_owner,
         );
-        delta.dash_terrain_truncations_by_owner = count_map_delta(
-            &self.dash_terrain_truncations_by_owner,
-            &start.dash_terrain_truncations_by_owner,
+        delta.dash_map_collision_truncations_by_owner = count_map_delta(
+            &self.dash_map_collision_truncations_by_owner,
+            &start.dash_map_collision_truncations_by_owner,
         );
         delta.dash_contacts_by_owner =
             count_map_delta(&self.dash_contacts_by_owner, &start.dash_contacts_by_owner);

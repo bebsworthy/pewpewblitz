@@ -146,15 +146,15 @@ fn policy_change_changes_content_fingerprint() {
 // --- Delivery-level world effects (Milestone 10) ---
 
 #[test]
-fn only_the_arc_launcher_carries_a_terrain_world_effect() {
+fn only_the_arc_launcher_carries_a_map_destruction_world_effect() {
     let catalog = WeaponCatalog::embedded().unwrap();
     for preset in &catalog.presets {
         match preset.id.0 {
             3 => {
                 assert_eq!(
                     preset.configuration.recipe.world_effects,
-                    vec![WorldEffectDefinition::DestroyTerrain { radius: 48.0 }],
-                    "Arc Launcher carries exactly one radius-48 terrain brush"
+                    vec![WorldEffectDefinition::DestroyMap { radius: 48.0 }],
+                    "Arc Launcher carries exactly one radius-48 map destruction effect"
                 );
             }
             _ => assert!(
@@ -185,20 +185,20 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
     let mut two = arc_configuration();
     two.recipe
         .world_effects
-        .push(WorldEffectDefinition::DestroyTerrain { radius: 16.0 });
+        .push(WorldEffectDefinition::DestroyMap { radius: 16.0 });
     assert!(
         two.validate(&policy, limits, Some(fighter.body_radius))
             .unwrap_err()
             .contains("too many world effects")
     );
 
-    for radius in [f32::NAN, 4.0, 7.5, 50.0, 68.0] {
+    for radius in [f32::NAN, 0.0, 129.0] {
         let mut bad = arc_configuration();
-        bad.recipe.world_effects = vec![WorldEffectDefinition::DestroyTerrain { radius }];
+        bad.recipe.world_effects = vec![WorldEffectDefinition::DestroyMap { radius }];
         assert!(
             bad.validate(&policy, limits, Some(fighter.body_radius))
                 .unwrap_err()
-                .contains("brush radius"),
+                .contains("map destruction radius"),
             "radius {radius} must reject"
         );
     }
@@ -229,7 +229,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
 
     // A policy ceiling wider than the engine ceiling rejects during catalog validation.
     let mut catalog = WeaponCatalog::embedded().unwrap();
-    catalog.recipe_policy.max_terrain_brush_radius = 132.0;
+    catalog.recipe_policy.max_map_destruction_radius = 132.0;
     assert!(
         catalog
             .validate()

@@ -246,32 +246,32 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
             .is_err_and(|error| error.contains("more attacks with contact than accepted"))
     );
 
-    let mut terrain = weapon;
-    terrain.gameplay.attacks_with_hostile_contact = 0;
-    terrain.gameplay.terrain_requested_brushes = 2;
-    terrain.gameplay.terrain_applied_brushes = 3;
-    let terrain_contents = terrain.to_report_lines().join("\n");
-    let pairs = split_report_lines(&terrain_contents).expect("lines split");
+    let mut map_destruction = weapon;
+    map_destruction.gameplay.attacks_with_hostile_contact = 0;
+    map_destruction.gameplay.map_destruction_requested = 2;
+    map_destruction.gameplay.map_destruction_applied = 3;
+    let map_contents = map_destruction.to_report_lines().join("\n");
+    let pairs = split_report_lines(&map_contents).expect("lines split");
     assert!(parse_closeout_report(&pairs).is_err_and(|error| {
-        error.contains("terminal brush outcomes exceed the submitted brushes")
+        error.contains("map-destruction terminal outcomes exceed the submitted requests")
     }));
 
     // Deferral is a lifecycle event, not a terminal outcome: a brush deferred once and
     // later applied must still validate against its single submission.
-    let mut deferred = terrain;
-    deferred.gameplay.terrain_requested_brushes = 1;
-    deferred.gameplay.terrain_applied_brushes = 1;
-    deferred.gameplay.terrain_deferred_brushes = 1;
+    let mut deferred = map_destruction;
+    deferred.gameplay.map_destruction_requested = 1;
+    deferred.gameplay.map_destruction_applied = 1;
+    deferred.gameplay.map_destruction_deferred = 1;
     let deferred_contents = deferred.to_report_lines().join("\n");
     let pairs = split_report_lines(&deferred_contents).expect("lines split");
     assert!(parse_closeout_report(&pairs).is_ok());
 
     let mut duplicate_terminal = deferred.clone();
-    duplicate_terminal.gameplay.terrain_no_op_brushes = 1;
+    duplicate_terminal.gameplay.map_destruction_no_ops = 1;
     let contents = duplicate_terminal.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
     assert!(parse_closeout_report(&pairs).is_err_and(|error| {
-        error.contains("terminal brush outcomes exceed the submitted brushes")
+        error.contains("map-destruction terminal outcomes exceed the submitted requests")
     }));
 
     // A completed match must carry exactly one complete, consistent mode summary.
@@ -1222,172 +1222,6 @@ fn manifest_participants_are_cached_while_fighters_live_and_survive_shutdown() {
     }
     app.update();
     assert_eq!(rows(&app).len(), 2);
-}
-
-/// The consolidated report's gameplay block comes from the process's own bounded
-/// telemetry summaries: match/mode, weapon, and ability aggregates from the latest match
-/// summary, build selections from the build telemetry, and terrain aggregates from the
-/// terrain telemetry. Process-lifetime totals include records the bounded queues evicted.
-#[cfg(feature = "server")]
-#[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the test stages four telemetry resources and asserts the consolidated block; its length is the staging itself"
-)]
-fn gameplay_aggregates_consolidate_match_build_weapon_and_terrain_summaries() {
-    use super::process::ProcessDiagnosticsState;
-    use crate::abilities::AbilityTelemetry;
-    use crate::builds::{
-        BuildPresetId, BuildRecipeFingerprint, BuildRevision, BuildSelectionTelemetryRecord,
-        BuildTelemetry, PassiveDefinitionId, UltimateDefinitionId,
-    };
-    use crate::combat::{
-        TeamId, WeaponPresetId, WeaponRecipeFingerprint, WeaponTelemetry, WeaponTelemetryAggregate,
-        WeaponTelemetryKey,
-    };
-    use crate::map::WIPEOUT_MODE_DEFINITION;
-    use crate::matchplay::{MatchId, MatchResult, MatchTelemetry, ModeSummary, WipeoutSummary};
-    use crate::protocol::NetworkEntityId;
-    use crate::terrain::telemetry::TerrainTelemetry;
-
-    let mut matches = MatchTelemetry::default();
-    matches.begin(MatchId(7), 100);
-    let mut weapons = WeaponTelemetry::default();
-    weapons.source_aggregates.insert(
-        WeaponTelemetryKey {
-            preset_id: WeaponPresetId(1),
-            recipe_fingerprint: WeaponRecipeFingerprint(5),
-        },
-        WeaponTelemetryAggregate {
-            accepted_attacks: 4,
-            emitted_deliveries: 6,
-            attacks_with_hostile_contact: 3,
-            hostile_damage: 40,
-            ..WeaponTelemetryAggregate::default()
-        },
-    );
-    matches.complete_with_mode(
-        250,
-        WIPEOUT_MODE_DEFINITION,
-        ModeSummary::Wipeout(WipeoutSummary {
-            final_scores: [10, 2],
-            target_score: 10,
-            score_margin: 8,
-        }),
-        MatchResult::TeamVictory { team: TeamId(0) },
-        8,
-        &weapons,
-        &AbilityTelemetry::default(),
-    );
-    // One summary was already evicted by the bound: the process-lifetime total still
-    // counts it, while consolidation reads the retained tail.
-    matches.dropped_summaries = 1;
-
-    let mut builds = BuildTelemetry::default();
-    for request_id in 1..=2 {
-        builds.record(BuildSelectionTelemetryRecord {
-            tick: request_id,
-            request_id,
-            owner_network_id: NetworkEntityId(request_id),
-            identity: crate::builds::SelectedBuild {
-                source_build_preset_id: Some(BuildPresetId(3)),
-                recipe_fingerprint: BuildRecipeFingerprint(7),
-                revision: BuildRevision(1),
-            },
-            total_points: 8,
-            weapon_fingerprint: WeaponRecipeFingerprint(5),
-            ultimate_id: UltimateDefinitionId(1),
-            passive_ids: [PassiveDefinitionId(1), PassiveDefinitionId(6)],
-        });
-    }
-    // Five earlier selection records were evicted by the bound.
-    builds.dropped_records = 5;
-
-    let mut terrain = TerrainTelemetry::default();
-    terrain.aggregates.requested_brushes = 3;
-    terrain.aggregates.applied_brushes = 2;
-    terrain.aggregates.no_op_brushes = 1;
-    terrain.aggregates.deferred_brushes = 1;
-    terrain.aggregates.cells_erased = 48;
-
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .init_resource::<ProcessDiagnosticsState>()
-        .insert_resource(matches)
-        .insert_resource(builds)
-        .insert_resource(terrain)
-        .add_systems(Update, process::observe_gameplay_aggregates);
-    app.update();
-    let GameplayAggregatesV1 {
-        matches_completed,
-        match_result,
-        mode_definition_id,
-        wipeout_final_scores,
-        wipeout_target_score,
-        wipeout_score_margin,
-        hot_zone_controlled_ticks,
-        match_active_ticks,
-        team_a_defeats,
-        build_selections,
-        build_dropped_records,
-        accepted_attacks,
-        emitted_deliveries,
-        attacks_with_hostile_contact,
-        hostile_damage,
-        terrain_requested_brushes,
-        terrain_applied_brushes,
-        terrain_no_op_brushes,
-        terrain_deferred_brushes,
-        terrain_cells_erased,
-        ..
-    } = app
-        .world()
-        .resource::<ProcessDiagnosticsState>()
-        .gameplay
-        .clone();
-    let match_result = match_result.expect("a completed match carries its result label");
-    assert_eq!(match_result, "victory:0");
-    assert_eq!(
-        (matches_completed, match_active_ticks, team_a_defeats),
-        (2, 150, 0),
-        "one retained summary plus one evicted summary still completes two matches"
-    );
-    assert_eq!(
-        mode_definition_id,
-        Some(WIPEOUT_MODE_DEFINITION.0),
-        "the completed match carries its mode identity"
-    );
-    assert_eq!(wipeout_final_scores, Some([10, 2]));
-    assert_eq!(wipeout_target_score, Some(10));
-    assert_eq!(wipeout_score_margin, Some(8));
-    assert_eq!(
-        hot_zone_controlled_ticks, None,
-        "a Wipeout match carries no Hot Zone fields"
-    );
-    assert_eq!(
-        (build_selections, build_dropped_records),
-        (7, 5),
-        "two retained selections plus five evicted records report seven"
-    );
-    assert_eq!(
-        (
-            accepted_attacks,
-            emitted_deliveries,
-            attacks_with_hostile_contact,
-            hostile_damage
-        ),
-        (4, 6, 3, 40)
-    );
-    assert_eq!(
-        (
-            terrain_requested_brushes,
-            terrain_applied_brushes,
-            terrain_no_op_brushes,
-            terrain_deferred_brushes
-        ),
-        (3, 2, 1, 1)
-    );
-    assert_eq!(terrain_cells_erased, 48);
 }
 
 /// Hot Zone closeouts carry the mode identity plus the terminal objective state the

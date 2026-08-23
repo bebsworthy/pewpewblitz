@@ -24,8 +24,8 @@ use super::input::{
     latest_present_remote_tick,
 };
 use super::{
-    AuthoritativeInputTrace, DESTRUCTIBLE_TERRAIN_LAYER, INDESTRUCTIBLE_TERRAIN_LAYER,
-    MovementTuning, pose_is_valid,
+    AuthoritativeInputTrace, DESTRUCTIBLE_MAP_LAYER, MovementTuning, STATIC_MAP_LAYER,
+    pose_is_valid,
 };
 
 /// One fighter's per-tick movement decision plus the freshness value to commit.
@@ -384,7 +384,7 @@ pub(super) fn authoritative_movement(
             external_motion,
         );
         let filter = SpatialQueryFilter::from_mask(
-            INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
+            STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER | crate::movement::PLAYER_ONLY_MAP_LAYER,
         )
         .with_excluded_entities([entity]);
         let output = move_and_slide.move_and_slide(

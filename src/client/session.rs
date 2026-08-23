@@ -28,7 +28,10 @@ impl Plugin for ClientNetworkPlugin {
         configure_client_settings_ui(app);
         app.insert_resource(FallbackErrorHandler(error))
             .add_plugins(ClientCombatPlugin)
-            .add_plugins(crate::terrain::ClientTerrainPlugin)
+            .add_plugins((
+                crate::map::ClientMapPlugin,
+                crate::map::MapPresentationPlugin,
+            ))
             .add_plugins(ClientQueuePlugin)
             .add_plugins(ClientProfilePlugin)
             .init_resource::<RosterLogState>()

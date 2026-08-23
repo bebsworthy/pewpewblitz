@@ -112,7 +112,7 @@ pub enum BuildResolutionError {
 
 impl BuildCatalog {
     pub fn embedded() -> Result<Self, String> {
-        let catalog: Self = ron::from_str(include_str!("../../content/v1/builds.ron"))
+        let catalog: Self = ron::from_str(include_str!("../../content/catalogs/builds.ron"))
             .map_err(|error| format!("embedded build catalog parse failed: {error}"))?;
         catalog.validate()?;
         Ok(catalog)

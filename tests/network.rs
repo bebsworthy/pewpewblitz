@@ -25,17 +25,13 @@ use brawler::{
         TeamId, TestDummy, TestDummyFixture, TestDummyResetDeadline, WeaponPhase, WeaponPresetId,
         WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
     },
-    config::{
-        ClientNetworkConfig, NetworkImpairmentProfile, NetworkTransport, ServerNetworkConfig,
-    },
+    config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
     map::{
-        AuthoritativeMapPlugin, MapCatalogResource, MapInstanceId, MapInstanceMember,
-        MapLayoutRequirements, MapObjectDefinitionId, MapObjectPlacement, MapPlacementId,
-        MapPresentationProfileId, MapPresetId as ArenaPresetId, MapRegionPlacement, MapRoot,
-        MapShape, MapVisualVariantId, PlayableBounds, RegionId, RegionProfileId, ResolvedMap,
-        ResolvedMapSnapshot, SpawnAssignment, SpawnPointCatalog, SpawnPointId, TeamSpawnPoint,
-        install_resolved_map,
+        AuthoritativeMapPlugin, MapCatalogResource, MapDynamicState, MapInstanceId,
+        MapInstanceMember, MapPlacementId, MapPlacementParameters, MapPresetId as ArenaPresetId,
+        MapRoot, PlayableBounds, ResolvedMap, ResolvedMapSnapshot, SpawnAssignment,
+        SpawnPointCatalog, install_resolved_map,
     },
     matchplay::{
         ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot as MatchRootMarker,
@@ -105,5 +101,3 @@ mod queue;
 mod selection;
 #[path = "network/soaks.rs"]
 mod soaks;
-#[path = "network/terrain.rs"]
-mod terrain;

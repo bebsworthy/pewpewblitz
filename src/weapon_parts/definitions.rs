@@ -28,7 +28,7 @@ pub struct WeaponPartCatalog {
 
 impl WeaponPartCatalog {
     pub fn embedded() -> Result<Self, String> {
-        let catalog: Self = ron::from_str(include_str!("../../content/v7/weapon-parts.ron"))
+        let catalog: Self = ron::from_str(include_str!("../../content/catalogs/weapon_parts.ron"))
             .map_err(|error| format!("embedded weapon-part catalog parse failed: {error}"))?;
         catalog.validate()?;
         Ok(catalog)

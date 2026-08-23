@@ -2,12 +2,8 @@
 #![allow(clippy::wildcard_imports)]
 
 use super::*;
-use crate::movement::{ArenaWall, terrain_collision_layers};
-use avian2d::prelude::{Collider, Position, RigidBody, Rotation};
 use bevy::prelude::*;
-use lightyear::prelude::{NetworkTarget, Replicate};
 
-pub const BUILT_IN_MAP_PRESET: MapPresetId = MapPresetId(1);
 pub const ARENA_WALL_THICKNESS: f32 = 48.0;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -26,7 +22,7 @@ pub struct ServerMapSelection {
 impl Default for ServerMapSelection {
     fn default() -> Self {
         Self {
-            preset_id: BUILT_IN_MAP_PRESET,
+            preset_id: CROSSROADS_PRESET,
         }
     }
 }
@@ -60,6 +56,7 @@ impl Plugin for AuthoritativeMapPlugin {
                 Startup,
                 initialize_authoritative_map.in_set(MapStartupSet::Instantiate),
             );
+        register_map_runtime(app);
     }
 }
 
@@ -72,69 +69,16 @@ fn initialize_authoritative_map(world: &mut World) {
         .resource_mut::<NextMapInstanceId>()
         .allocate()
         .expect("map instance identifier space is available");
-    let catalog = world.resource::<MapCatalogResource>().0.clone();
     let selection = *world.resource::<ServerMapSelection>();
-    let preset = catalog
-        .preset(selection.preset_id)
-        .expect("selected built-in map preset exists");
-    let requirements = MapLayoutRequirements::for_mode_definition(preset.recipe.mode_definition_id)
-        .expect("selected built-in map preset has a known mode");
-    let resolved = catalog
-        .resolve_preset(selection.preset_id, instance_id, &requirements)
-        .expect("embedded built-in map must resolve");
-    install_resolved_map(world, resolved).expect("resolved built-in map must instantiate");
-}
-
-pub fn install_resolved_map(world: &mut World, resolved: ResolvedMap) -> Result<(), String> {
-    let snapshot = &resolved.snapshot;
-    if snapshot.identity.instance_id.0 == 0 {
-        return Err("cannot install a zero map instance".to_string());
-    }
-    teardown_authoritative_map(world);
-    let instance_id = snapshot.identity.instance_id;
-    world.spawn((
-        MapRoot,
-        instance_id,
-        snapshot.identity,
-        snapshot.clone(),
-        Replicate::to_clients(NetworkTarget::All),
-    ));
-    for (index, (position, size)) in perimeter_wall_shapes(snapshot.playable_bounds)
-        .into_iter()
-        .enumerate()
-    {
-        let index = u32::try_from(index).expect("four perimeter indices fit u32");
-        spawn_wall(
-            world,
-            instance_id,
-            MapPlacementId(u32::MAX - index),
-            position,
-            0.0,
-            MapShape::Rectangle {
-                half_extents: size * 0.5,
-            },
-        );
-    }
-    for geometry in &snapshot.geometry {
-        spawn_wall(
-            world,
-            instance_id,
-            geometry.placement_id,
-            geometry.position,
-            geometry.rotation,
-            geometry.shape,
-        );
-    }
-    world.insert_resource(PlayableBounds(snapshot.playable_bounds));
-    world.insert_resource(SpawnPointCatalog(resolved.spawn_points_by_team.clone()));
-    world.insert_resource(resolved);
-    Ok(())
+    let resolved = world
+        .resource::<MapCatalogResource>()
+        .0
+        .resolve_preset(selection.preset_id, instance_id)
+        .expect("embedded grid map must resolve");
+    install_resolved_map(world, resolved).expect("resolved grid map must instantiate");
 }
 
 pub fn teardown_authoritative_map(world: &mut World) {
-    // Narrow terrain cleanup handoff: stale destructible colliders may not survive map
-    // replacement into an unrelated frame.
-    crate::terrain::teardown_authoritative_terrain(world);
     let roots: Vec<_> = {
         let mut query = world.query_filtered::<Entity, With<MapRoot>>();
         query.iter(world).collect()
@@ -159,35 +103,7 @@ pub fn teardown_authoritative_map(world: &mut World) {
     world.remove_resource::<ResolvedMap>();
     world.remove_resource::<PlayableBounds>();
     world.remove_resource::<SpawnPointCatalog>();
-}
-
-fn spawn_wall(
-    world: &mut World,
-    instance_id: MapInstanceId,
-    placement_id: MapPlacementId,
-    position: Vec2,
-    rotation: f32,
-    shape: MapShape,
-) {
-    let collider = match shape {
-        MapShape::Rectangle { half_extents } => {
-            Collider::rectangle(half_extents.x * 2.0, half_extents.y * 2.0)
-        }
-        MapShape::Circle { radius } => Collider::circle(radius),
-    };
-    world.spawn((
-        ArenaWall,
-        MapInstanceMember {
-            map_instance_id: instance_id,
-            placement_id,
-        },
-        RigidBody::Static,
-        collider,
-        terrain_collision_layers(),
-        Position::from_xy(position.x, position.y),
-        Rotation::radians(rotation),
-        Transform::from_translation(position.extend(0.0)),
-    ));
+    world.remove_resource::<crate::matchplay::ResolvedObjectiveZone>();
 }
 
 #[must_use]

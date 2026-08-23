@@ -4,7 +4,7 @@ set -euo pipefail
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 
-world_sources=(src/client/presentation_3d src/combat/client src/map/client.rs src/terrain/client)
+world_sources=(src/client/presentation_3d src/combat/client src/map/client.rs)
 if rg -n '\b(Sprite|Text2d|Mesh2d|ColorMaterial)\b' "${world_sources[@]}"; then
     printf '%s\n' 'V3 gameplay-world presentation contains a retired 2D render type' >&2
     exit 1

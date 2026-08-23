@@ -191,8 +191,9 @@ pub(crate) fn activate_dash(
             continue;
         };
         let filter = SpatialQueryFilter::from_mask(
-            crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+            crate::movement::STATIC_MAP_LAYER
+                | crate::movement::DESTRUCTIBLE_MAP_LAYER
+                | crate::movement::PLAYER_ONLY_MAP_LAYER,
         )
         .with_excluded_entities([entity]);
         let distance = spatial_query
@@ -266,7 +267,7 @@ pub(crate) fn activate_dash(
             kind: crate::abilities::AbilityTelemetryKind::DashTravel {
                 requested_distance_milli: distance_milli(DASH_MAX_DISTANCE),
                 actual_distance_milli: distance_milli(position.0.distance(endpoint)),
-                terrain_truncated: distance + 0.01 < DASH_MAX_DISTANCE,
+                map_collision_truncated: distance + 0.01 < DASH_MAX_DISTANCE,
             },
         });
     }

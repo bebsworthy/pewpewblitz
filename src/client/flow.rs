@@ -4369,7 +4369,7 @@ fn match_loading_text(
         crate::lobby::MatchLoadingPhase::Reserving => "Reserving roster",
         crate::lobby::MatchLoadingPhase::StartingServer => "Starting server",
         crate::lobby::MatchLoadingPhase::Connecting => "Connecting",
-        crate::lobby::MatchLoadingPhase::Synchronizing => "Synchronizing map and terrain",
+        crate::lobby::MatchLoadingPhase::Synchronizing => "Synchronizing map",
         crate::lobby::MatchLoadingPhase::WaitingForPlayers => "Waiting for players",
         crate::lobby::MatchLoadingPhase::Cancelling => "Cancelling",
         crate::lobby::MatchLoadingPhase::ReturningToQueue => "Returning to queue",

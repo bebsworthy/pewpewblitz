@@ -143,7 +143,7 @@ Keep these concerns distinct even when their Rust types live near one another:
 7. client presentation state.
 
 Authoritative mutation belongs to the lobby or match worker that owns the relevant World. Clients
-send intent, not positions, hits, damage, effects, scores, objective results, or terrain edits.
+send intent, not positions, hits, damage, effects, scores, objective results, or map mutations.
 Presentation and diagnostics may observe authoritative facts but do not become a second mutation
 path.
 

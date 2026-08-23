@@ -218,8 +218,8 @@ pub fn process_build_selection(
                                     },
                                     CollisionLayers::new(
                                         crate::movement::FIGHTER_LAYER,
-                                        crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                                            | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                                        crate::movement::STATIC_MAP_LAYER
+                                            | crate::movement::DESTRUCTIBLE_MAP_LAYER,
                                     ),
                                 ))
                                 .remove::<crate::combat::SelectingBuild>()

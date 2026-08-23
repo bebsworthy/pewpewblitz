@@ -1,0 +1,33 @@
+(
+    schema_version: 3,
+    maps: [
+        (
+            id: MapPresetId(1),
+            key: "crossroads-facility",
+            display_name: "Crossroads Facility",
+            admission_revision: 5,
+            document: "builtin/crossroads-facility.ron",
+        ),
+        (
+            id: MapPresetId(2),
+            key: "crossroads-facility-hot-zone",
+            display_name: "Crossroads Facility (Hot Zone)",
+            admission_revision: 2,
+            document: "builtin/crossroads-facility-hot-zone.ron",
+        ),
+        (
+            id: MapPresetId(3),
+            key: "ashen-court",
+            display_name: "Ashen Court",
+            admission_revision: 2,
+            document: "builtin/ashen-court.ron",
+        ),
+        (
+            id: MapPresetId(4),
+            key: "tidal-garden",
+            display_name: "Tidal Garden",
+            admission_revision: 1,
+            document: "builtin/tidal-garden.ron",
+        ),
+    ],
+)

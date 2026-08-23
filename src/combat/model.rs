@@ -280,7 +280,7 @@ pub struct PendingDelivery {
 }
 
 /// One committed delivery-level world effect. Combat emits these after the delivery
-/// transaction commits; the terrain authority owns whether any cell actually changes.
+/// transaction commits; the map authority owns whether any cell actually changes.
 #[cfg(feature = "server")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct CombatWorldEffectFact {

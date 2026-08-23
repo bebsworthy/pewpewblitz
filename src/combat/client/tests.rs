@@ -10,12 +10,9 @@ use crate::combat::{
     fighter_color, projectile_color,
 };
 use crate::combat::{FighterDefinitions, WeaponCatalog, WeaponPresetId};
-use crate::map::{
-    MapContentCatalog, MapInstanceId, MapLayoutRequirements, MapPresetId as ArenaPresetId,
-};
+use crate::map::{MapContentCatalog, MapDynamicState, MapInstanceId, MapPresetId as ArenaPresetId};
 use crate::protocol::{Fighter, PlayerId};
 use crate::timing::SimulationTick;
-use std::collections::BTreeMap;
 
 fn preview_for(id: u16) -> Vec<(Vec2, f32, Vec2, Color)> {
     let catalog = WeaponCatalog::embedded().unwrap();
@@ -25,19 +22,22 @@ fn preview_for(id: u16) -> Vec<(Vec2, f32, Vec2, Color)> {
         .unwrap();
     let map_catalog = MapContentCatalog::embedded().unwrap();
     let map = map_catalog
-        .resolve_preset(
-            ArenaPresetId(1),
-            MapInstanceId(1),
-            &MapLayoutRequirements::wipeout(),
-        )
+        .resolve_preset(ArenaPresetId(1), MapInstanceId(1))
         .unwrap();
+    let state = MapDynamicState {
+        map_instance_id: MapInstanceId(1),
+        generation: 1,
+        revision: 0,
+        terminal_states: Vec::new(),
+    };
     preview_segments(
         Vec2::ZERO,
         0.0,
         None,
         &resolved,
         &map.snapshot,
-        &BTreeMap::new(),
+        &state,
+        &map_catalog,
     )
 }
 
@@ -67,77 +67,25 @@ fn launcher_preview_uses_the_requested_focal_distance() {
     let resolved = catalog.resolve_preset(WeaponPresetId(3), &fighter).unwrap();
     let map_catalog = MapContentCatalog::embedded().unwrap();
     let map = map_catalog
-        .resolve_preset(
-            ArenaPresetId(1),
-            MapInstanceId(1),
-            &MapLayoutRequirements::wipeout(),
-        )
+        .resolve_preset(ArenaPresetId(1), MapInstanceId(1))
         .unwrap();
+    let state = MapDynamicState {
+        map_instance_id: MapInstanceId(1),
+        generation: 1,
+        revision: 0,
+        terminal_states: Vec::new(),
+    };
     let segments = preview_segments(
         Vec2::ZERO,
         0.0,
         Some(180.0),
         &resolved,
         &map.snapshot,
-        &BTreeMap::new(),
+        &state,
+        &map_catalog,
     );
 
     assert!((segments[0].2.x - 180.0).abs() < 0.001);
-}
-
-#[test]
-fn launcher_preview_repairs_landings_against_committed_terrain() {
-    let catalog = WeaponCatalog::embedded().unwrap();
-    let fighter = FighterDefinitions::default().entries[0];
-    let resolved = catalog.resolve_preset(WeaponPresetId(3), &fighter).unwrap();
-    let map_catalog = MapContentCatalog::embedded().unwrap();
-    let map = map_catalog
-        .resolve_preset(
-            ArenaPresetId(1),
-            MapInstanceId(1),
-            &MapLayoutRequirements::wipeout(),
-        )
-        .unwrap();
-    // Occupied destructible cells covering world x [288, 328) around the aim axis:
-    // the marker must repair exactly like the server's collider clearance instead of
-    // promising a landing inside terrain.
-    let mut chunks: BTreeMap<crate::terrain::TerrainChunkId, crate::terrain::TerrainBits> =
-        BTreeMap::new();
-    for cell_y in -3..3 {
-        for cell_x in 36..41 {
-            let Some((chunk, (local_x, local_y))) =
-                crate::terrain::grid::cell_to_chunk_and_local((cell_x, cell_y))
-            else {
-                continue;
-            };
-            chunks.entry(chunk).or_default().set(local_x, local_y);
-        }
-    }
-    let empty = preview_segments(
-        Vec2::ZERO,
-        0.0,
-        Some(300.0),
-        &resolved,
-        &map.snapshot,
-        &BTreeMap::new(),
-    );
-    assert!((empty[1].0.x - 300.0).abs() <= 0.5);
-    assert_eq!(empty[1].3, Color::srgba(0.35, 0.85, 1.0, 0.34));
-
-    let repaired = preview_segments(
-        Vec2::ZERO,
-        0.0,
-        Some(300.0),
-        &resolved,
-        &map.snapshot,
-        &chunks,
-    );
-    assert!(
-        repaired[1].0.x < 286.0 && repaired[1].0.x > 260.0,
-        "the marker pulls back out of the occupied cells: {}",
-        repaired[1].0.x
-    );
-    assert_eq!(repaired[1].3, Color::srgba(0.95, 0.35, 1.0, 0.45));
 }
 
 /// Resolve a loadout through the real build pipeline, so presentation tests observe the

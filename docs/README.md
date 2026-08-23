@@ -60,6 +60,9 @@ delivery status and evidence.
   and security contracts.
 - [Balance Lab guide](./15-balance-lab.md) — local operator workflow, validation philosophy,
   persistence, limitations, and the required maintenance checklist for fighter and weapon changes.
+- [Grid map-asset system specification](./16-grid-map-asset-system.md) — implemented V8 sparse-grid
+  recipes, unified map assets, gameplay properties, client visual profiles, conversion, and
+  legacy-removal contract.
 - [Research sources](./06-research-sources.md) — external references used to establish the original
   product and technical baseline.
 
@@ -85,6 +88,7 @@ and closeout learning.
 | V5 | Auto-connect, Player Dashboard, connected-loop convergence, responsive presentation, and lifecycle hardening | [V5 roadmap](./implementation/v5/roadmap.md) |
 | V6 | Development-only, server-authoritative Practice Balance Lab for rapid fighter and weapon tuning | [V6 roadmap](./implementation/v6/roadmap.md) |
 | V7 | Persistent server-owned player profiles, saved brawlers, weapon bases, and four-slot weapon-part equipment | [V7 roadmap](./implementation/v7/roadmap.md) |
+| V8 | Sparse-grid maps, unified map-asset/gameplay/visual catalogs, full built-in conversion, and retirement of the old production map system | [V8 roadmap](./implementation/v8/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

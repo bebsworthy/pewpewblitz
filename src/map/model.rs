@@ -1,4 +1,4 @@
-//! Stable authored and resolved map data shared by authoritative and presentation roles.
+//! Stable identities and generic runtime facts shared by every map role.
 
 use bevy::prelude::{Component, Resource, Vec2};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,13 @@ macro_rules! stable_id {
 
 stable_id!(MapPresetId, u16);
 stable_id!(MapRecipeId, u64);
+stable_id!(MapRecipeFingerprint, u64);
+stable_id!(MapPlacementId, u32);
+stable_id!(MapPresentationThemeId, u16);
+stable_id!(ModeDefinitionId, u16);
+stable_id!(ModeAnchorId, u32);
+stable_id!(SpawnPointId, u16);
+
 #[derive(
     Component,
     Serialize,
@@ -40,20 +47,6 @@ stable_id!(MapRecipeId, u64);
     PartialOrd,
 )]
 pub struct MapInstanceId(pub u64);
-stable_id!(MapRecipeFingerprint, u64);
-stable_id!(MapPlacementId, u32);
-stable_id!(MapPresentationThemeId, u16);
-stable_id!(MapPresentationProfileId, u16);
-stable_id!(MapObjectDefinitionId, u16);
-stable_id!(MapVisualVariantId, u16);
-stable_id!(CollisionProfileId, u16);
-stable_id!(RegionProfileId, u16);
-stable_id!(EntityDefinitionId, u16);
-stable_id!(ModeDefinitionId, u16);
-stable_id!(ModeAnchorDefinitionId, u16);
-stable_id!(ModeAnchorId, u32);
-stable_id!(SpawnPointId, u16);
-stable_id!(RegionId, u16);
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct AxisAlignedMapRect {
@@ -103,11 +96,22 @@ pub enum MapShape {
     Circle { radius: f32 },
 }
 
-/// A normalized, axis-aligned objective area derived from one resolved area anchor.
-///
-/// Containment is inclusive on the boundary: a fighter center exactly on the circle or
-/// rectangle edge counts as inside. Server occupancy uses this math authoritatively;
-/// clients may repeat it only for presentation.
+impl MapShape {
+    #[must_use]
+    pub fn bounding_half_extents(self, rotation: f32) -> Vec2 {
+        match self {
+            Self::Rectangle { half_extents } => {
+                let (sin, cos) = rotation.sin_cos();
+                Vec2::new(
+                    cos.abs() * half_extents.x + sin.abs() * half_extents.y,
+                    sin.abs() * half_extents.x + cos.abs() * half_extents.y,
+                )
+            }
+            Self::Circle { radius } => Vec2::splat(radius),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct NormalizedArea {
     pub center: Vec2,
@@ -127,88 +131,6 @@ impl NormalizedArea {
     }
 }
 
-impl MapShape {
-    #[must_use]
-    pub fn bounding_half_extents(self, rotation: f32) -> Vec2 {
-        match self {
-            Self::Rectangle { half_extents } => {
-                let (sin, cos) = rotation.sin_cos();
-                Vec2::new(
-                    cos.abs() * half_extents.x + sin.abs() * half_extents.y,
-                    sin.abs() * half_extents.x + cos.abs() * half_extents.y,
-                )
-            }
-            Self::Circle { radius } => Vec2::splat(radius),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct MapObjectPlacement {
-    pub placement_id: MapPlacementId,
-    pub object_definition_id: MapObjectDefinitionId,
-    pub visual_variant_id: Option<MapVisualVariantId>,
-    pub position: Vec2,
-    pub rotation: f32,
-    pub footprint_override: Option<MapShape>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct GeometryPlacement {
-    pub placement_id: MapPlacementId,
-    pub object_definition_id: MapObjectDefinitionId,
-    pub visual_variant_id: Option<MapVisualVariantId>,
-    pub collision_profile_id: CollisionProfileId,
-    pub presentation_profile_id: Option<MapPresentationProfileId>,
-    pub position: Vec2,
-    pub rotation: f32,
-    pub shape: MapShape,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub enum VisualPlacementKind {
-    TiledRectangle { half_extents: Vec2, cell_size: Vec2 },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct VisualPlacement {
-    pub placement_id: MapPlacementId,
-    pub presentation_profile_id: MapPresentationProfileId,
-    pub position: Vec2,
-    pub rotation: f32,
-    pub kind: VisualPlacementKind,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct MapEntityPlacement {
-    pub placement_id: MapPlacementId,
-    pub object_definition_id: MapObjectDefinitionId,
-    pub visual_variant_id: Option<MapVisualVariantId>,
-    pub definition_id: EntityDefinitionId,
-    pub presentation_profile_id: MapPresentationProfileId,
-    pub position: Vec2,
-    pub rotation: f32,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct MapRegionPlacement {
-    pub placement_id: MapPlacementId,
-    pub region_id: RegionId,
-    pub profile_id: RegionProfileId,
-    pub presentation_profile_id: MapPresentationProfileId,
-    pub position: Vec2,
-    pub rotation: f32,
-    pub shape: MapShape,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct TeamSpawnArea {
-    pub placement_id: MapPlacementId,
-    pub team_slot: u8,
-    pub bounds: AxisAlignedMapRect,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TeamSpawnPoint {
     pub placement_id: MapPlacementId,
@@ -218,46 +140,6 @@ pub struct TeamSpawnPoint {
     pub facing: f32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub enum ModeAnchorShape {
-    Point { position: Vec2, facing: f32 },
-    Area { position: Vec2, shape: MapShape },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ModeAnchorPlacement {
-    pub placement_id: MapPlacementId,
-    pub anchor_id: ModeAnchorId,
-    pub definition_id: ModeAnchorDefinitionId,
-    pub shape: ModeAnchorShape,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct MapRecipe {
-    pub recipe_id: MapRecipeId,
-    pub revision: u32,
-    pub recipe_version: u16,
-    pub mode_definition_id: ModeDefinitionId,
-    pub presentation_theme_id: MapPresentationThemeId,
-    pub playable_bounds: AxisAlignedMapRect,
-    pub camera_bounds: AxisAlignedMapRect,
-    pub objects: Vec<MapObjectPlacement>,
-    pub regions: Vec<MapRegionPlacement>,
-    pub spawn_areas: Vec<TeamSpawnArea>,
-    pub spawn_points: Vec<TeamSpawnPoint>,
-    pub mode_anchors: Vec<ModeAnchorPlacement>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ResolvedVisualInstance {
-    pub placement_id: MapPlacementId,
-    pub instance_index: u16,
-    pub presentation_profile_id: MapPresentationProfileId,
-    pub position: Vec2,
-    pub rotation: f32,
-}
-
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedMapIdentity {
     pub instance_id: MapInstanceId,
@@ -265,64 +147,6 @@ pub struct ResolvedMapIdentity {
     pub recipe_id: MapRecipeId,
     pub recipe_revision: u32,
     pub recipe_fingerprint: MapRecipeFingerprint,
-}
-
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ResolvedMapSnapshot {
-    pub identity: ResolvedMapIdentity,
-    pub catalog_schema_version: u16,
-    pub recipe_schema_version: u16,
-    pub layout_schema_version: u16,
-    pub presentation_theme_id: MapPresentationThemeId,
-    pub mode_definition_id: ModeDefinitionId,
-    pub playable_bounds: AxisAlignedMapRect,
-    pub camera_bounds: AxisAlignedMapRect,
-    pub geometry: Vec<GeometryPlacement>,
-    pub visual_instances: Vec<ResolvedVisualInstance>,
-    pub entities: Vec<MapEntityPlacement>,
-    pub regions: Vec<MapRegionPlacement>,
-    pub spawn_areas: Vec<TeamSpawnArea>,
-    pub spawn_points: Vec<TeamSpawnPoint>,
-    pub mode_anchors: Vec<ModeAnchorPlacement>,
-}
-
-#[derive(Resource, Clone, Debug, PartialEq)]
-pub struct ResolvedMap {
-    pub snapshot: ResolvedMapSnapshot,
-    pub spawn_points_by_team: BTreeMap<u8, Vec<TeamSpawnPoint>>,
-    pub regions_by_id: BTreeMap<RegionId, MapRegionPlacement>,
-    pub anchors_by_definition: BTreeMap<ModeAnchorDefinitionId, Vec<ModeAnchorPlacement>>,
-}
-
-impl ResolvedMap {
-    #[must_use]
-    pub fn from_snapshot(snapshot: ResolvedMapSnapshot) -> Self {
-        let mut spawn_points_by_team: BTreeMap<u8, Vec<TeamSpawnPoint>> = BTreeMap::new();
-        for point in &snapshot.spawn_points {
-            spawn_points_by_team
-                .entry(point.team_slot)
-                .or_default()
-                .push(point.clone());
-        }
-        let regions_by_id = snapshot
-            .regions
-            .iter()
-            .map(|region| (region.region_id, region.clone()))
-            .collect();
-        let mut anchors_by_definition: BTreeMap<_, Vec<_>> = BTreeMap::new();
-        for anchor in &snapshot.mode_anchors {
-            anchors_by_definition
-                .entry(anchor.definition_id)
-                .or_default()
-                .push(anchor.clone());
-        }
-        Self {
-            snapshot,
-            spawn_points_by_team,
-            regions_by_id,
-            anchors_by_definition,
-        }
-    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]

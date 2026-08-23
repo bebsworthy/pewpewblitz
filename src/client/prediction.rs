@@ -4,16 +4,19 @@
 //! Cargo feature enabled only by the prediction-comparison measurement. The server
 //! remains the sole pose authority; the client only simulates the same deterministic
 //! movement rules for immediate presentation and resynchronizes on every authoritative
-//! pose. Remote fighters, combat, abilities, terrain mutation, match rules, and session
+//! pose. Remote fighters, combat, abilities, map mutation, match rules, and session
 //! lifecycle are never predicted.
 //!
 //! Known candidate limitation recorded by the experiment: collision resolution covers the
-//! static arena geometry from the replicated map snapshot only. Destructible terrain is
+//! static arena geometry from the replicated map snapshot only. Destructible map assets is
 //! server-authoritative and unmodelled here, so predicted poses can cross still-solid
 //! destructible cells until the next authoritative correction.
 
 use crate::combat::{ActiveEffects, AuthoritativePose, FighterDefinitionId};
-use crate::map::{GeometryPlacement, MapRoot, MapShape, ResolvedMapSnapshot};
+use crate::map::{
+    MapCatalogResource, MapDynamicState, MapRoot, ResolvedMapSnapshot,
+    resolve_circle_against_blocking_map,
+};
 use crate::movement::{InputTuning, MovementTuning, committed_aim, decoded_move};
 use crate::movement::{active_slow_multiplier, adrenaline_multiplier};
 use crate::protocol::{Fighter, FighterInput};
@@ -197,7 +200,8 @@ fn predict_owner_movement(
     time: Res<Time<Fixed>>,
     tuning: Res<MovementTuning>,
     input_tuning: Res<InputTuning>,
-    snapshots: Query<&ResolvedMapSnapshot, With<MapRoot>>,
+    maps: Query<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>,
+    catalog: Res<MapCatalogResource>,
     mut owners: Query<
         (
             &FighterDefinitionId,
@@ -214,7 +218,7 @@ fn predict_owner_movement(
     if !settings.enabled {
         return;
     }
-    let Ok(snapshot) = snapshots.single() else {
+    let Ok((snapshot, map_state)) = maps.single() else {
         return;
     };
     let delta = time.delta().as_secs_f32();
@@ -242,7 +246,13 @@ fn predict_owner_movement(
             * active_slow_multiplier(effects, tick.0)
             * adrenaline_multiplier(passive_state, tick.0);
         let mut position = predicted.position + velocity * delta;
-        position = resolve_static_arena(position, tuning.radius, snapshot);
+        position = resolve_circle_against_blocking_map(
+            position,
+            tuning.radius,
+            snapshot,
+            map_state,
+            &catalog.0,
+        );
         predicted.position = position;
         predicted.tick = tick.0.max(history.last_reconciled_tick);
         history.entries.push_back((tick.0, position));
@@ -250,61 +260,5 @@ fn predict_owner_movement(
             history.entries.pop_front();
         }
         stats.predicted_ticks = stats.predicted_ticks.saturating_add(1);
-    }
-}
-
-/// Bounded static-arena resolution: clamp to the playable bounds, then push the fighter
-/// circle out of every static geometry placement (two relaxation passes).
-#[must_use]
-pub fn resolve_static_arena(position: Vec2, radius: f32, snapshot: &ResolvedMapSnapshot) -> Vec2 {
-    let mut position = snapshot.playable_bounds.clamp_circle(position, radius);
-    for _ in 0..2 {
-        for placement in &snapshot.geometry {
-            position = push_out_of_placement(position, radius, placement);
-        }
-        position = snapshot.playable_bounds.clamp_circle(position, radius);
-    }
-    position
-}
-
-fn push_out_of_placement(position: Vec2, radius: f32, placement: &GeometryPlacement) -> Vec2 {
-    match placement.shape {
-        MapShape::Circle {
-            radius: obstacle_radius,
-        } => {
-            let delta = position - placement.position;
-            let distance = delta.length();
-            let minimum = radius + obstacle_radius;
-            if distance >= minimum || distance <= f32::EPSILON {
-                position
-            } else {
-                placement.position + delta / distance * minimum
-            }
-        }
-        MapShape::Rectangle { half_extents } => {
-            // Transform into the placement's local frame, push to the closest surface
-            // point, and transform back.
-            let rotation = Vec2::from_angle(-placement.rotation);
-            let local = rotation.rotate(position - placement.position);
-            let closest = local.clamp(-half_extents, half_extents);
-            let offset = local - closest;
-            let distance = offset.length();
-            if distance >= radius {
-                return position;
-            }
-            let resolved = if distance <= f32::EPSILON {
-                // The center is inside the rectangle: exit along the shallowest axis.
-                let to_positive_x = half_extents.x - local.x.abs();
-                let to_positive_y = half_extents.y - local.y.abs();
-                if to_positive_x <= to_positive_y {
-                    Vec2::new(local.x.signum() * (half_extents.x + radius), local.y)
-                } else {
-                    Vec2::new(local.x, local.y.signum() * (half_extents.y + radius))
-                }
-            } else {
-                closest + offset / distance * radius
-            };
-            placement.position + Vec2::from_angle(placement.rotation).rotate(resolved)
-        }
     }
 }

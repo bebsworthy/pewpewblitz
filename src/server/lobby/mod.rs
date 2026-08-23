@@ -1,7 +1,7 @@
 //! Bounded M01 lobby-worker session and allocation state.
 //!
 //! This module owns only the authenticated lobby roster and its supervisor allocation transaction.
-//! It deliberately has no map, physics, combat, match, or terrain authority.  The pure state
+//! It deliberately has no map, physics, combat, match, or map authority.  The pure state
 //! machine is kept separate from the Bevy adapters so deterministic codec and idempotency tests do
 //! not need a running network endpoint.
 
@@ -544,8 +544,8 @@ impl LobbyState {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let map_preset = match self.mode {
-            GameMode::Wipeout => crate::map::BUILT_IN_MAP_PRESET,
-            GameMode::HotZone => crate::map::HOT_ZONE_MAP_PRESET,
+            GameMode::Wipeout => crate::map::CROSSROADS_PRESET,
+            GameMode::HotZone => crate::map::CROSSROADS_HOT_ZONE_PRESET,
         };
         let map_revision = crate::map::MapContentCatalog::embedded()
             .ok()

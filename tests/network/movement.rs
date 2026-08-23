@@ -599,26 +599,38 @@ fn configured_map_recipe_drives_authoritative_spawn_pose() {
             .server
             .world_mut()
             .resource_mut::<MapCatalogResource>();
-        for point in &mut catalog.0.presets[0].recipe.spawn_points {
-            if point.team_slot == 0 {
-                point.position.x = -800.0;
-                point.facing = 0.25;
+        for placement in &mut catalog.0.presets[0].recipe.placements {
+            if let MapPlacementParameters::PlayerSpawn {
+                team_slot,
+                facing_quarter_turns,
+                ..
+            } = &mut placement.parameters
+                && *team_slot == 0
+            {
+                placement.cell.x = 3;
+                *facing_quarter_turns = 1;
             }
         }
     }
     for client in &mut harness.clients {
         let mut catalog = client.world_mut().resource_mut::<MapCatalogResource>();
-        for point in &mut catalog.0.presets[0].recipe.spawn_points {
-            if point.team_slot == 0 {
-                point.position.x = -800.0;
-                point.facing = 0.25;
+        for placement in &mut catalog.0.presets[0].recipe.placements {
+            if let MapPlacementParameters::PlayerSpawn {
+                team_slot,
+                facing_quarter_turns,
+                ..
+            } = &mut placement.parameters
+                && *team_slot == 0
+            {
+                placement.cell.x = 3;
+                *facing_quarter_turns = 1;
             }
         }
     }
     harness.step_until(|harness| harness.client_is_active(0) && harness.server_ids().len() == 1);
     let pose = harness.server_poses()[0];
-    assert!((pose.1.0.x + 800.0).abs() < 0.5);
-    assert!((pose.2.as_radians() - 0.25).abs() < 0.01);
+    assert!((pose.1.0.x + 784.0).abs() < 0.5);
+    assert!((pose.2.as_radians() - std::f32::consts::FRAC_PI_2).abs() < 0.01);
 }
 
 #[test]

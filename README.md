@@ -3,12 +3,12 @@
 PewPew Blitz is a server-authoritative top-down arena shooter built around player-authored brawler
 builds, readable combat, meaningful tradeoffs, and short objective matches. The current product
 supports Wipeout and Hot Zone, bounded weapon/build recipes, abilities and passives, destructible
-terrain, independently authored maps, a fixed-camera 3D presentation, server-local multiplayer,
+map assets, independently authored maps, a fixed-camera 3D presentation, server-local multiplayer,
 and server-hosted practice matches with inert roster bots.
 
 The windowed client presents the Player Dashboard and renders the world, HUD, audio, and local input.
 The routed supervisor and lobby own admission and server-local queues; isolated match workers own
-authoritative movement, combat, terrain, modes, lifecycle, and outcomes. Avian 2D remains the planar
+authoritative movement, combat, map dynamics, modes, lifecycle, and outcomes. Avian 2D remains the planar
 collision authority beneath the 3D presentation.
 
 The product is named PewPew Blitz; repository, crate, executable, log-target, and environment-variable
@@ -157,14 +157,16 @@ Server game types live in [`config/server/game-types.ron`](config/server/game-ty
 advertisement combines one mode, compatible map pool, exact team topology, and flat bounded match
 rules. Startup validates the catalog before the lobby advertises it or a match worker installs it.
 
-Non-map authored gameplay catalogs live under [`content/v1/`](content/v1/). Built-in map documents
-and shared server-safe map definitions live under [`content/v4/`](content/v4/). To add a built-in
-map, create `content/v4/maps/builtin/<map-key>.ron` and add its stable metadata and admission revision
-to the sorted [`content/v4/maps/index.ron`](content/v4/maps/index.ron). Startup rejects disagreement
-between the index and embedded map sources.
+Build-embedded, headless-safe gameplay definitions live under
+[`content/catalogs/`](content/catalogs/). Built-in sparse-grid map documents live under
+[`content/maps/`](content/maps/). To add a built-in map, create
+`content/maps/builtin/<map-key>.ron` and add its stable metadata and admission revision to the
+sorted [`content/maps/index.ron`](content/maps/index.ron). Startup rejects disagreement between the
+index and embedded map sources.
 
-Map recipes reference stable semantic IDs rather than client asset paths. The server lowers those
-placements into a resolved authoritative snapshot. The client maps stable presentation IDs through
+Map recipes reference stable `MapAssetId`s rather than client asset paths. The server derives
+surfaces, collision, destruction, spawns, and typed mode anchors from shared gameplay profiles and
+lowers them into a resolved authoritative snapshot. The client maps stable visual IDs through
 [`assets/catalogs/`](assets/catalogs/) to art under [`assets/brawler/`](assets/brawler/). Exact source
 and CC0 provenance live in [`assets/manifest.ron`](assets/manifest.ron), with retained license texts
 under [`assets/licenses/`](assets/licenses/).

@@ -39,7 +39,8 @@ use crate::combat::{
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
-    MapInstanceId, MapRoot, ResolvedMapIdentity, ResolvedMapSnapshot, SpawnAssignment,
+    MapDynamicState, MapInstanceId, MapRoot, ResolvedMapIdentity, ResolvedMapSnapshot,
+    SpawnAssignment,
 };
 use crate::matchplay::{
     FighterDisplayName, HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker,
@@ -51,7 +52,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 17;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 21;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -68,9 +69,8 @@ pub struct QueueSnapshotChannel;
 /// Ordered reliable server-to-client stream for presentation-only combat facts.
 pub struct CombatChannel;
 
-/// Ordered reliable bidirectional channel for terrain events and bounded recovery. Kept
-/// distinct so a fragmented recovery snapshot never blocks joins or combat presentation.
-pub struct TerrainChannel;
+/// Ordered reliable map-mutation and bounded recovery traffic.
+pub struct MapDynamicChannel;
 
 #[cfg(feature = "network-test")]
 pub type TestNativeInputMessage = InputMessage<NativeStateSequence<FighterInput>>;
@@ -620,18 +620,16 @@ fn interpolate_network_pose(
     )
 }
 
-/// Register the terrain wire: one ordered reliable bidirectional channel kept distinct
-/// from session and combat traffic so fragmented recovery never blocks either.
-fn register_terrain_protocol(app: &mut App) {
-    app.register_message::<crate::terrain::TerrainDestructionEvent>()
+fn register_map_dynamic_protocol(app: &mut App) {
+    app.register_message::<crate::map::MapMutationEvent>()
         .add_direction(NetworkDirection::ServerToClient);
-    app.register_message::<crate::terrain::TerrainResetEvent>()
+    app.register_message::<crate::map::MapDynamicResetEvent>()
         .add_direction(NetworkDirection::ServerToClient);
-    app.register_message::<crate::terrain::TerrainRecoveryRequest>()
+    app.register_message::<crate::map::MapDynamicRecoveryRequest>()
         .add_direction(NetworkDirection::ClientToServer);
-    app.register_message::<crate::terrain::TerrainRecoverySnapshot>()
+    app.register_message::<crate::map::MapDynamicRecoverySnapshot>()
         .add_direction(NetworkDirection::ServerToClient);
-    app.add_channel::<TerrainChannel>(ChannelSettings {
+    app.add_channel::<MapDynamicChannel>(ChannelSettings {
         mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
         ..default()
     })
@@ -674,6 +672,7 @@ fn register_replicated_components(app: &mut App) {
     app.component::<MapInstanceId>().replicate_once();
     app.component::<ResolvedMapIdentity>().replicate_once();
     app.component::<ResolvedMapSnapshot>().replicate_once();
+    app.component::<MapDynamicState>().replicate_once();
     app.component::<SpawnAssignment>().replicate();
     app.component::<PlayerId>().replicate_once();
     app.component::<NetworkEntityId>().replicate_once();
@@ -783,7 +782,7 @@ impl Plugin for ProtocolPlugin {
         })
         .add_direction(NetworkDirection::ServerToClient);
 
-        register_terrain_protocol(app);
+        register_map_dynamic_protocol(app);
 
         register_replicated_components(app);
         app.add_systems(Startup, initialize_protocol_fingerprint);
@@ -870,10 +869,10 @@ mod tests {
         assert!(app.is_message_registered::<MatchLoadingServerMessage>());
         assert!(app.is_message_registered::<MatchLoadingStatus>());
         assert!(app.is_message_registered::<CombatCue>());
-        assert!(app.is_message_registered::<crate::terrain::TerrainDestructionEvent>());
-        assert!(app.is_message_registered::<crate::terrain::TerrainResetEvent>());
-        assert!(app.is_message_registered::<crate::terrain::TerrainRecoveryRequest>());
-        assert!(app.is_message_registered::<crate::terrain::TerrainRecoverySnapshot>());
+        assert!(app.is_message_registered::<crate::map::MapMutationEvent>());
+        assert!(app.is_message_registered::<crate::map::MapDynamicResetEvent>());
+        assert!(app.is_message_registered::<crate::map::MapDynamicRecoveryRequest>());
+        assert!(app.is_message_registered::<crate::map::MapDynamicRecoverySnapshot>());
         assert!(app.world().contains_resource::<MessageRegistry>());
         assert!(app.world().contains_resource::<ChannelRegistry>());
         let channels = app.world().resource::<ChannelRegistry>();
@@ -884,7 +883,7 @@ mod tests {
             channels.get_name_from_net_id(id) == core::any::type_name::<QueueSnapshotChannel>()
         }));
         assert!((0..32).any(|id| {
-            channels.get_name_from_net_id(id) == core::any::type_name::<TerrainChannel>()
+            channels.get_name_from_net_id(id) == core::any::type_name::<MapDynamicChannel>()
         }));
         let components = app.world().resource::<ComponentRegistry>();
         assert!(components.is_registered::<Fighter>());
@@ -1112,7 +1111,7 @@ mod tests {
     }
 
     #[test]
-    fn terrain_messages_install_senders_only_in_their_exact_directions() {
+    fn map_dynamic_messages_install_senders_only_in_their_exact_directions() {
         let mut client = App::new();
         client.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin));
         #[cfg(feature = "client")]
@@ -1134,17 +1133,17 @@ mod tests {
             let world = client.world();
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainRecoveryRequest>>(client_link)
+                    .get::<MessageSender<crate::map::MapDynamicRecoveryRequest>>(client_link)
                     .is_some()
             );
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainDestructionEvent>>(client_link)
+                    .get::<MessageSender<crate::map::MapMutationEvent>>(client_link)
                     .is_none()
             );
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainRecoverySnapshot>>(client_link)
+                    .get::<MessageSender<crate::map::MapDynamicRecoverySnapshot>>(client_link)
                     .is_none()
             );
             assert!(
@@ -1154,7 +1153,7 @@ mod tests {
             );
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainResetEvent>>(client_link)
+                    .get::<MessageSender<crate::map::MapDynamicResetEvent>>(client_link)
                     .is_none()
             );
         }
@@ -1180,22 +1179,22 @@ mod tests {
             let world = server.world();
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainDestructionEvent>>(server_link)
+                    .get::<MessageSender<crate::map::MapMutationEvent>>(server_link)
                     .is_some()
             );
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainRecoverySnapshot>>(server_link)
+                    .get::<MessageSender<crate::map::MapDynamicRecoverySnapshot>>(server_link)
                     .is_some()
             );
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainResetEvent>>(server_link)
+                    .get::<MessageSender<crate::map::MapDynamicResetEvent>>(server_link)
                     .is_some()
             );
             assert!(
                 world
-                    .get::<MessageSender<crate::terrain::TerrainRecoveryRequest>>(server_link)
+                    .get::<MessageSender<crate::map::MapDynamicRecoveryRequest>>(server_link)
                     .is_none()
             );
             assert!(
@@ -1277,58 +1276,51 @@ mod tests {
     }
 
     #[test]
-    fn terrain_wire_shapes_round_trip_with_serde() {
-        use crate::terrain::{
-            TerrainBits, TerrainBrush, TerrainChunkId, TerrainChunkSnapshot,
-            TerrainDestructionEvent, TerrainGeneration, TerrainRecoverySnapshot, TerrainResetEvent,
+    fn map_dynamic_wire_shapes_round_trip_with_serde() {
+        use crate::map::{
+            MapAssetId, MapDynamicGeneration, MapDynamicRecoverySnapshot, MapDynamicResetEvent,
+            MapDynamicState, MapMutationEvent, MapPlacementId, MapPlacementOutcome,
+            MapPlacementTransition,
         };
-        let generation = TerrainGeneration {
+        let generation = MapDynamicGeneration {
             map_instance_id: MapInstanceId(3),
-            match_id: crate::matchplay::MatchId(7),
-            terrain_fingerprint: 0x1234_5678_9abc_def0,
+            generation: 7,
         };
-        let event = TerrainDestructionEvent {
+        let transition = MapPlacementTransition {
+            placement_id: MapPlacementId(11),
+            outcome: MapPlacementOutcome::ReplacedWith(MapAssetId(4)),
+        };
+        let event = MapMutationEvent {
             generation,
             revision: 42,
-            source_attack_id: crate::combat::AttackId(11),
-            source_delivery_index: 0,
-            brush: TerrainBrush {
-                center_half_cells_x: -3,
-                center_half_cells_y: 5,
-                radius_half_cells: 12,
-            },
-            affected_chunks: vec![
-                TerrainChunkId { x: -1, y: 0 },
-                TerrainChunkId { x: 0, y: 0 },
-            ],
-            erased_cells: 77,
+            transitions: vec![transition],
         };
         let bytes = postcard::to_allocvec(&event).expect("event serializes");
-        let decoded: TerrainDestructionEvent =
-            postcard::from_bytes(&bytes).expect("event deserializes");
+        let decoded: MapMutationEvent = postcard::from_bytes(&bytes).expect("event deserializes");
         assert_eq!(decoded, event);
 
-        let snapshot = TerrainRecoverySnapshot {
-            generation,
-            revision: 42,
-            chunks: vec![TerrainChunkSnapshot {
-                chunk_id: TerrainChunkId { x: 0, y: 0 },
-                occupancy: TerrainBits([u64::MAX; 16]),
-            }],
+        let snapshot = MapDynamicRecoverySnapshot {
+            state: MapDynamicState {
+                map_instance_id: generation.map_instance_id,
+                generation: generation.generation,
+                revision: 42,
+                terminal_states: vec![transition],
+            },
         };
         let bytes = postcard::to_allocvec(&snapshot).expect("snapshot serializes");
-        let decoded: TerrainRecoverySnapshot =
+        let decoded: MapDynamicRecoverySnapshot =
             postcard::from_bytes(&bytes).expect("snapshot deserializes");
         assert_eq!(decoded, snapshot);
-        let reset = TerrainResetEvent {
+        let reset = MapDynamicResetEvent {
             previous_generation: generation,
-            next_generation: TerrainGeneration {
-                match_id: crate::matchplay::MatchId(8),
+            next_generation: MapDynamicGeneration {
+                generation: 8,
                 ..generation
             },
         };
         let bytes = postcard::to_allocvec(&reset).expect("reset serializes");
-        let decoded: TerrainResetEvent = postcard::from_bytes(&bytes).expect("reset deserializes");
+        let decoded: MapDynamicResetEvent =
+            postcard::from_bytes(&bytes).expect("reset deserializes");
         assert_eq!(decoded, reset);
     }
 

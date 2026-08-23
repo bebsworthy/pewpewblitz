@@ -559,10 +559,9 @@ fn validate_snapshot(
             recipe: supplied.recipe.clone(),
         };
     }
-    // Balance Lab numeric tuning is constrained by the code-owned terrain/wire ceiling, not the
+    // Balance Lab numeric tuning is constrained by the code-owned map-destruction ceiling, not the
     // narrower authored shipping policy carried by the canonical weapon catalog.
-    next_weapons.recipe_policy.max_terrain_brush_radius =
-        crate::terrain::MAX_TERRAIN_BRUSH_RADIUS_WORLD;
+    next_weapons.recipe_policy.max_map_destruction_radius = 128.0;
     next_weapons.validate()?;
     let mut next_builds = current_builds.clone();
     next_builds.fighter_profiles = candidate.fighter_profiles;
@@ -678,8 +677,8 @@ fn same_recipe_shape(expected: &WeaponRecipe, supplied: &WeaponRecipe) -> bool {
                 matches!(
                     (left, right),
                     (
-                        WorldEffectDefinition::DestroyTerrain { .. },
-                        WorldEffectDefinition::DestroyTerrain { .. }
+                        WorldEffectDefinition::DestroyMap { .. },
+                        WorldEffectDefinition::DestroyMap { .. }
                     )
                 )
             })
@@ -690,11 +689,11 @@ fn same_target_shape(left: TargetSelection, right: TargetSelection) -> bool {
         (TargetSelection::Direct, TargetSelection::Direct) => true,
         (
             TargetSelection::Area {
-                terrain_occlusion: left,
+                map_occlusion: left,
                 ..
             },
             TargetSelection::Area {
-                terrain_occlusion: right,
+                map_occlusion: right,
                 ..
             },
         ) => left == right,
@@ -903,10 +902,10 @@ mod tests {
         validate_snapshot(&numeric, &baseline, &builds, &weapons, &fighter).unwrap();
         let mut expanded_brush = baseline.clone();
         expanded_brush.weapons[2].recipe.world_effects =
-            vec![WorldEffectDefinition::DestroyTerrain { radius: 128.0 }];
+            vec![WorldEffectDefinition::DestroyMap { radius: 128.0 }];
         validate_snapshot(&expanded_brush, &baseline, &builds, &weapons, &fighter).unwrap();
         expanded_brush.weapons[2].recipe.world_effects =
-            vec![WorldEffectDefinition::DestroyTerrain { radius: 132.0 }];
+            vec![WorldEffectDefinition::DestroyMap { radius: 132.0 }];
         assert!(
             validate_snapshot(&expanded_brush, &baseline, &builds, &weapons, &fighter,).is_err()
         );

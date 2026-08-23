@@ -112,7 +112,6 @@ pub(super) fn sweep_composed_projectiles(
     >,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     walls: Query<Entity, With<ArenaWall>>,
-    terrain_chunks: Query<Entity, With<crate::terrain::TerrainChunk>>,
     spatial_query: avian2d::prelude::SpatialQuery,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
@@ -137,8 +136,7 @@ pub(super) fn sweep_composed_projectiles(
     // Static authoritative geometry stops projectiles: permanent map colliders (the
     // ArenaWall entities) and destructible chunk colliders alike, so cover works and
     // carved lanes are the only way through.
-    let mut blocking_geometry: HashSet<Entity> = walls.iter().collect();
-    blocking_geometry.extend(terrain_chunks.iter());
+    let blocking_geometry: HashSet<Entity> = walls.iter().collect();
     let mut ordered: Vec<_> = projectiles.iter_mut().collect();
     ordered.sort_by_key(|(_, _, runtime, lob)| {
         (
@@ -248,8 +246,8 @@ pub(super) fn sweep_composed_projectiles(
         let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
             FIGHTER_LAYER
                 | crate::movement::DEPLOYABLE_LAYER
-                | INDESTRUCTIBLE_TERRAIN_LAYER
-                | DESTRUCTIBLE_TERRAIN_LAYER,
+                | STATIC_MAP_LAYER
+                | DESTRUCTIBLE_MAP_LAYER,
         )
         .with_excluded_entities([entity, runtime.owner_entity, runtime.source_entity]);
         let hit = spatial_query.cast_shape_predicate(

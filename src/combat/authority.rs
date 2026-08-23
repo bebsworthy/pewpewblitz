@@ -301,16 +301,15 @@ pub(super) fn area_line_of_sight_clear(
     let Some(direction) = Dir2::new(delta.normalize_or_zero()).ok() else {
         return true;
     };
-    let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-        INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
-    );
+    let filter =
+        avian2d::prelude::SpatialQueryFilter::from_mask(STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER);
     spatial_query
         .cast_ray(origin, direction, distance.max(0.0), true, &filter)
         .is_none()
 }
 
 #[cfg(feature = "server")]
-pub(super) fn terrain_muzzle_contact(
+pub(super) fn map_muzzle_contact(
     origin: Vec2,
     muzzle: Vec2,
     radius: f32,
@@ -319,9 +318,8 @@ pub(super) fn terrain_muzzle_contact(
     let delta = muzzle - origin;
     let distance = delta.length();
     let direction = Dir2::new(delta.normalize_or_zero()).ok()?;
-    let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-        INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
-    );
+    let filter =
+        avian2d::prelude::SpatialQueryFilter::from_mask(STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER);
     spatial_query
         .cast_shape_predicate(
             &Collider::circle(radius),
@@ -373,7 +371,7 @@ pub(super) fn queue_area_payloads(
     {
         let TargetSelection::Area {
             radius,
-            terrain_occlusion,
+            map_occlusion,
             max_targets,
         } = bundle.target
         else {
@@ -397,8 +395,7 @@ pub(super) fn queue_area_payloads(
             }
             if defeated.is_some()
                 || controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner))
-                || (terrain_occlusion
-                    && !area_line_of_sight_clear(landing, position.0, spatial_query))
+                || (map_occlusion && !area_line_of_sight_clear(landing, position.0, spatial_query))
                 || !payload_can_affect_target(bundle, source, *team, *network_id)
             {
                 continue;

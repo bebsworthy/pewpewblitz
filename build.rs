@@ -1,12 +1,19 @@
 use std::{env, ffi::OsStr, fmt::Write as _, fs, path::PathBuf};
 
 fn main() {
-    const SOURCE_DIR: &str = "content/v4/maps/builtin";
-    println!("cargo::rerun-if-changed={SOURCE_DIR}");
+    generate_embedded_maps(
+        "content/maps/builtin",
+        "embedded_builtin_maps.rs",
+        "EMBEDDED_BUILTIN_MAPS",
+    );
+}
 
-    let source_dir = PathBuf::from(SOURCE_DIR);
+fn generate_embedded_maps(source_dir: &str, output_file: &str, constant: &str) {
+    println!("cargo::rerun-if-changed={source_dir}");
+
+    let source_path = PathBuf::from(source_dir);
     let mut sources = Vec::new();
-    for entry in fs::read_dir(&source_dir).expect("read built-in map source directory") {
+    for entry in fs::read_dir(&source_path).expect("read built-in map source directory") {
         let entry = entry.expect("read built-in map source entry");
         let file_type = entry.file_type().expect("read built-in map file type");
         assert!(
@@ -30,10 +37,10 @@ fn main() {
     }
     sources.sort();
 
-    let mut generated = String::from("pub const EMBEDDED_BUILTIN_MAPS: &[(&str, &str)] = &[\n");
+    let mut generated = format!("pub const {constant}: &[(&str, &str)] = &[\n");
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("Cargo manifest directory");
     for name in sources {
-        let absolute = PathBuf::from(&manifest_dir).join(SOURCE_DIR).join(&name);
+        let absolute = PathBuf::from(&manifest_dir).join(source_dir).join(&name);
         writeln!(
             generated,
             "    (\"builtin/{name}\", include_str!(r#\"{}\"#)),",
@@ -42,7 +49,6 @@ fn main() {
         .expect("write generated built-in map row");
     }
     generated.push_str("];\n");
-    let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"))
-        .join("embedded_builtin_maps.rs");
+    let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR")).join(output_file);
     fs::write(out, generated).expect("write embedded built-in map table");
 }

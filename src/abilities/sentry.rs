@@ -268,8 +268,9 @@ pub(crate) fn activate_sentry(
         let filter = SpatialQueryFilter::from_mask(
             crate::movement::FIGHTER_LAYER
                 | crate::movement::DEPLOYABLE_LAYER
-                | crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                | crate::movement::STATIC_MAP_LAYER
+                | crate::movement::DESTRUCTIBLE_MAP_LAYER
+                | crate::movement::PLAYER_ONLY_MAP_LAYER,
         )
         .with_excluded_entities(excluded);
         let placement = first_clear_sentry_placement(position.0, facing, |candidate, radius| {
@@ -648,8 +649,8 @@ pub(crate) fn tick_sentries(
                                         delta.length(),
                                         true,
                                         &avian2d::prelude::SpatialQueryFilter::from_mask(
-                                            crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                                                | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                                            crate::movement::STATIC_MAP_LAYER
+                                                | crate::movement::DESTRUCTIBLE_MAP_LAYER,
                                         ),
                                     )
                                     .is_none()
@@ -794,8 +795,8 @@ pub(crate) fn tick_sentries(
                 crate::movement::PROJECTILE_LAYER,
                 crate::movement::FIGHTER_LAYER
                     | crate::movement::DEPLOYABLE_LAYER
-                    | crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                    | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                    | crate::movement::STATIC_MAP_LAYER
+                    | crate::movement::DESTRUCTIBLE_MAP_LAYER,
             ),
             crate::matchplay::MatchMember(identity.match_id),
             Replicate::to_clients(NetworkTarget::All),

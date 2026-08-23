@@ -42,7 +42,7 @@ Client presentation and local feedback
 - play visual, audio, and camera effects;
 - display HUD and scoreboard;
 - never decide whether a weapon recipe is legal or directly install resolved weapon values;
-- never decide authoritative damage, hits, deaths, status triggers, scores, or terrain edits.
+- never decide authoritative damage, hits, deaths, status triggers, scores, or map mutations.
 
 ### Server responsibilities
 
@@ -54,7 +54,7 @@ Client presentation and local feedback
 - perform projectile, hit, damage, and collision resolution;
 - own status meters and threshold effects;
 - own pickups, objectives, scores, respawns, and victory;
-- own destructible terrain occupancy grids and collision regeneration;
+- own map-asset placement outcomes and collider updates;
 - derive observer-specific concealment and reveal outcomes before replication when those mechanics
   are implemented;
 - replicate authoritative components and send discrete gameplay messages where required.
@@ -85,7 +85,7 @@ Runtime authority lives in server components, resources, entities, states, and s
 Client-only presentation observes replicated gameplay state or presentation messages and must not
 become gameplay truth.
 
-Use a shared gameplay plugin or module only for systems that genuinely execute on both server and client, primarily when prediction requires identical fixed-step behavior. Server-only match, validation, damage, score, terrain, and lifecycle rules remain server-only. Package and folder boundaries are implementation decisions made from feature and dependency evidence, not part of the network contract.
+Use a shared gameplay plugin or module only for systems that genuinely execute on both server and client, primarily when prediction requires identical fixed-step behavior. Server-only match, validation, damage, score, map-mutation, and lifecycle rules remain server-only. Package and folder boundaries are implementation decisions made from feature and dependency evidence, not part of the network contract.
 
 ## Application protocol compatibility and evolution
 
@@ -187,24 +187,23 @@ recipes to become game-mode programs:
 
 ```text
 Shared map-content catalog and mode schemas
-  known presentation, geometry, terrain, entity, region, and anchor definitions
+  known map assets, gameplay profiles, presentation profiles/themes, and anchor schemas
 
 Candidate map recipe
-  one built-in preset in Milestone 06
-  future bounded user-authored layout/revision
+  bounded dimensions, default surface, sparse MapAssetId placements, and typed anchors
 
 Resolved map
-  immutable server-validated geometry, regions, placements, presentation references, and mode ID
+  immutable server-validated placements, derived collision/spawns, presentation references, and mode ID
 
 Runtime map state
-  spawned entities, objective state, active regions, and terrain revisions owned by the server
+  spawned colliders, objective state, and terminal placement outcomes owned by the server
 ```
 
-Milestone 06 loads one built-in recipe through the future-compatible resolver. A future builder may
-produce a typed candidate recipe, but the server validates catalog/schema versions, IDs, finite and
-bounded geometry, complexity/count budgets, spawn safety, objective requirements, mode
+Built-ins resolve through one sparse-grid catalog and recipe path. A future builder may produce a
+typed candidate recipe, but the server validates catalog/schema versions, IDs, bounded cells,
+footprints and counts, gameplay-profile coherence, spawn safety, objective requirements, mode
 compatibility, and allowed references before installing it. A client cannot submit collision,
-spawn, region, entity, or terrain changes directly to a running match.
+spawn, placement, anchor, or map-state changes directly to a running match.
 
 The selected `ModeDefinitionId` resolves only to a server-installed mode plugin. A map recipe may
 place that mode's required anchors and choose explicitly exposed parameters, but cannot define or
@@ -224,7 +223,7 @@ Replicated components
   stable player / match / definition identity
   fighter and projectile state
   active effects and objective state
-  scores and terrain revision
+  scores, resolved map snapshot, and map dynamic generation/revision
 
 Gameplay message, when required
   event_id
@@ -235,37 +234,26 @@ Gameplay message, when required
 
 Do not introduce a custom aggregate `Snapshot` wrapper when Lightyear component replication provides the needed behavior. Register concrete inputs, replicated components, messages, and channels through Bevy plugins, including delivery and ordering semantics. Network data must not expose process-local ECS entity identity unless Lightyear's entity mapping explicitly handles it.
 
-## Terrain synchronization
+## Dynamic map synchronization
 
-Terrain destruction is server-authoritative. The server quantizes the destruction brush into terrain
-cells, updates the terrain revision, and broadcasts a compact deterministic destruction command or
-affected-chunk update. Clients reconstruct the same visual crater locally. Do not send a full terrain
-texture or whole-map grid after every explosion.
+Map destruction is server-authoritative. An accepted world effect resolves its bounded radius
+against current destructible placements and commits each overlapping placement once as either
+removed or replaced. The same transaction updates authoritative colliders and increments one map
+revision; clients never rasterize collision or independently decide which cells were affected.
 
-Milestone 10 defines the live terrain event as:
+The map root replicates `ResolvedMapSnapshot` and the current `MapDynamicState` once for bootstrap
+and late join. Live ordered-reliable `MapMutationEvent`s carry an exact generation, revision, and
+bounded list of `(MapPlacementId, MapPlacementOutcome)` transitions. A reset publishes the exact
+old/new generation pair. Clients accept only the embedded catalog/schema/fingerprint identity,
+apply contiguous transitions, ignore duplicates and stale generations, and close presentation
+readiness on invalid state.
 
-```text
-TerrainDestructionEvent
-  map_instance_id and match_id
-  terrain_fingerprint
-  terrain_revision
-  attack_id and delivery_index
-  half-cell brush center and radius
-  affected terrain-chunk IDs
-  erased-cell count
-```
-
-Brush coordinates are bounded integers in half-cell units and have exactly one canonical cell
-rasterization. Peers never independently round unconstrained floating-point geometry. Live events
-use a dedicated ordered-reliable terrain channel; revision recovery sends bounded current chunk
-bitsets rather than replaying complete history.
-
-The server remains responsible for collision and gameplay truth. Clients use the event for
-presentation and prediction only. Each client tracks the latest applied terrain revision. A gap must
-trigger authoritative recovery from initial occupancy, affected-chunk bitsets, or retained event
-history; reconnecting and late-joining clients cannot be required to have observed every live
-destruction event. Recovery is sparse and region/chunk scoped so its memory and bandwidth do not
-scale with empty space on larger maps.
+A revision gap triggers `MapDynamicRecoveryRequest` for the current generation. The active server
+session may return a bounded `MapDynamicRecoverySnapshot` containing current terminal outcomes;
+requests for foreign/stale generations, inactive or disconnected sessions, and response-rate
+exhaustion are rejected. Recovery never replays unbounded destruction history. The server remains
+responsible for collision and gameplay truth; client reconstruction is presentation and optional
+prediction support only.
 
 ## Interest management and concealment
 
@@ -346,7 +334,8 @@ Networking is validated incrementally rather than treated as one oversized miles
 3. **v1 Milestone 04 — combat:** the server owns firing, projectiles, hits, damage, defeats, and sandbox reset under packet delay, loss, duplication, and jitter tests.
 4. **v1 Milestone 07 — match:** the server owns teams, respawns, scores, timers, victory, restart, and disconnect behavior throughout the match lifecycle.
 5. **v1 Milestone 09 — objectives:** Hot Zone proves that continuous objective state remains authoritative while reusing the same gameplay and match-lifecycle components/plugins.
-6. **v1 Milestone 10 — terrain:** connected and late/reconnecting clients converge on the authoritative terrain revision and crater state.
+6. **V8 map dynamics:** connected and late/reconnecting clients converge on authoritative
+   whole-placement removal/replacement state and exact map generations.
 7. **Future environment/concealment milestone:** surface effects remain server-owned while per-client visibility culls secret spatial state and recovers correctly at reveal, late join, and reconnect.
 8. **Future systemic-status milestone:** accumulating meters, threshold triggers, immunity, and duration remain server-owned and recover correctly.
 

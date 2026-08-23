@@ -1,9 +1,9 @@
-//! Neutral compatibility envelope for all shared authored gameplay content.
+//! Neutral envelope for all shared authored gameplay content.
 
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 9;
+pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 13;
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GameplayContentFingerprint(pub u64);

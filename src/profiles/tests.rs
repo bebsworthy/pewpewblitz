@@ -306,12 +306,13 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
 fn poll_authority(
     authority: &mut ProfileAuthority,
 ) -> (Vec<ProfileLoadCompletion>, Vec<(u64, ProfileOutcome)>) {
-    for _ in 0..10_000 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
         let result = authority.poll_loads().unwrap();
         if !result.0.is_empty() || !result.1.is_empty() {
             return result;
         }
-        std::thread::yield_now();
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
     panic!("profile storage did not complete bounded test work");
 }

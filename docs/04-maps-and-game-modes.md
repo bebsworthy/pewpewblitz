@@ -21,11 +21,11 @@ The central rule is:
 Keep these layers distinct:
 
 ```text
-MapContentCatalog          allowed objects, regions, geometry, themes, and authoring limits
-MapRecipe                  one bounded, mode-compatible authored layout
+MapContentCatalog          allowed map assets, gameplay profiles, themes, and authoring limits
+MapRecipe                  bounded dimensions, default surface, sparse placements, typed anchors
 MapPreset                  a named developer-authored legal recipe
-ResolvedMap                immutable server-validated match snapshot
-MapRuntimeState            instantiated geometry, regions, entities, and terrain revisions
+ResolvedMap                immutable server-validated match snapshot and derived authority facts
+MapDynamicState            terminal placement outcomes and authoritative generation/revision
 
 ModeDefinition             stable developer-authored rule identity and map-facing schema
 ModeConfiguration          bounded server-operator values for one advertised game type
@@ -38,7 +38,7 @@ and resources; the client independently derives presentation from the resolved s
 presentation IDs.
 
 Each map recipe targets one mode definition because its spawns and objective anchors must satisfy a
-specific schema. A visual arena, semantic object arrangement, or presentation theme may be reused
+specific schema. A visual arena, map-asset arrangement, or presentation theme may be reused
 across several recipes, but a Wipeout-compatible recipe and a Hot Zone-compatible recipe remain
 independently validated documents. Selecting a map therefore means selecting a compatible recipe,
 not attaching arbitrary rules to an unvalidated scene.
@@ -48,28 +48,25 @@ installation path. Systems must not branch on a built-in map's identity.
 
 ## Map recipe contract
 
-The supported recipe model can express:
+The supported recipe model expresses:
 
-- stable recipe identity and revision;
-- playable bounds;
-- camera/presentation bounds that do not alter authoritative collision;
-- a presentation theme and semantic visual-object placements;
-- permanent blocking geometry and walkable space;
-- destructible-terrain reservations and initial occupancy;
-- spawn points and team slots;
+- stable recipe identity, revision, integer dimensions, and a default surface;
+- a presentation theme and sparse stable `MapAssetId` placements on 32-unit cells;
+- profile-derived player/projectile collision, including footprint rectangles and bounded circles;
+- explicit whole-cell destructible placements and optional replacement assets;
+- parameterized player-spawn marker assets and team slots;
 - the compatible mode definition;
-- mode-required point or area anchors;
-- bounded gameplay regions and server-known environment entities supported by the active catalog.
+- typed mode-required anchors, currently the grid-vertex Hot Zone circle.
 
 The schema may grow to support additional approved pickups, hazards, concealment regions, movement
 surfaces, and other environment primitives. Adding a catalog capability is an explicit content and
 gameplay decision; unknown fields, IDs, or executable behavior are rejected rather than interpreted
 dynamically.
 
-Presentation and gameplay layers are independent. A visible wall does not block movement unless the
-recipe resolves blocking geometry. A decorative puddle does not slow a fighter unless the recipe
-also references a supported gameplay region. Conversely, invisible authoring helpers may describe
-spawns, objectives, collision, or occupancy without becoming rendered objects.
+Presentation and gameplay layers are independent. A wall asset blocks only because its shared
+gameplay profile says so; its visual profile cannot change authority. Decorations remain inert,
+spawn markers remain hidden helpers, and a mode anchor supplies validated space without becoming a
+generic environment asset.
 
 ## Resolution and validation
 
@@ -78,19 +75,19 @@ cover at least:
 
 - schema and catalog compatibility;
 - stable identities and allowed references;
-- finite, bounded coordinates, dimensions, orientations, and counts;
-- playable bounds and geometry complexity;
-- collider, region, semantic-object, and entity budgets;
+- bounded integer cells, dimensions, quarter turns, footprints, and counts;
+- legal surface/feature/decoration/marker occupancy;
+- gameplay-profile coherence, collider shapes, replacement behavior, and entity budgets;
 - spawn count, team capacity, safety, and reachable re-entry space;
 - required mode anchors and rejection of unsupported anchors;
 - mode compatibility and topology intersection;
-- destructible-terrain allocation and mutation ceilings;
+- destructible-placement mutation and recovery ceilings;
 - headless operation without client assets;
 - deterministic identity and content fingerprints needed by admission and recovery.
 
 Resolution produces an immutable `ResolvedMap` and contributes to a
 `ResolvedMatchComposition`. Mutable runtime state never flows back into the authored recipe. A map
-author cannot publish a terrain revision, objective score, fighter position, or other live match
+author cannot publish a placement revision, objective score, fighter position, or other live match
 fact.
 
 Competitive fairness analysis, asset licensing, persistence, publishing, discovery, moderation,
@@ -101,9 +98,8 @@ distributed or selected, but they must not be hidden inside collision or mode sy
 
 An envisioned map builder may let a player:
 
-- arrange approved themes, surfaces, decorations, and semantic objects;
-- shape bounded playable space and permanent or destructible geometry;
-- place approved environment entities and gameplay regions;
+- arrange approved themes, surfaces, features, and decorations;
+- shape bounded playable space with sparse permanent or destructible map assets;
 - place spawn points and team slots supported by the selected mode;
 - place and configure the selected mode's required anchors;
 - edit only parameters and ranges exposed by the authoritative catalog;
@@ -124,8 +120,8 @@ The authoritative map runtime owns:
 
 - installed permanent geometry and collision;
 - spawn and mode-anchor indexes derived from the resolved map;
-- gameplay-region and environment-entity instances;
-- destructible occupancy, colliders, revisions, and rebuild work;
+- profile-derived surface/feature collision and dynamic placement instances;
+- terminal destruction/replacement outcomes, colliders, revisions, and rebuild work;
 - installation, reset, recovery, and teardown of those map-owned facts.
 
 The authoritative mode runtime owns:
@@ -140,23 +136,23 @@ Mode systems consume stable map indexes and authoritative gameplay outcomes such
 objective occupancy. They do not mutate authored recipes. Map systems expose compatible space but
 do not decide what a capture zone scores or when a match ends.
 
-Client presentation observes resolved and replicated facts. It may render geometry, terrain,
+Client presentation observes resolved and replicated facts. It may render surfaces, features,
 objective volumes, timers, scores, and results, but it does not decide collision, occupancy,
 visibility, scoring, or victory.
 
 ## Visual presentation and gameplay space
 
-Authoritative gameplay is planar and composed from exact geometry, regions, environment entities,
-and terrain occupancy. Client 3D presentation resolves those facts to cached or generated meshes and
-validated presentation profiles. Visual height, animation, material, lighting, or decorative
-placement never changes authoritative collision or occupancy.
+Authoritative gameplay is planar and composed from resolved map-asset placements, profile-owned
+collision, dynamic outcomes, and mode anchors. Client 3D presentation resolves those facts to
+cached or generated meshes and validated visual profiles. Visual height, animation, material,
+lighting, or decorative placement never changes authoritative collision or occupancy.
 
 Useful gameplay-space primitives include:
 
 - ordinary walkable ground;
 - permanent walls and cover;
-- destructible terrain;
-- shaped movement, hazard, and concealment regions;
+- explicit destructible cover and replacement assets;
+- catalog-backed surfaces and features with implemented gameplay properties;
 - mode-owned objective areas derived from validated anchors;
 - server-owned runtime areas such as smoke or temporary barriers;
 - server-known pickups or interactables when a supported mode or content definition owns them.
@@ -165,44 +161,25 @@ See [Environment gameplay direction](./09-environment-gameplay.md) for the candi
 promotion rules. An idea becomes part of this contract only when a concrete feature adopts and
 validates it.
 
-## Destructible terrain contract
+## Destructible placement contract
 
-Destructible solidity is a server-owned, chunked, quantized occupancy grid rather than the presence
-of visible tiles:
+Destructible solidity is a property of a placed map asset, not a terrain kind or visual tile:
 
 ```text
-Terrain appearance
-        +
-Quantized occupancy grid
-        +
-Generated collision
+MapAssetId placement
+  -> shared gameplay profile: blocks + destructible
+  -> authoritative collider and terminal outcome
+  -> normal or replacement client visual
 ```
 
-The supported representation uses 8-world-unit cells, sparse 32×32-cell chunks, and `[u64; 16]`
-occupied/empty bitsets per chunk. Global chunk coordinates use Euclidean floor division, so terrain
-resolution does not vary with map size or destructible-region dimensions.
-
-Authoritative terrain rules must:
-
-- convert supported brushes to deterministic integer cell operations;
-- allocate only chunks intersecting authored destructible regions;
-- rebuild only dirty collision chunks between physics frames;
-- reconcile orthogonal-neighbor topology across chunk seams;
-- generate bounded chunk collision rather than one entity per cell;
-- keep permanent geometry, fighters, projectiles, objectives, pickups, and props separate;
-- recover a current snapshot without replaying unbounded destruction history;
-- provide basic correction when a terrain mutation embeds a fighter.
-
-The current engine bounds playable maps from 1024–4096 units wide and 720–3072 units high.
-Destructible shapes may be up to 2048 units across, with at most four reservations, 221 intersected
-chunks, and 196,608 occupied cells. These are validation limits of the supported format, not targets
-derived from one built-in arena. Any revision must continue bounding allocation, accepted mutation
-work, dirty rebuilds, collision complexity, and recovery bytes.
-
-The authoritative server owns occupancy, collision, revisions, and rebuild state. The client owns
-only visual mesh/material state derived from replicated terrain facts. Deformation animation,
-falling debris, layered materials, fluids, structural collapse, persistent deformation, and broader
-bandwidth strategies are envisioned extensions rather than implied behavior of the base grid.
+The supported representation removes or replaces each explicit 32-world-unit cover cell as one
+coarse unit when an accepted authoritative destruction effect overlaps it. Transactions sort by
+placement ID, publish bounded terminal outcomes and revisions, update colliders before later
+gameplay observes them, and recover current state without replaying history. Reset restores the
+recipe's initial placements; teardown removes all state owned by the map instance. This readable
+whole-cell rule intentionally leaves no tiny collision specks. Deformation animation, structural
+collapse, partial cells, and persistent deformation are future mechanics rather than implications
+of the base system.
 
 ## Concealment and visibility extension
 

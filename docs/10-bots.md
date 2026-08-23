@@ -14,7 +14,7 @@ The first playable bots are **server-hosted practice controllers** for the exist
 fighters. A controller observes a bounded allowlist of authoritative match facts, runs a pure
 deterministic policy, and produces ordinary bounded `FighterInput`. Existing authoritative systems
 remain the only owners of movement, collision, attacks, damage, abilities, scores, respawns, match
-outcomes, and terrain mutation.
+outcomes, and map mutation.
 
 Server-hosted input production is not network-equivalent to a human client. Practice bot input does
 not traverse Lightyear transport and therefore does not exercise connection ownership, sequence,

@@ -20,7 +20,7 @@ use crate::{
         MeleeAttack, PendingDelivery, PendingPayload, SpawnState, TeamId, WeaponDefinitions,
         WeaponTelemetry,
     },
-    map::{MapStartupSet, ResolvedMap, WIPEOUT_MODE_DEFINITION},
+    map::{MapStartupSet, ResolvedMap, SpawnPointCatalog, WIPEOUT_MODE_DEFINITION},
     protocol::{Fighter, FighterInput, NetworkEntityId, PlayerId},
     timing::SimulationTick,
 };
@@ -197,12 +197,6 @@ impl PendingMatchRestart {
         self.0 = Some(slot);
         true
     }
-
-    /// In-crate test staging for the environment-reset transaction.
-    #[cfg(test)]
-    pub(crate) fn stage_for_test(&mut self, slot: PendingMatchRestartSlot) {
-        self.0 = Some(slot);
-    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -291,12 +285,12 @@ fn reject_under_provisioned_connection_capacity(app: &App, capacity: &ResolvedMa
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn validate_capacity_against_selected_map(
     capacity: Res<ResolvedMatchCapacity>,
-    resolved: Option<Res<ResolvedMap>>,
+    spawns: Option<Res<SpawnPointCatalog>>,
 ) {
-    let Some(resolved) = resolved else {
+    let Some(spawns) = spawns else {
         return;
     };
-    if let Err(reason) = capacity.validate_against_map(&resolved.snapshot) {
+    if let Err(reason) = capacity.validate_against_spawn_catalog(&spawns) {
         panic!("resolved match capacity does not satisfy the selected map: {reason}");
     }
 }
@@ -692,8 +686,8 @@ fn activate_started_match(
                 ammunition,
                 position: spawn.position,
                 facing: spawn.facing,
-                collision_mask: crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                    | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                collision_mask: crate::movement::STATIC_MAP_LAYER
+                    | crate::movement::DESTRUCTIBLE_MAP_LAYER,
                 protection_until: Some(tick.0.saturating_add(rules.spawn_protection_ticks)),
                 active: true,
             },
@@ -998,7 +992,7 @@ fn cleanup_restarted_match(
 fn select_due_respawn_spawns(
     tick: Res<SimulationTick>,
     roots: Query<&MatchState, With<MatchRoot>>,
-    spawn_points: Res<crate::map::SpawnPointCatalog>,
+    spawn_points: Res<SpawnPointCatalog>,
     tuning: Res<crate::movement::MovementTuning>,
     mut ordinals: ResMut<RespawnOrdinals>,
     living: Query<(&TeamId, &Position, Option<&Defeated>), With<Fighter>>,
@@ -1170,7 +1164,7 @@ pub(crate) fn clear_combat_facts(
 ) {
     facts.0.clear();
     // Terrain drains world-effect facts earlier in the fixed-post chain; this clear is the
-    // safety net for compositions without an authoritative terrain plugin.
+    // safety net for compositions without an authoritative map runtime.
     world_effect_facts.0.clear();
 }
 

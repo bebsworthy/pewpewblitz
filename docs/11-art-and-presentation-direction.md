@@ -8,10 +8,10 @@ constraints that future art must preserve; versioned implementation documents re
 individual parts were delivered.
 
 Exact redistributed third-party files, licenses, and provenance belong to `assets/manifest.ron`,
-not to this document. Client environment paths and theme profiles belong to
-`assets/catalogs/environment_visuals.ron`. Shared map-object, theme, and compatible visual-variant
-identities belong to `content/v4/`. Those machine-readable sources may evolve without turning this
-specification into a duplicate inventory.
+not to this document. Every advertised built-in resolves stable map visual identities through
+`assets/catalogs/map_asset_visuals.ron` and `assets/catalogs/map_presentation_themes.ron`, paired
+with the shared definitions in `content/catalogs/` and authored recipes in `content/maps/`. These
+machine-readable sources may evolve without turning this specification into a duplicate inventory.
 
 ## Visual direction
 
@@ -70,6 +70,13 @@ Replicated gameplay entities remain presentation-neutral. Render entities carry 
 links and reconcile idempotently across spawn, replacement, restart, reconnect, and late asset
 readiness. Final transforms are written after Lightyear interpolation and Avian writeback, before
 transform propagation; projected UI follows propagation.
+
+V8 grid-map presentation derives water shores, vegetation edges, and wall joins from canonical
+four-neighbor cell masks; recipes do not author visual variants or adjacency masks. Tidal Garden
+uses low generated water, deliberately short non-concealing tall grass, whole-placement barrier
+visuals, and a normal rubble replacement asset. Imported and primitive fallback paths must
+communicate the same walkability and destruction state. The accepted 32-unit destruction
+granularity must never leave a smaller visual or collision speck.
 
 ### Player Dashboard preview
 
@@ -144,18 +151,19 @@ Visual footprints must agree with authoritative planar shapes:
 - rectangles become cuboids or validated imported models with presentation-only height;
 - circles become cylinders or generated circular geometry;
 - floors use calm generated or cached surfaces;
-- destructible terrain builds chunk-owned meshes from replicated occupied cells and updates dirty
-  chunks in place;
+- destructible map assets reconcile whole-placement normal, removed, or replacement visuals from
+  replicated terminal outcomes;
 - arbitrary or dynamic shapes use primitives/generated meshes rather than an approximate prop;
 - imported environment scenes require a validated pivot, orientation, scale, footprint, and
   compatible visual profile.
 
 A map theme provides client-owned ground, edge, lighting, palette, material, and default visual
-choices. It is not a baked map image or style lock. An authored placement may select another
-compatible stable visual variant, but neither the theme nor the model decides collision,
-destructibility, health, terrain occupancy, or other gameplay behavior.
+choices. It is not a baked map image or style lock. An authored placement resolves one stable
+visual profile, but neither the theme nor the model decides collision, destructibility,
+replacement, or other gameplay behavior.
 
-The client resolves shared stable theme and visual-variant IDs through its environment catalog.
+The client resolves shared stable theme and visual-profile IDs through its map presentation
+catalogs.
 Asset paths, tints, transforms, and fallbacks remain client-only and do not contribute renderer
 details to the gameplay protocol. Presentation reconciliation keys include the accepted map
 instance, recipe fingerprint, and theme so replacement cannot retain stale geometry or materials.
@@ -196,7 +204,7 @@ The asset boundary has four distinct sources:
 | `external_assets/` and `inspiration/` | Source material and retained concepts; not scanned or packaged as runtime content |
 | `assets/manifest.ron` | Exact shipped third-party file inventory, provenance, license, requiredness, and fallback |
 | `assets/catalogs/` | Client-owned paths, transforms, material values, theme profiles, and degradation mappings |
-| `content/` | Stable server/client-neutral gameplay, map, theme, object, and compatible visual-variant identities |
+| `content/` | Stable server/client-neutral gameplay, map-asset, gameplay-profile, and theme identities |
 
 Only assets owned by a current gameplay, map, product-shell, accessibility, or presentation use are
 promoted into `assets/`. Availability in a source pack is not sufficient. Preview renders, source
@@ -240,7 +248,7 @@ A presentation asset or family is admitted only when:
 
 ## Performance and verification
 
-The baseline remains deliberately simple: cached meshes and materials, chunked terrain, bounded
+The baseline remains deliberately simple: cached meshes and materials, bounded map-asset visuals,
 transients, restrained shadows, limited lighting, and Bevy's normal culling. Instancing, LOD, GPU
 particles, bloom, deferred rendering, or custom gameplay-world pipelines require measured need.
 
@@ -248,7 +256,7 @@ Automated verification should cover coordinate conversion, exact footprints, pro
 asset/catalog validation, lifecycle cleanup, animation recovery, relationship colors, projected-UI
 query safety, reduced-effects bounds, degraded fallbacks, and server feature isolation. Native
 checks should exercise supported modes, maps/themes, aspect ratios and UI scales, imported and
-fallback paths, Dashboard preview, defeat/respawn, terrain mutation, objectives, and representative
+fallback paths, Dashboard preview, defeat/respawn, map destruction, objectives, and representative
 combat density.
 
 ## Envisioned direction

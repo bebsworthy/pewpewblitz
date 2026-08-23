@@ -13,7 +13,7 @@ use crate::{
     content::gameplay_content_fingerprint,
     map::{
         HOT_ZONE_MODE_DEFINITION, MapCatalogResource, MapContentCatalog, MapInstanceId,
-        MapLayoutRequirements, MapPresetId, ServerMapSelection, WIPEOUT_MODE_DEFINITION,
+        MapPresetId, ServerMapSelection, WIPEOUT_MODE_DEFINITION,
     },
     protocol::protocol_fingerprint,
 };
@@ -185,21 +185,23 @@ fn validate_manifest_map_against_catalog(
     manifest: &MatchManifestV1,
     catalog: &MapContentCatalog,
 ) -> Result<(), MatchWorkerManifestError> {
+    let preset_id = MapPresetId(manifest.map_preset);
+    let mode_definition = match config.game_mode {
+        GameMode::Wipeout => WIPEOUT_MODE_DEFINITION,
+        GameMode::HotZone => HOT_ZONE_MODE_DEFINITION,
+    };
     let preset = catalog
-        .preset(MapPresetId(manifest.map_preset))
+        .preset(preset_id)
         .ok_or(MatchWorkerManifestError::MapPresetMismatch)?;
     if preset.admission_revision != manifest.map_revision {
         return Err(MatchWorkerManifestError::MapRevisionMismatch);
     }
-    let (mode_definition, requirements) = match config.game_mode {
-        GameMode::Wipeout => (WIPEOUT_MODE_DEFINITION, MapLayoutRequirements::wipeout()),
-        GameMode::HotZone => (HOT_ZONE_MODE_DEFINITION, MapLayoutRequirements::hot_zone()),
-    };
     if preset.recipe.mode_definition_id != mode_definition {
         return Err(MatchWorkerManifestError::ModeMismatch);
     }
     catalog
-        .resolve_preset(preset.id, MapInstanceId(1), &requirements)
+        .resolve_preset(preset.id, MapInstanceId(1))
+        .map(|_| ())
         .map_err(MatchWorkerManifestError::Configuration)?;
     Ok(())
 }
@@ -376,7 +378,7 @@ pub fn build_match_worker_app(
 }
 
 /// Build the minimum lobby worker.  It intentionally contains the shared protocol registry and
-/// Lightyear server lifecycle, but no map, combat, terrain, or match-authority plugins.  M01 keeps
+/// Lightyear server lifecycle, but no map, combat, or match-authority plugins.  M01 keeps
 /// allocation policy outside this process graph; the immutable manifest still gates the process
 /// identity and protocol before the first schedule runs.
 pub fn build_lobby_worker_app(
@@ -567,28 +569,53 @@ mod tests {
     }
 
     #[test]
-    fn catalog_backed_admission_accepts_a_second_same_mode_preset_and_revision() {
+    fn admission_rejects_unknown_map_presets() {
         let config = ServerNetworkConfig::default();
-        let mut catalog = MapContentCatalog::embedded().unwrap();
-        let mut fixture = catalog.presets[0].clone();
-        fixture.id = MapPresetId(4);
-        fixture.key = "crossroads-facility-alt".to_string();
-        fixture.display_name = "Crossroads Facility Alt".to_string();
-        fixture.admission_revision = 7;
-        fixture.recipe.recipe_id = crate::map::MapRecipeId(4);
-        fixture.recipe.revision += 1;
-        catalog.presets.push(fixture);
-        catalog.validate().unwrap();
+        let catalog = MapContentCatalog::embedded().unwrap();
 
         let mut value = manifest();
-        value.map_preset = 4;
+        value.map_preset = 5;
         value.map_revision = 7;
-        assert!(validate_manifest_map_against_catalog(&config, &value, &catalog).is_ok());
-        value.map_revision = 6;
         assert_eq!(
             validate_manifest_map_against_catalog(&config, &value, &catalog),
-            Err(MatchWorkerManifestError::MapRevisionMismatch)
+            Err(MatchWorkerManifestError::MapPresetMismatch)
         );
+    }
+
+    #[test]
+    fn manifest_admission_accepts_tidal_garden_through_the_grid_catalog() {
+        let config = ServerNetworkConfig::default();
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let mut value = manifest();
+        value.map_preset = crate::map::TIDAL_GARDEN_PRESET.0;
+        value.map_revision = crate::map::TIDAL_GARDEN_ADMISSION_REVISION;
+        assert!(validate_manifest_map_against_catalog(&config, &value, &catalog).is_ok());
+    }
+
+    #[test]
+    fn manifest_admission_accepts_converted_ashen_and_hot_zone_presets() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let mut wipeout = manifest();
+        wipeout.map_preset = crate::map::ASHEN_COURT_PRESET.0;
+        wipeout.map_revision = crate::map::ASHEN_COURT_ADMISSION_REVISION;
+        assert!(
+            validate_manifest_map_against_catalog(
+                &ServerNetworkConfig::default(),
+                &wipeout,
+                &catalog
+            )
+            .is_ok()
+        );
+
+        let mut hot_zone = wipeout;
+        hot_zone.mode = brawler_routing::GameMode::HotZone;
+        hot_zone.map_preset = crate::map::CROSSROADS_HOT_ZONE_PRESET.0;
+        hot_zone.map_revision = crate::map::CROSSROADS_HOT_ZONE_ADMISSION_REVISION;
+        let config = ServerNetworkConfig {
+            game_mode: GameMode::HotZone,
+            ..default()
+        };
+        assert!(validate_manifest_map_against_catalog(&config, &hot_zone, &catalog).is_ok());
     }
 
     #[test]
@@ -757,16 +784,16 @@ mod tests {
         assert_eq!(
             policy.for_mode(brawler_routing::GameMode::Wipeout),
             brawler_routing::ModeAllocationPolicy::new(
-                crate::map::BUILT_IN_MAP_PRESET.0,
-                crate::map::WIPEOUT_LAYOUT_SCHEMA_VERSION,
+                crate::map::CROSSROADS_PRESET.0,
+                crate::map::CROSSROADS_ADMISSION_REVISION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );
         assert_eq!(
             policy.for_mode(brawler_routing::GameMode::HotZone),
             brawler_routing::ModeAllocationPolicy::new(
-                crate::map::HOT_ZONE_MAP_PRESET.0,
-                crate::map::HOT_ZONE_LAYOUT_SCHEMA_VERSION,
+                crate::map::CROSSROADS_HOT_ZONE_PRESET.0,
+                crate::map::CROSSROADS_HOT_ZONE_ADMISSION_REVISION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );
@@ -824,6 +851,5 @@ mod tests {
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
         assert!(!worker.is_plugin_added::<crate::combat::ServerCombatPlugin>());
         assert!(!worker.is_plugin_added::<crate::map::AuthoritativeMapPlugin>());
-        assert!(!worker.is_plugin_added::<crate::terrain::AuthoritativeTerrainPlugin>());
     }
 }

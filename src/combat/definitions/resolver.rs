@@ -132,7 +132,7 @@ pub(super) fn normalize_recipe(recipe: &mut WeaponRecipe) {
         }
     }
     for effect in &mut recipe.world_effects {
-        let WorldEffectDefinition::DestroyTerrain { radius } = effect;
+        let WorldEffectDefinition::DestroyMap { radius } = effect;
         n(radius);
     }
     if let FiringPattern::Spread {

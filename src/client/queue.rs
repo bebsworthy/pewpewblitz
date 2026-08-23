@@ -914,11 +914,16 @@ fn drive_headless_queue_smoke(
                 return;
             };
             if model.start_join(&selection, brawler.id, brawler.revision, time.elapsed()) {
+                debug!(
+                    game_type = game.id.as_str(),
+                    "product match automation joined queue"
+                );
                 *stage = HeadlessQueueSmokeStage::Joining;
             }
         }
         HeadlessQueueSmokeStage::Joining => {
             if model.membership().is_some() {
+                debug!("product match automation received queue membership");
                 *stage = HeadlessQueueSmokeStage::AwaitingJoinedSnapshot;
             }
         }

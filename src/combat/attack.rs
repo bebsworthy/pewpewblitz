@@ -117,16 +117,15 @@ fn resolved_lob_landing(
         bounds.0.min + Vec2::splat(landing_clearance_radius),
         bounds.0.max - Vec2::splat(landing_clearance_radius),
     );
-    let terrain_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-        INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
-    );
+    let map_filter =
+        avian2d::prelude::SpatialQueryFilter::from_mask(STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER);
     delivery::repaired_landing_point(origin, bounded, landing_clearance_radius, |candidate| {
         spatial_query
             .shape_intersections(
                 &Collider::circle(landing_clearance_radius),
                 candidate,
                 0.0,
-                &terrain_filter,
+                &map_filter,
             )
             .is_empty()
     })
@@ -152,7 +151,7 @@ fn blocked_straight_deliveries(
         .enumerate()
         .filter_map(|(index, angle)| {
             let muzzle = muzzle_position(origin, angle, muzzle_offset);
-            terrain_muzzle_contact(origin, muzzle, radius, spatial_query)
+            map_muzzle_contact(origin, muzzle, radius, spatial_query)
                 .map(|(point, normal)| (u8::try_from(index).unwrap_or(u8::MAX), point, normal))
         })
         .collect()
@@ -287,7 +286,7 @@ fn emit_attack_deliveries(
                     Collider::circle(radius),
                     CollisionLayers::new(
                         PROJECTILE_LAYER,
-                        FIGHTER_LAYER | INDESTRUCTIBLE_TERRAIN_LAYER | DESTRUCTIBLE_TERRAIN_LAYER,
+                        FIGHTER_LAYER | STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER,
                     ),
                     Replicate::to_clients(NetworkTarget::All),
                     InterpolationTarget::to_clients(NetworkTarget::All),

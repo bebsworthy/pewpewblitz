@@ -1,8 +1,0 @@
-(
-    schema_version: 1,
-    maps: [
-        (id: MapPresetId(1), key: "crossroads-facility", display_name: "Crossroads Facility", admission_revision: 1, document: "builtin/crossroads-facility.ron"),
-        (id: MapPresetId(2), key: "crossroads-facility-hot-zone", display_name: "Crossroads Facility (Hot Zone)", admission_revision: 1, document: "builtin/crossroads-facility-hot-zone.ron"),
-        (id: MapPresetId(3), key: "ashen-court", display_name: "Ashen Court", admission_revision: 1, document: "builtin/ashen-court.ron"),
-    ],
-)

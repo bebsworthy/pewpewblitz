@@ -1,0 +1,8 @@
+(
+    schema_version: 3,
+    themes: [
+        (id: MapPresentationThemeId(1), key: "crossroads-facility"),
+        (id: MapPresentationThemeId(2), key: "tidal-garden"),
+        (id: MapPresentationThemeId(3), key: "ashen-court"),
+    ],
+)

@@ -241,9 +241,7 @@ mod rules {
     #![allow(clippy::wildcard_imports)]
     use super::*;
     use crate::combat::CurrentHealth;
-    use crate::map::{
-        HOT_ZONE_MODE_DEFINITION, HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION, NormalizedArea, ResolvedMap,
-    };
+    use crate::map::HOT_ZONE_MODE_DEFINITION;
     use crate::matchplay::{
         ActiveCombatant, ConnectedMatchRoster, MatchOutcomeDiagnostics, MatchParticipant,
         MatchPhase, MatchRestartSet, MatchRoot, MatchSet, MatchState, ModeOutcomeCause,
@@ -304,8 +302,7 @@ mod rules {
     fn initialize_hot_zone_state(
         mut commands: Commands,
         rules: Res<HotZoneRules>,
-        zone: Option<Res<ResolvedObjectiveZone>>,
-        resolved_map: Option<Res<ResolvedMap>>,
+        zone: Res<ResolvedObjectiveZone>,
         roots: Query<(Entity, &MatchState), With<MatchRoot>>,
     ) {
         let Ok((root, state)) = roots.single() else {
@@ -315,16 +312,7 @@ mod rules {
             state.mode_definition_id, HOT_ZONE_MODE_DEFINITION,
             "Hot Zone mode requires a Hot Zone map"
         );
-        let zone = zone.map_or_else(
-            || {
-                let resolved = resolved_map
-                    .as_ref()
-                    .expect("the authoritative map resolves before the match root");
-                resolve_objective_zone(resolved)
-                    .expect("the installed Hot Zone map carries exactly one area objective anchor")
-            },
-            |zone| *zone,
-        );
+        let zone = *zone;
         commands.entity(root).insert(HotZoneState {
             match_id: state.match_id,
             zone_anchor_id: zone.anchor_id,
@@ -338,26 +326,6 @@ mod rules {
             anchor_id: zone.anchor_id,
             area: zone.area,
         });
-    }
-
-    fn resolve_objective_zone(resolved: &ResolvedMap) -> Option<ResolvedObjectiveZone> {
-        let anchors = resolved
-            .anchors_by_definition
-            .get(&HOT_ZONE_OBJECTIVE_ANCHOR_DEFINITION)?;
-        if anchors.len() != 1 {
-            return None;
-        }
-        let anchor = &anchors[0];
-        match anchor.shape {
-            crate::map::ModeAnchorShape::Area { position, shape } => Some(ResolvedObjectiveZone {
-                anchor_id: anchor.anchor_id,
-                area: NormalizedArea {
-                    center: position,
-                    shape,
-                },
-            }),
-            crate::map::ModeAnchorShape::Point { .. } => None,
-        }
     }
 
     /// Deadline rule: at or after `ends_at_tick`, recognize an already-present threshold

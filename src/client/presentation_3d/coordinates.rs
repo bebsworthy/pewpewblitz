@@ -28,12 +28,6 @@ pub(crate) fn ground_rotation(rotation: Rotation) -> Quat {
     Quat::from_rotation_y(rotation.as_radians())
 }
 
-/// Convert full simulation rectangle dimensions to X/Z dimensions.
-#[must_use]
-pub(crate) fn ground_extents(extents: Vec2) -> Vec3 {
-    Vec3::new(extents.x, 0.0, extents.y)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,13 +52,9 @@ mod tests {
     }
 
     #[test]
-    fn basis_directions_and_extents_preserve_the_gameplay_plane() {
+    fn basis_directions_preserve_the_gameplay_plane() {
         assert_eq!(ground_direction(Vec2::X), Vec3::X);
         assert_eq!(ground_direction(Vec2::Y), Vec3::NEG_Z);
-        assert_eq!(
-            ground_extents(Vec2::new(320.0, 64.0)),
-            Vec3::new(320.0, 0.0, 64.0)
-        );
     }
 
     #[test]

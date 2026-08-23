@@ -44,14 +44,6 @@ impl Plugin for ServerCombatPlugin {
                 position: Vec2::new(0.0, -320.0),
                 facing: 0.0,
             });
-        } else if env::var("BRAWLER_NETWORK_TERRAIN_TEST_DUMMY").as_deref() == Ok("1") {
-            // Terrain-profile target: just south of the central destructible block, so
-            // aimed Arc Launcher lobs land within the radius-48 brush reach of its face
-            // from any spawn lane. The combat-assert fixture above keeps its own position.
-            app.insert_resource(TestDummyFixture {
-                position: Vec2::new(0.0, -120.0),
-                facing: 0.0,
-            });
         }
         app.init_resource::<FighterDefinitions>()
             .init_resource::<WeaponDefinitions>()

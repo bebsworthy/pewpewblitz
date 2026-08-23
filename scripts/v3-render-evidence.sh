@@ -137,7 +137,7 @@ peer_pid=$!
 for ((client_id = 3; client_id <= roster_size; client_id++)); do
     sleep 1
     target/release/brawler-client --client-id "$client_id" --server "$bind_addr" \
-        --transport routed-udp --headless --product-requeue-smoke \
+        --transport routed-udp --headless "$match_flag" \
         --product-game-type "$game_type" \
         >"${report_path}.client-${client_id}.log" 2>&1 &
     extra_pids+=("$!")

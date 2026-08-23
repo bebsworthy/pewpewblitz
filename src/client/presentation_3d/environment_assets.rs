@@ -4,77 +4,320 @@ use super::*;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-pub(crate) const ENVIRONMENT_VISUAL_CATALOG: &str =
-    include_str!("../../../assets/catalogs/environment_visuals.ron");
+const MAP_VISUAL_CATALOG: &str = include_str!("../../../assets/catalogs/map_asset_visuals.ron");
+const MAP_THEME_CATALOG: &str =
+    include_str!("../../../assets/catalogs/map_presentation_themes.ron");
 
-#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum EnvironmentFallback {
-    Wall,
-    Block,
-    Column,
-    Decoration,
-    Boundary,
+#[derive(Deserialize, Clone)]
+pub(super) enum MapVisualKind {
+    Imported { path: String },
+    GeneratedGround,
+    GeneratedCover,
+    GeneratedWater,
+    GeneratedVegetation,
+    GeneratedBarrier,
+    GeneratedRubble,
+    GeneratedDecoration,
+    HiddenMarker,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-pub(super) struct EnvironmentVisualProfile {
-    pub(super) variant_id: crate::map::MapVisualVariantId,
-    pub(super) path: String,
-    pub(super) scale: f32,
-    pub(super) yaw_degrees: f32,
-    pub(super) vertical_offset: f32,
-    material_tint: (f32, f32, f32),
-    pub(super) fallback: EnvironmentFallback,
+#[derive(Deserialize, Clone)]
+#[allow(
+    dead_code,
+    reason = "fallback identity is validated structurally in M01"
+)]
+enum MapVisualFallback {
+    Wall,
+    Decoration,
+    Ground,
+    Cover,
+    Water,
+    Vegetation,
+    Barrier,
+    Rubble,
+    Hidden,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum MapVisualFitting {
+    #[default]
+    Exact,
+    Tiled,
+    Contained,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum MapAdjacencyGroup {
+    #[default]
+    None,
+    Water,
+    Vegetation,
+    Wall,
 }
 
 #[derive(Deserialize)]
-struct EnvironmentVisualCatalogSource {
+#[serde(deny_unknown_fields)]
+pub(super) struct MapVisualProfile {
+    pub(super) id: crate::map::MapVisualProfileId,
+    pub(super) kind: MapVisualKind,
+    pub(super) scale: f32,
+    pub(super) yaw_degrees: f32,
+    pub(super) vertical_offset: f32,
+    pub(super) tint: (f32, f32, f32),
+    fallback: MapVisualFallback,
+    #[serde(default)]
+    pub(super) fitting: MapVisualFitting,
+    #[serde(default)]
+    pub(super) adjacency_group: MapAdjacencyGroup,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapVisualSource {
     schema_version: u16,
-    visuals: Vec<EnvironmentVisualProfile>,
-    themes: Vec<EnvironmentThemeProfile>,
+    visuals: Vec<MapVisualProfile>,
 }
 
-#[derive(Resource, Clone)]
-pub(crate) struct EnvironmentVisualCatalog {
-    profiles: BTreeMap<crate::map::MapVisualVariantId, EnvironmentVisualProfile>,
-    themes: BTreeMap<crate::map::MapPresentationThemeId, EnvironmentThemeProfile>,
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapThemeSource {
+    schema_version: u16,
+    themes: Vec<MapThemeProfile>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-pub(crate) struct EnvironmentThemeProfile {
-    pub(crate) theme_id: crate::map::MapPresentationThemeId,
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[derive(Clone)]
+pub(super) struct MapThemeProfile {
+    id: crate::map::MapPresentationThemeId,
     playable_ground: (f32, f32, f32),
     ground_accent: (f32, f32, f32),
     outer_ground: (f32, f32, f32),
     fallback_wall: (f32, f32, f32),
     fallback_perimeter: (f32, f32, f32),
-    terrain: (f32, f32, f32),
+    destructible_cover: (f32, f32, f32),
+    water: (f32, f32, f32),
+    vegetation: (f32, f32, f32),
+    rubble: (f32, f32, f32),
     ambient_color: (f32, f32, f32),
-    pub(crate) ambient_brightness: f32,
+    pub(super) ambient_brightness: f32,
     directional_color: (f32, f32, f32),
-    pub(crate) directional_illuminance: f32,
+    pub(super) directional_illuminance: f32,
 }
 
-impl EnvironmentThemeProfile {
-    fn colors(&self) -> [[f32; 3]; 8] {
-        [
-            tuple_channels(self.playable_ground),
-            tuple_channels(self.ground_accent),
-            tuple_channels(self.outer_ground),
-            tuple_channels(self.fallback_wall),
-            tuple_channels(self.fallback_perimeter),
-            tuple_channels(self.terrain),
-            tuple_channels(self.ambient_color),
-            tuple_channels(self.directional_color),
-        ]
-    }
-
-    pub(crate) fn ambient_color(&self) -> Color {
+impl MapThemeProfile {
+    pub(super) fn ambient_color(&self) -> Color {
         tuple_color(self.ambient_color)
     }
 
-    pub(crate) fn directional_color(&self) -> Color {
+    pub(super) fn directional_color(&self) -> Color {
         tuple_color(self.directional_color)
+    }
+}
+
+fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), String> {
+    let source: MapVisualSource = ron::from_str(MAP_VISUAL_CATALOG)
+        .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
+    let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
+        .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
+    if source.schema_version != 3 || themes.schema_version != 3 {
+        return Err("unsupported client map catalog schema".to_string());
+    }
+    let expected: BTreeSet<_> = catalog
+        .assets
+        .iter()
+        .map(|asset| asset.visual_profile_id)
+        .collect();
+    let mut actual = BTreeSet::new();
+    for profile in source.visuals {
+        let kind_matches_fallback = matches!(
+            (&profile.kind, &profile.fallback),
+            (
+                MapVisualKind::Imported { .. },
+                MapVisualFallback::Wall | MapVisualFallback::Decoration
+            ) | (MapVisualKind::GeneratedGround, MapVisualFallback::Ground)
+                | (MapVisualKind::GeneratedCover, MapVisualFallback::Cover)
+                | (MapVisualKind::GeneratedWater, MapVisualFallback::Water)
+                | (
+                    MapVisualKind::GeneratedVegetation,
+                    MapVisualFallback::Vegetation
+                )
+                | (MapVisualKind::GeneratedBarrier, MapVisualFallback::Barrier)
+                | (MapVisualKind::GeneratedRubble, MapVisualFallback::Rubble)
+                | (
+                    MapVisualKind::GeneratedDecoration,
+                    MapVisualFallback::Decoration
+                )
+                | (MapVisualKind::HiddenMarker, MapVisualFallback::Hidden)
+        );
+        let fitting_matches_kind = match &profile.kind {
+            MapVisualKind::GeneratedWater => {
+                profile.fitting == MapVisualFitting::Tiled
+                    && profile.adjacency_group == MapAdjacencyGroup::Water
+            }
+            MapVisualKind::GeneratedVegetation => {
+                profile.fitting == MapVisualFitting::Tiled
+                    && profile.adjacency_group == MapAdjacencyGroup::Vegetation
+            }
+            MapVisualKind::HiddenMarker => {
+                profile.fitting == MapVisualFitting::Exact
+                    && profile.adjacency_group == MapAdjacencyGroup::None
+            }
+            _ => true,
+        };
+        let colors = [profile.tint.0, profile.tint.1, profile.tint.2];
+        if profile.id.0 == 0
+            || !actual.insert(profile.id)
+            || !profile.scale.is_finite()
+            || profile.scale <= 0.0
+            || !profile.yaw_degrees.is_finite()
+            || !profile.vertical_offset.is_finite()
+            || !kind_matches_fallback
+            || !fitting_matches_kind
+            || colors
+                .into_iter()
+                .any(|channel| !channel.is_finite() || !(0.0..=1.0).contains(&channel))
+        {
+            return Err("invalid or duplicate client map visual".to_string());
+        }
+        if let MapVisualKind::Imported { path } = profile.kind
+            && (path.trim().is_empty()
+                || std::path::Path::new(&path)
+                    .extension()
+                    .is_none_or(|extension| !extension.eq_ignore_ascii_case("glb")))
+        {
+            return Err("invalid imported client map visual path".to_string());
+        }
+    }
+    if actual != expected {
+        return Err("client visual catalog does not exactly cover shared map assets".to_string());
+    }
+    validate_map_themes(themes, catalog)?;
+    Ok(())
+}
+
+fn validate_map_themes(
+    themes: MapThemeSource,
+    catalog: &crate::map::MapContentCatalog,
+) -> Result<(), String> {
+    let mut theme_ids = BTreeSet::new();
+    for theme in themes.themes {
+        let channels = [
+            theme.playable_ground,
+            theme.ground_accent,
+            theme.outer_ground,
+            theme.fallback_wall,
+            theme.fallback_perimeter,
+            theme.destructible_cover,
+            theme.water,
+            theme.vegetation,
+            theme.rubble,
+            theme.ambient_color,
+            theme.directional_color,
+        ];
+        if theme.id.0 == 0
+            || !theme_ids.insert(theme.id)
+            || channels
+                .into_iter()
+                .flat_map(|color| [color.0, color.1, color.2])
+                .any(|channel| !channel.is_finite() || !(0.0..=1.0).contains(&channel))
+            || !theme.ambient_brightness.is_finite()
+            || theme.ambient_brightness < 0.0
+            || !theme.directional_illuminance.is_finite()
+            || theme.directional_illuminance < 0.0
+        {
+            return Err("invalid or duplicate client map theme".to_string());
+        }
+    }
+    let expected_themes: BTreeSet<_> = catalog
+        .presets
+        .iter()
+        .map(|preset| preset.recipe.presentation_theme_id)
+        .collect();
+    if theme_ids != expected_themes {
+        return Err("client theme catalog does not cover grid recipes".to_string());
+    }
+    Ok(())
+}
+
+#[derive(Resource)]
+pub(super) struct MapVisualCatalog {
+    profiles: BTreeMap<crate::map::MapVisualProfileId, MapVisualProfile>,
+    themes: BTreeMap<crate::map::MapPresentationThemeId, MapThemeProfile>,
+}
+
+impl MapVisualCatalog {
+    pub(super) fn embedded(catalog: &crate::map::MapContentCatalog) -> Result<Self, String> {
+        validate_map_visuals(catalog)?;
+        let source: MapVisualSource = ron::from_str(MAP_VISUAL_CATALOG)
+            .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
+        let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
+            .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
+        Ok(Self {
+            profiles: source
+                .visuals
+                .into_iter()
+                .map(|profile| (profile.id, profile))
+                .collect(),
+            themes: themes
+                .themes
+                .into_iter()
+                .map(|theme| (theme.id, theme))
+                .collect(),
+        })
+    }
+
+    pub(super) fn profile(&self, id: crate::map::MapVisualProfileId) -> Option<&MapVisualProfile> {
+        self.profiles.get(&id)
+    }
+
+    pub(super) fn theme(&self, id: crate::map::MapPresentationThemeId) -> Option<&MapThemeProfile> {
+        self.themes.get(&id)
+    }
+
+    pub(super) fn build_theme_materials(
+        &self,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> BTreeMap<crate::map::MapPresentationThemeId, EnvironmentThemeMaterials> {
+        let matte = |color: Color| StandardMaterial {
+            base_color: color,
+            perceptual_roughness: 0.82,
+            metallic: 0.0,
+            ..default()
+        };
+        self.themes
+            .iter()
+            .map(|(id, theme)| {
+                let destructible_cover = materials.add(StandardMaterial {
+                    double_sided: true,
+                    cull_mode: None,
+                    ..matte(tuple_color(theme.destructible_cover))
+                });
+                (
+                    *id,
+                    EnvironmentThemeMaterials {
+                        floor: materials.add(matte(tuple_color(theme.playable_ground))),
+                        floor_accent: materials.add(matte(tuple_color(theme.ground_accent))),
+                        outer_ground: materials.add(matte(tuple_color(theme.outer_ground))),
+                        wall: materials.add(matte(tuple_color(theme.fallback_wall))),
+                        perimeter: materials.add(matte(tuple_color(theme.fallback_perimeter))),
+                        destructible_cover,
+                        water: materials.add(StandardMaterial {
+                            base_color: tuple_color(theme.water),
+                            metallic: 0.05,
+                            perceptual_roughness: 0.25,
+                            ..default()
+                        }),
+                        vegetation: materials.add(StandardMaterial {
+                            double_sided: true,
+                            cull_mode: None,
+                            ..matte(tuple_color(theme.vegetation))
+                        }),
+                        rubble: materials.add(matte(tuple_color(theme.rubble))),
+                    },
+                )
+            })
+            .collect()
     }
 }
 
@@ -85,12 +328,15 @@ pub(crate) struct EnvironmentThemeMaterials {
     pub(crate) outer_ground: Handle<StandardMaterial>,
     pub(crate) wall: Handle<StandardMaterial>,
     pub(crate) perimeter: Handle<StandardMaterial>,
-    pub(crate) terrain: Handle<StandardMaterial>,
+    pub(crate) destructible_cover: Handle<StandardMaterial>,
+    pub(crate) water: Handle<StandardMaterial>,
+    pub(crate) vegetation: Handle<StandardMaterial>,
+    pub(crate) rubble: Handle<StandardMaterial>,
 }
 
 #[derive(Resource, Clone)]
 pub(crate) struct EnvironmentThemeMaterialCatalog {
-    materials: BTreeMap<crate::map::MapPresentationThemeId, EnvironmentThemeMaterials>,
+    pub(super) materials: BTreeMap<crate::map::MapPresentationThemeId, EnvironmentThemeMaterials>,
 }
 
 impl EnvironmentThemeMaterialCatalog {
@@ -102,145 +348,27 @@ impl EnvironmentThemeMaterialCatalog {
     }
 }
 
-impl EnvironmentVisualCatalog {
-    pub(crate) fn embedded(objects: &crate::map::MapObjectCatalog) -> Result<Self, String> {
-        let source: EnvironmentVisualCatalogSource = ron::from_str(ENVIRONMENT_VISUAL_CATALOG)
-            .map_err(|error| format!("environment visual catalog parse failed: {error}"))?;
-        if source.schema_version != 2 || source.visuals.is_empty() || source.themes.is_empty() {
-            return Err("environment visual catalog schema or entries are invalid".to_string());
-        }
-        let mut profiles = BTreeMap::new();
-        let mut paths = BTreeSet::new();
-        for profile in source.visuals {
-            if objects.variant(profile.variant_id).is_none()
-                || profile.path.trim().is_empty()
-                || !std::path::Path::new(&profile.path)
-                    .extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("glb"))
-                || !profile.scale.is_finite()
-                || profile.scale <= 0.0
-                || !profile.yaw_degrees.is_finite()
-                || !profile.vertical_offset.is_finite()
-                || profile
-                    .tint()
-                    .iter()
-                    .any(|channel| !channel.is_finite() || !(0.0..=1.0).contains(channel))
-                || !paths.insert(profile.path.clone())
-                || profiles.insert(profile.variant_id, profile).is_some()
-            {
-                return Err("environment visual profile is invalid or duplicated".to_string());
-            }
-        }
-        let known_themes = objects
-            .themes()
-            .map(|theme| theme.id)
-            .collect::<BTreeSet<_>>();
-        let mut themes = BTreeMap::new();
-        for theme in source.themes {
-            if !known_themes.contains(&theme.theme_id)
-                || theme
-                    .colors()
-                    .into_iter()
-                    .flatten()
-                    .any(|channel| !channel.is_finite() || !(0.0..=1.0).contains(&channel))
-                || !theme.ambient_brightness.is_finite()
-                || theme.ambient_brightness < 0.0
-                || !theme.directional_illuminance.is_finite()
-                || theme.directional_illuminance < 0.0
-                || themes.insert(theme.theme_id, theme).is_some()
-            {
-                return Err("environment theme profile is invalid or duplicated".to_string());
-            }
-        }
-        if themes.keys().copied().collect::<BTreeSet<_>>() != known_themes {
-            return Err(
-                "environment theme profiles do not cover the shared theme catalog".to_string(),
-            );
-        }
-        Ok(Self { profiles, themes })
-    }
-
-    pub(super) fn profile(
-        &self,
-        id: crate::map::MapVisualVariantId,
-    ) -> Option<&EnvironmentVisualProfile> {
-        self.profiles.get(&id)
-    }
-
-    pub(crate) fn theme(
-        &self,
-        id: crate::map::MapPresentationThemeId,
-    ) -> Option<&EnvironmentThemeProfile> {
-        self.themes.get(&id)
-    }
-
-    pub(crate) fn build_theme_materials(
-        &self,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> EnvironmentThemeMaterialCatalog {
-        let matte = |color: Color| StandardMaterial {
-            base_color: color,
-            perceptual_roughness: 0.82,
-            metallic: 0.0,
-            ..default()
-        };
-        let materials = self
-            .themes
-            .iter()
-            .map(|(id, theme)| {
-                (
-                    *id,
-                    EnvironmentThemeMaterials {
-                        floor: materials.add(matte(tuple_color(theme.playable_ground))),
-                        floor_accent: materials.add(matte(tuple_color(theme.ground_accent))),
-                        outer_ground: materials.add(matte(tuple_color(theme.outer_ground))),
-                        wall: materials.add(matte(tuple_color(theme.fallback_wall))),
-                        perimeter: materials.add(matte(tuple_color(theme.fallback_perimeter))),
-                        terrain: materials.add(StandardMaterial {
-                            double_sided: true,
-                            cull_mode: None,
-                            ..matte(tuple_color(theme.terrain))
-                        }),
-                    },
-                )
-            })
-            .collect();
-        EnvironmentThemeMaterialCatalog { materials }
-    }
-}
-
 fn tuple_color(color: (f32, f32, f32)) -> Color {
     Color::srgb(color.0, color.1, color.2)
 }
 
-fn tuple_channels(color: (f32, f32, f32)) -> [f32; 3] {
-    [color.0, color.1, color.2]
-}
-
-impl EnvironmentVisualProfile {
-    pub(super) fn tint(&self) -> [f32; 3] {
-        [
-            self.material_tint.0,
-            self.material_tint.1,
-            self.material_tint.2,
-        ]
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn environment_asset_paths() -> Result<Vec<String>, String> {
-    let source: EnvironmentVisualCatalogSource = ron::from_str(ENVIRONMENT_VISUAL_CATALOG)
-        .map_err(|error| format!("environment visual catalog parse failed: {error}"))?;
+    let source: MapVisualSource = ron::from_str(MAP_VISUAL_CATALOG)
+        .map_err(|error| format!("map visual catalog parse failed: {error}"))?;
     Ok(source
         .visuals
         .into_iter()
-        .map(|profile| profile.path)
+        .filter_map(|profile| match profile.kind {
+            MapVisualKind::Imported { path } => Some(path),
+            _ => None,
+        })
         .collect())
 }
 
 #[derive(Resource)]
 pub(super) struct EnvironmentAssetHandles {
-    handles: BTreeMap<crate::map::MapVisualVariantId, Handle<Gltf>>,
+    handles: BTreeMap<crate::map::MapVisualProfileId, Handle<Gltf>>,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -253,7 +381,7 @@ pub(super) struct EnvironmentTintedMaterials {
 
 #[derive(Resource, Default)]
 pub(super) struct EnvironmentImportedScenes {
-    scenes: BTreeMap<crate::map::MapVisualVariantId, Handle<WorldAsset>>,
+    scenes: BTreeMap<crate::map::MapVisualProfileId, Handle<WorldAsset>>,
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
@@ -261,11 +389,11 @@ pub(super) enum EnvironmentAssetReadiness {
     #[default]
     Loading,
     Ready,
-    Degraded(Vec<crate::map::MapVisualVariantId>),
+    Degraded(Vec<crate::map::MapVisualProfileId>),
 }
 
 impl EnvironmentImportedScenes {
-    pub(super) fn scene(&self, id: crate::map::MapVisualVariantId) -> Option<&Handle<WorldAsset>> {
+    pub(super) fn scene(&self, id: crate::map::MapVisualProfileId) -> Option<&Handle<WorldAsset>> {
         self.scenes.get(&id)
     }
 }
@@ -277,23 +405,52 @@ impl EnvironmentImportedScenes {
 pub(super) fn load_environment_assets(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    objects: Res<crate::map::MapObjectCatalogResource>,
+    maps: Res<crate::map::MapCatalogResource>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let catalog = EnvironmentVisualCatalog::embedded(&objects.0)
-        .expect("embedded environment visual catalog is valid");
-    let theme_materials = catalog.build_theme_materials(&mut materials);
-    let handles = catalog
-        .profiles
-        .iter()
-        .map(|(id, profile)| (*id, asset_server.load(profile.path.clone())))
-        .collect();
-    commands.insert_resource(catalog);
+    let map_visuals =
+        MapVisualCatalog::embedded(&maps.0).expect("embedded client map catalogs are valid");
+    let theme_materials = EnvironmentThemeMaterialCatalog {
+        materials: map_visuals.build_theme_materials(&mut materials),
+    };
+    let mut handles = BTreeMap::new();
+    for (id, profile) in &map_visuals.profiles {
+        if let MapVisualKind::Imported { path } = &profile.kind {
+            handles.insert(*id, asset_server.load(path.clone()));
+        }
+    }
+    commands.insert_resource(map_visuals);
     commands.insert_resource(theme_materials);
     commands.insert_resource(EnvironmentAssetHandles { handles });
     commands.init_resource::<EnvironmentImportedScenes>();
     commands.init_resource::<EnvironmentAssetReadiness>();
     commands.init_resource::<EnvironmentTintedMaterials>();
+}
+
+#[cfg(test)]
+mod grid_catalog_tests {
+    #[test]
+    fn client_grid_catalog_exactly_covers_shared_visuals_and_themes() {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
+        assert_eq!(visuals.profiles.len(), shared.assets.len());
+        assert!(
+            visuals
+                .theme(crate::map::MapPresentationThemeId(3))
+                .is_some()
+        );
+        for profile in visuals.profiles.values() {
+            if let super::MapVisualKind::Imported { path } = &profile.kind {
+                assert!(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("assets")
+                        .join(path)
+                        .is_file(),
+                    "missing promoted environment asset: {path}"
+                );
+            }
+        }
+    }
 }
 
 #[allow(
@@ -411,23 +568,6 @@ pub(super) fn prepare_environment_scenes(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn embedded_environment_profiles_resolve_and_exist() {
-        let objects = crate::map::MapObjectCatalog::embedded().unwrap();
-        let catalog = EnvironmentVisualCatalog::embedded(&objects).unwrap();
-        assert_eq!(catalog.profiles.len(), 22);
-        assert_eq!(catalog.themes.len(), 2);
-        for profile in catalog.profiles.values() {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("assets")
-                .join(&profile.path);
-            assert!(
-                path.is_file(),
-                "missing promoted environment asset: {path:?}"
-            );
-        }
-    }
 
     #[test]
     fn material_tint_preserves_alpha_and_scales_color_channels() {

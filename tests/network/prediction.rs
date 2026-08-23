@@ -3,7 +3,7 @@
 //!
 //! Gates (milestone-03): reduce p95 input-to-visible latency by at least two fixed ticks
 //! at the 100 ms-RTT-equivalent profile, converge to within one world unit within twelve
-//! ticks after an impairment/correction, never cross or persistently penetrate terrain,
+//! ticks after an impairment/correction, never cross or persistently penetrate map collision,
 //! and keep p95 render-space correction within the 24-unit fighter radius.
 
 use super::harness::Harness;
@@ -258,106 +258,5 @@ fn owner_prediction_never_persistently_penetrates_static_arena_geometry() {
     assert!(
         worst_streak <= 1,
         "gate: predicted pose persistently penetrated static arena geometry for {worst_streak} ticks"
-    );
-}
-
-#[test]
-fn owner_prediction_diverges_across_solid_destructible_terrain() {
-    // The candidate resolves only static geometry from the map snapshot. Destructible
-    // cells are server-authoritative and unmodelled, so driving into a still-solid
-    // destructible region must produce measured divergence: this is the recorded
-    // evidence for the keep/defer decision rather than a pass/fail gate.
-    let mut harness = joined_sandbox_harness(3, true);
-    let convergence = {
-        let world = harness.clients[0].world_mut();
-        world
-            .resource::<brawler::terrain::ClientTerrainConvergence>()
-            .clone()
-    };
-    // The central destructible reservation is the only occupied region before any brush.
-    // Find its easternmost occupied cell so the staged drive enters real cells.
-    let easternmost = convergence
-        .chunks()
-        .iter()
-        .flat_map(|(chunk, bits)| {
-            (0..brawler::terrain::TERRAIN_CHUNK_SIDE_CELLS).flat_map(move |local_y| {
-                (0..brawler::terrain::TERRAIN_CHUNK_SIDE_CELLS).filter_map(move |local_x| {
-                    bits.get(local_x, local_y).then(|| {
-                        brawler::terrain::grid::chunk_min_world(*chunk)
-                            + bevy::prelude::Vec2::new(
-                                local_x as f32 * brawler::terrain::TERRAIN_CELL_SIZE_WORLD,
-                                local_y as f32 * brawler::terrain::TERRAIN_CELL_SIZE_WORLD,
-                            )
-                    })
-                })
-            })
-        })
-        .max_by(|a, b| a.x.total_cmp(&b.x))
-        .expect("committed destructible occupancy");
-    let occupied_center = easternmost + bevy::prelude::Vec2::X * 8.0;
-    // Teleport the authoritative fighter beside the region so the scripted drive reaches
-    // still-solid cells deterministically regardless of arena layout.
-    let edge = occupied_center + bevy::prelude::Vec2::X * (FIGHTER_RADIUS + 32.0);
-    {
-        let world = harness.server.world_mut();
-        let mut fighters = world
-            .query_filtered::<&mut avian2d::prelude::Position, (With<Fighter>, Without<TestDummy>)>(
-            );
-        *fighters.single_mut(world).expect("one fighter") = avian2d::prelude::Position(edge);
-    }
-    // Let the teleport resync settle, then reset the stats so the recorded correction
-    // magnitude reflects the terrain drive rather than the staging jump.
-    for _ in 0..12 {
-        harness.step();
-    }
-    harness.clients[0]
-        .world_mut()
-        .insert_resource(OwnerPredictionStats::default());
-    let direction = bevy::prelude::Vec2::NEG_X;
-    harness.set_controlled_input(0, FighterInput::from_axes(direction, None, 0));
-    let mut predicted_penetrations = 0;
-    let mut authoritative_penetrations = 0;
-    for step in 0..150 {
-        harness.step();
-        if step == 12 || step == 60 {
-            // Bursts let the prediction run uncorrected across still-solid cells, which
-            // is the gameplay-visible risk the decision must weigh.
-            harness.arm_packet_impairment(0);
-        }
-        if let Some((_, position)) = client_predicted_position(&mut harness)
-            && brawler::terrain::grid::circle_overlaps_occupied(
-                position,
-                FIGHTER_RADIUS,
-                convergence.chunks(),
-            )
-        {
-            predicted_penetrations += 1;
-        }
-        if let Some((_, position)) = client_authoritative_position(&mut harness)
-            && brawler::terrain::grid::circle_overlaps_occupied(
-                position,
-                FIGHTER_RADIUS,
-                convergence.chunks(),
-            )
-        {
-            authoritative_penetrations += 1;
-        }
-    }
-    harness.set_controlled_input(0, FighterInput::default());
-    let stats = harness.clients[0]
-        .world()
-        .resource::<OwnerPredictionStats>()
-        .clone();
-    println!(
-        "prediction destructible-terrain divergence: predicted penetration ticks {predicted_penetrations}, authoritative penetration ticks {authoritative_penetrations}, corrections {}, p95 {:.2} units",
-        stats.corrections,
-        stats.correction_percentile(0.95),
-    );
-    // Evidence expectation: the predicted pose crosses still-solid destructible cells
-    // while the authoritative pose never does. Record it; the decision follows in the
-    // milestone file.
-    assert!(
-        predicted_penetrations > 0 && authoritative_penetrations == 0,
-        "destructible divergence probe must show predicted-only penetration"
     );
 }

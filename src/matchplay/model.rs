@@ -188,15 +188,15 @@ impl ResolvedMatchCapacity {
     /// Validate the resolved capacity against the selected map snapshot: the map must
     /// serve exactly the team slots the rules declare, with enough spawn points per team
     /// for every simultaneous participant. Returns the exact mismatch otherwise.
-    pub fn validate_against_map(
+    pub fn validate_against_spawn_catalog(
         &self,
-        snapshot: &crate::map::ResolvedMapSnapshot,
+        spawn_points: &crate::map::SpawnPointCatalog,
     ) -> Result<(), String> {
-        let mut per_team_points: std::collections::BTreeMap<u8, usize> =
-            std::collections::BTreeMap::new();
-        for point in &snapshot.spawn_points {
-            *per_team_points.entry(point.team_slot).or_default() += 1;
-        }
+        let per_team_points: std::collections::BTreeMap<u8, usize> = spawn_points
+            .0
+            .iter()
+            .map(|(team, points)| (*team, points.len()))
+            .collect();
         let capacity_slots: std::collections::BTreeSet<u8> =
             self.team_slots.iter().map(|slot| slot.team_slot).collect();
         let map_slots: std::collections::BTreeSet<u8> = per_team_points.keys().copied().collect();

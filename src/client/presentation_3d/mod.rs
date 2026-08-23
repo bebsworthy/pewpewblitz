@@ -30,14 +30,10 @@ pub(super) use camera::cursor_ground_point;
 use camera::{
     CAMERA_DISTANCE, CAMERA_ELEVATION_RADIANS, CAMERA_VERTICAL_FOV_RADIANS, follow_3d_camera,
 };
-#[cfg(test)]
-use camera::{clamp_3d_camera_center, perspective_ground_footprint, presentation_camera_bounds};
-use coordinates::{ground_extents, ground_point, ground_position, ground_rotation};
+use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
 
 const WALL_HEIGHT: f32 = 72.0;
-const GROUND_OFFSET: f32 = 1.0;
-const ZONE_RING_WIDTH: f32 = 28.0;
 // Kenney's Mini Characters face local +Z, while Brawler fighter roots face local +X.
 pub(crate) const KENNEY_CHARACTER_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
 // Blaster Kit barrels also point local +Z, so the corrected character hierarchy needs no extra yaw.
@@ -57,7 +53,6 @@ const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
 pub(crate) struct Primitive3dAssets {
     pub(crate) cover_block: Handle<Mesh>,
     pub(crate) map_entity: Handle<Mesh>,
-    pub(crate) debris: Handle<Mesh>,
     pub(crate) fighter: Handle<Mesh>,
     pub(crate) sentry_direction: Handle<Mesh>,
     pub(crate) fighter_facing: Handle<Mesh>,
@@ -78,8 +73,6 @@ pub(crate) struct Material3dAssets {
     pub(crate) marker_ally: Handle<StandardMaterial>,
     pub(crate) marker_enemy: Handle<StandardMaterial>,
     pub(crate) neutral: Handle<StandardMaterial>,
-    pub(crate) zone_fill: Handle<StandardMaterial>,
-    pub(crate) zone_boundary: Handle<StandardMaterial>,
     pub(crate) preview: Handle<StandardMaterial>,
     pub(crate) preview_blocked: Handle<StandardMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
@@ -202,6 +195,7 @@ impl Plugin for WorldPresentationPlugin {
                     prepare_imported_assets,
                     environment_assets::prepare_environment_scenes,
                     reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
+                    reconcile_dynamic_map_visuals,
                     combat::reconcile_combat_visuals,
                     upgrade_fighters_to_imported_models,
                     combat::consume_combat_cues,
@@ -233,6 +227,134 @@ impl Plugin for WorldPresentationPlugin {
     }
 }
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+struct DynamicMapVisual {
+    placement_id: crate::map::MapPlacementId,
+    generation: u64,
+    asset_id: crate::map::MapAssetId,
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "parameters are Bevy system parameters owned by the presentation schedule"
+)]
+fn reconcile_dynamic_map_visuals(
+    mut commands: Commands,
+    primitives: Res<Primitive3dAssets>,
+    theme_materials: Res<environment_assets::EnvironmentThemeMaterialCatalog>,
+    catalog: Res<crate::map::MapCatalogResource>,
+    accepted: Option<Res<crate::map::PresentedMap>>,
+    grids: Query<
+        (
+            &crate::map::ResolvedMapSnapshot,
+            &crate::map::MapDynamicState,
+        ),
+        With<crate::map::MapRoot>,
+    >,
+    existing: Query<(
+        Entity,
+        &crate::map::MapPresentationMember,
+        &DynamicMapVisual,
+    )>,
+) {
+    let Some(accepted) = accepted else {
+        return;
+    };
+    let Ok((snapshot, state)) = grids.get(accepted.source_root) else {
+        return;
+    };
+    let terminal: std::collections::BTreeMap<_, _> = state
+        .terminal_states
+        .iter()
+        .map(|transition| (transition.placement_id, transition.outcome))
+        .collect();
+    let desired_asset =
+        |placement: &crate::map::MapAssetPlacement| match terminal.get(&placement.placement_id) {
+            Some(crate::map::MapPlacementOutcome::Removed) => None,
+            Some(crate::map::MapPlacementOutcome::ReplacedWith(asset_id)) => Some(*asset_id),
+            None => Some(placement.asset_id),
+        };
+    let mut present = std::collections::BTreeSet::new();
+    for (entity, member, visual) in &existing {
+        let desired = snapshot
+            .placements
+            .iter()
+            .find(|placement| placement.placement_id == visual.placement_id)
+            .and_then(desired_asset);
+        if member.instance_id != snapshot.identity.instance_id
+            || visual.generation != state.generation
+            || desired != Some(visual.asset_id)
+        {
+            commands.entity(entity).try_despawn();
+        } else {
+            present.insert(visual.placement_id);
+        }
+    }
+    let Some(materials) = theme_materials.get(snapshot.presentation_theme_id) else {
+        return;
+    };
+    let marker = crate::map::MapPresentationMember {
+        instance_id: snapshot.identity.instance_id,
+    };
+    for placement in &snapshot.placements {
+        let Some(source_asset) = catalog.0.asset(placement.asset_id) else {
+            continue;
+        };
+        let dynamic = catalog
+            .0
+            .profile(source_asset.gameplay_profile_id)
+            .is_some_and(|profile| {
+                profile.destruction != crate::map::MapDestructionBehavior::Indestructible
+            });
+        if !dynamic || present.contains(&placement.placement_id) {
+            continue;
+        }
+        let Some(asset_id) = desired_asset(placement) else {
+            continue;
+        };
+        let Some(asset) = catalog.0.asset(asset_id) else {
+            continue;
+        };
+        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
+        let center = crate::map::placement_world_center(snapshot.dimensions, asset, placement);
+        let material = if asset_id == crate::map::RUBBLE_ASSET {
+            materials.rubble.clone()
+        } else {
+            materials.destructible_cover.clone()
+        };
+        commands.spawn((
+            marker,
+            DynamicMapVisual {
+                placement_id: placement.placement_id,
+                generation: state.generation,
+                asset_id,
+            },
+            Mesh3d(primitives.cover_block.clone()),
+            MeshMaterial3d(material),
+            Transform {
+                translation: ground_position(center)
+                    + Vec3::Y
+                        * if asset_id == crate::map::RUBBLE_ASSET {
+                            4.0
+                        } else {
+                            16.0
+                        },
+                scale: Vec3::new(
+                    f32::from(footprint.width) * 0.5,
+                    if asset_id == crate::map::RUBBLE_ASSET {
+                        0.25
+                    } else {
+                        1.0
+                    },
+                    f32::from(footprint.height) * 0.5,
+                ),
+                ..default()
+            },
+            Name::new("dynamic map asset"),
+        ));
+    }
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "startup constructs one bounded shared mesh/material palette and the two cameras"
@@ -245,7 +367,6 @@ fn setup_3d_foundation(
     let primitives = Primitive3dAssets {
         cover_block: meshes.add(Cuboid::new(64.0, 32.0, 64.0)),
         map_entity: meshes.add(Cuboid::new(24.0, 24.0, 24.0)),
-        debris: meshes.add(Cuboid::new(12.0, 8.0, 12.0)),
         fighter: meshes.add(Sphere::new(24.0)),
         sentry_direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
         fighter_facing: meshes.add(fighter_facing_mesh()),
@@ -285,18 +406,6 @@ fn setup_3d_foundation(
             ..default()
         }),
         neutral: materials.add(matte(Color::srgb(0.72, 0.76, 0.82))),
-        zone_fill: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.2, 0.5, 0.95, 0.30),
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        }),
-        zone_boundary: materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.82, 0.2),
-            emissive: LinearRgba::new(1.2, 0.8, 0.08, 1.0),
-            unlit: true,
-            ..default()
-        }),
         preview: materials.add(StandardMaterial {
             base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
             alpha_mode: AlphaMode::Blend,
@@ -439,14 +548,13 @@ fn reconcile_3d_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
     theme_materials: Res<environment_assets::EnvironmentThemeMaterialCatalog>,
-    object_catalog: Res<crate::map::MapObjectCatalogResource>,
-    visual_catalog: Option<Res<environment_assets::EnvironmentVisualCatalog>>,
+    grid_catalog: Res<crate::map::MapCatalogResource>,
+    map_visuals: Option<Res<environment_assets::MapVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
     accepted: Option<Res<crate::map::PresentedMap>>,
     current: Option<Res<Presented3dMap>>,
-    snapshots: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
+    map_snapshots: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
     members: Query<(
         Entity,
         &crate::map::MapPresentationMember,
@@ -465,303 +573,265 @@ fn reconcile_3d_map(
         commands.remove_resource::<Presented3dMap>();
         return;
     };
-    let Ok(snapshot) = snapshots.get(accepted.source_root) else {
-        return;
-    };
-    let presentation_key = Presented3dMap {
-        instance_id: snapshot.identity.instance_id,
-        recipe_fingerprint: snapshot.identity.recipe_fingerprint,
-        theme_id: snapshot.presentation_theme_id,
-    };
-    if current.is_some_and(|current| *current == presentation_key) {
-        return;
-    }
-    let Some(environment_materials) = theme_materials.get(snapshot.presentation_theme_id) else {
-        error!(
-            theme = snapshot.presentation_theme_id.0,
-            "accepted map has no client theme materials"
-        );
-        return;
-    };
-    let Some(environment_theme) = visual_catalog
-        .as_deref()
-        .and_then(|catalog| catalog.theme(snapshot.presentation_theme_id))
-    else {
-        error!(
-            theme = snapshot.presentation_theme_id.0,
-            "accepted map has no client theme profile"
-        );
-        return;
-    };
-    ambient.color = environment_theme.ambient_color();
-    ambient.brightness = environment_theme.ambient_brightness;
-    for mut light in &mut directional_lights {
-        light.color = environment_theme.directional_color();
-        light.illuminance = environment_theme.directional_illuminance;
-    }
-    for (entity, _, generated) in &members {
-        if let Some(generated) = generated {
-            meshes.remove(generated.0.id());
+    let current_grid_snapshot = map_snapshots.get(accepted.source_root).ok().cloned();
+    if let Some(grid_snapshot) = current_grid_snapshot.as_ref() {
+        let presentation_key = Presented3dMap {
+            instance_id: grid_snapshot.identity.instance_id,
+            recipe_fingerprint: grid_snapshot.identity.recipe_fingerprint,
+            theme_id: grid_snapshot.presentation_theme_id,
+        };
+        if current.is_some_and(|current| *current == presentation_key) {
+            return;
         }
-        commands.entity(entity).try_despawn();
-    }
-    let marker = crate::map::MapPresentationMember {
-        instance_id: snapshot.identity.instance_id,
-    };
-    let bounds = snapshot.playable_bounds;
-    map::spawn_ground_surfaces(
-        &mut commands,
-        &mut meshes,
-        environment_materials,
-        marker,
-        bounds,
-    );
-    for geometry in &snapshot.geometry {
-        let variant = object_catalog.0.resolve_variant(
-            snapshot.presentation_theme_id,
-            geometry.object_definition_id,
-            geometry.visual_variant_id,
-        );
-        match geometry.shape {
-            crate::map::MapShape::Rectangle { half_extents } => {
-                let size = half_extents * 2.0;
-                if let (Some(variant), Some(imported), Some(visual_catalog)) =
-                    (variant, imported.as_deref(), visual_catalog.as_deref())
-                    && let (Some(scene), Some(profile)) =
-                        (imported.scene(variant), visual_catalog.profile(variant))
-                    && spawn_imported_wall_modules(
-                        &mut commands,
-                        scene,
-                        profile,
-                        geometry.position,
-                        geometry.rotation,
-                        size,
-                        snapshot.identity.instance_id,
-                    )
-                {
-                    // The selected Mini Arena block is exactly 1x0.5x1 source units;
-                    // uniform scale 64 gives the authoritative 64x64 module footprint.
-                } else {
-                    spawn_fallback_wall_modules(
-                        &mut commands,
-                        &mut meshes,
-                        &primitives,
-                        environment_materials,
-                        geometry.position,
-                        geometry.rotation,
-                        size,
-                        snapshot.identity.instance_id,
-                    );
-                }
-            }
-            crate::map::MapShape::Circle { radius } => {
-                if let (Some(variant), Some(imported), Some(visual_catalog)) =
-                    (variant, imported.as_deref(), visual_catalog.as_deref())
-                    && let (Some(scene), Some(profile)) =
-                        (imported.scene(variant), visual_catalog.profile(variant))
-                {
-                    spawn_imported_environment(
-                        &mut commands,
-                        marker,
-                        scene,
-                        profile,
-                        geometry.position,
-                        geometry.rotation,
-                        "V4 imported circular cover",
-                    );
-                } else {
-                    let mut translation = ground_position(geometry.position);
-                    translation.y = WALL_HEIGHT * 0.5;
-                    let mesh = meshes.add(Cylinder::new(radius, WALL_HEIGHT));
-                    commands.spawn((
-                        marker,
-                        Mesh3d(mesh.clone()),
-                        GeneratedMapMesh(mesh),
-                        MeshMaterial3d(environment_materials.wall.clone()),
-                        Transform::from_translation(translation),
-                        Name::new("V4 circular cover fallback"),
-                    ));
-                }
-            }
-        }
-    }
-    for module in border::border_modules(bounds) {
-        let boundary_object =
-            crate::map::MapObjectDefinitionId(if module.corner { 21 } else { 20 });
-        let variant =
-            object_catalog
-                .0
-                .resolve_variant(snapshot.presentation_theme_id, boundary_object, None);
-        if let (Some(imported), Some(visual_catalog)) =
-            (imported.as_deref(), visual_catalog.as_deref())
-            && let Some(variant) = variant
-            && let (Some(scene), Some(profile)) =
-                (imported.scene(variant), visual_catalog.profile(variant))
-        {
-            spawn_imported_environment(
-                &mut commands,
-                marker,
-                scene,
-                profile,
-                module.position,
-                module.rotation,
-                "V4 imported arena edge module",
+        let Some(environment_materials) = theme_materials.get(grid_snapshot.presentation_theme_id)
+        else {
+            error!(
+                theme = grid_snapshot.presentation_theme_id.0,
+                "accepted map has no client theme materials"
             );
-        } else {
+            return;
+        };
+        let Some(grid_theme) = map_visuals
+            .as_deref()
+            .and_then(|catalog| catalog.theme(grid_snapshot.presentation_theme_id))
+        else {
+            error!(
+                theme = grid_snapshot.presentation_theme_id.0,
+                "accepted map has no client theme profile"
+            );
+            return;
+        };
+        ambient.color = grid_theme.ambient_color();
+        ambient.brightness = grid_theme.ambient_brightness;
+        for mut light in &mut directional_lights {
+            light.color = grid_theme.directional_color();
+            light.illuminance = grid_theme.directional_illuminance;
+        }
+        for (entity, _, generated) in &members {
+            if let Some(generated) = generated {
+                meshes.remove(generated.0.id());
+            }
+            commands.entity(entity).try_despawn();
+        }
+        let marker = crate::map::MapPresentationMember {
+            instance_id: grid_snapshot.identity.instance_id,
+        };
+        map::spawn_ground_surfaces(
+            &mut commands,
+            &mut meshes,
+            environment_materials,
+            marker,
+            grid_snapshot.dimensions.bounds(),
+        );
+        materialize_map_static_visuals(
+            &mut commands,
+            &primitives,
+            environment_materials,
+            marker,
+            grid_snapshot,
+            &grid_catalog.0,
+            map_visuals.as_deref(),
+            imported.as_deref(),
+        );
+        commands.insert_resource(presentation_key);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn materialize_map_static_visuals(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &environment_assets::EnvironmentThemeMaterials,
+    marker: crate::map::MapPresentationMember,
+    snapshot: &crate::map::ResolvedMapSnapshot,
+    catalog: &crate::map::MapContentCatalog,
+    visual_catalog: Option<&environment_assets::MapVisualCatalog>,
+    imported: Option<&environment_assets::EnvironmentImportedScenes>,
+) {
+    for placement in &snapshot.placements {
+        let Some(asset) = catalog.asset(placement.asset_id) else {
+            continue;
+        };
+        let dynamic = catalog
+            .profile(asset.gameplay_profile_id)
+            .is_some_and(|profile| {
+                profile.destruction != crate::map::MapDestructionBehavior::Indestructible
+            });
+        if asset.slot == crate::map::MapAssetSlot::Marker || dynamic {
+            continue;
+        }
+        if asset.slot == crate::map::MapAssetSlot::Surface
+            && placement.asset_id != crate::map::WATER_ASSET
+        {
+            continue;
+        }
+        let center = crate::map::placement_world_center(snapshot.dimensions, asset, placement);
+        let rotation = f32::from(placement.quarter_turns) * core::f32::consts::FRAC_PI_2;
+        let profile = visual_catalog.and_then(|catalog| catalog.profile(asset.visual_profile_id));
+        let adjacent_cells: std::collections::BTreeSet<_> = snapshot
+            .placements
+            .iter()
+            .filter(|candidate| candidate.asset_id == placement.asset_id)
+            .map(|candidate| candidate.cell)
+            .collect();
+        let adjacency = crate::map::cardinal_adjacency_mask(placement.cell, &adjacent_cells);
+        let scene = imported.and_then(|scenes| scenes.scene(asset.visual_profile_id));
+        if let (Some(profile), Some(scene)) = (profile, scene)
+            && matches!(
+                profile.kind,
+                environment_assets::MapVisualKind::Imported { .. }
+            )
+        {
+            commands.spawn((
+                marker,
+                environment_assets::EnvironmentMaterialTint([
+                    profile.tint.0,
+                    profile.tint.1,
+                    profile.tint.2,
+                ]),
+                WorldAssetRoot(scene.clone()),
+                Transform {
+                    translation: ground_position(center) + Vec3::Y * profile.vertical_offset,
+                    rotation: Quat::from_rotation_y(rotation + profile.yaw_degrees.to_radians()),
+                    scale: Vec3::splat(profile.scale),
+                },
+                Name::new("imported map asset"),
+            ));
+        } else if placement.asset_id == crate::map::WATER_ASSET {
+            spawn_map_water(commands, primitives, materials, marker, center, adjacency);
+        } else if placement.asset_id == crate::map::TALL_GRASS_ASSET {
+            spawn_map_grass(
+                commands, primitives, materials, marker, center, rotation, adjacency,
+            );
+        } else if asset.slot == crate::map::MapAssetSlot::Feature {
+            let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
             commands.spawn((
                 marker,
                 Mesh3d(primitives.cover_block.clone()),
-                MeshMaterial3d(environment_materials.perimeter.clone()),
+                MeshMaterial3d(materials.wall.clone()),
                 Transform {
-                    translation: ground_position(module.position) + Vec3::Y * 46.0,
-                    rotation: Quat::from_rotation_y(module.rotation),
-                    scale: if module.corner {
-                        Vec3::splat(0.8)
-                    } else {
-                        Vec3::new(1.0, 0.75, 0.45)
-                    },
+                    translation: ground_position(center) + Vec3::Y * (WALL_HEIGHT * 0.5),
+                    rotation: Quat::from_rotation_y(rotation),
+                    scale: Vec3::new(
+                        f32::from(footprint.width) * 0.5,
+                        1.0,
+                        f32::from(footprint.height) * 0.5,
+                    ),
                 },
-                Name::new("V4 primitive arena edge module"),
+                Name::new(format!("primitive wall adjacency {adjacency:04b}")),
+            ));
+        } else {
+            commands.spawn((
+                marker,
+                Mesh3d(primitives.map_entity.clone()),
+                MeshMaterial3d(materials.wall.clone()),
+                Transform {
+                    translation: ground_position(center) + Vec3::Y * 12.0,
+                    rotation: Quat::from_rotation_y(rotation),
+                    scale: Vec3::splat(0.7),
+                },
+                Name::new("primitive decoration asset"),
             ));
         }
     }
-    for entity in &snapshot.entities {
-        let variant = object_catalog.0.resolve_variant(
-            snapshot.presentation_theme_id,
-            entity.object_definition_id,
-            entity.visual_variant_id,
-        );
-        if let (Some(variant), Some(imported), Some(visual_catalog)) =
-            (variant, imported.as_deref(), visual_catalog.as_deref())
-            && let (Some(scene), Some(profile)) =
-                (imported.scene(variant), visual_catalog.profile(variant))
-        {
-            spawn_imported_environment(
-                &mut commands,
+    spawn_map_border(
+        commands,
+        primitives,
+        materials,
+        marker,
+        snapshot.dimensions.bounds(),
+    );
+}
+
+fn spawn_map_border(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &environment_assets::EnvironmentThemeMaterials,
+    marker: crate::map::MapPresentationMember,
+    bounds: crate::map::AxisAlignedMapRect,
+) {
+    for module in border::border_modules(bounds) {
+        commands.spawn((
+            marker,
+            Mesh3d(primitives.cover_block.clone()),
+            MeshMaterial3d(materials.perimeter.clone()),
+            Transform {
+                translation: ground_position(module.position) + Vec3::Y * 46.0,
+                rotation: Quat::from_rotation_y(module.rotation),
+                scale: if module.corner {
+                    Vec3::splat(0.8)
+                } else {
+                    Vec3::new(1.0, 0.75, 0.45)
+                },
+            },
+            Name::new("primitive arena edge module"),
+        ));
+    }
+}
+
+fn spawn_map_water(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &environment_assets::EnvironmentThemeMaterials,
+    marker: crate::map::MapPresentationMember,
+    center: Vec2,
+    adjacency: u8,
+) {
+    commands.spawn((
+        marker,
+        Mesh3d(primitives.cover_block.clone()),
+        MeshMaterial3d(materials.water.clone()),
+        Transform {
+            translation: ground_position(center) + Vec3::Y,
+            scale: Vec3::new(0.5, 0.04, 0.5),
+            ..default()
+        },
+        Name::new(format!("water tile adjacency {adjacency:04b}")),
+    ));
+    for (bit, offset, scale) in [
+        (0, Vec2::new(0.0, 15.0), Vec3::new(0.5, 0.08, 0.04)),
+        (1, Vec2::new(15.0, 0.0), Vec3::new(0.04, 0.08, 0.5)),
+        (2, Vec2::new(0.0, -15.0), Vec3::new(0.5, 0.08, 0.04)),
+        (3, Vec2::new(-15.0, 0.0), Vec3::new(0.04, 0.08, 0.5)),
+    ] {
+        if adjacency & (1 << bit) == 0 {
+            commands.spawn((
                 marker,
-                scene,
-                profile,
-                entity.position,
-                entity.rotation,
-                "V4 imported placed decoration",
-            );
-        } else {
-            spawn_environment_fallback(
-                &mut commands,
-                marker,
-                &primitives,
-                &materials,
-                entity.position,
-                entity.rotation,
-                variant.and_then(|id| {
-                    visual_catalog
-                        .as_deref()?
-                        .profile(id)
-                        .map(|profile| profile.fallback)
-                }),
-                "V4 placed decoration fallback",
-            );
+                Mesh3d(primitives.cover_block.clone()),
+                MeshMaterial3d(materials.floor_accent.clone()),
+                Transform {
+                    translation: ground_position(center + offset) + Vec3::Y * 2.0,
+                    scale,
+                    ..default()
+                },
+                Name::new("derived water shore edge"),
+            ));
         }
     }
-    if let Some(theme) = object_catalog.0.theme(snapshot.presentation_theme_id) {
-        for dressing in border::dressing_plan(
-            bounds,
-            snapshot.identity.recipe_fingerprint.0,
-            &theme.outside_dressing_anchor_variants,
-            &theme.outside_dressing_detail_variants,
-        ) {
-            if let (Some(imported), Some(visual_catalog)) =
-                (imported.as_deref(), visual_catalog.as_deref())
-                && let (Some(scene), Some(profile)) = (
-                    imported.scene(dressing.variant),
-                    visual_catalog.profile(dressing.variant),
-                )
-            {
-                spawn_imported_environment(
-                    &mut commands,
-                    marker,
-                    scene,
-                    profile,
-                    dressing.position,
-                    dressing.rotation,
-                    "V4 imported outer dressing",
-                );
-            } else {
-                spawn_environment_fallback(
-                    &mut commands,
-                    marker,
-                    &primitives,
-                    &materials,
-                    dressing.position,
-                    dressing.rotation,
-                    visual_catalog
-                        .as_deref()
-                        .and_then(|catalog| catalog.profile(dressing.variant))
-                        .map(|profile| profile.fallback),
-                    "V4 outer dressing fallback",
-                );
-            }
-        }
-    }
-    for anchor in &snapshot.mode_anchors {
-        let crate::map::ModeAnchorShape::Area { position, shape } = anchor.shape else {
-            continue;
-        };
-        match shape {
-            crate::map::MapShape::Circle { radius } => {
-                let rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
-                let mut translation = ground_position(position);
-                translation.y = GROUND_OFFSET;
-                let fill_mesh = meshes.add(Circle::new(radius));
-                commands.spawn((
-                    marker,
-                    V3ZoneFill,
-                    Mesh3d(fill_mesh.clone()),
-                    GeneratedMapMesh(fill_mesh),
-                    MeshMaterial3d(materials.zone_fill.clone()),
-                    NotShadowCaster,
-                    Transform {
-                        translation,
-                        rotation,
-                        ..default()
-                    },
-                ));
-                let boundary_mesh = meshes.add(Annulus::new(
-                    (radius - ZONE_RING_WIDTH * 0.5).max(0.0),
-                    radius + ZONE_RING_WIDTH * 0.5,
-                ));
-                commands.spawn((
-                    marker,
-                    V3ZoneBoundary,
-                    Mesh3d(boundary_mesh.clone()),
-                    GeneratedMapMesh(boundary_mesh),
-                    MeshMaterial3d(materials.zone_boundary.clone()),
-                    NotShadowCaster,
-                    Transform {
-                        translation: translation + Vec3::Y * 0.2,
-                        rotation,
-                        ..default()
-                    },
-                ));
-            }
-            crate::map::MapShape::Rectangle { half_extents } => {
-                let size = half_extents * 2.0;
-                let mut translation = ground_position(position);
-                translation.y = GROUND_OFFSET;
-                let mesh = meshes.add(Plane3d::default().mesh().size(size.x, size.y));
-                commands.spawn((
-                    marker,
-                    V3ZoneFill,
-                    Mesh3d(mesh.clone()),
-                    GeneratedMapMesh(mesh),
-                    MeshMaterial3d(materials.zone_fill.clone()),
-                    NotShadowCaster,
-                    Transform::from_translation(translation),
-                ));
-            }
-        }
-    }
-    commands.insert_resource(presentation_key);
+}
+
+fn spawn_map_grass(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &environment_assets::EnvironmentThemeMaterials,
+    marker: crate::map::MapPresentationMember,
+    center: Vec2,
+    rotation: f32,
+    adjacency: u8,
+) {
+    commands.spawn((
+        marker,
+        Mesh3d(primitives.map_entity.clone()),
+        MeshMaterial3d(materials.vegetation.clone()),
+        Transform {
+            translation: ground_position(center) + Vec3::Y * 9.0,
+            rotation: Quat::from_rotation_y(rotation + f32::from(adjacency) * 0.17),
+            scale: Vec3::new(0.72, 0.75, 0.72),
+        },
+        Name::new(format!(
+            "non-concealing tall grass adjacency {adjacency:04b}"
+        )),
+    ));
 }
 
 fn team_material(
@@ -1069,166 +1139,6 @@ fn play_character_motion(
     }
 }
 
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::too_many_arguments,
-    reason = "validated positive map dimensions cap module counts far below u16"
-)]
-fn spawn_imported_wall_modules(
-    commands: &mut Commands,
-    scene: &Handle<WorldAsset>,
-    profile: &environment_assets::EnvironmentVisualProfile,
-    center: Vec2,
-    rotation: f32,
-    size: Vec2,
-    instance_id: crate::map::MapInstanceId,
-) -> bool {
-    const MODULE: f32 = 64.0;
-    let counts = (size / MODULE).round();
-    if (counts * MODULE).distance(size) > 0.01 || counts.x < 1.0 || counts.y < 1.0 {
-        return false;
-    }
-    let basis_x = Vec2::from_angle(rotation);
-    let basis_y = Vec2::new(-basis_x.y, basis_x.x);
-    for y in 0..counts.y as u16 {
-        for x in 0..counts.x as u16 {
-            let local = Vec2::new(
-                (f32::from(x) + 0.5) * MODULE - size.x * 0.5,
-                (f32::from(y) + 0.5) * MODULE - size.y * 0.5,
-            );
-            let position = center + basis_x * local.x + basis_y * local.y;
-            commands.spawn((
-                crate::map::MapPresentationMember { instance_id },
-                environment_assets::EnvironmentMaterialTint(profile.tint()),
-                WorldAssetRoot(scene.clone()),
-                Transform {
-                    translation: ground_position(position) + Vec3::Y * profile.vertical_offset,
-                    rotation: Quat::from_rotation_y(rotation + profile.yaw_degrees.to_radians()),
-                    scale: Vec3::splat(profile.scale),
-                },
-                Name::new("V4 imported wall module"),
-            ));
-        }
-    }
-    true
-}
-
-fn spawn_imported_environment(
-    commands: &mut Commands,
-    marker: crate::map::MapPresentationMember,
-    scene: &Handle<WorldAsset>,
-    profile: &environment_assets::EnvironmentVisualProfile,
-    position: Vec2,
-    rotation: f32,
-    name: &'static str,
-) {
-    commands.spawn((
-        marker,
-        environment_assets::EnvironmentMaterialTint(profile.tint()),
-        WorldAssetRoot(scene.clone()),
-        Transform {
-            translation: ground_position(position) + Vec3::Y * profile.vertical_offset,
-            rotation: Quat::from_rotation_y(rotation + profile.yaw_degrees.to_radians()),
-            scale: Vec3::splat(profile.scale),
-        },
-        Name::new(name),
-    ));
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the focused spawn helper receives explicit retained render assets and placement state"
-)]
-fn spawn_environment_fallback(
-    commands: &mut Commands,
-    marker: crate::map::MapPresentationMember,
-    primitives: &Primitive3dAssets,
-    materials: &Material3dAssets,
-    position: Vec2,
-    rotation: f32,
-    fallback: Option<environment_assets::EnvironmentFallback>,
-    name: &'static str,
-) {
-    let scale = match fallback {
-        Some(environment_assets::EnvironmentFallback::Column) => Vec3::new(1.0, 2.0, 1.0),
-        Some(environment_assets::EnvironmentFallback::Boundary) => Vec3::new(1.8, 1.0, 0.6),
-        Some(environment_assets::EnvironmentFallback::Wall) => Vec3::new(2.0, 2.0, 1.0),
-        Some(environment_assets::EnvironmentFallback::Block) => Vec3::splat(1.6),
-        _ => Vec3::ONE,
-    };
-    commands.spawn((
-        marker,
-        Mesh3d(primitives.map_entity.clone()),
-        MeshMaterial3d(materials.neutral.clone()),
-        Transform {
-            translation: ground_position(position) + Vec3::Y * 12.0,
-            rotation: Quat::from_rotation_y(rotation),
-            scale,
-        },
-        Name::new(name),
-    ));
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::too_many_arguments,
-    reason = "validated positive map dimensions cap module counts far below u16"
-)]
-fn spawn_fallback_wall_modules(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    primitives: &Primitive3dAssets,
-    materials: &environment_assets::EnvironmentThemeMaterials,
-    center: Vec2,
-    rotation: f32,
-    size: Vec2,
-    instance_id: crate::map::MapInstanceId,
-) {
-    const MODULE: f32 = 64.0;
-    let counts = (size / MODULE).round();
-    if (counts * MODULE).distance(size) > 0.01 || counts.x < 1.0 || counts.y < 1.0 {
-        let extents = ground_extents(size);
-        let mesh = meshes.add(Cuboid::new(extents.x, WALL_HEIGHT, extents.z));
-        commands.spawn((
-            crate::map::MapPresentationMember { instance_id },
-            Mesh3d(mesh.clone()),
-            GeneratedMapMesh(mesh),
-            MeshMaterial3d(materials.wall.clone()),
-            Transform {
-                translation: ground_position(center) + Vec3::Y * (WALL_HEIGHT * 0.5),
-                rotation: Quat::from_rotation_y(rotation),
-                ..default()
-            },
-            Name::new("V3 exact rectangular cover fallback"),
-        ));
-        return;
-    }
-    let basis_x = Vec2::from_angle(rotation);
-    let basis_y = Vec2::new(-basis_x.y, basis_x.x);
-    for y in 0..counts.y as u16 {
-        for x in 0..counts.x as u16 {
-            let local = Vec2::new(
-                (f32::from(x) + 0.5) * MODULE - size.x * 0.5,
-                (f32::from(y) + 0.5) * MODULE - size.y * 0.5,
-            );
-            let position = center + basis_x * local.x + basis_y * local.y;
-            commands.spawn((
-                crate::map::MapPresentationMember { instance_id },
-                Mesh3d(primitives.cover_block.clone()),
-                MeshMaterial3d(materials.wall.clone()),
-                Transform {
-                    translation: ground_position(position) + Vec3::Y * 16.0,
-                    rotation: Quat::from_rotation_y(rotation),
-                    ..default()
-                },
-                Name::new("V3 exact cover block fallback"),
-            ));
-        }
-    }
-}
-
 fn catch_up_projectile_position(
     presented: Vec2,
     authoritative: Vec2,
@@ -1377,380 +1287,5 @@ mod tests {
         assert!(character_is_visually_defeated(0, true));
         assert!(!character_is_visually_defeated(100, true));
         assert!(!character_is_visually_defeated(0, false));
-    }
-
-    fn map_app(snapshot: crate::map::ResolvedMapSnapshot) -> App {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            crate::map::MapContentPlugin,
-            crate::map::MapPresentationPlugin,
-        ))
-        .init_resource::<Assets<Mesh>>()
-        .init_resource::<Assets<StandardMaterial>>()
-        .add_systems(
-            Update,
-            reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
-        );
-        let cover_block = {
-            let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
-            meshes.add(Cuboid::new(64.0, 32.0, 64.0))
-        };
-        let material = app
-            .world_mut()
-            .resource_mut::<Assets<StandardMaterial>>()
-            .add(StandardMaterial::default());
-        let environment_catalog = environment_assets::EnvironmentVisualCatalog::embedded(
-            &crate::map::MapObjectCatalog::embedded().unwrap(),
-        )
-        .unwrap();
-        let environment_materials = {
-            let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
-            environment_catalog.build_theme_materials(&mut materials)
-        };
-        app.insert_resource(Primitive3dAssets {
-            cover_block,
-            map_entity: Handle::default(),
-            debris: Handle::default(),
-            fighter: Handle::default(),
-            sentry_direction: Handle::default(),
-            fighter_facing: Handle::default(),
-            projectile: Handle::default(),
-            lobbed_projectile: Handle::default(),
-            unit_cuboid: Handle::default(),
-            sentry_base: Handle::default(),
-            sentry_body: Handle::default(),
-            ground_ring: Handle::default(),
-            effect_sphere: Handle::default(),
-        })
-        .insert_resource(Material3dAssets {
-            team_blue: material.clone(),
-            team_red: material.clone(),
-            marker_local: material.clone(),
-            marker_ally: material.clone(),
-            marker_enemy: material.clone(),
-            neutral: material.clone(),
-            zone_fill: material.clone(),
-            zone_boundary: material.clone(),
-            preview: material.clone(),
-            preview_blocked: material.clone(),
-            status_slow: material.clone(),
-            status_knockback: material.clone(),
-            effect_muzzle: material.clone(),
-            effect_impact: material.clone(),
-            effect_damage: material.clone(),
-            dash: material,
-        })
-        .insert_resource(environment_catalog)
-        .insert_resource(environment_materials)
-        .insert_resource(environment_assets::EnvironmentImportedScenes::default())
-        .insert_resource(GlobalAmbientLight::default());
-        app.world_mut().spawn((
-            crate::map::MapRoot,
-            snapshot.identity.instance_id,
-            snapshot.identity,
-            snapshot,
-        ));
-        app
-    }
-
-    #[test]
-    fn camera_clamp_centers_small_maps_and_clamps_large_maps() {
-        let small = crate::map::AxisAlignedMapRect {
-            min: Vec2::splat(-100.0),
-            max: Vec2::splat(100.0),
-        };
-        assert_eq!(
-            clamp_3d_camera_center(Vec2::new(90.0, 90.0), small, Vec2::new(1600.0, 900.0)),
-            Vec2::ZERO
-        );
-        let large = crate::map::AxisAlignedMapRect {
-            min: Vec2::splat(-2000.0),
-            max: Vec2::splat(2000.0),
-        };
-        let clamped = clamp_3d_camera_center(Vec2::splat(2000.0), large, Vec2::new(1600.0, 900.0));
-        assert!(clamped.x < 2000.0 && clamped.y < 2000.0);
-    }
-
-    #[test]
-    fn camera_follow_bounds_reveal_a_bounded_outer_environment_band() {
-        let gameplay = crate::map::AxisAlignedMapRect {
-            min: Vec2::new(-896.0, -576.0),
-            max: Vec2::new(896.0, 576.0),
-        };
-        let presentation = presentation_camera_bounds(gameplay);
-        assert_eq!(presentation.min, gameplay.min - Vec2::splat(224.0));
-        assert_eq!(presentation.max, gameplay.max + Vec2::splat(224.0));
-    }
-
-    #[test]
-    fn perspective_ground_footprint_is_trapezoidal_and_combat_sized() {
-        let footprint = perspective_ground_footprint(16.0 / 9.0);
-        let size = footprint.size();
-
-        assert!(footprint.min.x < 0.0 && footprint.max.x > 0.0);
-        assert!(footprint.min.y < 0.0 && footprint.max.y > 0.0);
-        assert!(footprint.max.y > -footprint.min.y);
-        assert!((1_550.0..=1_700.0).contains(&size.x));
-        assert!((900.0..=1_050.0).contains(&size.y));
-    }
-
-    #[test]
-    fn camera_clamp_is_finite_for_supported_aspects_and_missing_viewport() {
-        let bounds = crate::map::AxisAlignedMapRect {
-            min: Vec2::splat(-3_000.0),
-            max: Vec2::splat(3_000.0),
-        };
-        for viewport in [
-            Vec2::new(1_280.0, 720.0),
-            Vec2::new(1_024.0, 768.0),
-            Vec2::new(1_680.0, 720.0),
-            Vec2::ZERO,
-            Vec2::new(f32::NAN, 720.0),
-        ] {
-            let center = clamp_3d_camera_center(Vec2::splat(3_000.0), bounds, viewport);
-            assert!(
-                center.is_finite(),
-                "viewport {viewport:?} produced {center:?}"
-            );
-            assert!(bounds.contains(center));
-        }
-    }
-
-    #[test]
-    fn straight_projectile_visual_starts_at_muzzle_and_catches_up_without_overshoot() {
-        let origin = Vec2::ZERO;
-        let authoritative = Vec2::new(90.0, 0.0);
-        let first = catch_up_projectile_position(origin, authoritative, 900.0, 1.0 / 60.0);
-        assert!(first.abs_diff_eq(Vec2::new(45.0, 0.0), 0.0001));
-        assert_eq!(
-            catch_up_projectile_position(first, authoritative, 900.0, 1.0 / 60.0),
-            authoritative
-        );
-        assert_eq!(
-            catch_up_projectile_position(authoritative, authoritative, 900.0, 1.0 / 60.0),
-            authoritative
-        );
-    }
-
-    #[test]
-    fn imported_world_fallback_policy_has_an_explicit_verification_override() {
-        assert_eq!(
-            ImportedWorldFallbackPolicy::from_value(Some("1")),
-            ImportedWorldFallbackPolicy::ForcePrimitive
-        );
-        assert_eq!(
-            ImportedWorldFallbackPolicy::from_value(Some("true")),
-            ImportedWorldFallbackPolicy::ForcePrimitive
-        );
-        assert_eq!(
-            ImportedWorldFallbackPolicy::from_value(None),
-            ImportedWorldFallbackPolicy::Auto
-        );
-    }
-
-    #[test]
-    fn built_in_wipeout_materializes_bounded_ground_cover_edge_and_dressing_counts() {
-        let snapshot = crate::map::MapContentCatalog::embedded()
-            .unwrap()
-            .resolve_preset(
-                crate::map::MapPresetId(1),
-                crate::map::MapInstanceId(1),
-                &crate::map::MapLayoutRequirements::wipeout(),
-            )
-            .unwrap()
-            .snapshot;
-        let mut app = map_app(snapshot);
-        app.update();
-        app.update();
-        let world = app.world_mut();
-        let mut names = world.query::<(&crate::map::MapPresentationMember, &Name)>();
-        let presented: Vec<_> = names.iter(world).map(|(_, name)| name.as_str()).collect();
-        assert_eq!(
-            presented
-                .iter()
-                .filter(|name| **name == "V4 playable ground surface")
-                .count(),
-            1
-        );
-        assert_eq!(
-            presented
-                .iter()
-                .filter(|name| **name == "V4 outer ground surface")
-                .count(),
-            1
-        );
-        assert_eq!(
-            presented
-                .iter()
-                .filter(|name| **name == "V3 exact cover block fallback")
-                .count(),
-            24
-        );
-        assert_eq!(
-            presented
-                .iter()
-                .filter(|name| **name == "V4 primitive arena edge module")
-                .count(),
-            96
-        );
-        assert_eq!(
-            presented
-                .iter()
-                .filter(|name| **name == "V4 outer dressing fallback")
-                .count(),
-            64
-        );
-    }
-
-    #[test]
-    fn hot_zone_is_generation_owned_and_invalid_snapshots_materialize_nothing() {
-        let snapshot = crate::map::MapContentCatalog::embedded()
-            .unwrap()
-            .resolve_preset(
-                crate::map::MapPresetId(2),
-                crate::map::MapInstanceId(7),
-                &crate::map::MapLayoutRequirements::hot_zone(),
-            )
-            .unwrap()
-            .snapshot;
-        let mut app = map_app(snapshot);
-        app.update();
-        app.update();
-        let world = app.world_mut();
-        assert_eq!(world.query::<&V3ZoneFill>().iter(world).count(), 1);
-        assert_eq!(world.query::<&V3ZoneBoundary>().iter(world).count(), 1);
-        assert!(
-            world
-                .query::<&crate::map::MapPresentationMember>()
-                .iter(world)
-                .all(|member| member.instance_id == crate::map::MapInstanceId(7))
-        );
-
-        let mut invalid = crate::map::MapContentCatalog::embedded()
-            .unwrap()
-            .resolve_preset(
-                crate::map::MapPresetId(1),
-                crate::map::MapInstanceId(9),
-                &crate::map::MapLayoutRequirements::wipeout(),
-            )
-            .unwrap()
-            .snapshot;
-        invalid.geometry[0].presentation_profile_id =
-            Some(crate::map::MapPresentationProfileId(999));
-        let mut invalid_app = map_app(invalid);
-        invalid_app.update();
-        invalid_app.update();
-        assert_eq!(
-            invalid_app
-                .world_mut()
-                .query::<&crate::map::MapPresentationMember>()
-                .iter(invalid_app.world())
-                .count(),
-            0
-        );
-    }
-
-    #[test]
-    fn same_instance_theme_change_rematerializes_the_world() {
-        let snapshot = crate::map::MapContentCatalog::embedded()
-            .unwrap()
-            .resolve_preset(
-                crate::map::MapPresetId(1),
-                crate::map::MapInstanceId(11),
-                &crate::map::MapLayoutRequirements::wipeout(),
-            )
-            .unwrap()
-            .snapshot;
-        let mut app = map_app(snapshot);
-        app.update();
-        app.update();
-        assert_eq!(
-            app.world().resource::<Presented3dMap>().theme_id,
-            crate::map::MapPresentationThemeId(1)
-        );
-
-        let root = app
-            .world_mut()
-            .query_filtered::<Entity, With<crate::map::MapRoot>>()
-            .single(app.world())
-            .unwrap();
-        app.world_mut()
-            .entity_mut(root)
-            .get_mut::<crate::map::ResolvedMapSnapshot>()
-            .unwrap()
-            .presentation_theme_id = crate::map::MapPresentationThemeId(2);
-        app.update();
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<Presented3dMap>().theme_id,
-            crate::map::MapPresentationThemeId(2)
-        );
-        assert_eq!(
-            app.world()
-                .resource::<crate::map::PresentedMap>()
-                .presentation_theme_id,
-            crate::map::MapPresentationThemeId(2)
-        );
-    }
-
-    #[test]
-    fn repeated_map_replacement_keeps_generated_meshes_and_entities_bounded() {
-        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
-        let first = catalog
-            .resolve_preset(
-                crate::map::MapPresetId(1),
-                crate::map::MapInstanceId(1),
-                &crate::map::MapLayoutRequirements::wipeout(),
-            )
-            .unwrap()
-            .snapshot;
-        let mut app = map_app(first);
-        app.update();
-        app.update();
-        let baseline_meshes = app.world().resource::<Assets<Mesh>>().len();
-        let baseline_entities = app
-            .world_mut()
-            .query::<&crate::map::MapPresentationMember>()
-            .iter(app.world())
-            .count();
-
-        for generation in 2..=40 {
-            let hot_zone = generation % 2 == 0;
-            let requirements = if hot_zone {
-                crate::map::MapLayoutRequirements::hot_zone()
-            } else {
-                crate::map::MapLayoutRequirements::wipeout()
-            };
-            let snapshot = catalog
-                .resolve_preset(
-                    crate::map::MapPresetId(if hot_zone { 2 } else { 1 }),
-                    crate::map::MapInstanceId(generation),
-                    &requirements,
-                )
-                .unwrap()
-                .snapshot;
-            app.world_mut().spawn((
-                crate::map::MapRoot,
-                snapshot.identity.instance_id,
-                snapshot.identity,
-                snapshot,
-            ));
-            app.update();
-            app.update();
-            assert!(
-                app.world().resource::<Assets<Mesh>>().len() <= baseline_meshes + 2,
-                "generation {generation} leaked generated meshes"
-            );
-            assert!(
-                app.world_mut()
-                    .query::<&crate::map::MapPresentationMember>()
-                    .iter(app.world())
-                    .count()
-                    <= baseline_entities + 2,
-                "generation {generation} leaked presentation entities"
-            );
-        }
     }
 }

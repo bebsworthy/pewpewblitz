@@ -179,8 +179,8 @@ fn respawn_due_fighters(
                 ammunition,
                 position: spawn.position,
                 facing: spawn.facing,
-                collision_mask: crate::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                    | crate::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                collision_mask: crate::movement::STATIC_MAP_LAYER
+                    | crate::movement::DESTRUCTIBLE_MAP_LAYER,
                 protection_until: Some(tick.0.saturating_add(config.spawn_protection_ticks)),
                 active: true,
             },

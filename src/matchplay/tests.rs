@@ -718,19 +718,15 @@ mod schedule_trace_tests {
 mod capacity_composition_tests {
     use super::super::server::validate_capacity_against_selected_map;
     use super::*;
-    use crate::map::{MapInstanceId, MapLayoutRequirements, MapPresetId, ResolvedMap};
+    use crate::map::{MapContentCatalog, MapInstanceId, MapPresetId, SpawnPointCatalog};
     use bevy::prelude::{App, Startup};
 
-    fn embedded_snapshot() -> crate::map::ResolvedMapSnapshot {
-        let catalog = crate::map::MapContentCatalog::embedded().expect("embedded map catalog");
-        catalog
-            .resolve_preset(
-                MapPresetId(1),
-                MapInstanceId(1),
-                &MapLayoutRequirements::wipeout(),
-            )
-            .expect("built-in wipeout preset resolves")
-            .snapshot
+    fn embedded_spawns() -> SpawnPointCatalog {
+        let catalog = MapContentCatalog::embedded().expect("embedded map catalog");
+        let resolved = catalog
+            .resolve_preset(MapPresetId(1), MapInstanceId(1))
+            .expect("built-in wipeout preset resolves");
+        SpawnPointCatalog(resolved.spawn_points_by_team)
     }
 
     fn production_capacity() -> ResolvedMatchCapacity {
@@ -741,31 +737,28 @@ mod capacity_composition_tests {
     #[test]
     fn production_capacity_satisfies_the_builtin_map() {
         production_capacity()
-            .validate_against_map(&embedded_snapshot())
+            .validate_against_spawn_catalog(&embedded_spawns())
             .expect("the built-in wipeout map serves the production profile");
     }
 
     #[test]
     fn capacity_rejects_maps_serving_other_team_slots() {
-        let mut lopsided = embedded_snapshot();
-        lopsided.spawn_points.retain(|point| point.team_slot == 0);
+        let mut lopsided = embedded_spawns();
+        lopsided.0.remove(&1);
         let error = production_capacity()
-            .validate_against_map(&lopsided)
+            .validate_against_spawn_catalog(&lopsided)
             .expect_err("a one-team map cannot serve a two-team profile");
         assert!(error.contains("team slots"), "{error}");
     }
 
     #[test]
     fn capacity_rejects_maps_without_spawn_capacity_for_simultaneous_participants() {
-        let mut sparse = embedded_snapshot();
-        let mut kept_per_team = [0_usize; 2];
-        sparse.spawn_points.retain(|point| {
-            let slot = usize::from(point.team_slot);
-            kept_per_team[slot] += 1;
-            kept_per_team[slot] <= 1
-        });
+        let mut sparse = embedded_spawns();
+        for points in sparse.0.values_mut() {
+            points.truncate(1);
+        }
         let error = production_capacity()
-            .validate_against_map(&sparse)
+            .validate_against_spawn_catalog(&sparse)
             .expect_err("one spawn point per team cannot admit two simultaneous fighters");
         assert!(error.contains("spawn points"), "{error}");
     }
@@ -775,14 +768,11 @@ mod capacity_composition_tests {
     fn startup_panics_when_the_selected_map_under_serves_the_profile() {
         let mut app = App::new();
         app.add_systems(Startup, validate_capacity_against_selected_map);
-        let mut under_served = embedded_snapshot();
-        let mut kept_per_team = [0_usize; 2];
-        under_served.spawn_points.retain(|point| {
-            let slot = usize::from(point.team_slot);
-            kept_per_team[slot] += 1;
-            kept_per_team[slot] <= 1
-        });
-        app.insert_resource(ResolvedMap::from_snapshot(under_served));
+        let mut under_served = embedded_spawns();
+        for points in under_served.0.values_mut() {
+            points.truncate(1);
+        }
+        app.insert_resource(under_served);
         app.insert_resource(production_capacity());
         app.update();
     }
@@ -808,7 +798,10 @@ mod capacity_composition_tests {
         };
         assert_eq!(wide.maximum_active_fighters, 24);
         // The built-in map does not serve twelve simultaneous participants per team.
-        assert!(wide.validate_against_map(&embedded_snapshot()).is_err());
+        assert!(
+            wide.validate_against_spawn_catalog(&embedded_spawns())
+                .is_err()
+        );
     }
 }
 

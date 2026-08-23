@@ -354,8 +354,8 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
                 CollisionLayers::new(
                     brawler::movement::PROJECTILE_LAYER,
                     brawler::movement::FIGHTER_LAYER
-                        | brawler::movement::INDESTRUCTIBLE_TERRAIN_LAYER
-                        | brawler::movement::DESTRUCTIBLE_TERRAIN_LAYER,
+                        | brawler::movement::STATIC_MAP_LAYER
+                        | brawler::movement::DESTRUCTIBLE_MAP_LAYER,
                 ),
             ))
             .id();
@@ -399,7 +399,6 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
             ServerNetworkPlugin,
             brawler::matchplay::AuthoritativeMatchPlugin,
             brawler::matchplay::WipeoutModePlugin,
-            brawler::terrain::AuthoritativeTerrainPlugin,
         ));
     server.finish();
     server.cleanup();

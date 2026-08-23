@@ -1100,7 +1100,7 @@ fn sentry_expiry_destruction_disconnect_and_impaired_recovery_converge() {
 }
 
 #[test]
-fn dash_shape_cast_truncates_before_terrain_and_blocks_primary_fire() {
+fn dash_shape_cast_truncates_before_map_collision_and_blocks_primary_fire() {
     let mut harness = Harness::new_match(2);
     for client in &mut harness.clients {
         client
@@ -1177,7 +1177,7 @@ fn dash_shape_cast_truncates_before_terrain_and_blocks_primary_fire() {
         avian2d::prelude::RigidBody::Static,
         Position::from_xy(0.0, 250.0),
         CollisionLayers::new(
-            brawler::movement::INDESTRUCTIBLE_TERRAIN_LAYER,
+            brawler::movement::STATIC_MAP_LAYER,
             brawler::movement::FIGHTER_LAYER,
         ),
     ));

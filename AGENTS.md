@@ -7,22 +7,29 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
+2. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
+   `docs/16-grid-map-asset-system.md` for the current sparse map-asset system, domain-organized
+   content, legacy-removal evidence, and pending closeout playtest.
+3. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
+   brawlers, weapon bases, and four-slot weapon-part equipment.
+4. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
+   development-only authoritative Balance Lab and its enduring operator contract.
+5. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
    responsive Player Dashboard, connected-loop convergence, recovery/lifecycle hardening, and V5
    closeout evidence.
-3. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the completed independently
+6. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
    embedded map documents, semantic object placement, two reusable themes, routed admission,
    presentation hardening, and V4 closeout evidence.
-4. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
+7. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
-5. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
+8. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
    provenance, degradation, and future-art contracts.
-6. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-7. `docs/13-player-ux.md` for the canonical player experience and
+9. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
+10. `docs/13-player-ux.md` for the canonical player experience and
    `docs/14-multiplayer-server-architecture.md` for the routed-process decisions it relies on.
-8. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
+11. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
    baseline and closeout evidence.
-9. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
+12. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
    verification evidence, deferred release polish, and the direct-UDP comparison baseline.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
@@ -44,6 +51,13 @@ was accepted on 2026-08-22 after auto-connect, the responsive Player Dashboard, 
 convergence, recovery/lifecycle hardening, routed 1v1/2v2/3v3 E2E, and native Dashboard/gameplay
 render evidence passed closeout.
 
+V6 completed and was accepted on 2026-08-22 after the Balance Lab's routed Practice workflow,
+validated persistence, isolation, and native operator checks passed. V7 completed and was accepted
+on 2026-08-23 after persistent saved-brawler profiles and four-slot weapon-part equipment passed
+storage, routed handoff, recovery, and player-flow verification. V8 M01–M03 completed on 2026-08-23;
+M04 has implemented the hard map-system cutover, domain-organized active content, legacy removal,
+canonical/E2E/native verification, and is awaiting the final user playtest before V8 closeout.
+
 ## Technical stack
 
 - The main Rust package provides independently buildable macOS-client and headless gameplay-worker
@@ -52,7 +66,7 @@ render evidence passed closeout.
 - Bevy 0.19 for ECS, application/plugin structure, client-side 3D world rendering, screen-space UI,
   input, assets, animation, and audio.
 - Lightyear 0.29 for client/server transport, input networking, replication, interpolation, and later prediction/rollback where evidence justifies it.
-- Avian 2D 0.7 for authoritative planar collision and generated terrain colliders. V3 does not
+- Avian 2D 0.7 for authoritative planar collision and map-asset colliders. V3 does not
   replace it with 3D physics.
 - Fixed-tick, dedicated-server-authoritative simulation from the first gameplay code.
 - macOS is the initial client development target; local dedicated-server and multi-client testing are required.
@@ -109,11 +123,11 @@ src/
     tests.rs               shared combat model/composition tests
   map/
     mod.rs                 map composition root, stable IDs/profiles, public re-exports
-    model.rs               recipe/resolved snapshot/runtime map shapes and indexes
-    definitions/           catalog parsing, validation, resolution, fingerprints, tests
-    server.rs              authoritative map generation install/teardown and colliders
-    client.rs              replicated map reconstruction and presentation acceptance state
-    tests.rs               shared map composition and lifecycle tests
+    model.rs               stable map identity, bounds, spawn, and shared placement types
+    catalog.rs             map-asset catalogs, recipes, validation, resolution, and tests
+    runtime.rs             authoritative dynamic state, destruction, recovery, and colliders
+    server.rs              selected-map startup and exact-generation lifecycle
+    client.rs              replicated map convergence, recovery, and presentation readiness
   matchplay/
     mod.rs                 common match schedule/restart composition and mode plugins
     model.rs               stable match state, results, participants, and summaries
@@ -152,17 +166,6 @@ src/
     mod.rs                 dedicated-server and connection/session composition
     verification.rs        process-only movement/combat evidence validation
     tests.rs               server composition and lifecycle tests
-  terrain/
-    mod.rs                 terrain composition root and public API
-    model.rs               stable terrain/grid/runtime state shapes
-    grid.rs                quantized occupancy rules and rasterization
-    collider.rs            generated collider ownership and rebuild rules
-    lifecycle.rs           install, reset, teardown, and generation transitions
-    authority.rs           authoritative brush transaction
-    network/               server publication and client convergence rules
-    client/                generated 3D chunk-mesh presentation and recovery ownership
-    telemetry.rs           bounded mutation/convergence evidence
-    tests.rs               terrain rule, lifecycle, and schedule tests
 tests/
   network.rs               integration-test composition entry point
   network/
@@ -171,10 +174,11 @@ tests/
   performance.rs           fixed-tick and subsystem performance/capacity gates
 ```
 
-`content/v1/` retains non-map build-embedded authored gameplay data. `content/v4/` owns shared map
-definitions, semantic object/variant/theme catalogs, the built-in map index, and one recipe document
-per built-in. `references/` contains read-only upstream material and is not part of Brawler's
-production module layout.
+`content/catalogs/` owns build-embedded, headless-safe gameplay definitions. `content/maps/` owns
+the built-in map index and one sparse map-asset recipe per built-in. `assets/catalogs/` owns
+client-only visual paths and presentation data. Schema versions live in the documents and Rust
+compatibility constants, not directory names. `references/` contains read-only upstream material
+and is not part of Brawler's production module layout.
 
 The routed supervisor, route envelope, IPC transport, and isolated lobby/match-worker composition
 are completed V2 production paths. `just server`, `just client`, `just run`, and `just e2e` exercise
@@ -326,7 +330,7 @@ For the next non-complete milestone:
 
 - The current milestone file is the implementation scope contract. Update and revalidate it before materially changing scope or architecture.
 - Server authority is not optional, including in-process and offline development modes.
-- Clients send intent, not positions, hits, damage, scores, status triggers, or terrain edits.
+- Clients send intent, not positions, hits, damage, scores, status triggers, or map edits.
 - Separate authored definitions, selected builds, and runtime state.
 - Keep gameplay events independent from rendering, audio, camera, and HUD presentation.
 - Use focused pure-function tests where a rule is naturally independent of ECS. Test component, resource, lifecycle, and state behavior with small `App`/`World` schedule tests; add headless integration tests for authority and replication.

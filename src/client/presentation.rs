@@ -293,7 +293,6 @@ impl Plugin for ClientPresentationPlugin {
                 ),
             )
             .add_plugins((
-                crate::map::MapPresentationPlugin,
                 assets::ClientAssetPlugin,
                 audio::ClientAudioPlugin,
                 hud::ClientReadinessHudPlugin,

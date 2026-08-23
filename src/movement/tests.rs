@@ -90,30 +90,21 @@ fn absent_remote_input_does_not_refresh_freshness() {
 fn camera_and_spawn_bounds_are_stable() {
     let catalog = crate::map::MapContentCatalog::embedded().unwrap();
     let resolved = catalog
-        .resolve_preset(
-            crate::map::MapPresetId(1),
-            crate::map::MapInstanceId(1),
-            &crate::map::MapLayoutRequirements::wipeout(),
-        )
+        .resolve_preset(crate::map::MapPresetId(1), crate::map::MapInstanceId(1))
         .unwrap();
-    assert_eq!(
-        resolved.snapshot.camera_bounds.min,
-        Vec2::new(-896.0, -576.0)
-    );
-    assert_eq!(resolved.snapshot.camera_bounds.max, Vec2::new(896.0, 576.0));
+    let bounds = resolved.snapshot.dimensions.bounds();
+    assert_eq!(bounds.min, Vec2::new(-896.0, -576.0));
+    assert_eq!(bounds.max, Vec2::new(896.0, 576.0));
     assert_eq!(
         resolved.spawn_points_by_team[&0][0].position,
-        Vec2::new(-768.0, -288.0)
+        Vec2::new(-752.0, -272.0)
     );
     assert_eq!(
         resolved.spawn_points_by_team[&1][3].position,
-        Vec2::new(768.0, 288.0)
+        Vec2::new(752.0, 272.0)
     );
     assert_eq!(
-        resolved
-            .snapshot
-            .playable_bounds
-            .clamp_circle(Vec2::new(9_000.0, -9_000.0), 24.0),
+        bounds.clamp_circle(Vec2::new(9_000.0, -9_000.0), 24.0),
         Vec2::new(872.0, -552.0)
     );
 }

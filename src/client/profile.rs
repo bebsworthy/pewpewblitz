@@ -177,7 +177,7 @@ impl Plugin for ClientProfilePlugin {
                 bind_profile_snapshot,
                 receive_profile_outcomes,
                 send_profile_commands,
-                create_headless_default_brawler,
+                create_automation_default_brawler,
             )
                 .chain(),
         );
@@ -232,11 +232,11 @@ fn send_profile_commands(
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn create_headless_default_brawler(
+fn create_automation_default_brawler(
     config: Res<crate::config::ClientNetworkConfig>,
     mut model: ResMut<ClientProfileModel>,
 ) {
-    if !config.headless
+    if !(config.headless || config.render_measurement.is_some())
         || model.pending()
         || model
             .snapshot()

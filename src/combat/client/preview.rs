@@ -12,7 +12,8 @@ pub(crate) fn preview_segments(
     aim_distance: Option<f32>,
     resolved: &ResolvedWeapon,
     map: &crate::map::ResolvedMapSnapshot,
-    terrain_chunks: &BTreeMap<crate::terrain::TerrainChunkId, crate::terrain::TerrainBits>,
+    state: &crate::map::MapDynamicState,
+    catalog: &crate::map::MapContentCatalog,
 ) -> Vec<(Vec2, f32, Vec2, Color)> {
     let mut segments = Vec::with_capacity(MAX_PREVIEW_SEGMENTS);
     match resolved.recipe.delivery {
@@ -80,26 +81,20 @@ pub(crate) fn preview_segments(
             let desired =
                 origin + direction * aim_distance.unwrap_or(distance).clamp(0.0, distance);
             let bounded = desired.clamp(
-                map.playable_bounds.min + Vec2::splat(landing_clearance_radius),
-                map.playable_bounds.max - Vec2::splat(landing_clearance_radius),
+                map.dimensions.bounds().min + Vec2::splat(landing_clearance_radius),
+                map.dimensions.bounds().max - Vec2::splat(landing_clearance_radius),
             );
             let repaired_landing = delivery::repaired_landing_point(
                 origin,
                 bounded,
                 landing_clearance_radius,
                 |candidate| {
-                    map.geometry.iter().all(|geometry| {
-                        !circle_overlaps_map_shape(
-                            candidate,
-                            landing_clearance_radius,
-                            geometry.position,
-                            geometry.rotation,
-                            geometry.shape,
-                        )
-                    }) && !crate::terrain::grid::circle_overlaps_occupied(
+                    !crate::map::circle_overlaps_blocking_map(
                         candidate,
                         landing_clearance_radius,
-                        terrain_chunks,
+                        map,
+                        state,
+                        catalog,
                     )
                 },
             );
@@ -182,23 +177,4 @@ fn segment_between(start: Vec2, end: Vec2, width: f32, color: Color) -> (Vec2, f
         Vec2::new(delta.length(), width),
         color,
     )
-}
-
-fn circle_overlaps_map_shape(
-    center: Vec2,
-    radius: f32,
-    shape_center: Vec2,
-    rotation: f32,
-    shape: crate::map::MapShape,
-) -> bool {
-    match shape {
-        crate::map::MapShape::Circle {
-            radius: shape_radius,
-        } => center.distance_squared(shape_center) < (radius + shape_radius).powi(2),
-        crate::map::MapShape::Rectangle { half_extents } => {
-            let local = Vec2::from_angle(-rotation).rotate(center - shape_center);
-            let closest = local.clamp(-half_extents, half_extents);
-            local.distance_squared(closest) < radius * radius
-        }
-    }
 }

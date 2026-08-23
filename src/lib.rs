@@ -13,7 +13,6 @@ pub mod matchplay;
 pub mod movement;
 pub mod profiles;
 pub mod protocol;
-pub mod terrain;
 pub mod timing;
 pub mod weapon_parts;
 

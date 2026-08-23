@@ -22,24 +22,23 @@ the vocabulary; they are not content to copy.
 Authoritative gameplay is planar and independent from its 3D presentation. The existing foundation
 provides:
 
-- exact permanent geometry and collision profiles;
-- bounded map recipes with stable object, region, entity, spawn, and mode-anchor identities;
-- validated and resolved region placements containing a stable profile ID, shape, transform, and
-  presentation profile;
-- chunked quantized destructible terrain derived from the one currently supported region profile;
-- server-owned map installation, terrain mutation, restart, recovery, and teardown;
+- sparse 32-unit grid recipes with stable map-asset, gameplay-profile, visual, spawn, and typed
+  mode-anchor identities;
+- exact profile-owned rectangle/circle collision independent of authoring footprints;
+- explicit destructible map-asset cells with whole-cell removal or bounded replacement;
+- server-owned map installation, placement mutation, restart, recovery, and teardown;
 - mode-owned Hot Zone objective occupancy, progress, and scoring derived from a map anchor;
-- client-owned semantic object variants, themes, imported scenes, primitives, generated meshes,
+- client-owned visual profiles, themes, imported scenes, primitives, generated meshes,
   and deterministic fallbacks.
 
-The current region catalog implements only destructible-terrain reservations. The schema's ability
-to carry additional stable region profiles is an extension seam, not evidence that hazards,
-movement surfaces, concealment, or other behaviors already exist.
+The current map-asset catalog implements ground, blocking water, honestly non-concealing tall
+grass, walls, round obstacles, destructible cover, rubble replacement, inert decorations, and
+spawn markers. It does not imply hazards, movement modifiers, concealment, or arbitrary scripted
+interactions.
 
-A visible tile is not an authoritative gameplay object. A grid may help author layouts or implement
-quantized terrain, while gameplay remains expressed through resolved geometry, regions, entities,
-mode anchors, and terrain occupancy. Client surfaces, props, vegetation, particles, materials, and
-shaders present those facts without deciding them.
+A visible tile is not independently authoritative. Gameplay comes from the shared profile attached
+to a placed `MapAssetId`; client surfaces, props, vegetation, particles, materials, and shaders
+present those facts without deciding them.
 
 ## Environment extension principles
 
@@ -82,7 +81,7 @@ shaders present those facts without deciding them.
 | Interactive geometry | Door, switch, moving or retractable cover | Change available paths or sight/projectile lines | Stateful collision transitions and recovery |
 | Ability-created area | Smoke, temporary wall, speed/slow field, hazard | Spend build power to temporarily reshape local space | Ownership, lifetime, cleanup, interaction with authored areas |
 
-Permanent walls, ordinary ground, destructible terrain, and cosmetic dressing are established map or
+Permanent walls, ordinary ground, destructible cover, and cosmetic dressing are established map or
 presentation capabilities rather than candidates in this catalog. Additional visual themes or props
 without gameplay consequences belong to map content and art direction.
 
@@ -96,7 +95,7 @@ The extension model should remain direct:
 
 ```text
 Map recipe
-  stable region/entity profile + bounded shape and placement
+  stable MapAssetId + cell placement or typed mode anchor
           |
           v
 Developer-authored capability definition
@@ -235,7 +234,7 @@ Every gameplay-relevant environment capability must be legible independently of 
 - presentation cleanup follows the authoritative owner and cannot keep a stale area visible after
   removal or replacement.
 
-Themes and compatible visual variants may change the art treatment without changing the capability
+Themes and compatible visual profiles may change the art treatment without changing the capability
 definition. Conversely, a visual prop or material never grants gameplay behavior merely because it
 resembles grass, fire, ice, a door, or a teleporter.
 

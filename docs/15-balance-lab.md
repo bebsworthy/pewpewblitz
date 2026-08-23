@@ -77,8 +77,8 @@ Review this checklist:
   implementation milestone.
 
 Primary implementation ownership currently lives in `src/server/balance_lab/`, with authored build
-tuning in `src/builds/definitions.rs`, weapon definitions in `src/combat/definitions/`, terrain
-bounds in `src/terrain/`, and the operator application in `tools/balance-lab-web/`.
+tuning in `src/builds/definitions.rs`, weapon definitions and map-destruction bounds in
+`src/combat/definitions/`, and the operator application in `tools/balance-lab-web/`.
 
 ## Scope and limitations
 
