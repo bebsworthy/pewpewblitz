@@ -202,6 +202,44 @@ fn sqlite_profile_crud_is_transactional_and_recovers() {
 
 #[cfg(feature = "server")]
 #[test]
+fn deleting_selected_brawler_selects_next_creation_ordinal_and_wraps() {
+    let database = path("delete-successor");
+    let account = AccountId::new(101).unwrap();
+    let ids = [
+        SavedBrawlerId::new(101).unwrap(),
+        SavedBrawlerId::new(102).unwrap(),
+        SavedBrawlerId::new(103).unwrap(),
+    ];
+    let mut store = ProfileStorage::open(&database).unwrap();
+    let mut snapshot = store.load_or_create(account).unwrap();
+    for (index, id) in ids.into_iter().enumerate() {
+        snapshot = store
+            .create_brawler(
+                account,
+                snapshot.revision,
+                id,
+                draft(&format!("Brawler {}", index + 1), 1, 1),
+            )
+            .unwrap();
+    }
+    snapshot = store
+        .select_brawler(account, snapshot.revision, ids[1])
+        .unwrap();
+    snapshot = store
+        .delete_brawler(account, snapshot.revision, ids[1], ProfileRevision::INITIAL)
+        .unwrap();
+    assert_eq!(snapshot.selected_brawler_id, Some(ids[2]));
+
+    snapshot = store
+        .delete_brawler(account, snapshot.revision, ids[2], ProfileRevision::INITIAL)
+        .unwrap();
+    assert_eq!(snapshot.selected_brawler_id, Some(ids[0]));
+    drop(store);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+#[test]
 fn sqlite_backup_restores_exact_profile() {
     let database = path("source");
     let backup = path("backup");

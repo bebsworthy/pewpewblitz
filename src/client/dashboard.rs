@@ -1,6 +1,9 @@
 //! Client-only Dashboard fighter viewport and presentation lifecycle.
 
-use super::{ClientFlow, flow::DashboardPreviewHost};
+use super::{
+    ClientFlow,
+    flow::{BrawlerDetailsPreviewHost, DashboardPreviewHost},
+};
 use bevy::{
     asset::RenderAssetUsages,
     camera::{ClearColorConfig, RenderTarget, visibility::RenderLayers},
@@ -17,7 +20,11 @@ use core::time::Duration;
 const DASHBOARD_RENDER_LAYER: usize = 29;
 
 #[derive(Resource)]
-struct DashboardPreviewTarget(Handle<Image>);
+struct DashboardPreviewTarget {
+    image: Handle<Image>,
+    camera: Entity,
+    host: Entity,
+}
 
 #[derive(Resource)]
 struct DashboardBackgroundTarget(Handle<DashboardBackgroundMaterial>);
@@ -75,6 +82,7 @@ impl Plugin for ClientDashboardPlugin {
                     ensure_dashboard_background,
                     update_dashboard_background,
                     spawn_dashboard_preview,
+                    bind_dashboard_preview_host,
                     upgrade_dashboard_preview,
                 )
                     .chain()
@@ -223,7 +231,11 @@ fn spawn_dashboard_preview(
         ))
         .id();
     commands.entity(host).insert(ViewportNode::new(camera));
-    commands.insert_resource(DashboardPreviewTarget(target));
+    commands.insert_resource(DashboardPreviewTarget {
+        image: target,
+        camera,
+        host,
+    });
 
     spawn_dashboard_preview_lights(&mut commands, &layer);
     let root = commands
@@ -267,6 +279,34 @@ fn spawn_dashboard_preview(
     if let Some(imported) = imported {
         spawn_imported_character(&mut commands, root, &imported, layer);
     }
+}
+
+fn bind_dashboard_preview_host(
+    mut commands: Commands,
+    dashboard_hosts: Query<Entity, With<DashboardPreviewHost>>,
+    detail_hosts: Query<Entity, With<BrawlerDetailsPreviewHost>>,
+    mut target: Option<ResMut<DashboardPreviewTarget>>,
+) {
+    let Some(target) = target.as_deref_mut() else {
+        return;
+    };
+    let desired_host = detail_hosts
+        .iter()
+        .next()
+        .or_else(|| dashboard_hosts.iter().next());
+    let Some(desired_host) = desired_host else {
+        return;
+    };
+    if desired_host == target.host {
+        return;
+    }
+    if let Ok(mut previous) = commands.get_entity(target.host) {
+        previous.remove::<ViewportNode>();
+    }
+    commands
+        .entity(desired_host)
+        .insert(ViewportNode::new(target.camera));
+    target.host = desired_host;
 }
 
 fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers) {
@@ -435,7 +475,7 @@ fn release_dashboard_preview_target(
     mut images: ResMut<Assets<Image>>,
 ) {
     if let Some(target) = target {
-        images.remove(target.0.id());
+        images.remove(target.image.id());
         commands.remove_resource::<DashboardPreviewTarget>();
     }
 }
@@ -460,6 +500,31 @@ mod tests {
         assert_eq!(dashboard_motion(12.0, false, false), (12.0, 1.0));
         assert_eq!(dashboard_motion(12.0, true, false), (5.0, 0.0));
         assert_eq!(dashboard_motion(12.0, false, true), (5.0, 0.0));
+    }
+
+    #[test]
+    fn brawler_details_temporarily_owns_the_dashboard_preview_viewport() {
+        let mut app = App::new();
+        app.add_systems(Update, bind_dashboard_preview_host);
+        let camera = app.world_mut().spawn_empty().id();
+        let dashboard = app
+            .world_mut()
+            .spawn((DashboardPreviewHost, ViewportNode::new(camera)))
+            .id();
+        let details = app.world_mut().spawn(BrawlerDetailsPreviewHost).id();
+        app.world_mut().insert_resource(DashboardPreviewTarget {
+            image: Handle::default(),
+            camera,
+            host: dashboard,
+        });
+
+        app.update();
+        assert!(app.world().get::<ViewportNode>(dashboard).is_none());
+        assert!(app.world().get::<ViewportNode>(details).is_some());
+
+        app.world_mut().despawn(details);
+        app.update();
+        assert!(app.world().get::<ViewportNode>(dashboard).is_some());
     }
 
     #[test]
@@ -493,8 +558,13 @@ mod tests {
                     palette_light: Vec4::ZERO,
                     glow: Vec4::ZERO,
                 });
-            app.world_mut()
-                .insert_resource(DashboardPreviewTarget(image));
+            let host = app.world_mut().spawn_empty().id();
+            let camera = app.world_mut().spawn_empty().id();
+            app.world_mut().insert_resource(DashboardPreviewTarget {
+                image,
+                camera,
+                host,
+            });
             app.world_mut()
                 .insert_resource(DashboardBackgroundTarget(material));
             app.update();

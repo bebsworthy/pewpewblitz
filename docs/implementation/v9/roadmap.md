@@ -196,6 +196,11 @@ client state or packet-decoded application facts to prove that the secret pose w
 
 ## Explicitly deferred beyond V9
 
+- Removal of the superseded full-build preset system, including named presets such as
+  `Veilkeeper`, the unreachable legacy Build Editor, standalone build persistence, and obsolete
+  direct-session selection surfaces. This is tracked as `MAINT-LEGACY-BUILD-SYSTEM` in the
+  [canonical backlog](../../backlog.md#trigger-bound-technical-maintenance); the active saved-brawler
+  profile/loadout path and weapon-base presets remain.
 - Wall/line-of-sight vision, fog of war, lighting-based stealth, last-known-position UI, target
   memory, replay, kill-cam, and spectator permissions.
 - Team-shared proximity reveal, reveal cleanses/immunity, counter-counter abilities, concealed

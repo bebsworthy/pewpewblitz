@@ -442,6 +442,35 @@ Passing evidence:
 Native visual/controller evaluation and user feedback remain open, so neither M03 nor V9 is marked
 Complete.
 
+### Playtest feedback — 2026-08-24
+
+- **Veilkeeper showed `ULTIMATE: Unknown` in the brawler creation/edit overlay — implemented now.**
+  The overlay still used a four-entry hard-coded display-name table after ultimate ID 5 was added.
+  It now resolves ultimate names from the authoritative build catalog, where ID 5 is
+  `Concealment Field`. The selector was already catalog-driven and could reach the fifth ultimate.
+  A focused regression test passes.
+- **The Dashboard and blind `Select Next Brawler` menu made the active Concealment Field brawler
+  impossible to identify confidently — implemented now.** The Dashboard card now presents the
+  active brawler's named fighter profile, weapon, ultimate, and passives with a direct
+  `VIEW BRAWLERS` action. Tapping it opens a full-screen, scrollable Brawlers List with
+  human-readable loadouts and a selected marker; tapping a row opens a touch-oriented Brawler
+  Details screen with fighter/weapon statistics, abilities, equipment state, Select, Customize,
+  Delete, and Back actions. Creation, editing, equipment, confirmation, and empty-profile paths
+  return to the owning brawler screen rather than the unrelated application menu. The application
+  Menu now contains only application actions. Deleting the selected brawler chooses the next
+  creation ordinal with wraparound in the same authoritative transaction; deleting the last leaves
+  the empty list and Create action. Focused client-flow and server-storage regressions pass; native
+  touch/layout feedback remains required.
+- **The Brawlers List and Brawler Details still read as modal menu overlays rather than screens —
+  implemented now.** Both destinations now own an opaque edge-to-edge viewport with screen-edge
+  navigation and no centered outer dialog. The list uses a fixed top navigation band, full-height
+  roster, and fixed Create action. Details uses a character-focused composition: fighter identity
+  and base statistics, the existing live 3D fighter viewport, and the named loadout plus touch-size
+  actions. Wide windows arrange these as three columns; compact windows stack them while preserving
+  the large fighter stage. The live render target moves from Dashboard to Details and returns when
+  Details closes, avoiding a duplicate preview renderer. The provided Brawl Stars image was used
+  only as broad hierarchy/layout direction, not as an asset or literal screen specification.
+
 ## Verification plan
 
 ### Pure and catalog tests

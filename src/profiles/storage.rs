@@ -200,6 +200,23 @@ impl ProfileStorage {
         let transaction = self.connection.transaction()?;
         let current = load_profile(&transaction, account_id)?;
         require_revision(&current, expected_profile_revision)?;
+        let selected_successor = (current.selected_brawler_id == Some(brawler_id))
+            .then(|| {
+                current
+                    .brawlers
+                    .iter()
+                    .position(|brawler| brawler.id == brawler_id)
+                    .and_then(|deleted_index| {
+                        current
+                            .brawlers
+                            .iter()
+                            .skip(deleted_index + 1)
+                            .chain(current.brawlers.iter().take(deleted_index))
+                            .next()
+                            .map(|brawler| brawler.id)
+                    })
+            })
+            .flatten();
         let changed = transaction.execute(
             "DELETE FROM brawlers WHERE account_id=?1 AND brawler_id=?2 AND revision=?3",
             params![
@@ -220,15 +237,13 @@ impl ProfileStorage {
                 "DELETE FROM profile_selection WHERE account_id=?1",
                 [account_id.to_bytes().as_slice()],
             )?;
-            let fallback: Option<Vec<u8>> = transaction.query_row(
-                "SELECT brawler_id FROM brawlers WHERE account_id=?1 ORDER BY creation_ordinal LIMIT 1",
-                [account_id.to_bytes().as_slice()],
-                |row| row.get(0),
-            ).optional()?;
-            if let Some(fallback) = fallback {
+            if let Some(successor) = selected_successor {
                 transaction.execute(
                     "INSERT INTO profile_selection(account_id,brawler_id) VALUES(?1,?2)",
-                    params![account_id.to_bytes().as_slice(), fallback],
+                    params![
+                        account_id.to_bytes().as_slice(),
+                        successor.to_bytes().as_slice()
+                    ],
                 )?;
             }
         }
