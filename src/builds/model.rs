@@ -92,7 +92,7 @@ pub struct MatchBuildSnapshotV1 {
 }
 
 impl MatchBuildSnapshotV1 {
-    pub const SCHEMA_VERSION: u8 = 3;
+    pub const SCHEMA_VERSION: u8 = 4;
 
     pub fn encode(self) -> Result<brawler_routing::MatchBuildSnapshot, String> {
         let bytes = postcard::to_allocvec(&self)
@@ -146,6 +146,7 @@ pub enum UltimateKind {
     Sentry,
     SelfCloak,
     RevealScan,
+    ConcealmentField,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,7 +160,7 @@ impl UltimateKind {
     pub const fn activation_style(self) -> UltimateActivationStyle {
         match self {
             Self::Dash | Self::Sentry | Self::SelfCloak => UltimateActivationStyle::Immediate,
-            Self::RevealScan => UltimateActivationStyle::Targeted,
+            Self::RevealScan | Self::ConcealmentField => UltimateActivationStyle::Targeted,
         }
     }
 }
@@ -175,6 +176,11 @@ pub enum UltimateParameters {
         maximum_range_milliunits: u32,
         radius_milliunits: u32,
         reveal_ticks: u64,
+    },
+    ConcealmentField {
+        maximum_range_milliunits: u32,
+        radius_milliunits: u32,
+        duration_ticks: u64,
     },
 }
 
@@ -236,6 +242,10 @@ pub enum AbilityPhase {
     Cloaked {
         generation: u64,
         activated_at_tick: u64,
+        expires_at_tick: u64,
+    },
+    FieldActive {
+        field_id: crate::concealment::ConcealmentFieldId,
         expires_at_tick: u64,
     },
 }

@@ -94,6 +94,8 @@ pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, res
         .remove::<crate::concealment::ForcedRevealSources>()
         .remove::<crate::concealment::ConcealmentRevealDeadlines>()
         .remove::<crate::concealment::TerrainConcealmentMembership>()
+        .remove::<crate::concealment::AlliedConcealmentMemberships>()
+        .remove::<crate::concealment::ObjectiveCarrier>()
         .remove::<crate::concealment::ConcealmentPresentationState>()
         .remove::<crate::combat::ExternalMotion>()
         .remove::<crate::combat::KnockbackFeedback>();
@@ -115,6 +117,8 @@ pub(crate) fn complete_fighter_lifecycle(commands: &mut Commands, entity: Entity
         .remove::<crate::concealment::ForcedRevealSources>()
         .remove::<crate::concealment::ConcealmentRevealDeadlines>()
         .remove::<crate::concealment::TerrainConcealmentMembership>()
+        .remove::<crate::concealment::AlliedConcealmentMemberships>()
+        .remove::<crate::concealment::ObjectiveCarrier>()
         .remove::<crate::concealment::ConcealmentPresentationState>()
         .remove::<RespawnState>()
         .remove::<SpawnProtection>()

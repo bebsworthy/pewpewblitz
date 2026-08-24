@@ -52,7 +52,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 23;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 24;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -661,6 +661,10 @@ fn register_replicated_components(app: &mut App) {
     app.component::<Fighter>().replicate_once();
     app.component::<crate::concealment::ConcealmentPresentationState>()
         .replicate();
+    app.component::<crate::concealment::ConcealmentFieldState>()
+        .replicate_once();
+    app.component::<crate::concealment::ObjectiveCarrier>()
+        .replicate();
     app.component::<MatchRootMarker>().replicate_once();
     app.component::<MatchState>().replicate();
     app.component::<MatchClock>().replicate();
@@ -890,6 +894,8 @@ mod tests {
         }));
         let components = app.world().resource::<ComponentRegistry>();
         assert!(components.is_registered::<Fighter>());
+        assert!(components.is_registered::<crate::concealment::ConcealmentFieldState>());
+        assert!(components.is_registered::<crate::concealment::ObjectiveCarrier>());
         assert!(components.is_registered::<MatchRootMarker>());
         assert!(components.is_registered::<MatchState>());
         assert!(components.is_registered::<MatchClock>());

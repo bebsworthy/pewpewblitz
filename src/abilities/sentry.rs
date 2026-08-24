@@ -622,7 +622,11 @@ pub(crate) fn tick_sentries(
             Option<&crate::combat::Defeated>,
             Option<&crate::matchplay::ActiveCombatant>,
             Option<&crate::concealment::TerrainConcealmentMembership>,
+            Option<&crate::concealment::AlliedConcealmentMemberships>,
             Option<&crate::concealment::ConcealmentRevealDeadlines>,
+            &crate::builds::AbilityState,
+            Option<&crate::concealment::ForcedRevealSources>,
+            Has<crate::concealment::ObjectiveCarrier>,
         ),
         With<crate::protocol::Fighter>,
     >,
@@ -648,19 +652,50 @@ pub(crate) fn tick_sentries(
             });
         if runtime.begin_acquisition_if_due(tick.0) {
             runtime.set_target(stable_sentry_target(fighters.iter().filter_map(
-                |(target_position, target_id, team, defeated, active, concealed, deadlines)| {
+                |(
+                    target_position,
+                    target_id,
+                    team,
+                    defeated,
+                    active,
+                    terrain,
+                    field,
+                    deadlines,
+                    ability,
+                    forced,
+                    objective_carrier,
+                )| {
                     if *team == identity.team_id || defeated.is_some() || active.is_none() {
                         return None;
                     }
-                    if concealed.is_some()
-                        && !deadlines.is_some_and(|value| {
-                            crate::concealment::reveal_lock_active(tick.0, *value)
-                        })
-                        && owner_view.is_none_or(|(owner_position, reveal_radius)| {
-                            owner_position.distance_squared(target_position.0)
-                                > reveal_radius * reveal_radius
-                        })
-                    {
+                    let permitted = owner_view.is_some_and(|(owner_position, reveal_radius)| {
+                        crate::concealment::observer_can_see(
+                            crate::concealment::ObserverVisibilityInput {
+                                relation: crate::concealment::ObserverRelation::Enemy,
+                                observer_alive: true,
+                                concealment: if objective_carrier {
+                                    crate::concealment::ConcealmentSources::NONE
+                                } else {
+                                    crate::concealment::ConcealmentSources {
+                                        terrain: terrain.is_some(),
+                                        self_cloak: matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if tick.0 < expires_at_tick),
+                                        allied_field: field
+                                            .is_some_and(|value| !value.0.is_empty()),
+                                    }
+                                },
+                                forced_revealed: forced.is_some_and(|sources| {
+                                    sources.active_for_team(identity.team_id, tick.0)
+                                }),
+                                subject_reveal_locked: deadlines.is_some_and(|value| {
+                                    crate::concealment::reveal_lock_active(tick.0, *value)
+                                }),
+                                distance_squared: owner_position
+                                    .distance_squared(target_position.0),
+                                reveal_radius,
+                            },
+                        )
+                    });
+                    if !permitted {
                         return None;
                     }
                     let delta = target_position.0 - position.0;
@@ -692,20 +727,47 @@ pub(crate) fn tick_sentries(
         let Some(target_id) = runtime.target() else {
             continue;
         };
-        let Some((target_position, _, _, _, _, concealed, deadlines)) =
-            fighters.iter().find(|(_, id, _, defeated, active, _, _)| {
-                **id == target_id && defeated.is_none() && active.is_some()
-            })
+        let Some((
+            target_position,
+            _,
+            _,
+            _,
+            _,
+            terrain,
+            field,
+            deadlines,
+            ability,
+            forced,
+            objective_carrier,
+        )) = fighters.iter().find(|(_, id, _, defeated, active, ..)| {
+            **id == target_id && defeated.is_none() && active.is_some()
+        })
         else {
             continue;
         };
-        if concealed.is_some()
-            && !deadlines
-                .is_some_and(|value| crate::concealment::reveal_lock_active(tick.0, *value))
-            && owner_view.is_none_or(|(owner_position, reveal_radius)| {
-                owner_position.distance_squared(target_position.0) > reveal_radius * reveal_radius
+        let permitted = owner_view.is_some_and(|(owner_position, reveal_radius)| {
+            crate::concealment::observer_can_see(crate::concealment::ObserverVisibilityInput {
+                relation: crate::concealment::ObserverRelation::Enemy,
+                observer_alive: true,
+                concealment: if objective_carrier {
+                    crate::concealment::ConcealmentSources::NONE
+                } else {
+                    crate::concealment::ConcealmentSources {
+                        terrain: terrain.is_some(),
+                        self_cloak: matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if tick.0 < expires_at_tick),
+                        allied_field: field.is_some_and(|value| !value.0.is_empty()),
+                    }
+                },
+                forced_revealed: forced
+                    .is_some_and(|sources| sources.active_for_team(identity.team_id, tick.0)),
+                subject_reveal_locked: deadlines.is_some_and(|value| {
+                    crate::concealment::reveal_lock_active(tick.0, *value)
+                }),
+                distance_squared: owner_position.distance_squared(target_position.0),
+                reveal_radius,
             })
-        {
+        });
+        if !permitted {
             runtime.set_target(None);
             continue;
         }

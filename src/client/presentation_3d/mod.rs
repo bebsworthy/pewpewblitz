@@ -65,6 +65,7 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) sentry_body: Handle<Mesh>,
     pub(crate) ground_ring: Handle<Mesh>,
     pub(crate) area_ring: Handle<Mesh>,
+    pub(crate) area_disc: Handle<Mesh>,
     pub(crate) effect_sphere: Handle<Mesh>,
 }
 
@@ -84,6 +85,10 @@ pub(crate) struct Material3dAssets {
     pub(crate) status_knockback: Handle<StandardMaterial>,
     pub(crate) status_reveal: Handle<StandardMaterial>,
     pub(crate) scan_area: Handle<StandardMaterial>,
+    pub(crate) concealment_field_blue_fill: Handle<StandardMaterial>,
+    pub(crate) concealment_field_blue_boundary: Handle<StandardMaterial>,
+    pub(crate) concealment_field_red_fill: Handle<StandardMaterial>,
+    pub(crate) concealment_field_red_boundary: Handle<StandardMaterial>,
     pub(crate) effect_muzzle: Handle<StandardMaterial>,
     pub(crate) effect_impact: Handle<StandardMaterial>,
     pub(crate) effect_damage: Handle<StandardMaterial>,
@@ -389,6 +394,7 @@ fn setup_3d_foundation(
             FIGHTER_RING_OUTER_RADIUS,
         )),
         area_ring: meshes.add(Annulus::new(0.93, 1.0)),
+        area_disc: meshes.add(Circle::new(1.0)),
         effect_sphere: meshes.add(Sphere::new(1.0)),
     };
     let matte = |color: Color| StandardMaterial {
@@ -461,6 +467,30 @@ fn setup_3d_foundation(
         scan_area: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.12, 0.72),
             emissive: LinearRgba::new(1.8, 0.04, 0.7, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        concealment_field_blue_fill: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.08, 0.62, 1.0, 0.22),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        concealment_field_blue_boundary: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.08, 0.72, 1.0),
+            emissive: LinearRgba::new(0.05, 0.75, 1.5, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        concealment_field_red_fill: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.2, 0.16, 0.22),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        concealment_field_red_boundary: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.24, 0.16),
+            emissive: LinearRgba::new(1.5, 0.12, 0.05, 1.0),
             unlit: true,
             ..default()
         }),

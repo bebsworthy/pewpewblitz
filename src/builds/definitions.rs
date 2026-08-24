@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 4;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 4;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 5;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 5;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -130,12 +130,12 @@ impl BuildCatalog {
         }
         self.validate_tuning()?;
         if self.weapon_costs.len() != 4
-            || self.ultimates.len() != 4
+            || self.ultimates.len() != 5
             || self.passives.len() != 6
-            || self.presets.len() != 6
+            || self.presets.len() != 7
         {
             return Err(
-                "V9 M02 requires four weapon costs, four ultimates, six passives, and six presets"
+                "V9 M03 requires four weapon costs, five ultimates, six passives, and seven presets"
                     .into(),
             );
         }
@@ -293,50 +293,20 @@ impl BuildCatalog {
 
 fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(), String> {
     let expected = [
-        (
-            UltimateDefinitionId(1),
-            UltimateKind::Dash,
-            3,
-            UltimateParameters::Dash,
-        ),
-        (
-            UltimateDefinitionId(2),
-            UltimateKind::Sentry,
-            4,
-            UltimateParameters::Sentry,
-        ),
-        (
-            UltimateDefinitionId(3),
-            UltimateKind::SelfCloak,
-            4,
-            UltimateParameters::SelfCloak {
-                duration_ticks: 360,
-            },
-        ),
-        (
-            UltimateDefinitionId(4),
-            UltimateKind::RevealScan,
-            4,
-            UltimateParameters::RevealScan {
-                maximum_range_milliunits: 640_000,
-                radius_milliunits: 192_000,
-                reveal_ticks: 300,
-            },
-        ),
+        (UltimateDefinitionId(1), UltimateKind::Dash, 3),
+        (UltimateDefinitionId(2), UltimateKind::Sentry, 4),
+        (UltimateDefinitionId(3), UltimateKind::SelfCloak, 4),
+        (UltimateDefinitionId(4), UltimateKind::RevealScan, 4),
+        (UltimateDefinitionId(5), UltimateKind::ConcealmentField, 4),
     ];
     if !definitions
         .iter()
         .zip(expected)
         .all(|(definition, expected)| {
-            (
-                definition.id,
-                definition.kind,
-                definition.point_cost,
-                definition.parameters,
-            ) == expected
+            (definition.id, definition.kind, definition.point_cost) == expected
         })
     {
-        return Err("ultimate inventory does not match the V9 M02 engine contract".into());
+        return Err("ultimate inventory does not match the V9 M03 engine contract".into());
     }
     if definitions.iter().any(|definition| {
         !matches!(
@@ -355,6 +325,14 @@ fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(),
                         maximum_range_milliunits: 1..=4_096_000,
                         radius_milliunits: 1..=2_048_000,
                         reveal_ticks: 1..=3_600,
+                    }
+                )
+                | (
+                    UltimateKind::ConcealmentField,
+                    UltimateParameters::ConcealmentField {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        radius_milliunits: 1..=2_048_000,
+                        duration_ticks: 1..=3_600,
                     }
                 )
         )

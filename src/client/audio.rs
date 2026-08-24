@@ -69,6 +69,7 @@ impl Plugin for ClientAudioPlugin {
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     clippy::type_complexity,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
@@ -93,6 +94,10 @@ fn play_ability_audio(
         ),
     >,
     sentries: Query<&crate::abilities::SentryIdentity, Added<crate::abilities::Sentry>>,
+    concealment_fields: Query<
+        &crate::concealment::ConcealmentFieldState,
+        Added<crate::concealment::ConcealmentFieldState>,
+    >,
     active: Query<(), With<ClientAudioOneShot>>,
 ) {
     let Some(handles) = handles else { return };
@@ -107,7 +112,8 @@ fn play_ability_audio(
             }
             crate::builds::AbilityPhase::Charging
             | crate::builds::AbilityPhase::Deployed { .. }
-            | crate::builds::AbilityPhase::Cloaked { .. } => {}
+            | crate::builds::AbilityPhase::Cloaked { .. }
+            | crate::builds::AbilityPhase::FieldActive { .. } => {}
         }
     }
     if passives
@@ -118,6 +124,9 @@ fn play_ability_audio(
     }
     for _ in &sentries {
         sounds.push((SoundKind::Sentry, handles.ready.clone(), 0.75));
+    }
+    for _ in &concealment_fields {
+        sounds.push((SoundKind::Sentry, handles.ready.clone(), 0.9));
     }
     let available = MAX_ACTIVE_ONE_SHOTS.saturating_sub(active.iter().count());
     for (_kind, handle, speed) in sounds.into_iter().take(available) {

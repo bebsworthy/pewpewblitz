@@ -319,3 +319,124 @@ fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
         "subject stayed visible at tick {final_tick}; cloak={final_phase:?} sources={final_sources:?} ids={visible_ids:?}"
     );
 }
+
+#[test]
+fn concealment_field_is_public_hides_at_range_and_confirmation_does_not_fire() {
+    let mut harness = Harness::new_tidal_garden(2);
+    harness.clients[1]
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .build_preset = Some(7);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.client_is_active(1)
+            && harness.selection_is_complete(0)
+            && harness.selection_is_complete(1)
+    });
+    let (observer, caster, caster_id) = {
+        let mut query = harness.server.world_mut().query_filtered::<(
+            Entity,
+            &NetworkEntityId,
+            &lightyear::prelude::ControlledBy,
+        ), With<Fighter>>();
+        let values: Vec<_> = query
+            .iter(harness.server.world())
+            .map(|(entity, id, controlled)| (controlled.owner, entity, *id))
+            .collect();
+        let observer = values
+            .iter()
+            .find(|value| value.0 == harness.server_links[0])
+            .unwrap();
+        let caster = values
+            .iter()
+            .find(|value| value.0 == harness.server_links[1])
+            .unwrap();
+        (observer.1, caster.1, caster.2)
+    };
+    harness
+        .server
+        .world_mut()
+        .entity_mut(observer)
+        .insert(Position::from_xy(320.0, 0.0));
+    harness
+        .server
+        .world_mut()
+        .entity_mut(caster)
+        .insert((
+            Position::from_xy(0.0, 0.0),
+            brawler::builds::AbilityState {
+                charge: 1_000,
+                phase: brawler::builds::AbilityPhase::Ready,
+            },
+        ))
+        .remove::<brawler::matchplay::SpawnProtection>();
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.set_controlled_input(1, FighterInput::default());
+    harness.step();
+    let caster_ammo = harness
+        .server
+        .world()
+        .get::<WeaponState>(caster)
+        .expect("caster weapon state")
+        .ammo;
+    harness.set_controlled_input(
+        1,
+        FighterInput::from_axes_with_aim_distance(
+            Vec2::ZERO,
+            Some(Vec2::X),
+            Some(0.0),
+            FighterInput::ULTIMATE | FighterInput::PRIMARY_FIRE,
+        ),
+    );
+    harness.step_until(|harness| {
+        matches!(
+            harness
+                .server
+                .world()
+                .get::<brawler::builds::AbilityState>(caster)
+                .map(|ability| ability.phase),
+            Some(brawler::builds::AbilityPhase::FieldActive { .. })
+        )
+    });
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<WeaponState>(caster)
+            .expect("caster weapon after confirmation")
+            .ammo,
+        caster_ammo,
+        "Concealment Field confirmation must not also fire the primary weapon"
+    );
+    harness.set_controlled_input(1, FighterInput::default());
+    harness.step_until(|harness| {
+        let public_fields = {
+            let mut query = harness.clients[0]
+                .world_mut()
+                .query::<&brawler::concealment::ConcealmentFieldState>();
+            query.iter(harness.clients[0].world()).count()
+        };
+        public_fields == 1 && !harness.client_ids(0).iter().any(|(_, id)| *id == caster_id)
+    });
+
+    harness
+        .server
+        .world_mut()
+        .entity_mut(observer)
+        .insert(Position::from_xy(120.0, 0.0));
+    harness.step_until(|harness| harness.client_ids(0).iter().any(|(_, id)| *id == caster_id));
+
+    harness
+        .server
+        .world_mut()
+        .entity_mut(caster)
+        .insert(Defeated {
+            event_id: CombatEventId(99_001),
+        });
+    harness.step_until(|harness| {
+        let mut query = harness.clients[0]
+            .world_mut()
+            .query::<&brawler::concealment::ConcealmentFieldState>();
+        query.iter(harness.clients[0].world()).count() == 0
+    });
+}

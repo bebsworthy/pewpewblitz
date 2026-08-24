@@ -20,6 +20,9 @@ const CONCEALED_FIGHTER_ALPHA: f32 = 0.52;
 pub(super) struct SentryVisual3d;
 
 #[derive(Component)]
+pub(super) struct ConcealmentFieldVisual3d;
+
+#[derive(Component)]
 pub(super) struct FighterGroundMarker3d {
     owner: Entity,
 }
@@ -125,6 +128,7 @@ pub(super) struct CombatEffectSequence(u64);
     clippy::cast_possible_truncation,
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::type_complexity,
     reason = "this reconciliation phase owns the complete set of independent durable visual families"
 )]
@@ -147,9 +151,11 @@ pub(super) fn reconcile_combat_visuals(
         (Entity, &Position, &crate::abilities::SentryIdentity),
         With<crate::abilities::Sentry>,
     >,
+    fields: Query<(Entity, &crate::concealment::ConcealmentFieldState)>,
     fighter_visuals: Query<(Entity, &CombatVisualOwner), With<V3FighterVisual>>,
     projectile_visuals: Query<(Entity, &CombatVisualOwner), With<V3ProjectileVisual>>,
     sentry_visuals: Query<(Entity, &CombatVisualOwner), With<SentryVisual3d>>,
+    field_visuals: Query<(Entity, &CombatVisualOwner), With<ConcealmentFieldVisual3d>>,
     overhead_visuals: Query<(Entity, &CombatVisualOwner), With<FighterOverheadUi>>,
     trails: Query<(Entity, &CombatVisualOwner), With<DashTrailVisual3d>>,
     statuses: Query<(Entity, &CombatVisualOwner), With<StatusVisual3d>>,
@@ -159,6 +165,7 @@ pub(super) fn reconcile_combat_visuals(
     let fighter_roots = unique_roots(&mut commands, &fighter_visuals);
     let projectile_roots = unique_roots(&mut commands, &projectile_visuals);
     let sentry_roots = unique_roots(&mut commands, &sentry_visuals);
+    let field_roots = unique_roots(&mut commands, &field_visuals);
     let overhead_roots = unique_roots(&mut commands, &overhead_visuals);
     let controlled_team = fighters
         .iter()
@@ -210,6 +217,21 @@ pub(super) fn reconcile_combat_visuals(
             );
         }
     }
+    for (owner, state) in &fields {
+        if !field_roots.contains_key(&owner)
+            && let Some(radius) = state.radius()
+        {
+            spawn_concealment_field(
+                &mut commands,
+                &primitives,
+                &materials,
+                owner,
+                state.center_vec2(),
+                radius,
+                state.team,
+            );
+        }
+    }
 
     for (root, owner) in &fighter_visuals {
         if fighters.get(owner.0).is_err() {
@@ -223,6 +245,11 @@ pub(super) fn reconcile_combat_visuals(
     }
     for (root, owner) in &sentry_visuals {
         if sentries.get(owner.0).is_err() {
+            commands.entity(root).despawn();
+        }
+    }
+    for (root, owner) in &field_visuals {
+        if fields.get(owner.0).is_err() {
             commands.entity(root).despawn();
         }
     }
@@ -273,8 +300,61 @@ fn ensure_targeting_previews(
         NotShadowReceiver,
         Transform::default(),
         Visibility::Hidden,
-        Name::new("V9 Reveal Scan targeting ring"),
+        Name::new("V9 targeted ultimate area ring"),
     ));
+}
+
+fn spawn_concealment_field(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    owner: Entity,
+    center: Vec2,
+    radius: f32,
+    team: crate::combat::TeamId,
+) {
+    let (fill, boundary) = if team.0 == 1 {
+        (
+            materials.concealment_field_red_fill.clone(),
+            materials.concealment_field_red_boundary.clone(),
+        )
+    } else {
+        (
+            materials.concealment_field_blue_fill.clone(),
+            materials.concealment_field_blue_boundary.clone(),
+        )
+    };
+    let root = commands
+        .spawn((
+            CombatVisualOwner(owner),
+            ConcealmentFieldVisual3d,
+            Transform::from_translation(ground_position(center)),
+            Visibility::default(),
+            Name::new("V9 Concealment Field visual root"),
+        ))
+        .id();
+    commands.entity(root).with_children(|parent| {
+        parent.spawn((
+            Mesh3d(primitives.area_disc.clone()),
+            MeshMaterial3d(fill),
+            NotShadowCaster,
+            NotShadowReceiver,
+            Transform::from_xyz(0.0, PREVIEW_HEIGHT, 0.0)
+                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                .with_scale(Vec3::splat(radius)),
+            Name::new("V9 Concealment Field fill"),
+        ));
+        parent.spawn((
+            Mesh3d(primitives.area_ring.clone()),
+            MeshMaterial3d(boundary),
+            NotShadowCaster,
+            NotShadowReceiver,
+            Transform::from_xyz(0.0, PREVIEW_HEIGHT + 0.5, 0.0)
+                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                .with_scale(Vec3::splat(radius)),
+            Name::new("V9 Concealment Field boundary"),
+        ));
+    });
 }
 
 fn update_ground_markers(
@@ -377,7 +457,9 @@ fn fighter_is_visually_concealed(
     observer_team: Option<crate::combat::TeamId>,
 ) -> bool {
     state.is_some_and(|state| {
-        (state.inside_concealing_terrain || current_tick < state.self_cloaked_until_tick)
+        (state.inside_concealing_terrain
+            || state.inside_allied_concealment_field
+            || current_tick < state.self_cloaked_until_tick)
             && current_tick >= state.revealed_until_tick
             && !state.forced_reveals.iter().any(|reveal| {
                 Some(reveal.team) == observer_team && current_tick < reveal.expires_at_tick
@@ -1157,15 +1239,25 @@ pub(super) fn update_combat_visual_state(
         .max_by_key(|(snapshot, _)| snapshot.identity.instance_id);
     let scan_preview = match (map, controlled) {
         (Some((map, _)), Some((origin, facing, loadout, Some(ability))))
-            if loadout.ultimate.kind == crate::builds::UltimateKind::RevealScan
-                && pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
+            if matches!(
+                loadout.ultimate.kind,
+                crate::builds::UltimateKind::RevealScan
+                    | crate::builds::UltimateKind::ConcealmentField
+            ) && pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
                 && matches!(ability.phase, crate::builds::AbilityPhase::Ready) =>
         {
-            let crate::builds::UltimateParameters::RevealScan {
-                maximum_range_milliunits,
-                radius_milliunits,
-                ..
-            } = loadout.ultimate.parameters
+            let (
+                crate::builds::UltimateParameters::RevealScan {
+                    maximum_range_milliunits,
+                    radius_milliunits,
+                    ..
+                }
+                | crate::builds::UltimateParameters::ConcealmentField {
+                    maximum_range_milliunits,
+                    radius_milliunits,
+                    ..
+                },
+            ) = (loadout.ultimate.parameters,)
             else {
                 unreachable!()
             };

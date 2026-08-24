@@ -20,10 +20,19 @@ export interface WeaponTuning extends JsonObject {
   recipe: JsonObject;
 }
 
+export interface UltimateTuning extends JsonObject {
+  id: number;
+  key: string;
+  displayName: string;
+  kind: string;
+  parameters: JsonObject;
+}
+
 export interface BalanceLabSnapshot extends JsonObject {
   schemaVersion: number;
   fighterProfiles: FighterProfiles;
   weapons: WeaponTuning[];
+  ultimates: UltimateTuning[];
 }
 
 export interface TransactionView {

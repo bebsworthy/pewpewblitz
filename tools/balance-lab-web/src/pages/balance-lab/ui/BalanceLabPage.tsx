@@ -19,7 +19,7 @@ export function BalanceLabPage() {
     <main>
       <header className="topbar">
         <div>
-          <p className="eyebrow">PewPew Blitz · V7</p>
+          <p className="eyebrow">PewPew Blitz · V9</p>
           <h1>Balance Lab</h1>
           <p>Match {state.matchId} · Applied revision {state.revision}</p>
         </div>
@@ -75,6 +75,33 @@ export function BalanceLabPage() {
               <NumericTreeEditor
                 value={weapon.recipe}
                 path={["weapons", index, "recipe"]}
+                onNumber={controller.setNumber}
+              />
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <h2>Concealment ultimates</h2>
+            <p>Durations, ranges, and radii for the V9 concealment and counter-play families.</p>
+          </div>
+        </div>
+        <div className="weapon-grid">
+          {draft.ultimates.map((ultimate, index) => (
+            <article className="panel weapon" key={ultimate.id}>
+              <div className="weapon-heading">
+                <div>
+                  <p className="eyebrow">{ultimate.kind} · ultimate {ultimate.id}</p>
+                  <h3>{ultimate.displayName}</h3>
+                </div>
+                <code>{ultimate.key}</code>
+              </div>
+              <NumericTreeEditor
+                value={ultimate.parameters}
+                path={["ultimates", index, "parameters"]}
                 onNumber={controller.setNumber}
               />
             </article>

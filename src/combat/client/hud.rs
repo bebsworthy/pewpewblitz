@@ -148,10 +148,14 @@ pub(crate) fn update_combat_hud(
                 crate::builds::AbilityPhase::Dashing { .. } => "DASHING",
                 crate::builds::AbilityPhase::Deployed { .. } => "DEPLOYED",
                 crate::builds::AbilityPhase::Cloaked { .. } => "CLOAKED",
+                crate::builds::AbilityPhase::FieldActive { .. } => "FIELD ACTIVE",
             };
             let remaining = match (ability.phase, authoritative_tick) {
                 (
                     crate::builds::AbilityPhase::Cloaked {
+                        expires_at_tick, ..
+                    }
+                    | crate::builds::AbilityPhase::FieldActive {
                         expires_at_tick, ..
                     },
                     Some(now),

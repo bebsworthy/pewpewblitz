@@ -649,6 +649,9 @@ fn ultimate_description(kind: crate::builds::UltimateKind) -> &'static str {
         crate::builds::UltimateKind::RevealScan => {
             "reveal every hostile in a targeted area to your team"
         }
+        crate::builds::UltimateKind::ConcealmentField => {
+            "create a public area that conceals friendly fighters inside"
+        }
     }
 }
 

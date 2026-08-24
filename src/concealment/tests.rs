@@ -5,7 +5,10 @@ fn distance_equality_reveals_and_defeated_observer_has_no_enemy_permission() {
     let input = |distance_squared, observer_alive| ObserverVisibilityInput {
         relation: ObserverRelation::Enemy,
         observer_alive,
-        concealment: ConcealmentSources::Terrain,
+        concealment: ConcealmentSources {
+            terrain: true,
+            ..ConcealmentSources::NONE
+        },
         forced_revealed: false,
         subject_reveal_locked: false,
         distance_squared,
@@ -36,7 +39,10 @@ fn self_cloak_ignores_proximity_but_team_reveal_overrides_it_for_live_observers(
     let cloaked = ObserverVisibilityInput {
         relation: ObserverRelation::Enemy,
         observer_alive: true,
-        concealment: ConcealmentSources::SelfCloak,
+        concealment: ConcealmentSources {
+            self_cloak: true,
+            ..ConcealmentSources::NONE
+        },
         forced_revealed: false,
         subject_reveal_locked: false,
         distance_squared: 0.0,
@@ -53,6 +59,42 @@ fn self_cloak_ignores_proximity_but_team_reveal_overrides_it_for_live_observers(
         forced_revealed: true,
         subject_reveal_locked: true,
         ..cloaked
+    }));
+}
+
+#[test]
+fn allied_field_uses_proximity_and_combines_with_other_sources_without_cancelling_them() {
+    let field_only = ObserverVisibilityInput {
+        relation: ObserverRelation::Enemy,
+        observer_alive: true,
+        concealment: ConcealmentSources {
+            allied_field: true,
+            ..ConcealmentSources::NONE
+        },
+        forced_revealed: false,
+        subject_reveal_locked: false,
+        distance_squared: 161.0_f32.powi(2),
+        reveal_radius: 160.0,
+    };
+    assert!(!observer_can_see(field_only));
+    assert!(observer_can_see(ObserverVisibilityInput {
+        distance_squared: 160.0_f32.powi(2),
+        ..field_only
+    }));
+
+    let all_sources = ObserverVisibilityInput {
+        concealment: ConcealmentSources {
+            terrain: true,
+            self_cloak: true,
+            allied_field: true,
+        },
+        distance_squared: 0.0,
+        ..field_only
+    };
+    assert!(!observer_can_see(all_sources));
+    assert!(observer_can_see(ObserverVisibilityInput {
+        forced_revealed: true,
+        ..all_sources
     }));
 }
 
@@ -99,6 +141,9 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     fn resolve(mut trace: ResMut<Trace>) {
         trace.0.push("sources");
     }
+    fn lifecycle(mut trace: ResMut<Trace>) {
+        trace.0.push("lifecycle");
+    }
     fn decide(mut trace: ResMut<Trace>) {
         trace.0.push("observers");
     }
@@ -119,6 +164,7 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
         FixedPostUpdate,
         (
             observe.in_set(AbilitySet::ObserveOutcomes),
+            lifecycle.in_set(CombatSet::Lifecycle),
             resolve.in_set(ConcealmentSet::ResolveSources),
             decide.in_set(ConcealmentSet::DecideObservers),
             cues.in_set(CombatSet::TelemetryAndCues),
@@ -129,6 +175,6 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     app.update();
     assert_eq!(
         app.world().resource::<Trace>().0,
-        vec!["outcomes", "sources", "observers", "cues"]
+        vec!["lifecycle", "outcomes", "sources", "observers", "cues"]
     );
 }

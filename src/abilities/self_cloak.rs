@@ -32,6 +32,7 @@ pub(crate) fn activate_self_cloak(
             Has<crate::combat::Defeated>,
             Has<crate::matchplay::ActiveCombatant>,
             Has<crate::combat::AwaitingPostSelectionInput>,
+            Has<crate::concealment::ObjectiveCarrier>,
         ),
         With<crate::protocol::Fighter>,
     >,
@@ -48,6 +49,7 @@ pub(crate) fn activate_self_cloak(
         defeated,
         active,
         barrier,
+        objective_carrier,
     ) in &mut fighters
     {
         if loadout.ultimate.kind != crate::builds::UltimateKind::SelfCloak {
@@ -81,6 +83,8 @@ pub(crate) fn activate_self_cloak(
             Some(crate::abilities::AbilityRejectionReason::Defeated)
         } else if !active {
             Some(crate::abilities::AbilityRejectionReason::Inactive)
+        } else if objective_carrier {
+            Some(crate::abilities::AbilityRejectionReason::ObjectiveCarrier)
         } else if ability.charge != crate::abilities::ULTIMATE_CHARGE_MAX
             || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
         {

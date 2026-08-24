@@ -2,11 +2,12 @@
 
 ## Status
 
-**User playtest.** M01 completed and was accepted on 2026-08-23. M02 research and this
+**Complete.** M01 completed and was accepted on 2026-08-23. M02 research and this
 specification were prepared on 2026-08-23, the user approved implementation on 2026-08-23, and
 the implemented slice passed its canonical automated gates on 2026-08-23. The first native
 playtest validated terrain reveal and identified targeted-input and reveal-signifier corrections
-that were implemented and passed affected canonical verification on 2026-08-23.
+that were implemented and passed affected canonical verification. The user accepted the corrected
+slice and requested M02 closeout on 2026-08-24.
 
 ## Player-visible outcome
 
@@ -383,9 +384,9 @@ Engine ceilings:
   replication send.
 - [x] Extend cue privacy classification, client dedupe, audio, HUD, world presentation, alpha
   treatment, scan preview/active area, revealed marker, and cleanup.
-- [ ] Add pure, ECS, protocol, profile, Balance Lab, separate-App, routed, impairment, recovery,
+- [x] Add pure, ECS, protocol, profile, Balance Lab, separate-App, routed, impairment, recovery,
   capacity, and native evidence specified below.
-- [ ] Triage playtest feedback, rerun affected gates, complete the learning review, and obtain user
+- [x] Triage playtest feedback, rerun affected gates, complete the learning review, and obtain user
   acceptance before M03 research begins.
 
 ## Automated verification evidence
@@ -550,12 +551,18 @@ The first native playtest produced these accepted decisions:
   until physical release, and server authority also rejects a simultaneous targeted-ultimate and
   primary-fire intent so one confirmation cannot produce a weapon shot.
 
-Affected automated verification passed. Native confirmation of the corrected input behavior and
-the restored scan/objective readability remains pending the updated handoff above.
+Affected automated verification passed. The user's 2026-08-24 closeout request accepts the corrected
+input behavior, restored scan/objective readability, and full-duration scan ring as the M02 native
+result.
+
+M03 research subsequently found that the V6 Balance Lab snapshot still exposes fighter profiles and
+weapons only, despite M02's intended ultimate-tuning surface. The accepted M02 gameplay slice remains
+closed; the missing Self Cloak/Reveal Scan tuning surface is explicitly carried into M03 because the
+new field needs the same bounded editor and V9 cannot close without all three ultimate families.
 
 ## Learn-from-errors review
 
-Interim verification lessons recorded on 2026-08-23:
+Closeout lessons recorded on 2026-08-23 and 2026-08-24:
 
 - adding inventory entries requires searching every product and automation count, not only the main
   build editor. The saved-brawler creation flow, legacy match selector, CLI bound, help text, and
@@ -568,9 +575,20 @@ Interim verification lessons recorded on 2026-08-23:
   active, replicated, ability-bearing fighter population as concealment authority;
 - a network wait helper bounded below the authored five-second scan duration was unsuitable for
   expiry evidence. The scenario now advances to the authoritative deadline and inspects both
-  durable source state and client-World absence.
+  durable source state and client-World absence;
+- the V8 map-presentation cutover removed Hot Zone objective materialization while leaving marker
+  and tint-update code intact. Future mode visuals need a small presentation test proving that each
+  authoritative objective anchor creates its durable client entity, not only source-removal checks;
+- targeted confirmation is an input lifecycle, not a one-frame button substitution. The client now
+  requires physical Fire release before confirmation and consumes confirmation until release, while
+  server authority rejects simultaneous targeted-ultimate and primary-fire intent as a second
+  invariant;
+- a gameplay-significant area visual must derive its lifetime from the replicated authoritative
+  deadline. A convenient client-only pulse timer made the Reveal Scan radius disappear early; the
+  corrected presentation carries and reconciles the authoritative expiry tick.
 
-The final learning review remains open until user feedback is triaged and affected gates rerun.
+The feedback inventory is fully triaged, affected verification passed, the user accepted the slice,
+and no recurring failure justified a new repository skill. M02 is complete.
 
 ## References
 

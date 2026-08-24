@@ -1,6 +1,7 @@
 //! Server-authoritative ultimate and passive runtime rules.
 
 mod charge;
+mod concealment_field;
 mod dash;
 mod passives;
 mod reveal_scan;
@@ -37,7 +38,8 @@ pub(crate) use sentry::{
 };
 pub use telemetry::{
     AbilityRejectionReason, AbilityTelemetry, AbilityTelemetryKind, AbilityTelemetryRecord,
-    DashInterruptionReason, SentryCleanupReason, SentryTelemetryAggregate,
+    ConcealmentFieldCleanupReason, DashInterruptionReason, SentryCleanupReason,
+    SentryTelemetryAggregate,
 };
 
 #[cfg(feature = "server")]
@@ -73,6 +75,7 @@ impl Plugin for ServerAbilityPlugin {
                     sentry::activate_sentry,
                     self_cloak::activate_self_cloak,
                     reveal_scan::activate_reveal_scan,
+                    concealment_field::activate_concealment_field,
                     ApplyDeferred,
                 )
                     .chain()
@@ -83,6 +86,7 @@ impl Plugin for ServerAbilityPlugin {
                 (
                     request_sentry_lifecycle_cleanup,
                     cleanup_requested_sentries,
+                    concealment_field::cleanup_concealment_fields,
                     ApplyDeferred,
                     dash::advance_dash,
                     sentry::tick_sentries,
@@ -101,6 +105,13 @@ impl Plugin for ServerAbilityPlugin {
                     .chain()
                     .in_set(AbilitySet::ObserveOutcomes),
             );
+        app.add_systems(
+            FixedPostUpdate,
+            (concealment_field::cleanup_concealment_fields, ApplyDeferred)
+                .chain()
+                .after(crate::combat::CombatSet::Lifecycle)
+                .before(crate::concealment::ConcealmentSet::ResolveSources),
+        );
     }
 }
 

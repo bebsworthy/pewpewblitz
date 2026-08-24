@@ -6,7 +6,7 @@ mod persistence;
 use crate::{
     builds::{
         BuildCatalog, BuildCatalogResource, FighterStatProfiles, ResolvedMatchLoadout,
-        SelectedBuild,
+        SelectedBuild, UltimateDefinitionId, UltimateKind, UltimateParameters,
     },
     combat::{
         CurrentHealth, DamageFalloff, DeliveryMethod, FighterDefinitions, FiringPattern,
@@ -32,7 +32,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 4;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 5;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -66,12 +66,23 @@ struct WeaponPresetTuning {
     recipe: WeaponRecipe,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct UltimateTuning {
+    id: u16,
+    key: String,
+    display_name: String,
+    kind: UltimateKind,
+    parameters: UltimateParameters,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct BalanceLabSnapshotV2 {
     schema_version: u16,
     fighter_profiles: FighterStatProfiles,
     weapons: Vec<WeaponPresetTuning>,
+    ultimates: Vec<UltimateTuning>,
 }
 
 impl BalanceLabSnapshotV2 {
@@ -87,6 +98,25 @@ impl BalanceLabSnapshotV2 {
                     key: preset.key.clone(),
                     display_name: preset.display_name.clone(),
                     recipe: preset.configuration.recipe.clone(),
+                })
+                .collect(),
+            ultimates: builds
+                .ultimates
+                .iter()
+                .filter(|ultimate| {
+                    matches!(
+                        ultimate.kind,
+                        UltimateKind::SelfCloak
+                            | UltimateKind::RevealScan
+                            | UltimateKind::ConcealmentField
+                    )
+                })
+                .map(|ultimate| UltimateTuning {
+                    id: ultimate.id.0,
+                    key: ultimate.key.clone(),
+                    display_name: ultimate.display_name.clone(),
+                    kind: ultimate.kind,
+                    parameters: ultimate.parameters,
                 })
                 .collect(),
         }
@@ -537,6 +567,7 @@ fn validate_snapshot(
 ) -> Result<(BuildCatalog, WeaponCatalog), String> {
     if candidate.schema_version != SNAPSHOT_SCHEMA_VERSION
         || candidate.weapons.len() != baseline.weapons.len()
+        || candidate.ultimates.len() != baseline.ultimates.len()
     {
         return Err("unsupported snapshot shape".into());
     }
@@ -565,6 +596,7 @@ fn validate_snapshot(
     next_weapons.validate()?;
     let mut next_builds = current_builds.clone();
     next_builds.fighter_profiles = candidate.fighter_profiles;
+    apply_ultimate_tuning(candidate, baseline, &mut next_builds)?;
     next_builds.validate()?;
     for profile_id in 1..=3 {
         for weapon_id in 1..=4 {
@@ -577,7 +609,7 @@ fn validate_snapshot(
                 name: "Balance candidate".into(),
                 fighter_profile_id: crate::profiles::FighterProfileId(profile_id),
                 weapon_base_id: crate::profiles::WeaponBaseId(weapon_id),
-                ultimate_id: crate::builds::UltimateDefinitionId(1),
+                ultimate_id: UltimateDefinitionId(1),
                 passive_ids: [
                     crate::builds::PassiveDefinitionId(3),
                     crate::builds::PassiveDefinitionId(4),
@@ -622,6 +654,49 @@ fn validate_snapshot(
         }
     }
     Ok((next_builds, next_weapons))
+}
+
+fn apply_ultimate_tuning(
+    candidate: &BalanceLabSnapshotV2,
+    baseline: &BalanceLabSnapshotV2,
+    next_builds: &mut BuildCatalog,
+) -> Result<(), String> {
+    for (expected, supplied) in baseline.ultimates.iter().zip(&candidate.ultimates) {
+        if supplied.id != expected.id
+            || supplied.key != expected.key
+            || supplied.display_name != expected.display_name
+            || supplied.kind != expected.kind
+            || !same_ultimate_parameter_shape(expected.parameters, supplied.parameters)
+        {
+            return Err("ultimate identity or parameter topology changed".into());
+        }
+        let ultimate = next_builds
+            .ultimates
+            .iter_mut()
+            .find(|ultimate| ultimate.id == UltimateDefinitionId(supplied.id))
+            .ok_or_else(|| "unknown ultimate definition".to_string())?;
+        ultimate.parameters = supplied.parameters;
+    }
+    Ok(())
+}
+
+fn same_ultimate_parameter_shape(
+    expected: UltimateParameters,
+    supplied: UltimateParameters,
+) -> bool {
+    matches!(
+        (expected, supplied),
+        (
+            UltimateParameters::SelfCloak { .. },
+            UltimateParameters::SelfCloak { .. }
+        ) | (
+            UltimateParameters::RevealScan { .. },
+            UltimateParameters::RevealScan { .. }
+        ) | (
+            UltimateParameters::ConcealmentField { .. },
+            UltimateParameters::ConcealmentField { .. }
+        )
+    )
 }
 
 fn same_recipe_shape(expected: &WeaponRecipe, supplied: &WeaponRecipe) -> bool {
@@ -810,7 +885,7 @@ mod tests {
             name: format!("Lab {identity}"),
             fighter_profile_id: crate::profiles::FighterProfileId(fighter_profile_id),
             weapon_base_id: crate::profiles::WeaponBaseId(weapon_base_id),
-            ultimate_id: crate::builds::UltimateDefinitionId(1),
+            ultimate_id: UltimateDefinitionId(1),
             passive_ids: [
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
@@ -895,6 +970,11 @@ mod tests {
         let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
         let mut numeric = baseline.clone();
         numeric.weapons[0].recipe.fire_cooldown_ticks += 1;
+        let UltimateParameters::SelfCloak { duration_ticks } = &mut numeric.ultimates[0].parameters
+        else {
+            panic!("first tunable ultimate is Self Cloak");
+        };
+        *duration_ticks += 1;
         let DeliveryMethod::Straight { range, .. } = &mut numeric.weapons[0].recipe.delivery else {
             panic!("Pulse Sidearm uses straight delivery");
         };
@@ -928,6 +1008,7 @@ mod tests {
         let json = serde_json::to_string(&snapshot).unwrap();
         assert!(json.contains(&format!("\"schemaVersion\":{SNAPSHOT_SCHEMA_VERSION}")));
         assert!(json.contains("\"fighterProfiles\""));
+        assert!(json.contains("\"ultimates\""));
         assert!(json.contains("\"reveal_proximity_radius\""));
         assert!(json.contains("\"displayName\""));
     }

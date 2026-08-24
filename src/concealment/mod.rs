@@ -2,6 +2,8 @@
 
 mod model;
 pub use model::*;
+mod field;
+pub use field::*;
 
 #[cfg(feature = "server")]
 mod network;
@@ -49,9 +51,15 @@ mod server {
         fn build(&self, app: &mut App) {
             app.init_resource::<ObserverVisibilityCache>()
                 .init_resource::<QueuedVisibilityTransitions>()
-                .init_resource::<ConcealmentTelemetry>();
+                .init_resource::<ConcealmentTelemetry>()
+                .init_resource::<NextConcealmentFieldId>();
             configure_concealment_schedule(app);
             app.add_systems(
+                FixedPostUpdate,
+                observe_attack_and_damage_reveal_locks
+                    .in_set(crate::abilities::AbilitySet::ObserveOutcomes),
+            )
+            .add_systems(
                 FixedPostUpdate,
                 (resolve_membership_and_reveal_locks, ApplyDeferred)
                     .chain()
@@ -74,11 +82,64 @@ mod server {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
+    fn observe_attack_and_damage_reveal_locks(
+        mut commands: Commands,
+        tick: Res<SimulationTick>,
+        outbox: Res<CombatOutbox>,
+        outcomes: Res<CombatOutcomeFacts>,
+        fighters: Query<
+            (
+                Entity,
+                &NetworkEntityId,
+                Option<&ConcealmentRevealDeadlines>,
+            ),
+            With<Fighter>,
+        >,
+    ) {
+        let attack_reveals: HashSet<_> = outbox
+            .0
+            .iter()
+            .filter_map(|cue| match cue {
+                CombatCue::AttackAccepted { source, .. } => Some(source.0),
+                _ => None,
+            })
+            .collect();
+        let damage_reveals: HashSet<_> = outcomes
+            .0
+            .iter()
+            .filter_map(|fact| match fact.kind {
+                CombatOutcomeKind::Damage { amount } if amount > 0 => {
+                    Some(fact.target_network_id.0)
+                }
+                _ => None,
+            })
+            .collect();
+        for (entity, network_id, prior) in &fighters {
+            let mut deadlines = prior.copied().unwrap_or_default();
+            if attack_reveals.contains(&network_id.0) {
+                deadlines.attack_until_tick = deadlines
+                    .attack_until_tick
+                    .max(tick.0.saturating_add(ATTACK_REVEAL_TICKS));
+            }
+            if damage_reveals.contains(&network_id.0) {
+                deadlines.damage_until_tick = deadlines
+                    .damage_until_tick
+                    .max(tick.0.saturating_add(DAMAGE_REVEAL_TICKS));
+            }
+            if deadlines != prior.copied().unwrap_or_default() {
+                commands.entity(entity).insert(deadlines);
+            }
+        }
+    }
+
     pub(super) fn configure_concealment_schedule(app: &mut App) {
         app.configure_sets(
             FixedPostUpdate,
             (
-                ConcealmentSet::ResolveSources.after(crate::abilities::AbilitySet::ObserveOutcomes),
+                ConcealmentSet::ResolveSources
+                    .after(crate::abilities::AbilitySet::ObserveOutcomes)
+                    .after(crate::combat::CombatSet::Lifecycle),
                 ConcealmentSet::DecideObservers
                     .after(ConcealmentSet::ResolveSources)
                     .before(crate::combat::CombatSet::TelemetryAndCues),
@@ -86,7 +147,11 @@ mod server {
         );
     }
 
-    #[allow(clippy::type_complexity, clippy::needless_pass_by_value)]
+    #[allow(
+        clippy::type_complexity,
+        clippy::needless_pass_by_value,
+        reason = "projection reconciliation owns the complete public participant shape"
+    )]
     fn sync_public_participant_projections(
         mut commands: Commands,
         fighters: Query<
@@ -169,60 +234,62 @@ mod server {
         }
     }
 
-    #[allow(clippy::type_complexity, clippy::needless_pass_by_value)]
+    #[allow(
+        clippy::type_complexity,
+        clippy::needless_pass_by_value,
+        clippy::too_many_lines,
+        reason = "one bounded source-resolution phase reconciles terrain, fields, and reveal state"
+    )]
     fn resolve_membership_and_reveal_locks(
         mut commands: Commands,
         tick: Res<SimulationTick>,
         map: Option<Res<ResolvedMap>>,
         catalog: Res<MapCatalogResource>,
-        outbox: Res<CombatOutbox>,
-        outcomes: Res<CombatOutcomeFacts>,
+        fields: Query<&ConcealmentFieldState>,
         fighters: Query<
             (
                 Entity,
                 &NetworkEntityId,
+                &TeamId,
                 &Position,
                 Option<&TerrainConcealmentMembership>,
+                Option<&AlliedConcealmentMemberships>,
                 Option<&ConcealmentRevealDeadlines>,
                 &crate::builds::AbilityState,
                 Option<&ForcedRevealSources>,
                 Has<Defeated>,
+                Has<ActiveCombatant>,
+                Has<ObjectiveCarrier>,
             ),
             With<Fighter>,
         >,
     ) {
-        let attack_reveals: HashSet<_> = outbox
-            .0
-            .iter()
-            .filter_map(|cue| match cue {
-                CombatCue::AttackAccepted { source, .. } => Some(source.0),
-                _ => None,
-            })
-            .collect();
-        let damage_reveals: HashSet<_> = outcomes
-            .0
-            .iter()
-            .filter_map(|fact| match fact.kind {
-                CombatOutcomeKind::Damage { amount } if amount > 0 => {
-                    Some(fact.target_network_id.0)
-                }
-                _ => None,
-            })
-            .collect();
-
         let active_sources: HashSet<_> = fighters.iter().map(|(_, id, ..)| id.0).collect();
+        let mut active_fields: Vec<_> = fields
+            .iter()
+            .filter_map(|state| {
+                (tick.0 < state.expires_at_tick)
+                    .then(|| state.radius().map(|radius| (*state, radius)))
+                    .flatten()
+            })
+            .collect();
+        active_fields.sort_by_key(|(state, ..)| state.id);
         for (
             entity,
-            network_id,
+            _network_id,
+            team,
             position,
             prior_membership,
+            prior_field_memberships,
             prior_deadlines,
             ability,
             forced,
             defeated,
+            active,
+            objective_carrier,
         ) in &fighters
         {
-            let membership = (!defeated)
+            let membership = (!defeated && active && !objective_carrier)
                 .then_some(map.as_ref())
                 .flatten()
                 .and_then(|map| concealment_membership(position.0, map, &catalog.0));
@@ -236,20 +303,32 @@ mod server {
                 }
             }
 
-            let mut deadlines = prior_deadlines.copied().unwrap_or_default();
-            if attack_reveals.contains(&network_id.0) {
-                deadlines.attack_until_tick = deadlines
-                    .attack_until_tick
-                    .max(tick.0.saturating_add(ATTACK_REVEAL_TICKS));
+            let field_memberships = if !defeated && active && !objective_carrier {
+                AlliedConcealmentMemberships::bounded(
+                    active_fields
+                        .iter()
+                        .filter_map(|(state, radius)| {
+                            (state.team == *team
+                                && field_contains(state.center_vec2(), *radius, position.0))
+                            .then_some(state.id)
+                        })
+                        .collect(),
+                )
+                .unwrap_or_default()
+            } else {
+                AlliedConcealmentMemberships::default()
+            };
+            if prior_field_memberships != Some(&field_memberships) {
+                if field_memberships.0.is_empty() {
+                    commands
+                        .entity(entity)
+                        .remove::<AlliedConcealmentMemberships>();
+                } else {
+                    commands.entity(entity).insert(field_memberships.clone());
+                }
             }
-            if damage_reveals.contains(&network_id.0) {
-                deadlines.damage_until_tick = deadlines
-                    .damage_until_tick
-                    .max(tick.0.saturating_add(DAMAGE_REVEAL_TICKS));
-            }
-            if deadlines != prior_deadlines.copied().unwrap_or_default() {
-                commands.entity(entity).insert(deadlines);
-            }
+
+            let deadlines = prior_deadlines.copied().unwrap_or_default();
             let mut forced = forced.cloned().unwrap_or_default();
             forced.0.retain(|source| {
                 tick.0 < source.expires_at_tick
@@ -267,13 +346,16 @@ mod server {
             let self_cloaked_until_tick = match ability.phase {
                 crate::builds::AbilityPhase::Cloaked {
                     expires_at_tick, ..
-                } if !defeated && tick.0 < expires_at_tick => expires_at_tick,
+                } if !defeated && active && !objective_carrier && tick.0 < expires_at_tick => {
+                    expires_at_tick
+                }
                 _ => 0,
             };
             commands.entity(entity).insert((
                 forced,
                 ConcealmentPresentationState {
                     inside_concealing_terrain: membership.is_some(),
+                    inside_allied_concealment_field: !field_memberships.0.is_empty(),
                     self_cloaked_until_tick,
                     revealed_until_tick: deadlines
                         .attack_until_tick
@@ -357,9 +439,11 @@ mod server {
                 Has<Defeated>,
                 Has<ActiveCombatant>,
                 Option<&TerrainConcealmentMembership>,
+                Option<&AlliedConcealmentMemberships>,
                 Option<&ConcealmentRevealDeadlines>,
                 &crate::builds::AbilityState,
                 Option<&ForcedRevealSources>,
+                Has<ObjectiveCarrier>,
             ),
             (With<Fighter>, With<Replicate>),
         >,
@@ -377,9 +461,11 @@ mod server {
                     defeated,
                     active,
                     membership,
+                    field_memberships,
                     deadlines,
                     ability,
                     forced,
+                    objective_carrier,
                 )| FighterView {
                     entity,
                     team: *team,
@@ -389,14 +475,16 @@ mod server {
                         .map_or(160.0, |value| value.fighter_stats.reveal_proximity_radius),
                     connection: controlled.map(|value| value.owner),
                     alive: !defeated && active,
-                    concealment: match (
-                        membership.is_some() && !defeated,
-                        matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if !defeated && tick.0 < expires_at_tick),
-                    ) {
-                        (false, false) => ConcealmentSources::None,
-                        (true, false) => ConcealmentSources::Terrain,
-                        (false, true) => ConcealmentSources::SelfCloak,
-                        (true, true) => ConcealmentSources::TerrainAndSelfCloak,
+                    concealment: if objective_carrier {
+                        ConcealmentSources::NONE
+                    } else {
+                        ConcealmentSources {
+                            terrain: membership.is_some() && !defeated,
+                            self_cloak: matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if !defeated && tick.0 < expires_at_tick),
+                            allied_field: field_memberships
+                                .is_some_and(|memberships| !memberships.0.is_empty())
+                                && !defeated,
+                        }
                     },
                     forced_reveals: forced.map_or_else(Vec::new, |sources| {
                         let mut deadlines = std::collections::BTreeMap::new();
@@ -449,7 +537,7 @@ mod server {
                         reveal.team == observer.team && tick.0 < reveal.expires_at_tick
                     }) {
                         VisibilityTransitionReason::RevealLock
-                    } else if subject.concealment == ConcealmentSources::None {
+                    } else if !subject.concealment.any() {
                         VisibilityTransitionReason::PublicOrOutsideTerrain
                     } else if subject.reveal_locked {
                         VisibilityTransitionReason::RevealLock

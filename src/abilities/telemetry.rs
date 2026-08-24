@@ -15,6 +15,8 @@ pub enum AbilityRejectionReason {
     PlacementBlocked,
     ZeroLengthDash,
     IdentifierExhausted,
+    ActiveFieldCeiling,
+    ObjectiveCarrier,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,6 +37,19 @@ pub enum SentryCleanupReason {
     MatchCompleted,
     MatchRestarted,
     BuildReplaced,
+}
+
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub enum ConcealmentFieldCleanupReason {
+    Expired,
+    OwnerDefeated,
+    OwnerDisconnected,
+    BuildReplaced,
+    MatchCompleted,
+    MatchRestarted,
+    Teardown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +116,11 @@ pub enum AbilityTelemetryKind {
     RevealScanAccepted {
         targets: u16,
     },
+    ConcealmentFieldAccepted,
+    ConcealmentFieldCleanup {
+        reason: ConcealmentFieldCleanupReason,
+        active_ticks: u64,
+    },
     AbilityDamage(u16),
     AbilityTarget,
     AbilityDefeat,
@@ -132,6 +152,11 @@ pub struct AbilityTelemetry {
     pub self_cloak_end_reasons: BTreeMap<crate::combat::SelfCloakEndReason, u64>,
     pub reveal_scan_uses: u64,
     pub reveal_scan_targets: u64,
+    pub concealment_field_uses: u64,
+    pub concealment_field_active_ticks: u64,
+    pub concealment_field_cleanup_reasons: BTreeMap<ConcealmentFieldCleanupReason, u64>,
+    pub concurrent_concealment_fields: u64,
+    pub concurrent_concealment_field_high_water: u64,
     pub sentry_shots: u64,
     pub wasted_charge: u64,
     pub ready_to_use_delay_ticks: u64,
@@ -286,6 +311,35 @@ impl AbilityTelemetry {
                     .or_default() += 1;
                 self.record_ready_to_use_delay(record.owner_network_id, record.tick);
             }
+            AbilityTelemetryKind::ConcealmentFieldAccepted => {
+                self.accepts = self.accepts.saturating_add(1);
+                self.concealment_field_uses = self.concealment_field_uses.saturating_add(1);
+                *self
+                    .uses_by_owner
+                    .entry(record.owner_network_id)
+                    .or_default() += 1;
+                self.record_ready_to_use_delay(record.owner_network_id, record.tick);
+                self.concurrent_concealment_fields =
+                    self.concurrent_concealment_fields.saturating_add(1);
+                self.concurrent_concealment_field_high_water = self
+                    .concurrent_concealment_field_high_water
+                    .max(self.concurrent_concealment_fields);
+            }
+            AbilityTelemetryKind::ConcealmentFieldCleanup {
+                reason,
+                active_ticks,
+            } => {
+                self.concealment_field_active_ticks = self
+                    .concealment_field_active_ticks
+                    .saturating_add(active_ticks);
+                let count = self
+                    .concealment_field_cleanup_reasons
+                    .entry(reason)
+                    .or_default();
+                *count = count.saturating_add(1);
+                self.concurrent_concealment_fields =
+                    self.concurrent_concealment_fields.saturating_sub(1);
+            }
             AbilityTelemetryKind::SentrySpawned(deployable_id) => {
                 self.sentries.insert(
                     deployable_id,
@@ -411,6 +465,14 @@ impl AbilityTelemetry {
             reveal_scan_targets: self
                 .reveal_scan_targets
                 .saturating_sub(start.reveal_scan_targets),
+            concealment_field_uses: self
+                .concealment_field_uses
+                .saturating_sub(start.concealment_field_uses),
+            concealment_field_active_ticks: self
+                .concealment_field_active_ticks
+                .saturating_sub(start.concealment_field_active_ticks),
+            concurrent_concealment_fields: self.concurrent_concealment_fields,
+            concurrent_concealment_field_high_water: self.concurrent_concealment_field_high_water,
             sentry_shots: self.sentry_shots.saturating_sub(start.sentry_shots),
             wasted_charge: self.wasted_charge.saturating_sub(start.wasted_charge),
             ready_to_use_delay_ticks: self
@@ -430,6 +492,10 @@ impl AbilityTelemetry {
             .collect();
         delta.rejections_by_reason =
             count_map_delta(&self.rejections_by_reason, &start.rejections_by_reason);
+        delta.concealment_field_cleanup_reasons = count_map_delta(
+            &self.concealment_field_cleanup_reasons,
+            &start.concealment_field_cleanup_reasons,
+        );
         delta.dash_requested_distance_milli_by_owner = count_map_delta(
             &self.dash_requested_distance_milli_by_owner,
             &start.dash_requested_distance_milli_by_owner,
