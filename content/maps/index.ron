@@ -1,5 +1,5 @@
 (
-    schema_version: 5,
+    schema_version: 6,
     maps: [
         (
             id: MapPresetId(1),
@@ -33,21 +33,21 @@
             id: MapPresetId(7),
             key: "feature-yard-wipeout",
             display_name: "Feature Yard (Wipeout)",
-            admission_revision: 1,
+            admission_revision: 2,
             document: "builtin/feature-yard-wipeout.ron",
         ),
         (
             id: MapPresetId(8),
             key: "feature-yard-hot-zone",
             display_name: "Feature Yard (Hot Zone)",
-            admission_revision: 1,
+            admission_revision: 2,
             document: "builtin/feature-yard-hot-zone.ron",
         ),
         (
             id: MapPresetId(9),
             key: "feature-yard-heist",
             display_name: "Feature Yard (Heist)",
-            admission_revision: 1,
+            admission_revision: 2,
             document: "builtin/feature-yard-heist.ron",
         ),
     ],

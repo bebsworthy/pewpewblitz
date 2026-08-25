@@ -38,6 +38,14 @@ fn client_barrel_health(harness: &mut Harness, index: usize, placement_id: u32) 
         .map(|(_, health)| health.0)
 }
 
+fn client_pickup_count(harness: &mut Harness, index: usize) -> usize {
+    let world = harness.clients[index].world_mut();
+    world
+        .query_filtered::<Entity, With<RestorationPickup>>()
+        .iter(world)
+        .count()
+}
+
 #[test]
 fn two_clients_receive_identical_map_snapshot_without_authoritative_colliders() {
     let mut harness = Harness::new(2);
@@ -370,4 +378,243 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
         transition.outcome,
         brawler::map::MapPlacementOutcome::ReplacedWith(brawler::map::BARREL_WOOD_DEBRIS_ASSET,)
     );
+}
+
+#[test]
+fn chest_drop_and_collection_converge_for_two_clients() {
+    let mut harness = Harness::new_feature_yard_match(2);
+    harness.step_until(|harness| {
+        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+    });
+    let waiting = server_match_state(&mut harness);
+    for index in 0..2 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: 1,
+                match_id: waiting.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        matches!(server_match_state(harness).phase, MatchPhase::Active { .. })
+            && (0..2).all(|index| client_barrel_health(harness, index, 260) == Some(80))
+    });
+    let (target, source) = {
+        let world = harness.server.world_mut();
+        let target = *world
+            .query::<&DamageableTargetIdentity>()
+            .iter(world)
+            .find(|identity| identity.placement_id() == MapPlacementId(260))
+            .unwrap();
+        let (player, network_id, team, position) = world
+            .query_filtered::<(&PlayerId, &NetworkEntityId, &TeamId, &Position), With<Fighter>>()
+            .iter(world)
+            .next()
+            .unwrap();
+        (
+            target,
+            AttackSource {
+                kind: CombatSourceKind::PrimaryWeapon,
+                attack_id: AttackId(811),
+                player_id: *player,
+                owner_network_entity_id: *network_id,
+                team_id: *team,
+                recipe_fingerprint: WeaponRecipeFingerprint::default(),
+                presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+                legacy_compatibility: false,
+                source_preset_id: None,
+                origin: WorldPoint::from(position.0),
+                facing: 0.0,
+            },
+        )
+    };
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<PendingWorldTargetDamages>()
+        .0
+        .push(PendingWorldTargetDamage {
+            target,
+            source,
+            attack_id: source.attack_id,
+            requested_damage: 80,
+            delivery_index: 0,
+            bundle_index: 0,
+            effect_index: 0,
+        });
+    harness.step_until(|harness| {
+        (0..2).all(|index| {
+            client_barrel_health(harness, index, 260).is_none()
+                && client_pickup_count(harness, index) == 1
+        })
+    });
+    let (collector, collector_position, pickup_entity) = {
+        let world = harness.server.world_mut();
+        let pickup_entity = world
+            .query_filtered::<Entity, With<RestorationPickup>>()
+            .single(world)
+            .unwrap();
+        let (collector, _, collector_position) = world
+            .query_filtered::<
+                (Entity, &NetworkEntityId, &Position),
+                (With<Fighter>, With<ActiveCombatant>),
+            >()
+            .iter(world)
+            .min_by_key(|(_, id, _)| id.0)
+            .unwrap();
+        (collector, collector_position.0, pickup_entity)
+    };
+    harness
+        .server
+        .world_mut()
+        .entity_mut(pickup_entity)
+        .insert(Position::from_xy(
+            collector_position.x,
+            collector_position.y,
+        ));
+    harness
+        .server
+        .world_mut()
+        .entity_mut(collector)
+        .insert(CurrentHealth(50));
+    for _ in 0..30 {
+        harness.step();
+    }
+    let server_pickups = {
+        let world = harness.server.world_mut();
+        world
+            .query_filtered::<Entity, With<RestorationPickup>>()
+            .iter(world)
+            .count()
+    };
+    assert_eq!(
+        server_pickups, 0,
+        "the authoritative pickup was not collected"
+    );
+    assert!((0..2).all(|index| client_pickup_count(&mut harness, index) == 0));
+    assert!(
+        harness
+            .server
+            .world()
+            .get::<CurrentHealth>(collector)
+            .is_some_and(|health| health.0 > 50 && health.0 <= 100)
+    );
+    let world = harness.server.world_mut();
+    assert_eq!(
+        world
+            .query::<&RestorationPickupIdentity>()
+            .iter(world)
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn point_blank_shots_damage_the_first_chest_or_barrel_without_passing_through() {
+    let mut harness = Harness::new_feature_yard_match(2);
+    harness.step_until(|harness| {
+        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+    });
+    let waiting = server_match_state(&mut harness);
+    for index in 0..2 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: 1,
+                match_id: waiting.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        matches!(server_match_state(harness).phase, MatchPhase::Active { .. })
+            && client_barrel_health(harness, 0, 240) == Some(60)
+            && client_barrel_health(harness, 0, 260) == Some(80)
+    });
+
+    let source_player = harness.controlled_player_id(0);
+    let (chest_position, barrel_entity) = {
+        let world = harness.server.world_mut();
+        let mut objects = world.query::<(Entity, &DamageableTargetIdentity, &Position)>();
+        let chest_position = objects
+            .iter(world)
+            .find(|(_, identity, _)| identity.placement_id() == MapPlacementId(260))
+            .map(|(_, _, position)| position.0)
+            .expect("Feature Yard chest");
+        let barrel_entity = objects
+            .iter(world)
+            .find(|(_, identity, _)| identity.placement_id() == MapPlacementId(240))
+            .map(|(entity, _, _)| entity)
+            .expect("Feature Yard barrel");
+        (chest_position, barrel_entity)
+    };
+    let barrel_position = chest_position + Vec2::new(64.0, 0.0);
+    harness
+        .server
+        .world_mut()
+        .entity_mut(barrel_entity)
+        .insert(Position::from_xy(barrel_position.x, barrel_position.y));
+    {
+        let world = harness.server.world_mut();
+        let mut fighters =
+            world.query_filtered::<(&PlayerId, &mut Position, &mut Rotation), With<Fighter>>();
+        for (player, mut position, mut rotation) in fighters.iter_mut(world) {
+            if *player == source_player {
+                position.0 = chest_position - Vec2::new(32.0, 0.0);
+                *rotation = Rotation::IDENTITY;
+            } else {
+                position.0 = Vec2::new(-700.0, -400.0);
+            }
+        }
+    }
+    for _ in 0..3 {
+        harness.step();
+    }
+
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        client_barrel_health(harness, 0, 260).is_some_and(|health| health < 80)
+    });
+    harness.set_controlled_input(0, FighterInput::default());
+    let chest_health_after_point_blank_hit =
+        client_barrel_health(&mut harness, 0, 260).expect("damaged chest remains live");
+    assert_eq!(client_barrel_health(&mut harness, 0, 240), Some(60));
+    assert_eq!(harness.server_projectile_count(), 0);
+
+    for _ in 0..30 {
+        harness.step();
+    }
+    {
+        let world = harness.server.world_mut();
+        let mut fighters =
+            world.query_filtered::<(&PlayerId, &mut Position, &mut Rotation), With<Fighter>>();
+        for (player, mut position, mut rotation) in fighters.iter_mut(world) {
+            if *player == source_player {
+                position.0 = barrel_position + Vec2::new(32.0, 0.0);
+                *rotation = Rotation::radians(std::f32::consts::PI);
+            }
+        }
+    }
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(-Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        client_barrel_health(harness, 0, 240).is_some_and(|health| health < 60)
+    });
+    harness.set_controlled_input(0, FighterInput::default());
+
+    assert_eq!(
+        client_barrel_health(&mut harness, 0, 260),
+        Some(chest_health_after_point_blank_hit)
+    );
+    assert_eq!(harness.server_projectile_count(), 0);
 }

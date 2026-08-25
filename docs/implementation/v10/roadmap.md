@@ -14,14 +14,14 @@ V10 stages the work as complete player-visible slices: environment damage first,
 one consolidated product-visible Feature Yard map family, and finally the pickup-bearing chest and
 cross-feature closeout. V9 is complete; its concealment and
 server-authoritative brawler-catalog contracts are preserved as dependencies rather than changed by
-this prepared roadmap.
+V10.
 
 ## Version status
 
 | Field | Value |
 |---|---|
-| Status | Not started |
-| Current milestone | M03 — Treasure chest, restoration pickup, and V10 closeout (`Not started`) |
+| Status | Complete |
+| Current milestone | Complete — M03 and V10 accepted on 2026-08-25 |
 | Entry gate | Satisfied: V9 completed and was accepted on 2026-08-24, including final playtest, feedback triage, verification, documentation reconciliation, and learning review |
 | Completion gate | Oil barrels, mirrored Heist, treasure chests, and restoration pickups use one server-owned damageable-target contract; map/mode/object identity, collision, damage, terminal behavior, pickup, HUD/results, routed admission, recovery, boundedness, balance, native feedback, and learning gates all pass |
 
@@ -45,6 +45,11 @@ V10 M02b completed and was accepted on 2026-08-25 after the consolidated Feature
 exact Wipeout/Hot Zone/Heist 1v1/2v2/3v3 catalog, migrated regression coverage, obsolete-map
 retirement, canonical and routed verification, imported/primitive native evidence, documentation
 reconciliation, learning review, and user playtest all passed.
+
+V10 M03 and V10 completed and were accepted on 2026-08-25 after treasure-chest and restoration-
+pickup authority, recovery, Balance Lab, routed/capacity/native evidence, presentation feedback,
+point-blank damage correction, affected verification, durable-document reconciliation, and the
+learn-from-errors review all passed.
 
 ## Accepted product decisions
 
@@ -93,7 +98,7 @@ reconciliation, learning review, and user playtest all passed.
 | 01 | Complete | One accepted map contains damageable oil barrels: ordinary attacks damage them, zero health commits one readable bounded explosion and nonblocking terminal state, and every client/recovery path converges | Closed with accepted native presentation, affected verification, documentation reconciliation, and learning review on 2026-08-25 |
 | 02 | Complete | One dedicated Heist mode and map, advertised as exact routed 1v1/2v2/3v3 game types, provide a complete simultaneous attack/defense loop with two distinct team objectives, objective damage, HUD/audio/results, restart, and recovery | Closed with accepted core loop, scrolling, collider-aligned idol presentation, affected verification, feedback triage, and learning review on 2026-08-25 |
 | 02b | Complete | One product-visible Feature Yard family consolidates permanent cover, water, concealment, destructible barriers, oil barrels, spawns, and mode objectives through Wipeout/Hot Zone/Heist variants for exact 1v1/2v2/3v3 | Closed with accepted shared-map coherence, canonical/routed verification, imported/primitive native evidence, documentation reconciliation, and learning review on 2026-08-25 |
-| 03 | Not started | Treasure chests open exactly once and drop one contested restoration pickup in Feature Yard; V10 then closes with full cross-feature lifecycle, capacity, routed, native, feedback, documentation, and learning evidence | Create after M02b evidence and acceptance |
+| 03 | Complete | Treasure chests open exactly once and drop one contested restoration pickup in Feature Yard; V10 then closes with full cross-feature lifecycle, capacity, routed, native, feedback, documentation, and learning evidence | [milestone-03.md](./milestone-03.md); closed with accepted presentation and point-blank collision feedback, affected verification, documentation reconciliation, and learning review on 2026-08-25 |
 
 ## Ordering rationale
 
@@ -306,8 +311,9 @@ Feature Yard is an integration and playtest arena, not a promise of enjoyable pa
 balance. Proper fun/balanced maps remain later product content and should be named and evaluated as
 such rather than growing the test yard into a release-map claim.
 
-The implementing milestone chooses exact map identities after inspecting V9's accepted final
-content and records all new catalog/content fingerprints through the global compatibility contract.
+The implementing milestones chose exact map identities after inspecting V9's accepted final
+content and recorded all new catalog/content fingerprints through the global compatibility
+contract.
 
 ## Verification strategy
 

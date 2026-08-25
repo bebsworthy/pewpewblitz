@@ -100,6 +100,7 @@ pub(crate) struct Material3dAssets {
     pub(crate) dash: Handle<StandardMaterial>,
     pub(crate) barrel: Handle<StandardMaterial>,
     pub(crate) barrel_damaged: Handle<StandardMaterial>,
+    pub(crate) pickup_glow: Handle<StandardMaterial>,
 }
 
 #[derive(Component)]
@@ -242,6 +243,7 @@ impl Plugin for WorldPresentationPlugin {
                     environment_assets::prepare_environment_scenes,
                     reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
                     reconcile_dynamic_map_visuals,
+                    reconcile_restoration_pickup_visuals,
                     reconcile_heist_safe_visuals,
                     update_heist_safe_status_visuals,
                     update_damageable_map_visuals,
@@ -250,6 +252,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::update_fighter_concealment_visuals,
                     combat::consume_combat_cues,
                     combat::consume_world_object_cues,
+                    combat::consume_pickup_cues,
                     combat::consume_heist_objective_cues,
                     combat::update_combat_visual_state,
                     update_character_animation,
@@ -287,6 +290,11 @@ struct DynamicMapVisual {
     placement_id: crate::map::MapPlacementId,
     generation: u64,
     asset_id: crate::map::MapAssetId,
+}
+
+#[derive(Component)]
+struct RestorationPickupVisual {
+    owner: Entity,
 }
 
 #[derive(Component)]
@@ -677,9 +685,101 @@ fn reconcile_dynamic_map_visuals(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    reason = "pickup presentation reconciles durable replicated owners with imported and primitive assets"
+)]
+fn reconcile_restoration_pickup_visuals(
+    mut commands: Commands,
+    time: Res<Time>,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
+    imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
+    catalog: Res<crate::map::MapCatalogResource>,
+    pickups: Query<
+        (
+            Entity,
+            &Position,
+            &crate::map::RestorationPickupDefinitionId,
+        ),
+        With<crate::map::RestorationPickup>,
+    >,
+    mut visuals: Query<(Entity, &RestorationPickupVisual, &mut Transform)>,
+) {
+    let owners: std::collections::BTreeSet<_> = pickups.iter().map(|(entity, ..)| entity).collect();
+    let mut present = std::collections::BTreeSet::new();
+    for (visual_entity, visual, mut transform) in &mut visuals {
+        let Ok((_, position, _)) = pickups.get(visual.owner) else {
+            commands.entity(visual_entity).despawn();
+            continue;
+        };
+        present.insert(visual.owner);
+        let bob = (time.elapsed_secs() * 2.8).sin() * 3.0;
+        transform.translation = ground_position(position.0) + Vec3::Y * (16.0 + bob);
+        transform.rotation = Quat::from_rotation_y(time.elapsed_secs() * 0.8);
+    }
+    for (owner, position, definition_id) in &pickups {
+        if !owners.contains(&owner) || present.contains(&owner) {
+            continue;
+        }
+        let Some(definition) = catalog.0.restoration_pickup(*definition_id) else {
+            continue;
+        };
+        let profile = visual_catalog
+            .as_deref()
+            .and_then(|visuals| visuals.profile(definition.visual_profile_id));
+        let scene = imported
+            .as_deref()
+            .and_then(|scenes| scenes.scene(definition.visual_profile_id));
+        let root = commands
+            .spawn((
+                RestorationPickupVisual { owner },
+                Transform::from_translation(ground_position(position.0) + Vec3::Y * 16.0),
+                Visibility::default(),
+                Name::new("restoration pickup visual"),
+            ))
+            .id();
+        commands.entity(root).with_children(|parent| {
+            parent.spawn((
+                Mesh3d(primitives.area_disc.clone()),
+                MeshMaterial3d(materials.pickup_glow.clone()),
+                Transform::from_xyz(0.0, -15.0, 0.0).with_scale(Vec3::splat(36.0)),
+                Name::new("restoration pickup ground glow"),
+            ));
+            if let (Some(profile), Some(scene)) = (profile, scene) {
+                parent.spawn((
+                    environment_assets::EnvironmentMaterialTint([
+                        profile.tint.0,
+                        profile.tint.1,
+                        profile.tint.2,
+                    ]),
+                    WorldAssetRoot(scene.clone()),
+                    Transform {
+                        translation: Vec3::Y * profile.vertical_offset,
+                        rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
+                        scale: Vec3::splat(profile.scale),
+                    },
+                    Name::new("imported restoration potion"),
+                ));
+            } else {
+                parent.spawn((
+                    Mesh3d(primitives.effect_sphere.clone()),
+                    MeshMaterial3d(materials.pickup_glow.clone()),
+                    Transform::from_scale(Vec3::new(16.0, 28.0, 16.0)),
+                    Name::new("primitive restoration pickup"),
+                ));
+            }
+        });
+    }
+}
+
 fn dynamic_visual_lift(asset_id: crate::map::MapAssetId) -> f32 {
     if asset_id == crate::map::OIL_BARREL_ASSET {
         14.0
+    } else if asset_id == crate::map::TREASURE_CHEST_ASSET {
+        10.0
     } else if asset_id == crate::map::RUBBLE_ASSET
         || asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET
     {
@@ -696,8 +796,11 @@ fn dynamic_visual_scale(
 ) -> Vec3 {
     if asset_id == crate::map::OIL_BARREL_ASSET
         || (asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET && imported_visual)
+        || (asset_id == crate::map::TREASURE_CHEST_ASSET && imported_visual)
     {
         Vec3::ONE
+    } else if asset_id == crate::map::TREASURE_CHEST_ASSET {
+        Vec3::splat(0.75)
     } else {
         Vec3::new(
             f32::from(footprint.width) * 0.5,
@@ -1090,6 +1193,13 @@ fn setup_3d_foundation(
         }),
         barrel: materials.add(matte(Color::srgb(0.92, 0.38, 0.06))),
         barrel_damaged: materials.add(matte(Color::srgb(0.34, 0.12, 0.04))),
+        pickup_glow: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.18, 1.0, 0.42, 0.58),
+            emissive: LinearRgba::new(0.12, 2.4, 0.42, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
     };
     commands.insert_resource(primitives);
     commands.insert_resource(material_assets);
@@ -1982,6 +2092,23 @@ mod tests {
         assert_eq!(
             dynamic_visual_scale(crate::map::BARREL_WOOD_DEBRIS_ASSET, footprint, false),
             Vec3::new(0.5, 0.25, 0.5)
+        );
+    }
+
+    #[test]
+    fn primitive_chest_uses_the_feedback_enlarged_scale() {
+        let footprint = crate::map::MapFootprint {
+            width: 1,
+            height: 1,
+        };
+
+        assert_eq!(
+            dynamic_visual_scale(crate::map::TREASURE_CHEST_ASSET, footprint, false),
+            Vec3::splat(0.75)
+        );
+        assert_eq!(
+            dynamic_visual_scale(crate::map::TREASURE_CHEST_ASSET, footprint, true),
+            Vec3::ONE
         );
     }
 

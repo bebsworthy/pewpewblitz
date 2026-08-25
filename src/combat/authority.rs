@@ -334,7 +334,7 @@ pub(super) fn map_muzzle_contact(
     muzzle: Vec2,
     radius: f32,
     spatial_query: &avian2d::prelude::SpatialQuery,
-) -> Option<(Vec2, Vec2)> {
+) -> Option<(Entity, Vec2, Vec2)> {
     let delta = muzzle - origin;
     let distance = delta.length();
     let direction = Dir2::new(delta.normalize_or_zero()).ok()?;
@@ -350,7 +350,7 @@ pub(super) fn map_muzzle_contact(
             &filter,
             &|_| true,
         )
-        .map(|hit| (hit.point2, hit.normal1))
+        .map(|hit| (hit.entity, hit.point2, hit.normal1))
 }
 
 #[cfg(feature = "server")]

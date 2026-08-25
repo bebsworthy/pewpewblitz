@@ -116,14 +116,9 @@ impl MapThemeProfile {
     }
 }
 
-fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), String> {
-    let source: MapVisualSource = ron::from_str(MAP_VISUAL_CATALOG)
-        .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
-    let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
-        .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
-    if source.schema_version != 3 || themes.schema_version != 3 {
-        return Err("unsupported client map catalog schema".to_string());
-    }
+fn expected_visual_profiles(
+    catalog: &crate::map::MapContentCatalog,
+) -> BTreeSet<crate::map::MapVisualProfileId> {
     let mut expected: BTreeSet<_> = catalog
         .assets
         .iter()
@@ -142,6 +137,24 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
                 crate::map::MapModeAnchorKind::HotZoneCircle { .. } => None,
             })
     }));
+    expected.extend(
+        catalog
+            .restoration_pickups
+            .iter()
+            .map(|definition| definition.visual_profile_id),
+    );
+    expected
+}
+
+fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), String> {
+    let source: MapVisualSource = ron::from_str(MAP_VISUAL_CATALOG)
+        .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
+    let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
+        .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
+    if source.schema_version != 3 || themes.schema_version != 3 {
+        return Err("unsupported client map catalog schema".to_string());
+    }
+    let expected = expected_visual_profiles(catalog);
     let mut actual = BTreeSet::new();
     for profile in source.visuals {
         let kind_matches_fallback = matches!(
@@ -451,7 +464,7 @@ mod grid_catalog_tests {
     fn client_grid_catalog_exactly_covers_shared_visuals_and_themes() {
         let shared = crate::map::MapContentCatalog::embedded().unwrap();
         let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
-        assert_eq!(visuals.profiles.len(), shared.assets.len() + 1);
+        assert_eq!(visuals.profiles.len(), shared.assets.len() + 2);
         assert!(
             visuals
                 .theme(crate::map::MapPresentationThemeId(3))
@@ -525,6 +538,28 @@ mod grid_catalog_tests {
                 < f32::EPSILON,
             "the imported idol must remain inside the 96-by-64 authoritative footprint"
         );
+    }
+
+    #[test]
+    fn chest_feedback_visuals_use_enlarged_live_profiles_and_no_terminal_model() {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
+        let chest_scale = visuals
+            .profile(crate::map::MapVisualProfileId(40))
+            .unwrap()
+            .scale;
+        let potion_scale = visuals
+            .profile(crate::map::MapVisualProfileId(42))
+            .unwrap()
+            .scale;
+
+        assert!((chest_scale - 64.0).abs() < f32::EPSILON);
+        assert!(
+            visuals
+                .profile(crate::map::MapVisualProfileId(41))
+                .is_none()
+        );
+        assert!((potion_scale - 72.0).abs() < f32::EPSILON);
     }
 }
 

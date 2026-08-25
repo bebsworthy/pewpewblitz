@@ -45,7 +45,7 @@ delivery status and evidence.
   self-cloak, allied-area, proximity, attack/damage reveal, reveal-scan, privacy, and verification
   contract.
 - [Damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md) —
-  proposed V10 contract for health-bearing targets, oil barrels, mirrored team safes, treasure
+  completed V10 contract for health-bearing targets, oil barrels, mirrored team idols, treasure
   chests, restoration pickups, authority, recovery, and verification.
 - [Bots](./10-bots.md) — server-hosted practice-controller decision, bounded policy contract,
   integration seams, first playable slice, and deferred hosting alternatives.
@@ -97,7 +97,7 @@ and closeout learning.
 | V7 | Persistent server-owned player profiles, saved brawlers, weapon bases, and four-slot weapon-part equipment | [V7 roadmap](./implementation/v7/roadmap.md) |
 | V8 | Sparse-grid maps, unified map-asset/gameplay/visual catalogs, full built-in conversion, and retirement of the old production map system | [V8 roadmap](./implementation/v8/roadmap.md) |
 | V9 | Authoritative observer-specific concealment, terrain/proximity proof, cloak/reveal/field ultimates, server-advertised brawler metadata, and the full-screen saved-brawler flow | [V9 roadmap](./implementation/v9/roadmap.md) |
-| V10 (M02 implementing; M01 complete) | Damageable world objects, oil barrels, mirrored Heist with one dedicated map, treasure chests, and restoration pickups | [V10 roadmap](./implementation/v10/roadmap.md) |
+| V10 | Damageable world objects, oil barrels, mirrored Heist, the consolidated Feature Yard family, treasure chests, restoration pickups, and cross-feature closeout | [V10 roadmap](./implementation/v10/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

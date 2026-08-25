@@ -26,12 +26,15 @@ Accepted tuning is stored in `target/balance-lab/session-v2.json`. The page reco
 Practice workers at the same loopback URL, and each worker validates the persisted snapshot before
 installing it. Deleting build artifacts or using **Restore defaults** removes the override.
 
-The current snapshot schema is version 5. It exposes the three permanent fighter profiles, four
-canonical weapon-base recipes, and the bounded parameters of all five supported ultimates,
-including Self Cloak, Reveal Scan, and Concealment Field. The retired Custom Pulse axes, named build
-presets, point budget, and frame passives are not Balance Lab surfaces. Apply validation re-resolves
-the complete 3×4 fighter-profile/weapon-base matrix and validates the advertised brawler catalog
-before it can reset Practice.
+The current snapshot schema is version 8 and the persistence envelope is version 4. It exposes the
+three permanent fighter profiles, four canonical weapon-base recipes, the bounded parameters of
+all five supported ultimates, oil-barrel health/explosion tuning, Heist safe health, and treasure-
+chest/restoration-pickup health, restoration, radius, and lifetime. Structural IDs, terminal
+topology, replacement assets, and pickup visual identity remain locked. Persistence envelope 3 is
+migrated by filling canonical chest defaults before validation. The retired Custom Pulse axes,
+named build presets, point budget, and frame passives are not Balance Lab surfaces. Apply validation
+re-resolves the complete 3×4 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
+and advertised brawler catalog, and then starts a clean Practice epoch.
 
 ## Validation principle
 

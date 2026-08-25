@@ -1,5 +1,5 @@
 (
-    recipe_id: MapRecipeId(9), revision: 1, recipe_version: 4,
+    recipe_id: MapRecipeId(9), revision: 2, recipe_version: 4,
     mode_definition_id: ModeDefinitionId(4), presentation_theme_id: MapPresentationThemeId(1),
     dimensions: (width: 64, height: 40), default_surface_asset_id: MapAssetId(1),
     placements: [
@@ -15,6 +15,8 @@
         (placement_id: MapPlacementId(241), cell: (x: 30, y: 13), asset_id: MapAssetId(24), quarter_turns: 0, parameters: None),
         (placement_id: MapPlacementId(242), cell: (x: 33, y: 26), asset_id: MapAssetId(24), quarter_turns: 0, parameters: None),
         (placement_id: MapPlacementId(243), cell: (x: 34, y: 26), asset_id: MapAssetId(24), quarter_turns: 0, parameters: None),
+        (placement_id: MapPlacementId(260), cell: (x: 31, y: 15), asset_id: MapAssetId(26), quarter_turns: 0, parameters: None),
+        (placement_id: MapPlacementId(261), cell: (x: 32, y: 24), asset_id: MapAssetId(26), quarter_turns: 2, parameters: None),
         (placement_id: MapPlacementId(1000), cell: (x: 13, y: 17), asset_id: MapAssetId(6), quarter_turns: 0, parameters: None),
         (placement_id: MapPlacementId(1001), cell: (x: 14, y: 17), asset_id: MapAssetId(6), quarter_turns: 0, parameters: None),
         (placement_id: MapPlacementId(1002), cell: (x: 14, y: 18), asset_id: MapAssetId(6), quarter_turns: 0, parameters: None),

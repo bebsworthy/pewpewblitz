@@ -132,12 +132,46 @@ fn resolved_lob_landing(
 }
 
 #[cfg(feature = "server")]
+#[derive(Clone, Copy)]
+struct BlockedStraightDelivery {
+    delivery_index: u8,
+    target: Option<crate::map::DamageableTargetIdentity>,
+    point: Vec2,
+    normal: Vec2,
+}
+
+#[cfg(feature = "server")]
+type DamageableMuzzleTargetQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static crate::map::DamageableTargetIdentity,
+        &'static CurrentHealth,
+        &'static crate::map::DamageableLifeState,
+    ),
+    Or<(
+        With<crate::map::DamageableWorldObject>,
+        With<crate::matchplay::HeistSafe>,
+    )>,
+>;
+
+#[cfg(feature = "server")]
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct MuzzleContactState<'w, 's> {
+    spatial_query: avian2d::prelude::SpatialQuery<'w, 's>,
+    objects: DamageableMuzzleTargetQuery<'w, 's>,
+    world_pending: ResMut<'w, crate::map::PendingWorldTargetDamages>,
+    objective_pending: ResMut<'w, crate::matchplay::PendingModeObjectiveDamages>,
+}
+
+#[cfg(feature = "server")]
 fn blocked_straight_deliveries(
     origin: Vec2,
     facing: f32,
     recipe: &WeaponRecipe,
     spatial_query: &avian2d::prelude::SpatialQuery,
-) -> Vec<(u8, Vec2, Vec2)> {
+    objects: &DamageableMuzzleTargetQuery<'_, '_>,
+) -> Vec<BlockedStraightDelivery> {
     let DeliveryMethod::Straight {
         radius,
         muzzle_offset,
@@ -151,10 +185,67 @@ fn blocked_straight_deliveries(
         .enumerate()
         .filter_map(|(index, angle)| {
             let muzzle = muzzle_position(origin, angle, muzzle_offset);
-            map_muzzle_contact(origin, muzzle, radius, spatial_query)
-                .map(|(point, normal)| (u8::try_from(index).unwrap_or(u8::MAX), point, normal))
+            map_muzzle_contact(origin, muzzle, radius, spatial_query).map(
+                |(entity, point, normal)| BlockedStraightDelivery {
+                    delivery_index: u8::try_from(index).unwrap_or(u8::MAX),
+                    target: objects
+                        .get(entity)
+                        .ok()
+                        .filter(|(_, health, life)| crate::map::object_is_live(**health, **life))
+                        .map(|(identity, _, _)| *identity),
+                    point,
+                    normal,
+                },
+            )
         })
         .collect()
+}
+
+#[cfg(feature = "server")]
+fn queue_blocked_world_target_damage(
+    target: crate::map::DamageableTargetIdentity,
+    point: Vec2,
+    source: AttackSource,
+    delivery_index: u8,
+    recipe: &WeaponRecipe,
+    world_pending: &mut crate::map::PendingWorldTargetDamages,
+    objective_pending: &mut crate::matchplay::PendingModeObjectiveDamages,
+) {
+    for (bundle_index, bundle) in recipe
+        .payload_bundles
+        .iter()
+        .enumerate()
+        .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Direct))
+    {
+        for (effect_index, effect) in bundle.effects.iter().enumerate() {
+            let PayloadEffectDefinition::Damage {
+                amount, falloff, ..
+            } = *effect
+            else {
+                continue;
+            };
+            delivery::queue_damageable_target(
+                world_pending,
+                objective_pending,
+                crate::map::PendingWorldTargetDamage {
+                    target,
+                    source,
+                    attack_id: source.attack_id,
+                    requested_damage: effects::requested_damage(
+                        amount,
+                        falloff,
+                        0.0,
+                        1.0,
+                        false,
+                        source.origin.as_vec2().distance(point),
+                    ),
+                    delivery_index,
+                    bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                    effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
+                },
+            );
+        }
+    }
 }
 
 #[cfg(feature = "server")]
@@ -170,12 +261,14 @@ fn emit_attack_deliveries(
     source: AttackSource,
     source_component: ProjectileSource,
     weapon_id: WeaponDefinitionId,
-    blocked_deliveries: &[(u8, Vec2, Vec2)],
+    blocked_deliveries: &[BlockedStraightDelivery],
     reserved_events: &[CombatEventId],
     blocked_event_cursor: &mut usize,
     legacy_telemetry: &mut CombatTelemetry,
     outbox: &mut CombatOutbox,
     melee: &mut MessageWriter<MeleeAttack>,
+    world_pending: &mut crate::map::PendingWorldTargetDamages,
+    objective_pending: &mut crate::matchplay::PendingModeObjectiveDamages,
     lob_landing: Option<Vec2>,
     match_member: Option<crate::matchplay::MatchMember>,
 ) -> u64 {
@@ -197,11 +290,23 @@ fn emit_attack_deliveries(
             for (delivery_index, angle) in angles.into_iter().enumerate() {
                 let delivery_index = u8::try_from(delivery_index).unwrap_or(u8::MAX);
                 let muzzle = muzzle_position(origin, angle, muzzle_offset);
-                if let Some((point, normal)) = blocked_deliveries
+                if let Some(blocked) = blocked_deliveries
                     .iter()
-                    .find(|(blocked_index, _, _)| *blocked_index == delivery_index)
-                    .map(|(_, point, normal)| (*point, *normal))
+                    .find(|blocked| blocked.delivery_index == delivery_index)
                 {
+                    let point = blocked.point;
+                    let normal = blocked.normal;
+                    if let Some(target) = blocked.target {
+                        queue_blocked_world_target_damage(
+                            target,
+                            point,
+                            source,
+                            delivery_index,
+                            recipe,
+                            world_pending,
+                            objective_pending,
+                        );
+                    }
                     let impact_event_id = reserved_events[*blocked_event_cursor];
                     *blocked_event_cursor += 1;
                     let impact_cue = CombatCue::DeliveryImpact {
@@ -520,7 +625,7 @@ pub(super) fn authoritative_composed_fire(
     mut commands: Commands,
     tick: Res<SimulationTick>,
     bounds: Res<crate::map::PlayableBounds>,
-    spatial_query: avian2d::prelude::SpatialQuery,
+    mut muzzle_contacts: MuzzleContactState,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     mut ids: ResMut<NextCombatIds>,
     mut gameplay_telemetry: AbilityWeaponTelemetry,
@@ -630,14 +735,19 @@ pub(super) fn authoritative_composed_fire(
             input.aim_distance,
             recipe,
             &bounds,
-            &spatial_query,
+            &muzzle_contacts.spatial_query,
         );
         if matches!(recipe.delivery, DeliveryMethod::Lobbed { .. }) && lob_landing.is_none() {
             continue;
         }
         let legacy_compatibility = legacy_compatibility_recipe(recipe);
-        let blocked_deliveries =
-            blocked_straight_deliveries(origin, facing, recipe, &spatial_query);
+        let blocked_deliveries = blocked_straight_deliveries(
+            origin,
+            facing,
+            recipe,
+            &muzzle_contacts.spatial_query,
+            &muzzle_contacts.objects,
+        );
         let per_blocked_delivery_events = if legacy_compatibility { 2 } else { 1 };
         let event_count = 1
             + usize::from(legacy_compatibility)
@@ -714,6 +824,8 @@ pub(super) fn authoritative_composed_fire(
             &mut legacy_telemetry,
             &mut outbox,
             &mut melee,
+            &mut muzzle_contacts.world_pending,
+            &mut muzzle_contacts.objective_pending,
             lob_landing,
             match_participant
                 .map(|participant| crate::matchplay::MatchMember(participant.match_id)),

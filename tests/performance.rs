@@ -458,7 +458,10 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
                     facing: 0.0,
                 },
                 delivery_index: 0,
-                velocity: Vec2::X * 900.0,
+                // Keep the 60-sample stream in the left-side open lanes. At combat speed the
+                // newly admitted central chests correctly consume two projectiles, which changes
+                // this capacity fixture into a chest-destruction scenario.
+                velocity: Vec2::X * 100.0,
                 travelled: 0.0,
                 expires_at_tick: u64::MAX,
                 maximum_range: 100_000.0,

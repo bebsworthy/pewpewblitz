@@ -15,9 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
 pub const MAX_MAP_OBJECT_HEALTH: u16 = 1_000;
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 5;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 6;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 4;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 6;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 7;
 #[cfg(test)]
 const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const ASHEN_COURT_PRESET: MapPresetId = MapPresetId(3);
@@ -27,11 +27,11 @@ const TIDAL_GARDEN_PRESET: MapPresetId = MapPresetId(4);
 #[cfg(test)]
 const BARREL_YARD_PRESET: MapPresetId = MapPresetId(5);
 pub const FEATURE_YARD_WIPEOUT_PRESET: MapPresetId = MapPresetId(7);
-pub const FEATURE_YARD_WIPEOUT_ADMISSION_REVISION: u16 = 1;
+pub const FEATURE_YARD_WIPEOUT_ADMISSION_REVISION: u16 = 2;
 pub const FEATURE_YARD_HOT_ZONE_PRESET: MapPresetId = MapPresetId(8);
-pub const FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION: u16 = 1;
+pub const FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION: u16 = 2;
 pub const FEATURE_YARD_HEIST_PRESET: MapPresetId = MapPresetId(9);
-pub const FEATURE_YARD_HEIST_ADMISSION_REVISION: u16 = 1;
+pub const FEATURE_YARD_HEIST_ADMISSION_REVISION: u16 = 2;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
@@ -56,6 +56,7 @@ pub const COFFIN_DECORATION_ASSET: MapAssetId = MapAssetId(22);
 pub const LANTERN_DECORATION_ASSET: MapAssetId = MapAssetId(23);
 pub const OIL_BARREL_ASSET: MapAssetId = MapAssetId(24);
 pub const BARREL_WOOD_DEBRIS_ASSET: MapAssetId = MapAssetId(25);
+pub const TREASURE_CHEST_ASSET: MapAssetId = MapAssetId(26);
 
 macro_rules! grid_id {
     ($name:ident) => {
@@ -82,6 +83,22 @@ grid_id!(MapVisualProfileId);
 grid_id!(MapSurfaceTagId);
 grid_id!(MapDamageProfileId);
 grid_id!(EnvironmentExplosionProfileId);
+
+#[derive(
+    Component,
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+)]
+pub struct RestorationPickupDefinitionId(pub u16);
 
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Ord, PartialOrd,
@@ -194,6 +211,10 @@ pub enum MapObjectTerminalBehavior {
         explosion_profile_id: EnvironmentExplosionProfileId,
         outcome: MapPlacementOutcome,
     },
+    DropPickup {
+        pickup_definition_id: RestorationPickupDefinitionId,
+        outcome: MapPlacementOutcome,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,6 +233,16 @@ pub struct EnvironmentExplosionProfile {
     pub radius_world_units: u16,
     pub maximum_targets: u8,
     pub maximum_chain_reactions: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RestorationPickupDefinition {
+    pub id: RestorationPickupDefinitionId,
+    pub restoration: u16,
+    pub collection_radius_world_units: u16,
+    pub lifetime_ticks: u16,
+    pub visual_profile_id: MapVisualProfileId,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -486,6 +517,7 @@ pub struct MapContentCatalog {
     pub gameplay_profiles: Vec<MapGameplayProfile>,
     pub damage_profiles: Vec<MapDamageProfile>,
     pub explosion_profiles: Vec<EnvironmentExplosionProfile>,
+    pub restoration_pickups: Vec<RestorationPickupDefinition>,
     pub assets: Vec<MapAssetDefinition>,
     pub presentation_themes: Vec<MapPresentationTheme>,
     pub presets: Vec<MapPreset>,
@@ -516,6 +548,7 @@ struct GameplayProfileSource {
     gameplay_profiles: Vec<MapGameplayProfile>,
     damage_profiles: Vec<MapDamageProfile>,
     explosion_profiles: Vec<EnvironmentExplosionProfile>,
+    restoration_pickups: Vec<RestorationPickupDefinition>,
 }
 
 #[derive(Deserialize)]
@@ -604,6 +637,7 @@ impl MapContentCatalog {
             gameplay_profiles: profiles.gameplay_profiles,
             damage_profiles: profiles.damage_profiles,
             explosion_profiles: profiles.explosion_profiles,
+            restoration_pickups: profiles.restoration_pickups,
             assets: assets.assets,
             presentation_themes: themes.themes,
             presets,
@@ -620,6 +654,7 @@ impl MapContentCatalog {
             || self.gameplay_profiles.is_empty()
             || self.damage_profiles.is_empty()
             || self.explosion_profiles.is_empty()
+            || self.restoration_pickups.is_empty()
             || self.assets.is_empty()
             || self.presentation_themes.is_empty()
             || self.presets.is_empty()
@@ -631,6 +666,7 @@ impl MapContentCatalog {
             "gameplay profiles",
         )?;
         validate_damageable_profiles(self)?;
+        validate_restoration_pickups(self)?;
         validate_sorted_ids(self.assets.iter().map(|asset| asset.id.0), "map assets")?;
         validate_sorted_ids(
             self.presentation_themes.iter().map(|theme| theme.id.0),
@@ -723,6 +759,16 @@ impl MapContentCatalog {
             .find(|profile| profile.id == id)
     }
 
+    #[must_use]
+    pub fn restoration_pickup(
+        &self,
+        id: RestorationPickupDefinitionId,
+    ) -> Option<&RestorationPickupDefinition> {
+        self.restoration_pickups
+            .iter()
+            .find(|definition| definition.id == id)
+    }
+
     pub fn canonical_fingerprint_material(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
         let mut canonical = self.clone();
@@ -733,6 +779,9 @@ impl MapContentCatalog {
         canonical
             .explosion_profiles
             .sort_by_key(|profile| profile.id);
+        canonical
+            .restoration_pickups
+            .sort_by_key(|definition| definition.id);
         canonical.assets.sort_by_key(|asset| asset.id);
         canonical.presentation_themes.sort_by_key(|theme| theme.id);
         canonical.presets.sort_by_key(|preset| preset.id);
@@ -778,8 +827,16 @@ fn validate_replacement_assets(
                     MapObjectTerminalBehavior::Explode {
                         outcome: MapPlacementOutcome::ReplacedWith(id),
                         ..
+                    }
+                    | MapObjectTerminalBehavior::DropPickup {
+                        outcome: MapPlacementOutcome::ReplacedWith(id),
+                        ..
                     } => Some(id),
                     MapObjectTerminalBehavior::Explode {
+                        outcome: MapPlacementOutcome::Removed,
+                        ..
+                    }
+                    | MapObjectTerminalBehavior::DropPickup {
                         outcome: MapPlacementOutcome::Removed,
                         ..
                     } => None,
@@ -2043,13 +2100,22 @@ fn validate_damageable_profiles(catalog: &MapContentCatalog) -> Result<(), Strin
         .map(|profile| profile.id)
         .collect();
     for profile in &catalog.damage_profiles {
-        let MapObjectTerminalBehavior::Explode {
-            explosion_profile_id,
-            outcome,
-        } = profile.terminal;
+        let (known_terminal, outcome) = match profile.terminal {
+            MapObjectTerminalBehavior::Explode {
+                explosion_profile_id,
+                outcome,
+            } => (explosion_ids.contains(&explosion_profile_id), outcome),
+            MapObjectTerminalBehavior::DropPickup {
+                pickup_definition_id,
+                outcome,
+            } => (
+                catalog.restoration_pickup(pickup_definition_id).is_some(),
+                outcome,
+            ),
+        };
         if profile.maximum_health == 0
             || profile.maximum_health > MAX_MAP_OBJECT_HEALTH
-            || !explosion_ids.contains(&explosion_profile_id)
+            || !known_terminal
             || matches!(outcome, MapPlacementOutcome::ReplacedWith(MapAssetId(0)))
         {
             return Err("invalid map damage profile".to_string());
@@ -2065,6 +2131,26 @@ fn validate_damageable_profiles(catalog: &MapContentCatalog) -> Result<(), Strin
             && !damage_ids.contains(&id)
         {
             return Err("map gameplay profile references unknown durability".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_restoration_pickups(catalog: &MapContentCatalog) -> Result<(), String> {
+    validate_sorted_ids(
+        catalog
+            .restoration_pickups
+            .iter()
+            .map(|definition| definition.id.0),
+        "restoration pickup definitions",
+    )?;
+    for definition in &catalog.restoration_pickups {
+        if !(1..=1_000).contains(&definition.restoration)
+            || !(8..=64).contains(&definition.collection_radius_world_units)
+            || !(60..=3_600).contains(&definition.lifetime_ticks)
+            || definition.visual_profile_id.0 == 0
+        {
+            return Err("invalid restoration pickup definition".to_string());
         }
     }
     Ok(())
@@ -2165,8 +2251,9 @@ mod tests {
         assert_eq!(count(BREAKABLE_BARRIER_ASSET), 4);
         assert_eq!(count(DESTRUCTIBLE_COVER_ASSET), 4);
         assert_eq!(count(OIL_BARREL_ASSET), 4);
+        assert_eq!(count(TREASURE_CHEST_ASSET), 2);
         assert_eq!(count(PLAYER_SPAWN_ASSET), 6);
-        assert_eq!(resolved.dynamic_placements.len(), 12);
+        assert_eq!(resolved.dynamic_placements.len(), 14);
         assert_eq!(
             resolved
                 .player_only_surface_rects
@@ -2185,8 +2272,16 @@ mod tests {
                         MapObjectTerminalBehavior::Explode {
                             outcome: MapPlacementOutcome::ReplacedWith(id),
                             ..
+                        }
+                        | MapObjectTerminalBehavior::DropPickup {
+                            outcome: MapPlacementOutcome::ReplacedWith(id),
+                            ..
                         } => Some(id),
                         MapObjectTerminalBehavior::Explode {
+                            outcome: MapPlacementOutcome::Removed,
+                            ..
+                        }
+                        | MapObjectTerminalBehavior::DropPickup {
                             outcome: MapPlacementOutcome::Removed,
                             ..
                         } => None,
@@ -2396,7 +2491,7 @@ mod tests {
             }
         );
         assert_eq!(resolved.static_colliders.len(), 4);
-        assert_eq!(resolved.dynamic_placements.len(), 12);
+        assert_eq!(resolved.dynamic_placements.len(), 14);
         let grass = resolved
             .snapshot
             .placements
@@ -2452,7 +2547,7 @@ mod tests {
             (resolved.heist_safes[0].center.y - resolved.heist_safes[1].center.y).abs()
                 < f32::EPSILON
         );
-        assert_eq!(resolved.dynamic_placements.len(), 12);
+        assert_eq!(resolved.dynamic_placements.len(), 14);
         assert!(
             resolved
                 .spawn_points_by_team

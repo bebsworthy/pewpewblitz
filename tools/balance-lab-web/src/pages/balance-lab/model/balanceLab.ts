@@ -37,12 +37,18 @@ export interface HeistTuning extends JsonObject {
   safeMaximumHealth: number;
 }
 
+export interface ChestTuning extends JsonObject {
+  damageProfile: JsonObject;
+  pickupDefinition: JsonObject;
+}
+
 export interface BalanceLabSnapshot extends JsonObject {
   schemaVersion: number;
   fighterProfiles: FighterProfiles;
   weapons: WeaponTuning[];
   ultimates: UltimateTuning[];
   barrel: BarrelTuning;
+  chest: ChestTuning;
   heist: HeistTuning;
 }
 

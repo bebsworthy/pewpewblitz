@@ -32,7 +32,8 @@ use brawler::{
         DamageableWorldObject, MapCatalogResource, MapDynamicState, MapInstanceId,
         MapInstanceMember, MapPlacementId, MapPlacementParameters, MapPresetId as ArenaPresetId,
         MapRoot, PendingWorldTargetDamage, PendingWorldTargetDamages, PlayableBounds, ResolvedMap,
-        ResolvedMapSnapshot, SpawnAssignment, SpawnPointCatalog, install_resolved_map,
+        ResolvedMapSnapshot, RestorationPickup, RestorationPickupIdentity, SpawnAssignment,
+        SpawnPointCatalog, install_resolved_map,
     },
     matchplay::{
         ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot as MatchRootMarker,

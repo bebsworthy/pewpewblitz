@@ -121,6 +121,17 @@ export function BalanceLabPage() {
       </section>
 
       <section className="panel">
+        <p className="eyebrow">Contested restoration · V10</p>
+        <h2>Treasure chest &amp; pickup</h2>
+        <p>Chest health, restoration amount, collection radius, and lifetime for the next clean Practice epoch.</p>
+        <NumericTreeEditor
+          value={draft.chest}
+          path={["chest"]}
+          onNumber={controller.setNumber}
+        />
+      </section>
+
+      <section className="panel">
         <p className="eyebrow">Mode objective · V10</p>
         <h2>Heist safe</h2>
         <p>Authoritative maximum health applied on the next clean Heist Practice epoch.</p>

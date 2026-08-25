@@ -1487,6 +1487,98 @@ pub(super) fn consume_world_object_cues(
 #[allow(
     clippy::too_many_arguments,
     clippy::needless_pass_by_value,
+    reason = "the pickup cue presenter owns bounded green open, heal, and expiry feedback"
+)]
+pub(super) fn consume_pickup_cues(
+    mut commands: Commands,
+    received: Option<ResMut<crate::map::ReceivedPickupCues>>,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    settings: Option<Res<ClientShellSettings>>,
+    effects: Query<(Entity, &CombatEffect3d)>,
+    map_states: Query<&crate::map::MapDynamicState, With<crate::map::MapRoot>>,
+    mut sequence: Local<CombatEffectSequence>,
+) {
+    let Some(mut received) = received else { return };
+    let Ok(map_state) = map_states.single() else {
+        received.0.clear();
+        return;
+    };
+    let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
+    for cue in received.0.drain(..) {
+        let (identity, position, radius, ring, label) = match cue {
+            crate::map::PickupCue::Spawned {
+                identity, position, ..
+            } => (
+                identity,
+                position.as_vec2(),
+                22.0,
+                true,
+                "V10 chest restoration drop",
+            ),
+            crate::map::PickupCue::Collected {
+                identity, position, ..
+            } => (
+                identity,
+                position.as_vec2(),
+                18.0,
+                false,
+                "V10 restoration collected",
+            ),
+            crate::map::PickupCue::Expired {
+                identity, position, ..
+            } => (
+                identity,
+                position.as_vec2(),
+                12.0,
+                true,
+                "V10 restoration expired",
+            ),
+        };
+        if identity.generation != map_state.generation_id() {
+            continue;
+        }
+        if effects.iter().count() >= MAX_EFFECTS
+            && let Some((oldest, _)) = effects.iter().min_by_key(|(_, effect)| effect.order)
+        {
+            commands.entity(oldest).despawn();
+        }
+        sequence.0 = sequence.0.saturating_add(1);
+        commands.spawn((
+            CombatEffect3d {
+                timer: Timer::new(
+                    Duration::from_secs_f32(if reduced { 0.12 } else { 0.3 }),
+                    TimerMode::Once,
+                ),
+                expires_at_tick: None,
+                order: sequence.0,
+            },
+            Mesh3d(if ring {
+                primitives.area_ring.clone()
+            } else {
+                primitives.effect_sphere.clone()
+            }),
+            MeshMaterial3d(materials.pickup_glow.clone()),
+            NotShadowCaster,
+            NotShadowReceiver,
+            if ring {
+                Transform {
+                    translation: ground_position(position) + Vec3::Y * PREVIEW_HEIGHT,
+                    rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+                    scale: Vec3::splat(if reduced { radius * 0.65 } else { radius }),
+                }
+            } else {
+                Transform::from_translation(ground_position(position) + Vec3::Y * 15.0)
+                    .with_scale(Vec3::splat(if reduced { radius * 0.6 } else { radius }))
+            },
+            Name::new(label),
+        ));
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
     reason = "the focused presentation system validates and materializes bounded objective cues"
 )]
 pub(super) fn consume_heist_objective_cues(

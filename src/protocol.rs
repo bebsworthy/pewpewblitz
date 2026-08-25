@@ -52,7 +52,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 27;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 28;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -699,6 +699,16 @@ fn register_replicated_components(app: &mut App) {
         .replicate_once();
     app.component::<crate::map::DamageableLifeState>()
         .replicate();
+    app.component::<crate::map::RestorationPickup>()
+        .replicate_once();
+    app.component::<crate::map::RestorationPickupIdentity>()
+        .replicate_once();
+    app.component::<crate::map::RestorationPickupDefinitionId>()
+        .replicate_once();
+    app.component::<crate::map::PickupAvailableAtTick>()
+        .replicate_once();
+    app.component::<crate::map::PickupExpiresAtTick>()
+        .replicate_once();
     app.component::<SpawnAssignment>().replicate();
     app.component::<PlayerId>().replicate_once();
     app.component::<NetworkEntityId>().replicate_once();
@@ -801,6 +811,8 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<CombatCue>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<crate::map::WorldObjectCue>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<crate::map::PickupCue>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<crate::matchplay::HeistObjectiveCue>()
             .add_direction(NetworkDirection::ServerToClient);

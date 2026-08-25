@@ -71,10 +71,15 @@ pub struct ClientMapPlugin;
 #[derive(Resource, Default)]
 struct SeenWorldObjectCueIds(std::collections::VecDeque<crate::combat::CombatEventId>);
 
+#[derive(Resource, Default)]
+struct SeenPickupCueIds(std::collections::VecDeque<crate::combat::CombatEventId>);
+
 impl Plugin for ClientMapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ReceivedWorldObjectCues>()
+            .init_resource::<ReceivedPickupCues>()
             .init_resource::<SeenWorldObjectCueIds>()
+            .init_resource::<SeenPickupCueIds>()
             .init_resource::<ClientWorldObjectReadiness>()
             .add_systems(
                 Update,
@@ -82,9 +87,32 @@ impl Plugin for ClientMapPlugin {
                     converge_map_dynamic_state,
                     converge_world_object_readiness.after(converge_map_dynamic_state),
                     receive_world_object_cues,
+                    receive_pickup_cues,
                 ),
             );
     }
+}
+
+fn receive_pickup_cues(
+    mut receivers: Query<Option<&mut MessageReceiver<PickupCue>>, With<Client>>,
+    mut inbox: ResMut<ReceivedPickupCues>,
+    mut seen: ResMut<SeenPickupCueIds>,
+) {
+    for receiver in &mut receivers {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for cue in receiver.receive() {
+            if inbox.0.len() < MAX_PICKUP_CUES && !seen.0.contains(&cue.event_id()) {
+                if seen.0.len() >= MAX_PICKUP_CUES {
+                    seen.0.pop_front();
+                }
+                seen.0.push_back(cue.event_id());
+                inbox.0.push(cue);
+            }
+        }
+    }
+    inbox.0.sort_by_key(|cue| cue.event_id().0);
 }
 
 #[allow(
@@ -265,7 +293,8 @@ fn legal_dynamic_outcomes(
                 MapDurabilityBehavior::HitPoints(id) => {
                     let damage = catalog.damage_profile(id)?;
                     match damage.terminal {
-                        MapObjectTerminalBehavior::Explode { outcome, .. } => outcome,
+                        MapObjectTerminalBehavior::Explode { outcome, .. }
+                        | MapObjectTerminalBehavior::DropPickup { outcome, .. } => outcome,
                     }
                 }
                 MapDurabilityBehavior::Indestructible => match profile.destruction {

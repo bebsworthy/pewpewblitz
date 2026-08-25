@@ -1,5 +1,5 @@
 (
-    schema_version: 5,
+    schema_version: 6,
     damage_profiles: [
         (
             id: MapDamageProfileId(1),
@@ -7,6 +7,14 @@
             terminal: Explode(
                 explosion_profile_id: EnvironmentExplosionProfileId(1),
                 outcome: ReplacedWith(MapAssetId(25)),
+            ),
+        ),
+        (
+            id: MapDamageProfileId(2),
+            maximum_health: 80,
+            terminal: DropPickup(
+                pickup_definition_id: RestorationPickupDefinitionId(1),
+                outcome: Removed,
             ),
         ),
     ],
@@ -17,6 +25,15 @@
             radius_world_units: 128,
             maximum_targets: 16,
             maximum_chain_reactions: 16,
+        ),
+    ],
+    restoration_pickups: [
+        (
+            id: RestorationPickupDefinitionId(1),
+            restoration: 40,
+            collection_radius_world_units: 32,
+            lifetime_ticks: 600,
+            visual_profile_id: MapVisualProfileId(42),
         ),
     ],
     gameplay_profiles: [
@@ -107,6 +124,16 @@
             collider_shape: Circle(radius_world_units: 16),
             destruction: Indestructible,
             durability: HitPoints(MapDamageProfileId(1)),
+            interaction: None,
+            concealment: None,
+        ),
+        (
+            id: MapGameplayProfileId(10),
+            player_collision: Block,
+            projectile_collision: BlockAndConsume,
+            collider_shape: Circle(radius_world_units: 16),
+            destruction: Indestructible,
+            durability: HitPoints(MapDamageProfileId(2)),
             interaction: None,
             concealment: None,
         ),

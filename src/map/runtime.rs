@@ -99,6 +99,7 @@ pub fn register_map_runtime(app: &mut App) {
                 .before(crate::gameplay::advance_simulation_tick),
         )
         .add_systems(Update, receive_map_recovery_requests);
+    super::pickups::register_pickup_runtime(app);
     crate::matchplay::register_environment_reset_system(app, reset_map_on_match_restart);
 }
 
@@ -288,7 +289,8 @@ fn process_world_target_damage(world: &mut World) {
             .damage_profile(damage_profile_id)
             .expect("validated object damage profile exists");
         let terminal = (health_after == 0).then_some(match damage_profile.terminal {
-            super::MapObjectTerminalBehavior::Explode { outcome, .. } => outcome,
+            super::MapObjectTerminalBehavior::Explode { outcome, .. }
+            | super::MapObjectTerminalBehavior::DropPickup { outcome, .. } => outcome,
         });
         if terminal.is_some() && reaction_count >= super::MAX_TERMINAL_REACTIONS_PER_TICK {
             error!("barrel reaction ceiling reached; terminal request rejected");
@@ -296,6 +298,31 @@ fn process_world_target_damage(world: &mut World) {
                 telemetry.capacity_rejections = telemetry.capacity_rejections.saturating_add(1);
             });
             continue;
+        }
+        if terminal.is_some()
+            && matches!(
+                damage_profile.terminal,
+                super::MapObjectTerminalBehavior::DropPickup { .. }
+            )
+        {
+            let live_pickups = world
+                .query_filtered::<Entity, With<super::RestorationPickup>>()
+                .iter(world)
+                .count();
+            if live_pickups >= super::MAX_LIVE_RESTORATION_PICKUPS
+                || world.resource::<super::PickupLifecycleFacts>().0.len()
+                    >= super::MAX_PICKUP_FACTS
+                || world.resource::<super::PickupOutbox>().0.len() >= super::MAX_PICKUP_CUES
+            {
+                error!("pickup capacity exhausted; chest terminal request rejected");
+                update_world_object_telemetry(world, |telemetry| {
+                    telemetry.capacity_rejections = telemetry.capacity_rejections.saturating_add(1);
+                });
+                let mut pickup_telemetry = world.resource_mut::<super::PickupTelemetry>();
+                pickup_telemetry.capacity_rejections =
+                    pickup_telemetry.capacity_rejections.saturating_add(1);
+                continue;
+            }
         }
         let Some(event_ids) = crate::combat::server::reserve_event_ids(
             &mut world.resource_mut::<crate::combat::NextCombatIds>(),
@@ -353,10 +380,32 @@ fn process_world_target_damage(world: &mut World) {
             placement_id: request.target.placement_id(),
             outcome,
         });
-        let super::MapObjectTerminalBehavior::Explode {
-            explosion_profile_id,
-            ..
-        } = damage_profile.terminal;
+        let explosion_profile_id = match damage_profile.terminal {
+            super::MapObjectTerminalBehavior::Explode {
+                explosion_profile_id,
+                ..
+            } => explosion_profile_id,
+            super::MapObjectTerminalBehavior::DropPickup {
+                pickup_definition_id,
+                ..
+            } => {
+                let identity = super::RestorationPickupIdentity {
+                    generation: request.target.generation(),
+                    source_placement_id: request.target.placement_id(),
+                };
+                super::pickups::spawn_restoration_pickup(
+                    world,
+                    identity,
+                    pickup_definition_id,
+                    position,
+                    tick,
+                    event_ids[1],
+                )
+                .expect("pickup capacity was reserved before committing the chest");
+                world.entity_mut(entity).despawn();
+                continue;
+            }
+        };
         let explosion = *catalog
             .explosion_profile(explosion_profile_id)
             .expect("validated explosion profile exists");
@@ -1134,6 +1183,19 @@ fn restore_map(world: &mut World) {
     if let Some(mut outbox) = world.get_resource_mut::<super::WorldObjectOutbox>() {
         outbox.0.clear();
     }
+    if let Some(mut facts) = world.get_resource_mut::<super::PickupLifecycleFacts>() {
+        facts.0.clear();
+    }
+    if let Some(mut outbox) = world.get_resource_mut::<super::PickupOutbox>() {
+        outbox.0.clear();
+    }
+    let pickups: Vec<_> = world
+        .query_filtered::<Entity, With<super::RestorationPickup>>()
+        .iter(world)
+        .collect();
+    for entity in pickups {
+        world.entity_mut(entity).despawn();
+    }
     let damageable_entities: Vec<_> = world
         .query_filtered::<Entity, With<super::DamageableWorldObject>>()
         .iter(world)
@@ -1308,6 +1370,9 @@ mod tests {
             .init_resource::<super::super::WorldObjectExplosionFacts>()
             .init_resource::<super::super::WorldObjectOutbox>()
             .init_resource::<super::super::WorldObjectTelemetry>()
+            .init_resource::<super::super::PickupLifecycleFacts>()
+            .init_resource::<super::super::PickupOutbox>()
+            .init_resource::<super::super::PickupTelemetry>()
             .init_resource::<crate::combat::CombatOutcomeFacts>()
             .init_resource::<crate::combat::CombatOutbox>()
             .init_resource::<crate::combat::NextCombatIds>()
@@ -1631,7 +1696,7 @@ mod tests {
                 .resource::<super::super::WorldTargetDamageFacts>()
                 .0
                 .len(),
-            2
+            3
         );
         let destroyed_collider_exists = {
             let world = app.world_mut();
@@ -1681,8 +1746,70 @@ mod tests {
             .iter(world)
             .map(|(identity, health)| (identity.generation().generation, health.0))
             .collect();
-        assert_eq!(restored.len(), 4);
-        assert!(restored.iter().all(|entry| *entry == (2, 60)));
+        assert_eq!(restored.len(), 6);
+        assert_eq!(
+            restored.iter().filter(|entry| **entry == (2, 60)).count(),
+            4
+        );
+        assert_eq!(
+            restored.iter().filter(|entry| **entry == (2, 80)).count(),
+            2
+        );
+    }
+
+    #[test]
+    fn treasure_chest_commits_one_removed_state_and_one_generation_derived_pickup() {
+        let (mut app, root) = barrel_test_app();
+        let target = barrel_identity(&mut app, 260);
+        let source = AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(71),
+            player_id: crate::protocol::PlayerId(1),
+            owner_network_entity_id: crate::protocol::NetworkEntityId(1),
+            team_id: crate::combat::TeamId(0),
+            recipe_fingerprint: crate::combat::WeaponRecipeFingerprint::default(),
+            presentation_profile_id: crate::combat::WeaponPresentationProfileId(3),
+            legacy_compatibility: false,
+            source_preset_id: None,
+            origin: WorldPoint { x: 0.0, y: 0.0 },
+            facing: 0.0,
+        };
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<super::super::PendingWorldTargetDamages>()
+                .0
+                .push(super::super::PendingWorldTargetDamage {
+                    target,
+                    source,
+                    attack_id: source.attack_id,
+                    requested_damage: 80,
+                    delivery_index: 0,
+                    bundle_index: 0,
+                    effect_index: 0,
+                });
+            process_world_target_damage(app.world_mut());
+        }
+
+        assert_eq!(barrel_health(&mut app, 260), None);
+        let state = app.world().get::<MapDynamicState>(root).unwrap();
+        assert!(state.terminal_states.contains(&MapPlacementTransition {
+            placement_id: MapPlacementId(260),
+            outcome: MapPlacementOutcome::Removed,
+        }));
+        let world = app.world_mut();
+        let pickups = world
+            .query::<&super::super::RestorationPickupIdentity>()
+            .iter(world)
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(pickups.len(), 1);
+        assert_eq!(
+            pickups[0],
+            super::super::RestorationPickupIdentity {
+                generation: target.generation(),
+                source_placement_id: MapPlacementId(260),
+            }
+        );
     }
 
     #[test]
@@ -1809,8 +1936,8 @@ mod tests {
                 .resource::<super::super::WorldTargetDamageFacts>()
                 .0
                 .len(),
-            2,
-            "only the primary barrel and chained barrel use the object-fact channel"
+            3,
+            "the primary barrel, chained barrel, and nearby chest use the object-fact channel"
         );
     }
 }

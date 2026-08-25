@@ -5,6 +5,7 @@ mod catalog;
 mod client;
 mod model;
 mod objects;
+mod pickups;
 #[cfg(feature = "server")]
 mod runtime;
 #[cfg(feature = "server")]
@@ -29,7 +30,8 @@ pub use catalog::{
     MapPlacementOutcome, MapPlacementParameterKind, MapPlacementParameters, MapPlacementTransition,
     MapPreset, MapRecipe, MapSurfaceTagId, MapVisualProfileId, OIL_BARREL_ASSET,
     PLAYER_SPAWN_ASSET, PlayerCollision, ProjectileCollision, RUBBLE_ASSET,
-    ResolvedHeistSafeAnchor, ResolvedMap, ResolvedMapSnapshot, SAND_FLOOR_ASSET, TALL_GRASS_ASSET,
+    ResolvedHeistSafeAnchor, ResolvedMap, ResolvedMapSnapshot, RestorationPickupDefinition,
+    RestorationPickupDefinitionId, SAND_FLOOR_ASSET, TALL_GRASS_ASSET, TREASURE_CHEST_ASSET,
     WALL_ARENA_ASSET, WALL_DUNGEON_ASSET, WATER_ASSET, WIPEOUT_MODE_DEFINITION,
     cardinal_adjacency_mask, circle_overlaps_blocking_map, placement_cells, placement_world_center,
     resolve_circle_against_blocking_map,
@@ -41,6 +43,7 @@ pub use client::{
 };
 pub use model::*;
 pub use objects::*;
+pub use pickups::*;
 #[cfg(feature = "server")]
 pub use runtime::{
     DestructibleMapCollider, MapDynamicTelemetry, MapRuntimeSet, install_resolved_map,

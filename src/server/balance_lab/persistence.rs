@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 3;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 4;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -46,7 +46,19 @@ pub(super) fn load(
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_PERSISTED_BYTES {
         return Err("persisted snapshot is too large".into());
     }
-    let persisted = serde_json::from_slice::<PersistedBalanceLabV1>(&bytes)
+    let mut value = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(3)
+    {
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["snapshot"]["chest"] = serde_json::to_value(validator.baseline.chest)
+            .map_err(|error| format!("canonical chest migration failed: {error}"))?;
+    }
+    let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
     if persisted.schema_version != PERSISTENCE_SCHEMA_VERSION
         || persisted.snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION

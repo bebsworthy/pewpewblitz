@@ -15,13 +15,13 @@ attacks, deliveries, payloads, and combat source identity. The
 compatibility. The [network architecture](./08-network-architecture.md) owns stable wire identity
 and replication. The [V10 roadmap](./implementation/v10/roadmap.md) owns staged delivery.
 
-V9 completed on 2026-08-24. V10 M01 was explicitly initiated and approved the same day, then its
-oil-barrel vertical slice completed with user acceptance on 2026-08-25. This document remains the
-accepted version-wide capability boundary.
+V9 completed on 2026-08-24. V10 completed with user acceptance on 2026-08-25 after its oil-barrel,
+mirrored Heist, consolidated Feature Yard, treasure-chest, restoration-pickup, feedback, and
+closeout gates passed. This document remains the accepted version-wide capability boundary.
 
 ## Player-facing outcomes
 
-V10 adds three intentionally distinct pieces of gameplay:
+V10 delivered three intentionally distinct pieces of gameplay:
 
 1. **Oil barrel.** A neutral blocking map feature can be damaged by attacks. At zero health it
    explodes once, damages nearby eligible fighters and ordinary damageable objects, and becomes a
@@ -30,7 +30,7 @@ V10 adds three intentionally distinct pieces of gameplay:
    safe and defend their own. Destroying exactly one safe wins immediately; timeout compares the
    remaining safe-health fractions.
 3. **Treasure chest.** A neutral blocking map feature can be damaged by attacks. At zero health it
-   opens once, becomes a clearly nonblocking terminal placement, and drops exactly one public
+   disappears once, becomes a clearly nonblocking terminal placement, and drops exactly one public
    restoration pickup that either team may collect.
 
 The treasure chest is never a Heist safe:
@@ -189,7 +189,7 @@ V10 promotes exact assets only when their full behavior exists:
 | Asset | Placement | Collision while live | Damage owner | Terminal outcome |
 |---|---|---|---|---|
 | Oil barrel | Ordinary `Feature` placement | Blocks players; intercepts eligible projectiles | Environment-object runtime | One explosion, then nonblocking broken/removal state |
-| Treasure chest | Ordinary `Feature` placement | Blocks players; intercepts eligible projectiles | Environment-object runtime | One restoration pickup, then nonblocking opened state |
+| Treasure chest | Ordinary `Feature` placement | Blocks players; intercepts eligible projectiles | Environment-object runtime | One restoration pickup, then removed state |
 | Heist safe | Typed Heist mode anchor, not an ordinary chest placement | Blocks players; intercepts eligible projectiles | Heist mode | Public destroyed objective state and mode outcome; no loot |
 
 The implementing milestones select original names, stable IDs, exact footprints, normal/damaged/
@@ -298,6 +298,9 @@ The collision contract is:
   static map blocker can consume the delivery without a target;
 - a straight projectile that first hits an eligible blocking object commits one impact, applies
   permitted damage, and is consumed according to its existing delivery policy;
+- the fighter-origin-to-muzzle clearance segment obeys the same first-contact rule: when an
+  eligible damageable object blocks that segment, the direct payload damages that object and no
+  projectile is spawned beyond it;
 - melee and area deliveries use exact authoritative geometry, stable candidate ordering, and the
   same line-of-sight rule as their implemented fighter behavior unless the profile explicitly
   documents an exception;
@@ -413,7 +416,7 @@ fallback rendering. Cosmetic debris and audio are bounded and cannot delay autho
 ### Chest lifecycle
 
 A treasure chest is neutral and publicly damageable during `MatchPhase::Active`. At zero health,
-the server atomically marks it terminal, commits the opened/nonblocking placement state, and creates
+the server atomically marks it terminal, commits the removed/nonblocking placement state, and creates
 exactly one pickup whose stable identity is derived from the map generation and source placement.
 Duplicate damage, terminal observation, recovery, or message delivery cannot create a second drop.
 

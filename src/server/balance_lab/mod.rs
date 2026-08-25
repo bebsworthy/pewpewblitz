@@ -32,7 +32,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 7;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 8;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -89,6 +89,13 @@ struct HeistTuning {
     safe_maximum_health: u16,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ChestTuning {
+    damage_profile: crate::map::MapDamageProfile,
+    pickup_definition: crate::map::RestorationPickupDefinition,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct BalanceLabSnapshotV3 {
@@ -97,6 +104,7 @@ struct BalanceLabSnapshotV3 {
     weapons: Vec<WeaponPresetTuning>,
     ultimates: Vec<UltimateTuning>,
     barrel: BarrelTuning,
+    chest: ChestTuning,
     heist: HeistTuning,
 }
 
@@ -145,6 +153,14 @@ impl BalanceLabSnapshotV3 {
                 explosion_profile: *maps
                     .explosion_profile(crate::map::EnvironmentExplosionProfileId(1))
                     .expect("embedded oil-barrel explosion profile exists"),
+            },
+            chest: ChestTuning {
+                damage_profile: *maps
+                    .damage_profile(crate::map::MapDamageProfileId(2))
+                    .expect("embedded treasure-chest damage profile exists"),
+                pickup_definition: *maps
+                    .restoration_pickup(crate::map::RestorationPickupDefinitionId(1))
+                    .expect("embedded restoration pickup definition exists"),
             },
             heist: HeistTuning {
                 safe_maximum_health: crate::matchplay::HeistRules::default().safe_maximum_health,
@@ -674,6 +690,26 @@ fn validate_snapshot(
         .find(|profile| profile.id == candidate.barrel.explosion_profile.id)
         .ok_or_else(|| "oil-barrel explosion profile disappeared".to_string())? =
         candidate.barrel.explosion_profile;
+    if candidate.chest.damage_profile.id != baseline.chest.damage_profile.id
+        || candidate.chest.pickup_definition.id != baseline.chest.pickup_definition.id
+        || candidate.chest.damage_profile.terminal != baseline.chest.damage_profile.terminal
+        || candidate.chest.pickup_definition.visual_profile_id
+            != baseline.chest.pickup_definition.visual_profile_id
+    {
+        return Err("chest identity or terminal topology changed".into());
+    }
+    *next_maps
+        .damage_profiles
+        .iter_mut()
+        .find(|profile| profile.id == candidate.chest.damage_profile.id)
+        .ok_or_else(|| "treasure-chest damage profile disappeared".to_string())? =
+        candidate.chest.damage_profile;
+    *next_maps
+        .restoration_pickups
+        .iter_mut()
+        .find(|definition| definition.id == candidate.chest.pickup_definition.id)
+        .ok_or_else(|| "restoration pickup definition disappeared".to_string())? =
+        candidate.chest.pickup_definition;
     next_maps.validate()?;
     Ok((next_builds, next_weapons, next_maps))
 }

@@ -2,9 +2,10 @@
 
 PewPew Blitz is a server-authoritative top-down arena shooter built around player-authored brawler
 builds, readable combat, meaningful tradeoffs, and short objective matches. The current product
-supports Wipeout and Hot Zone, bounded weapon/build recipes, abilities and passives, destructible
-map assets, independently authored maps, a fixed-camera 3D presentation, server-local multiplayer,
-and server-hosted practice matches with inert roster bots.
+supports Wipeout, Hot Zone, and Heist; bounded weapon/build recipes; abilities and passives;
+destructible and health-bearing map assets; treasure-chest restoration pickups; the consolidated
+Feature Yard test-map family; a fixed-camera 3D presentation; server-local multiplayer; and server-
+hosted practice matches with inert roster bots.
 
 The windowed client presents the Player Dashboard and renders the world, HUD, audio, and local input.
 The routed supervisor and lobby own admission and server-local queues; isolated match workers own
