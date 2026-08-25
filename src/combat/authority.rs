@@ -681,7 +681,9 @@ fn combat_cue_subjects(cue: &CombatCue) -> Vec<NetworkEntityId> {
         CombatCue::FighterReset { target, .. }
         | CombatCue::Reset { target, .. }
         | CombatCue::ForcedRevealApplied { target, .. } => vec![*target],
-        CombatCue::SentryFired { owner, target, .. } => vec![*owner, *target],
+        CombatCue::SentryFired { owner, target, .. } => {
+            target.map_or_else(|| vec![*owner], |target| vec![*owner, target])
+        }
         CombatCue::DeployableRemoved { owner, .. } => vec![*owner],
         CombatCue::SelfCloakActivated { source, .. } | CombatCue::SelfCloakEnded { source, .. } => {
             vec![*source]

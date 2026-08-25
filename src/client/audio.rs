@@ -531,7 +531,7 @@ mod tests {
             tick: 100,
             owner: NetworkEntityId(7),
             deployable_id: crate::builds::DeployableId(3),
-            target: NetworkEntityId(8),
+            target: Some(NetworkEntityId(8)),
             position: crate::combat::WorldPoint { x: 20.0, y: 30.0 },
             presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
         };

@@ -46,6 +46,27 @@ pub fn stable_sentry_target(
     candidates.first().map(|candidate| candidate.0)
 }
 
+#[cfg(feature = "server")]
+#[must_use]
+pub(crate) fn stable_sentry_objective_target(
+    candidates: impl IntoIterator<Item = (crate::map::DamageableTargetIdentity, f32, bool)>,
+) -> Option<crate::map::DamageableTargetIdentity> {
+    let mut candidates: Vec<_> = candidates
+        .into_iter()
+        .filter(|(_, distance_squared, visible)| {
+            *visible
+                && distance_squared.is_finite()
+                && *distance_squared <= SENTRY_ACQUISITION_RANGE.powi(2)
+        })
+        .collect();
+    candidates.sort_by(|left, right| {
+        left.1
+            .total_cmp(&right.1)
+            .then_with(|| left.0.stable_order_key().cmp(&right.0.stable_order_key()))
+    });
+    candidates.first().map(|candidate| candidate.0)
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Sentry;
 
@@ -73,11 +94,18 @@ pub(crate) struct SentryCleanupRequest {
 }
 
 #[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SentryTarget {
+    Fighter(NetworkEntityId),
+    ModeObjective(crate::map::DamageableTargetIdentity),
+}
+
+#[cfg(feature = "server")]
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SentryRuntime {
     next_acquire_tick: u64,
     next_fire_tick: u64,
-    target: Option<NetworkEntityId>,
+    target: Option<SentryTarget>,
 }
 
 #[cfg(feature = "server")]
@@ -106,12 +134,20 @@ impl SentryRuntime {
         self.next_fire_tick = tick.saturating_add(SENTRY_FIRE_INTERVAL_TICKS);
     }
 
-    pub(super) fn target(&self) -> Option<NetworkEntityId> {
+    pub(super) fn target(&self) -> Option<SentryTarget> {
         self.target
     }
 
-    pub(super) fn set_target(&mut self, target: Option<NetworkEntityId>) {
-        self.target = target;
+    pub(super) fn set_fighter_target(&mut self, target: Option<NetworkEntityId>) {
+        self.target = target.map(SentryTarget::Fighter);
+    }
+
+    fn set_objective_target(&mut self, target: Option<crate::map::DamageableTargetIdentity>) {
+        self.target = target.map(SentryTarget::ModeObjective);
+    }
+
+    fn clear_target(&mut self) {
+        self.target = None;
     }
 }
 
@@ -630,6 +666,17 @@ pub(crate) fn tick_sentries(
         ),
         With<crate::protocol::Fighter>,
     >,
+    objectives: Query<
+        (
+            Entity,
+            &avian2d::prelude::Position,
+            &crate::map::DamageableTargetIdentity,
+            &crate::matchplay::HeistSafe,
+            &crate::combat::CurrentHealth,
+            &crate::map::DamageableLifeState,
+        ),
+        With<crate::matchplay::HeistSafe>,
+    >,
     mut owners: Query<
         (
             Entity,
@@ -651,7 +698,7 @@ pub(crate) fn tick_sentries(
                 (position.0, loadout.fighter_stats.reveal_proximity_radius)
             });
         if runtime.begin_acquisition_if_due(tick.0) {
-            runtime.set_target(stable_sentry_target(fighters.iter().filter_map(
+            let fighter_target = stable_sentry_target(fighters.iter().filter_map(
                 |(
                     target_position,
                     target_id,
@@ -719,59 +766,123 @@ pub(crate) fn tick_sentries(
                             });
                     Some((*target_id, distance_squared, visible))
                 },
-            )));
+            ));
+            if fighter_target.is_some() {
+                runtime.set_fighter_target(fighter_target);
+            } else {
+                runtime.set_objective_target(stable_sentry_objective_target(
+                    objectives.iter().filter_map(
+                        |(target_entity, target_position, target, safe, health, life)| {
+                            if safe.match_id != identity.match_id
+                                || safe.defending_team == identity.team_id
+                                || health.0 == 0
+                                || !matches!(life, crate::map::DamageableLifeState::Live)
+                            {
+                                return None;
+                            }
+                            let delta = target_position.0 - position.0;
+                            let visible = Dir2::new(delta.normalize_or_zero()).ok().is_some_and(
+                                |direction| {
+                                    spatial_query
+                                        .cast_ray(
+                                            position.0,
+                                            direction,
+                                            delta.length(),
+                                            true,
+                                            &avian2d::prelude::SpatialQueryFilter::from_mask(
+                                                crate::movement::STATIC_MAP_LAYER
+                                                    | crate::movement::DESTRUCTIBLE_MAP_LAYER,
+                                            )
+                                            .with_excluded_entities([target_entity]),
+                                        )
+                                        .is_none()
+                                },
+                            );
+                            Some((*target, delta.length_squared(), visible))
+                        },
+                    ),
+                ));
+            }
         }
         if !runtime.fire_is_due(tick.0) {
             continue;
         }
-        let Some(target_id) = runtime.target() else {
+        let Some(target) = runtime.target() else {
             continue;
         };
-        let Some((
-            target_position,
-            _,
-            _,
-            _,
-            _,
-            terrain,
-            field,
-            deadlines,
-            ability,
-            forced,
-            objective_carrier,
-        )) = fighters.iter().find(|(_, id, _, defeated, active, ..)| {
-            **id == target_id && defeated.is_none() && active.is_some()
-        })
-        else {
-            continue;
+        let (target_position, cue_target) = match target {
+            SentryTarget::Fighter(target_id) => {
+                let Some((
+                    target_position,
+                    _,
+                    _,
+                    _,
+                    _,
+                    terrain,
+                    field,
+                    deadlines,
+                    ability,
+                    forced,
+                    objective_carrier,
+                )) = fighters.iter().find(|(_, id, _, defeated, active, ..)| {
+                    **id == target_id && defeated.is_none() && active.is_some()
+                })
+                else {
+                    runtime.clear_target();
+                    continue;
+                };
+                let permitted = owner_view.is_some_and(|(owner_position, reveal_radius)| {
+                    crate::concealment::observer_can_see(
+                        crate::concealment::ObserverVisibilityInput {
+                            relation: crate::concealment::ObserverRelation::Enemy,
+                            observer_alive: true,
+                            concealment: if objective_carrier {
+                                crate::concealment::ConcealmentSources::NONE
+                            } else {
+                                crate::concealment::ConcealmentSources {
+                                    terrain: terrain.is_some(),
+                                    self_cloak: matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if tick.0 < expires_at_tick),
+                                    allied_field: field
+                                        .is_some_and(|value| !value.0.is_empty()),
+                                }
+                            },
+                            forced_revealed: forced.is_some_and(|sources| {
+                                sources.active_for_team(identity.team_id, tick.0)
+                            }),
+                            subject_reveal_locked: deadlines.is_some_and(|value| {
+                                crate::concealment::reveal_lock_active(tick.0, *value)
+                            }),
+                            distance_squared: owner_position
+                                .distance_squared(target_position.0),
+                            reveal_radius,
+                        },
+                    )
+                });
+                if !permitted {
+                    runtime.clear_target();
+                    continue;
+                }
+                (target_position.0, Some(target_id))
+            }
+            SentryTarget::ModeObjective(target_identity) => {
+                let Some((_, target_position, _, _, _, _)) =
+                    objectives
+                        .iter()
+                        .find(|(_, _, candidate, safe, health, life)| {
+                            **candidate == target_identity
+                                && safe.match_id == identity.match_id
+                                && safe.defending_team != identity.team_id
+                                && health.0 > 0
+                                && matches!(life, crate::map::DamageableLifeState::Live)
+                        })
+                else {
+                    runtime.clear_target();
+                    continue;
+                };
+                (target_position.0, None)
+            }
         };
-        let permitted = owner_view.is_some_and(|(owner_position, reveal_radius)| {
-            crate::concealment::observer_can_see(crate::concealment::ObserverVisibilityInput {
-                relation: crate::concealment::ObserverRelation::Enemy,
-                observer_alive: true,
-                concealment: if objective_carrier {
-                    crate::concealment::ConcealmentSources::NONE
-                } else {
-                    crate::concealment::ConcealmentSources {
-                        terrain: terrain.is_some(),
-                        self_cloak: matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if tick.0 < expires_at_tick),
-                        allied_field: field.is_some_and(|value| !value.0.is_empty()),
-                    }
-                },
-                forced_revealed: forced
-                    .is_some_and(|sources| sources.active_for_team(identity.team_id, tick.0)),
-                subject_reveal_locked: deadlines.is_some_and(|value| {
-                    crate::concealment::reveal_lock_active(tick.0, *value)
-                }),
-                distance_squared: owner_position.distance_squared(target_position.0),
-                reveal_radius,
-            })
-        });
-        if !permitted {
-            runtime.set_target(None);
-            continue;
-        }
-        let delta = target_position.0 - position.0;
+        let delta = target_position - position.0;
         let Some(direction) = delta.try_normalize() else {
             continue;
         };
@@ -804,7 +915,7 @@ pub(crate) fn tick_sentries(
             tick: tick.0,
             owner: identity.owner_network_id,
             deployable_id: identity.deployable_id,
-            target: target_id,
+            target: cue_target,
             position: crate::combat::WorldPoint::from(position.0),
             presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
         };

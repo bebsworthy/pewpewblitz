@@ -435,8 +435,10 @@ resolved safe anchors, authoritative persistent safe entities, hostile safe dama
 straight/lobbed/melee delivery plus dash contact, destruction/timeout evaluation, restart health
 and collider restoration, public replication, the three exact operator catalog entries, initial
 structural imported/primitive presentation, objective HUD/results text, and Balance Lab safe-health
-tuning. Focused compilation and tests are recorded below; sentry fallback, complete facts/cues/audio,
-full access-sector validation, recovery/network coverage, and final verification remain in progress.
+tuning. Sentries now retain stable hostile-fighter priority and fall back to an in-range,
+line-of-sight enemy safe only when no fighter qualifies. Focused compilation and tests are recorded
+below; complete facts/cues/audio, full access-sector validation, recovery/network coverage, and
+final verification remain in progress.
 
 - [ ] Add Heist IDs, rules/state/summary/cues, explicit mode plugin composition, and pure rule tests.
 - [ ] Extend target identity/class and terminal fact without routing safes through map-object
@@ -517,6 +519,8 @@ not replace authority, recovery, exact-once, and non-mutation tests.
   Twin Vaults anchor regression and client safe-visual catalog regression also passed.
 - The checked-in ten-entry operator catalog and its updated canonical revision regression passed.
 - Balance Lab web `npm run typecheck --prefix tools/balance-lab-web` passed.
+- The focused sentry-objective fallback regression passed, covering deterministic safe selection,
+  visibility/range rejection, and preservation of fighter-first priority.
 - `cargo check --workspace --all-targets --all-features` reaches the pre-existing experimental
   `owner-prediction` test incompatibility (`resolve_static_arena`/legacy snapshot geometry); the
   production server/client/balance-lab/network-test feature graph passes and M02 did not modify

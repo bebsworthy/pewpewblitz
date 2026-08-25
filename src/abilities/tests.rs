@@ -233,6 +233,48 @@ fn sentry_offsets_and_target_ties_are_stable() {
 
 #[cfg(feature = "server")]
 #[test]
+fn sentry_objective_fallback_is_stable_and_does_not_replace_fighter_priority() {
+    use crate::{
+        combat::TeamId,
+        map::{DamageableTargetIdentity, ModeAnchorId},
+        matchplay::MatchId,
+    };
+
+    let farther = DamageableTargetIdentity::HeistSafe {
+        match_id: MatchId(7),
+        anchor_id: ModeAnchorId(9),
+        defending_team: TeamId(1),
+    };
+    let stable_tie_winner = DamageableTargetIdentity::HeistSafe {
+        match_id: MatchId(7),
+        anchor_id: ModeAnchorId(3),
+        defending_team: TeamId(1),
+    };
+    assert_eq!(
+        sentry::stable_sentry_objective_target([
+            (farther, 100.0, true),
+            (stable_tie_winner, 100.0, true),
+        ]),
+        Some(stable_tie_winner)
+    );
+    assert_eq!(
+        sentry::stable_sentry_objective_target([
+            (stable_tie_winner, 1.0, false),
+            (farther, (SENTRY_ACQUISITION_RANGE + 1.0).powi(2), true),
+        ]),
+        None
+    );
+
+    let fighter = stable_sentry_target([(NetworkEntityId(4), 400.0, true)]);
+    assert_eq!(fighter, Some(NetworkEntityId(4)));
+    assert!(
+        fighter.is_some(),
+        "the authority path must consult an objective only when no fighter target exists"
+    );
+}
+
+#[cfg(feature = "server")]
+#[test]
 #[allow(clippy::too_many_lines)]
 fn charge_observer_accepts_only_hostile_primary_damage_and_is_idempotent() {
     use crate::combat::{CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind, TeamId};
@@ -466,18 +508,24 @@ fn sentry_acquisition_and_fire_cadence_are_independent_and_stable() {
         assert!(!runtime.begin_acquisition_if_due(tick));
     }
     assert!(runtime.begin_acquisition_if_due(106));
-    runtime.set_target(stable_sentry_target([
+    runtime.set_fighter_target(stable_sentry_target([
         (NetworkEntityId(9), 100.0, true),
         (NetworkEntityId(3), 100.0, true),
     ]));
-    assert_eq!(runtime.target(), Some(NetworkEntityId(3)));
+    assert_eq!(
+        runtime.target(),
+        Some(sentry::SentryTarget::Fighter(NetworkEntityId(3)))
+    );
     assert!(!runtime.begin_acquisition_if_due(111));
     assert!(runtime.begin_acquisition_if_due(112));
-    runtime.set_target(stable_sentry_target([
+    runtime.set_fighter_target(stable_sentry_target([
         (NetworkEntityId(3), 100.0, true),
         (NetworkEntityId(9), 100.0, true),
     ]));
-    assert_eq!(runtime.target(), Some(NetworkEntityId(3)));
+    assert_eq!(
+        runtime.target(),
+        Some(sentry::SentryTarget::Fighter(NetworkEntityId(3)))
+    );
 
     assert!(!runtime.fire_is_due(129));
     assert!(runtime.fire_is_due(130));

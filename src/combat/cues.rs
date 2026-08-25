@@ -230,7 +230,7 @@ pub enum CombatCue {
         tick: u64,
         owner: NetworkEntityId,
         deployable_id: crate::builds::DeployableId,
-        target: NetworkEntityId,
+        target: Option<NetworkEntityId>,
         position: WorldPoint,
         presentation_profile_id: WeaponPresentationProfileId,
     },
