@@ -37,6 +37,11 @@ pub(crate) enum ModeScoreView {
         progress_percent: [u8; 2],
         status: crate::matchplay::HotZoneStatus,
     },
+    Heist {
+        health: [u16; 2],
+        maximum: [u16; 2],
+        local_team: Option<TeamId>,
+    },
     Syncing,
 }
 
@@ -161,6 +166,12 @@ fn update_readiness_hud(
     controlled: Query<(&PlayerId, &TeamId), (With<Fighter>, With<Controlled>)>,
     matches: Query<(&MatchState, Option<&crate::matchplay::WipeoutState>), With<MatchRoot>>,
     hot_zones: Query<&crate::matchplay::HotZoneState, With<MatchRoot>>,
+    heist_states: Query<&crate::matchplay::HeistState, With<MatchRoot>>,
+    heist_safes: Query<(
+        &crate::matchplay::HeistSafe,
+        &crate::combat::CurrentHealth,
+        &crate::map::DamageableMaximumHealth,
+    )>,
     clocks: Query<&crate::matchplay::MatchClock, With<MatchRoot>>,
     participants: Query<&crate::matchplay::PublicParticipantState>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
@@ -260,7 +271,13 @@ fn update_readiness_hud(
         participants.iter(),
         &mut roster_presentation,
     );
-    let final_line = final_objective_line(match_state, hot_zones.iter().next());
+    let final_line = match_state.and_then(|(state, _)| {
+        if state.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
+            final_heist_objective_line(state, heist_states.iter().next(), heist_safes.iter())
+        } else {
+            final_objective_line(match_state, hot_zones.iter().next())
+        }
+    });
     for (mut text, mut visibility) in &mut phase_overlay {
         if let Some(label) = phase_overlay_label(
             match_state.map(|(state, _)| *state),
@@ -280,7 +297,19 @@ fn update_readiness_hud(
             *visibility = Visibility::Hidden;
         }
     }
-    let score_view = build_mode_score_view(match_state, hot_zones.iter().next(), clock);
+    let score_view = match_state.and_then(|(state, _)| {
+        if state.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
+            build_heist_score_view(
+                state,
+                heist_states.iter().next(),
+                heist_safes.iter(),
+                fighter.map(|(_, team)| *team),
+                clock,
+            )
+        } else {
+            build_mode_score_view(match_state, hot_zones.iter().next(), clock)
+        }
+    });
     for (mut text, mut visibility) in &mut match_text {
         text.0 = score_view.map_or_else(String::new, mode_score_text);
         *visibility = if match_state.is_some_and(|(state, _)| {
@@ -380,8 +409,78 @@ pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
                 progress_percent[0], progress_percent[1]
             )
         }
+        ModeScoreView::Heist {
+            health,
+            maximum,
+            local_team,
+        } => {
+            let percent =
+                |team: usize| u32::from(health[team]) * 100 / u32::from(maximum[team].max(1));
+            let labels = local_team.map_or(["T1", "T2"], |team| {
+                if team.0 == 0 {
+                    ["DEFEND T1", "ATTACK T2"]
+                } else {
+                    ["ATTACK T1", "DEFEND T2"]
+                }
+            });
+            format!(
+                "{}  {}/{} ({}%)\n{}  {}/{} ({}%)",
+                labels[0],
+                health[0],
+                maximum[0],
+                percent(0),
+                labels[1],
+                health[1],
+                maximum[1],
+                percent(1),
+            )
+        }
         ModeScoreView::Syncing => "SYNCING OBJECTIVE".to_string(),
     }
+}
+
+fn build_heist_score_view<'a>(
+    state: &MatchState,
+    heist: Option<&crate::matchplay::HeistState>,
+    safes: impl Iterator<
+        Item = (
+            &'a crate::matchplay::HeistSafe,
+            &'a crate::combat::CurrentHealth,
+            &'a crate::map::DamageableMaximumHealth,
+        ),
+    >,
+    local_team: Option<TeamId>,
+    clock: Option<&crate::matchplay::MatchClock>,
+) -> Option<ModeScoreView> {
+    if clock.is_none_or(|clock| clock.match_id != state.match_id)
+        || heist.is_none_or(|heist| heist.match_id != state.match_id)
+    {
+        return Some(ModeScoreView::Syncing);
+    }
+    let mut health = [0; 2];
+    let mut maximum = [0; 2];
+    let mut seen = [false; 2];
+    for (safe, current, max) in safes {
+        if safe.match_id != state.match_id || safe.defending_team.0 > 1 {
+            continue;
+        }
+        let index = usize::from(safe.defending_team.0);
+        if seen[index] {
+            return Some(ModeScoreView::Syncing);
+        }
+        seen[index] = true;
+        health[index] = current.0;
+        maximum[index] = max.0;
+    }
+    Some(if seen.into_iter().all(|value| value) {
+        ModeScoreView::Heist {
+            health,
+            maximum,
+            local_team,
+        }
+    } else {
+        ModeScoreView::Syncing
+    })
 }
 
 fn format_match_time(remaining_ticks: u64) -> String {
@@ -487,6 +586,49 @@ fn final_objective_line(
             ),
         _ => "UNKNOWN MODE".to_string(),
     })
+}
+
+fn final_heist_objective_line<'a>(
+    state: &MatchState,
+    heist: Option<&crate::matchplay::HeistState>,
+    safes: impl Iterator<
+        Item = (
+            &'a crate::matchplay::HeistSafe,
+            &'a crate::combat::CurrentHealth,
+            &'a crate::map::DamageableMaximumHealth,
+        ),
+    >,
+) -> Option<String> {
+    let heist = heist.filter(|heist| heist.match_id == state.match_id)?;
+    let mut health = [0; 2];
+    let mut maximum = [0; 2];
+    let mut seen = [false; 2];
+    for (safe, current, max) in safes {
+        if safe.match_id == state.match_id && safe.defending_team.0 <= 1 {
+            let index = usize::from(safe.defending_team.0);
+            if seen[index] {
+                return Some("SYNCING OBJECTIVE".to_string());
+            }
+            seen[index] = true;
+            health[index] = current.0;
+            maximum[index] = max.0;
+        }
+    }
+    if !seen.into_iter().all(|value| value) {
+        return Some("SYNCING OBJECTIVE".to_string());
+    }
+    let cause = match heist.completion {
+        Some(crate::matchplay::HeistCompletion::SafeDestroyed {
+            destroyed_teams: [true, true],
+        }) => "BOTH SAFES DESTROYED — DRAW",
+        Some(crate::matchplay::HeistCompletion::SafeDestroyed { .. }) => "SAFE DESTROYED",
+        Some(crate::matchplay::HeistCompletion::Timeout { .. }) => "TIME EXPIRED",
+        None => "HEIST COMPLETE",
+    };
+    Some(format!(
+        "{cause}\nFINAL  T1 {}/{}  T2 {}/{}",
+        health[0], maximum[0], health[1], maximum[1]
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

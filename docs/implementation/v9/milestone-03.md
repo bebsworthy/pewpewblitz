@@ -2,10 +2,34 @@
 
 ## Status
 
-**User playtest.** M02 completed and was accepted on 2026-08-24. M03 research and this
+**Complete.** M02 completed and was accepted on 2026-08-24. M03 research and this
 specification were prepared on 2026-08-24, the user approved implementation the same day, and the
 player-visible slice plus Balance Lab surface are implemented. Canonical check, lint, unit,
-separate-App network, soak, and performance gates pass; native gameplay feedback remains required.
+separate-App network, soak, and performance gates pass. Native feedback identified a saved-brawler
+catalog-authority defect; the user approved its remediation specification on 2026-08-24.
+
+The remediation is implemented: protocol version 25 carries a bounded, revisioned brawler catalog
+atomically with the profile; storage validates structure while lobby authority validates active
+content; the client clears/rebinds connection-scoped catalog state and drives saved-brawler names,
+statistics, choices, cycling, automation, and previews from the advertisement. Rejected create/edit
+mutations remain on their owning screen. Focused profile/catalog/protocol/client-flow, canonical
+role checks/lint, 513 all-feature library tests, 81 separate-App network tests, the routed catalog
+handoff test, and 11 performance gates pass. On 2026-08-24 the user confirmed that Concealment
+Field works in gameplay and accepted the revised full-screen brawler flow. Feedback is reconciled,
+the learning review is complete, and M03 closes V9.
+
+### Server-authoritative catalog verification — 2026-08-24
+
+- `just check` — pass for routing, client, server, network-test, Balance Lab, and web assets;
+- `just lint` — pass for formatting, all role-specific Clippy builds, server-feature isolation,
+  renderer isolation, and V8 map cleanup;
+- `cargo test --lib --all-features` — 513 passed;
+- `just test` — pass: routing/process suites, 366 client tests, 282 server tests, 292 Balance Lab
+  tests, the revised-catalog routed test, 81 separate-App network tests, and 11 performance tests;
+- the active lobby welcome with the advertised catalog stays under the existing 64 KiB bound, and
+  oversized game-type and brawler-catalog sequences fail during decode;
+- the server rejects an unadvertised fighter ID without changing storage, and synthetic
+  non-contiguous fighter/weapon IDs validate without range or modulo assumptions.
 
 ## Player-visible outcome
 
@@ -402,7 +426,7 @@ server could not validate.
   late-join reconciliation, and cleanup tests with no overhead text.
 - [x] Add pure, ECS, protocol, profile, Balance Lab, separate-App, routed, impairment, recovery,
   security, capacity, performance, and native evidence below.
-- [ ] Triage every playtest item, rerun affected gates, complete the V9 learning review, and obtain
+- [x] Triage every playtest item, rerun affected gates, complete the V9 learning review, and obtain
   user acceptance before marking M03 and V9 complete.
 
 ## Implementation and verification record — 2026-08-24
@@ -439,8 +463,11 @@ Passing evidence:
 - all 11 performance gates pass; the combined 100-effect/32-scatter/16-lob/32-blade case measured
   p95 2.932 ms on the local aarch64 macOS host.
 
-Native visual/controller evaluation and user feedback remain open, so neither M03 nor V9 is marked
-Complete.
+The user subsequently confirmed Concealment Field in gameplay and accepted the revised brawler
+screens. No controller-specific observation was reported; the existing automated input coverage
+and accepted native gameplay result are sufficient for this milestone, while controller and
+reduced/primitive presentation remain part of the ordinary regression matrix rather than an open
+V9 deliverable.
 
 ### Playtest feedback — 2026-08-24
 
@@ -470,6 +497,214 @@ Complete.
   the large fighter stage. The live render target moves from Dashboard to Details and returns when
   Details closes, avoiding a duplicate preview renderer. The provided Brawl Stars image was used
   only as broad hierarchy/layout direction, not as an asset or literal screen specification.
+- **Selecting Concealment Field appeared to save nothing, and creating a brawler with it produced
+  no list entry — implemented now.** The saved-profile model still bounded ultimate IDs to the
+  pre-M03 range `1..=4`, so authoritative storage rejected both mutations after the catalog and UI
+  had already exposed ultimate ID 5. Profile validation now accepts the complete V9 ultimate
+  inventory. Pure model and SQLite create/edit regressions cover Concealment Field explicitly.
+- **A newly created brawler could remain visually stuck on `SELECTING...` — implemented now.**
+  Brawler List and Details cached their rendered trees by profile revision but rendered controls
+  from a separate pending-request flag. They now include that flag in their render identity, so an
+  accepted or rejected server outcome immediately refreshes disabled controls. The client also
+  tracks whether the outstanding mutation is specifically a selection, preventing unrelated
+  create/edit/equipment requests from being mislabeled as selection. Membership replication no
+  longer clears an outstanding request before its matching authoritative outcome arrives.
+- **The selected brawler's `SELECTED FOR PLAY` action was disabled — implemented now.** The primary
+  action remains enabled when inspecting the active brawler and returns directly to the Dashboard
+  without sending a redundant selection mutation or advancing the authoritative profile revision.
+- **Ability and weapon customization appeared as cramped modal dialogs, and Delete exposed the
+  Dashboard behind its confirmation — implemented now.** Creation, ability customization, and
+  weapon customization are opaque edge-to-edge screens with fixed screen-edge Back/Save actions,
+  responsive wide/compact compositions, larger semantic sections, and touch-size controls. Weapon
+  customization separates equipped slots from its scrollable owned inventory while retaining the
+  live resolved preview. The small Delete confirmation remains contextual, but its originating
+  Brawler screen stays mounted visibly underneath with background actions disabled. The canonical
+  UX now bans substantial modal dialogs and permits only small, fully contextual overlays. Focused
+  client-flow regressions verify the opaque creation screen, both customization destinations, and
+  retained/disabled Brawler Details content beneath Delete confirmation; client test compilation,
+  Clippy with warnings denied, formatting, and diff hygiene pass.
+- **Native follow-up — accepted.** The user confirmed the revised full-screen brawler flow is
+  better and that Concealment Field works in their gameplay test. This supplies the outstanding
+  player-visible functional confirmation for field selection and activation. The remaining M03
+  work is closeout reconciliation and the learning review; no new gameplay defect was reported.
+
+### Feedback specification — server-authoritative brawler catalog
+
+#### Decision and outcome
+
+The selectable brawler inventory and its player-facing metadata become server authoritative and
+connection scoped. The client must not decide legal fighter-profile, weapon-base, ultimate, or
+mutable-passive IDs from numeric ranges, fixed arrays, or local display-name matches.
+
+After lobby admission, the client owns one validated snapshot advertised by that server and uses it
+for every Dashboard, Brawlers List, creation, editing, equipment, and accessibility choice. Profile
+commands continue to carry stable IDs rather than authored values. The lobby validates those IDs
+against the same active server catalog before persistence, and match admission resolves the saved
+facts against the same catalog again.
+
+This change centralizes product authority; it does not introduce downloadable gameplay code,
+server-delivered models, hot content replacement, rolling protocol compatibility, or support for an
+old client joining a server with unknown gameplay primitives. The existing exact application build,
+registry, and gameplay-content fingerprint handshake remains mandatory.
+
+#### Advertised catalog shape
+
+Add one shared, bounded `AdvertisedBrawlerCatalog` wire/domain shape. Proposed contents:
+
+```text
+AdvertisedBrawlerCatalog
+  revision/digest
+  limits
+    maximum saved brawlers
+    weapon-part slot count
+  fighter profiles [1..16]
+    stable FighterProfileId
+    bounded key and display name
+    authoritative displayed fighter stats
+  weapon bases [1..16]
+    stable WeaponBaseId
+    bounded key and display name
+    presentation profile key/id
+    authoritative base WeaponConfiguration needed for preview
+  ultimates [1..32]
+    stable UltimateDefinitionId
+    bounded key and display name
+    UltimateKind, activation style, and bounded parameters
+  passives [2..32]
+    stable PassiveDefinitionId
+    bounded key and display name
+    PassiveKind
+    saved-brawler-selectable flag
+```
+
+All collections receive decode-time element limits; keys, names, and any later summaries receive
+byte and grapheme limits. IDs must be nonzero and unique within their family. At least one fighter,
+one weapon, one ultimate, and two distinct selectable passives are required. Every weapon
+configuration and ability parameter is validated through its existing canonical rules before the
+server may advertise the snapshot. The canonical digest covers every advertised field and ordering
+is normalized by stable ID.
+
+The server derives this snapshot from its active `BuildCatalog`, `WeaponCatalog`, fighter-profile
+definitions, and saved-brawler policy. It is not a separately hand-maintained catalog. Frame-only
+passives are excluded from saved-brawler selection by `PassiveKind`/explicit eligibility rather
+than by assuming IDs `1..=2` and `3..=6`. Weapon display names come from `WeaponCatalog`; ultimate
+and passive names come from `BuildCatalog`. Fighter profile metadata gains one server-owned
+descriptor source so names, IDs, and displayed stats are no longer reconstructed in client code.
+
+#### Connection and protocol lifecycle
+
+`LobbyJoinOutcome::Accepted` carries the advertised brawler catalog beside the game-type catalog and
+profile snapshot. Keeping one accepted envelope makes installation atomic: the client either
+validates and installs membership, profile, game types, and brawler catalog together, or rejects the
+welcome and tears down the session.
+
+The implementation must prove the maximum profile snapshot (32 KiB), maximum advertised catalog,
+game-type catalog, and envelope overhead remain below `MAX_LOBBY_WELCOME_BYTES` (64 KiB). Start with
+a 16 KiB advertised-catalog bound. If measured worst-case encoding cannot satisfy the existing
+welcome limit, use one additional reliable ordered lobby-catalog message and keep Dashboard entry
+gated until both bounded pieces validate; do not silently raise transport/application bounds.
+
+The catalog is immutable for the accepted lobby session. A server content restart requires a fresh
+connection and compatibility handshake. Profile commands therefore do not need per-command catalog
+versions: they are already tied to the authenticated connection, and the server validates against
+that connection's active catalog. Dynamic in-session catalog replacement remains out of scope.
+
+Changing `LobbyJoinOutcome`, membership state, and registered wire shapes advances the one global
+`SUPPORTED_PROTOCOL_VERSION` and protocol-registry golden evidence. There is no old-message decoder
+or optional fallback field. The gameplay-content fingerprint remains the proof that client runtime
+code/assets understand the advertised kinds and configurations; the advertised digest proves the
+installed selection snapshot itself is canonical.
+
+#### Validation and storage ownership
+
+Split current profile validation into two explicit responsibilities:
+
+- structural validation owns names, stable-ID encoding, revisions, collection bounds, duplicate
+  brawlers/parts, selected ownership, equipment uniqueness, and snapshot byte bounds;
+- catalog validation owns whether fighter, weapon, ultimate, passive, and part-definition IDs exist,
+  are eligible for saved brawlers, and resolve into a legal loadout.
+
+`ProfileStorage` persists structurally valid facts and never defines content legality with ranges
+such as `1..=5`. `ProfileAuthority` owns catalog validation before submitting a mutation and after
+loading a stored snapshot. A stored profile that references content absent from the active server
+catalog fails closed with an explicit profile-content rejection; it is never silently rewritten,
+deleted, or replaced with defaults. The profile admin/restore path uses the same server catalog
+validator before declaring restored data usable.
+
+The client repeats structural and advertised-catalog consistency checks only to reject malformed or
+contradictory server data. That defensive check is not gameplay authority. Server mutation outcomes
+remain authoritative, and rejected create/edit operations stay on their owning screen with a visible
+reason rather than navigating away and hiding the failure.
+
+#### Client ECS and UI ownership
+
+Install the accepted snapshot as connection-scoped client state, either inside
+`ClientLobbyMembership` with a narrow accessor resource or as a resource bound atomically from that
+component. Clear it on disconnect, server change, rejected welcome, or lobby-generation replacement.
+No menu may fall back to embedded numeric inventories after connection.
+
+Creation initializes from the first advertised fighter, weapon, ultimate, and first two distinct
+selectable passives. Cycling walks the advertised stable-ID order with wraparound. Editing starts
+from the selected brawler's advertised entries and cycles only eligible alternatives. List/detail
+names, fighter stats, weapon-base preview, ultimate targeting labels, accessibility strings, and
+equipment applicability all resolve through the installed snapshot.
+
+Embedded client catalogs remain for compatible prediction/presentation code, asset lookup, and
+local previews where required by the current exact-fingerprint architecture. They may be cross-
+checked against the advertisement, but they no longer determine which saved-brawler options exist.
+Presentation assets remain client owned and are selected through bounded presentation keys/IDs;
+server metadata must never carry filesystem paths or Bevy handles.
+
+#### Implementation sequence
+
+1. Add bounded advertised catalog types, canonical validation/digest, server derivation, and focused
+   pure tests without changing the connection flow.
+2. Split structural profile validation from catalog validation. Inject the active server catalog
+   into `ProfileAuthority`; remove numeric fighter/weapon/ultimate/passive legality from storage
+   models while retaining fail-closed post-load validation.
+3. Extend `LobbyJoinOutcome::Accepted` and `ClientLobbyMembership`, bump the global protocol, add
+   decode bounds, and atomically validate catalog plus profile during admission.
+4. Add the connection-scoped client catalog resource and lifecycle cleanup/rebind behavior.
+5. Convert brawler creation, editing, list/detail presentation, accessible labels, and equipment
+   previews to advertised lookups and collection traversal. Remove `fighter_profile_name`,
+   `weapon_base_name`, numeric modulo/threshold cycling, and the temporary `1..=5` ultimate fix.
+6. Convert Balance Lab combination validation and supported automation fixtures to enumerate
+   authoritative catalogs. Handle or retire the legacy `--build-preset` mapping under the existing
+   `MAINT-LEGACY-BUILD-SYSTEM` boundary rather than making it another product catalog.
+7. Re-run protocol, role-isolation, profile persistence, routed lobby/match, UI/controller, size,
+   and native visual checks; then update feedback and learning evidence.
+
+#### Required verification
+
+- every advertised field changes the catalog digest; duplicate, zero, unsorted, oversized,
+  unsupported-kind, invalid-parameter, and insufficient-choice snapshots fail closed;
+- every advertised fighter × weapon × ultimate × distinct selectable-passive pair passes profile
+  catalog validation and saved-loadout resolution, while every non-advertised ID is rejected;
+- a synthetic catalog with non-contiguous IDs proves creation/edit navigation contains no ordinal,
+  modulo, fixed-count, or display-name assumptions;
+- maximum catalog plus maximum profile plus maximum game types fits the welcome bound and oversized
+  sequences fail during decode before allocation can exceed their cap;
+- accepted welcome installs catalog and profile together; malformed catalog, profile/catalog
+  disagreement, duplicate/conflicting welcome, reconnect, server change, and disconnect leave no
+  stale selectable state;
+- create and edit with Concealment Field pass through real client command, routed lobby authority,
+  SQLite persistence, returned snapshot, list/detail refresh, and match admission;
+- server rejects tampered/unadvertised IDs and queued mutations without storage changes; failed UI
+  mutations remain visible on the owning screen with actionable copy;
+- headless server builds retain no Bevy UI/assets, clients cannot author stats/configurations, and
+  match workers still accept only immutable lobby-resolved snapshots;
+- `just check`, `just lint`, full role-specific tests, separate-App network tests, routed E2E, and a
+  native mouse/controller/touch-layout pass succeed.
+
+#### Exit criteria
+
+- no production saved-brawler path contains numeric catalog ranges or fixed display-name tables;
+- the server-advertised snapshot is the sole source of selectable IDs and user-facing brawler
+  metadata after connection;
+- storage has no authored-content inventory and server authority validates every load/mutation;
+- current and synthetic non-contiguous catalogs pass the contract matrix;
+- protocol/bounds documentation and closeout learning explicitly record the authority correction;
+- the user confirms creation, editing, selection, and Concealment Field behavior in the native UI.
 
 ## Verification plan
 
@@ -532,13 +767,56 @@ Complete.
   caster-inside rule, ally entry/exit, proximity, reveal suppression/resumption, objective visibility,
   and no stale ring/fill/model/nameplate/shadow/audio.
 
-## User playtest handoff
+## Closeout learning review — 2026-08-24
 
-Prepared after automated verification. The intended scenario is `just run 2` for targeting and
-counter interaction, then a routed 2v2 Hot Zone match so one Concealment Field user can cover an
-ally while an opposing Reveal Scan user tests team-wide counterplay. The handoff will name the
-exact preset selections and request feedback on the provisional 480 range, 192 radius, six-second
-duration, public team readability, and whether proximity creates understandable counterplay.
+### What went wrong and why
+
+- The client exposed ultimate ID 5 while profile validation and display-name lookup still encoded
+  the older four-ultimate inventory. The content catalog had become authoritative for gameplay but
+  not for every selection and presentation surface, so duplicated numeric bounds drifted.
+- Saved-brawler screen render identities omitted pending-request state even though button labels and
+  enabled state depended on it. Profile membership could also arrive before the matching command
+  outcome and clear the generic pending marker, leaving `SELECTING...` visually stale.
+- Brawler editing reused the overlay shell intended for brief contextual questions. Opening Delete
+  replaced the details tree, so the Dashboard—not the invoking Brawler screen—was exposed beneath
+  the confirmation.
+- Initial closeout wording treated a named legacy full-build preset as if it were part of the active
+  saved-brawler product. That made the otherwise internal `Veilkeeper` fixture sound user-facing.
+- Field scheduling initially observed damage after lifecycle cleanup and catalog validation locked
+  tunable numeric defaults too tightly. Both issues came from tests covering each subsystem without
+  first asserting the cross-system schedule and tuning ownership contracts.
+
+### Corrections and prevention
+
+- The accepted lobby snapshot now carries one bounded server-authoritative brawler catalog. Client
+  choices, names, previews, and automation use stable advertised IDs; storage owns structure and
+  lobby authority owns active-content legality. Non-contiguous-ID and Concealment Field persistence
+  regressions prevent numeric-range assumptions from returning.
+- Every retained UI tree includes all non-local facts that affect its rendering. Selection pending
+  state is request-specific and clears only on its matching authoritative outcome; focused tests
+  cover accepted and rejected refreshes.
+- The canonical UX distinguishes opaque full-screen destinations from small contextual overlays.
+  A confirmation must retain its invoking screen visibly underneath and disable background actions.
+- Legacy full-build presets remain explicitly internal and are tracked for removal under
+  `MAINT-LEGACY-BUILD-SYSTEM`; active product copy describes saved brawlers and their loadouts.
+- Cross-source concealment schedule tests now assert damage observation, lifecycle cleanup, field
+  membership, and observer decisions in their actual fixed-tick order. Catalog tests lock stable
+  topology while Balance Lab-owned numeric values remain tunable within validated bounds.
+
+### Reusable conclusion
+
+Server authority includes discoverability metadata and legal selection inventory, not only runtime
+combat mutation. Likewise, UI state ownership includes navigation context and asynchronous request
+state, not only saved data. Future gameplay additions must therefore extend the authoritative
+catalog, persistence validation, render identity, and originating-screen lifecycle as one vertical
+slice before a player-facing selector is considered complete.
+
+## User playtest record
+
+The handoff used `just run 2` for targeting and counter interaction, with Hot Zone and tall grass
+available for concealment checks. After the saved-brawler creation, selection, catalog, and screen
+feedback was corrected, the user confirmed that Concealment Field works in gameplay and accepted
+the revised brawler flow. No further gameplay or readability defect was reported.
 
 ## Exit criteria
 
@@ -558,9 +836,9 @@ duration, public team readability, and whether proximity creates understandable 
 - every feedback item is implemented, deferred to the owning backlog, rejected with rationale, or
   marked as requiring evidence, and the user accepts M03 before M03 and V9 become Complete.
 
-## Specification decisions awaiting approval
+## Accepted specification decisions
 
-Approval of this M03 specification accepts these concrete decisions:
+M03 closed with these concrete decisions:
 
 1. the display name is **Concealment Field**, ultimate ID 5, cost 4, with the **Veilkeeper** preset;
 2. initial tuning is 480-unit range, 192-unit radius, and 360 ticks / 6 seconds;

@@ -28,10 +28,11 @@ use brawler::{
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
     map::{
-        AuthoritativeMapPlugin, MapCatalogResource, MapDynamicState, MapInstanceId,
+        AuthoritativeMapPlugin, ClientWorldObjectReadiness, DamageableTargetIdentity,
+        DamageableWorldObject, MapCatalogResource, MapDynamicState, MapInstanceId,
         MapInstanceMember, MapPlacementId, MapPlacementParameters, MapPresetId as ArenaPresetId,
-        MapRoot, PlayableBounds, ResolvedMap, ResolvedMapSnapshot, SpawnAssignment,
-        SpawnPointCatalog, install_resolved_map,
+        MapRoot, PendingWorldTargetDamage, PendingWorldTargetDamages, PlayableBounds, ResolvedMap,
+        ResolvedMapSnapshot, SpawnAssignment, SpawnPointCatalog, install_resolved_map,
     },
     matchplay::{
         ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot as MatchRootMarker,

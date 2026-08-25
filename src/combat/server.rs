@@ -5,7 +5,7 @@ use super::*;
 
 pub(super) const MAX_ACTIVE_ATTACK_TRACKERS: usize = 512;
 
-pub(super) fn reserve_event_ids(
+pub(crate) fn reserve_event_ids(
     ids: &mut NextCombatIds,
     count: usize,
 ) -> Option<Vec<CombatEventId>> {
@@ -56,6 +56,7 @@ impl Plugin for ServerCombatPlugin {
             .init_resource::<CombatOutcomeFacts>()
             .init_resource::<CombatWorldEffectFacts>()
             .init_resource::<CombatEvidenceSnapshots>()
+            .init_resource::<crate::matchplay::PendingModeObjectiveDamages>()
             .init_resource::<CombatSummaryLogged>()
             .insert_resource(CombatEvidenceMode {
                 enabled: env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1"),
@@ -63,6 +64,17 @@ impl Plugin for ServerCombatPlugin {
             .add_message::<MeleeAttack>()
             .add_message::<PendingPayload>()
             .add_message::<PendingDelivery>()
+            .configure_sets(
+                FixedPostUpdate,
+                (
+                    CombatDamageSet::Combatants,
+                    CombatDamageSet::WorldTargets.after(CombatDamageSet::Combatants),
+                    CombatDamageSet::ModeObjectives.after(CombatDamageSet::WorldTargets),
+                    CombatDamageSet::EnvironmentReactions.after(CombatDamageSet::ModeObjectives),
+                    CombatDamageSet::Publish.after(CombatDamageSet::EnvironmentReactions),
+                )
+                    .in_set(CombatSet::Damage),
+            )
             .add_systems(
                 Startup,
                 (
@@ -89,10 +101,10 @@ impl Plugin for ServerCombatPlugin {
                     sweep_composed_projectiles
                         .after(avian2d::prelude::PhysicsSystems::StepSimulation)
                         .in_set(CombatSet::ProjectileSweep),
-                    resolve_melee_attacks.in_set(CombatSet::Damage),
+                    resolve_melee_attacks.in_set(CombatDamageSet::Combatants),
                     resolve_composed_payloads
                         .after(resolve_melee_attacks)
-                        .in_set(CombatSet::Damage),
+                        .in_set(CombatDamageSet::Combatants),
                     flush_completed_attack_telemetry.in_set(CombatSet::TelemetryAndCues),
                     send_combat_cues.in_set(CombatSet::TelemetryAndCues),
                     publish_authoritative_tick

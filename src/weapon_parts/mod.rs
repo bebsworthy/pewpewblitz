@@ -14,7 +14,9 @@ pub use model::{
     WeaponPartDefinitionId, WeaponPartEffect, WeaponPartInstance, WeaponPartInstanceId,
     WeaponPartModelError,
 };
-pub use resolver::{aggregate_weapon_part_effects, resolve_weapon_parts};
+pub use resolver::{
+    aggregate_weapon_part_effects, resolve_advertised_weapon_parts, resolve_weapon_parts,
+};
 
 #[cfg(test)]
 mod tests;

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::combat::{
     DeliveryMethod, EngineWeaponLimits, PayloadEffectDefinition, RecipientPolicy, SlowStacking,
-    WeaponCatalog, WeaponConfiguration, WeaponEconomy, WeaponPresetId,
+    WeaponCatalog, WeaponConfiguration, WeaponEconomy, WeaponPresetId, WeaponRecipePolicy,
 };
 
 pub fn aggregate_weapon_part_effects(
@@ -96,6 +96,25 @@ pub fn resolve_weapon_parts(
         configuration,
         fighter,
         weapons.recipe_policy.clone(),
+        EngineWeaponLimits::default(),
+    )
+    .map_err(|_| WeaponPartModelError::IncompatibleWeapon)
+}
+
+pub fn resolve_advertised_weapon_parts(
+    configuration: &WeaponConfiguration,
+    policy: &WeaponRecipePolicy,
+    fighter: &crate::combat::FighterDefinition,
+    base: WeaponPresetId,
+    modifiers: CanonicalWeaponModifiers,
+) -> Result<crate::combat::ResolvedWeapon, WeaponPartModelError> {
+    let mut configuration = configuration.clone();
+    apply_modifiers(&mut configuration, modifiers)?;
+    crate::combat::definitions::resolve_configuration_with_policy(
+        Some(base),
+        configuration,
+        fighter,
+        policy.clone(),
         EngineWeaponLimits::default(),
     )
     .map_err(|_| WeaponPartModelError::IncompatibleWeapon)

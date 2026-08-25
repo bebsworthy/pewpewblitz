@@ -259,6 +259,13 @@ checks should exercise supported modes, maps/themes, aspect ratios and UI scales
 fallback paths, Dashboard preview, defeat/respawn, map destruction, objectives, and representative
 combat density.
 
+Imported map-object scale is validated from intrinsic asset bounds after the complete parent/child
+transform chain, not from a profile number in isolation. A nearby authored tile provides a native
+size reference when footprint readability matters. Static materialization and dynamic replacement
+must share one runtime classification so an HP-bearing object cannot leave an obscuring static
+duplicate. Imported and primitive-fallback transforms receive separate focused regressions when
+their fitting rules differ.
+
 ## Envisioned direction
 
 - a coherent original PewPew Blitz environment, fighter, weapon, animation, VFX, UI, icon,

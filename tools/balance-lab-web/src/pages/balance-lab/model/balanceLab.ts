@@ -28,11 +28,22 @@ export interface UltimateTuning extends JsonObject {
   parameters: JsonObject;
 }
 
+export interface BarrelTuning extends JsonObject {
+  damageProfile: JsonObject;
+  explosionProfile: JsonObject;
+}
+
+export interface HeistTuning extends JsonObject {
+  safeMaximumHealth: number;
+}
+
 export interface BalanceLabSnapshot extends JsonObject {
   schemaVersion: number;
   fighterProfiles: FighterProfiles;
   weapons: WeaponTuning[];
   ultimates: UltimateTuning[];
+  barrel: BarrelTuning;
+  heist: HeistTuning;
 }
 
 export interface TransactionView {

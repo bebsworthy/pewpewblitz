@@ -1,5 +1,5 @@
 (
-    schema_version: 4,
+    schema_version: 5,
     assets: [
         (
             id: MapAssetId(1), key: "ground", display_name: "Ground", slot: Surface,
@@ -151,6 +151,20 @@
         (
             id: MapAssetId(23), key: "decoration-lantern", display_name: "Lantern", slot: Decoration,
             gameplay_profile_id: MapGameplayProfileId(1), visual_profile_id: MapVisualProfileId(23),
+            footprint_cells: (width: 1, height: 1),
+            allowed_quarter_turns: 15, surface_tag: None,
+            allowed_surface_tags: [MapSurfaceTagId(1)], parameter_kind: None,
+        ),
+        (
+            id: MapAssetId(24), key: "oil-barrel", display_name: "Oil Barrel", slot: Feature,
+            gameplay_profile_id: MapGameplayProfileId(9), visual_profile_id: MapVisualProfileId(37),
+            footprint_cells: (width: 1, height: 1),
+            allowed_quarter_turns: 15, surface_tag: None,
+            allowed_surface_tags: [MapSurfaceTagId(1)], parameter_kind: None,
+        ),
+        (
+            id: MapAssetId(25), key: "barrel-wood-debris", display_name: "Barrel Wood Debris", slot: Feature,
+            gameplay_profile_id: MapGameplayProfileId(1), visual_profile_id: MapVisualProfileId(38),
             footprint_cells: (width: 1, height: 1),
             allowed_quarter_turns: 15, surface_tag: None,
             allowed_surface_tags: [MapSurfaceTagId(1)], parameter_kind: None,

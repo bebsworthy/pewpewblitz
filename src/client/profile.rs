@@ -8,7 +8,9 @@ use std::collections::VecDeque;
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ClientProfileModel {
     snapshot: Option<crate::profiles::ProfileSnapshot>,
+    catalog: Option<crate::profiles::AdvertisedBrawlerCatalog>,
     pending_request_id: Option<u64>,
+    pending_selection_id: Option<crate::profiles::SavedBrawlerId>,
     next_request_id: u64,
     outbound: VecDeque<crate::profiles::ProfileCommand>,
     last_decision: Option<crate::profiles::ProfileDecision>,
@@ -21,8 +23,18 @@ impl ClientProfileModel {
     }
 
     #[must_use]
+    pub fn catalog(&self) -> Option<&crate::profiles::AdvertisedBrawlerCatalog> {
+        self.catalog.as_ref()
+    }
+
+    #[must_use]
     pub const fn pending(&self) -> bool {
         self.pending_request_id.is_some()
+    }
+
+    #[must_use]
+    pub fn selection_pending(&self, brawler_id: crate::profiles::SavedBrawlerId) -> bool {
+        matches!(self.pending_selection_id, Some(pending_id) if pending_id == brawler_id)
     }
 
     pub fn take_decision(&mut self) -> Option<crate::profiles::ProfileDecision> {
@@ -32,6 +44,15 @@ impl ClientProfileModel {
     #[cfg(test)]
     pub(crate) fn set_snapshot_for_test(&mut self, snapshot: crate::profiles::ProfileSnapshot) {
         self.snapshot = Some(snapshot);
+        self.pending_request_id = None;
+        self.pending_selection_id = None;
+        self.catalog = Some(
+            crate::profiles::AdvertisedBrawlerCatalog::from_content(
+                &crate::builds::BuildCatalog::embedded().expect("embedded build catalog"),
+                &crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog"),
+            )
+            .expect("embedded brawler advertisement"),
+        );
     }
 
     pub fn create(&mut self, draft: crate::profiles::BrawlerDraft) -> bool {
@@ -88,6 +109,7 @@ impl ClientProfileModel {
         let Some(request_id) = self.begin_request() else {
             return false;
         };
+        self.pending_selection_id = Some(brawler_id);
         self.outbound
             .push_back(crate::profiles::ProfileCommand::SelectBrawler {
                 request_id,
@@ -162,6 +184,7 @@ impl ClientProfileModel {
         let request_id = self.next_request_id.checked_add(1)?;
         self.next_request_id = request_id;
         self.pending_request_id = Some(request_id);
+        self.pending_selection_id = None;
         self.last_decision = None;
         Some(request_id)
     }
@@ -174,6 +197,7 @@ impl Plugin for ClientProfilePlugin {
         app.init_resource::<ClientProfileModel>().add_systems(
             Update,
             (
+                clear_profile_when_membership_ends,
                 bind_profile_snapshot,
                 receive_profile_outcomes,
                 send_profile_commands,
@@ -184,13 +208,22 @@ impl Plugin for ClientProfilePlugin {
     }
 }
 
+fn clear_profile_when_membership_ends(
+    mut removed: RemovedComponents<ClientLobbyMembership>,
+    mut model: ResMut<ClientProfileModel>,
+) {
+    if removed.read().next().is_some() {
+        *model = ClientProfileModel::default();
+    }
+}
+
 fn bind_profile_snapshot(
     memberships: Query<&ClientLobbyMembership, (With<Client>, Changed<ClientLobbyMembership>)>,
     mut model: ResMut<ClientProfileModel>,
 ) {
     for membership in &memberships {
         model.snapshot = Some(membership.profile.clone());
-        model.pending_request_id = None;
+        model.catalog = Some(membership.brawler_catalog.clone());
     }
 }
 
@@ -210,8 +243,18 @@ fn receive_profile_outcomes(
                 continue;
             }
             model.pending_request_id = None;
+            model.pending_selection_id = None;
             model.last_decision = Some(outcome.decision.clone());
             if let Some(snapshot) = outcome.snapshot {
+                let snapshot_valid = snapshot.validate_bounded().is_ok()
+                    && model
+                        .catalog
+                        .as_ref()
+                        .is_some_and(|catalog| catalog.validate_profile(&snapshot).is_ok());
+                if !snapshot_valid {
+                    model.last_decision = Some(crate::profiles::ProfileDecision::StorageFault);
+                    continue;
+                }
                 membership.profile = snapshot.clone();
                 model.snapshot = Some(snapshot);
             }
@@ -244,15 +287,37 @@ fn create_automation_default_brawler(
     {
         return;
     }
-    let weapon = config.build_preset.unwrap_or(1).clamp(1, 4);
+    let Some(catalog) = model.catalog() else {
+        return;
+    };
+    let requested_weapon = config
+        .build_preset
+        .and_then(|id| catalog.weapon(crate::profiles::WeaponBaseId(id)))
+        .or_else(|| catalog.weapon_bases.first());
+    let Some((fighter, weapon, ultimate, passive_ids)) = catalog
+        .fighter_profiles
+        .first()
+        .zip(requested_weapon)
+        .zip(catalog.ultimates.first())
+        .and_then(|((fighter, weapon), ultimate)| {
+            let mut passives = catalog
+                .selectable_passives()
+                .map(|definition| definition.id);
+            Some((
+                fighter.id,
+                weapon.id,
+                ultimate.id,
+                [passives.next()?, passives.next()?],
+            ))
+        })
+    else {
+        return;
+    };
     let _ = model.create(crate::profiles::BrawlerDraft {
         name: "Automation Brawler".into(),
-        fighter_profile_id: crate::profiles::FighterProfileId(1),
-        weapon_base_id: crate::profiles::WeaponBaseId(weapon),
-        ultimate_id: crate::builds::UltimateDefinitionId(1),
-        passive_ids: [
-            crate::builds::PassiveDefinitionId(3),
-            crate::builds::PassiveDefinitionId(4),
-        ],
+        fighter_profile_id: fighter,
+        weapon_base_id: weapon,
+        ultimate_id: ultimate,
+        passive_ids,
     });
 }

@@ -86,12 +86,29 @@ pub(crate) struct DashRuntime {
     clippy::too_many_lines,
     clippy::type_complexity
 )]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the authoritative Bevy activation system coordinates input, collision, fighter state, telemetry, and one world-target request"
+)]
 pub(crate) fn activate_dash(
     mut commands: bevy::prelude::Commands,
     tick: bevy::prelude::Res<crate::timing::SimulationTick>,
     spatial_query: avian2d::prelude::SpatialQuery,
     mut ids: bevy::prelude::ResMut<crate::combat::NextCombatIds>,
     mut telemetry: bevy::prelude::ResMut<crate::abilities::AbilityTelemetry>,
+    mut world_pending: bevy::prelude::ResMut<crate::map::PendingWorldTargetDamages>,
+    mut objective_pending: bevy::prelude::ResMut<crate::matchplay::PendingModeObjectiveDamages>,
+    objects: bevy::prelude::Query<
+        (
+            &crate::map::DamageableTargetIdentity,
+            &crate::combat::CurrentHealth,
+            &crate::map::DamageableLifeState,
+        ),
+        bevy::prelude::Or<(
+            bevy::prelude::With<crate::map::DamageableWorldObject>,
+            bevy::prelude::With<crate::matchplay::HeistSafe>,
+        )>,
+    >,
     mut fighters: bevy::prelude::Query<
         (
             bevy::prelude::Entity,
@@ -196,15 +213,16 @@ pub(crate) fn activate_dash(
                 | crate::movement::PLAYER_ONLY_MAP_LAYER,
         )
         .with_excluded_entities([entity]);
-        let distance = spatial_query
-            .cast_shape(
-                &Collider::circle(24.0),
-                position.0,
-                rotation.as_radians(),
-                direction_dir,
-                &ShapeCastConfig::from_max_distance(DASH_MAX_DISTANCE),
-                &filter,
-            )
+        let collision = spatial_query.cast_shape(
+            &Collider::circle(24.0),
+            position.0,
+            rotation.as_radians(),
+            direction_dir,
+            &ShapeCastConfig::from_max_distance(DASH_MAX_DISTANCE),
+            &filter,
+        );
+        let distance = collision
+            .as_ref()
             .map_or(DASH_MAX_DISTANCE, |hit| hit.distance.max(0.0));
         let Some(endpoint) = bounded_dash_endpoint(position.0, direction, distance) else {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -246,6 +264,36 @@ pub(crate) fn activate_dash(
             origin: crate::combat::WorldPoint::from(position.0),
             facing: rotation.as_radians(),
         };
+        if let Some(hit) = collision
+            && let Ok((identity, health, life)) = objects.get(hit.entity)
+            && crate::map::object_is_live(*health, *life)
+        {
+            match *identity {
+                crate::map::DamageableTargetIdentity::MapObject { .. } => {
+                    world_pending.0.push(crate::map::PendingWorldTargetDamage {
+                        target: *identity,
+                        source,
+                        attack_id,
+                        requested_damage: 35,
+                        delivery_index: 0,
+                        bundle_index: 0,
+                        effect_index: 0,
+                    });
+                }
+                crate::map::DamageableTargetIdentity::HeistSafe { .. } => {
+                    objective_pending
+                        .0
+                        .push(crate::matchplay::PendingModeObjectiveDamage {
+                            target: *identity,
+                            source,
+                            requested_damage: 35,
+                            delivery_index: 0,
+                            bundle_index: 0,
+                            effect_index: 0,
+                        });
+                }
+            }
+        }
         commands
             .entity(entity)
             .insert(DashRuntime {

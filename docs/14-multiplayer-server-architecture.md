@@ -29,8 +29,9 @@ One logical Brawler server consists of:
 1. One **supervisor/router process** owning the public UDP socket, routing capabilities, bounded
    route and worker registries, host admission, child handles, and shutdown coordination.
 2. One long-lived **lobby worker process** owning a headless Bevy `App`/`World`, Lightyear
-   authority for game types, sessions, profiles, queues, and reservations, plus the exclusive
-   bounded SQLite profile-storage executor—not match simulation. It
+   authority for game types, sessions, profiles, the server-derived advertised brawler catalog,
+   queues, and reservations, plus the exclusive bounded SQLite profile-storage executor—not match
+   simulation. It
    requests host admission and match-worker allocation from the supervisor. Embedding the lobby in
    the supervisor is a deviation that must return to specification review with measured evidence;
    it is not the default topology.
@@ -174,8 +175,11 @@ The immutable match manifest contains match/game-type identity, protocol/content
 mode, map/seed, rules, topology, accepted participants and opaque immutable V3 loadout snapshots,
 route identities, and declared limits. It contains no account ID, profile cache, or database path.
 The lobby manifest instead contains logical-server identity, its lobby-only profile database path,
-game-type catalog/configuration fingerprints, default-route identity, declared limits, and restart/reconciliation inputs. Each worker
-validates its role-specific manifest completely before reporting readiness or accepting a client.
+game-type catalog/configuration fingerprints, default-route identity, declared limits, and
+restart/reconciliation inputs. From its validated active build and weapon content, the lobby derives
+the bounded brawler advertisement used for both profile legality and client presentation. Each
+worker validates its role-specific manifest completely before reporting readiness or accepting a
+client.
 
 ## Authority and ownership boundaries
 
@@ -183,7 +187,8 @@ validates its role-specific manifest completely before reporting readiness or ac
 |---|---|
 | Public UDP socket and route envelope | Supervisor/router |
 | Route capability creation, validation, expiry, revocation | Supervisor from validated lobby allocation input |
-| Game-type catalog, queue tickets, formation, reservation | Lobby authority |
+| Game-type and advertised brawler catalogs, profile content validation, queue tickets, formation, reservation | Lobby authority |
+| Saved-profile structural persistence and atomic load/store | Lobby-owned storage executor |
 | Host worker count and resource admission | Supervisor |
 | Match manifest validation | Worker |
 | Match ECS, physics, map, terrain, modes, combat, results | Worker authoritative world |

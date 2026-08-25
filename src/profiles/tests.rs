@@ -71,6 +71,25 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
 }
 
 #[test]
+fn concealment_field_is_valid_for_saved_brawler_creation_and_editing() {
+    let draft = BrawlerDraft {
+        name: "Field Keeper".into(),
+        fighter_profile_id: FighterProfileId(1),
+        weapon_base_id: WeaponBaseId(1),
+        ultimate_id: UltimateDefinitionId(5),
+        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
+    };
+    assert_eq!(draft.clone().normalized().unwrap(), draft);
+
+    let edit = BrawlerEdit {
+        name: "Field Keeper Edited".into(),
+        ultimate_id: UltimateDefinitionId(5),
+        passive_ids: [PassiveDefinitionId(4), PassiveDefinitionId(5)],
+    };
+    assert_eq!(edit.clone().normalized().unwrap(), edit);
+}
+
+#[test]
 fn v3_part_snapshot_stays_inside_the_routing_bound() {
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
@@ -197,6 +216,61 @@ fn sqlite_profile_crud_is_transactional_and_recovers() {
     drop(store);
     let mut reopened = ProfileStorage::open(&database).unwrap();
     assert_eq!(reopened.load_or_create(account).unwrap(), deleted);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn sqlite_persists_concealment_field_on_create_and_edit() {
+    let database = path("concealment-field");
+    let account = AccountId::new(102).unwrap();
+    let first_id = SavedBrawlerId::new(201).unwrap();
+    let second_id = SavedBrawlerId::new(202).unwrap();
+    let mut store = ProfileStorage::open(&database).unwrap();
+    let empty = store.load_or_create(account).unwrap();
+    let mut field_draft = draft("Created Field", 1, 1);
+    field_draft.ultimate_id = UltimateDefinitionId(5);
+    let created = store
+        .create_brawler(account, empty.revision, first_id, field_draft)
+        .unwrap();
+    assert_eq!(created.brawlers[0].ultimate_id, UltimateDefinitionId(5));
+
+    let with_second = store
+        .create_brawler(
+            account,
+            created.revision,
+            second_id,
+            draft("Editable", 2, 2),
+        )
+        .unwrap();
+    let editable = with_second
+        .brawlers
+        .iter()
+        .find(|brawler| brawler.id == second_id)
+        .unwrap();
+    let edited = store
+        .edit_brawler(
+            account,
+            with_second.revision,
+            second_id,
+            editable.revision,
+            BrawlerEdit {
+                name: editable.name.clone(),
+                ultimate_id: UltimateDefinitionId(5),
+                passive_ids: editable.passive_ids,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        edited
+            .brawlers
+            .iter()
+            .find(|brawler| brawler.id == second_id)
+            .unwrap()
+            .ultimate_id,
+        UltimateDefinitionId(5)
+    );
+    drop(store);
     std::fs::remove_file(database).unwrap();
 }
 
@@ -375,6 +449,21 @@ fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
     assert_eq!(loaded.account_id, account);
     assert!(loaded.brawlers.is_empty());
     assert_eq!(loaded.inventory.len(), 8);
+
+    let unadvertised = ProfileCommand::CreateBrawler {
+        request_id: 1,
+        expected_profile_revision: ProfileRevision::INITIAL,
+        draft: draft("Tampered", 99, 3),
+    };
+    assert_eq!(
+        authority.submit_command(7, unadvertised, false).unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            request_id: 1,
+            decision: ProfileDecision::InvalidRequest,
+            snapshot: None,
+        })
+    );
+    assert!(authority.snapshot(7).unwrap().brawlers.is_empty());
 
     let create = ProfileCommand::CreateBrawler {
         request_id: 1,

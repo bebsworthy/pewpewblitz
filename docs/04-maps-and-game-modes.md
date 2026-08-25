@@ -187,14 +187,14 @@ The model reserves concealment regions for tall grass, bushes, smoke, darkness, 
 similar mechanics. All sources must feed one server-owned observer-versus-subject visibility
 decision. Clients do not declare themselves concealed or decide which opponents they may observe.
 
-Static concealment geometry may be public while a hidden fighter's live spatial state remains
-private. Implementing concealment requires explicit proximity, ally, attack, damage,
+Static concealment geometry is public while a hidden fighter's live spatial state remains private.
+The implemented contract defines proximity, ally, attack, damage,
 objective-carrier, spectator, projectile, audio, and reappearance rules, plus verification that
 related replication cannot leak hidden state. See
 [Network architecture](./08-network-architecture.md#interest-management-and-concealment) and the
-[V9 concealment and reveal specification](./17-concealment.md). V9 M01 deliberately promotes the
-existing `TALL_GRASS` identity into concealing terrain now that the required observer-specific
-privacy rule is being implemented.
+[V9 concealment and reveal specification](./17-concealment.md). Completed V9 M01 promoted the
+existing `TALL_GRASS` identity into concealing terrain through the required observer-specific
+privacy rule.
 
 ## Match topology and capacity
 
@@ -239,10 +239,15 @@ are not coupled to one scoring model.
 
 ## Envisioned mode families
 
-These are product candidates, not supported rules merely because their layouts can be described:
+These layouts do not become supported rules merely because they can be described. Heist has been
+selected for the gated, not-started [V10 roadmap](./implementation/v10/roadmap.md) and is governed by
+the [damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md);
+it remains unsupported until that roadmap is implemented and accepted. The other families remain
+product candidates:
 
 - **Heist:** teams attack an opposing durable objective while defending their own. It adds objective
-  health, attack/defense lanes, and objective-specific damage policy.
+  health, attack/defense lanes, and objective-specific damage policy. The selected first version is
+  one simultaneous mirrored round with two typed team-safe anchors, not alternating roles.
 - **Gem Grab:** teams collect and carry a contested resource. It adds spawn cadence, carrier state,
   drops, visibility pressure, and a threshold/hold win sequence.
 - **Showdown:** solo fighters or teams survive until one remains. It adds elimination, distributed

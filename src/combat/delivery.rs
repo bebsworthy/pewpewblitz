@@ -78,6 +78,29 @@ pub fn repaired_landing_point(
 }
 
 #[cfg(feature = "server")]
+pub(super) fn queue_damageable_target(
+    world: &mut crate::map::PendingWorldTargetDamages,
+    objectives: &mut crate::matchplay::PendingModeObjectiveDamages,
+    request: crate::map::PendingWorldTargetDamage,
+) {
+    match request.target {
+        crate::map::DamageableTargetIdentity::MapObject { .. } => world.0.push(request),
+        crate::map::DamageableTargetIdentity::HeistSafe { .. } => {
+            objectives
+                .0
+                .push(crate::matchplay::PendingModeObjectiveDamage {
+                    target: request.target,
+                    source: request.source,
+                    requested_damage: request.requested_damage,
+                    delivery_index: request.delivery_index,
+                    bundle_index: request.bundle_index,
+                    effect_index: request.effect_index,
+                });
+        }
+    }
+}
+
+#[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 #[allow(
@@ -92,6 +115,8 @@ pub(super) fn sweep_composed_projectiles(
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut telemetry: ResMut<WeaponTelemetry>,
     mut pending: MessageWriter<PendingPayload>,
+    mut world_pending: ResMut<crate::map::PendingWorldTargetDamages>,
+    mut objective_pending: ResMut<crate::matchplay::PendingModeObjectiveDamages>,
     mut deliveries: MessageWriter<PendingDelivery>,
     mut projectiles: Query<(
         Entity,
@@ -109,6 +134,19 @@ pub(super) fn sweep_composed_projectiles(
             Option<&lightyear::prelude::ControlledBy>,
         ),
         Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+    >,
+    objects: Query<
+        (
+            Entity,
+            &Position,
+            &crate::map::DamageableTargetIdentity,
+            &CurrentHealth,
+            &crate::map::DamageableLifeState,
+        ),
+        Or<(
+            With<crate::map::DamageableWorldObject>,
+            With<crate::matchplay::HeistSafe>,
+        )>,
     >,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     walls: Query<Entity, With<ArenaWall>>,
@@ -132,6 +170,12 @@ pub(super) fn sweep_composed_projectiles(
                 )
             },
         )
+        .collect();
+    let object_lookup: HashMap<_, _> = objects
+        .iter()
+        .map(|(entity, position, identity, health, life)| {
+            (entity, (position.0, *identity, *health, *life))
+        })
         .collect();
     // Static authoritative geometry stops projectiles: permanent map colliders (the
     // ArenaWall entities) and destructible chunk colliders alike, so cover works and
@@ -196,9 +240,12 @@ pub(super) fn sweep_composed_projectiles(
                 runtime.delivery_index,
                 &runtime.recipe,
                 &fighters,
+                &objects,
                 &disconnected,
                 &spatial_query,
                 &mut pending,
+                &mut world_pending,
+                &mut objective_pending,
             );
             deliveries.write(PendingDelivery {
                 entity: Some(entity),
@@ -259,7 +306,12 @@ pub(super) fn sweep_composed_projectiles(
             &filter,
             &|candidate| {
                 fighter_lookup.get(&candidate).map_or_else(
-                    || blocking_geometry.contains(&candidate),
+                    || {
+                        object_lookup.get(&candidate).map_or_else(
+                            || blocking_geometry.contains(&candidate),
+                            |(_, _, health, life)| crate::map::object_is_live(*health, *life),
+                        )
+                    },
                     |(_, team, _, defeated, owner_disconnected)| {
                         teams_are_hostile(runtime.source.team_id, *team)
                             && !defeated
@@ -311,6 +363,46 @@ pub(super) fn sweep_composed_projectiles(
                 });
             }
         }
+        if let Some((_, identity, health, life)) = object_lookup.get(&hit.entity).copied()
+            && crate::map::object_is_live(health, life)
+        {
+            for (bundle_index, bundle) in runtime
+                .recipe
+                .payload_bundles
+                .iter()
+                .enumerate()
+                .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Direct))
+            {
+                for (effect_index, effect) in bundle.effects.iter().enumerate() {
+                    let PayloadEffectDefinition::Damage {
+                        amount, falloff, ..
+                    } = *effect
+                    else {
+                        continue;
+                    };
+                    queue_damageable_target(
+                        &mut world_pending,
+                        &mut objective_pending,
+                        crate::map::PendingWorldTargetDamage {
+                            target: identity,
+                            source: runtime.source,
+                            attack_id: runtime.source.attack_id,
+                            requested_damage: effects::requested_damage(
+                                amount,
+                                falloff,
+                                runtime.travelled,
+                                1.0,
+                                false,
+                                runtime.source.origin.as_vec2().distance(hit.point2),
+                            ),
+                            delivery_index: runtime.delivery_index,
+                            bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                            effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
+                        },
+                    );
+                }
+            }
+        }
         deliveries.write(PendingDelivery {
             entity: Some(entity),
             source: runtime.source,
@@ -338,9 +430,15 @@ pub(super) fn sweep_composed_projectiles(
     clippy::type_complexity,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
 )]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the authoritative melee system keeps combatant and world-object sector, occlusion, and shared payload planning together"
+)]
 pub(super) fn resolve_melee_attacks(
     mut attacks: MessageReader<MeleeAttack>,
     mut pending: MessageWriter<PendingPayload>,
+    mut world_pending: ResMut<crate::map::PendingWorldTargetDamages>,
+    mut objective_pending: ResMut<crate::matchplay::PendingModeObjectiveDamages>,
     mut deliveries: MessageWriter<PendingDelivery>,
     mut trackers: ResMut<ActiveAttackTrackers>,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
@@ -354,6 +452,19 @@ pub(super) fn resolve_melee_attacks(
             Option<&lightyear::prelude::ControlledBy>,
         ),
         Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+    >,
+    objects: Query<
+        (
+            Entity,
+            &Position,
+            &crate::map::DamageableTargetIdentity,
+            &CurrentHealth,
+            &crate::map::DamageableLifeState,
+        ),
+        Or<(
+            With<crate::map::DamageableWorldObject>,
+            With<crate::matchplay::HeistSafe>,
+        )>,
     >,
     spatial_query: avian2d::prelude::SpatialQuery,
     tuning: Res<MovementTuning>,
@@ -448,6 +559,60 @@ pub(super) fn resolve_melee_attacks(
                     bundle: bundle.clone(),
                 });
                 queued_payloads = true;
+            }
+        }
+        let mut object_candidates: Vec<_> = objects
+            .iter()
+            .filter(|(_, position, _, health, life)| {
+                crate::map::object_is_live(**health, **life)
+                    && sector_contains(attack.origin, attack.facing, reach, angle, position.0, 16.0)
+            })
+            .collect();
+        object_candidates.sort_by_key(|(_, _, identity, ..)| identity.stable_order_key());
+        for (entity, position, identity, _, _) in object_candidates {
+            if !area_line_of_sight_clear_excluding(
+                attack.origin,
+                position.0,
+                entity,
+                &spatial_query,
+            ) {
+                continue;
+            }
+            for (bundle_index, bundle) in attack
+                .recipe
+                .payload_bundles
+                .iter()
+                .enumerate()
+                .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Direct))
+            {
+                for (effect_index, effect) in bundle.effects.iter().enumerate() {
+                    let PayloadEffectDefinition::Damage {
+                        amount, falloff, ..
+                    } = *effect
+                    else {
+                        continue;
+                    };
+                    queue_damageable_target(
+                        &mut world_pending,
+                        &mut objective_pending,
+                        crate::map::PendingWorldTargetDamage {
+                            target: *identity,
+                            source: attack.source,
+                            attack_id: attack.source.attack_id,
+                            requested_damage: effects::requested_damage(
+                                amount,
+                                falloff,
+                                0.0,
+                                1.0,
+                                false,
+                                attack.origin.distance(position.0),
+                            ),
+                            delivery_index: 0,
+                            bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                            effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
+                        },
+                    );
+                }
             }
         }
         if !queued_payloads {

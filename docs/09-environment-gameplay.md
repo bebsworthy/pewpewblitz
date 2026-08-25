@@ -28,13 +28,14 @@ provides:
 - explicit destructible map-asset cells with whole-cell removal or bounded replacement;
 - server-owned map installation, placement mutation, restart, recovery, and teardown;
 - mode-owned Hot Zone objective occupancy, progress, and scoring derived from a map anchor;
+- V9 observer-specific concealment from tall grass, Self Cloak, and public allied fields, with
+  proximity, attack/damage, and Reveal Scan outcomes enforced before replication;
 - client-owned visual profiles, themes, imported scenes, primitives, generated meshes,
   and deterministic fallbacks.
 
-The current map-asset catalog implements ground, blocking water, honestly non-concealing tall
-grass, walls, round obstacles, destructible cover, rubble replacement, inert decorations, and
-spawn markers. It does not imply hazards, movement modifiers, concealment, or arbitrary scripted
-interactions.
+The current map-asset catalog implements ground, blocking water, concealing tall grass, walls,
+round obstacles, destructible cover, rubble replacement, inert decorations, and spawn markers. It
+does not imply hazards, movement modifiers, or arbitrary scripted interactions.
 
 A visible tile is not independently authoritative. Gameplay comes from the shared profile attached
 to a placed `MapAssetId`; client surfaces, props, vegetation, particles, materials, and shaders
@@ -148,24 +149,27 @@ Movement surfaces must additionally specify whether they change maximum speed, a
 turning, momentum, or add forced displacement. They should not collapse these distinct behaviors
 into one ambiguous speed multiplier.
 
-The first environmental damage capability must revisit `M08-ENV-SOURCE` in the
-[V1 backlog](./implementation/v1/roadmap.md#v1-backlog) so outcomes preserve correct source
-attribution rather than appearing as unattributed map damage.
+The first environmental damage capability is now selected as V10's oil-barrel slice. Its
+[damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md)
+revisits `M08-ENV-SOURCE` in the [V1 backlog](./implementation/v1/roadmap.md#v1-backlog) so
+outcomes preserve the immediate object cause and bounded initiating-player lineage rather than
+appearing as unattributed map damage. The [V10 roadmap](./implementation/v10/roadmap.md) remains
+prepared and `Not started` until explicitly initiated.
 
 ## Concealment gameplay model
 
-Concealment is a high-risk candidate because its gameplay rule, bot perception, UI/audio policy,
-and replication boundary must agree. Static grass, temporary smoke or darkness, and fighter
-invisibility may feed one observer-versus-subject decision when their actual reveal semantics are
-compatible, but that shared decision should be demonstrated by the selected slice rather than
-assumed as a generic framework.
+V9 established one observer-versus-subject decision shared by concealing tall grass, Self Cloak,
+and Concealment Field. Its gameplay rule, sentry perception, UI/audio policy, and replication
+boundary agree without introducing a generic perception or runtime-area framework. Later smoke,
+darkness, or other hiding sources may join that decision only when their reveal semantics and
+privacy audit are compatible.
 
 The authoritative server retains absolute match state, including hidden fighters, bots,
 projectiles, effects, objectives, and terrain. For each observer and potentially hidden subject it
 derives whether live spatial state is observable. A client never declares itself concealed and
 never decides which opponents it may observe.
 
-The first concealment specification must explicitly decide:
+The implemented concealment contract explicitly decides:
 
 - self, ally, enemy, spectator, and defeated-player visibility;
 - whether occupants of the same concealment instance see one another;
@@ -178,12 +182,12 @@ The first concealment specification must explicitly decide:
 - how late join, reconnect, defeat, respawn, interpolation, and any future prediction behave at
   visibility transitions.
 
-The [concealment and reveal specification](./17-concealment.md) now fixes the promoted V9 semantics:
+The [concealment and reveal specification](./17-concealment.md) fixes the completed V9 semantics:
 owners and allies retain visibility; terrain and allied fields use the observing fighter's resolved
 proximity radius; accepted attacks and positive applied damage create global reveal locks and
 consume self cloak; reveal scan forces team-wide visibility; and objective carriers are initially
-ineligible. Exact numeric balance values remain unselected and belong to V9 implementation evidence
-and playtest.
+ineligible. Tunable numeric defaults are validated server-side and exposed through Balance Lab;
+they are not permanent claims in this direction document.
 
 The [network architecture](./08-network-architecture.md#interest-management-and-concealment) owns
 the exact Lightyear visibility mechanism, public-participant versus private-spatial split, hierarchy
@@ -191,7 +195,7 @@ and message audit, security limitation, schedule boundary, and transport verific
 
 ### Concealment verification expectations
 
-An implementing milestone should prove at least:
+V9 verification proves:
 
 - an unauthorized observer does not receive a subject hidden before initial relevance;
 - a visible subject becoming hidden disappears for opponents but remains valid for its owner and
@@ -200,7 +204,7 @@ An implementing milestone should prove at least:
 - reveal returns current state without replaying the hidden path;
 - proximity, action, damage, objective, and expiry rules transition on exact authoritative ticks;
 - private descendants, messages, effects, UI, and cues do not leak hidden state;
-- bots follow the same gameplay perception rules without requiring network connections;
+- sentries follow the same observer permission rule; autonomous practice bots remain deferred;
 - late join, reconnect, defeat, respawn, restart, and map replacement do not retain stale visibility;
 - presentation clearly communicates boundaries, reveal, disappearance, reappearance, and the
   reason a subject became observable.

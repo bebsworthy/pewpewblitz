@@ -11,10 +11,24 @@ function isTerrainBrushRadius(path: NumericPath) {
   return String(path.at(-1)) === "radius" && path.some((part) => part === "world_effects");
 }
 
+function isBarrelField(path: NumericPath, field: string) {
+  return path.includes("barrel") && String(path.at(-1)) === field;
+}
+
+function isHeistField(path: NumericPath, field: string) {
+  return path.includes("heist") && String(path.at(-1)) === field;
+}
+
 export function numberSpec(key: string, value: number, path: NumericPath) {
   const lower = key.toLowerCase();
   const integer = Number.isInteger(value);
   if (isTerrainBrushRadius(path)) return { min: 8, max: 128, step: 4 };
+  if (isBarrelField(path, "maximum_health")) return { min: 1, max: 1000, step: 1 };
+  if (isHeistField(path, "safeMaximumHealth")) return { min: 100, max: 20000, step: 100 };
+  if (isBarrelField(path, "radius_world_units")) return { min: 1, max: 512, step: 1 };
+  if (isBarrelField(path, "maximum_targets") || isBarrelField(path, "maximum_chain_reactions")) {
+    return { min: 1, max: 16, step: 1 };
+  }
   if (lower.includes("multiplier") || lower.includes("scale")) {
     return { min: 0, max: 2, step: 0.01 };
   }

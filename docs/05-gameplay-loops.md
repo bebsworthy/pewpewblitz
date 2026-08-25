@@ -162,9 +162,9 @@ phase transitions, results handoff, cleanup, and restart behavior that is genuin
 
 A completed match must terminate cleanly, preserve one authoritative result, release its isolated
 worker resources, and offer a clear player choice. **Play Again** requests new admission using the
-exact game type and build only while their fresh catalogs remain compatible; it is not recorded-match
-playback. No-result disconnect and recovery paths return to a usable product state rather than
-pretending that an outcome occurred.
+exact game type and saved-brawler identity/revision only while the fresh game-type and brawler
+catalogs remain compatible; it is not recorded-match playback. No-result disconnect and recovery
+paths return to a usable product state rather than pretending that an outcome occurred.
 
 ## Player session loop
 
@@ -172,9 +172,9 @@ The supported ordinary session begins at the connected Player Dashboard:
 
 ```text
 Dashboard
-   ├─ choose game type and build → multiplayer admission → match
-   ├─ choose game type and build → server-hosted practice → match
-   ├─ inspect or edit build
+   ├─ choose game type and saved brawler → multiplayer admission → match
+   ├─ choose game type and saved brawler → server-hosted practice → match
+   ├─ inspect, create, or customize saved brawlers
    └─ adjust settings or recover connection
 
 match → results → Play Again with an exact compatible selection, or Dashboard
@@ -184,11 +184,12 @@ Multiplayer and practice share validated game types, resolved builds, authoritat
 mode rules, maps, combat, and results. Practice removes dependence on a populated human queue; it
 does not create a client-authoritative or reduced-rule simulation.
 
-The session loop should minimize repeated configuration without hiding meaningful choices. The
-Dashboard remembers useful local selections, exposes their current validity, and makes Play and
-Practice the two ordinary admission actions. Queueing, loading, cancellation, confirmed leave,
-disconnect, results, and Play Again must converge predictably rather than creating separate dead-end
-flows.
+The session loop should minimize repeated configuration without hiding meaningful choices. Lobby
+admission loads the server-owned profile plus bounded brawler and game-type advertisements before
+Dashboard entry. The client mirrors those connection-scoped facts, exposes their current validity,
+and makes Play and Practice the two ordinary admission actions. Queueing, loading, cancellation,
+confirmed leave, disconnect, results, and Play Again must converge predictably rather than creating
+separate dead-end flows.
 
 ## Build-learning loop
 
@@ -203,15 +204,16 @@ Use it against human decisions and mode pressure
         ↓
 Read outcomes and identify a strength, weakness, or tradeoff
         ↓
-Adjust one bounded choice or choose another preset
+Adjust one bounded choice or select another saved brawler
         ↓
 Repeat
 ```
 
-The player selects a bounded primary-weapon specification, one ultimate, and exactly two passives
-under the supported build budget. The server resolves that selection into an immutable match
-loadout. Presets offer quick entry and a shared reference point; custom builds must use the same
-validation and combat path.
+Each saved brawler permanently owns one advertised fighter profile and weapon base, and may change
+its name, ultimate, exactly two passives, and four generic weapon-part slots outside queue. The
+server validates stable-ID mutations against its active catalog and resolves the selected brawler
+into an immutable match loadout. The client never supplies gameplay values or defines the legal
+inventory.
 
 Build feedback should emphasize decisions rather than only aggregate power. Useful questions include:
 
@@ -225,15 +227,17 @@ Practice is the fastest experimentation path, but it must eventually provide opp
 movement, range, pressure, objectives, and counterplay. Inert participants validate lifecycle only;
 they do not complete the build-learning promise.
 
-## Envisioned arsenal loop
+## Saved-brawler arsenal loop
 
-The long-lived product direction is an arsenal of player-authored brawlers rather than a roster of
-fixed heroes. A mature loop may let a player create, name, save, compare, revise, and select several
-validated builds for different modes, maps, team needs, or personal styles.
+V7 established an arsenal of player-authored brawlers rather than a roster of fixed heroes. A
+player can create, name, save, inspect, customize, delete, and select multiple validated brawlers
+for different modes, maps, team needs, or personal styles through the full-screen Dashboard child
+flow.
 
-Persistence and collection do not alter combat legality. Ownership, acquisition, or entitlement may
-control which definitions a player can select, while the same build validator continues to decide
-whether the composition is legal and the same resolver produces its match loadout.
+Persistence and collection do not alter combat legality. The server-advertised catalog defines
+which definitions the current lobby permits, profile authority validates ownership and selection,
+and the same resolver produces the immutable match loadout. Future acquisition or entitlement may
+narrow availability but cannot move legality to the client.
 
 The arsenal should reward mastery and expression without forcing constant replacement of understood
 builds. New content should create new decisions, counters, or play patterns rather than merely higher

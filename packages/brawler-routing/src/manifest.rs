@@ -39,12 +39,13 @@ impl TryFrom<u8> for WorkerRole {
     }
 }
 
-/// M01's two supported game modes.
+/// Stable routed game-mode identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum GameMode {
     Wipeout = 1,
     HotZone = 2,
+    Heist = 3,
 }
 
 impl TryFrom<u16> for GameMode {
@@ -54,6 +55,7 @@ impl TryFrom<u16> for GameMode {
         match value {
             1 => Ok(Self::Wipeout),
             2 => Ok(Self::HotZone),
+            3 => Ok(Self::Heist),
             _ => Err(CodecError::InvalidValue),
         }
     }

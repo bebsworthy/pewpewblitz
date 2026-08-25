@@ -26,6 +26,7 @@ pub struct MatchOutcomeDiagnostics {
 pub enum ModeSummary {
     Wipeout(WipeoutSummary),
     HotZone(crate::matchplay::HotZoneSummary),
+    Heist(crate::matchplay::HeistSummary),
 }
 
 /// Wipeout's terminal scores, preserving the pre-M09 report meaning.

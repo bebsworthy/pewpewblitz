@@ -171,6 +171,7 @@ fn update_asset_readiness(
     handles: Option<Res<ClientAssetHandles>>,
     asset_server: Res<AssetServer>,
     map: Res<crate::map::ClientMapReadiness>,
+    world_objects: Res<crate::map::ClientWorldObjectReadiness>,
     joins: Query<&ClientJoinStatus>,
     mut readiness: ResMut<ClientAssetReadiness>,
     mut playable: ResMut<ClientPlayableGate>,
@@ -206,6 +207,10 @@ fn update_asset_readiness(
         .any(|status| matches!(status.phase, ClientJoinPhase::Active { .. }));
     playable.0 = joined
         && matches!(*map, crate::map::ClientMapReadiness::Ready)
+        && matches!(
+            *world_objects,
+            crate::map::ClientWorldObjectReadiness::Ready
+        )
         && !matches!(*readiness, ClientAssetReadiness::Loading);
 }
 

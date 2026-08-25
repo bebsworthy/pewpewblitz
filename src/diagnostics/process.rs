@@ -416,6 +416,7 @@ fn consolidate_match_summary(
             gameplay.hot_zone_longest_control_ticks =
                 Some(hot_zone.longest_consecutive_control_ticks_by_team);
         }
+        ModeSummary::Heist(_) => {}
     }
     gameplay.match_active_ticks = summary.active_duration_ticks;
     gameplay.match_respawns = summary.respawns;

@@ -225,7 +225,7 @@ pub enum ClientJoinPhase {
     Disconnected,
 }
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq)]
 pub struct ClientLobbyMembership {
     pub logical_server_id: u128,
     pub player_id: PlayerId,
@@ -233,6 +233,7 @@ pub struct ClientLobbyMembership {
     pub server_name: String,
     pub catalog_revision: crate::lobby::CatalogRevision,
     pub game_types: Vec<crate::lobby::AdvertisedGameType>,
+    pub brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog,
     pub profile: crate::profiles::ProfileSnapshot,
 }
 

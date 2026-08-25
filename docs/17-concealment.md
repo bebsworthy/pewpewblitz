@@ -15,6 +15,10 @@ selection, charge, activation, targeting, and combat outcomes. The
 [network architecture](./08-network-architecture.md#interest-management-and-concealment) owns the
 Lightyear replication boundary. The [V9 roadmap](./implementation/v9/roadmap.md) owns delivery.
 
+V9 completed and this contract entered production on 2026-08-24. Its three sources, reveal rules,
+server-owned observer decision, sentry integration, bounded replication, presentation, recovery,
+and Balance Lab controls passed the verification and user-playtest gates recorded by that roadmap.
+
 ## Player-facing outcomes
 
 Concealment has three sources and one explicit build-based counter:
@@ -305,7 +309,7 @@ state.
 
 ## Bounds and telemetry
 
-V9 must define and validate ceilings for concealment placements, simultaneous fields, scan targets,
+V9 defines and validates ceilings for concealment placements, simultaneous fields, scan targets,
 active source records, observer–subject decisions, visibility transitions per tick, cue fan-out,
 and recovery bytes. Pair evaluation is bounded by the admitted active-fighter ceiling; current
 ordinary matches cap at six fighters, but implementation must use the resolved topology ceiling
@@ -319,7 +323,7 @@ and time-to-damage after reveal.
 
 ## Verification contract
 
-An implementing milestone must prove:
+The completed implementation proves:
 
 - pure observer-decision truth tables across teams, source combinations, deadlines, proximity
   bonuses/maluses, and exact boundary distances;

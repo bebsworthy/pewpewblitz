@@ -30,7 +30,11 @@ pub enum DamageSource {
         attack_id: AttackId,
     },
     Environment {
-        cause_id: u16,
+        map_instance_id: u64,
+        generation: u64,
+        placement_id: u32,
+        initiating_player: Option<PlayerId>,
+        initiating_fighter: Option<NetworkEntityId>,
     },
 }
 

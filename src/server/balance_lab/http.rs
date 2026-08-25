@@ -361,7 +361,7 @@ mod tests {
     use crate::{
         builds::BuildCatalog,
         combat::{FighterDefinitions, WeaponCatalog},
-        server::balance_lab::{BalanceLabRevision, BalanceLabSnapshotV2, BalanceLabValidator},
+        server::balance_lab::{BalanceLabRevision, BalanceLabSnapshotV3, BalanceLabValidator},
     };
     use std::{
         io::Write as _,
@@ -399,12 +399,13 @@ mod tests {
     fn fixture() -> (
         Arc<Mutex<BalanceLabStateView>>,
         BalanceLabValidator,
-        BalanceLabSnapshotV2,
+        BalanceLabSnapshotV3,
     ) {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
+        let maps = crate::map::MapContentCatalog::embedded().unwrap();
         let fighter = FighterDefinitions::default().entries[0];
-        let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
+        let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let state = BalanceLabStateView {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             match_id: u128::MAX.to_string(),
@@ -420,6 +421,7 @@ mod tests {
                 baseline: baseline.clone(),
                 builds,
                 weapons,
+                maps,
                 fighter,
             },
             baseline,

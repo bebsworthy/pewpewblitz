@@ -43,6 +43,7 @@ pub enum SeedPolicy {
 pub struct AllocationPolicy {
     pub wipeout: ModeAllocationPolicy,
     pub hot_zone: ModeAllocationPolicy,
+    pub heist: ModeAllocationPolicy,
     pub heartbeat_ms: u32,
     pub seed_policy: SeedPolicy,
 }
@@ -63,6 +64,7 @@ impl AllocationPolicy {
         Self::new(
             ModeAllocationPolicy::new(1, 5, rules_profile),
             ModeAllocationPolicy::new(2, 3, rules_profile),
+            ModeAllocationPolicy::new(6, 1, rules_profile),
             1_000,
             SeedPolicy::OsRandom,
         )
@@ -72,12 +74,14 @@ impl AllocationPolicy {
     pub const fn new(
         wipeout: ModeAllocationPolicy,
         hot_zone: ModeAllocationPolicy,
+        heist: ModeAllocationPolicy,
         heartbeat_ms: u32,
         seed_policy: SeedPolicy,
     ) -> Self {
         Self {
             wipeout,
             hot_zone,
+            heist,
             heartbeat_ms,
             seed_policy,
         }
@@ -86,6 +90,7 @@ impl AllocationPolicy {
     pub fn validate(self) -> Result<(), CodecError> {
         self.wipeout.validate()?;
         self.hot_zone.validate()?;
+        self.heist.validate()?;
         if self.heartbeat_ms == 0 {
             return Err(CodecError::InvalidValue);
         }
@@ -97,6 +102,7 @@ impl AllocationPolicy {
         match mode {
             GameMode::Wipeout => self.wipeout,
             GameMode::HotZone => self.hot_zone,
+            GameMode::Heist => self.heist,
         }
     }
 }
@@ -160,6 +166,7 @@ mod tests {
     const POLICY: AllocationPolicy = AllocationPolicy::new(
         ModeAllocationPolicy::new(11, 12, 1),
         ModeAllocationPolicy::new(21, 22, 2),
+        ModeAllocationPolicy::new(31, 32, 3),
         1_000,
         SeedPolicy::OsRandom,
     );
@@ -176,6 +183,7 @@ mod tests {
         let invalid = AllocationPolicy::new(
             ModeAllocationPolicy::new(0, 12, 1),
             POLICY.hot_zone,
+            POLICY.heist,
             POLICY.heartbeat_ms,
             POLICY.seed_policy,
         );

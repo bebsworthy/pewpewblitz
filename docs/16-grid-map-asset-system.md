@@ -227,12 +227,13 @@ struct MapGameplayProfile {
     projectile_collision: ProjectileCollision,
     destruction: MapDestructionBehavior,
     interaction: MapInteractionBehavior,
+    concealment: MapConcealmentBehavior,
 }
 ```
 
-The values are bounded enums with implemented semantics. M02 deliberately has no concealment field;
-that field may enter this schema only with a complete authoritative concealment slice. Unknown
-variants fail catalog loading.
+The values are bounded enums with implemented semantics. V8 M02 deliberately omitted concealment;
+completed V9 added `MapConcealmentBehavior` through the full authoritative concealment slice and
+revised the schema/catalog/content identity atomically. Unknown variants fail catalog loading.
 The catalog validator rejects contradictory combinations. In particular:
 
 - walkability is derived from `player_collision`; there is no second `walkable` boolean that can
@@ -278,6 +279,12 @@ candidate sets. It does not retain a second public 8-unit map-authoring grid. If
 work remains useful internally during migration, it is an implementation detail and cannot appear
 in recipes, shared IDs, recovery schemas, or authoring terminology at V8 closeout.
 
+The proposed V10 [damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md)
+adds ordinary attack durability as a separate profile/runtime axis. It does not reinterpret these
+V8 destruction variants: a V10 hit-point placement is immune to `DestroyMap`, carries durable
+partial health, and commits one compatible terminal placement outcome only when its health reaches
+zero.
+
 ### Concealment
 
 Initial values are `None` and one fully specified `HideOccupants` behavior. `HideOccupants` means
@@ -286,12 +293,12 @@ allies, nearby enemies, attacks, damage, objective carrying, projectiles, audio 
 reveal timing, reconnect, and transitions across adjacent cells. A client-only opacity effect is not
 accepted as gameplay concealment.
 
-M02 research selected the safe branch: it ships non-concealing `TALL_GRASS` and omits both `BUSH`
-and `HideOccupants`. Exact Lightyear per-client visibility can hide a fighter entity, but Brawler's
-projectiles, deployables, combat cues, audio, spectator state, and reconnect paths also require
-recipient-aware policy before concealment is truthful. That larger slice remains a dedicated future
-capability; the schema may not claim that `BUSH` hides players while any ordinary replicated state
-leaks the subject.
+V8 M02 selected the safe historical branch: it shipped non-concealing `TALL_GRASS` and omitted both
+`BUSH` and `HideOccupants` because the full privacy boundary did not yet exist. V9 deliberately
+changed `TALL_GRASS` to reference an explicit `HideOccupants` gameplay profile and implemented the
+required per-observer Lightyear visibility, cue/audio filtering, sentry perception, lifecycle,
+late-join, reconnect, and recovery rules. New concealing assets must use that contract; a schema
+entry may never claim to hide players while ordinary replicated state leaks the subject.
 
 ### Interactions and parameters
 
@@ -303,14 +310,17 @@ PlayerSpawn
 Teleporter
 ```
 
-Only behavior completed by a V8 milestone may be present in the production catalog. Spawn placement
+Only behavior completed by an accepted milestone may be present in the production catalog. Spawn placement
 parameters contain team slot, stable spawn ordinal, and facing quarter-turn. Teleporter placement
 parameters contain a bounded channel/link identity and exit facing policy. A teleporter behavior is
 not complete until authoritative entry, destination choice, cooldown/re-entry protection, collision
 repair, replication, reset, and presentation are specified and tested.
 
 Chests, healing pads, launchers, pickups, and hazards follow the same rule: the asset model can host
-them later, but names in an example do not create unsupported runtime behavior.
+them later, but names in an example do not create unsupported runtime behavior. V10 has now
+selected one exact treasure-chest/restoration-pickup behavior, documented separately and still
+unsupported until the gated [V10 roadmap](./implementation/v10/roadmap.md) is implemented and
+accepted; this does not promote the other interaction families.
 
 ## Client visual catalog
 
@@ -580,7 +590,8 @@ V8 verification must include:
   and sparse default ground;
 - collision tests distinguishing player and projectile behavior;
 - destruction transaction, replacement, restart, duplicate/gap, late join, and recovery tests;
-- complete concealment privacy tests before any hiding asset ships;
+- completed V9 concealment privacy, lifecycle, cue-filtering, and recovery tests for every hiding
+  asset;
 - interaction lifecycle tests before any interactive asset ships;
 - spawn safety, reachability, objective accessibility, topology, and map-capacity tests;
 - separate-App authority/replication tests and routed 1v1, 2v2, and 3v3 Wipeout/Hot Zone E2E;
@@ -602,6 +613,7 @@ The accepted decisions are:
    in a separate role-owned catalog;
 4. property/profile semantics rather than role names such as `TerrainDestructible`;
 5. dedicated typed mode anchors but spawn represented as a map asset placement;
-6. full server-owned concealment as the requirement for shipping a hiding bush;
+6. full server-owned concealment as the requirement fulfilled by V9 before shipping hiding grass
+   or bush behavior;
 7. hard conversion with no V4 decoder or production compatibility period;
 8. retention of historical milestone evidence despite zero old-system production traces.

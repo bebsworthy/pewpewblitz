@@ -35,6 +35,8 @@ Client presentation and local feedback
 - read controller or keyboard/mouse input;
 - present a caller-supplied development account ID at lobby admission and request profile mutations
   or selected-brawler admission using stable identity/revision data;
+- validate and install the accepted connection-scoped profile, game-type catalog, and advertised
+  brawler catalog before entering Dashboard, then clear them together when that lobby ends;
 - send timestamped input commands or input frames;
 - predict local movement later if needed;
 - render the latest authoritative state;
@@ -49,14 +51,15 @@ Client presentation and local feedback
 - own the match lifecycle and mode rules;
 - load the server-owned profile, resolve its selected saved brawler, and create immutable resolved
   match loadouts without accepting client-authored combat values at queue admission;
+- derive and advertise the bounded legal brawler inventory and player-facing metadata from active
+  server content, and validate profile references against that same catalog;
 - simulate fighter movement and abilities;
 - validate fire commands and cooldowns;
 - perform projectile, hit, damage, and collision resolution;
 - own status meters and threshold effects;
 - own pickups, objectives, scores, respawns, and victory;
 - own map-asset placement outcomes and collider updates;
-- derive observer-specific concealment and reveal outcomes before replication when those mechanics
-  are implemented;
+- derive observer-specific concealment and reveal outcomes before replication;
 - replicate authoritative components and send discrete gameplay messages where required.
 
 ## Bevy and Lightyear world composition
@@ -146,6 +149,35 @@ Build selection and weapon editing are not per-tick combat input. They use order
 requests tied to the receiving authenticated/session connection. A request never authoritatively
 names another fighter or installs ECS runtime state.
 
+### Lobby profile and brawler-catalog installation
+
+The accepted lobby envelope installs one coherent membership:
+
+```text
+LobbyJoinOutcome::Accepted
+  logical server and player identity
+  bounded game-type catalog + revision
+  bounded AdvertisedBrawlerCatalog + revision
+  bounded server-owned ProfileSnapshot
+```
+
+The brawler advertisement is derived by lobby authority from its active build and weapon catalogs.
+It carries stable fighter-profile, weapon-base, ultimate, and passive identities plus the bounded
+names, kinds, eligibility, statistics, weapon configuration/policy, and limits required by the
+player flow. The complete welcome remains under the existing 64 KiB envelope bound; each variable
+collection and the brawler catalog's 16 KiB encoded ceiling are enforced while decoding.
+
+The client validates game types, brawler-catalog structure/revision, profile structure, and profile
+references before installing any of them. A conflicting, partial, malformed, or incompatible batch
+fails the lobby join; there is no locally reconstructed fallback. Membership, profile, and both
+catalogs are connection-scoped and clear on disconnect, server change, rejected replacement, or
+lobby-generation change. A reconnect repeats the authoritative load and atomically replaces the
+old client mirror.
+
+This defensive client validation does not transfer authority. Clients still send only stable-ID,
+revision-bound profile intent. Storage owns structural validity, while lobby authority validates
+active content and returns the complete authoritative profile outcome.
+
 ### Weapon-recipe authority
 
 Keep these network concepts separate:
@@ -153,6 +185,9 @@ Keep these network concepts separate:
 ```text
 Shared content/rule catalog fingerprint
   proves client/server schema and known primitive compatibility
+
+Advertised brawler catalog
+  bounded server-derived legal inventory and presentation/preview metadata for this lobby session
 
 Selected saved-brawler identity and revision
   bounded client intent tied to the accepted lobby session
@@ -336,7 +371,9 @@ Networking is validated incrementally rather than treated as one oversized miles
 5. **v1 Milestone 09 — objectives:** Hot Zone proves that continuous objective state remains authoritative while reusing the same gameplay and match-lifecycle components/plugins.
 6. **V8 map dynamics:** connected and late/reconnecting clients converge on authoritative
    whole-placement removal/replacement state and exact map generations.
-7. **Future environment/concealment milestone:** surface effects remain server-owned while per-client visibility culls secret spatial state and recovers correctly at reveal, late join, and reconnect.
+7. **V9 concealment and reveal:** server-owned terrain/ability sources feed per-client visibility,
+   which withholds secret spatial state and recovers current state correctly at reveal, late join,
+   and reconnect.
 8. **Future systemic-status milestone:** accumulating meters, threshold triggers, immunity, and duration remain server-owned and recover correctly.
 
 Prediction, lag compensation, advanced interpolation tuning, anti-cheat hardening, matchmaking, authentication, session services, and production hosting may be developed after the relevant early gates. The authority boundary, state recovery rules, and explicit connection lifecycle outcomes may not be postponed.

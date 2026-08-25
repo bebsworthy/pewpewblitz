@@ -1405,6 +1405,85 @@ pub(super) fn consume_combat_cues(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    reason = "the focused Bevy presentation system reads bounded cue, map, palette, settings, and effect state"
+)]
+pub(super) fn consume_world_object_cues(
+    mut commands: Commands,
+    received: Option<ResMut<crate::map::ReceivedWorldObjectCues>>,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    settings: Option<Res<ClientShellSettings>>,
+    effects: Query<(Entity, &CombatEffect3d)>,
+    map_states: Query<&crate::map::MapDynamicState, With<crate::map::MapRoot>>,
+    mut sequence: Local<CombatEffectSequence>,
+) {
+    let Some(mut received) = received else {
+        return;
+    };
+    let Ok(map_state) = map_states.single() else {
+        received.0.clear();
+        return;
+    };
+    let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
+    for cue in received.0.drain(..) {
+        if cue.target().generation() != map_state.generation_id() {
+            continue;
+        }
+        if effects.iter().count() >= MAX_EFFECTS
+            && let Some((oldest, _)) = effects.iter().min_by_key(|(_, effect)| effect.order)
+        {
+            commands.entity(oldest).despawn();
+        }
+        sequence.0 = sequence.0.saturating_add(1);
+        let (position, radius, exploded) = match cue {
+            crate::map::WorldObjectCue::Damaged { position, .. } => {
+                (position.as_vec2(), 11.0, false)
+            }
+            crate::map::WorldObjectCue::Exploded {
+                position,
+                radius_world_units,
+                ..
+            } => (position.as_vec2(), f32::from(radius_world_units), true),
+        };
+        commands.spawn((
+            CombatEffect3d {
+                timer: Timer::new(
+                    Duration::from_secs_f32(if reduced { 0.12 } else { 0.28 }),
+                    TimerMode::Once,
+                ),
+                expires_at_tick: None,
+                order: sequence.0,
+            },
+            Mesh3d(if exploded {
+                primitives.area_ring.clone()
+            } else {
+                primitives.effect_sphere.clone()
+            }),
+            MeshMaterial3d(materials.effect_damage.clone()),
+            NotShadowCaster,
+            NotShadowReceiver,
+            if exploded {
+                Transform {
+                    translation: ground_position(position) + Vec3::Y * PREVIEW_HEIGHT,
+                    rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+                    scale: Vec3::splat(radius),
+                }
+            } else {
+                Transform::from_translation(ground_position(position) + Vec3::Y * 8.0)
+                    .with_scale(Vec3::splat(if reduced { 7.0 } else { radius }))
+            },
+            Name::new(if exploded {
+                "V10 authoritative oil-barrel blast"
+            } else {
+                "V10 oil-barrel damage response"
+            }),
+        ));
+    }
+}
+
 fn reveal_ring_remaining_duration(
     activated_at_tick: u64,
     expires_at_tick: u64,

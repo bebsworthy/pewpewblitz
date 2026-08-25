@@ -1,5 +1,6 @@
 //! Shared match state and server-authoritative common lifecycle plus installed mode rules.
 
+mod heist;
 mod hot_zone;
 #[cfg(feature = "server")]
 mod lifecycle;
@@ -10,6 +11,13 @@ mod spawns;
 mod telemetry;
 mod wipeout;
 
+pub use heist::{
+    HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HeistCompletion, HeistHealthComparison, HeistRules,
+    HeistSafe, HeistSafeIdentity, HeistState, HeistSummary, destroyed_safe_result,
+    remaining_health_comparison, timeout_result as heist_timeout_result,
+};
+#[cfg(feature = "server")]
+pub use heist::{HeistModePlugin, PendingModeObjectiveDamage, PendingModeObjectiveDamages};
 #[cfg(feature = "server")]
 pub use hot_zone::HotZoneModePlugin;
 #[cfg(feature = "server")]

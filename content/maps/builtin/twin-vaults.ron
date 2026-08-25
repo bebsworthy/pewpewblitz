@@ -1,0 +1,31 @@
+(
+    recipe_id: MapRecipeId(6),
+    revision: 1,
+    recipe_version: 4,
+    mode_definition_id: ModeDefinitionId(4),
+    presentation_theme_id: MapPresentationThemeId(1),
+    dimensions: (width: 64, height: 40),
+    default_surface_asset_id: MapAssetId(1),
+    placements: [
+        (placement_id: MapPlacementId(100), cell: (x: 30, y: 10), asset_id: MapAssetId(24), quarter_turns: 0, parameters: None),
+        (placement_id: MapPlacementId(101), cell: (x: 33, y: 10), asset_id: MapAssetId(24), quarter_turns: 0, parameters: None),
+        (placement_id: MapPlacementId(102), cell: (x: 30, y: 29), asset_id: MapAssetId(24), quarter_turns: 0, parameters: None),
+        (placement_id: MapPlacementId(103), cell: (x: 33, y: 29), asset_id: MapAssetId(24), quarter_turns: 0, parameters: None),
+        (placement_id: MapPlacementId(300), cell: (x: 8, y: 10), asset_id: MapAssetId(20), quarter_turns: 0, parameters: PlayerSpawn(team_slot: 0, ordinal: 1, facing_quarter_turns: 0)),
+        (placement_id: MapPlacementId(301), cell: (x: 8, y: 19), asset_id: MapAssetId(20), quarter_turns: 0, parameters: PlayerSpawn(team_slot: 0, ordinal: 2, facing_quarter_turns: 0)),
+        (placement_id: MapPlacementId(302), cell: (x: 8, y: 29), asset_id: MapAssetId(20), quarter_turns: 0, parameters: PlayerSpawn(team_slot: 0, ordinal: 3, facing_quarter_turns: 0)),
+        (placement_id: MapPlacementId(303), cell: (x: 55, y: 10), asset_id: MapAssetId(20), quarter_turns: 0, parameters: PlayerSpawn(team_slot: 1, ordinal: 1, facing_quarter_turns: 2)),
+        (placement_id: MapPlacementId(304), cell: (x: 55, y: 19), asset_id: MapAssetId(20), quarter_turns: 0, parameters: PlayerSpawn(team_slot: 1, ordinal: 2, facing_quarter_turns: 2)),
+        (placement_id: MapPlacementId(305), cell: (x: 55, y: 29), asset_id: MapAssetId(20), quarter_turns: 0, parameters: PlayerSpawn(team_slot: 1, ordinal: 3, facing_quarter_turns: 2)),
+    ],
+    filled_rects: [
+        (first_placement_id: MapPlacementId(1), min: (x: 20, y: 7), width: 2, height: 7, asset_id: MapAssetId(2), quarter_turns: 0),
+        (first_placement_id: MapPlacementId(20), min: (x: 20, y: 26), width: 2, height: 7, asset_id: MapAssetId(2), quarter_turns: 0),
+        (first_placement_id: MapPlacementId(40), min: (x: 42, y: 7), width: 2, height: 7, asset_id: MapAssetId(2), quarter_turns: 0),
+        (first_placement_id: MapPlacementId(60), min: (x: 42, y: 26), width: 2, height: 7, asset_id: MapAssetId(2), quarter_turns: 0),
+    ],
+    mode_anchors: [
+        (placement_id: MapPlacementId(400), anchor_id: ModeAnchorId(1), kind: HeistSafe(team_slot: 0, origin_cell: (x: 3, y: 19), width_cells: 3, height_cells: 2, quarter_turns: 0, objective_visual_profile_id: MapVisualProfileId(39))),
+        (placement_id: MapPlacementId(401), anchor_id: ModeAnchorId(2), kind: HeistSafe(team_slot: 1, origin_cell: (x: 58, y: 19), width_cells: 3, height_cells: 2, quarter_turns: 2, objective_visual_profile_id: MapVisualProfileId(39))),
+    ],
+)

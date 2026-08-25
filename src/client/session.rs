@@ -1426,6 +1426,7 @@ pub(super) fn process_join_outcome(
                     server_name,
                     catalog_revision,
                     game_types,
+                    brawler_catalog,
                     profile,
                 } => {
                     let accepted = ClientLobbyMembership {
@@ -1435,6 +1436,7 @@ pub(super) fn process_join_outcome(
                         server_name,
                         catalog_revision,
                         game_types,
+                        brawler_catalog: *brawler_catalog,
                         profile: *profile,
                     };
                     let catalog_invalid =
@@ -1451,7 +1453,12 @@ pub(super) fn process_join_outcome(
                         identity.logical_server_id != logical_server_id
                             || identity.account_id != accepted.profile.account_id
                     });
-                    let profile_invalid = accepted.profile.validate_bounded().is_err();
+                    let profile_invalid = accepted.profile.validate_bounded().is_err()
+                        || accepted.brawler_catalog.validate().is_err()
+                        || accepted
+                            .brawler_catalog
+                            .validate_profile(&accepted.profile)
+                            .is_err();
                     if catalog_invalid
                         || catalog_revision_mismatch
                         || rejected_this_batch

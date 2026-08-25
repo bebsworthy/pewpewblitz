@@ -388,7 +388,7 @@ impl BrawlerDraft {
     pub fn normalized(mut self) -> Result<Self, ProfileModelError> {
         self.name = normalize_proposed_display_name(&self.name)
             .map_err(|_| ProfileModelError::InvalidName)?;
-        validate_recipe(
+        validate_recipe_structure(
             self.fighter_profile_id,
             self.weapon_base_id,
             self.ultimate_id,
@@ -402,20 +402,24 @@ impl BrawlerEdit {
     pub fn normalized(mut self) -> Result<Self, ProfileModelError> {
         self.name = normalize_proposed_display_name(&self.name)
             .map_err(|_| ProfileModelError::InvalidName)?;
-        validate_mutable_recipe(self.ultimate_id, self.passive_ids)?;
+        validate_mutable_recipe_structure(self.ultimate_id, self.passive_ids)?;
         Ok(self)
     }
 }
 
 impl SavedBrawler {
     pub fn validate(&self) -> Result<(), ProfileModelError> {
+        self.validate_structure()
+    }
+
+    pub fn validate_structure(&self) -> Result<(), ProfileModelError> {
         if self.creation_ordinal == 0 {
             return Err(ProfileModelError::InvalidCreationOrdinal);
         }
         if normalize_proposed_display_name(&self.name).as_deref() != Ok(self.name.as_str()) {
             return Err(ProfileModelError::InvalidName);
         }
-        validate_recipe(
+        validate_recipe_structure(
             self.fighter_profile_id,
             self.weapon_base_id,
             self.ultimate_id,
@@ -478,6 +482,10 @@ impl SavedBrawler {
 
 impl ProfileSnapshot {
     pub fn validate(&self) -> Result<(), ProfileModelError> {
+        self.validate_structure()
+    }
+
+    pub fn validate_structure(&self) -> Result<(), ProfileModelError> {
         if self.brawlers.len() > MAX_BRAWLERS_PER_PROFILE {
             return Err(ProfileModelError::TooManyBrawlers);
         }
@@ -542,29 +550,29 @@ impl ProfileSnapshot {
     }
 }
 
-fn validate_recipe(
+fn validate_recipe_structure(
     fighter: FighterProfileId,
     weapon: WeaponBaseId,
     ultimate: UltimateDefinitionId,
     passives: [PassiveDefinitionId; 2],
 ) -> Result<(), ProfileModelError> {
-    if !(1..=3).contains(&fighter.0) {
+    if fighter.0 == 0 {
         return Err(ProfileModelError::UnknownFighterProfile);
     }
-    if !(1..=4).contains(&weapon.0) {
+    if weapon.0 == 0 {
         return Err(ProfileModelError::UnknownWeaponBase);
     }
-    validate_mutable_recipe(ultimate, passives)
+    validate_mutable_recipe_structure(ultimate, passives)
 }
 
-fn validate_mutable_recipe(
+fn validate_mutable_recipe_structure(
     ultimate: UltimateDefinitionId,
     passives: [PassiveDefinitionId; 2],
 ) -> Result<(), ProfileModelError> {
-    if !(1..=4).contains(&ultimate.0) {
+    if ultimate.0 == 0 {
         return Err(ProfileModelError::UnknownUltimate);
     }
-    if !passives.iter().all(|id| (3..=6).contains(&id.0)) {
+    if passives.iter().any(|id| id.0 == 0) {
         return Err(ProfileModelError::UnknownPassive);
     }
     if passives[0] == passives[1] {

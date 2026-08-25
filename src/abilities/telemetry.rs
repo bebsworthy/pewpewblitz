@@ -641,7 +641,8 @@ pub(crate) fn observe_ability_outcomes(
             continue;
         };
         let deployable_id = match fact.source_kind {
-            crate::combat::CombatSourceKind::PrimaryWeapon => None,
+            crate::combat::CombatSourceKind::PrimaryWeapon
+            | crate::combat::CombatSourceKind::Environment => None,
             crate::combat::CombatSourceKind::Ultimate { .. } => Some(None),
             crate::combat::CombatSourceKind::Deployable { deployable_id, .. } => {
                 Some(Some(deployable_id))

@@ -3,9 +3,10 @@
 ## Purpose
 
 Balance Lab is a development-only, server-authoritative tuning console for local Practice matches.
-It edits a complete V7 fighter-profile/weapon-base snapshot, validates it against concrete engine and wire safety
-invariants, persists accepted tuning locally, and applies it by starting a clean authoritative match
-epoch. It does not modify canonical authored content.
+It edits a complete fighter-profile, weapon-base, and supported-ultimate tuning snapshot, validates
+it against concrete engine and wire safety invariants, persists accepted tuning locally, and
+applies it by starting a clean authoritative match epoch. It does not modify canonical authored
+content.
 
 Use [Weapons and abilities](./03-weapons-and-abilities.md) and
 [Fighter and build specification](./02-fighter-model.md) for the gameplay property model. The
@@ -25,10 +26,12 @@ Accepted tuning is stored in `target/balance-lab/session-v2.json`. The page reco
 Practice workers at the same loopback URL, and each worker validates the persisted snapshot before
 installing it. Deleting build artifacts or using **Restore defaults** removes the override.
 
-The current snapshot schema is version 2. It exposes the three permanent fighter profiles and the
-four canonical weapon-base recipes. The retired Custom Pulse axes, named build presets, point
-budget, and frame passives are not Balance Lab surfaces. Apply validation re-resolves the complete
-3×4 fighter-profile/weapon-base matrix before it can reset Practice.
+The current snapshot schema is version 5. It exposes the three permanent fighter profiles, four
+canonical weapon-base recipes, and the bounded parameters of all five supported ultimates,
+including Self Cloak, Reveal Scan, and Concealment Field. The retired Custom Pulse axes, named build
+presets, point budget, and frame passives are not Balance Lab surfaces. Apply validation re-resolves
+the complete 3×4 fighter-profile/weapon-base matrix and validates the advertised brawler catalog
+before it can reset Practice.
 
 ## Validation principle
 

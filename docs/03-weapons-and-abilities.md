@@ -54,8 +54,10 @@ The intended long-lived brawler model fixes one fighter profile and one weapon b
 creates that brawler. The fighter-profile identity and persistence lifecycle belong to
 [Fighter and build specification](./02-fighter-model.md); this document owns how the fixed weapon
 base and its equipped parts resolve into an operational weapon. The current four reference weapon
-presets are the initial weapon-base candidates. More bases may be added as complete playable recipes
-without changing the part-slot model.
+presets are the initial weapon bases. Lobby authority advertises their stable IDs, display names,
+presentation profile keys, and validated base configurations as part of the connection-scoped
+brawler catalog. More bases may be added as complete playable recipes without changing the
+part-slot model or adding a client-owned inventory table.
 
 Every weapon has exactly four interchangeable part slots:
 
@@ -381,13 +383,13 @@ Possible future ultimate families include shielding, healing or repair fields, a
 knockback, and temporary wall placement. Each should be introduced as a complete readable gameplay
 slice rather than as unused framework capacity.
 
-V9 promotes two additional ultimate families: a self cloak that is permanently consumed by an
+V9 delivered three additional ultimate families: a self cloak that is permanently consumed by an
 accepted attack or positive applied damage, and an instant targeted reveal scan that applies a
-team-wide forced-reveal deadline to hostile fighters in its accepted area. A later V9 milestone adds
-a public allied concealment field. Their shared observer-specific rule, proximity exclusions,
+team-wide forced-reveal deadline to hostile fighters in its accepted area, plus a public targeted
+allied concealment field. Their shared observer-specific rule, proximity exclusions,
 attack/damage locks, counter relationship, privacy boundary, and staging are owned by the
 [Concealment and reveal specification](./17-concealment.md) and
-[V9 roadmap](./implementation/v9/roadmap.md).
+[completed V9 roadmap](./implementation/v9/roadmap.md).
 
 ## Active-item extension
 

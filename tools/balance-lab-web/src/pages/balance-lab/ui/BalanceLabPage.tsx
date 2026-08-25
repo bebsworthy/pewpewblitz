@@ -19,7 +19,7 @@ export function BalanceLabPage() {
     <main>
       <header className="topbar">
         <div>
-          <p className="eyebrow">PewPew Blitz · V9</p>
+          <p className="eyebrow">PewPew Blitz · V10</p>
           <h1>Balance Lab</h1>
           <p>Match {state.matchId} · Applied revision {state.revision}</p>
         </div>
@@ -107,6 +107,28 @@ export function BalanceLabPage() {
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="panel">
+        <p className="eyebrow">Damageable environment · V10</p>
+        <h2>Oil barrel</h2>
+        <p>Authoritative health, blast damage, radius, target budget, and chain ceiling.</p>
+        <NumericTreeEditor
+          value={draft.barrel}
+          path={["barrel"]}
+          onNumber={controller.setNumber}
+        />
+      </section>
+
+      <section className="panel">
+        <p className="eyebrow">Mode objective · V10</p>
+        <h2>Heist safe</h2>
+        <p>Authoritative maximum health applied on the next clean Heist Practice epoch.</p>
+        <NumericTreeEditor
+          value={draft.heist}
+          path={["heist"]}
+          onNumber={controller.setNumber}
+        />
       </section>
 
       <footer className="actionbar">

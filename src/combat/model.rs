@@ -35,6 +35,7 @@ pub struct AttackSource {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CombatSourceKind {
     PrimaryWeapon,
+    Environment,
     Ultimate {
         ultimate_id: crate::builds::UltimateDefinitionId,
     },

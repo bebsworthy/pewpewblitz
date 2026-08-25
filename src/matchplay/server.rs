@@ -1198,30 +1198,52 @@ fn capture_match_summary(
             &MatchState,
             Option<&WipeoutState>,
             Option<&super::HotZoneState>,
+            Option<&super::HeistState>,
         ),
         With<MatchRoot>,
     >,
     hot_zone_telemetry: Option<ResMut<super::hot_zone::HotZoneTelemetry>>,
+    heist_safes: Query<(
+        &super::HeistSafe,
+        &crate::combat::CurrentHealth,
+        &crate::map::DamageableMaximumHealth,
+    )>,
     mut telemetry: ResMut<MatchTelemetry>,
     weapons: Res<WeaponTelemetry>,
     abilities: Res<crate::abilities::AbilityTelemetry>,
 ) {
-    let Ok((state, wipeout, hot_zone)) = roots.single() else {
+    let Ok((state, wipeout, hot_zone, heist)) = roots.single() else {
         return;
     };
     match state.phase {
         MatchPhase::Active { .. } => telemetry.begin(state.match_id, tick.0),
         MatchPhase::Completed { result, .. } => {
-            let mode_summary = match (wipeout, hot_zone) {
-                (Some(wipeout), _) => ModeSummary::Wipeout(WipeoutSummary {
+            let mode_summary = match (wipeout, hot_zone, heist) {
+                (Some(wipeout), _, _) => ModeSummary::Wipeout(WipeoutSummary {
                     final_scores: wipeout.team_scores,
                     target_score: wipeout.target_score,
                     score_margin: wipeout.team_scores[0].abs_diff(wipeout.team_scores[1]),
                 }),
-                (None, Some(hot_zone)) => hot_zone_telemetry
+                (None, Some(hot_zone), _) => hot_zone_telemetry
                     .map(|telemetry| ModeSummary::HotZone(telemetry.summary(hot_zone)))
                     .expect("an installed Hot Zone match carries its telemetry"),
-                (None, None) => panic!("an installed mode carries its state on the root"),
+                (None, None, Some(heist)) => {
+                    let mut final_health = [0; 2];
+                    let mut maximum_health = [0; 2];
+                    for (safe, health, maximum) in &heist_safes {
+                        if safe.match_id == state.match_id && safe.defending_team.0 <= 1 {
+                            let index = usize::from(safe.defending_team.0);
+                            final_health[index] = health.0;
+                            maximum_health[index] = maximum.0;
+                        }
+                    }
+                    ModeSummary::Heist(super::HeistSummary {
+                        final_health,
+                        maximum_health,
+                        completion: heist.completion,
+                    })
+                }
+                (None, None, None) => panic!("an installed mode carries its state on the root"),
             };
             telemetry.complete_with_mode(
                 tick.0,

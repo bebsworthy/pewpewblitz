@@ -44,6 +44,17 @@ use std::{
     time::Duration,
 };
 
+fn routing_mode_for_definition(
+    mode: crate::map::ModeDefinitionId,
+) -> Option<brawler_routing::GameMode> {
+    match mode {
+        crate::map::WIPEOUT_MODE_DEFINITION => Some(brawler_routing::GameMode::Wipeout),
+        crate::map::HOT_ZONE_MODE_DEFINITION => Some(brawler_routing::GameMode::HotZone),
+        crate::map::HEIST_MODE_DEFINITION => Some(brawler_routing::GameMode::Heist),
+        _ => None,
+    }
+}
+
 /// M01's hard upper bound for authenticated lobby sessions.
 pub const MAX_AUTHENTICATED_LOBBY_SESSIONS: usize = crate::lobby::MAX_QUEUE_TICKETS as usize;
 /// M01 allocates one match only when exactly two authenticated sessions are present.
@@ -546,6 +557,7 @@ impl LobbyState {
         let map_preset = match self.mode {
             GameMode::Wipeout => crate::map::CROSSROADS_PRESET,
             GameMode::HotZone => crate::map::CROSSROADS_HOT_ZONE_PRESET,
+            GameMode::Heist => crate::map::TWIN_VAULTS_PRESET,
         };
         let map_revision = crate::map::MapContentCatalog::embedded()
             .ok()
@@ -561,6 +573,7 @@ impl LobbyState {
             mode: match self.mode {
                 GameMode::Wipeout => brawler_routing::GameMode::Wipeout,
                 GameMode::HotZone => brawler_routing::GameMode::HotZone,
+                GameMode::Heist => brawler_routing::GameMode::Heist,
             },
             map_preset: map_preset.0,
             map_revision,
@@ -568,6 +581,7 @@ impl LobbyState {
             objective_target: match self.mode {
                 GameMode::Wipeout => 10,
                 GameMode::HotZone => 1_800,
+                GameMode::Heist => 2_000,
             },
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
@@ -634,11 +648,8 @@ impl LobbyState {
             body: AllocateRequestBody {
                 request_id,
                 lobby_session_id,
-                mode: if game.mode_definition_id == crate::map::WIPEOUT_MODE_DEFINITION {
-                    brawler_routing::GameMode::Wipeout
-                } else {
-                    brawler_routing::GameMode::HotZone
-                },
+                mode: routing_mode_for_definition(game.mode_definition_id)
+                    .ok_or(CodecError::InvalidValue)?,
                 map_preset: reservation.map_preset_id.0,
                 map_revision: catalog
                     .map_admission_revision(reservation.map_preset_id)
@@ -725,11 +736,8 @@ impl LobbyState {
             body: AllocateRequestBody {
                 request_id,
                 lobby_session_id: session.lobby_session_id,
-                mode: if game.mode_definition_id == crate::map::WIPEOUT_MODE_DEFINITION {
-                    brawler_routing::GameMode::Wipeout
-                } else {
-                    brawler_routing::GameMode::HotZone
-                },
+                mode: routing_mode_for_definition(game.mode_definition_id)
+                    .ok_or(Rejection::Internal)?,
                 map_preset: game.map_preset_ids[0].0,
                 map_revision: catalog
                     .map_admission_revision(game.map_preset_ids[0])
@@ -1309,8 +1317,11 @@ fn initialize_lobby_state(
         return;
     };
     let profile_database_path = std::path::PathBuf::from(&manifest.profile_database_path);
-    let profile_authority = crate::profiles::ProfileAuthority::start(profile_database_path)
-        .unwrap_or_else(|error| panic!("profile storage failed to start: {error}"));
+    let profile_authority = crate::profiles::ProfileAuthority::start_with_catalog(
+        profile_database_path,
+        catalog.brawler_catalog.clone(),
+    )
+    .unwrap_or_else(|error| panic!("profile storage failed to start: {error}"));
     commands.insert_resource(profile_authority);
     commands.insert_resource(LobbyState::new(manifest, config.game_mode, build));
     commands.insert_resource(QueueState::new(&catalog));
@@ -1487,6 +1498,7 @@ fn process_profile_storage_results(
                 server_name: catalog.server_name.clone(),
                 catalog_revision: catalog.revision,
                 game_types: catalog.game_types.clone(),
+                brawler_catalog: Box::new(catalog.brawler_catalog.clone()),
                 profile: Box::new(profile),
             });
             publications.initial_pending = true;

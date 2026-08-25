@@ -7,29 +7,32 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
-   `docs/16-grid-map-asset-system.md` for the current sparse map-asset system, domain-organized
-   content, legacy-removal evidence, and pending closeout playtest.
-3. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
+2. `docs/implementation/v9/roadmap.md`, `milestone-03.md`, and `docs/17-concealment.md` for the
+   completed authoritative terrain, Self Cloak, Concealment Field, reveal-proximity, Reveal Scan,
+   server-advertised brawler catalog, and saved-brawler UI closeout.
+3. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
+   `docs/16-grid-map-asset-system.md` for the completed sparse map-asset system, domain-organized
+   content, and legacy-removal evidence.
+4. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
    brawlers, weapon bases, and four-slot weapon-part equipment.
-4. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
+5. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
    development-only authoritative Balance Lab and its enduring operator contract.
-5. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
+6. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
    responsive Player Dashboard, connected-loop convergence, recovery/lifecycle hardening, and V5
    closeout evidence.
-6. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
+7. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
    embedded map documents, semantic object placement, two reusable themes, routed admission,
    presentation hardening, and V4 closeout evidence.
-7. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
+8. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
-8. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
+9. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
    provenance, degradation, and future-art contracts.
-9. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-10. `docs/13-player-ux.md` for the canonical player experience and
+10. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
+11. `docs/13-player-ux.md` for the canonical player experience and
    `docs/14-multiplayer-server-architecture.md` for the routed-process decisions it relies on.
-11. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
+12. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
    baseline and closeout evidence.
-12. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
+13. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
    verification evidence, deferred release polish, and the direct-UDP comparison baseline.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
@@ -54,9 +57,12 @@ render evidence passed closeout.
 V6 completed and was accepted on 2026-08-22 after the Balance Lab's routed Practice workflow,
 validated persistence, isolation, and native operator checks passed. V7 completed and was accepted
 on 2026-08-23 after persistent saved-brawler profiles and four-slot weapon-part equipment passed
-storage, routed handoff, recovery, and player-flow verification. V8 M01–M03 completed on 2026-08-23;
-M04 has implemented the hard map-system cutover, domain-organized active content, legacy removal,
-canonical/E2E/native verification, and is awaiting the final user playtest before V8 closeout.
+storage, routed handoff, recovery, and player-flow verification. V8 completed and was accepted on
+2026-08-23 after its hard map-system cutover, domain-organized active content, legacy removal, and
+canonical/E2E/native verification. V9 completed and was accepted on 2026-08-24 after all three
+concealment sources, observer-specific reveal, Reveal Scan, the server-authoritative brawler
+catalog, saved-brawler UX remediation, full verification, native gameplay confirmation, and its
+learning review passed closeout.
 
 ## Technical stack
 

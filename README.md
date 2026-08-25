@@ -101,15 +101,21 @@ E2E runs choose an unused loopback port by default and may run beside an interac
 ## Current player flow
 
 Dashboard is the sole authenticated home. The server loads the account's saved-brawler profile
-before admitting the client. New profiles start empty; create a brawler before Play or Practice.
-Each brawler permanently binds one of three fighter profiles and one of four weapon bases, while its
-name, ultimate, two passives, and four generic weapon-part slots remain server-owned editable data
-outside queue. Every profile receives eight starter part instances once; the brawler editor opens a
-four-slot equipment overlay with signed effects and a live resolved-weapon preview. The Dashboard
-menu creates, selects, edits, and deletes saved brawlers; deleting requires confirmation. Play enters
-the selected game type's multiplayer queue and Practice fills the remaining roster with inert
-`Bot N` fighters. Queue admission freezes the selected brawler revision and resolved part modifiers
-for that match.
+before admitting the client. The accepted lobby response atomically supplies that profile and the
+server's bounded, revisioned brawler catalog: legal fighter profiles, weapon bases, ultimates,
+passives, display metadata, preview values, and selection limits. The client installs that catalog
+for the connection, drives every brawler screen from it, and clears it on disconnect or server
+change; it does not reconstruct legal choices from numeric ranges or local name tables.
+
+New profiles start empty; create a brawler before Play or Practice. Each brawler permanently binds
+one advertised fighter profile and weapon base, while its name, ultimate, two passives, and four
+generic weapon-part slots remain server-owned editable data outside queue. Every profile receives
+eight starter part instances once. Tapping the Dashboard brawler card opens the full-screen
+Brawlers List, then a full-screen Brawler screen; creation, ability customization, and weapon
+customization are full-screen child destinations. Delete is a small contextual confirmation over
+the invoking Brawler screen. Play enters the selected game type's multiplayer queue and Practice
+fills the remaining roster with inert `Bot N` fighters. Queue admission freezes the selected
+brawler revision and resolved part modifiers for that match.
 
 Queue cancellation, loading cancellation, confirmed leave, and ordinary no-result return converge
 on Dashboard while the lobby remains valid. Results retains the authoritative outcome and offers

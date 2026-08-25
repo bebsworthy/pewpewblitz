@@ -1,7 +1,7 @@
 use super::{
-    AccountId, MatchBuildSnapshotV3, ProfileCommand, ProfileDecision, ProfileOutcome,
-    ProfileSnapshot, ProfileStorageCommand, ProfileStorageError, ProfileStorageExecutor,
-    SavedBrawlerId,
+    AccountId, AdvertisedBrawlerCatalog, MatchBuildSnapshotV3, ProfileCommand, ProfileDecision,
+    ProfileOutcome, ProfileSnapshot, ProfileStorageCommand, ProfileStorageError,
+    ProfileStorageExecutor, SavedBrawlerId,
 };
 use bevy::prelude::Resource;
 use std::{collections::BTreeMap, path::PathBuf};
@@ -31,6 +31,7 @@ enum PendingOperation {
 #[derive(Resource)]
 pub struct ProfileAuthority {
     storage: ProfileStorageExecutor,
+    catalog: AdvertisedBrawlerCatalog,
     next_storage_request_id: u64,
     sessions: BTreeMap<u64, AcceptedProfileSession>,
     active_accounts: BTreeMap<AccountId, u64>,
@@ -67,8 +68,23 @@ type ProfilePollResult = (Vec<ProfileLoadCompletion>, Vec<(u64, ProfileOutcome)>
 
 impl ProfileAuthority {
     pub fn start(path: PathBuf) -> Result<Self, ProfileStorageError> {
+        let builds =
+            crate::builds::BuildCatalog::embedded().map_err(ProfileStorageError::Database)?;
+        let weapons =
+            crate::combat::WeaponCatalog::embedded().map_err(ProfileStorageError::Database)?;
+        let catalog = AdvertisedBrawlerCatalog::from_content(&builds, &weapons)
+            .map_err(ProfileStorageError::Database)?;
+        Self::start_with_catalog(path, catalog)
+    }
+
+    pub fn start_with_catalog(
+        path: PathBuf,
+        catalog: AdvertisedBrawlerCatalog,
+    ) -> Result<Self, ProfileStorageError> {
+        catalog.validate().map_err(ProfileStorageError::Database)?;
         Ok(Self {
             storage: ProfileStorageExecutor::start(path)?,
+            catalog,
             next_storage_request_id: 1,
             sessions: BTreeMap::new(),
             active_accounts: BTreeMap::new(),
@@ -134,7 +150,7 @@ impl ProfileAuthority {
                         .result
                         .map_err(|error| storage_decision(&error))
                         .and_then(|snapshot| {
-                            if snapshot_catalog_is_valid(&snapshot) {
+                            if snapshot_catalog_is_valid(&snapshot, &self.catalog) {
                                 Ok(snapshot)
                             } else {
                                 Err(ProfileDecision::StorageFault)
@@ -165,7 +181,7 @@ impl ProfileAuthority {
                     command,
                 } => {
                     let result = completion.result.and_then(|snapshot| {
-                        if snapshot_catalog_is_valid(&snapshot) {
+                        if snapshot_catalog_is_valid(&snapshot, &self.catalog) {
                             Ok(snapshot)
                         } else {
                             Err(ProfileStorageError::InvalidData(
@@ -214,6 +230,12 @@ impl ProfileAuthority {
             )));
         }
         if command_request_id(&command) == 0 {
+            return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
+                &command,
+                ProfileDecision::InvalidRequest,
+            )));
+        }
+        if !command_catalog_is_valid(&command, &self.catalog) {
             return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
                 &command,
                 ProfileDecision::InvalidRequest,
@@ -498,7 +520,23 @@ fn equipment_candidate_is_valid(
     .is_ok()
 }
 
-fn snapshot_catalog_is_valid(snapshot: &ProfileSnapshot) -> bool {
+fn command_catalog_is_valid(command: &ProfileCommand, catalog: &AdvertisedBrawlerCatalog) -> bool {
+    match command {
+        ProfileCommand::CreateBrawler { draft, .. } => catalog.validate_draft(draft).is_ok(),
+        ProfileCommand::EditBrawler { edit, .. } => catalog.validate_edit(edit).is_ok(),
+        ProfileCommand::SelectBrawler { .. }
+        | ProfileCommand::DeleteBrawler { .. }
+        | ProfileCommand::EquipWeaponParts { .. } => true,
+    }
+}
+
+fn snapshot_catalog_is_valid(
+    snapshot: &ProfileSnapshot,
+    catalog: &AdvertisedBrawlerCatalog,
+) -> bool {
+    if catalog.validate_profile(snapshot).is_err() {
+        return false;
+    }
     let Ok(parts) = crate::weapon_parts::WeaponPartCatalog::embedded() else {
         return false;
     };

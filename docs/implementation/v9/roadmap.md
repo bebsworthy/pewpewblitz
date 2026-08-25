@@ -18,8 +18,8 @@ spectator mode, or unrelated environment capabilities.
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M03 — Allied concealment field and closeout |
+| Status | Complete |
+| Current milestone | Complete — M03 accepted on 2026-08-24 |
 | Entry gate | Satisfied: V8 M04/V8 completed and the user approved V9 M01 implementation on 2026-08-23 |
 | Completion gate | Terrain, self-cloak, allied concealment area, proximity, attack/damage reveal, and reveal scan use one server-owned observer decision; unauthorized clients receive no hidden live spatial state or subject-derived leaks; all lifecycle, routed, impairment, capacity, native, feedback, and learning gates pass |
 
@@ -60,7 +60,16 @@ Allowed statuses are `Not started`, `Researching`, `Specification review`, `Impl
 |---|---|---|---|
 | 01 | Complete | One accepted map contains real concealing terrain: allies remain visible, sufficiently distant enemies disappear at the network boundary, and the observer's resolved reveal-proximity attribute determines close reveal | [milestone-01.md](./milestone-01.md) |
 | 02 | Complete | Self-cloak and reveal-scan ultimates form one complete build/counter pair with attack, damage, charge, targeting, HUD, cue, recovery, and balance behavior | [milestone-02.md](./milestone-02.md) |
-| 03 | User playtest | A public targeted allied concealment field hides its caster and teammates through the same observer rule; V9 closes with full cross-source, lifecycle, security, performance, and playtest evidence | [milestone-03.md](./milestone-03.md) |
+| 03 | Complete | A public targeted allied concealment field hides its caster and teammates through the same observer rule; V9 closes with full cross-source, lifecycle, security, performance, and playtest evidence | [milestone-03.md](./milestone-03.md) |
+
+## Completion record
+
+V9 completed and was accepted on 2026-08-24. Terrain concealment, Self Cloak, Concealment Field,
+observer-owned reveal proximity, attack/damage reveal, and Reveal Scan now share one authoritative
+visibility decision and withhold unauthorized spatial state at the network boundary. The user
+confirmed Concealment Field in gameplay after the server-authoritative brawler catalog and
+full-screen saved-brawler flow corrections. All playtest feedback is reconciled, the verification
+record is retained in the milestone documents, and the V9 learning review is complete.
 
 ## Ordering rationale
 

@@ -138,6 +138,16 @@ pub const IMPACT_BLADE_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(4);
 pub const NEUTRAL_TEAM: TeamId = TeamId(u8::MAX);
 pub const DUMMY_NETWORK_ENTITY: NetworkEntityId = NetworkEntityId(0);
 
+#[cfg(feature = "server")]
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CombatDamageSet {
+    Combatants,
+    WorldTargets,
+    ModeObjectives,
+    EnvironmentReactions,
+    Publish,
+}
+
 /// Stable presentation colors make the replicated world-space ownership visible during
 /// two-client smoke tests. These are presentation-only; gameplay never depends on color.
 #[cfg(feature = "client")]

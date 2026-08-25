@@ -32,6 +32,8 @@ use planning::{abort_composed_event_batch, resolve_pending_deliveries};
 pub(crate) use planning::{
     finish_attack_delivery, flush_completed_attack_telemetry, payload_target_visible,
 };
+#[cfg(feature = "server")]
+pub(crate) use runtime::requested_damage;
 pub use runtime::{combine_knockback, refresh_strongest_slow};
 
 /// The bounded authoritative transaction outputs produced by payload resolution, grouped

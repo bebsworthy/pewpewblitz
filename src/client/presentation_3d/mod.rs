@@ -67,6 +67,7 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) area_ring: Handle<Mesh>,
     pub(crate) area_disc: Handle<Mesh>,
     pub(crate) effect_sphere: Handle<Mesh>,
+    pub(crate) barrel_body: Handle<Mesh>,
 }
 
 #[derive(Resource)]
@@ -93,6 +94,8 @@ pub(crate) struct Material3dAssets {
     pub(crate) effect_impact: Handle<StandardMaterial>,
     pub(crate) effect_damage: Handle<StandardMaterial>,
     pub(crate) dash: Handle<StandardMaterial>,
+    pub(crate) barrel: Handle<StandardMaterial>,
+    pub(crate) barrel_damaged: Handle<StandardMaterial>,
 }
 
 #[derive(Component)]
@@ -180,6 +183,32 @@ struct V3ZoneFill;
 #[derive(Component)]
 struct V3ZoneBoundary;
 
+const OBJECT_HEALTH_BAR_WIDTH: f32 = 76.8;
+const OBJECT_HEALTH_BAR_HEIGHT: f32 = 11.0;
+const OBJECT_HEALTH_WORLD_HEIGHT: f32 = 52.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum DamageableObjectHealthKey {
+    Map {
+        map_instance_id: crate::map::MapInstanceId,
+        generation: u64,
+        placement_id: crate::map::MapPlacementId,
+    },
+    HeistSafe {
+        match_id: crate::matchplay::MatchId,
+        anchor_id: crate::map::ModeAnchorId,
+    },
+}
+
+#[derive(Component)]
+struct DamageableObjectHealthUi {
+    key: DamageableObjectHealthKey,
+    fill: Entity,
+}
+
+#[derive(Component)]
+struct DamageableObjectHealthFillUi;
+
 /// Client-only 3D world composition. Gameplay authority remains planar and server-owned.
 pub(super) struct WorldPresentationPlugin;
 
@@ -209,10 +238,13 @@ impl Plugin for WorldPresentationPlugin {
                     environment_assets::prepare_environment_scenes,
                     reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
                     reconcile_dynamic_map_visuals,
+                    reconcile_heist_safe_visuals,
+                    update_damageable_map_visuals,
                     combat::reconcile_combat_visuals,
                     upgrade_fighters_to_imported_models,
                     combat::update_fighter_concealment_visuals,
                     combat::consume_combat_cues,
+                    combat::consume_world_object_cues,
                     combat::update_combat_visual_state,
                     update_character_animation,
                     combat::cleanup_combat_effects,
@@ -231,7 +263,10 @@ impl Plugin for WorldPresentationPlugin {
             )
             .add_systems(
                 PostUpdate,
-                combat::project_fighter_overhead_ui
+                (
+                    combat::project_fighter_overhead_ui,
+                    project_damageable_object_health_ui,
+                )
                     .after(TransformSystems::Propagate)
                     .after(CameraUpdateSystems)
                     .before(UiSystems::Prepare),
@@ -248,14 +283,144 @@ struct DynamicMapVisual {
     asset_id: crate::map::MapAssetId,
 }
 
+#[derive(Component)]
+struct HeistSafeVisual {
+    owner: Entity,
+}
+
+fn reconcile_heist_safe_visuals(
+    mut commands: Commands,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
+    imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
+    safes: Query<(
+        Entity,
+        &crate::matchplay::HeistSafe,
+        &Position,
+        &crate::map::DamageableLifeState,
+    )>,
+    mut visuals: Query<(Entity, &HeistSafeVisual, &mut Transform)>,
+) {
+    let safe_entities: std::collections::BTreeSet<_> =
+        safes.iter().map(|(entity, ..)| entity).collect();
+    let mut existing = std::collections::BTreeSet::new();
+    for (visual_entity, visual, mut transform) in &mut visuals {
+        let Ok((_, _, position, life)) = safes.get(visual.owner) else {
+            commands.entity(visual_entity).despawn();
+            continue;
+        };
+        existing.insert(visual.owner);
+        transform.translation = ground_position(position.0);
+        transform.scale.y = if matches!(life, crate::map::DamageableLifeState::Live) {
+            1.0
+        } else {
+            0.35
+        };
+    }
+    for (owner, safe, position, life) in &safes {
+        if existing.contains(&owner) || !safe_entities.contains(&owner) {
+            continue;
+        }
+        let team_material = if safe.defending_team.0 == 0 {
+            materials.team_blue.clone()
+        } else {
+            materials.team_red.clone()
+        };
+        let profile_id = crate::map::MapVisualProfileId(39);
+        let imported_core = imported
+            .as_deref()
+            .and_then(|scenes| scenes.scene(profile_id))
+            .cloned();
+        let profile = visual_catalog
+            .as_deref()
+            .and_then(|catalog| catalog.profile(profile_id));
+        let root = commands
+            .spawn((
+                HeistSafeVisual { owner },
+                Transform {
+                    translation: ground_position(position.0),
+                    scale: Vec3::new(
+                        1.0,
+                        if matches!(life, crate::map::DamageableLifeState::Live) {
+                            1.0
+                        } else {
+                            0.35
+                        },
+                        1.0,
+                    ),
+                    ..default()
+                },
+                Visibility::default(),
+                Name::new("Heist structural safe"),
+            ))
+            .id();
+        commands.entity(root).with_children(|parent| {
+            parent.spawn((
+                Mesh3d(primitives.unit_cuboid.clone()),
+                MeshMaterial3d(materials.neutral.clone()),
+                Transform::from_xyz(0.0, 10.0, 0.0).with_scale(Vec3::new(108.0, 20.0, 76.0)),
+            ));
+            if let (Some(scene), Some(profile)) = (imported_core.as_ref(), profile) {
+                parent.spawn((
+                    environment_assets::EnvironmentMaterialTint([
+                        profile.tint.0,
+                        profile.tint.1,
+                        profile.tint.2,
+                    ]),
+                    WorldAssetRoot(scene.clone()),
+                    Transform {
+                        translation: Vec3::Y * (28.0 + profile.vertical_offset),
+                        rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
+                        scale: Vec3::splat(profile.scale),
+                    },
+                    Name::new("imported Heist safe core"),
+                ));
+            } else {
+                parent.spawn((
+                    Mesh3d(primitives.unit_cuboid.clone()),
+                    MeshMaterial3d(materials.neutral.clone()),
+                    Transform::from_xyz(0.0, 34.0, 0.0).with_scale(Vec3::new(92.0, 28.0, 60.0)),
+                ));
+            }
+            parent.spawn((
+                Mesh3d(primitives.unit_cuboid.clone()),
+                MeshMaterial3d(team_material.clone()),
+                Transform::from_xyz(0.0, 49.0, 0.0).with_scale(Vec3::new(100.0, 8.0, 66.0)),
+            ));
+            for x in [-50.0, 50.0] {
+                parent.spawn((
+                    Mesh3d(primitives.unit_cuboid.clone()),
+                    MeshMaterial3d(team_material.clone()),
+                    Transform::from_xyz(x, 32.0, 0.0).with_scale(Vec3::new(8.0, 64.0, 72.0)),
+                ));
+            }
+        });
+    }
+}
+
+fn map_profile_has_dynamic_runtime(profile: &crate::map::MapGameplayProfile) -> bool {
+    profile.destruction != crate::map::MapDestructionBehavior::Indestructible
+        || profile.durability != crate::map::MapDurabilityBehavior::Indestructible
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "parameters are Bevy system parameters owned by the presentation schedule"
+)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the Bevy reconciliation system atomically compares one dynamic map generation and materializes its bounded visual set"
 )]
 fn reconcile_dynamic_map_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     theme_materials: Res<environment_assets::EnvironmentThemeMaterialCatalog>,
+    presentation_materials: Res<Material3dAssets>,
+    map_visuals: Option<Res<environment_assets::MapVisualCatalog>>,
+    imported_scenes: Option<Res<environment_assets::EnvironmentImportedScenes>>,
+    imported_readiness: Option<Res<environment_assets::EnvironmentAssetReadiness>>,
     catalog: Res<crate::map::MapCatalogResource>,
     accepted: Option<Res<crate::map::PresentedMap>>,
     grids: Query<
@@ -317,9 +482,7 @@ fn reconcile_dynamic_map_visuals(
         let dynamic = catalog
             .0
             .profile(source_asset.gameplay_profile_id)
-            .is_some_and(|profile| {
-                profile.destruction != crate::map::MapDestructionBehavior::Indestructible
-            });
+            .is_some_and(map_profile_has_dynamic_runtime);
         if !dynamic || present.contains(&placement.placement_id) {
             continue;
         }
@@ -329,43 +492,349 @@ fn reconcile_dynamic_map_visuals(
         let Some(asset) = catalog.0.asset(asset_id) else {
             continue;
         };
+        let profile = map_visuals
+            .as_deref()
+            .and_then(|visuals| visuals.profile(asset.visual_profile_id));
+        let imported_requested = profile.is_some_and(|profile| {
+            matches!(
+                profile.kind,
+                environment_assets::MapVisualKind::Imported { .. }
+            )
+        });
+        let imported_scene = imported_scenes
+            .as_deref()
+            .and_then(|scenes| scenes.scene(asset.visual_profile_id));
+        let imported_visual = profile.is_some_and(|profile| {
+            matches!(
+                profile.kind,
+                environment_assets::MapVisualKind::Imported { .. }
+            )
+        }) && imported_scene.is_some();
+        if imported_requested
+            && imported_scene.is_none()
+            && imported_readiness.as_deref().is_some_and(|readiness| {
+                matches!(
+                    readiness,
+                    environment_assets::EnvironmentAssetReadiness::Loading
+                )
+            })
+        {
+            continue;
+        }
         let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
         let center = crate::map::placement_world_center(snapshot.dimensions, asset, placement);
-        let material = if asset_id == crate::map::RUBBLE_ASSET {
+        let terminal_debris = asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET;
+        let material = if asset_id == crate::map::OIL_BARREL_ASSET {
+            presentation_materials.barrel.clone()
+        } else if asset_id == crate::map::RUBBLE_ASSET || terminal_debris {
             materials.rubble.clone()
         } else {
             materials.destructible_cover.clone()
         };
-        commands.spawn((
-            marker,
-            DynamicMapVisual {
-                placement_id: placement.placement_id,
-                generation: state.generation,
-                asset_id,
-            },
-            Mesh3d(primitives.cover_block.clone()),
-            MeshMaterial3d(material),
-            Transform {
-                translation: ground_position(center)
-                    + Vec3::Y
-                        * if asset_id == crate::map::RUBBLE_ASSET {
-                            4.0
-                        } else {
-                            16.0
-                        },
-                scale: Vec3::new(
-                    f32::from(footprint.width) * 0.5,
-                    if asset_id == crate::map::RUBBLE_ASSET {
-                        0.25
-                    } else {
-                        1.0
+        let visual = commands
+            .spawn((
+                marker,
+                DynamicMapVisual {
+                    placement_id: placement.placement_id,
+                    generation: state.generation,
+                    asset_id,
+                },
+                Transform {
+                    translation: ground_position(center) + Vec3::Y * dynamic_visual_lift(asset_id),
+                    rotation: Quat::from_rotation_y(
+                        f32::from(placement.quarter_turns) * core::f32::consts::FRAC_PI_2,
+                    ),
+                    scale: dynamic_visual_scale(asset_id, footprint, imported_visual),
+                },
+                Visibility::default(),
+                Name::new("dynamic map asset"),
+            ))
+            .id();
+        if let (Some(profile), Some(scene)) = (profile, imported_scene) {
+            commands.entity(visual).with_children(|parent| {
+                parent.spawn((
+                    environment_assets::EnvironmentMaterialTint([
+                        profile.tint.0,
+                        profile.tint.1,
+                        profile.tint.2,
+                    ]),
+                    WorldAssetRoot(scene.clone()),
+                    Transform {
+                        translation: Vec3::Y
+                            * (profile.vertical_offset - dynamic_visual_lift(asset_id)),
+                        rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
+                        scale: Vec3::splat(profile.scale),
                     },
-                    f32::from(footprint.height) * 0.5,
-                ),
+                    Name::new("imported dynamic map asset"),
+                ));
+            });
+        } else {
+            commands.entity(visual).insert((
+                Mesh3d(if asset_id == crate::map::OIL_BARREL_ASSET {
+                    primitives.barrel_body.clone()
+                } else {
+                    primitives.cover_block.clone()
+                }),
+                MeshMaterial3d(material),
+            ));
+        }
+    }
+}
+
+fn dynamic_visual_lift(asset_id: crate::map::MapAssetId) -> f32 {
+    if asset_id == crate::map::OIL_BARREL_ASSET {
+        14.0
+    } else if asset_id == crate::map::RUBBLE_ASSET
+        || asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET
+    {
+        4.0
+    } else {
+        16.0
+    }
+}
+
+fn dynamic_visual_scale(
+    asset_id: crate::map::MapAssetId,
+    footprint: crate::map::MapFootprint,
+    imported_visual: bool,
+) -> Vec3 {
+    if asset_id == crate::map::OIL_BARREL_ASSET
+        || (asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET && imported_visual)
+    {
+        Vec3::ONE
+    } else {
+        Vec3::new(
+            f32::from(footprint.width) * 0.5,
+            if asset_id == crate::map::RUBBLE_ASSET
+                || asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET
+            {
+                0.25
+            } else {
+                1.0
+            },
+            f32::from(footprint.height) * 0.5,
+        )
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy systems receive resource system parameters by value"
+)]
+fn update_damageable_map_visuals(
+    materials: Res<Material3dAssets>,
+    objects: Query<
+        (
+            &crate::map::DamageableTargetIdentity,
+            &crate::combat::CurrentHealth,
+            &crate::map::DamageableMaximumHealth,
+        ),
+        With<crate::map::DamageableWorldObject>,
+    >,
+    mut visuals: Query<(&DynamicMapVisual, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    let health_by_placement: std::collections::BTreeMap<_, _> = objects
+        .iter()
+        .map(|(identity, health, maximum)| (identity.placement_id(), (health.0, maximum.0)))
+        .collect();
+    for (visual, mut material) in &mut visuals {
+        if visual.asset_id != crate::map::OIL_BARREL_ASSET {
+            continue;
+        }
+        material.0 = if health_by_placement
+            .get(&visual.placement_id)
+            .is_some_and(|(health, maximum)| health < maximum)
+        {
+            materials.barrel_damaged.clone()
+        } else {
+            materials.barrel.clone()
+        };
+    }
+}
+
+fn damageable_object_health_fraction(current: u16, maximum: u16) -> Option<f32> {
+    (maximum > 0 && current > 0 && current < maximum)
+        .then(|| f32::from(current) / f32::from(maximum))
+}
+
+fn spawn_damageable_object_health_ui(
+    commands: &mut Commands,
+    key: DamageableObjectHealthKey,
+    fraction: f32,
+) {
+    let fill = commands
+        .spawn((
+            DamageableObjectHealthFillUi,
+            Node {
+                width: percent(fraction * 100.0),
+                height: percent(100.0),
+                border_radius: BorderRadius::all(px(5.0)),
                 ..default()
             },
-            Name::new("dynamic map asset"),
-        ));
+            BackgroundColor(Color::srgb(0.96, 0.48, 0.08)),
+            Name::new("damageable object floating health fill"),
+        ))
+        .id();
+    commands
+        .spawn((
+            DamageableObjectHealthUi { key, fill },
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(OBJECT_HEALTH_BAR_WIDTH),
+                height: px(OBJECT_HEALTH_BAR_HEIGHT),
+                padding: UiRect::all(px(2.0)),
+                overflow: Overflow::clip(),
+                border_radius: BorderRadius::all(px(6.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.025, 0.03, 0.04)),
+            GlobalZIndex(119),
+            Visibility::Hidden,
+            Name::new("damageable object projected floating health bar"),
+        ))
+        .add_child(fill);
+}
+
+fn projected_object_health_top_left(viewport: Vec2, anchor: Vec2) -> Option<Vec2> {
+    let top_left = anchor
+        - Vec2::new(
+            OBJECT_HEALTH_BAR_WIDTH * 0.5,
+            OBJECT_HEALTH_BAR_HEIGHT * 0.5,
+        );
+    (top_left.x + OBJECT_HEALTH_BAR_WIDTH >= 0.0
+        && top_left.x <= viewport.x
+        && top_left.y + OBJECT_HEALTH_BAR_HEIGHT >= 0.0
+        && top_left.y <= viewport.y)
+        .then_some(top_left)
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "the projection system reconciles replicated object health with dynamic world visuals and screen-space UI"
+)]
+fn project_damageable_object_health_ui(
+    mut commands: Commands,
+    cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
+    objects: Query<
+        (
+            &crate::map::DamageableTargetIdentity,
+            &crate::combat::CurrentHealth,
+            &crate::map::DamageableMaximumHealth,
+        ),
+        With<crate::map::DamageableWorldObject>,
+    >,
+    safes: Query<(
+        &crate::matchplay::HeistSafe,
+        &Position,
+        &crate::combat::CurrentHealth,
+        &crate::map::DamageableMaximumHealth,
+    )>,
+    visuals: Query<(
+        &DynamicMapVisual,
+        &crate::map::MapPresentationMember,
+        &GlobalTransform,
+    )>,
+    mut overheads: Query<(
+        Entity,
+        &DamageableObjectHealthUi,
+        &mut Node,
+        &mut Visibility,
+    )>,
+    mut fills: Query<
+        &mut Node,
+        (
+            With<DamageableObjectHealthFillUi>,
+            Without<DamageableObjectHealthUi>,
+        ),
+    >,
+) {
+    let damaged: std::collections::BTreeMap<_, _> = objects
+        .iter()
+        .filter_map(|(identity, health, maximum)| {
+            damageable_object_health_fraction(health.0, maximum.0).map(|fraction| {
+                let generation = identity.generation();
+                (
+                    DamageableObjectHealthKey::Map {
+                        map_instance_id: generation.map_instance_id,
+                        generation: generation.generation,
+                        placement_id: identity.placement_id(),
+                    },
+                    fraction,
+                )
+            })
+        })
+        .collect();
+    let mut desired: std::collections::BTreeMap<_, _> = visuals
+        .iter()
+        .filter_map(|(visual, member, transform)| {
+            let key = DamageableObjectHealthKey::Map {
+                map_instance_id: member.instance_id,
+                generation: visual.generation,
+                placement_id: visual.placement_id,
+            };
+            damaged
+                .get(&key)
+                .map(|fraction| (key, (transform.translation(), *fraction)))
+        })
+        .collect();
+    for (safe, position, health, maximum) in &safes {
+        if maximum.0 == 0 {
+            continue;
+        }
+        desired.insert(
+            DamageableObjectHealthKey::HeistSafe {
+                match_id: safe.match_id,
+                anchor_id: safe.anchor_id,
+            },
+            (
+                ground_position(position.0),
+                f32::from(health.0) / f32::from(maximum.0),
+            ),
+        );
+    }
+    let projection = cameras.single().ok().and_then(|(camera, transform)| {
+        camera
+            .logical_viewport_size()
+            .map(|viewport| (camera, transform, viewport))
+    });
+    let mut existing = std::collections::BTreeSet::new();
+    for (entity, overhead, mut node, mut visibility) in &mut overheads {
+        let Some((world_position, fraction)) = desired.get(&overhead.key) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if !existing.insert(overhead.key) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if let Ok(mut fill) = fills.get_mut(overhead.fill) {
+            fill.width = percent(fraction * 100.0);
+        }
+        let Some((camera, camera_transform, viewport)) = projection else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let Ok(anchor) = camera.world_to_viewport(
+            camera_transform,
+            *world_position + Vec3::Y * OBJECT_HEALTH_WORLD_HEIGHT,
+        ) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let Some(top_left) = projected_object_health_top_left(viewport, anchor) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        node.left = px(top_left.x);
+        node.top = px(top_left.y);
+        *visibility = Visibility::Inherited;
+    }
+    for (key, (_, fraction)) in desired {
+        if existing.contains(&key) {
+            continue;
+        }
+        spawn_damageable_object_health_ui(&mut commands, key, fraction);
     }
 }
 
@@ -396,6 +865,7 @@ fn setup_3d_foundation(
         area_ring: meshes.add(Annulus::new(0.93, 1.0)),
         area_disc: meshes.add(Circle::new(1.0)),
         effect_sphere: meshes.add(Sphere::new(1.0)),
+        barrel_body: meshes.add(Cylinder::new(16.0, 28.0)),
     };
     let matte = |color: Color| StandardMaterial {
         base_color: color,
@@ -518,6 +988,8 @@ fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
+        barrel: materials.add(matte(Color::srgb(0.92, 0.38, 0.06))),
+        barrel_damaged: materials.add(matte(Color::srgb(0.34, 0.12, 0.04))),
     };
     commands.insert_resource(primitives);
     commands.insert_resource(material_assets);
@@ -723,9 +1195,7 @@ fn materialize_map_static_visuals(
         };
         let dynamic = catalog
             .profile(asset.gameplay_profile_id)
-            .is_some_and(|profile| {
-                profile.destruction != crate::map::MapDestructionBehavior::Indestructible
-            });
+            .is_some_and(map_profile_has_dynamic_runtime);
         if asset.slot == crate::map::MapAssetSlot::Marker || dynamic {
             continue;
         }
@@ -818,7 +1288,10 @@ fn hot_zone_visual_geometry(snapshot: &crate::map::ResolvedMapSnapshot) -> Optio
         let crate::map::MapModeAnchorKind::HotZoneCircle {
             center_vertex,
             radius_cells,
-        } = anchor.kind;
+        } = anchor.kind
+        else {
+            return None;
+        };
         snapshot
             .dimensions
             .vertex_world(center_vertex)
@@ -1357,6 +1830,69 @@ mod tests {
         let corrected_front = Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION) * Vec3::Z;
 
         assert!(corrected_front.abs_diff_eq(Vec3::X, 1e-5));
+    }
+
+    #[test]
+    fn damageable_object_health_bar_exists_only_between_full_and_terminal_health() {
+        assert_eq!(damageable_object_health_fraction(60, 60), None);
+        assert_eq!(damageable_object_health_fraction(0, 60), None);
+        assert_eq!(damageable_object_health_fraction(20, 0), None);
+        assert_eq!(damageable_object_health_fraction(30, 60), Some(0.5));
+    }
+
+    #[test]
+    fn hp_durable_map_assets_are_excluded_from_static_materialization() {
+        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+        let barrel = catalog.asset(crate::map::OIL_BARREL_ASSET).unwrap();
+        let profile = catalog.profile(barrel.gameplay_profile_id).unwrap();
+
+        assert_eq!(
+            profile.destruction,
+            crate::map::MapDestructionBehavior::Indestructible
+        );
+        assert!(matches!(
+            profile.durability,
+            crate::map::MapDurabilityBehavior::HitPoints(_)
+        ));
+        assert!(map_profile_has_dynamic_runtime(profile));
+    }
+
+    #[test]
+    fn barrel_debris_uses_a_low_terminal_visual_origin() {
+        assert!((dynamic_visual_lift(crate::map::OIL_BARREL_ASSET) - 14.0).abs() < f32::EPSILON);
+        assert!(
+            (dynamic_visual_lift(crate::map::BARREL_WOOD_DEBRIS_ASSET) - 4.0).abs() < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn imported_barrel_debris_uses_its_world_calibrated_profile_scale() {
+        let footprint = crate::map::MapFootprint {
+            width: 1,
+            height: 1,
+        };
+
+        assert_eq!(
+            dynamic_visual_scale(crate::map::BARREL_WOOD_DEBRIS_ASSET, footprint, true),
+            Vec3::ONE
+        );
+        assert_eq!(
+            dynamic_visual_scale(crate::map::BARREL_WOOD_DEBRIS_ASSET, footprint, false),
+            Vec3::new(0.5, 0.25, 0.5)
+        );
+    }
+
+    #[test]
+    fn damageable_object_health_projection_rejects_offscreen_anchors() {
+        assert!(
+            projected_object_health_top_left(Vec2::new(640.0, 360.0), Vec2::new(320.0, 180.0))
+                .unwrap()
+                .abs_diff_eq(Vec2::new(281.6, 174.5), 1e-4)
+        );
+        assert_eq!(
+            projected_object_health_top_left(Vec2::new(640.0, 360.0), Vec2::new(700.0, 180.0)),
+            None
+        );
     }
 
     #[test]

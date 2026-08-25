@@ -5,21 +5,25 @@ use crate::{
         AdvertisedGameType, AdvertisedRulesSummary, CatalogRevision, GameTypeId, MAX_GAME_TYPES,
         MAX_MAPS_PER_GAME_TYPE, catalog_revision, validate_catalog, validate_presentation_name,
     },
-    map::{HOT_ZONE_MODE_DEFINITION, MapInstanceId, MapPresetId, WIPEOUT_MODE_DEFINITION},
-    matchplay::{HotZoneRules, MatchLifecycleRules, WipeoutRules},
+    map::{
+        HEIST_MODE_DEFINITION, HOT_ZONE_MODE_DEFINITION, MapInstanceId, MapPresetId,
+        WIPEOUT_MODE_DEFINITION,
+    },
+    matchplay::{HeistRules, HotZoneRules, MatchLifecycleRules, WipeoutRules},
 };
 use bevy::prelude::Resource;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 1;
+pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 2;
 pub const MAX_OPERATOR_CATALOG_BYTES: usize = 16 * 1024;
 
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 pub(crate) struct ResolvedLobbyCatalog {
     pub server_name: String,
     pub revision: CatalogRevision,
     pub game_types: Vec<AdvertisedGameType>,
+    pub brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog,
     game_rules: BTreeMap<GameTypeId, ResolvedGameRules>,
     map_admission_revisions: BTreeMap<MapPresetId, u16>,
 }
@@ -64,6 +68,8 @@ struct OperatorGameType {
     kills_to_win: u16,
     #[serde(default)]
     capture_seconds: u16,
+    #[serde(default)]
+    safe_health: u16,
     match_duration_seconds: u16,
     countdown_seconds: u16,
     respawn_seconds: u16,
@@ -145,7 +151,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         }
 
         let (mode_definition_id, objective_target, rules_summary) = match entry.mode.as_str() {
-            "wipeout" if entry.capture_seconds == 0 => {
+            "wipeout" if entry.capture_seconds == 0 && entry.safe_health == 0 => {
                 let target_score = entry.kills_to_win;
                 WipeoutRules { target_score }.validate().map_err(|error| {
                     format!("game type {} has invalid objective: {error}", id.as_str())
@@ -159,7 +165,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     },
                 )
             }
-            "hot-zone" if entry.kills_to_win == 0 => {
+            "hot-zone" if entry.kills_to_win == 0 && entry.safe_health == 0 => {
                 let capture_seconds = entry.capture_seconds;
                 let target_progress_ticks = u16::try_from(seconds_to_ticks(capture_seconds)?)
                     .map_err(|_| {
@@ -177,6 +183,29 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     target_progress_ticks,
                     AdvertisedRulesSummary::HotZone {
                         target_progress_ticks,
+                        active_limit_ticks: match_duration_ticks,
+                    },
+                )
+            }
+            "heist"
+                if entry.kills_to_win == 0
+                    && entry.capture_seconds == 0
+                    && entry.safe_health > 0 =>
+            {
+                let safe_maximum_health = entry.safe_health;
+                HeistRules {
+                    safe_maximum_health,
+                    ..HeistRules::default()
+                }
+                .validate()
+                .map_err(|error| {
+                    format!("game type {} has invalid objective: {error}", id.as_str())
+                })?;
+                (
+                    HEIST_MODE_DEFINITION,
+                    safe_maximum_health,
+                    AdvertisedRulesSummary::Heist {
+                        safe_maximum_health,
                         active_limit_ticks: match_duration_ticks,
                     },
                 )
@@ -261,6 +290,10 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         .map_err(|error| format!("resolved game-type catalog is invalid: {error}"))?;
     let revision = catalog_revision(&advertised)
         .map_err(|error| format!("catalog revision failed: {error}"))?;
+    let brawler_catalog = crate::profiles::AdvertisedBrawlerCatalog::from_content(
+        &crate::builds::BuildCatalog::embedded()?,
+        &crate::combat::WeaponCatalog::embedded()?,
+    )?;
     let welcome = crate::protocol::LobbyJoinOutcome::Accepted {
         logical_server_id: 1,
         player_id: crate::protocol::PlayerId(1),
@@ -268,6 +301,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         server_name: server_name.clone(),
         catalog_revision: revision,
         game_types: advertised.clone(),
+        brawler_catalog: Box::new(brawler_catalog.clone()),
         profile: Box::new(crate::profiles::ProfileSnapshot::empty(
             crate::profiles::AccountId::new(1).expect("constant account ID is nonzero"),
         )),
@@ -281,6 +315,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         server_name,
         revision,
         game_types: advertised,
+        brawler_catalog,
         game_rules,
         map_admission_revisions,
     })
@@ -296,7 +331,7 @@ mod tests {
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local PewPew Blitz");
-        assert_eq!(catalog.game_types.len(), 6);
+        assert_eq!(catalog.game_types.len(), 10);
         let tidal = &catalog.game_types[2];
         assert_eq!(tidal.display_name, "Tidal Garden 2v2");
         assert_eq!(tidal.map_preset_ids, vec![MapPresetId(4)]);
@@ -305,7 +340,11 @@ mod tests {
         assert_eq!(hot_zone_one_vs_one.display_name, "Hot Zone 1v1");
         assert_eq!(hot_zone_one_vs_one.map_preset_ids, vec![MapPresetId(2)]);
         assert_eq!(hot_zone_one_vs_one.players_per_team, 1);
-        let first_blood = catalog.game_types.last().unwrap();
+        let first_blood = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == "first-blood")
+            .unwrap();
         assert_eq!(first_blood.display_name, "First Blood");
         assert_eq!(first_blood.configuration_revision, 2);
         assert_eq!(first_blood.map_preset_ids, vec![MapPresetId(3)]);
@@ -326,12 +365,29 @@ mod tests {
                 respawn_ticks: 180,
             })
         );
+        let barrel_yard = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == "barrel-yard-1v1")
+            .unwrap();
+        assert_eq!(barrel_yard.id.as_str(), "barrel-yard-1v1");
+        assert_eq!(barrel_yard.configuration_revision, 2);
+        assert_eq!(barrel_yard.map_preset_ids, vec![MapPresetId(5)]);
+        assert_eq!(barrel_yard.players_per_team, 1);
+        let heist = catalog
+            .game_types
+            .iter()
+            .filter(|game| game.mode_definition_id == HEIST_MODE_DEFINITION)
+            .collect::<Vec<_>>();
+        assert_eq!(heist.len(), 3);
+        assert_eq!(heist[0].map_preset_ids, vec![MapPresetId(6)]);
+        assert_eq!(heist[2].players_per_team, 3);
         assert_eq!(
             catalog.revision.0,
             [
-                0x26, 0x1d, 0x86, 0x1a, 0x59, 0x6f, 0x73, 0x8c, 0x62, 0xaa, 0xb2, 0x9a, 0x59, 0xd6,
-                0x77, 0x79, 0x43, 0x70, 0x4a, 0x4d, 0xf5, 0x10, 0xc4, 0xf4, 0x84, 0x2d, 0xba, 0x68,
-                0x59, 0x0b, 0x1e, 0x8b,
+                0x34, 0x2b, 0x32, 0xd0, 0xa8, 0xa9, 0x41, 0x85, 0xa3, 0x36, 0xe2, 0x50, 0x52, 0xde,
+                0xd7, 0x5b, 0xe7, 0xca, 0xc6, 0x1f, 0x88, 0x2f, 0xdf, 0x25, 0x70, 0x65, 0x58, 0x16,
+                0xc8, 0x4b, 0x9d, 0xfb,
             ]
         );
     }
@@ -339,7 +395,7 @@ mod tests {
     #[test]
     fn catalog_rejects_unknown_fields_modes_maps_objectives_and_unsupported_topology() {
         for invalid in [
-            VALID.replace("schema_version: 1", "schema_version: 1, surprise: true"),
+            VALID.replace("schema_version: 2", "schema_version: 2, surprise: true"),
             VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
             VALID.replace("crossroads-facility\"", "missing-map\""),
             VALID.replace("players_per_team: 2", "players_per_team: 4"),

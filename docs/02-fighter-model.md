@@ -19,10 +19,11 @@ data-model distinction, not a requirement for separate crates or architectural l
 
 1. **Fighter and content definitions:** developer-authored body values, compatible capabilities,
    legal bounds, slots, effects, costs, and stable presentation references.
-2. **Brawler build recipe:** a bounded player choice composed from stable definition IDs and typed
-   specifications. A built-in preset is an ordinary legal recipe authored by the team.
-3. **Selected build identity:** the accepted preset identity or canonical recipe fingerprint and
-   revision used across process and network boundaries.
+2. **Saved brawler:** server-owned persistent player choice composed from stable fighter-profile,
+   weapon-base, ultimate, passive, and equipped-part identities.
+3. **Selected brawler identity:** the accepted saved-brawler ID and revision used across process and
+   network boundaries. The superseded full-build preset/recipe identity remains only in legacy
+   internals pending `MAINT-LEGACY-BUILD-SYSTEM` removal.
 4. **Resolved match loadout:** the immutable, server-validated gameplay snapshot used to instantiate
    a fighter for one match.
 5. **Runtime fighter state:** mutable ECS state such as health, pose, weapon economy, ability charge,
@@ -35,19 +36,22 @@ FighterDefinition
   Compatibility and slot rules
   Stable presentation reference
 
-BrawlerBuildRecipe
-  Bounded weapon selection or specification
-  Ultimate selection
-  Two passive selections
-  Future equipment selections, when that capability exists
+AdvertisedBrawlerCatalog
+  Stable legal fighter, weapon, ultimate, and passive identities
+  Bounded display/preview metadata and selection limits
+  Canonical server-derived revision
 
-SelectedBuild
-  Preset identity, when applicable
-  Canonical recipe fingerprint
-  Balance/content revision
+SavedBrawler
+  Stable server-owned identity and revision
+  Permanent fighter profile and weapon base
+  Editable name, ultimate, two passives, and up to four equipped part instances
+
+SelectedBrawler
+  Saved-brawler identity and revision
+  Canonical resolved identity and content revision
 
 ResolvedMatchLoadout
-  SelectedBuild identity
+  Selected-brawler/resolved identity
   Resolved fighter stats
   Resolved primary weapon
   Resolved ultimate
@@ -66,9 +70,14 @@ Stable presentation references are gameplay-facing IDs that client presentation 
 and audio assets. The authoritative server validates those references where needed but does not load
 the assets.
 
-## Supported build contract
+## Legacy full-build contract
 
-The supported foundation is:
+The following contract describes the superseded preset/custom-build path retained temporarily for
+diagnostics and fixtures. It is not the player-facing arsenal; V7 saved brawlers and the
+server-advertised catalog below own ordinary product selection. Its removal is tracked as
+`MAINT-LEGACY-BUILD-SYSTEM`.
+
+The retained legacy foundation is:
 
 - one primary-weapon selection;
 - one ultimate selection;
@@ -78,7 +87,7 @@ The supported foundation is:
 - four built-in build/weapon presets resolved through the same paths as non-presets;
 - one bounded custom Pulse specification with discrete power, reach, and magazine choices.
 
-The player-facing selection is not the operational weapon recipe. It contains bounded IDs and typed
+The legacy selection is not the operational weapon recipe. It contains bounded IDs and typed
 choices; the server derives the numeric weapon configuration described in
 [Weapons and abilities](./03-weapons-and-abilities.md). This prevents clients from directly choosing
 unbounded damage, collision behavior, lifetimes, presentation profiles, or other authoritative
@@ -90,18 +99,19 @@ presentation, balance, and lifecycle rules are specified together.
 
 Do not allow unrestricted allocation of every numeric attribute. Builds should expose a few legible
 decisions, and the server must resolve every choice against explicit engine ceilings, catalog policy,
-compatibility rules, and budget constraints.
+compatibility rules, ownership, and slot constraints.
 
 ## Resolution and authority
 
-Selecting a preset or submitting a custom build is intent. At each authority boundary, the server:
+Creating, editing, equipping, selecting, or admitting a saved brawler is intent. At each authority
+boundary, the server:
 
 1. decodes a bounded candidate shape;
 2. validates stable IDs, revisions, field bounds, and supported combinations;
-3. canonicalizes order-insensitive choices and derives a reproducible identity;
-4. resolves weapon, fighter, ultimate, passive, and future equipment values;
-5. enforces slot, family, compatibility, and point-budget rules;
-6. applies ownership or entitlement checks when those product systems exist;
+3. validates referenced definitions against its active advertised catalog;
+4. canonicalizes order-insensitive choices and derives a reproducible identity;
+5. resolves weapon, fighter, ultimate, passive, and equipment values;
+6. enforces ownership, slot, uniqueness, applicability, and compatibility rules;
 7. creates an immutable resolved match loadout.
 
 Code-owned ceilings bound collection sizes, numeric ranges, and serialized snapshots. Authored
@@ -215,7 +225,7 @@ Presentation may observe these transitions but must never be their authority.
 
 ## Arsenal direction
 
-V7 promotes the long-lived arsenal direction into a planned product contract. An account may own at
+V7 established the long-lived arsenal product contract. An account may own at
 most 16 saved brawlers. Each brawler has a stable server-owned identity and revision with:
 
 - a non-unique, editable display name;
@@ -230,8 +240,9 @@ than mutating its body or weapon identity, is the intended way to try another pe
 
 V7 starts with fresh server-side profile data and does not import today's locally saved build. It
 also removes the 12-point budget and retires Runner, Bruiser, Controller, and Duelist as
-player-facing builds rather than converting them into starter templates. The exact launch fighter
-profile catalog remains a V7 M01 content decision.
+player-facing builds rather than converting them into starter templates. The launch
+fighter-profile and weapon-base inventory is developer-authored server content rather than a
+client-owned numeric range.
 
 Selecting a brawler for a match remains intent: the server-side profile authority retrieves the
 candidate, validates ownership and the active content revision, and creates a new resolved match
@@ -241,6 +252,29 @@ ID per logical server, while tests may use deterministic IDs. This seam has no p
 security check, recovery, or profile-creation rate limit and is not a production credential. The
 long-lived lobby worker owns the logical-server-local `ProfileAuthority`; its ECS systems exchange
 bounded commands and results with a dedicated storage executor that exclusively owns SQLite.
+
+### Advertised brawler catalog and connection lifecycle
+
+V9 made the selectable inventory and its player-facing metadata server authoritative. At lobby
+startup, `ProfileAuthority` derives one bounded `AdvertisedBrawlerCatalog` from the active build and
+weapon catalogs. It contains a canonical revision, saved-brawler/slot limits, weapon policy, and
+stable IDs, keys, display names, kinds, eligibility, and preview/stat data for fighter profiles,
+weapon bases, ultimates, and passives. It is derived from active content rather than maintained as a
+second client list.
+
+`LobbyJoinOutcome::Accepted` carries the catalog atomically with the bounded profile snapshot and
+game-type advertisement. The client validates and installs the complete accepted membership before
+entering Dashboard, then uses it for names, loadout summaries, creation choices, ability editing,
+weapon previews, selection cycling, and automation. Disconnect, server change, rejected welcome,
+or a replacement lobby generation clears the connection-scoped snapshot; reconnect loads a fresh
+authoritative profile and catalog. A stale local catalog is never used as a fallback.
+
+Profile storage validates persistent structure: bounds, revisions, identities, ownership,
+uniqueness, and equipment shape. Lobby profile authority separately validates every referenced
+fighter, weapon, ultimate, passive, and part definition against active content before accepting a
+mutation or admitting a match. Invalid stored content fails closed and is not silently rewritten.
+Clients send stable-ID intent and may defensively reject malformed advertisements, but they never
+define content legality.
 
 The established match path does not require accounts or persistence and must stay isolated from
 them. V7's first persistence baseline is transactional SQLite with WAL, versioned migrations, an

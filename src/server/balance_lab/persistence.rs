@@ -1,5 +1,5 @@
 use super::{
-    BalanceLabRevision, BalanceLabSnapshotV2, BalanceLabValidator, SNAPSHOT_SCHEMA_VERSION,
+    BalanceLabRevision, BalanceLabSnapshotV3, BalanceLabValidator, SNAPSHOT_SCHEMA_VERSION,
     validate_snapshot,
 };
 use crate::{builds::BuildCatalog, combat::WeaponCatalog};
@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 1;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 3;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -19,14 +19,15 @@ const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 struct PersistedBalanceLabV1 {
     schema_version: u16,
     revision: u64,
-    snapshot: BalanceLabSnapshotV2,
+    snapshot: BalanceLabSnapshotV3,
 }
 
 pub(super) struct LoadedBalanceLab {
     pub(super) revision: BalanceLabRevision,
-    pub(super) snapshot: BalanceLabSnapshotV2,
+    pub(super) snapshot: BalanceLabSnapshotV3,
     pub(super) builds: BuildCatalog,
     pub(super) weapons: WeaponCatalog,
+    pub(super) maps: crate::map::MapContentCatalog,
 }
 
 pub(super) fn load(
@@ -53,11 +54,12 @@ pub(super) fn load(
     {
         return Err("persisted snapshot has an unsupported version or revision".into());
     }
-    let (builds, weapons) = validate_snapshot(
+    let (builds, weapons, maps) = validate_snapshot(
         &persisted.snapshot,
         &validator.baseline,
         &validator.builds,
         &validator.weapons,
+        &validator.maps,
         &validator.fighter,
     )?;
     Ok(Some(LoadedBalanceLab {
@@ -65,12 +67,13 @@ pub(super) fn load(
         snapshot: persisted.snapshot,
         builds,
         weapons,
+        maps,
     }))
 }
 
 pub(super) fn save(
     path: &Path,
-    snapshot: &BalanceLabSnapshotV2,
+    snapshot: &BalanceLabSnapshotV3,
     revision: BalanceLabRevision,
 ) -> Result<(), String> {
     if revision.0 == 0 {
@@ -132,16 +135,18 @@ mod tests {
         }
     }
 
-    fn fixture() -> (BalanceLabValidator, BalanceLabSnapshotV2) {
+    fn fixture() -> (BalanceLabValidator, BalanceLabSnapshotV3) {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
-        let baseline = BalanceLabSnapshotV2::from_catalogs(&builds, &weapons);
+        let maps = crate::map::MapContentCatalog::embedded().unwrap();
+        let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let fighter = FighterDefinitions::default().entries[0];
         (
             BalanceLabValidator {
                 baseline: baseline.clone(),
                 builds,
                 weapons,
+                maps,
                 fighter,
             },
             baseline,
@@ -182,11 +187,12 @@ mod tests {
         let loaded = load(&path, &validator).unwrap().unwrap();
         let mut follow_up = loaded.snapshot;
         follow_up.fighter_profiles.lightweight.maximum_health += 1;
-        let (builds, _) = validate_snapshot(
+        let (builds, _, _) = validate_snapshot(
             &follow_up,
             &validator.baseline,
             &loaded.builds,
             &loaded.weapons,
+            &loaded.maps,
             &validator.fighter,
         )
         .unwrap();

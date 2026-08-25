@@ -103,6 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let transition_mode = match args.mode {
             GameMode::Wipeout => "wipeout",
             GameMode::HotZone => "hot-zone",
+            GameMode::Heist => "heist",
         };
         lobby_spec = lobby_spec
             .with_environment("BRAWLER_LOBBY_TRANSITION_DRIVER", "1")
@@ -433,18 +434,19 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
         } else if argument == "--mode" {
             parsed.mode = match args
                 .next()
-                .ok_or("--mode requires wipeout or hot-zone")?
+                .ok_or("--mode requires wipeout, hot-zone, or heist")?
                 .as_str()
             {
                 "wipeout" => GameMode::Wipeout,
                 "hot-zone" => GameMode::HotZone,
-                _ => return Err("--mode requires wipeout or hot-zone".into()),
+                "heist" => GameMode::Heist,
+                _ => return Err("--mode requires wipeout, hot-zone, or heist".into()),
             };
         } else if argument == "--automatic-transition-driver" {
             parsed.automatic_transition_driver = true;
         } else if argument == "--help" || argument == "-h" {
             println!(
-                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--data-directory PATH] [--automatic-transition-driver] [--bind IP:PORT] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>] [--metrics-file PATH]"
+                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--data-directory PATH] [--automatic-transition-driver] [--bind IP:PORT] [--mode <wipeout|hot-zone|heist>] [--match-rules <production|verification>] [--metrics-file PATH]"
             );
             std::process::exit(0);
         } else {

@@ -169,6 +169,7 @@ fn expected_routing_mode(mode: GameMode) -> brawler_routing::GameMode {
     match mode {
         GameMode::Wipeout => brawler_routing::GameMode::Wipeout,
         GameMode::HotZone => brawler_routing::GameMode::HotZone,
+        GameMode::Heist => brawler_routing::GameMode::Heist,
     }
 }
 
@@ -189,6 +190,7 @@ fn validate_manifest_map_against_catalog(
     let mode_definition = match config.game_mode {
         GameMode::Wipeout => WIPEOUT_MODE_DEFINITION,
         GameMode::HotZone => HOT_ZONE_MODE_DEFINITION,
+        GameMode::Heist => crate::map::HEIST_MODE_DEFINITION,
     };
     let preset = catalog
         .preset(preset_id)
@@ -574,7 +576,7 @@ mod tests {
         let catalog = MapContentCatalog::embedded().unwrap();
 
         let mut value = manifest();
-        value.map_preset = 5;
+        value.map_preset = 99;
         value.map_revision = 7;
         assert_eq!(
             validate_manifest_map_against_catalog(&config, &value, &catalog),

@@ -57,6 +57,11 @@ pub enum MapRuntimeSet {
 
 pub fn register_map_runtime(app: &mut App) {
     app.init_resource::<CombatWorldEffectFacts>()
+        .init_resource::<super::PendingWorldTargetDamages>()
+        .init_resource::<super::WorldTargetDamageFacts>()
+        .init_resource::<super::WorldObjectExplosionFacts>()
+        .init_resource::<super::WorldObjectOutbox>()
+        .init_resource::<super::WorldObjectTelemetry>()
         .init_resource::<MapDynamicOutbox>()
         .init_resource::<MapDynamicTelemetry>()
         .configure_sets(
@@ -75,10 +80,668 @@ pub fn register_map_runtime(app: &mut App) {
         )
         .add_systems(
             FixedPostUpdate,
+            process_world_target_damage.in_set(crate::combat::CombatDamageSet::WorldTargets),
+        )
+        .add_systems(
+            FixedPostUpdate,
             publish_map_dynamic_traffic.in_set(MapRuntimeSet::Publish),
+        )
+        .add_systems(
+            FixedPostUpdate,
+            send_world_object_cues
+                .in_set(crate::combat::CombatSet::TelemetryAndCues)
+                .after(crate::concealment::ConcealmentSet::DecideObservers),
+        )
+        .add_systems(
+            FixedPostUpdate,
+            clear_world_object_tick_facts
+                .in_set(crate::combat::CombatSet::Finalize)
+                .before(crate::gameplay::advance_simulation_tick),
         )
         .add_systems(Update, receive_map_recovery_requests);
     crate::matchplay::register_environment_reset_system(app, reset_map_on_match_restart);
+}
+
+fn clear_world_object_tick_facts(
+    mut damage: ResMut<super::WorldTargetDamageFacts>,
+    mut explosions: ResMut<super::WorldObjectExplosionFacts>,
+) {
+    damage.0.clear();
+    explosions.0.clear();
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy systems receive resource system parameters by value"
+)]
+fn send_world_object_cues(
+    mut outbox: ResMut<super::WorldObjectOutbox>,
+    links: Query<(Entity, &ServerSession, Has<Disconnected>), With<LinkOf>>,
+    mut senders: Query<&mut MessageSender<super::WorldObjectCue>, With<LinkOf>>,
+    visibility: Res<crate::concealment::ObserverVisibilityCache>,
+    fighters: Query<(Entity, &crate::protocol::NetworkEntityId), With<crate::protocol::Fighter>>,
+) {
+    if outbox.0.is_empty() {
+        return;
+    }
+    outbox.0.sort_by_key(|cue| cue.event_id().0);
+    let fighter_entities: std::collections::BTreeMap<_, _> = fighters
+        .iter()
+        .map(|(entity, network_id)| (network_id.0, entity))
+        .collect();
+    for (connection, session, disconnected) in &links {
+        if disconnected || !matches!(session.phase, ServerSessionPhase::Active { .. }) {
+            continue;
+        }
+        let Ok(mut sender) = senders.get_mut(connection) else {
+            continue;
+        };
+        for cue in &outbox.0 {
+            let permitted = cue.source_subject().is_none_or(|subject| {
+                fighter_entities
+                    .get(&subject.0)
+                    .is_some_and(|entity| visibility.permits(connection, *entity))
+            });
+            if permitted {
+                sender.send::<crate::protocol::CombatChannel>(*cue);
+            }
+        }
+    }
+    outbox.0.clear();
+}
+
+fn pending_world_damage_key(pending: &super::PendingWorldTargetDamage) -> (u64, u8, u8, u8, u32) {
+    (
+        pending.attack_id.0,
+        pending.delivery_index,
+        pending.bundle_index,
+        pending.effect_index,
+        pending.target.placement_id().0,
+    )
+}
+
+fn update_world_object_telemetry(
+    world: &mut World,
+    update: impl FnOnce(&mut super::WorldObjectTelemetry),
+) {
+    update(&mut world.resource_mut::<super::WorldObjectTelemetry>());
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the exclusive system commits one bounded health, terminal, collider, chain, and map-state transaction"
+)]
+fn process_world_target_damage(world: &mut World) {
+    let active = world
+        .query::<&crate::matchplay::MatchState>()
+        .iter(world)
+        .any(|state| matches!(state.phase, crate::matchplay::MatchPhase::Active { .. }));
+    if !active {
+        let rejected = world.resource::<super::PendingWorldTargetDamages>().0.len();
+        update_world_object_telemetry(world, |telemetry| {
+            telemetry.stale_or_invalid_rejections = telemetry
+                .stale_or_invalid_rejections
+                .saturating_add(u64::try_from(rejected).unwrap_or(u64::MAX));
+        });
+        world
+            .resource_mut::<super::PendingWorldTargetDamages>()
+            .0
+            .clear();
+        return;
+    }
+    let mut pending =
+        std::mem::take(&mut world.resource_mut::<super::PendingWorldTargetDamages>().0);
+    if pending.is_empty() {
+        return;
+    }
+    update_world_object_telemetry(world, |telemetry| {
+        telemetry.primary_requests = telemetry
+            .primary_requests
+            .saturating_add(u64::try_from(pending.len()).unwrap_or(u64::MAX));
+    });
+    pending.sort_by_key(pending_world_damage_key);
+    pending.dedup_by_key(|request| pending_world_damage_key(request));
+    if pending.len() > super::MAX_WORLD_TARGET_FACTS {
+        error!(
+            requests = pending.len(),
+            "world-target damage batch exceeds capacity"
+        );
+        update_world_object_telemetry(world, |telemetry| {
+            telemetry.capacity_rejections = telemetry
+                .capacity_rejections
+                .saturating_add(u64::try_from(pending.len()).unwrap_or(u64::MAX));
+        });
+        return;
+    }
+    if world.resource::<MapDynamicOutbox>().mutations.len() >= MAX_MAP_DYNAMIC_OUTBOX_EVENTS {
+        error!("map dynamic outbox capacity exhausted; world-target batch rejected");
+        update_world_object_telemetry(world, |telemetry| {
+            telemetry.capacity_rejections = telemetry
+                .capacity_rejections
+                .saturating_add(u64::try_from(pending.len()).unwrap_or(u64::MAX));
+        });
+        return;
+    }
+    let Some((root, mut state)) = world
+        .query_filtered::<(Entity, &MapDynamicState), With<super::MapRoot>>()
+        .iter(world)
+        .next()
+        .map(|(root, state)| (root, state.clone()))
+    else {
+        return;
+    };
+    let tick = world.resource::<crate::timing::SimulationTick>().0;
+    let catalog = world.resource::<MapCatalogResource>().0.clone();
+    let mut queue = std::collections::VecDeque::from(pending);
+    let mut transitions = Vec::new();
+    let mut reaction_count = 0_usize;
+    let mut secondary_count = 0_usize;
+    while let Some(request) = queue.pop_front() {
+        if world.resource::<super::WorldTargetDamageFacts>().0.len()
+            >= super::MAX_WORLD_TARGET_FACTS
+        {
+            error!("world-target fact capacity exhausted");
+            break;
+        }
+        if request.attack_id != request.source.attack_id
+            || request.target.generation() != state.generation_id()
+        {
+            update_world_object_telemetry(world, |telemetry| {
+                telemetry.stale_or_invalid_rejections =
+                    telemetry.stale_or_invalid_rejections.saturating_add(1);
+            });
+            continue;
+        }
+        let target = {
+            let mut objects = world.query_filtered::<(
+                Entity,
+                &super::DamageableTargetIdentity,
+                &Position,
+                &crate::combat::CurrentHealth,
+                &super::DamageableLifeState,
+                &super::DamageableObjectProfile,
+            ), With<super::DamageableWorldObject>>();
+            objects
+                .iter(world)
+                .find(|(_, identity, ..)| **identity == request.target)
+                .map(|(entity, _, position, health, life, profile)| {
+                    (entity, position.0, *health, *life, profile.0)
+                })
+        };
+        let Some((entity, position, health, life, damage_profile_id)) = target else {
+            update_world_object_telemetry(world, |telemetry| {
+                telemetry.stale_or_invalid_rejections =
+                    telemetry.stale_or_invalid_rejections.saturating_add(1);
+            });
+            continue;
+        };
+        if !super::object_is_live(health, life) || request.requested_damage == 0 {
+            update_world_object_telemetry(world, |telemetry| {
+                telemetry.stale_or_invalid_rejections =
+                    telemetry.stale_or_invalid_rejections.saturating_add(1);
+            });
+            continue;
+        }
+        let applied = request.requested_damage.min(health.0);
+        let health_after = health.0 - applied;
+        let damage_profile = *catalog
+            .damage_profile(damage_profile_id)
+            .expect("validated object damage profile exists");
+        let terminal = (health_after == 0).then_some(match damage_profile.terminal {
+            super::MapObjectTerminalBehavior::Explode { outcome, .. } => outcome,
+        });
+        if terminal.is_some() && reaction_count >= super::MAX_TERMINAL_REACTIONS_PER_TICK {
+            error!("barrel reaction ceiling reached; terminal request rejected");
+            update_world_object_telemetry(world, |telemetry| {
+                telemetry.capacity_rejections = telemetry.capacity_rejections.saturating_add(1);
+            });
+            continue;
+        }
+        let Some(event_ids) = crate::combat::server::reserve_event_ids(
+            &mut world.resource_mut::<crate::combat::NextCombatIds>(),
+            if terminal.is_some() { 2 } else { 1 },
+        ) else {
+            error!("world-object event identity exhausted");
+            break;
+        };
+        world
+            .entity_mut(entity)
+            .insert(crate::combat::CurrentHealth(health_after));
+        {
+            let mut telemetry = world.resource_mut::<super::WorldObjectTelemetry>();
+            telemetry.damage_applications = telemetry.damage_applications.saturating_add(1);
+            telemetry.applied_damage = telemetry.applied_damage.saturating_add(u64::from(applied));
+        }
+        world
+            .resource_mut::<super::WorldTargetDamageFacts>()
+            .0
+            .push(super::WorldTargetDamageFact {
+                event_id: event_ids[0],
+                tick,
+                attack_id: request.attack_id,
+                source: request.source,
+                target: request.target,
+                requested_damage: request.requested_damage,
+                applied_damage: applied,
+                health_after,
+                terminal: terminal.map(super::WorldTargetTerminalFact::MapPlacement),
+            });
+        world
+            .resource_mut::<super::WorldObjectOutbox>()
+            .0
+            .push(super::WorldObjectCue::Damaged {
+                event_id: event_ids[0],
+                tick,
+                attack_id: request.attack_id,
+                source_subject: Some(request.source.owner_network_entity_id),
+                target: request.target,
+                position: crate::combat::WorldPoint::from(position),
+                amount: applied,
+                health_after,
+            });
+        let Some(outcome) = terminal else {
+            continue;
+        };
+        reaction_count += 1;
+        update_world_object_telemetry(world, |telemetry| {
+            telemetry.terminal_reactions = telemetry.terminal_reactions.saturating_add(1);
+        });
+        world
+            .entity_mut(entity)
+            .insert(super::DamageableLifeState::TerminalCommitted);
+        transitions.push(MapPlacementTransition {
+            placement_id: request.target.placement_id(),
+            outcome,
+        });
+        let super::MapObjectTerminalBehavior::Explode {
+            explosion_profile_id,
+            ..
+        } = damage_profile.terminal;
+        let explosion = *catalog
+            .explosion_profile(explosion_profile_id)
+            .expect("validated explosion profile exists");
+        world
+            .resource_mut::<super::WorldObjectExplosionFacts>()
+            .0
+            .push(super::WorldObjectExplosionFact {
+                event_id: event_ids[1],
+                tick,
+                source: request.source,
+                target: request.target,
+                position,
+                radius: f32::from(explosion.radius_world_units),
+                damage: explosion.damage,
+            });
+        world.resource_mut::<crate::combat::CombatOutbox>().0.push(
+            crate::combat::CombatCue::Impact {
+                event_id: event_ids[1],
+                tick,
+                source: request.source.owner_network_entity_id,
+                shot_id: crate::combat::ShotId(request.attack_id.0),
+                weapon_definition_id: crate::combat::WeaponDefinitionId(0),
+                target: None,
+                position: crate::combat::WorldPoint::from(position),
+                normal: crate::combat::WorldPoint { x: 0.0, y: 1.0 },
+                distance_band: crate::combat::DistanceBand::Close,
+            },
+        );
+        world
+            .resource_mut::<super::WorldObjectOutbox>()
+            .0
+            .push(super::WorldObjectCue::Exploded {
+                event_id: event_ids[1],
+                tick,
+                attack_id: request.attack_id,
+                source_subject: Some(request.source.owner_network_entity_id),
+                target: request.target,
+                position: crate::combat::WorldPoint::from(position),
+                radius_world_units: explosion.radius_world_units,
+                damage: explosion.damage,
+            });
+        let mut candidates: Vec<_> = {
+            let mut objects = world.query_filtered::<(
+                Entity,
+                &super::DamageableTargetIdentity,
+                &Position,
+                &crate::combat::CurrentHealth,
+                &super::DamageableLifeState,
+            ), With<super::DamageableWorldObject>>();
+            objects
+                .iter(world)
+                .filter(|(_, identity, candidate_position, health, life)| {
+                    **identity != request.target
+                        && super::object_is_live(**health, **life)
+                        && candidate_position.0.distance_squared(position)
+                            <= f32::from(explosion.radius_world_units).powi(2)
+                })
+                .map(|(candidate_entity, identity, candidate_position, ..)| {
+                    (
+                        candidate_position.0.distance_squared(position),
+                        identity.placement_id(),
+                        *identity,
+                        candidate_entity,
+                        candidate_position.0,
+                    )
+                })
+                .collect()
+        };
+        candidates.sort_by(|left, right| {
+            left.0
+                .total_cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+        });
+        candidates.retain(|(_, _, _, candidate_entity, candidate_position)| {
+            explosion_line_of_sight_clear(
+                world,
+                position,
+                *candidate_position,
+                entity,
+                *candidate_entity,
+            )
+        });
+        let selected_objects: Vec<_> = candidates
+            .into_iter()
+            .take(usize::from(explosion.maximum_targets))
+            .collect();
+        let remaining_targets =
+            usize::from(explosion.maximum_targets).saturating_sub(selected_objects.len());
+        for (_, _, target, _, _) in selected_objects {
+            if secondary_count >= super::MAX_SECONDARY_DAMAGE_APPLICATIONS {
+                break;
+            }
+            secondary_count += 1;
+            update_world_object_telemetry(world, |telemetry| {
+                telemetry.chained_object_applications =
+                    telemetry.chained_object_applications.saturating_add(1);
+            });
+            queue.push_back(super::PendingWorldTargetDamage {
+                target,
+                source: request.source,
+                attack_id: request.attack_id,
+                requested_damage: explosion.damage,
+                delivery_index: request.delivery_index,
+                bundle_index: request.bundle_index,
+                effect_index: u8::MAX,
+            });
+        }
+        let combatant_applications = apply_explosion_to_combatants(
+            world,
+            tick,
+            request.source,
+            request.target,
+            entity,
+            position,
+            explosion.damage,
+            f32::from(explosion.radius_world_units),
+            remaining_targets,
+        );
+        update_world_object_telemetry(world, |telemetry| {
+            telemetry.secondary_combatant_applications = telemetry
+                .secondary_combatant_applications
+                .saturating_add(u64::try_from(combatant_applications).unwrap_or(u64::MAX));
+        });
+        world.entity_mut(entity).despawn();
+    }
+    if transitions.is_empty() {
+        return;
+    }
+    transitions.sort_by_key(|transition| transition.placement_id);
+    transitions.dedup_by_key(|transition| transition.placement_id);
+    state.revision = state.revision.saturating_add(1);
+    state.terminal_states.extend(transitions.iter().copied());
+    state
+        .terminal_states
+        .sort_by_key(|transition| transition.placement_id);
+    let event = MapMutationEvent {
+        generation: state.generation_id(),
+        revision: state.revision,
+        transitions,
+    };
+    world
+        .resource_mut::<MapDynamicOutbox>()
+        .mutations
+        .push(event);
+    world.entity_mut(root).insert(state);
+}
+
+fn explosion_line_of_sight_clear(
+    world: &mut World,
+    origin: Vec2,
+    target: Vec2,
+    source_entity: Entity,
+    target_entity: Entity,
+) -> bool {
+    let delta = target - origin;
+    let distance = delta.length();
+    let Some(direction) = Dir2::new(delta.normalize_or_zero()).ok() else {
+        return true;
+    };
+    let mut system_state =
+        bevy::ecs::system::SystemState::<avian2d::prelude::SpatialQuery>::new(world);
+    let Ok(spatial_query) = system_state.get(world) else {
+        error!("authoritative spatial-query state is unavailable for an environment explosion");
+        return false;
+    };
+    let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
+        crate::movement::STATIC_MAP_LAYER | crate::movement::DESTRUCTIBLE_MAP_LAYER,
+    )
+    .with_excluded_entities([source_entity, target_entity]);
+    spatial_query
+        .cast_ray(origin, direction, distance.max(0.0), true, &filter)
+        .is_none()
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "environmental damage must update combat-owned health, lifecycle, cues, and facts together"
+)]
+fn apply_explosion_to_combatants(
+    world: &mut World,
+    tick: u64,
+    source: crate::combat::AttackSource,
+    cause: super::DamageableTargetIdentity,
+    cause_entity: Entity,
+    origin: Vec2,
+    damage: u16,
+    radius: f32,
+    maximum_targets: usize,
+) -> usize {
+    if maximum_targets == 0 {
+        return 0;
+    }
+    let active_match = world
+        .query::<&crate::matchplay::MatchState>()
+        .iter(world)
+        .find_map(|state| {
+            matches!(state.phase, crate::matchplay::MatchPhase::Active { .. })
+                .then_some(state.match_id)
+        });
+    let lineage_is_current = active_match.is_some_and(|match_id| {
+        world
+            .query_filtered::<(
+                &crate::protocol::PlayerId,
+                &crate::protocol::NetworkEntityId,
+                &crate::combat::TeamId,
+                &crate::matchplay::MatchMember,
+            ), (
+                With<crate::protocol::Fighter>,
+                With<crate::matchplay::ActiveCombatant>,
+            )>()
+            .iter(world)
+            .any(|(player, network_id, team, member)| {
+                *player == source.player_id
+                    && *network_id == source.owner_network_entity_id
+                    && *team == source.team_id
+                    && member.0 == match_id
+            })
+    });
+    let mut candidates: Vec<_> = {
+        let mut query = world.query_filtered::<(
+            Entity,
+            &Position,
+            &crate::combat::CurrentHealth,
+            &crate::combat::TeamId,
+            &crate::protocol::NetworkEntityId,
+            Has<crate::abilities::Sentry>,
+            Has<crate::combat::Defeated>,
+        ), Or<(
+            With<crate::protocol::Fighter>,
+            With<crate::abilities::Sentry>,
+        )>>();
+        query
+            .iter(world)
+            .filter(|(_, position, health, _, _, _, defeated)| {
+                !defeated && health.0 > 0 && position.0.distance_squared(origin) <= radius * radius
+            })
+            .map(|(entity, position, health, team, network_id, sentry, _)| {
+                (
+                    position.0.distance_squared(origin),
+                    network_id.0,
+                    entity,
+                    position.0,
+                    *health,
+                    *team,
+                    *network_id,
+                    sentry,
+                )
+            })
+            .collect()
+    };
+    candidates.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    candidates.retain(|candidate| {
+        explosion_line_of_sight_clear(world, origin, candidate.3, cause_entity, candidate.2)
+    });
+    let mut applied_targets = 0;
+    for (_, _, entity, position, health, target_team, target_network_id, sentry) in
+        candidates.into_iter().take(maximum_targets)
+    {
+        let applied = damage.min(health.0);
+        let health_after = health.0 - applied;
+        let defeated = health_after == 0;
+        let event_count = if defeated { 2 } else { 1 };
+        let Some(event_ids) = crate::combat::server::reserve_event_ids(
+            &mut world.resource_mut::<crate::combat::NextCombatIds>(),
+            event_count,
+        ) else {
+            error!("environment damage event identity exhausted");
+            return applied_targets;
+        };
+        applied_targets += 1;
+        world
+            .entity_mut(entity)
+            .insert(crate::combat::CurrentHealth(health_after));
+        let target_kind = if sentry {
+            crate::combat::CombatTargetKind::Deployable
+        } else {
+            crate::combat::CombatTargetKind::Fighter
+        };
+        let hostile_credit = lineage_is_current
+            && source.team_id != target_team
+            && source.owner_network_entity_id != target_network_id
+            && source.team_id.0 <= 1;
+        let source_team = hostile_credit.then_some(source.team_id);
+        let source_kind = crate::combat::CombatSourceKind::Environment;
+        let distance = origin.distance(position);
+        world
+            .resource_mut::<crate::combat::CombatOutcomeFacts>()
+            .0
+            .push(crate::combat::CombatOutcomeFact {
+                event_id: event_ids[0],
+                tick,
+                attack_id: source.attack_id,
+                source_kind,
+                source_player: lineage_is_current.then_some(source.player_id),
+                source_network_id: lineage_is_current.then_some(source.owner_network_entity_id),
+                source_team,
+                target_network_id,
+                target_kind,
+                target_team,
+                preset_id: None,
+                recipe_fingerprint: None,
+                position: crate::combat::WorldPoint::from(position),
+                engagement_distance: distance,
+                kind: crate::combat::CombatOutcomeKind::Damage { amount: applied },
+            });
+        let generation = cause.generation();
+        let damage_source = crate::combat::DamageSource::Environment {
+            map_instance_id: generation.map_instance_id.0,
+            generation: generation.generation,
+            placement_id: cause.placement_id().0,
+            initiating_player: lineage_is_current.then_some(source.player_id),
+            initiating_fighter: lineage_is_current.then_some(source.owner_network_entity_id),
+        };
+        world.resource_mut::<crate::combat::CombatOutbox>().0.push(
+            crate::combat::CombatCue::Damage {
+                event_id: event_ids[0],
+                tick,
+                source: damage_source,
+                target: target_network_id,
+                amount: applied,
+                health_after,
+                distance_band: crate::combat::DistanceBand::Close,
+            },
+        );
+        if !defeated {
+            continue;
+        }
+        let defeat_event = event_ids[1];
+        world
+            .entity_mut(entity)
+            .insert((
+                crate::combat::Defeated {
+                    event_id: defeat_event,
+                },
+                avian2d::prelude::CollisionLayers::new(
+                    if sentry {
+                        crate::movement::DEPLOYABLE_LAYER
+                    } else {
+                        crate::movement::FIGHTER_LAYER
+                    },
+                    avian2d::prelude::LayerMask::NONE,
+                ),
+                crate::combat::ActiveEffects::default(),
+            ))
+            .remove::<crate::combat::ExternalMotion>()
+            .remove::<crate::combat::KnockbackFeedback>();
+        world
+            .resource_mut::<crate::combat::CombatOutcomeFacts>()
+            .0
+            .push(crate::combat::CombatOutcomeFact {
+                event_id: defeat_event,
+                tick,
+                attack_id: source.attack_id,
+                source_kind,
+                source_player: lineage_is_current.then_some(source.player_id),
+                source_network_id: lineage_is_current.then_some(source.owner_network_entity_id),
+                source_team,
+                target_network_id,
+                target_kind,
+                target_team,
+                preset_id: None,
+                recipe_fingerprint: None,
+                position: crate::combat::WorldPoint::from(position),
+                engagement_distance: distance,
+                kind: if sentry {
+                    crate::combat::CombatOutcomeKind::DeployableDestroyed
+                } else {
+                    crate::combat::CombatOutcomeKind::Defeat
+                },
+            });
+        world.resource_mut::<crate::combat::CombatOutbox>().0.push(
+            crate::combat::CombatCue::Defeat {
+                event_id: defeat_event,
+                tick,
+                source: Some(damage_source),
+                target: target_network_id,
+            },
+        );
+    }
+    applied_targets
 }
 
 pub fn install_resolved_map(world: &mut World, resolved: ResolvedMap) -> Result<(), String> {
@@ -145,7 +808,7 @@ pub fn install_resolved_map(world: &mut World, resolved: ResolvedMap) -> Result<
         let asset = catalog
             .asset(placement.asset_id)
             .ok_or_else(|| "resolved dynamic asset disappeared".to_string())?;
-        spawn_dynamic_collider(world, instance_id, &snapshot, asset, &placement);
+        spawn_dynamic_collider(world, instance_id, 1, &snapshot, asset, &placement);
     }
     for rectangle in player_only_surface_rects {
         let size = Vec2::new(f32::from(rectangle.width), f32::from(rectangle.height))
@@ -212,31 +875,76 @@ fn spawn_static_collider(
 fn spawn_dynamic_collider(
     world: &mut World,
     map_instance_id: MapInstanceId,
+    map_generation: u64,
     snapshot: &ResolvedMapSnapshot,
     asset: &super::MapAssetDefinition,
     placement: &super::MapAssetPlacement,
 ) {
     let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
     let center = placement_world_center(snapshot.dimensions, asset, placement);
-    world.spawn((
-        ArenaWall,
-        DestructibleMapCollider {
-            placement_id: placement.placement_id,
-        },
-        MapInstanceMember {
-            map_instance_id,
-            placement_id: placement.placement_id,
-        },
-        RigidBody::Static,
-        Collider::rectangle(
+    let profile = world
+        .resource::<MapCatalogResource>()
+        .0
+        .profile(asset.gameplay_profile_id)
+        .copied()
+        .expect("resolved dynamic asset profile exists");
+    let collider = match profile.collider_shape {
+        super::MapColliderShape::FootprintRectangle => Collider::rectangle(
             f32::from(footprint.width) * super::MAP_CELL_SIZE_WORLD,
             f32::from(footprint.height) * super::MAP_CELL_SIZE_WORLD,
         ),
-        destructible_map_collision_layers(),
-        Position::from_xy(center.x, center.y),
-        Rotation::default(),
-        Transform::from_translation(center.extend(0.0)),
-    ));
+        super::MapColliderShape::Circle { radius_world_units } => {
+            Collider::circle(f32::from(radius_world_units))
+        }
+        super::MapColliderShape::None => return,
+    };
+    let entity = world
+        .spawn((
+            ArenaWall,
+            MapInstanceMember {
+                map_instance_id,
+                placement_id: placement.placement_id,
+            },
+            RigidBody::Static,
+            collider,
+            destructible_map_collision_layers(),
+            Position::from_xy(center.x, center.y),
+            Rotation::default(),
+            Transform::from_translation(center.extend(0.0)),
+        ))
+        .id();
+    match profile.durability {
+        super::MapDurabilityBehavior::Indestructible => {
+            world.entity_mut(entity).insert(DestructibleMapCollider {
+                placement_id: placement.placement_id,
+            });
+        }
+        super::MapDurabilityBehavior::HitPoints(damage_profile_id) => {
+            let maximum_health = world
+                .resource::<MapCatalogResource>()
+                .0
+                .damage_profile(damage_profile_id)
+                .expect("validated damage profile exists")
+                .maximum_health;
+            world.entity_mut(entity).insert((
+                super::DamageableWorldObject,
+                super::DamageableTargetIdentity::MapObject {
+                    generation: MapDynamicGeneration {
+                        map_instance_id,
+                        generation: map_generation,
+                    },
+                    placement_id: placement.placement_id,
+                },
+                super::DamageableTargetClass::EnvironmentObject,
+                super::DamageableMaximumHealth(maximum_health),
+                super::DamageableObjectProfile(damage_profile_id),
+                super::DamageableObjectAsset(asset.id),
+                super::DamageableLifeState::Live,
+                crate::combat::CurrentHealth(maximum_health),
+                Replicate::to_clients(NetworkTarget::All),
+            ));
+        }
+    }
 }
 
 fn fact_key(fact: &CombatWorldEffectFact) -> (u64, u64, u8, u8) {
@@ -414,6 +1122,29 @@ fn restore_map(world: &mut World) {
         return;
     };
     world.resource_mut::<CombatWorldEffectFacts>().0.clear();
+    if let Some(mut pending) = world.get_resource_mut::<super::PendingWorldTargetDamages>() {
+        pending.0.clear();
+    }
+    if let Some(mut facts) = world.get_resource_mut::<super::WorldTargetDamageFacts>() {
+        facts.0.clear();
+    }
+    if let Some(mut facts) = world.get_resource_mut::<super::WorldObjectExplosionFacts>() {
+        facts.0.clear();
+    }
+    if let Some(mut outbox) = world.get_resource_mut::<super::WorldObjectOutbox>() {
+        outbox.0.clear();
+    }
+    let damageable_entities: Vec<_> = world
+        .query_filtered::<Entity, With<super::DamageableWorldObject>>()
+        .iter(world)
+        .collect();
+    for entity in damageable_entities {
+        world.entity_mut(entity).despawn();
+    }
+    let previous_generation = state.generation_id();
+    state.generation = state.generation.saturating_add(1);
+    state.revision = 0;
+    state.terminal_states.clear();
     let existing: std::collections::BTreeSet<_> = world
         .query::<&DestructibleMapCollider>()
         .iter(world)
@@ -426,15 +1157,21 @@ fn restore_map(world: &mut World) {
         };
         let dynamic = catalog
             .profile(asset.gameplay_profile_id)
-            .is_some_and(|profile| profile.destruction != MapDestructionBehavior::Indestructible);
+            .is_some_and(|profile| {
+                profile.destruction != MapDestructionBehavior::Indestructible
+                    || profile.durability != super::MapDurabilityBehavior::Indestructible
+            });
         if dynamic && !existing.contains(&placement.placement_id) {
-            spawn_dynamic_collider(world, state.map_instance_id, &snapshot, asset, placement);
+            spawn_dynamic_collider(
+                world,
+                state.map_instance_id,
+                state.generation,
+                &snapshot,
+                asset,
+                placement,
+            );
         }
     }
-    let previous_generation = state.generation_id();
-    state.generation = state.generation.saturating_add(1);
-    state.revision = 0;
-    state.terminal_states.clear();
     let mut outbox = world.resource_mut::<MapDynamicOutbox>();
     outbox.mutations.clear();
     outbox.reset = Some(MapDynamicResetEvent {
@@ -542,6 +1279,100 @@ mod tests {
     use crate::combat::{AttackId, AttackSource, CombatSourceKind, WorldPoint};
     use crate::map::{MapCatalogResource, MapRoot};
 
+    fn test_attack_source() -> AttackSource {
+        AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(41),
+            player_id: crate::protocol::PlayerId(7),
+            owner_network_entity_id: crate::protocol::NetworkEntityId(70),
+            team_id: crate::combat::TeamId(0),
+            recipe_fingerprint: crate::combat::WeaponRecipeFingerprint::default(),
+            presentation_profile_id: crate::combat::WeaponPresentationProfileId(3),
+            legacy_compatibility: false,
+            source_preset_id: None,
+            origin: WorldPoint { x: 0.0, y: 0.0 },
+            facing: 0.0,
+        }
+    }
+
+    fn barrel_test_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(avian2d::prelude::PhysicsPlugins::default())
+            .init_resource::<CombatWorldEffectFacts>()
+            .init_resource::<MapDynamicOutbox>()
+            .init_resource::<MapDynamicTelemetry>()
+            .init_resource::<MapCatalogResource>()
+            .init_resource::<super::super::PendingWorldTargetDamages>()
+            .init_resource::<super::super::WorldTargetDamageFacts>()
+            .init_resource::<super::super::WorldObjectExplosionFacts>()
+            .init_resource::<super::super::WorldObjectOutbox>()
+            .init_resource::<super::super::WorldObjectTelemetry>()
+            .init_resource::<crate::combat::CombatOutcomeFacts>()
+            .init_resource::<crate::combat::CombatOutbox>()
+            .init_resource::<crate::combat::NextCombatIds>()
+            .insert_resource(crate::timing::SimulationTick(9));
+        let resolved = app
+            .world()
+            .resource::<MapCatalogResource>()
+            .0
+            .resolve_preset(super::super::BARREL_YARD_PRESET, MapInstanceId(11))
+            .unwrap();
+        let snapshot = resolved.snapshot.clone();
+        let root = app
+            .world_mut()
+            .spawn((
+                MapRoot,
+                snapshot.clone(),
+                MapDynamicState {
+                    map_instance_id: MapInstanceId(11),
+                    generation: 1,
+                    revision: 0,
+                    terminal_states: Vec::new(),
+                },
+            ))
+            .id();
+        let catalog = app.world().resource::<MapCatalogResource>().0.clone();
+        for placement in &resolved.dynamic_placements {
+            spawn_dynamic_collider(
+                app.world_mut(),
+                MapInstanceId(11),
+                1,
+                &snapshot,
+                catalog.asset(placement.asset_id).unwrap(),
+                placement,
+            );
+        }
+        app.world_mut().spawn(crate::matchplay::MatchState {
+            match_id: crate::matchplay::MatchId(1),
+            mode_definition_id: snapshot.mode_definition_id,
+            phase: crate::matchplay::MatchPhase::Active { ends_at_tick: 999 },
+            rules_revision: 1,
+        });
+        (app, root)
+    }
+
+    fn barrel_identity(app: &mut App, placement_id: u32) -> super::super::DamageableTargetIdentity {
+        let world = app.world_mut();
+        let mut query = world.query::<&super::super::DamageableTargetIdentity>();
+        *query
+            .iter(world)
+            .find(|identity| identity.placement_id() == MapPlacementId(placement_id))
+            .unwrap()
+    }
+
+    fn barrel_health(app: &mut App, placement_id: u32) -> Option<u16> {
+        let world = app.world_mut();
+        let mut query = world.query::<(
+            &super::super::DamageableTargetIdentity,
+            &crate::combat::CurrentHealth,
+        )>();
+        query
+            .iter(world)
+            .find(|(identity, _)| identity.placement_id() == MapPlacementId(placement_id))
+            .map(|(_, health)| health.0)
+    }
+
     fn destruction_fact(position: Vec2, radius: f32) -> CombatWorldEffectFact {
         CombatWorldEffectFact {
             tick: 1,
@@ -628,6 +1459,7 @@ mod tests {
             spawn_dynamic_collider(
                 app.world_mut(),
                 MapInstanceId(1),
+                1,
                 &snapshot,
                 asset,
                 &placement,
@@ -706,6 +1538,7 @@ mod tests {
             spawn_dynamic_collider(
                 app.world_mut(),
                 MapInstanceId(2),
+                1,
                 &snapshot,
                 catalog.asset(placement.asset_id).unwrap(),
                 placement,
@@ -746,5 +1579,231 @@ mod tests {
             query.iter(world).count()
         };
         assert_eq!(restored_count, 4);
+    }
+
+    #[test]
+    fn barrel_damage_explodes_once_chains_and_restart_restores_a_new_generation() {
+        let (mut app, root) = barrel_test_app();
+        let target = barrel_identity(&mut app, 101);
+        let source = test_attack_source();
+        app.world_mut()
+            .resource_mut::<super::super::PendingWorldTargetDamages>()
+            .0
+            .push(super::super::PendingWorldTargetDamage {
+                target,
+                source,
+                attack_id: source.attack_id,
+                requested_damage: 60,
+                delivery_index: 0,
+                bundle_index: 0,
+                effect_index: 0,
+            });
+
+        process_world_target_damage(app.world_mut());
+
+        assert_eq!(barrel_health(&mut app, 101), None);
+        assert_eq!(barrel_health(&mut app, 102), Some(25));
+        let state = app.world().get::<MapDynamicState>(root).unwrap();
+        assert_eq!(state.revision, 1);
+        assert_eq!(
+            state.terminal_states,
+            vec![MapPlacementTransition {
+                placement_id: MapPlacementId(101),
+                outcome: MapPlacementOutcome::ReplacedWith(super::super::BARREL_WOOD_DEBRIS_ASSET,),
+            }]
+        );
+        assert_eq!(
+            app.world()
+                .resource::<super::super::WorldObjectExplosionFacts>()
+                .0
+                .len(),
+            1
+        );
+        assert_eq!(
+            app.world()
+                .resource::<super::super::WorldTargetDamageFacts>()
+                .0
+                .len(),
+            2
+        );
+        let destroyed_collider_exists = {
+            let world = app.world_mut();
+            let mut colliders = world.query::<&DestructibleMapCollider>();
+            colliders
+                .iter(world)
+                .any(|collider| collider.placement_id == MapPlacementId(101))
+        };
+        assert!(
+            !destroyed_collider_exists,
+            "the debris replacement is visual-only and nonblocking"
+        );
+
+        app.world_mut()
+            .resource_mut::<super::super::PendingWorldTargetDamages>()
+            .0
+            .push(super::super::PendingWorldTargetDamage {
+                target,
+                source,
+                attack_id: source.attack_id,
+                requested_damage: 60,
+                delivery_index: 0,
+                bundle_index: 0,
+                effect_index: 0,
+            });
+        process_world_target_damage(app.world_mut());
+        assert_eq!(
+            app.world()
+                .resource::<super::super::WorldObjectExplosionFacts>()
+                .0
+                .len(),
+            1,
+            "the stale terminal identity cannot explode twice"
+        );
+
+        restore_map(app.world_mut());
+        let state = app.world().get::<MapDynamicState>(root).unwrap();
+        assert_eq!(state.generation, 2);
+        assert_eq!(state.revision, 0);
+        assert!(state.terminal_states.is_empty());
+        let world = app.world_mut();
+        let mut query = world.query::<(
+            &super::super::DamageableTargetIdentity,
+            &crate::combat::CurrentHealth,
+        )>();
+        let restored: Vec<_> = query
+            .iter(world)
+            .map(|(identity, health)| (identity.generation().generation, health.0))
+            .collect();
+        assert_eq!(restored.len(), 6);
+        assert!(restored.iter().all(|entry| *entry == (2, 60)));
+    }
+
+    #[test]
+    fn barrel_explosion_respects_authoritative_map_occlusion() {
+        let (mut app, _) = barrel_test_app();
+        let target = barrel_identity(&mut app, 101);
+        let source_position = {
+            let world = app.world_mut();
+            let mut query = world.query::<(&super::super::DamageableTargetIdentity, &Position)>();
+            query
+                .iter(world)
+                .find(|(identity, _)| **identity == target)
+                .unwrap()
+                .1
+                .0
+        };
+        let chained_position = {
+            let chained = barrel_identity(&mut app, 102);
+            let world = app.world_mut();
+            let mut query = world.query::<(&super::super::DamageableTargetIdentity, &Position)>();
+            query
+                .iter(world)
+                .find(|(identity, _)| **identity == chained)
+                .unwrap()
+                .1
+                .0
+        };
+        let midpoint = (source_position + chained_position) * 0.5;
+        app.world_mut().spawn((
+            ArenaWall,
+            RigidBody::Static,
+            Collider::rectangle(16.0, 64.0),
+            destructible_map_collision_layers(),
+            Position::from_xy(midpoint.x, midpoint.y),
+            Rotation::default(),
+        ));
+        app.update();
+        let source = test_attack_source();
+        app.world_mut()
+            .resource_mut::<super::super::PendingWorldTargetDamages>()
+            .0
+            .push(super::super::PendingWorldTargetDamage {
+                target,
+                source,
+                attack_id: source.attack_id,
+                requested_damage: 60,
+                delivery_index: 0,
+                bundle_index: 0,
+                effect_index: 0,
+            });
+
+        process_world_target_damage(app.world_mut());
+
+        assert_eq!(barrel_health(&mut app, 102), Some(60));
+    }
+
+    #[test]
+    fn barrel_explosion_damages_combatants_as_environment_without_object_outcome_leakage() {
+        let (mut app, _) = barrel_test_app();
+        let target = barrel_identity(&mut app, 101);
+        let position = {
+            let world = app.world_mut();
+            let mut query = world.query::<(&super::super::DamageableTargetIdentity, &Position)>();
+            query
+                .iter(world)
+                .find(|(identity, _)| **identity == target)
+                .unwrap()
+                .1
+                .0
+        };
+        app.world_mut().spawn((
+            crate::protocol::Fighter,
+            crate::protocol::PlayerId(7),
+            crate::protocol::NetworkEntityId(70),
+            crate::combat::TeamId(0),
+            crate::combat::CurrentHealth(100),
+            crate::matchplay::MatchMember(crate::matchplay::MatchId(1)),
+            crate::matchplay::ActiveCombatant,
+            Position::from_xy(position.x - 256.0, position.y),
+        ));
+        let fighter = app
+            .world_mut()
+            .spawn((
+                crate::protocol::Fighter,
+                crate::protocol::NetworkEntityId(88),
+                crate::combat::TeamId(1),
+                crate::combat::CurrentHealth(100),
+                Position::from_xy(position.x, position.y + 48.0),
+            ))
+            .id();
+        app.update();
+        let source = test_attack_source();
+        app.world_mut()
+            .resource_mut::<super::super::PendingWorldTargetDamages>()
+            .0
+            .push(super::super::PendingWorldTargetDamage {
+                target,
+                source,
+                attack_id: source.attack_id,
+                requested_damage: 60,
+                delivery_index: 0,
+                bundle_index: 0,
+                effect_index: 0,
+            });
+
+        process_world_target_damage(app.world_mut());
+
+        assert_eq!(
+            app.world()
+                .get::<crate::combat::CurrentHealth>(fighter)
+                .unwrap()
+                .0,
+            65
+        );
+        let outcomes = &app
+            .world()
+            .resource::<crate::combat::CombatOutcomeFacts>()
+            .0;
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].source_kind, CombatSourceKind::Environment);
+        assert_eq!(outcomes[0].source_team, Some(crate::combat::TeamId(0)));
+        assert_eq!(
+            app.world()
+                .resource::<super::super::WorldTargetDamageFacts>()
+                .0
+                .len(),
+            2,
+            "only the primary barrel and chained barrel use the object-fact channel"
+        );
     }
 }

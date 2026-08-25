@@ -52,7 +52,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 24;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 27;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -261,7 +261,7 @@ pub struct LobbyHello {
     pub proposed_display_name: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum LobbyJoinOutcome {
     Accepted {
         logical_server_id: u128,
@@ -273,6 +273,7 @@ pub enum LobbyJoinOutcome {
         catalog_revision: crate::lobby::CatalogRevision,
         #[serde(deserialize_with = "crate::lobby::deserialize_game_types")]
         game_types: Vec<crate::lobby::AdvertisedGameType>,
+        brawler_catalog: Box<crate::profiles::AdvertisedBrawlerCatalog>,
         profile: Box<crate::profiles::ProfileSnapshot>,
     },
     Rejected {
@@ -419,6 +420,7 @@ impl Serialize for MatchRouteGrant {
             game_mode: match self.game_mode {
                 crate::config::GameMode::Wipeout => 1,
                 crate::config::GameMode::HotZone => 2,
+                crate::config::GameMode::Heist => 3,
             },
             capability: self.capability.bytes(),
             activation_expiry_unix_ms: self.activation_expiry_unix_ms,
@@ -447,6 +449,7 @@ impl<'de> Deserialize<'de> for MatchRouteGrant {
         let game_mode = match wire.game_mode {
             1 => crate::config::GameMode::Wipeout,
             2 => crate::config::GameMode::HotZone,
+            3 => crate::config::GameMode::Heist,
             _ => return Err(serde::de::Error::custom("unsupported game mode")),
         };
         let capability = RouteCapability::from_bytes(wire.capability)
@@ -670,6 +673,8 @@ fn register_replicated_components(app: &mut App) {
     app.component::<MatchClock>().replicate();
     app.component::<WipeoutState>().replicate();
     app.component::<HotZoneState>().replicate();
+    app.component::<crate::matchplay::HeistState>().replicate();
+    app.component::<crate::matchplay::HeistSafe>().replicate();
     app.component::<MatchParticipant>().replicate();
     app.component::<FighterDisplayName>().replicate_once();
     app.component::<PublicParticipantState>().replicate();
@@ -680,6 +685,20 @@ fn register_replicated_components(app: &mut App) {
     app.component::<ResolvedMapIdentity>().replicate_once();
     app.component::<ResolvedMapSnapshot>().replicate_once();
     app.component::<MapDynamicState>().replicate_once();
+    app.component::<crate::map::DamageableWorldObject>()
+        .replicate_once();
+    app.component::<crate::map::DamageableTargetIdentity>()
+        .replicate();
+    app.component::<crate::map::DamageableTargetClass>()
+        .replicate_once();
+    app.component::<crate::map::DamageableMaximumHealth>()
+        .replicate_once();
+    app.component::<crate::map::DamageableObjectProfile>()
+        .replicate_once();
+    app.component::<crate::map::DamageableObjectAsset>()
+        .replicate_once();
+    app.component::<crate::map::DamageableLifeState>()
+        .replicate();
     app.component::<SpawnAssignment>().replicate();
     app.component::<PlayerId>().replicate_once();
     app.component::<NetworkEntityId>().replicate_once();
@@ -780,6 +799,8 @@ impl Plugin for ProtocolPlugin {
         })
         .add_direction(NetworkDirection::Bidirectional);
         app.register_message::<CombatCue>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<crate::map::WorldObjectCue>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<CombatEvidenceCheckpoint>()
             .add_direction(NetworkDirection::ServerToClient);
@@ -1008,11 +1029,44 @@ mod tests {
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type.clone(); crate::lobby::MAX_GAME_TYPES + 1],
+            brawler_catalog: Box::new(
+                crate::profiles::AdvertisedBrawlerCatalog::from_content(
+                    &crate::builds::BuildCatalog::embedded().unwrap(),
+                    &crate::combat::WeaponCatalog::embedded().unwrap(),
+                )
+                .unwrap(),
+            ),
             profile: Box::new(crate::profiles::ProfileSnapshot::empty(
                 crate::profiles::AccountId::new(1).unwrap(),
             )),
         };
         let bytes = postcard::to_allocvec(&oversized).unwrap();
+        assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
+
+        let mut oversized_brawler_catalog =
+            crate::profiles::AdvertisedBrawlerCatalog::from_content(
+                &crate::builds::BuildCatalog::embedded().unwrap(),
+                &crate::combat::WeaponCatalog::embedded().unwrap(),
+            )
+            .unwrap();
+        oversized_brawler_catalog.fighter_profiles =
+            vec![
+                oversized_brawler_catalog.fighter_profiles[0].clone();
+                crate::profiles::MAX_ADVERTISED_FIGHTER_PROFILES + 1
+            ];
+        let oversized_brawler = LobbyJoinOutcome::Accepted {
+            logical_server_id: 1,
+            player_id: PlayerId(1),
+            accepted_display_name: "Player One".to_string(),
+            server_name: "Local Brawler".to_string(),
+            catalog_revision: crate::lobby::CatalogRevision([1; 32]),
+            game_types: vec![game_type.clone()],
+            brawler_catalog: Box::new(oversized_brawler_catalog),
+            profile: Box::new(crate::profiles::ProfileSnapshot::empty(
+                crate::profiles::AccountId::new(1).unwrap(),
+            )),
+        };
+        let bytes = postcard::to_allocvec(&oversized_brawler).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
 
         let invalid_name = LobbyJoinOutcome::Accepted {
@@ -1022,6 +1076,13 @@ mod tests {
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type],
+            brawler_catalog: Box::new(
+                crate::profiles::AdvertisedBrawlerCatalog::from_content(
+                    &crate::builds::BuildCatalog::embedded().unwrap(),
+                    &crate::combat::WeaponCatalog::embedded().unwrap(),
+                )
+                .unwrap(),
+            ),
             profile: Box::new(crate::profiles::ProfileSnapshot::empty(
                 crate::profiles::AccountId::new(1).unwrap(),
             )),

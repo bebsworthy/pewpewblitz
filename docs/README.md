@@ -30,7 +30,8 @@ delivery status and evidence.
 - [Product direction](./00-product-direction.md) — product promise, differentiation, principles,
   creator direction, and non-goals.
 - [Fighter and build specification](./02-fighter-model.md) — authored choices, accepted build
-  identity, resolved loadouts, fighter runtime, statuses, and future arsenal/equipment boundaries.
+  identity, resolved loadouts, fighter runtime, statuses, and the implemented saved-brawler arsenal
+  and equipment boundaries.
 - [Weapons and abilities specification](./03-weapons-and-abilities.md) — combat authoring layers,
   weapon recipes, delivery, payloads, effects, abilities, presentation facts, and extension rules.
 - [Map and mode specification](./04-maps-and-game-modes.md) — authored, resolved, and runtime map
@@ -43,6 +44,9 @@ delivery status and evidence.
 - [Concealment and reveal specification](./17-concealment.md) — V9's observer-specific terrain,
   self-cloak, allied-area, proximity, attack/damage reveal, reveal-scan, privacy, and verification
   contract.
+- [Damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md) —
+  proposed V10 contract for health-bearing targets, oil barrels, mirrored team safes, treasure
+  chests, restoration pickups, authority, recovery, and verification.
 - [Bots](./10-bots.md) — server-hosted practice-controller decision, bounded policy contract,
   integration seams, first playable slice, and deferred hosting alternatives.
 - [Art, presentation, and asset specification](./11-art-and-presentation-direction.md) — visual
@@ -92,7 +96,8 @@ and closeout learning.
 | V6 | Development-only, server-authoritative Practice Balance Lab for rapid fighter and weapon tuning | [V6 roadmap](./implementation/v6/roadmap.md) |
 | V7 | Persistent server-owned player profiles, saved brawlers, weapon bases, and four-slot weapon-part equipment | [V7 roadmap](./implementation/v7/roadmap.md) |
 | V8 | Sparse-grid maps, unified map-asset/gameplay/visual catalogs, full built-in conversion, and retirement of the old production map system | [V8 roadmap](./implementation/v8/roadmap.md) |
-| V9 | Authoritative observer-specific concealment, terrain/proximity proof, cloak/reveal ultimate pair, and allied concealment field | [V9 roadmap](./implementation/v9/roadmap.md) |
+| V9 | Authoritative observer-specific concealment, terrain/proximity proof, cloak/reveal/field ultimates, server-advertised brawler metadata, and the full-screen saved-brawler flow | [V9 roadmap](./implementation/v9/roadmap.md) |
+| V10 (M02 implementing; M01 complete) | Damageable world objects, oil barrels, mirrored Heist with one dedicated map, treasure chests, and restoration pickups | [V10 roadmap](./implementation/v10/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

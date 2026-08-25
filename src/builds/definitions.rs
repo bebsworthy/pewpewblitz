@@ -437,7 +437,18 @@ pub fn resolve_saved_brawler_recipe(
         3 => catalog.fighter_profiles.reinforced,
         _ => return Err(BuildResolutionError::UnknownId),
     };
-    if !(3..=6).contains(&passives[0].0) || !(3..=6).contains(&passives[1].0) {
+    if passives.iter().any(|id| {
+        catalog
+            .passives
+            .iter()
+            .find(|definition| definition.id == *id)
+            .is_none_or(|definition| {
+                matches!(
+                    definition.kind,
+                    PassiveKind::LightweightFrame | PassiveKind::ReinforcedFrame
+                )
+            })
+    }) {
         return Err(BuildResolutionError::UnknownId);
     }
     resolve_build_recipe_inner(

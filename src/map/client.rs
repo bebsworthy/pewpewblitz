@@ -32,6 +32,14 @@ pub enum ClientMapReadiness {
     Invalid(String),
 }
 
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub enum ClientWorldObjectReadiness {
+    #[default]
+    Waiting,
+    Ready,
+    Invalid(String),
+}
+
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapPresentationMember {
     pub instance_id: MapInstanceId,
@@ -60,10 +68,93 @@ impl Plugin for MapPresentationPlugin {
 /// Network-facing dynamic state convergence, installed for both headless and windowed clients.
 pub struct ClientMapPlugin;
 
+#[derive(Resource, Default)]
+struct SeenWorldObjectCueIds(std::collections::VecDeque<crate::combat::CombatEventId>);
+
 impl Plugin for ClientMapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, converge_map_dynamic_state);
+        app.init_resource::<ReceivedWorldObjectCues>()
+            .init_resource::<SeenWorldObjectCueIds>()
+            .init_resource::<ClientWorldObjectReadiness>()
+            .add_systems(
+                Update,
+                (
+                    converge_map_dynamic_state,
+                    converge_world_object_readiness.after(converge_map_dynamic_state),
+                    receive_world_object_cues,
+                ),
+            );
     }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy systems receive resource system parameters by value"
+)]
+fn converge_world_object_readiness(
+    roots: Query<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>,
+    objects: Query<&DamageableTargetIdentity, With<DamageableWorldObject>>,
+    catalog: Res<MapCatalogResource>,
+    mut readiness: ResMut<ClientWorldObjectReadiness>,
+) {
+    let Ok((snapshot, state)) = roots.single() else {
+        *readiness = ClientWorldObjectReadiness::Waiting;
+        return;
+    };
+    let terminal: std::collections::BTreeSet<_> = state
+        .terminal_states
+        .iter()
+        .map(|transition| transition.placement_id)
+        .collect();
+    let expected: std::collections::BTreeSet<_> = snapshot
+        .placements
+        .iter()
+        .filter(|placement| !terminal.contains(&placement.placement_id))
+        .filter_map(|placement| {
+            let asset = catalog.0.asset(placement.asset_id)?;
+            let profile = catalog.0.profile(asset.gameplay_profile_id)?;
+            matches!(profile.durability, MapDurabilityBehavior::HitPoints(_))
+                .then_some(placement.placement_id)
+        })
+        .collect();
+    let generation = state.generation_id();
+    let actual: std::collections::BTreeSet<_> = objects
+        .iter()
+        .filter_map(|identity| {
+            (identity.generation() == generation).then_some(identity.placement_id())
+        })
+        .collect();
+    *readiness = if actual == expected {
+        ClientWorldObjectReadiness::Ready
+    } else if actual.is_subset(&expected) {
+        ClientWorldObjectReadiness::Waiting
+    } else {
+        ClientWorldObjectReadiness::Invalid(
+            "replicated damageable objects do not match the map generation".to_string(),
+        )
+    };
+}
+
+fn receive_world_object_cues(
+    mut receivers: Query<Option<&mut MessageReceiver<WorldObjectCue>>, With<Client>>,
+    mut inbox: ResMut<ReceivedWorldObjectCues>,
+    mut seen: ResMut<SeenWorldObjectCueIds>,
+) {
+    for receiver in &mut receivers {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for cue in receiver.receive() {
+            if inbox.0.len() < MAX_WORLD_OBJECT_CUES && !seen.0.contains(&cue.event_id()) {
+                if seen.0.len() >= MAX_WORLD_OBJECT_CUES {
+                    seen.0.pop_front();
+                }
+                seen.0.push_back(cue.event_id());
+                inbox.0.push(cue);
+            }
+        }
+    }
+    inbox.0.sort_by_key(|cue| cue.event_id().0);
 }
 
 #[allow(
@@ -170,12 +261,20 @@ fn legal_dynamic_outcomes(
         .filter_map(|placement| {
             let asset = catalog.asset(placement.asset_id)?;
             let profile = catalog.profile(asset.gameplay_profile_id)?;
-            let outcome = match profile.destruction {
-                MapDestructionBehavior::Indestructible => return None,
-                MapDestructionBehavior::RemoveOnMapDestruction => MapPlacementOutcome::Removed,
-                MapDestructionBehavior::ReplaceOnMapDestruction(asset_id) => {
-                    MapPlacementOutcome::ReplacedWith(asset_id)
+            let outcome = match profile.durability {
+                MapDurabilityBehavior::HitPoints(id) => {
+                    let damage = catalog.damage_profile(id)?;
+                    match damage.terminal {
+                        MapObjectTerminalBehavior::Explode { outcome, .. } => outcome,
+                    }
                 }
+                MapDurabilityBehavior::Indestructible => match profile.destruction {
+                    MapDestructionBehavior::Indestructible => return None,
+                    MapDestructionBehavior::RemoveOnMapDestruction => MapPlacementOutcome::Removed,
+                    MapDestructionBehavior::ReplaceOnMapDestruction(asset_id) => {
+                        MapPlacementOutcome::ReplacedWith(asset_id)
+                    }
+                },
             };
             Some((placement.placement_id, outcome))
         })
@@ -386,5 +485,74 @@ mod tests {
         let shapes = perimeter_visual_shapes(bounds);
         assert!(shapes[0].0.x < bounds.min.x && shapes[1].0.x > bounds.max.x);
         assert!(shapes[2].0.y < bounds.min.y && shapes[3].0.y > bounds.max.y);
+    }
+
+    #[test]
+    fn world_object_readiness_requires_exact_live_generation_and_accepts_terminal_absence() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let resolved = catalog
+            .resolve_preset(BARREL_YARD_PRESET, MapInstanceId(5))
+            .unwrap();
+        let snapshot = resolved.snapshot.clone();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, MapContentPlugin, ClientMapPlugin));
+        let root = app
+            .world_mut()
+            .spawn((
+                MapRoot,
+                snapshot.clone(),
+                MapDynamicState {
+                    map_instance_id: MapInstanceId(5),
+                    generation: 1,
+                    revision: 0,
+                    terminal_states: Vec::new(),
+                },
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientWorldObjectReadiness>(),
+            ClientWorldObjectReadiness::Waiting
+        );
+
+        let mut object_entities = std::collections::BTreeMap::new();
+        for placement in resolved.dynamic_placements {
+            let identity = DamageableTargetIdentity::MapObject {
+                generation: MapDynamicGeneration {
+                    map_instance_id: MapInstanceId(5),
+                    generation: 1,
+                },
+                placement_id: placement.placement_id,
+            };
+            let entity = app
+                .world_mut()
+                .spawn((identity, DamageableWorldObject))
+                .id();
+            object_entities.insert(placement.placement_id, entity);
+        }
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientWorldObjectReadiness>(),
+            ClientWorldObjectReadiness::Ready
+        );
+
+        let terminal = MapPlacementId(101);
+        app.world_mut()
+            .entity_mut(object_entities[&terminal])
+            .despawn();
+        app.world_mut().entity_mut(root).insert(MapDynamicState {
+            map_instance_id: MapInstanceId(5),
+            generation: 1,
+            revision: 1,
+            terminal_states: vec![MapPlacementTransition {
+                placement_id: terminal,
+                outcome: MapPlacementOutcome::Removed,
+            }],
+        });
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientWorldObjectReadiness>(),
+            ClientWorldObjectReadiness::Ready
+        );
     }
 }

@@ -36,6 +36,7 @@ enum MapVisualFallback {
     Barrier,
     Rubble,
     Hidden,
+    Barrel,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -123,18 +124,35 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
     if source.schema_version != 3 || themes.schema_version != 3 {
         return Err("unsupported client map catalog schema".to_string());
     }
-    let expected: BTreeSet<_> = catalog
+    let mut expected: BTreeSet<_> = catalog
         .assets
         .iter()
         .map(|asset| asset.visual_profile_id)
         .collect();
+    expected.extend(catalog.presets.iter().flat_map(|preset| {
+        preset
+            .recipe
+            .mode_anchors
+            .iter()
+            .filter_map(|anchor| match anchor.kind {
+                crate::map::MapModeAnchorKind::HeistSafe {
+                    objective_visual_profile_id,
+                    ..
+                } => Some(objective_visual_profile_id),
+                crate::map::MapModeAnchorKind::HotZoneCircle { .. } => None,
+            })
+    }));
     let mut actual = BTreeSet::new();
     for profile in source.visuals {
         let kind_matches_fallback = matches!(
             (&profile.kind, &profile.fallback),
             (
                 MapVisualKind::Imported { .. },
-                MapVisualFallback::Wall | MapVisualFallback::Decoration
+                MapVisualFallback::Wall
+                    | MapVisualFallback::Cover
+                    | MapVisualFallback::Decoration
+                    | MapVisualFallback::Rubble
+                    | MapVisualFallback::Barrel
             ) | (MapVisualKind::GeneratedGround, MapVisualFallback::Ground)
                 | (MapVisualKind::GeneratedCover, MapVisualFallback::Cover)
                 | (MapVisualKind::GeneratedWater, MapVisualFallback::Water)
@@ -433,7 +451,7 @@ mod grid_catalog_tests {
     fn client_grid_catalog_exactly_covers_shared_visuals_and_themes() {
         let shared = crate::map::MapContentCatalog::embedded().unwrap();
         let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
-        assert_eq!(visuals.profiles.len(), shared.assets.len());
+        assert_eq!(visuals.profiles.len(), shared.assets.len() + 1);
         assert!(
             visuals
                 .theme(crate::map::MapPresentationThemeId(3))
@@ -450,6 +468,53 @@ mod grid_catalog_tests {
                 );
             }
         }
+        assert_eq!(
+            visuals
+                .profile(crate::map::MapVisualProfileId(37))
+                .and_then(|profile| match &profile.kind {
+                    super::MapVisualKind::Imported { path } => Some(path.as_str()),
+                    _ => None,
+                }),
+            Some("brawler/models/kenney/mini-dungeon/barrel.glb")
+        );
+        assert!(
+            (visuals
+                .profile(crate::map::MapVisualProfileId(37))
+                .unwrap()
+                .scale
+                - 64.0)
+                .abs()
+                < f32::EPSILON,
+            "the imported barrel must fill its 32-unit tile like its radius-16 collider"
+        );
+        assert_eq!(
+            visuals
+                .profile(crate::map::MapVisualProfileId(38))
+                .and_then(|profile| match &profile.kind {
+                    super::MapVisualKind::Imported { path } => Some(path.as_str()),
+                    _ => None,
+                }),
+            Some("brawler/models/kenney/graveyard/debris-wood.glb")
+        );
+        assert!(
+            (visuals
+                .profile(crate::map::MapVisualProfileId(38))
+                .unwrap()
+                .scale
+                - 64.0)
+                .abs()
+                < f32::EPSILON,
+            "the imported debris must fill its 32-unit terminal tile without root downscaling"
+        );
+        assert_eq!(
+            visuals
+                .profile(crate::map::MapVisualProfileId(39))
+                .and_then(|profile| match &profile.kind {
+                    super::MapVisualKind::Imported { path } => Some(path.as_str()),
+                    _ => None,
+                }),
+            Some("brawler/models/kenney/blaster-kit/crate-wide.glb")
+        );
     }
 }
 

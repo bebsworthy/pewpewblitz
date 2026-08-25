@@ -1473,6 +1473,27 @@ fn install_server_game_mode(app: &mut App) {
                 })
                 .add_plugins(crate::matchplay::HotZoneModePlugin);
         }
+        GameMode::Heist => {
+            let rules = objective_target.map_or_else(
+                crate::matchplay::HeistRules::default,
+                |safe_maximum_health| crate::matchplay::HeistRules {
+                    safe_maximum_health,
+                    ..crate::matchplay::HeistRules::default()
+                },
+            );
+            let rules = rules
+                .validate()
+                .expect("validated manifest Heist objective");
+            app.insert_resource(MatchModeSetup {
+                mode_definition_id: crate::map::HEIST_MODE_DEFINITION,
+                rules_revision: crate::matchplay::HEIST_RULES_REVISION,
+            })
+            .insert_resource(rules)
+            .insert_resource(ServerMapSelection {
+                preset_id: crate::map::TWIN_VAULTS_PRESET,
+            })
+            .add_plugins(crate::matchplay::HeistModePlugin);
+        }
     }
 }
 

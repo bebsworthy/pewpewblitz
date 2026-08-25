@@ -180,6 +180,16 @@ impl Harness {
         harness
     }
 
+    pub(super) fn new_barrel_yard_match(client_count: usize) -> Self {
+        let mut harness = Self::new_match(client_count);
+        harness
+            .server
+            .insert_resource(brawler::map::ServerMapSelection {
+                preset_id: brawler::map::BARREL_YARD_PRESET,
+            });
+        harness
+    }
+
     pub(super) fn new_match(client_count: usize) -> Self {
         let mut harness = Self::new_mode_with_options(client_count, None, false, false);
         harness

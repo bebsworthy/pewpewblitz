@@ -286,11 +286,12 @@ enum OverlayCommit {
     ChangeServerConfirmation,
 }
 
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
 struct BrawlerCreationDraft {
     fighter_profile_id: crate::profiles::FighterProfileId,
     weapon_base_id: crate::profiles::WeaponBaseId,
     ultimate: crate::builds::UltimateDefinitionId,
+    inline_error: Option<String>,
 }
 
 impl Default for BrawlerCreationDraft {
@@ -299,6 +300,7 @@ impl Default for BrawlerCreationDraft {
             fighter_profile_id: crate::profiles::FighterProfileId(1),
             weapon_base_id: crate::profiles::WeaponBaseId(1),
             ultimate: crate::builds::UltimateDefinitionId(1),
+            inline_error: None,
         }
     }
 }
@@ -484,6 +486,9 @@ struct DashboardNotice(Option<String>);
 struct PendingCreatedBrawler(Option<u64>);
 
 #[derive(Resource, Default)]
+struct PendingEditedBrawler(Option<crate::profiles::SavedBrawlerId>);
+
+#[derive(Resource, Default)]
 struct FlowNavigation {
     selected: usize,
 }
@@ -603,7 +608,10 @@ struct ChangeServerConfirmationRoot;
 struct DeleteBrawlerConfirmationRoot;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-struct BrawlerListRoot(crate::profiles::ProfileRevision);
+struct BrawlerListRoot {
+    profile_revision: crate::profiles::ProfileRevision,
+    pending: bool,
+}
 
 #[derive(Component)]
 struct BrawlerListScrollArea;
@@ -612,6 +620,8 @@ struct BrawlerListScrollArea;
 struct BrawlerDetailsRoot {
     brawler_id: crate::profiles::SavedBrawlerId,
     profile_revision: crate::profiles::ProfileRevision,
+    pending: bool,
+    contextual_confirmation: bool,
     layout: BrawlerDetailsLayout,
 }
 
@@ -627,14 +637,23 @@ struct BrawlerDetailsScrollArea;
 #[derive(Component)]
 pub(super) struct BrawlerDetailsPreviewHost;
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-struct BrawlerCreationRoot(BrawlerCreationDraft);
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct BrawlerCreationRoot {
+    draft: BrawlerCreationDraft,
+    layout: BrawlerDetailsLayout,
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct BrawlerEditorRoot(BrawlerEditDraft);
+struct BrawlerEditorRoot {
+    draft: BrawlerEditDraft,
+    layout: BrawlerDetailsLayout,
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct WeaponEquipmentRoot(WeaponEquipmentDraft);
+struct WeaponEquipmentRoot {
+    draft: WeaponEquipmentDraft,
+    layout: BrawlerDetailsLayout,
+}
 
 #[derive(Component)]
 struct WeaponEquipmentScrollArea;
@@ -702,6 +721,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<DashboardReturnFocus>()
             .init_resource::<DashboardNotice>()
             .init_resource::<PendingCreatedBrawler>()
+            .init_resource::<PendingEditedBrawler>()
             .init_resource::<BrawlerCreationDraft>()
             .init_resource::<BrawlerEditDraft>()
             .init_resource::<WeaponEquipmentDraft>()
@@ -1496,6 +1516,7 @@ fn resolve_flow_action(
         ResMut<DashboardReturnFocus>,
         ResMut<DashboardNotice>,
         ResMut<PendingCreatedBrawler>,
+        ResMut<PendingEditedBrawler>,
         ResMut<BrawlerCreationDraft>,
         ResMut<BrawlerEditDraft>,
         ResMut<WeaponEquipmentDraft>,
@@ -1525,6 +1546,7 @@ fn resolve_flow_action(
         mut dashboard_focus,
         mut dashboard_notice,
         mut pending_created_brawler,
+        mut pending_edited_brawler,
         mut creation_draft,
         mut brawler_edit,
         mut equipment_draft,
@@ -1589,8 +1611,18 @@ fn resolve_flow_action(
             dashboard_notice.0 = Some(format!("Created {}.", created.name));
             commit.overlay = Some(OverlayCommit::BrawlerDetails(created.id));
             commit.focus_index = Some(0);
+        } else if accepted && let Some(brawler_id) = pending_edited_brawler.0.take() {
+            commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
+            commit.focus_index = Some(1);
         } else if !accepted {
-            pending_created_brawler.0 = None;
+            if pending_created_brawler.0.take().is_some() {
+                creation_draft.inline_error = dashboard_notice.0.clone();
+                commit.overlay = Some(OverlayCommit::BrawlerCreation);
+            }
+            if pending_edited_brawler.0.take().is_some() {
+                brawler_edit.inline_error = dashboard_notice.0.clone();
+                commit.overlay = Some(OverlayCommit::BrawlerEditor);
+            }
         }
     }
     if let Some(explicit) = actions.explicit.take() {
@@ -2101,29 +2133,69 @@ fn resolve_flow_action(
             let Some(snapshot) = profile.snapshot() else {
                 return;
             };
-            if snapshot.brawlers.len() >= crate::profiles::MAX_BRAWLERS_PER_PROFILE {
-                dashboard_notice.0 = Some("Brawler limit reached (16).".to_string());
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            if snapshot.brawlers.len() >= usize::from(catalog.limits.maximum_saved_brawlers) {
+                dashboard_notice.0 = Some(format!(
+                    "Brawler limit reached ({}).",
+                    catalog.limits.maximum_saved_brawlers
+                ));
                 commit.overlay = Some(OverlayCommit::Clear);
                 return;
             }
-            *creation_draft = BrawlerCreationDraft::default();
+            let (Some(fighter), Some(weapon), Some(ultimate)) = (
+                catalog.fighter_profiles.first(),
+                catalog.weapon_bases.first(),
+                catalog.ultimates.first(),
+            ) else {
+                return;
+            };
+            *creation_draft = BrawlerCreationDraft {
+                fighter_profile_id: fighter.id,
+                weapon_base_id: weapon.id,
+                ultimate: ultimate.id,
+                inline_error: None,
+            };
             commit.overlay = Some(OverlayCommit::BrawlerCreation);
         }
         FlowUiAction::CycleCreationProfile => {
-            creation_draft.fighter_profile_id.0 = creation_draft.fighter_profile_id.0 % 3 + 1;
+            creation_draft.inline_error = None;
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            let index = catalog
+                .fighter_profiles
+                .iter()
+                .position(|entry| entry.id == creation_draft.fighter_profile_id)
+                .unwrap_or(0);
+            creation_draft.fighter_profile_id =
+                catalog.fighter_profiles[(index + 1) % catalog.fighter_profiles.len()].id;
         }
         FlowUiAction::CycleCreationWeapon => {
-            creation_draft.weapon_base_id.0 = creation_draft.weapon_base_id.0 % 4 + 1;
+            creation_draft.inline_error = None;
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            let index = catalog
+                .weapon_bases
+                .iter()
+                .position(|entry| entry.id == creation_draft.weapon_base_id)
+                .unwrap_or(0);
+            creation_draft.weapon_base_id =
+                catalog.weapon_bases[(index + 1) % catalog.weapon_bases.len()].id;
         }
         FlowUiAction::CycleCreationUltimate => {
-            let current = builds
-                .0
+            creation_draft.inline_error = None;
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            let current = catalog
                 .ultimates
                 .iter()
                 .position(|definition| definition.id == creation_draft.ultimate)
                 .unwrap_or(0);
-            creation_draft.ultimate =
-                builds.0.ultimates[(current + 1) % builds.0.ultimates.len()].id;
+            creation_draft.ultimate = catalog.ultimates[(current + 1) % catalog.ultimates.len()].id;
         }
         FlowUiAction::CancelCreateBrawler => {
             commit.overlay = Some(OverlayCommit::BrawlerList);
@@ -2155,18 +2227,21 @@ fn resolve_flow_action(
                 return;
             };
             let ordinal = snapshot.next_brawler_ordinal;
+            creation_draft.inline_error = None;
+            let Some((passive_one, passive_two)) = profile.catalog().and_then(|catalog| {
+                let mut passives = catalog.selectable_passives().map(|entry| entry.id);
+                Some((passives.next()?, passives.next()?))
+            }) else {
+                return;
+            };
             if profile.create(crate::profiles::BrawlerDraft {
                 name: format!("Brawler {ordinal}"),
                 fighter_profile_id: creation_draft.fighter_profile_id,
                 weapon_base_id: creation_draft.weapon_base_id,
                 ultimate_id: creation_draft.ultimate,
-                passive_ids: [
-                    crate::builds::PassiveDefinitionId(3),
-                    crate::builds::PassiveDefinitionId(4),
-                ],
+                passive_ids: [passive_one, passive_two],
             }) {
                 pending_created_brawler.0 = Some(ordinal);
-                commit.overlay = Some(OverlayCommit::BrawlerList);
             }
         }
         FlowUiAction::SelectBrawler(brawler_id) => {
@@ -2177,7 +2252,10 @@ fn resolve_flow_action(
             {
                 return;
             }
-            if profile.select(brawler_id) {
+            let already_selected = profile
+                .snapshot()
+                .is_some_and(|snapshot| snapshot.selected_brawler_id == Some(brawler_id));
+            if already_selected || profile.select(brawler_id) {
                 commit.overlay = Some(OverlayCommit::Clear);
                 commit.focus_index = Some(DASHBOARD_BUILD_INDEX);
             }
@@ -2244,37 +2322,48 @@ fn resolve_flow_action(
             brawler_edit.inline_error = None;
         }
         FlowUiAction::CycleBrawlerUltimate => {
-            let index = builds
-                .0
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            let index = catalog
                 .ultimates
                 .iter()
                 .position(|definition| definition.id == brawler_edit.ultimate_id)
                 .unwrap_or(0);
-            brawler_edit.ultimate_id =
-                builds.0.ultimates[(index + 1) % builds.0.ultimates.len()].id;
+            brawler_edit.ultimate_id = catalog.ultimates[(index + 1) % catalog.ultimates.len()].id;
         }
         FlowUiAction::CycleBrawlerPassiveOne => {
-            let next = if brawler_edit.passive_ids[0].0 >= 6 {
-                3
-            } else {
-                brawler_edit.passive_ids[0].0 + 1
+            let Some(catalog) = profile.catalog() else {
+                return;
             };
-            brawler_edit.passive_ids[0] = crate::builds::PassiveDefinitionId(next);
+            let options: Vec<_> = catalog
+                .selectable_passives()
+                .map(|entry| entry.id)
+                .collect();
+            let index = options
+                .iter()
+                .position(|id| *id == brawler_edit.passive_ids[0])
+                .unwrap_or(0);
+            brawler_edit.passive_ids[0] = options[(index + 1) % options.len()];
             if brawler_edit.passive_ids[0] == brawler_edit.passive_ids[1] {
-                brawler_edit.passive_ids[1] =
-                    crate::builds::PassiveDefinitionId(if next >= 6 { 3 } else { next + 1 });
+                brawler_edit.passive_ids[1] = options[(index + 2) % options.len()];
             }
         }
         FlowUiAction::CycleBrawlerPassiveTwo => {
-            let next = if brawler_edit.passive_ids[1].0 >= 6 {
-                3
-            } else {
-                brawler_edit.passive_ids[1].0 + 1
+            let Some(catalog) = profile.catalog() else {
+                return;
             };
-            brawler_edit.passive_ids[1] = crate::builds::PassiveDefinitionId(next);
+            let options: Vec<_> = catalog
+                .selectable_passives()
+                .map(|entry| entry.id)
+                .collect();
+            let index = options
+                .iter()
+                .position(|id| *id == brawler_edit.passive_ids[1])
+                .unwrap_or(0);
+            brawler_edit.passive_ids[1] = options[(index + 1) % options.len()];
             if brawler_edit.passive_ids[0] == brawler_edit.passive_ids[1] {
-                brawler_edit.passive_ids[0] =
-                    crate::builds::PassiveDefinitionId(if next >= 6 { 3 } else { next + 1 });
+                brawler_edit.passive_ids[0] = options[(index + 2) % options.len()];
             }
         }
         FlowUiAction::ConfirmBrawlerEdit => {
@@ -2285,15 +2374,17 @@ fn resolve_flow_action(
             let Some(brawler_id) = brawler_edit.brawler_id else {
                 return;
             };
-            let _ = profile.edit(
+            if profile.edit(
                 brawler_id,
                 crate::profiles::BrawlerEdit {
                     name,
                     ultimate_id: brawler_edit.ultimate_id,
                     passive_ids: brawler_edit.passive_ids,
                 },
-            );
-            commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
+            ) {
+                pending_edited_brawler.0 = Some(brawler_id);
+                brawler_edit.inline_error = None;
+            }
         }
         FlowUiAction::SelectEquipmentSlot(slot) => {
             if slot < crate::weapon_parts::WEAPON_PART_SLOT_COUNT {
@@ -3801,7 +3892,6 @@ fn spawn_dashboard(
     mut navigation: ResMut<FlowNavigation>,
     mut selection: ResMut<SelectedGameType>,
     profile: Res<super::ClientProfileModel>,
-    builds: Res<crate::builds::BuildCatalogResource>,
     queue: Res<super::ClientQueueModel>,
     practice: Res<super::ClientPracticeModel>,
     mut purpose: ResMut<SessionPurpose>,
@@ -3850,7 +3940,7 @@ fn spawn_dashboard(
         selected_brawler.map_or("CREATE YOUR FIRST BRAWLER", |brawler| brawler.name.as_str());
     let build_summary = selected_brawler.map_or_else(
         || "Choose a permanent fighter profile and weapon base".to_string(),
-        |brawler| brawler_loadout_summary(brawler, &builds.0),
+        |brawler| brawler_loadout_summary(brawler, &membership.brawler_catalog),
     );
     let game_summary = dashboard_game_summary(game);
     let population = if queue.required_snapshot_is_fresh() {
@@ -4264,6 +4354,13 @@ fn dashboard_game_summary(game: &crate::lobby::AdvertisedGameType) -> String {
             target_progress_ticks / 60,
             active_limit_ticks / 60
         ),
+        crate::lobby::AdvertisedRulesSummary::Heist {
+            safe_maximum_health,
+            active_limit_ticks,
+        } => format!(
+            "Destroy the {safe_maximum_health} HP safe - {}s limit",
+            active_limit_ticks / 60
+        ),
     };
     format!("{rules}\nMap pool: {maps}")
 }
@@ -4312,6 +4409,8 @@ fn spawn_game_type_select(
                         "Wipeout"
                     } else if game_type.mode_definition_id == crate::map::HOT_ZONE_MODE_DEFINITION {
                         "Hot Zone"
+                    } else if game_type.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
+                        "Heist"
                     } else {
                         "Unknown mode"
                     };
@@ -4345,6 +4444,13 @@ fn spawn_game_type_select(
                     } => format!(
                         "hold {}s; {}s limit",
                         target_progress_ticks / 60,
+                        active_limit_ticks / 60
+                    ),
+                    crate::lobby::AdvertisedRulesSummary::Heist {
+                        safe_maximum_health,
+                        active_limit_ticks,
+                    } => format!(
+                        "{safe_maximum_health} HP safe; {}s limit",
                         active_limit_ticks / 60
                     ),
                 };
@@ -4687,76 +4793,81 @@ fn open_empty_profile_creation(
             .snapshot()
             .is_some_and(|snapshot| snapshot.brawlers.is_empty())
     {
-        *draft = BrawlerCreationDraft::default();
+        let Some(catalog) = profile.catalog() else {
+            return;
+        };
+        let (Some(fighter), Some(weapon), Some(ultimate)) = (
+            catalog.fighter_profiles.first(),
+            catalog.weapon_bases.first(),
+            catalog.ultimates.first(),
+        ) else {
+            return;
+        };
+        *draft = BrawlerCreationDraft {
+            fighter_profile_id: fighter.id,
+            weapon_base_id: weapon.id,
+            ultimate: ultimate.id,
+            inline_error: None,
+        };
         *overlay = ClientOverlay::BrawlerCreation;
     }
 }
 
-const fn fighter_profile_name(id: crate::profiles::FighterProfileId) -> &'static str {
-    match id.0 {
-        1 => "Default",
-        2 => "Lightweight",
-        3 => "Reinforced",
-        _ => "Unknown",
-    }
+fn advertised_fighter_name(
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
+    id: crate::profiles::FighterProfileId,
+) -> &str {
+    catalog
+        .fighter(id)
+        .map_or("Unknown", |definition| definition.display_name.as_str())
 }
 
-const fn weapon_base_name(id: crate::profiles::WeaponBaseId) -> &'static str {
-    match id.0 {
-        1 => "Pulse Sidearm",
-        2 => "Scatter Cannon",
-        3 => "Arc Launcher",
-        4 => "Impact Blade",
-        _ => "Unknown",
-    }
+fn advertised_weapon_name(
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
+    id: crate::profiles::WeaponBaseId,
+) -> &str {
+    catalog
+        .weapon(id)
+        .map_or("Unknown", |definition| definition.display_name.as_str())
 }
 
 fn ultimate_name(
-    catalog: &crate::builds::BuildCatalog,
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
     id: crate::builds::UltimateDefinitionId,
 ) -> &str {
     catalog
-        .ultimates
-        .iter()
-        .find(|definition| definition.id == id)
+        .ultimate(id)
         .map_or("Unknown", |definition| definition.display_name.as_str())
 }
 
 fn passive_name(
-    catalog: &crate::builds::BuildCatalog,
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
     id: crate::builds::PassiveDefinitionId,
 ) -> &str {
     catalog
-        .passives
-        .iter()
-        .find(|definition| definition.id == id)
+        .passive(id)
         .map_or("Unknown", |definition| definition.display_name.as_str())
 }
 
 fn brawler_loadout_summary(
     brawler: &crate::profiles::SavedBrawler,
-    catalog: &crate::builds::BuildCatalog,
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
 ) -> String {
     format!(
         "{} · {}\n{} · {} + {}",
-        fighter_profile_name(brawler.fighter_profile_id),
-        weapon_base_name(brawler.weapon_base_id),
+        advertised_fighter_name(catalog, brawler.fighter_profile_id),
+        advertised_weapon_name(catalog, brawler.weapon_base_id),
         ultimate_name(catalog, brawler.ultimate_id),
         passive_name(catalog, brawler.passive_ids[0]),
         passive_name(catalog, brawler.passive_ids[1]),
     )
 }
 
-const fn fighter_profile_stats(
-    catalog: &crate::builds::BuildCatalog,
+fn fighter_profile_stats(
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
     id: crate::profiles::FighterProfileId,
 ) -> Option<crate::builds::ResolvedFighterStats> {
-    match id.0 {
-        1 => Some(catalog.fighter_profiles.default),
-        2 => Some(catalog.fighter_profiles.lightweight),
-        3 => Some(catalog.fighter_profiles.reinforced),
-        _ => None,
-    }
+    catalog.fighter(id).map(|definition| definition.stats)
 }
 
 fn spawn_brawler_list_row(
@@ -4764,7 +4875,7 @@ fn spawn_brawler_list_row(
     index: usize,
     brawler: &crate::profiles::SavedBrawler,
     selected: bool,
-    catalog: &crate::builds::BuildCatalog,
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
     disabled: bool,
 ) {
     let summary = brawler_loadout_summary(brawler, catalog);
@@ -4905,7 +5016,6 @@ fn present_brawler_list(
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
     profile: Res<super::ClientProfileModel>,
-    builds: Res<crate::builds::BuildCatalogResource>,
     roots: Query<(Entity, &BrawlerListRoot)>,
     scroll_areas: Query<&ScrollPosition, With<BrawlerListScrollArea>>,
     mut navigation: ResMut<FlowNavigation>,
@@ -4921,7 +5031,15 @@ fn present_brawler_list(
     let Some(snapshot) = profile.snapshot() else {
         return;
     };
-    if roots.iter().any(|(_, root)| root.0 == snapshot.revision) {
+    let Some(catalog) = profile.catalog() else {
+        return;
+    };
+    let pending = profile.pending();
+    let render_key = BrawlerListRoot {
+        profile_revision: snapshot.revision,
+        pending,
+    };
+    if roots.iter().any(|(_, root)| *root == render_key) {
         return;
     }
     let retained_scroll = scroll_areas.iter().next().cloned().unwrap_or_default();
@@ -4940,10 +5058,9 @@ fn present_brawler_list(
             })
             .unwrap_or(0);
     }
-    let pending = profile.pending();
     commands
         .spawn((
-            BrawlerListRoot(snapshot.revision),
+            render_key,
             DespawnOnExit(ClientFlow::Dashboard),
             Node {
                 position_type: PositionType::Absolute,
@@ -4993,7 +5110,7 @@ fn present_brawler_list(
                     Text::new(format!(
                         "{} / {} SAVED",
                         snapshot.brawlers.len(),
-                        crate::profiles::MAX_BRAWLERS_PER_PROFILE
+                        catalog.limits.maximum_saved_brawlers
                     )),
                     TextFont::from_font_size(16.0),
                     TextColor(Color::srgb(0.42, 0.88, 1.0)),
@@ -5060,7 +5177,7 @@ fn present_brawler_list(
                                 index,
                                 brawler,
                                 snapshot.selected_brawler_id == Some(brawler.id),
-                                &builds.0,
+                                catalog,
                                 pending,
                             );
                         }
@@ -5092,7 +5209,7 @@ fn present_brawler_list(
                             percent(100),
                             pending
                                 || snapshot.brawlers.len()
-                                    >= crate::profiles::MAX_BRAWLERS_PER_PROFILE,
+                                    >= usize::from(catalog.limits.maximum_saved_brawlers),
                             Color::srgb(0.03, 0.5, 0.78),
                         );
                     });
@@ -5232,6 +5349,32 @@ fn keep_brawler_details_focus_visible(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct BrawlerScreenUi<'w, 's> {
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    scale: Option<Res<'w, UiScale>>,
+    navigation: ResMut<'w, FlowNavigation>,
+}
+
+fn brawler_screen_layout(screen: &BrawlerScreenUi<'_, '_>) -> BrawlerDetailsLayout {
+    screen
+        .windows
+        .iter()
+        .next()
+        .map_or(BrawlerDetailsLayout::Wide, |window| {
+            if dashboard_layout_class(
+                window.resolution.width(),
+                window.resolution.height(),
+                screen.scale.as_deref().map_or(1.0, |scale| scale.0),
+            ) == DashboardLayoutClass::Compact
+            {
+                BrawlerDetailsLayout::Compact
+            } else {
+                BrawlerDetailsLayout::Wide
+            }
+        })
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -5243,23 +5386,26 @@ fn present_brawler_details(
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
     profile: Res<super::ClientProfileModel>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    scale: Option<Res<UiScale>>,
+    mut screen: BrawlerScreenUi,
     roots: Query<(Entity, &BrawlerDetailsRoot)>,
-    mut navigation: ResMut<FlowNavigation>,
 ) {
-    let ClientOverlay::BrawlerDetails(brawler_id) = overlay.as_ref() else {
-        for (entity, _) in &roots {
-            commands.entity(entity).despawn();
+    let (brawler_id, contextual_confirmation) = match overlay.as_ref() {
+        ClientOverlay::BrawlerDetails(brawler_id) => (brawler_id, false),
+        ClientOverlay::DeleteBrawlerConfirmation(brawler_id) => (brawler_id, true),
+        _ => {
+            for (entity, _) in &roots {
+                commands.entity(entity).despawn();
+            }
+            return;
         }
-        return;
     };
     if *flow.get() != ClientFlow::Dashboard {
         return;
     }
     let Some(snapshot) = profile.snapshot() else {
+        return;
+    };
+    let Some(catalog) = profile.catalog() else {
         return;
     };
     let Some(brawler) = snapshot
@@ -5272,24 +5418,12 @@ fn present_brawler_details(
         }
         return;
     };
-    let layout = windows
-        .iter()
-        .next()
-        .map_or(BrawlerDetailsLayout::Wide, |window| {
-            if dashboard_layout_class(
-                window.resolution.width(),
-                window.resolution.height(),
-                scale.as_deref().map_or(1.0, |scale| scale.0),
-            ) == DashboardLayoutClass::Compact
-            {
-                BrawlerDetailsLayout::Compact
-            } else {
-                BrawlerDetailsLayout::Wide
-            }
-        });
+    let layout = brawler_screen_layout(&screen);
     let render_key = BrawlerDetailsRoot {
         brawler_id: *brawler_id,
         profile_revision: snapshot.revision,
+        pending: profile.pending(),
+        contextual_confirmation,
         layout,
     };
     if roots.iter().any(|(_, root)| *root == render_key) {
@@ -5298,9 +5432,10 @@ fn present_brawler_details(
     for (entity, _) in &roots {
         commands.entity(entity).despawn();
     }
-    navigation.selected = 0;
+    screen.navigation.selected = 0;
+    let compact = layout == BrawlerDetailsLayout::Compact;
     let selected = snapshot.selected_brawler_id == Some(brawler.id);
-    let stats = fighter_profile_stats(&builds.0, brawler.fighter_profile_id);
+    let stats = fighter_profile_stats(catalog, brawler.fighter_profile_id);
     let fighter_copy = stats.map_or_else(
         || "Fighter statistics unavailable".to_string(),
         |stats| {
@@ -5315,8 +5450,10 @@ fn present_brawler_details(
         .ok()
         .and_then(|modifiers| {
             let fighters = crate::combat::FighterDefinitions::default();
-            crate::weapon_parts::resolve_weapon_parts(
-                &weapons.0,
+            let weapon = catalog.weapon(brawler.weapon_base_id)?;
+            crate::weapon_parts::resolve_advertised_weapon_parts(
+                &weapon.configuration,
+                &catalog.weapon_policy,
                 &fighters.entries[0],
                 crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
                 modifiers,
@@ -5329,7 +5466,7 @@ fn present_brawler_details(
     );
     let equipped = brawler.equipped_part_ids.iter().flatten().count();
     let pending = profile.pending();
-    let compact = layout == BrawlerDetailsLayout::Compact;
+    let controls_disabled = pending || contextual_confirmation;
     commands
         .spawn((
             render_key,
@@ -5366,7 +5503,7 @@ fn present_brawler_details(
                     FlowUiAction::BackToBrawlerList,
                     "‹ BRAWLERS",
                     px(160),
-                    false,
+                    contextual_confirmation,
                     Color::srgb(0.06, 0.22, 0.4),
                 );
                 header.spawn((
@@ -5430,7 +5567,7 @@ fn present_brawler_details(
                         TextColor(Color::srgb(0.38, 0.88, 1.0)),
                     ));
                     identity.spawn((
-                        Text::new(fighter_profile_name(brawler.fighter_profile_id)),
+                        Text::new(advertised_fighter_name(catalog, brawler.fighter_profile_id)),
                         TextFont::from_font_size(28.0),
                         TextColor(Color::WHITE),
                     ));
@@ -5484,11 +5621,11 @@ fn present_brawler_details(
                     loadout.spawn((
                         Text::new(format!(
                             "WEAPON\n{} · PERMANENT\n{}\n\nULTIMATE\n{}\n\nPASSIVES\n{}\n{}\n\nWEAPON PARTS\n{equipped}/{} EQUIPPED",
-                            weapon_base_name(brawler.weapon_base_id),
+                            advertised_weapon_name(catalog, brawler.weapon_base_id),
                             weapon_copy,
-                            ultimate_name(&builds.0, brawler.ultimate_id),
-                            passive_name(&builds.0, brawler.passive_ids[0]),
-                            passive_name(&builds.0, brawler.passive_ids[1]),
+                            ultimate_name(catalog, brawler.ultimate_id),
+                            passive_name(catalog, brawler.passive_ids[0]),
+                            passive_name(catalog, brawler.passive_ids[1]),
                             crate::weapon_parts::WEAPON_PART_SLOT_COUNT,
                         )),
                         TextFont::from_font_size(15.0),
@@ -5500,13 +5637,13 @@ fn present_brawler_details(
                         FlowUiAction::SelectBrawler(brawler.id),
                         if selected {
                             "SELECTED FOR PLAY"
-                        } else if pending {
+                        } else if profile.selection_pending(brawler.id) {
                             "SELECTING..."
                         } else {
                             "SELECT FOR PLAY"
                         },
                         percent(100),
-                        selected || pending,
+                        controls_disabled,
                         Color::srgb(0.04, 0.62, 0.38),
                     );
                     spawn_brawler_screen_button(
@@ -5515,7 +5652,7 @@ fn present_brawler_details(
                         FlowUiAction::OpenBrawlerEditor(brawler.id),
                         "CUSTOMIZE ABILITIES",
                         percent(100),
-                        pending,
+                        controls_disabled,
                         Color::srgb(0.04, 0.42, 0.72),
                     );
                     spawn_brawler_screen_button(
@@ -5524,7 +5661,7 @@ fn present_brawler_details(
                         FlowUiAction::OpenWeaponEquipment(brawler.id),
                         "CUSTOMIZE WEAPON",
                         percent(100),
-                        pending,
+                        controls_disabled,
                         Color::srgb(0.04, 0.42, 0.72),
                     );
                     spawn_brawler_screen_button(
@@ -5533,7 +5670,7 @@ fn present_brawler_details(
                         FlowUiAction::DeleteBrawler(brawler.id),
                         "DELETE BRAWLER",
                         percent(100),
-                        pending,
+                        controls_disabled,
                         Color::srgb(0.48, 0.08, 0.12),
                     );
                 });
@@ -5541,15 +5678,19 @@ fn present_brawler_details(
         });
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    reason = "one bounded creation-screen builder owns its touch controls and inline mutation state"
+)]
 fn present_brawler_creation(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
     draft: Res<BrawlerCreationDraft>,
-    builds: Res<crate::builds::BuildCatalogResource>,
+    profile: Res<super::ClientProfileModel>,
+    mut screen: BrawlerScreenUi,
     roots: Query<(Entity, &BrawlerCreationRoot)>,
-    mut navigation: ResMut<FlowNavigation>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::BrawlerCreation)
         || *flow.get() != ClientFlow::Dashboard
@@ -5559,16 +5700,25 @@ fn present_brawler_creation(
         }
         return;
     }
-    if roots.iter().any(|(_, root)| root.0 == *draft) {
+    let Some(catalog) = profile.catalog() else {
+        return;
+    };
+    let layout = brawler_screen_layout(&screen);
+    let render_key = BrawlerCreationRoot {
+        draft: draft.clone(),
+        layout,
+    };
+    if roots.iter().any(|(_, root)| *root == render_key) {
         return;
     }
     for (entity, _) in &roots {
         commands.entity(entity).despawn();
     }
-    navigation.selected = 0;
+    screen.navigation.selected = 0;
+    let compact = layout == BrawlerDetailsLayout::Compact;
     commands
         .spawn((
-            BrawlerCreationRoot(*draft),
+            render_key,
             DespawnOnExit(ClientFlow::Dashboard),
             Node {
                 position_type: PositionType::Absolute,
@@ -5576,78 +5726,183 @@ fn present_brawler_creation(
                 right: px(0),
                 top: px(0),
                 bottom: px(0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.015, 0.04, 0.82)),
+            BackgroundColor(Color::srgb(0.018, 0.11, 0.24)),
             GlobalZIndex(510),
         ))
         .with_children(|root| {
             root.spawn((
                 Node {
-                    width: percent(88),
-                    max_width: px(620),
-                    flex_direction: FlexDirection::Column,
+                    width: percent(100),
+                    min_height: px(72),
                     align_items: AlignItems::Center,
-                    row_gap: px(12),
-                    padding: UiRect::all(px(24)),
-                    border: UiRect::all(px(2)),
-                    border_radius: BorderRadius::all(px(14)),
+                    column_gap: px(16),
+                    padding: UiRect::axes(px(18), px(10)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.035, 0.075, 0.14)),
-                BorderColor::all(Color::srgb(0.12, 0.42, 0.7)),
+                BackgroundColor(Color::srgb(0.015, 0.04, 0.085)),
             ))
-            .with_children(|panel| {
-                spawn_heading(panel, "CREATE BRAWLER");
-                panel.spawn((
-                    Text::new(
-                        "Choose carefully: fighter profile and weapon base are permanent after creation.",
-                    ),
-                    TextFont::from_font_size(16.0),
-                    TextColor(Color::srgb(1.0, 0.82, 0.38)),
-                ));
-                spawn_flow_error_button(
-                    panel,
-                    0,
-                    FlowUiAction::CycleCreationProfile,
-                    &format!(
-                        "FIGHTER PROFILE: {}  [PERMANENT]",
-                        fighter_profile_name(draft.fighter_profile_id)
-                    ),
-                );
-                spawn_flow_error_button(
-                    panel,
-                    1,
-                    FlowUiAction::CycleCreationWeapon,
-                    &format!(
-                        "WEAPON BASE: {}  [PERMANENT]",
-                        weapon_base_name(draft.weapon_base_id)
-                    ),
-                );
-                panel.spawn((
-                    Text::new("Name, ultimate, and passives can be changed later."),
-                    TextFont::from_font_size(14.0),
-                    TextColor(Color::srgb(0.72, 0.82, 0.9)),
-                ));
-                spawn_flow_error_button(
-                    panel,
-                    2,
-                    FlowUiAction::CycleCreationUltimate,
-                    &format!("ULTIMATE: {}", ultimate_name(&builds.0, draft.ultimate)),
-                );
-                spawn_flow_error_button(
-                    panel,
-                    3,
-                    FlowUiAction::ConfirmCreateBrawler,
-                    "CONFIRM CREATION",
-                );
-                spawn_flow_error_button(
-                    panel,
+            .with_children(|header| {
+                spawn_brawler_screen_button(
+                    header,
                     4,
                     FlowUiAction::CancelCreateBrawler,
-                    "BACK TO BRAWLERS",
+                    "‹ BRAWLERS",
+                    px(170),
+                    false,
+                    Color::srgb(0.06, 0.22, 0.4),
+                );
+                header.spawn((
+                    Text::new("CREATE BRAWLER"),
+                    TextFont::from_font_size(if compact { 27.0 } else { 34.0 }),
+                    TextColor(Color::WHITE),
+                ));
+            });
+            root.spawn((Node {
+                width: percent(100),
+                min_height: px(0),
+                flex_grow: 1.0,
+                flex_direction: if compact {
+                    FlexDirection::Column
+                } else {
+                    FlexDirection::Row
+                },
+                align_items: AlignItems::Stretch,
+                justify_content: JustifyContent::Center,
+                row_gap: px(16),
+                column_gap: px(18),
+                padding: UiRect::all(if compact { px(14) } else { px(28) }),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },))
+            .with_children(|body| {
+                body.spawn((
+                    Node {
+                        width: if compact { percent(100) } else { percent(31) },
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Stretch,
+                        row_gap: px(12),
+                        padding: UiRect::all(px(20)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.03, 0.22, 0.46)),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        Text::new("FIGHTER PROFILE"),
+                        TextFont::from_font_size(18.0),
+                        TextColor(Color::srgb(0.38, 0.88, 1.0)),
+                    ));
+                    card.spawn((
+                        Text::new("Defines health, speed, and reveal distance. Permanent after creation."),
+                        TextFont::from_font_size(14.0),
+                        TextColor(Color::srgb(0.76, 0.86, 0.95)),
+                    ));
+                    spawn_brawler_screen_button(
+                        card,
+                        0,
+                        FlowUiAction::CycleCreationProfile,
+                        advertised_fighter_name(catalog, draft.fighter_profile_id),
+                        percent(100),
+                        false,
+                        Color::srgb(0.04, 0.42, 0.72),
+                    );
+                });
+                body.spawn((
+                    Node {
+                        width: if compact { percent(100) } else { percent(31) },
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Stretch,
+                        row_gap: px(12),
+                        padding: UiRect::all(px(20)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.025, 0.16, 0.34)),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        Text::new("WEAPON BASE"),
+                        TextFont::from_font_size(18.0),
+                        TextColor(Color::srgb(1.0, 0.78, 0.25)),
+                    ));
+                    card.spawn((
+                        Text::new("Defines the permanent weapon family. Parts remain customizable."),
+                        TextFont::from_font_size(14.0),
+                        TextColor(Color::srgb(0.76, 0.86, 0.95)),
+                    ));
+                    spawn_brawler_screen_button(
+                        card,
+                        1,
+                        FlowUiAction::CycleCreationWeapon,
+                        advertised_weapon_name(catalog, draft.weapon_base_id),
+                        percent(100),
+                        false,
+                        Color::srgb(0.12, 0.35, 0.62),
+                    );
+                });
+                body.spawn((
+                    Node {
+                        width: if compact { percent(100) } else { percent(31) },
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Stretch,
+                        row_gap: px(12),
+                        padding: UiRect::all(px(20)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.08, 0.12, 0.28)),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        Text::new("STARTING ULTIMATE"),
+                        TextFont::from_font_size(18.0),
+                        TextColor(Color::srgb(0.82, 0.62, 1.0)),
+                    ));
+                    card.spawn((
+                        Text::new("The ultimate and both passives can be changed later."),
+                        TextFont::from_font_size(14.0),
+                        TextColor(Color::srgb(0.76, 0.86, 0.95)),
+                    ));
+                    spawn_brawler_screen_button(
+                        card,
+                        2,
+                        FlowUiAction::CycleCreationUltimate,
+                        ultimate_name(catalog, draft.ultimate),
+                        percent(100),
+                        false,
+                        Color::srgb(0.34, 0.18, 0.62),
+                    );
+                });
+            });
+            root.spawn((
+                Node {
+                    width: percent(100),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    column_gap: px(16),
+                    padding: UiRect::axes(px(22), px(12)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.015, 0.055, 0.11)),
+            ))
+            .with_children(|footer| {
+                if let Some(error) = &draft.inline_error {
+                    footer.spawn((
+                        Text::new(error),
+                        TextFont::from_font_size(14.0),
+                        TextColor(Color::srgb(1.0, 0.5, 0.45)),
+                    ));
+                }
+                spawn_brawler_screen_button(
+                    footer,
+                    3,
+                    FlowUiAction::ConfirmCreateBrawler,
+                    "CREATE BRAWLER",
+                    if compact { percent(100) } else { px(420) },
+                    profile.pending(),
+                    Color::srgb(0.03, 0.58, 0.4),
                 );
             });
         });
@@ -5663,9 +5918,9 @@ fn present_brawler_editor(
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
     draft: Res<BrawlerEditDraft>,
-    builds: Res<crate::builds::BuildCatalogResource>,
+    profile: Res<super::ClientProfileModel>,
+    mut screen: BrawlerScreenUi,
     roots: Query<(Entity, &BrawlerEditorRoot)>,
-    mut navigation: ResMut<FlowNavigation>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor)
         || *flow.get() != ClientFlow::Dashboard
@@ -5675,13 +5930,22 @@ fn present_brawler_editor(
         }
         return;
     }
-    if roots.iter().any(|(_, root)| root.0 == *draft) {
+    let Some(catalog) = profile.catalog() else {
+        return;
+    };
+    let layout = brawler_screen_layout(&screen);
+    let render_key = BrawlerEditorRoot {
+        draft: draft.clone(),
+        layout,
+    };
+    if roots.iter().any(|(_, root)| *root == render_key) {
         return;
     }
     for (entity, _) in &roots {
         commands.entity(entity).despawn();
     }
-    navigation.selected = 0;
+    screen.navigation.selected = 0;
+    let compact = layout == BrawlerDetailsLayout::Compact;
     let name = if draft.editing_name {
         let caret = draft.name_caret.min(draft.name.len());
         format!("{}|{}", &draft.name[..caret], &draft.name[caret..])
@@ -5690,7 +5954,7 @@ fn present_brawler_editor(
     };
     commands
         .spawn((
-            BrawlerEditorRoot(draft.clone()),
+            render_key,
             DespawnOnExit(ClientFlow::Dashboard),
             Node {
                 position_type: PositionType::Absolute,
@@ -5698,83 +5962,175 @@ fn present_brawler_editor(
                 right: px(0),
                 top: px(0),
                 bottom: px(0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.015, 0.04, 0.82)),
+            BackgroundColor(Color::srgb(0.018, 0.11, 0.24)),
             GlobalZIndex(510),
         ))
         .with_children(|root| {
             root.spawn((
                 Node {
-                    width: percent(90),
-                    max_width: px(660),
-                    flex_direction: FlexDirection::Column,
+                    width: percent(100),
+                    min_height: px(72),
                     align_items: AlignItems::Center,
-                    row_gap: px(9),
-                    padding: UiRect::all(px(22)),
-                    border: UiRect::all(px(2)),
-                    border_radius: BorderRadius::all(px(14)),
+                    column_gap: px(16),
+                    padding: UiRect::axes(px(18), px(10)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.035, 0.075, 0.14)),
-                BorderColor::all(Color::srgb(0.12, 0.42, 0.7)),
+                BackgroundColor(Color::srgb(0.015, 0.04, 0.085)),
             ))
-            .with_children(|panel| {
-                spawn_heading(panel, "EDIT BRAWLER");
-                panel.spawn((
-                    Text::new(format!(
-                        "PERMANENT: {} · {}",
-                        fighter_profile_name(draft.fighter_profile_id),
-                        weapon_base_name(draft.weapon_base_id)
-                    )),
-                    TextFont::from_font_size(15.0),
-                    TextColor(Color::srgb(1.0, 0.82, 0.38)),
+            .with_children(|header| {
+                spawn_brawler_screen_button(
+                    header,
+                    5,
+                    FlowUiAction::CancelBrawlerEdit,
+                    "‹ BRAWLER",
+                    px(170),
+                    false,
+                    Color::srgb(0.06, 0.22, 0.4),
+                );
+                header.spawn((
+                    Text::new("CUSTOMIZE ABILITIES"),
+                    TextFont::from_font_size(if compact { 27.0 } else { 34.0 }),
+                    TextColor(Color::WHITE),
                 ));
-                spawn_flow_error_button(
-                    panel,
-                    0,
-                    FlowUiAction::BeginBrawlerNameEdit,
-                    &format!("NAME: {name}"),
-                );
-                spawn_flow_error_button(
-                    panel,
-                    1,
-                    FlowUiAction::CycleBrawlerUltimate,
-                    &format!("ULTIMATE: {}", ultimate_name(&builds.0, draft.ultimate_id)),
-                );
-                spawn_flow_error_button(
-                    panel,
-                    2,
-                    FlowUiAction::CycleBrawlerPassiveOne,
-                    &format!(
-                        "PASSIVE 1: {}",
-                        passive_name(&builds.0, draft.passive_ids[0])
-                    ),
-                );
-                spawn_flow_error_button(
-                    panel,
-                    3,
-                    FlowUiAction::CycleBrawlerPassiveTwo,
-                    &format!(
-                        "PASSIVE 2: {}",
-                        passive_name(&builds.0, draft.passive_ids[1])
-                    ),
-                );
+            });
+            root.spawn((Node {
+                width: percent(100),
+                min_height: px(0),
+                flex_grow: 1.0,
+                flex_direction: if compact {
+                    FlexDirection::Column
+                } else {
+                    FlexDirection::Row
+                },
+                align_items: AlignItems::Stretch,
+                justify_content: JustifyContent::Center,
+                row_gap: px(16),
+                column_gap: px(20),
+                padding: UiRect::all(if compact { px(14) } else { px(28) }),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },))
+            .with_children(|body| {
+                body.spawn((
+                    Node {
+                        width: if compact { percent(100) } else { percent(32) },
+                        max_width: if compact { Val::Auto } else { px(420) },
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Stretch,
+                        row_gap: px(12),
+                        padding: UiRect::all(px(22)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.03, 0.22, 0.46)),
+                ))
+                .with_children(|identity| {
+                    identity.spawn((
+                        Text::new("IDENTITY"),
+                        TextFont::from_font_size(18.0),
+                        TextColor(Color::srgb(0.38, 0.88, 1.0)),
+                    ));
+                    identity.spawn((
+                        Text::new(format!(
+                            "{}\n{}\n\nFighter profile and weapon base are permanent.",
+                            advertised_fighter_name(catalog, draft.fighter_profile_id),
+                            advertised_weapon_name(catalog, draft.weapon_base_id)
+                        )),
+                        TextFont::from_font_size(16.0),
+                        TextColor(Color::srgb(0.8, 0.9, 0.98)),
+                    ));
+                    spawn_brawler_screen_button(
+                        identity,
+                        0,
+                        FlowUiAction::BeginBrawlerNameEdit,
+                        &format!("NAME · {name}"),
+                        percent(100),
+                        false,
+                        Color::srgb(0.06, 0.35, 0.62),
+                    );
+                });
+                body.spawn((
+                    Node {
+                        width: if compact { percent(100) } else { percent(68) },
+                        max_width: if compact { Val::Auto } else { px(760) },
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Stretch,
+                        row_gap: px(14),
+                        padding: UiRect::all(px(22)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.025, 0.075, 0.15)),
+                ))
+                .with_children(|abilities| {
+                    abilities.spawn((
+                        Text::new("ACTIVE LOADOUT"),
+                        TextFont::from_font_size(18.0),
+                        TextColor(Color::srgb(0.82, 0.62, 1.0)),
+                    ));
+                    abilities.spawn((
+                        Text::new("Tap a slot to cycle through the choices advertised by this server."),
+                        TextFont::from_font_size(14.0),
+                        TextColor(Color::srgb(0.72, 0.84, 0.94)),
+                    ));
+                    spawn_brawler_screen_button(
+                        abilities,
+                        1,
+                        FlowUiAction::CycleBrawlerUltimate,
+                        &format!("ULTIMATE\n{}", ultimate_name(catalog, draft.ultimate_id)),
+                        percent(100),
+                        false,
+                        Color::srgb(0.34, 0.18, 0.62),
+                    );
+                    spawn_brawler_screen_button(
+                        abilities,
+                        2,
+                        FlowUiAction::CycleBrawlerPassiveOne,
+                        &format!("PASSIVE 1\n{}", passive_name(catalog, draft.passive_ids[0])),
+                        percent(100),
+                        false,
+                        Color::srgb(0.08, 0.34, 0.5),
+                    );
+                    spawn_brawler_screen_button(
+                        abilities,
+                        3,
+                        FlowUiAction::CycleBrawlerPassiveTwo,
+                        &format!("PASSIVE 2\n{}", passive_name(catalog, draft.passive_ids[1])),
+                        percent(100),
+                        false,
+                        Color::srgb(0.08, 0.34, 0.5),
+                    );
+                });
+            });
+            root.spawn((
+                Node {
+                    width: percent(100),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    column_gap: px(16),
+                    padding: UiRect::axes(px(22), px(12)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.015, 0.055, 0.11)),
+            ))
+            .with_children(|footer| {
                 if let Some(error) = &draft.inline_error {
-                    panel.spawn((
+                    footer.spawn((
                         Text::new(error),
                         TextFont::from_font_size(14.0),
                         TextColor(Color::srgb(1.0, 0.5, 0.45)),
                     ));
                 }
-                spawn_flow_error_button(panel, 4, FlowUiAction::ConfirmBrawlerEdit, "SAVE CHANGES");
-                spawn_flow_error_button(
-                    panel,
-                    5,
-                    FlowUiAction::CancelBrawlerEdit,
-                    "BACK TO BRAWLER",
+                spawn_brawler_screen_button(
+                    footer,
+                    4,
+                    FlowUiAction::ConfirmBrawlerEdit,
+                    "SAVE CHANGES",
+                    if compact { percent(100) } else { px(420) },
+                    profile.pending(),
+                    Color::srgb(0.03, 0.58, 0.4),
                 );
             });
         });
@@ -5814,8 +6170,7 @@ fn present_weapon_equipment(
     scroll_areas: Query<&ScrollPosition, With<WeaponEquipmentScrollArea>>,
     profile: Res<super::ClientProfileModel>,
     parts: Res<crate::weapon_parts::WeaponPartCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
-    mut navigation: ResMut<FlowNavigation>,
+    mut screen: BrawlerScreenUi,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::WeaponEquipment)
         || *flow.get() != ClientFlow::Dashboard
@@ -5825,8 +6180,13 @@ fn present_weapon_equipment(
         }
         return;
     }
+    let layout = brawler_screen_layout(&screen);
+    let render_key = WeaponEquipmentRoot {
+        draft: draft.clone(),
+        layout,
+    };
     let existing = roots.iter().next();
-    if existing.is_some_and(|(_, root)| root.0 == *draft) {
+    if existing.is_some_and(|(_, root)| *root == render_key) {
         return;
     }
     let retained_scroll = scroll_areas.iter().next().cloned().unwrap_or_default();
@@ -5835,9 +6195,12 @@ fn present_weapon_equipment(
         commands.entity(entity).despawn();
     }
     if first_render {
-        navigation.selected = draft.selected_slot;
+        screen.navigation.selected = draft.selected_slot;
     }
     let Some(snapshot) = profile.snapshot() else {
+        return;
+    };
+    let Some(catalog) = profile.catalog() else {
         return;
     };
     let Some(brawler_id) = draft.brawler_id else {
@@ -5866,8 +6229,10 @@ fn present_weapon_equipment(
             .ok()
             .and_then(|modifiers| {
                 let fighters = crate::combat::FighterDefinitions::default();
-                crate::weapon_parts::resolve_weapon_parts(
-                    &weapons.0,
+                let weapon = catalog.weapon(saved.weapon_base_id)?;
+                crate::weapon_parts::resolve_advertised_weapon_parts(
+                    &weapon.configuration,
+                    &catalog.weapon_policy,
                     &fighters.entries[0],
                     crate::combat::WeaponPresetId(saved.weapon_base_id.0),
                     modifiers,
@@ -5879,10 +6244,12 @@ fn present_weapon_equipment(
         || "INVALID PART COMBINATION".into(),
         |weapon| weapon_preview_text(&weapon),
     );
+    let compact = layout == BrawlerDetailsLayout::Compact;
+    let save_index = 5 + snapshot.inventory.len();
 
     commands
         .spawn((
-            WeaponEquipmentRoot(draft.clone()),
+            render_key,
             DespawnOnExit(ClientFlow::Dashboard),
             Node {
                 position_type: PositionType::Absolute,
@@ -5890,68 +6257,103 @@ fn present_weapon_equipment(
                 right: px(0),
                 top: px(0),
                 bottom: px(0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.015, 0.04, 0.86)),
+            BackgroundColor(Color::srgb(0.018, 0.11, 0.24)),
             GlobalZIndex(520),
         ))
         .with_children(|root| {
             root.spawn((
                 Node {
-                    width: percent(94),
-                    max_width: px(900),
-                    height: percent(94),
-                    max_height: px(900),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Stretch,
-                    row_gap: px(7),
-                    padding: UiRect::all(px(18)),
-                    border: UiRect::all(px(2)),
-                    border_radius: BorderRadius::all(px(14)),
+                    width: percent(100),
+                    min_height: px(72),
+                    align_items: AlignItems::Center,
+                    column_gap: px(16),
+                    padding: UiRect::axes(px(18), px(10)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.035, 0.075, 0.14)),
-                BorderColor::all(Color::srgb(0.12, 0.42, 0.7)),
+                BackgroundColor(Color::srgb(0.015, 0.04, 0.085)),
             ))
-            .with_children(|panel| {
-                spawn_heading(panel, "WEAPON EQUIPMENT");
-                panel.spawn((
+            .with_children(|header| {
+                spawn_brawler_screen_button(
+                    header,
+                    save_index + 1,
+                    FlowUiAction::CancelWeaponEquipment,
+                    "‹ BRAWLER",
+                    px(170),
+                    false,
+                    Color::srgb(0.06, 0.22, 0.4),
+                );
+                header.spawn((
+                    Text::new("CUSTOMIZE WEAPON"),
+                    TextFont::from_font_size(if compact { 27.0 } else { 34.0 }),
+                    TextColor(Color::WHITE),
+                ));
+            });
+            root.spawn((
+                Node {
+                    width: percent(100),
+                    padding: UiRect::axes(px(24), px(12)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.025, 0.2, 0.42)),
+            ))
+            .with_children(|summary| {
+                summary.spawn((
                     Text::new(format!(
-                        "{}\n{}",
-                        weapon_base_name(saved.weapon_base_id),
+                        "{}  ·  {}",
+                        advertised_weapon_name(catalog, saved.weapon_base_id),
                         preview
                     )),
-                    TextFont::from_font_size(14.0),
+                    TextFont::from_font_size(16.0),
                     TextColor(Color::srgb(0.72, 0.9, 1.0)),
                 ));
-                panel
-                    .spawn((
-                        WeaponEquipmentScrollArea,
-                        retained_scroll,
+            });
+            root.spawn((Node {
+                width: percent(100),
+                min_height: px(0),
+                flex_grow: 1.0,
+                flex_direction: if compact {
+                    FlexDirection::Column
+                } else {
+                    FlexDirection::Row
+                },
+                align_items: AlignItems::Stretch,
+                justify_content: JustifyContent::Center,
+                row_gap: px(14),
+                column_gap: px(18),
+                padding: UiRect::all(if compact { px(12) } else { px(22) }),
+                ..default()
+            },))
+                .with_children(|body| {
+                    body.spawn((
                         Node {
-                            width: percent(100),
-                            min_height: px(0),
-                            flex_grow: 1.0,
-                            flex_shrink: 1.0,
+                            width: if compact { percent(100) } else { percent(36) },
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::Stretch,
-                            row_gap: px(7),
-                            overflow: Overflow::scroll_y(),
+                            row_gap: px(9),
+                            padding: UiRect::all(px(18)),
                             ..default()
                         },
+                        BackgroundColor(Color::srgb(0.03, 0.22, 0.46)),
                     ))
-                    .with_children(|scroll| {
+                    .with_children(|slots| {
+                        slots.spawn((
+                            Text::new("EQUIPPED SLOTS"),
+                            TextFont::from_font_size(18.0),
+                            TextColor(Color::srgb(0.38, 0.88, 1.0)),
+                        ));
                         for slot in 0..crate::weapon_parts::WEAPON_PART_SLOT_COUNT {
                             let label = draft.equipped_part_ids[slot]
                                 .and_then(|id| snapshot.inventory.iter().find(|part| part.id == id))
                                 .map_or_else(
-                                    || format!("SLOT {}: EMPTY", slot + 1),
-                                    |part| format!("SLOT {}: {}", slot + 1, part.display_name),
+                                    || format!("SLOT {} · EMPTY", slot + 1),
+                                    |part| format!("SLOT {} · {}", slot + 1, part.display_name),
                                 );
-                            spawn_flow_error_button(
-                                scroll,
+                            spawn_brawler_screen_button(
+                                slots,
                                 slot,
                                 FlowUiAction::SelectEquipmentSlot(slot),
                                 &if slot == draft.selected_slot {
@@ -5959,17 +6361,46 @@ fn present_weapon_equipment(
                                 } else {
                                     label
                                 },
+                                percent(100),
+                                false,
+                                if slot == draft.selected_slot {
+                                    Color::srgb(0.04, 0.5, 0.66)
+                                } else {
+                                    Color::srgb(0.06, 0.27, 0.48)
+                                },
                             );
                         }
-                        spawn_flow_error_button(
-                            scroll,
+                        spawn_brawler_screen_button(
+                            slots,
                             4,
                             FlowUiAction::UnequipWeaponPart,
                             "UNEQUIP SELECTED SLOT",
+                            percent(100),
+                            false,
+                            Color::srgb(0.35, 0.18, 0.24),
                         );
+                    });
+                    body.spawn((
+                        WeaponEquipmentScrollArea,
+                        retained_scroll,
+                        Node {
+                            width: if compact { percent(100) } else { percent(64) },
+                            min_height: px(0),
+                            flex_grow: 1.0,
+                            flex_shrink: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Stretch,
+                            row_gap: px(9),
+                            padding: UiRect::all(px(18)),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.025, 0.075, 0.15)),
+                    ))
+                    .with_children(|scroll| {
                         scroll.spawn((
-                            Text::new("OWNED PARTS — type labels are presentation only"),
-                            TextFont::from_font_size(14.0),
+                            Text::new("OWNED PARTS"),
+                            TextFont::from_font_size(18.0),
                             TextColor(Color::srgb(1.0, 0.82, 0.38)),
                         ));
                         for (index, part) in snapshot.inventory.iter().enumerate() {
@@ -5990,7 +6421,7 @@ fn present_weapon_equipment(
                                 .map(|effect| weapon_part_effect_text(*effect))
                                 .collect::<Vec<_>>()
                                 .join(" · ");
-                            spawn_flow_error_button(
+                            spawn_brawler_screen_button(
                                 scroll,
                                 5 + index,
                                 FlowUiAction::EquipWeaponPart(part.id),
@@ -5998,6 +6429,9 @@ fn present_weapon_equipment(
                                     "{} [{}] — {}{}",
                                     part.display_name, presentation, effects, availability
                                 ),
+                                percent(100),
+                                false,
+                                Color::srgb(0.09, 0.18, 0.28),
                             );
                         }
                         if let Some(error) = &draft.inline_error {
@@ -6008,19 +6442,27 @@ fn present_weapon_equipment(
                             ));
                         }
                     });
-                let end = 5 + snapshot.inventory.len();
-                spawn_flow_error_button_disabled(
-                    panel,
-                    end,
+                });
+            root.spawn((
+                Node {
+                    width: percent(100),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    column_gap: px(16),
+                    padding: UiRect::axes(px(22), px(12)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.015, 0.055, 0.11)),
+            ))
+            .with_children(|footer| {
+                spawn_brawler_screen_button(
+                    footer,
+                    save_index,
                     FlowUiAction::ConfirmWeaponEquipment,
                     "SAVE EQUIPMENT",
-                    !preview_valid,
-                );
-                spawn_flow_error_button(
-                    panel,
-                    end + 1,
-                    FlowUiAction::CancelWeaponEquipment,
-                    "BACK TO BRAWLER",
+                    if compact { percent(100) } else { px(420) },
+                    !preview_valid || profile.pending(),
+                    Color::srgb(0.03, 0.58, 0.4),
                 );
             });
         });
@@ -6197,7 +6639,7 @@ fn present_delete_brawler_confirmation(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.78)),
-            GlobalZIndex(510),
+            GlobalZIndex(610),
         ))
         .with_children(|root| {
             root.spawn((
@@ -6519,7 +6961,6 @@ fn update_dashboard_live_facts(
     queue: Res<super::ClientQueueModel>,
     practice: Res<super::ClientPracticeModel>,
     profile: Res<super::ClientProfileModel>,
-    builds: Res<crate::builds::BuildCatalogResource>,
     mut texts: Query<(
         &mut Text,
         Has<DashboardGameSummaryLabel>,
@@ -6568,7 +7009,7 @@ fn update_dashboard_live_facts(
             format!(
                 "View brawlers: {}, {}",
                 brawler.name,
-                brawler_loadout_summary(brawler, &builds.0)
+                brawler_loadout_summary(brawler, &membership.brawler_catalog)
             )
         },
     );
@@ -6583,7 +7024,7 @@ fn update_dashboard_live_facts(
         } else if is_brawler_summary {
             text.0 = selected_brawler.map_or_else(
                 || "Choose a permanent fighter profile and weapon base".to_string(),
-                |brawler| brawler_loadout_summary(brawler, &builds.0),
+                |brawler| brawler_loadout_summary(brawler, &membership.brawler_catalog),
             );
         }
     }
@@ -7674,14 +8115,15 @@ mod tests {
 
     #[test]
     fn brawler_editor_uses_catalog_name_for_concealment_field() {
-        let app = flow_test_app();
-        let catalog = &app
-            .world()
-            .resource::<crate::builds::BuildCatalogResource>()
-            .0;
+        let _app = flow_test_app();
+        let catalog = crate::profiles::AdvertisedBrawlerCatalog::from_content(
+            &crate::builds::BuildCatalog::embedded().unwrap(),
+            &crate::combat::WeaponCatalog::embedded().unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(
-            ultimate_name(catalog, crate::builds::UltimateDefinitionId(5)),
+            ultimate_name(&catalog, crate::builds::UltimateDefinitionId(5)),
             "Concealment Field"
         );
     }
@@ -7844,6 +8286,11 @@ mod tests {
                     active_limit_ticks: 3_600,
                 },
             }],
+            brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog::from_content(
+                &crate::builds::BuildCatalog::embedded().unwrap(),
+                &crate::combat::WeaponCatalog::embedded().unwrap(),
+            )
+            .unwrap(),
             profile: crate::profiles::ProfileSnapshot::empty(account_id),
         }
     }
@@ -7943,6 +8390,35 @@ mod tests {
             *app.world().resource::<ClientOverlay>(),
             ClientOverlay::Credits
         );
+    }
+
+    #[test]
+    fn empty_profile_creation_is_an_opaque_full_screen_destination() {
+        let mut app = flow_test_app();
+        let membership = lobby_membership();
+        app.world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .set_snapshot_for_test(membership.profile.clone());
+        app.world_mut().spawn((Client, membership));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::BrawlerCreation
+        );
+        let world = app.world_mut();
+        let mut roots =
+            world.query_filtered::<(&Node, &BackgroundColor), With<BrawlerCreationRoot>>();
+        let (node, background) = roots.single(world).unwrap();
+        assert_eq!(
+            (node.left, node.right, node.top, node.bottom),
+            (px(0), px(0), px(0), px(0))
+        );
+        assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
     }
 
     #[test]
@@ -8058,12 +8534,84 @@ mod tests {
                 .any(|text| text.contains("Pulse Sidearm"))
         );
 
+        let select_disabled = {
+            let world = app.world_mut();
+            let mut buttons = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
+            buttons
+                .iter(world)
+                .find(|(button, _)| button.action == FlowUiAction::SelectBrawler(brawler_id))
+                .map(|(_, disabled)| disabled)
+                .expect("selected brawler retains its primary action")
+        };
+        assert!(!select_disabled);
+        press_flow_button(&mut app, &FlowUiAction::SelectBrawler(brawler_id));
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
+        );
+        assert!(
+            !app.world()
+                .resource::<super::super::ClientProfileModel>()
+                .pending(),
+            "returning with the selected brawler must not send a profile mutation"
+        );
+        *app.world_mut().resource_mut::<ClientOverlay>() =
+            ClientOverlay::BrawlerDetails(brawler_id);
+        app.update();
+
+        press_flow_button(&mut app, &FlowUiAction::DeleteBrawler(brawler_id));
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::DeleteBrawlerConfirmation(brawler_id)
+        );
+        app.update();
+        {
+            let world = app.world_mut();
+            let mut details = world.query::<&BrawlerDetailsRoot>();
+            assert!(details.single(world).unwrap().contextual_confirmation);
+            let mut confirmations =
+                world.query_filtered::<Entity, With<DeleteBrawlerConfirmationRoot>>();
+            assert_eq!(confirmations.iter(world).count(), 1);
+            let mut background_actions = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
+            assert!(
+                background_actions
+                    .iter(world)
+                    .filter(|(button, _)| {
+                        matches!(
+                            button.action,
+                            FlowUiAction::SelectBrawler(_)
+                                | FlowUiAction::OpenBrawlerEditor(_)
+                                | FlowUiAction::OpenWeaponEquipment(_)
+                                | FlowUiAction::DeleteBrawler(_)
+                        )
+                    })
+                    .all(|(_, disabled)| disabled)
+            );
+        }
+        press_flow_button(&mut app, &FlowUiAction::CancelDeleteBrawler);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::BrawlerDetails(brawler_id)
+        );
+        app.update();
+
         press_flow_button(&mut app, &FlowUiAction::OpenBrawlerEditor(brawler_id));
         assert_eq!(
             *app.world().resource::<ClientOverlay>(),
             ClientOverlay::BrawlerEditor
         );
         app.update();
+        {
+            let world = app.world_mut();
+            let mut roots =
+                world.query_filtered::<(&Node, &BackgroundColor), With<BrawlerEditorRoot>>();
+            let (node, background) = roots.single(world).unwrap();
+            assert_eq!(
+                (node.left, node.right, node.top, node.bottom),
+                (px(0), px(0), px(0), px(0))
+            );
+            assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
+        }
         press_flow_button(&mut app, &FlowUiAction::CancelBrawlerEdit);
         assert_eq!(
             *app.world().resource::<ClientOverlay>(),
@@ -8078,8 +8626,14 @@ mod tests {
         app.update();
         let (scroll_area, save_parent, save_disabled) = {
             let world = app.world_mut();
-            let mut roots = world.query_filtered::<Entity, With<WeaponEquipmentRoot>>();
-            assert_eq!(roots.iter(world).count(), 1);
+            let mut roots = world
+                .query_filtered::<(Entity, &Node, &BackgroundColor), With<WeaponEquipmentRoot>>();
+            let (_, node, background) = roots.single(world).unwrap();
+            assert_eq!(
+                (node.left, node.right, node.top, node.bottom),
+                (px(0), px(0), px(0), px(0))
+            );
+            assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
             let mut areas = world.query_filtered::<Entity, With<WeaponEquipmentScrollArea>>();
             let area = areas.single(world).unwrap();
             let mut buttons = world.query::<(&FlowButton, &ChildOf, Has<InteractionDisabled>)>();
@@ -8116,6 +8670,59 @@ mod tests {
                 .resource::<super::super::ClientProfileModel>()
                 .pending()
         );
+    }
+
+    #[test]
+    fn brawler_details_refreshes_when_selection_request_finishes() {
+        let mut app = flow_test_app();
+        let mut membership = lobby_membership_with_brawler();
+        let selected_id = membership.profile.selected_brawler_id.unwrap();
+        let mut candidate = membership.profile.brawlers[0].clone();
+        candidate.id = crate::profiles::SavedBrawlerId::new(3).unwrap();
+        candidate.creation_ordinal = 2;
+        candidate.name = "Candidate Brawler".into();
+        membership.profile.brawlers.push(candidate.clone());
+        membership.profile.next_brawler_ordinal = 3;
+        app.world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .set_snapshot_for_test(membership.profile.clone());
+        app.world_mut().spawn((Client, membership.clone()));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Dashboard);
+        app.update();
+
+        *app.world_mut().resource_mut::<ClientOverlay>() =
+            ClientOverlay::BrawlerDetails(candidate.id);
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<super::super::ClientProfileModel>()
+                .select(candidate.id)
+        );
+        app.update();
+        assert!(
+            visible_text(&mut app)
+                .iter()
+                .any(|text| text == "SELECTING...")
+        );
+
+        membership.profile.selected_brawler_id = Some(selected_id);
+        app.world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .set_snapshot_for_test(membership.profile);
+        app.update();
+
+        let copy = visible_text(&mut app);
+        assert!(copy.iter().any(|text| text == "SELECT FOR PLAY"));
+        assert!(!copy.iter().any(|text| text == "SELECTING..."));
+        let world = app.world_mut();
+        let mut buttons = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
+        let (_, disabled) = buttons
+            .iter(world)
+            .find(|(button, _)| button.action == FlowUiAction::SelectBrawler(candidate.id))
+            .expect("selection button remains rendered after the outcome");
+        assert!(!disabled);
     }
 
     #[test]

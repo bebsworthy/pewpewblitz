@@ -109,6 +109,7 @@ pub enum GameMode {
     #[default]
     Wipeout,
     HotZone,
+    Heist,
 }
 
 impl GameMode {
@@ -117,6 +118,7 @@ impl GameMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "wipeout" | "default" => Some(Self::Wipeout),
             "hot-zone" | "hot_zone" | "hotzone" => Some(Self::HotZone),
+            "heist" => Some(Self::Heist),
             _ => None,
         }
     }
@@ -126,6 +128,7 @@ impl GameMode {
         match self {
             Self::Wipeout => "wipeout",
             Self::HotZone => "hot-zone",
+            Self::Heist => "heist",
         }
     }
 }
@@ -544,8 +547,10 @@ mod tests {
         assert_eq!(GameMode::parse("wipeout"), Some(GameMode::Wipeout));
         assert_eq!(GameMode::parse("hot-zone"), Some(GameMode::HotZone));
         assert_eq!(GameMode::parse("Hot_Zone"), Some(GameMode::HotZone));
+        assert_eq!(GameMode::parse("heist"), Some(GameMode::Heist));
         assert_eq!(GameMode::parse("koth"), None);
         assert_eq!(GameMode::HotZone.name(), "hot-zone");
+        assert_eq!(GameMode::Heist.name(), "heist");
     }
 
     #[test]

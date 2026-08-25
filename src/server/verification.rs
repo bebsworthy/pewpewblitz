@@ -226,6 +226,11 @@ pub(super) fn verify_process_match(
             hot_zone.final_progress_ticks[0],
             hot_zone.final_progress_ticks[1],
         ),
+        crate::matchplay::ModeSummary::Heist(heist) => (
+            summary.mode_definition_id.0,
+            heist.final_health[0],
+            heist.final_health[1],
+        ),
     };
     // Canonical map process evidence: exact authored identity and dynamic terminal state.
     let map_dynamic = maps.single().ok().map(|(snapshot, state)| {

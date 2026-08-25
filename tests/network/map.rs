@@ -21,6 +21,23 @@ fn client_grid_state(
         .map(|(snapshot, state)| (snapshot.clone(), state.clone()))
 }
 
+fn server_match_state(harness: &mut Harness) -> MatchState {
+    let world = harness.server.world_mut();
+    let mut query = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
+    *query.single(world).unwrap()
+}
+
+fn client_barrel_health(harness: &mut Harness, index: usize, placement_id: u32) -> Option<u16> {
+    let world = harness.clients[index].world_mut();
+    let mut query = world
+        .query_filtered::<(&DamageableTargetIdentity, &CurrentHealth), With<DamageableWorldObject>>(
+        );
+    query
+        .iter(world)
+        .find(|(identity, _)| identity.placement_id() == MapPlacementId(placement_id))
+        .map(|(_, health)| health.0)
+}
+
 #[test]
 fn two_clients_receive_identical_map_snapshot_without_authoritative_colliders() {
     let mut harness = Harness::new(2);
@@ -238,5 +255,119 @@ fn client_local_snapshot_edit_has_no_authoritative_map_path() {
     assert_eq!(
         harness.server.world().resource::<PlayableBounds>().0,
         authoritative.dimensions.bounds()
+    );
+}
+
+#[test]
+fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
+    let mut harness = Harness::new_barrel_yard_match(2);
+    harness.step_until(|harness| {
+        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+    });
+    let waiting = server_match_state(&mut harness);
+    for index in 0..2 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: 1,
+                match_id: waiting.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        matches!(server_match_state(harness).phase, MatchPhase::Active { .. })
+            && (0..2).all(|index| {
+                client_barrel_health(harness, index, 101) == Some(60)
+                    && *harness.clients[index]
+                        .world()
+                        .resource::<ClientWorldObjectReadiness>()
+                        == ClientWorldObjectReadiness::Ready
+            })
+    });
+
+    let (target, source) = {
+        let world = harness.server.world_mut();
+        let mut objects = world.query::<&DamageableTargetIdentity>();
+        let target = *objects
+            .iter(world)
+            .find(|identity| identity.placement_id() == MapPlacementId(101))
+            .unwrap();
+        let mut fighters = world
+            .query_filtered::<(&PlayerId, &NetworkEntityId, &TeamId, &Position), With<Fighter>>();
+        let (player, network_id, team, position) = fighters.iter(world).next().unwrap();
+        (
+            target,
+            AttackSource {
+                kind: CombatSourceKind::PrimaryWeapon,
+                attack_id: AttackId(700),
+                player_id: *player,
+                owner_network_entity_id: *network_id,
+                team_id: *team,
+                recipe_fingerprint: WeaponRecipeFingerprint::default(),
+                presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+                legacy_compatibility: false,
+                source_preset_id: None,
+                origin: WorldPoint::from(position.0),
+                facing: 0.0,
+            },
+        )
+    };
+    let terminal_source = AttackSource {
+        attack_id: AttackId(701),
+        ..source
+    };
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<PendingWorldTargetDamages>()
+        .0
+        .push(PendingWorldTargetDamage {
+            target,
+            source,
+            attack_id: source.attack_id,
+            requested_damage: 20,
+            delivery_index: 0,
+            bundle_index: 0,
+            effect_index: 0,
+        });
+    harness.step_until(|harness| {
+        (0..2).all(|index| client_barrel_health(harness, index, 101) == Some(40))
+    });
+
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<PendingWorldTargetDamages>()
+        .0
+        .push(PendingWorldTargetDamage {
+            target,
+            source: terminal_source,
+            attack_id: AttackId(701),
+            requested_damage: 40,
+            delivery_index: 0,
+            bundle_index: 0,
+            effect_index: 0,
+        });
+    harness.step_until(|harness| {
+        (0..2).all(|index| {
+            client_barrel_health(harness, index, 101).is_none()
+                && *harness.clients[index]
+                    .world()
+                    .resource::<ClientWorldObjectReadiness>()
+                    == ClientWorldObjectReadiness::Ready
+        })
+    });
+    let transition = client_grid_state(&mut harness, 0)
+        .unwrap()
+        .1
+        .terminal_states
+        .iter()
+        .find(|transition| transition.placement_id == MapPlacementId(101))
+        .copied()
+        .unwrap();
+    assert_eq!(
+        transition.outcome,
+        brawler::map::MapPlacementOutcome::ReplacedWith(brawler::map::BARREL_WOOD_DEBRIS_ASSET,)
     );
 }

@@ -14,9 +14,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 4;
-pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 3;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 4;
+pub const MAX_MAP_OBJECT_HEALTH: u16 = 1_000;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 5;
+pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 4;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 6;
 pub const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const CROSSROADS_ADMISSION_REVISION: u16 = 5;
 pub const CROSSROADS_HOT_ZONE_PRESET: MapPresetId = MapPresetId(2);
@@ -25,8 +26,13 @@ pub const ASHEN_COURT_PRESET: MapPresetId = MapPresetId(3);
 pub const ASHEN_COURT_ADMISSION_REVISION: u16 = 2;
 pub const TIDAL_GARDEN_PRESET: MapPresetId = MapPresetId(4);
 pub const TIDAL_GARDEN_ADMISSION_REVISION: u16 = 1;
+pub const BARREL_YARD_PRESET: MapPresetId = MapPresetId(5);
+pub const BARREL_YARD_ADMISSION_REVISION: u16 = 2;
+pub const TWIN_VAULTS_PRESET: MapPresetId = MapPresetId(6);
+pub const TWIN_VAULTS_ADMISSION_REVISION: u16 = 1;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
+pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
 
 pub const GROUND_ASSET: MapAssetId = MapAssetId(1);
 pub const WALL_ARENA_ASSET: MapAssetId = MapAssetId(2);
@@ -45,6 +51,8 @@ pub const PLAYER_SPAWN_ASSET: MapAssetId = MapAssetId(20);
 pub const GRAVESTONE_DECORATION_ASSET: MapAssetId = MapAssetId(21);
 pub const COFFIN_DECORATION_ASSET: MapAssetId = MapAssetId(22);
 pub const LANTERN_DECORATION_ASSET: MapAssetId = MapAssetId(23);
+pub const OIL_BARREL_ASSET: MapAssetId = MapAssetId(24);
+pub const BARREL_WOOD_DEBRIS_ASSET: MapAssetId = MapAssetId(25);
 
 macro_rules! grid_id {
     ($name:ident) => {
@@ -69,6 +77,8 @@ grid_id!(MapAssetId);
 grid_id!(MapGameplayProfileId);
 grid_id!(MapVisualProfileId);
 grid_id!(MapSurfaceTagId);
+grid_id!(MapDamageProfileId);
+grid_id!(EnvironmentExplosionProfileId);
 
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Ord, PartialOrd,
@@ -168,6 +178,39 @@ pub enum MapDestructionBehavior {
     ReplaceOnMapDestruction(MapAssetId),
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MapDurabilityBehavior {
+    #[default]
+    Indestructible,
+    HitPoints(MapDamageProfileId),
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapObjectTerminalBehavior {
+    Explode {
+        explosion_profile_id: EnvironmentExplosionProfileId,
+        outcome: MapPlacementOutcome,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MapDamageProfile {
+    pub id: MapDamageProfileId,
+    pub maximum_health: u16,
+    pub terminal: MapObjectTerminalBehavior,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct EnvironmentExplosionProfile {
+    pub id: EnvironmentExplosionProfileId,
+    pub damage: u16,
+    pub radius_world_units: u16,
+    pub maximum_targets: u8,
+    pub maximum_chain_reactions: u8,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapInteractionBehavior {
     None,
@@ -194,6 +237,7 @@ pub struct MapGameplayProfile {
     pub projectile_collision: ProjectileCollision,
     pub collider_shape: MapColliderShape,
     pub destruction: MapDestructionBehavior,
+    pub durability: MapDurabilityBehavior,
     pub interaction: MapInteractionBehavior,
     pub concealment: MapConcealmentBehavior,
 }
@@ -384,6 +428,14 @@ pub enum MapModeAnchorKind {
         center_vertex: MapGridVertex,
         radius_cells: u16,
     },
+    HeistSafe {
+        team_slot: u8,
+        origin_cell: MapCell,
+        width_cells: u16,
+        height_cells: u16,
+        quarter_turns: u8,
+        objective_visual_profile_id: MapVisualProfileId,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -429,6 +481,8 @@ pub struct MapPresentationTheme {
 pub struct MapContentCatalog {
     pub schema_version: u16,
     pub gameplay_profiles: Vec<MapGameplayProfile>,
+    pub damage_profiles: Vec<MapDamageProfile>,
+    pub explosion_profiles: Vec<EnvironmentExplosionProfile>,
     pub assets: Vec<MapAssetDefinition>,
     pub presentation_themes: Vec<MapPresentationTheme>,
     pub presets: Vec<MapPreset>,
@@ -457,6 +511,8 @@ impl Plugin for MapContentPlugin {
 struct GameplayProfileSource {
     schema_version: u16,
     gameplay_profiles: Vec<MapGameplayProfile>,
+    damage_profiles: Vec<MapDamageProfile>,
+    explosion_profiles: Vec<EnvironmentExplosionProfile>,
 }
 
 #[derive(Deserialize)]
@@ -543,6 +599,8 @@ impl MapContentCatalog {
         let catalog = Self {
             schema_version: MAP_CATALOG_SCHEMA_VERSION,
             gameplay_profiles: profiles.gameplay_profiles,
+            damage_profiles: profiles.damage_profiles,
+            explosion_profiles: profiles.explosion_profiles,
             assets: assets.assets,
             presentation_themes: themes.themes,
             presets,
@@ -557,6 +615,8 @@ impl MapContentCatalog {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != MAP_CATALOG_SCHEMA_VERSION
             || self.gameplay_profiles.is_empty()
+            || self.damage_profiles.is_empty()
+            || self.explosion_profiles.is_empty()
             || self.assets.is_empty()
             || self.presentation_themes.is_empty()
             || self.presets.is_empty()
@@ -567,6 +627,7 @@ impl MapContentCatalog {
             self.gameplay_profiles.iter().map(|profile| profile.id.0),
             "gameplay profiles",
         )?;
+        validate_damageable_profiles(self)?;
         validate_sorted_ids(self.assets.iter().map(|asset| asset.id.0), "map assets")?;
         validate_sorted_ids(
             self.presentation_themes.iter().map(|theme| theme.id.0),
@@ -644,11 +705,30 @@ impl MapContentCatalog {
             .find(|profile| profile.id == id)
     }
 
+    #[must_use]
+    pub fn damage_profile(&self, id: MapDamageProfileId) -> Option<&MapDamageProfile> {
+        self.damage_profiles.iter().find(|profile| profile.id == id)
+    }
+
+    #[must_use]
+    pub fn explosion_profile(
+        &self,
+        id: EnvironmentExplosionProfileId,
+    ) -> Option<&EnvironmentExplosionProfile> {
+        self.explosion_profiles
+            .iter()
+            .find(|profile| profile.id == id)
+    }
+
     pub fn canonical_fingerprint_material(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
         let mut canonical = self.clone();
         canonical
             .gameplay_profiles
+            .sort_by_key(|profile| profile.id);
+        canonical.damage_profiles.sort_by_key(|profile| profile.id);
+        canonical
+            .explosion_profiles
             .sort_by_key(|profile| profile.id);
         canonical.assets.sort_by_key(|asset| asset.id);
         canonical.presentation_themes.sort_by_key(|theme| theme.id);
@@ -687,19 +767,36 @@ fn validate_replacement_assets(
     catalog: &MapContentCatalog,
     profiles: &BTreeMap<MapGameplayProfileId, &MapGameplayProfile>,
 ) -> Result<(), String> {
+    let replacement_for = |profile: &MapGameplayProfile| match profile.durability {
+        MapDurabilityBehavior::HitPoints(id) => {
+            catalog
+                .damage_profile(id)
+                .and_then(|damage| match damage.terminal {
+                    MapObjectTerminalBehavior::Explode {
+                        outcome: MapPlacementOutcome::ReplacedWith(id),
+                        ..
+                    } => Some(id),
+                    MapObjectTerminalBehavior::Explode {
+                        outcome: MapPlacementOutcome::Removed,
+                        ..
+                    } => None,
+                })
+        }
+        MapDurabilityBehavior::Indestructible => match profile.destruction {
+            MapDestructionBehavior::ReplaceOnMapDestruction(id) => Some(id),
+            MapDestructionBehavior::Indestructible
+            | MapDestructionBehavior::RemoveOnMapDestruction => None,
+        },
+    };
     let terminal_assets: BTreeSet<_> = profiles
         .values()
-        .filter_map(|profile| match profile.destruction {
-            MapDestructionBehavior::ReplaceOnMapDestruction(id) => Some(id),
-            _ => None,
-        })
+        .filter_map(|profile| replacement_for(profile))
         .collect();
     for source in &catalog.assets {
         let profile = profiles
             .get(&source.gameplay_profile_id)
             .expect("asset profiles were validated before replacements");
-        let MapDestructionBehavior::ReplaceOnMapDestruction(replacement_id) = profile.destruction
-        else {
+        let Some(replacement_id) = replacement_for(profile) else {
             continue;
         };
         let replacement = catalog
@@ -712,6 +809,7 @@ fn validate_replacement_assets(
             || source.footprint_cells != replacement.footprint_cells
             || replacement.parameter_kind != MapPlacementParameterKind::None
             || replacement_profile.destruction != MapDestructionBehavior::Indestructible
+            || replacement_profile.durability != MapDurabilityBehavior::Indestructible
             || source.allowed_surface_tags != replacement.allowed_surface_tags
             || (profile.player_collision == PlayerCollision::Pass
                 && replacement_profile.player_collision == PlayerCollision::Block)
@@ -826,6 +924,7 @@ pub struct ResolvedMap {
     pub dynamic_placements: Vec<MapAssetPlacement>,
     pub player_only_surface_rects: Vec<MapCellRect>,
     pub objective_zone: Option<ResolvedMapObjective>,
+    pub heist_safes: Vec<ResolvedHeistSafeAnchor>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -839,6 +938,17 @@ pub struct ResolvedMapCollider {
 pub struct ResolvedMapObjective {
     pub anchor_id: ModeAnchorId,
     pub area: super::NormalizedArea,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedHeistSafeAnchor {
+    pub placement_id: MapPlacementId,
+    pub anchor_id: ModeAnchorId,
+    pub defending_team: crate::combat::TeamId,
+    pub center: Vec2,
+    pub half_extents: Vec2,
+    pub quarter_turns: u8,
+    pub objective_visual_profile_id: MapVisualProfileId,
 }
 
 #[allow(
@@ -857,7 +967,7 @@ fn resolve_grid_recipe(
         || recipe.recipe_version != MAP_RECIPE_SCHEMA_VERSION
         || !matches!(
             recipe.mode_definition_id,
-            WIPEOUT_MODE_DEFINITION | HOT_ZONE_MODE_DEFINITION
+            WIPEOUT_MODE_DEFINITION | HOT_ZONE_MODE_DEFINITION | HEIST_MODE_DEFINITION
         )
     {
         return Err("invalid grid map recipe identity or mode".to_string());
@@ -1001,7 +1111,7 @@ fn resolve_grid_recipe(
     });
     let mut mode_anchors = recipe.mode_anchors.clone();
     mode_anchors.sort_by_key(|anchor| (anchor.placement_id, anchor.anchor_id));
-    let objective_zone = validate_and_resolve_mode_anchors(
+    let (objective_zone, heist_safes) = validate_and_resolve_mode_anchors(
         recipe.mode_definition_id,
         recipe.dimensions,
         &mode_anchors,
@@ -1060,6 +1170,20 @@ fn resolve_grid_recipe(
     if bytes.len() > 64 * 1024 {
         return Err("map snapshot exceeds the byte ceiling".to_string());
     }
+    let damageable_count = placements
+        .iter()
+        .filter(|placement| {
+            catalog
+                .asset(placement.asset_id)
+                .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
+                .is_some_and(|profile| {
+                    matches!(profile.durability, MapDurabilityBehavior::HitPoints(_))
+                })
+        })
+        .count();
+    if damageable_count > super::MAX_DAMAGEABLE_MAP_OBJECTS {
+        return Err("map recipe exceeds the damageable-object ceiling".to_string());
+    }
     let (spawn_points_by_team, static_colliders) = derive_runtime_facts(&snapshot, catalog)?;
     let dynamic_placements: Vec<_> = placements
         .iter()
@@ -1069,6 +1193,7 @@ fn resolve_grid_recipe(
                 .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
                 .is_some_and(|profile| {
                     profile.destruction != MapDestructionBehavior::Indestructible
+                        || profile.durability != MapDurabilityBehavior::Indestructible
                 })
         })
         .cloned()
@@ -1099,6 +1224,7 @@ fn resolve_grid_recipe(
         dynamic_placements,
         player_only_surface_rects,
         objective_zone,
+        heist_safes,
     })
 }
 
@@ -1107,12 +1233,65 @@ fn validate_and_resolve_mode_anchors(
     dimensions: MapDimensions,
     anchors: &[MapModeAnchorPlacement],
     placement_ids: &mut BTreeSet<MapPlacementId>,
-) -> Result<Option<ResolvedMapObjective>, String> {
+) -> Result<(Option<ResolvedMapObjective>, Vec<ResolvedHeistSafeAnchor>), String> {
     if mode == WIPEOUT_MODE_DEFINITION {
         return anchors
             .is_empty()
-            .then_some(None)
+            .then_some((None, Vec::new()))
             .ok_or_else(|| "Wipeout maps cannot contain mode anchors".to_string());
+    }
+    if mode == HEIST_MODE_DEFINITION {
+        if anchors.len() != 2 {
+            return Err("Heist maps require exactly two safe anchors".to_string());
+        }
+        let mut teams = BTreeSet::new();
+        let mut resolved = Vec::with_capacity(2);
+        for anchor in anchors {
+            if anchor.placement_id.0 == 0
+                || anchor.anchor_id.0 == 0
+                || !placement_ids.insert(anchor.placement_id)
+            {
+                return Err("invalid or duplicate mode anchor identity".to_string());
+            }
+            let MapModeAnchorKind::HeistSafe {
+                team_slot,
+                origin_cell,
+                width_cells,
+                height_cells,
+                quarter_turns,
+                objective_visual_profile_id,
+            } = anchor.kind
+            else {
+                return Err("Heist maps cannot contain non-safe anchors".to_string());
+            };
+            if team_slot > 1
+                || !teams.insert(team_slot)
+                || width_cells != 3
+                || height_cells != 2
+                || quarter_turns > 3
+                || objective_visual_profile_id.0 == 0
+                || origin_cell.x < 2
+                || origin_cell.y < 2
+                || origin_cell.x.saturating_add(width_cells).saturating_add(2) > dimensions.width
+                || origin_cell.y.saturating_add(height_cells).saturating_add(2) > dimensions.height
+            {
+                return Err("invalid Heist safe anchor topology".to_string());
+            }
+            let size =
+                Vec2::new(f32::from(width_cells), f32::from(height_cells)) * MAP_CELL_SIZE_WORLD;
+            let center = dimensions.cell_min(origin_cell) + size * 0.5;
+            resolved.push(ResolvedHeistSafeAnchor {
+                placement_id: anchor.placement_id,
+                anchor_id: anchor.anchor_id,
+                defending_team: crate::combat::TeamId(team_slot),
+                center,
+                half_extents: size * 0.5,
+                quarter_turns,
+                objective_visual_profile_id,
+            });
+        }
+        resolved.sort_by_key(|safe| safe.defending_team);
+        return Ok((None, resolved));
     }
     if mode != HOT_ZONE_MODE_DEFINITION || anchors.len() != 1 {
         return Err("Hot Zone maps require exactly one objective anchor".to_string());
@@ -1127,7 +1306,10 @@ fn validate_and_resolve_mode_anchors(
     let MapModeAnchorKind::HotZoneCircle {
         center_vertex,
         radius_cells,
-    } = anchor.kind;
+    } = anchor.kind
+    else {
+        return Err("Hot Zone maps cannot contain non-zone anchors".to_string());
+    };
     if radius_cells == 0 || radius_cells > 32 {
         return Err("invalid Hot Zone objective radius".to_string());
     }
@@ -1143,13 +1325,16 @@ fn validate_and_resolve_mode_anchors(
     {
         return Err("Hot Zone objective does not fit playable bounds".to_string());
     }
-    Ok(Some(ResolvedMapObjective {
-        anchor_id: anchor.anchor_id,
-        area: super::NormalizedArea {
-            center,
-            shape: MapShape::Circle { radius },
-        },
-    }))
+    Ok((
+        Some(ResolvedMapObjective {
+            anchor_id: anchor.anchor_id,
+            area: super::NormalizedArea {
+                center,
+                shape: MapShape::Circle { radius },
+            },
+        }),
+        Vec::new(),
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -1426,7 +1611,8 @@ fn derive_runtime_facts(
                 && profile.player_collision == PlayerCollision::Block
                 && profile.projectile_collision == ProjectileCollision::BlockAndConsume
                 && profile.collider_shape == MapColliderShape::FootprintRectangle
-                && profile.destruction == MapDestructionBehavior::Indestructible)
+                && profile.destruction == MapDestructionBehavior::Indestructible
+                && profile.durability == MapDurabilityBehavior::Indestructible)
                 .then_some((
                     asset.id,
                     grid.placements
@@ -1480,7 +1666,9 @@ fn derive_runtime_facts(
         let MapColliderShape::Circle { radius_world_units } = profile.collider_shape else {
             continue;
         };
-        if profile.destruction != MapDestructionBehavior::Indestructible {
+        if profile.destruction != MapDestructionBehavior::Indestructible
+            || profile.durability != MapDurabilityBehavior::Indestructible
+        {
             continue;
         }
         static_colliders.push(ResolvedMapCollider {
@@ -1534,6 +1722,7 @@ fn validate_asset_profile(
     let inert = profile.player_collision == PlayerCollision::Pass
         && profile.projectile_collision == ProjectileCollision::Pass
         && profile.destruction == MapDestructionBehavior::Indestructible
+        && profile.durability == MapDurabilityBehavior::Indestructible
         && profile.collider_shape == MapColliderShape::None;
     let blocks = profile.player_collision == PlayerCollision::Block
         || profile.projectile_collision == ProjectileCollision::BlockAndConsume;
@@ -1545,6 +1734,7 @@ fn validate_asset_profile(
                 && profile.projectile_collision == ProjectileCollision::Pass
                 && profile.collider_shape == MapColliderShape::None
                 && profile.destruction == MapDestructionBehavior::Indestructible
+                && profile.durability == MapDurabilityBehavior::Indestructible
                 && profile.interaction == MapInteractionBehavior::None
         }
     };
@@ -1563,6 +1753,17 @@ fn validate_asset_profile(
                             .min(asset.footprint_cells.height),
                     ) * MAP_CELL_SIZE_WORLD
                         * 0.5
+        }
+    };
+    let durability_is_consistent = match profile.durability {
+        MapDurabilityBehavior::Indestructible => true,
+        MapDurabilityBehavior::HitPoints(_) => {
+            asset.slot == MapAssetSlot::Feature
+                && profile.destruction == MapDestructionBehavior::Indestructible
+                && profile.interaction == MapInteractionBehavior::None
+                && profile.concealment == MapConcealmentBehavior::None
+                && profile.collider_shape != MapColliderShape::None
+                && blocks
         }
     };
     let valid = match asset.slot {
@@ -1603,9 +1804,66 @@ fn validate_asset_profile(
             profile.interaction == MapInteractionBehavior::None && asset.surface_tag.is_none()
         }
     };
-    (valid && collider_is_consistent && concealment_is_consistent)
+    (valid && collider_is_consistent && concealment_is_consistent && durability_is_consistent)
         .then_some(())
         .ok_or_else(|| format!("asset {} contradicts its slot/gameplay profile", asset.key))
+}
+
+fn validate_damageable_profiles(catalog: &MapContentCatalog) -> Result<(), String> {
+    validate_sorted_ids(
+        catalog.damage_profiles.iter().map(|profile| profile.id.0),
+        "map damage profiles",
+    )?;
+    validate_sorted_ids(
+        catalog
+            .explosion_profiles
+            .iter()
+            .map(|profile| profile.id.0),
+        "environment explosion profiles",
+    )?;
+    for explosion in &catalog.explosion_profiles {
+        if explosion.damage == 0
+            || explosion.radius_world_units == 0
+            || explosion.radius_world_units > 512
+            || explosion.maximum_targets == 0
+            || explosion.maximum_targets > 16
+            || explosion.maximum_chain_reactions == 0
+            || explosion.maximum_chain_reactions > 16
+        {
+            return Err("invalid environment explosion profile".to_string());
+        }
+    }
+    let explosion_ids: BTreeSet<_> = catalog
+        .explosion_profiles
+        .iter()
+        .map(|profile| profile.id)
+        .collect();
+    for profile in &catalog.damage_profiles {
+        let MapObjectTerminalBehavior::Explode {
+            explosion_profile_id,
+            outcome,
+        } = profile.terminal;
+        if profile.maximum_health == 0
+            || profile.maximum_health > MAX_MAP_OBJECT_HEALTH
+            || !explosion_ids.contains(&explosion_profile_id)
+            || matches!(outcome, MapPlacementOutcome::ReplacedWith(MapAssetId(0)))
+        {
+            return Err("invalid map damage profile".to_string());
+        }
+    }
+    let damage_ids: BTreeSet<_> = catalog
+        .damage_profiles
+        .iter()
+        .map(|profile| profile.id)
+        .collect();
+    for profile in &catalog.gameplay_profiles {
+        if let MapDurabilityBehavior::HitPoints(id) = profile.durability
+            && !damage_ids.contains(&id)
+        {
+            return Err("map gameplay profile references unknown durability".to_string());
+        }
+    }
+    Ok(())
 }
 
 fn validate_sorted_ids(values: impl IntoIterator<Item = u16>, label: &str) -> Result<(), String> {
@@ -1852,6 +2110,43 @@ mod tests {
     }
 
     #[test]
+    fn twin_vaults_resolves_exact_mirrored_heist_safe_anchors() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let resolved = catalog
+            .resolve_preset(TWIN_VAULTS_PRESET, MapInstanceId(10))
+            .unwrap();
+        assert_eq!(resolved.snapshot.mode_definition_id, HEIST_MODE_DEFINITION);
+        assert!(resolved.objective_zone.is_none());
+        assert_eq!(resolved.heist_safes.len(), 2);
+        assert_eq!(resolved.heist_safes[0].anchor_id, ModeAnchorId(1));
+        assert_eq!(
+            resolved.heist_safes[0].defending_team,
+            crate::combat::TeamId(0)
+        );
+        assert_eq!(resolved.heist_safes[1].anchor_id, ModeAnchorId(2));
+        assert_eq!(
+            resolved.heist_safes[1].defending_team,
+            crate::combat::TeamId(1)
+        );
+        assert_eq!(resolved.heist_safes[0].half_extents, Vec2::new(48.0, 32.0));
+        assert_eq!(
+            resolved.heist_safes[0].center.x,
+            -resolved.heist_safes[1].center.x
+        );
+        assert_eq!(
+            resolved.heist_safes[0].center.y,
+            resolved.heist_safes[1].center.y
+        );
+        assert_eq!(resolved.dynamic_placements.len(), 4);
+        assert!(
+            resolved
+                .spawn_points_by_team
+                .values()
+                .all(|spawns| spawns.len() == 3)
+        );
+    }
+
+    #[test]
     fn converted_ashen_preserves_walls_round_obstacles_and_reviewed_quantization() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let resolved = catalog
@@ -1953,6 +2248,96 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn damageable_profiles_reject_invalid_bounds_references_and_incompatible_behavior() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+
+        let barrel = catalog.asset(OIL_BARREL_ASSET).unwrap();
+        let damage = match catalog
+            .profile(barrel.gameplay_profile_id)
+            .unwrap()
+            .durability
+        {
+            MapDurabilityBehavior::HitPoints(id) => catalog.damage_profile(id).unwrap(),
+            MapDurabilityBehavior::Indestructible => panic!("oil barrel must be damageable"),
+        };
+        assert_eq!(
+            damage.terminal,
+            MapObjectTerminalBehavior::Explode {
+                explosion_profile_id: EnvironmentExplosionProfileId(1),
+                outcome: MapPlacementOutcome::ReplacedWith(BARREL_WOOD_DEBRIS_ASSET),
+            }
+        );
+        let debris = catalog.asset(BARREL_WOOD_DEBRIS_ASSET).unwrap();
+        assert_eq!(barrel.slot, debris.slot);
+        assert_eq!(barrel.footprint_cells, debris.footprint_cells);
+        assert_eq!(
+            catalog.profile(debris.gameplay_profile_id).unwrap(),
+            &MapGameplayProfile {
+                id: MapGameplayProfileId(1),
+                player_collision: PlayerCollision::Pass,
+                projectile_collision: ProjectileCollision::Pass,
+                collider_shape: MapColliderShape::None,
+                destruction: MapDestructionBehavior::Indestructible,
+                durability: MapDurabilityBehavior::Indestructible,
+                interaction: MapInteractionBehavior::None,
+                concealment: MapConcealmentBehavior::None,
+            }
+        );
+
+        let mut zero_health = catalog.clone();
+        zero_health.damage_profiles[0].maximum_health = 0;
+        assert!(zero_health.validate().is_err());
+
+        let mut excessive_health = catalog.clone();
+        excessive_health.damage_profiles[0].maximum_health = MAX_MAP_OBJECT_HEALTH + 1;
+        assert!(excessive_health.validate().is_err());
+
+        let mut invalid_explosion = catalog.clone();
+        invalid_explosion.explosion_profiles[0].maximum_chain_reactions = 17;
+        assert!(invalid_explosion.validate().is_err());
+
+        let barrel_profile = catalog
+            .gameplay_profiles
+            .iter()
+            .position(|profile| profile.id == MapGameplayProfileId(9))
+            .unwrap();
+        let mut destroy_bypass = catalog.clone();
+        destroy_bypass.gameplay_profiles[barrel_profile].destruction =
+            MapDestructionBehavior::RemoveOnMapDestruction;
+        assert!(destroy_bypass.validate().is_err());
+
+        let mut concealed = catalog;
+        concealed.gameplay_profiles[barrel_profile].concealment =
+            MapConcealmentBehavior::HideOccupants;
+        assert!(concealed.validate().is_err());
+    }
+
+    #[test]
+    fn barrel_yard_places_one_dungeon_wall_directly_beside_the_reference_barrel() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let resolved = catalog
+            .resolve_preset(BARREL_YARD_PRESET, MapInstanceId(1))
+            .unwrap();
+        let wall = resolved
+            .snapshot
+            .placements
+            .iter()
+            .find(|placement| placement.placement_id == MapPlacementId(90))
+            .unwrap();
+        let barrel = resolved
+            .snapshot
+            .placements
+            .iter()
+            .find(|placement| placement.placement_id == MapPlacementId(100))
+            .unwrap();
+
+        assert_eq!(wall.asset_id, WALL_DUNGEON_ASSET);
+        assert_eq!(barrel.asset_id, OIL_BARREL_ASSET);
+        assert_eq!(wall.cell.y, barrel.cell.y);
+        assert_eq!(wall.cell.x + 1, barrel.cell.x);
     }
 
     #[test]

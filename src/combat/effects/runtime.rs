@@ -70,7 +70,7 @@ pub(super) fn effect_recipient_scale(
 
 #[cfg(feature = "server")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub(super) fn requested_damage(
+pub(crate) fn requested_damage(
     amount: u16,
     falloff: DamageFalloff,
     delivery_travel: f32,
@@ -98,6 +98,7 @@ pub(super) const fn combat_source_allows_target(
     match (source, target) {
         (
             CombatSourceKind::PrimaryWeapon
+            | CombatSourceKind::Environment
             | CombatSourceKind::Ultimate { .. }
             | CombatSourceKind::Deployable { .. },
             CombatTargetKind::Fighter | CombatTargetKind::Deployable,
@@ -124,6 +125,13 @@ pub(super) fn cue_damage_source(source: AttackSource) -> DamageSource {
                 source.source_preset_id.map_or(0, |preset| preset.0),
             ),
             shot_id: ShotId(source.attack_id.0),
+        },
+        CombatSourceKind::Environment => DamageSource::Environment {
+            map_instance_id: 0,
+            generation: 0,
+            placement_id: 0,
+            initiating_player: Some(source.player_id),
+            initiating_fighter: Some(source.owner_network_entity_id),
         },
         CombatSourceKind::Ultimate { ultimate_id } => DamageSource::Ultimate {
             player_id: source.player_id,

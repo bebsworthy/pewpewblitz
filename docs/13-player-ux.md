@@ -62,8 +62,23 @@ flowchart TD
     Connecting -- "cancel / bounded failure / rejection" --> ServerSelect[Server Select]
     ServerSelect -- connect --> Connecting
 
-    Dashboard -- "Create / select / edit" --> Arsenal[Saved Brawler controls]
-    Arsenal -- "accepted outcome / Back" --> Dashboard
+    Dashboard -- "tap active brawler card" --> BrawlerList[Brawlers List screen]
+    BrawlerList -- Back --> Dashboard
+    BrawlerList -- Create --> BrawlerCreate[Create Brawler screen]
+    BrawlerCreate -- Back --> BrawlerList
+    BrawlerCreate -- "accepted create" --> BrawlerDetails[Brawler screen]
+    BrawlerCreate -- "rejected create" --> BrawlerCreate
+    BrawlerList -- "tap row" --> BrawlerDetails
+    BrawlerDetails -- Back --> BrawlerList
+    BrawlerDetails -- "Select for Play" --> Dashboard
+    BrawlerDetails -- "Customize Abilities" --> AbilityCustomize[Customize Abilities screen]
+    AbilityCustomize -- "Back / accepted save" --> BrawlerDetails
+    AbilityCustomize -- "rejected save" --> AbilityCustomize
+    BrawlerDetails -- "Customize Weapon" --> WeaponCustomize[Customize Weapon screen]
+    WeaponCustomize -- "Back / Save" --> BrawlerDetails
+    BrawlerDetails -- Delete --> DeleteConfirm{Delete confirmation}
+    DeleteConfirm -- Cancel --> BrawlerDetails
+    DeleteConfirm -- "Confirm (mutation pending)" --> BrawlerList
     Dashboard -- "Change Game" --> GameTypeSelect[Game Type Select child]
     GameTypeSelect -- "Confirm / Back" --> Dashboard
 
@@ -94,7 +109,7 @@ player choices.
 
 ## Player-surface model
 
-Primary destinations, modal presentation, and continuing-match input contexts are distinct
+Primary destinations, contextual presentation, and continuing-match input contexts are distinct
 concerns. Their exact Bevy representation may evolve, but their ownership and return behavior must
 remain explicit.
 
@@ -102,23 +117,33 @@ remain explicit.
 |---|---|---|
 | Connecting | Initial or manual lobby connection progress | May expose Cancel, Settings, and Quit; success enters Dashboard |
 | Server Select | Recovery and manual connection | Owns address, display name, favorites, and recents; it does not pretend to be a connected home |
-| Player Dashboard | Sole authenticated home | Owns the authoritative saved-brawler list and selection, selected game summary, Play, Practice, and connected utilities |
+| Player Dashboard | Sole authenticated home | Presents the selected brawler and entry to Brawlers List, selected game summary, Play, Practice, and connected utilities |
 | Game Type Select | Dashboard child | Edits one local advertised-game draft; Confirm commits and Back discards |
-| Saved Brawler controls | Dashboard child/overlay | Sends create, select, mutable edit, and confirmed delete intent; permanent fighter-profile/weapon-base facts are visible but never emitted by edit |
+| Brawlers List | Full-screen Dashboard child | Shows every saved brawler with a human-readable loadout and one clear selected marker; owns Create and row navigation |
+| Brawler | Full-screen saved-brawler detail | Presents fighter identity, resolved statistics, live fighter preview, abilities, equipment, Select for Play, customization entry points, Delete, and Back |
+| Create Brawler | Full-screen creation destination | Selects permanent fighter profile and weapon base plus starting ultimate from the advertised catalog; accepted creation opens the new Brawler screen |
+| Customize Abilities | Full-screen Brawler child | Keeps permanent facts read-only and edits name, ultimate, and two distinct selectable passives; accepted save returns to the invoking Brawler screen |
+| Customize Weapon | Full-screen Brawler child | Separates four equipped slots from owned inventory and a live resolved preview; Save or Back returns to the invoking Brawler screen |
 | Queue | Accepted multiplayer admission | Shows the frozen accepted request and honest pool facts; Cancel awaits acknowledgement |
 | Match Loading | Reserved-match handoff and readiness | Shows server-owned progress and bounded cancellation or return behavior |
 | Match | Authoritative gameplay | Owns world presentation, HUD, non-pausing menu, and scoreboard presentation |
 | Match Complete | Transient result-preservation bridge | Accepts no navigation while lobby return and result capture converge |
 | Results | Completed-match decision | Keeps the authoritative outcome visible and offers exact replay or Dashboard |
-| Dashboard Menu | Connected utility overlay | Owns saved-brawler management, Credits, favorite-server action, Change Server, and Quit |
+| Dashboard Menu | Connected utility overlay | Owns Credits, favorite-server action, Change Server, and Quit; saved-brawler navigation starts from the Dashboard card |
 | Settings | Local settings surface | Returns to its explicit product-flow or match-menu origin |
 | Credits | Attribution surface | Reached from Dashboard Menu; required attribution derives from the asset manifest |
-| Confirmations | Destructive or membership-changing decisions | Preserve and restore their invoking context deterministically |
+| Confirmations | Small contextual overlays | Preserve their invoking screen visibly underneath and restore it deterministically |
 | Error | Contextual recovery surface | Presents a factual category and only actions valid for the underlying session state |
 
 Gameplay HUD elements such as countdown, phase messages, health, ammunition, cooldowns, objective
 state, and roster score are Match sublayers rather than navigation destinations. Developer
 diagnostics and legacy direct-UDP controls are not product screens.
+
+Substantial navigation and editing surfaces are screens: they occupy the full viewport, use an
+opaque background, own a clear Back action, and use the available space for hierarchy rather than
+appearing as centered dialogs over an unrelated destination. Modal overlays are reserved for small,
+immediate questions or errors that are completely contextual to the visible invoking screen. A
+contextual overlay must never remove that invoking screen and expose an older screen underneath.
 
 ### Continuing match contexts
 
@@ -151,22 +176,46 @@ not by itself solve internet reachability, trust, or moderation.
 ## Dashboard and selection contract
 
 Dashboard presents the selected saved brawler and selected advertised game type. It owns the only
-ordinary Play and Practice actions. Saved-brawler creation/editing and Game Type Select are child
-flows, not alternate hubs: they contain no queue, practice, favorite, server-change, or disconnect
-controls.
+ordinary Play and Practice actions. The accepted lobby membership atomically provides the
+server-owned profile plus bounded brawler and game-type catalogs before Dashboard is enterable.
+Every brawler name, loadout summary, statistic, creation/edit choice, preview, and selection limit
+comes from that connection-scoped brawler advertisement. Disconnect, server change, rejected
+welcome, or lobby-generation replacement clears it; reconnect installs a fresh snapshot rather
+than retaining client-local metadata.
+
+Saved-brawler creation/editing and Game Type Select are child flows, not alternate hubs: they
+contain no queue, practice, favorite, server-change, or disconnect controls.
+
+Tapping the Dashboard brawler card always opens Brawlers List. The list owns the complete saved
+collection, its selected marker, human-readable loadouts, Create action, and Back to Dashboard.
+Tapping a row opens that Brawler screen; merely opening a row does not select it. `Select for Play`
+is always available, including for the already-selected brawler, and returns directly to Dashboard.
+
+Every Brawler screen has Back to Brawlers. Customize Abilities and Customize Weapon are opaque
+full-screen children with Back to the same Brawler. Delete is the deliberate exception: it is a
+small confirmation layered over the still-visible Brawler screen, whose background actions remain
+disabled until Cancel or Delete is confirmed. Confirmation sends the authoritative intent and
+returns to Brawlers List while the mutation is pending. Accepted deletion removes the row; deleting
+the selected brawler selects the next creation ordinal with wraparound, while deleting the last
+leaves the empty list with Create available.
 
 Game Type Select edits a private draft from the current bounded server advertisement. Confirm
 commits an exact current `GameTypeId` and revision; Back discards the draft. The UI describes the
 advertised mode, topology, rules, and map pool without claiming which map formation will choose.
 
 Creation starts from safe defaults, clearly identifies fighter profile and weapon base as permanent,
-and requires confirmation. The brawler editor shows those permanent choices read-only while name,
-ultimate, the two ordinary passives, and four generic weapon-part slots remain editable. Equipment
-opens one child overlay with four numbered slots, the bounded owned inventory, presentation-only
-type labels, signed effects, and a live resolved-weapon preview. Save sends one full revision-bound
-slot replacement; Back discards the draft. Invalid combinations cannot be saved, and an instance
-equipped by another brawler is identified rather than silently moved. Pending mutations disable
-admission and later mutations until the authoritative whole-profile outcome arrives.
+and requires confirmation. An accepted create opens the new Brawler screen; rejection remains on
+Create with an inline reason, and Back discards the draft to Brawlers List. Customize Abilities
+shows permanent fighter/weapon choices read-only while name, ultimate, and the two ordinary
+passives remain editable. Accepted save returns to the same Brawler; rejection retains the draft
+and inline reason.
+
+Customize Weapon owns four numbered slots, the bounded owned inventory, presentation-only type
+labels, signed effects, and a live resolved-weapon preview. Save sends one full revision-bound slot
+replacement and returns to the Brawler screen; Back discards the draft to that screen. Invalid
+combinations cannot be saved, and an instance equipped by another brawler is identified rather than
+silently moved. Pending mutations disable admission and later mutations until the authoritative
+whole-profile outcome arrives.
 
 Responsive presentation does not change this semantic hierarchy. At an effective UI canvas of at
 least `1000x640`, Dashboard uses the Wide hierarchy with its fighter/build focus and horizontal
@@ -318,7 +367,7 @@ session, admission, handoff, match, and return protocols as the product flow.
 
 Player-flow changes should preserve representative evidence at the layer where failure is costly:
 
-- flow and UI tests for every primary transition, modal return, draft Confirm/Back rule, focus
+- flow and UI tests for every primary transition, contextual-overlay return, draft Confirm/Back rule, focus
   restoration, disabled repair, exact replay gate, and error mapping;
 - local persistence tests for schema handling, bounded input, atomic save, and safe fallback;
 - schedule or ECS tests proving presentation cannot mutate authoritative gameplay and that scoped

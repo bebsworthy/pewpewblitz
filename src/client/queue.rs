@@ -1017,6 +1017,11 @@ mod tests {
             server_name: "Server".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game()],
+            brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog::from_content(
+                &crate::builds::BuildCatalog::embedded().unwrap(),
+                &crate::combat::WeaponCatalog::embedded().unwrap(),
+            )
+            .unwrap(),
             profile: crate::profiles::ProfileSnapshot::empty(
                 crate::profiles::AccountId::new(1).unwrap(),
             ),

@@ -1252,6 +1252,7 @@ fn config_from_manifest(
             {
                 Some(crate::map::WIPEOUT_MODE_DEFINITION) => GameMode::Wipeout,
                 Some(crate::map::HOT_ZONE_MODE_DEFINITION) => GameMode::HotZone,
+                Some(crate::map::HEIST_MODE_DEFINITION) => GameMode::Heist,
                 _ => return Err(WorkerBootstrapError::Invalid("unsupported lobby game mode")),
             };
         }
@@ -1259,6 +1260,7 @@ fn config_from_manifest(
             config.game_mode = match manifest.mode {
                 brawler_routing::GameMode::Wipeout => GameMode::Wipeout,
                 brawler_routing::GameMode::HotZone => GameMode::HotZone,
+                brawler_routing::GameMode::Heist => GameMode::Heist,
             };
             config.match_rules_profile = match manifest.rules_profile {
                 1 => MatchRulesProfile::Production,

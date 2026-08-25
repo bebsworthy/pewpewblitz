@@ -309,6 +309,26 @@ pub(super) fn area_line_of_sight_clear(
 }
 
 #[cfg(feature = "server")]
+pub(super) fn area_line_of_sight_clear_excluding(
+    origin: Vec2,
+    target: Vec2,
+    excluded: Entity,
+    spatial_query: &avian2d::prelude::SpatialQuery,
+) -> bool {
+    let delta = target - origin;
+    let distance = delta.length();
+    let Some(direction) = Dir2::new(delta.normalize_or_zero()).ok() else {
+        return true;
+    };
+    let filter =
+        avian2d::prelude::SpatialQueryFilter::from_mask(STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER)
+            .with_excluded_entities([excluded]);
+    spatial_query
+        .cast_ray(origin, direction, distance.max(0.0), true, &filter)
+        .is_none()
+}
+
+#[cfg(feature = "server")]
 pub(super) fn map_muzzle_contact(
     origin: Vec2,
     muzzle: Vec2,
@@ -339,6 +359,10 @@ pub(super) fn map_muzzle_contact(
     clippy::type_complexity,
     reason = "the query parameter is the shared area-targeting view, declared inline where the payload plan is built"
 )]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the bounded area planner keeps the shared combatant/object target budget and stable ordering visible in one transaction"
+)]
 pub(super) fn queue_area_payloads(
     landing: Vec2,
     source: AttackSource,
@@ -355,9 +379,24 @@ pub(super) fn queue_area_payloads(
         ),
         Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
     >,
+    objects: &Query<
+        (
+            Entity,
+            &Position,
+            &crate::map::DamageableTargetIdentity,
+            &CurrentHealth,
+            &crate::map::DamageableLifeState,
+        ),
+        Or<(
+            With<crate::map::DamageableWorldObject>,
+            With<crate::matchplay::HeistSafe>,
+        )>,
+    >,
     disconnected: &HashSet<Entity>,
     spatial_query: &avian2d::prelude::SpatialQuery,
     pending: &mut MessageWriter<PendingPayload>,
+    world_pending: &mut ResMut<crate::map::PendingWorldTargetDamages>,
+    objective_pending: &mut ResMut<crate::matchplay::PendingModeObjectiveDamages>,
 ) -> usize {
     let mut queued = 0;
     let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
@@ -414,6 +453,54 @@ pub(super) fn queue_area_payloads(
             });
             queued += 1;
             collected = collected.saturating_add(1);
+        }
+        let mut object_candidates: Vec<_> = objects
+            .iter()
+            .filter(|(_, position, _, health, life)| {
+                crate::map::object_is_live(**health, **life)
+                    && position.0.distance_squared(landing) <= radius * radius
+            })
+            .collect();
+        object_candidates.sort_by_key(|(_, _, identity, ..)| identity.stable_order_key());
+        for (entity, position, identity, _, _) in object_candidates {
+            if collected >= max_targets {
+                break;
+            }
+            if map_occlusion
+                && !area_line_of_sight_clear_excluding(landing, position.0, entity, spatial_query)
+            {
+                continue;
+            }
+            for (effect_index, effect) in bundle.effects.iter().enumerate() {
+                let PayloadEffectDefinition::Damage {
+                    amount, falloff, ..
+                } = *effect
+                else {
+                    continue;
+                };
+                delivery::queue_damageable_target(
+                    world_pending,
+                    objective_pending,
+                    crate::map::PendingWorldTargetDamage {
+                        target: *identity,
+                        source,
+                        attack_id: source.attack_id,
+                        requested_damage: effects::requested_damage(
+                            amount,
+                            falloff,
+                            lob_launch_point(source, recipe).distance(landing),
+                            1.0,
+                            false,
+                            source.origin.as_vec2().distance(position.0),
+                        ),
+                        delivery_index,
+                        bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                        effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
+                    },
+                );
+            }
+            collected = collected.saturating_add(1);
+            queued += 1;
         }
     }
     queued
@@ -568,7 +655,9 @@ fn damage_source_fighter(source: DamageSource) -> Option<NetworkEntityId> {
         DamageSource::PlayerWeapon { fighter_id, .. }
         | DamageSource::Ultimate { fighter_id, .. }
         | DamageSource::Deployable { fighter_id, .. } => Some(fighter_id),
-        DamageSource::Environment { .. } => None,
+        DamageSource::Environment {
+            initiating_fighter, ..
+        } => initiating_fighter,
     }
 }
 
