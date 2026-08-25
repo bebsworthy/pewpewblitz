@@ -569,6 +569,9 @@ struct BuildEditorRenderKey {
 struct GamePopulationLabel(usize);
 
 #[derive(Component)]
+struct GameTypeSelectRoot;
+
+#[derive(Component)]
 struct DashboardGameSummaryLabel;
 
 #[derive(Component)]
@@ -828,6 +831,7 @@ impl Plugin for ClientFlowPlugin {
                     scroll_weapon_equipment.before(present_weapon_equipment),
                     present_weapon_equipment,
                     present_delete_brawler_confirmation,
+                    scroll_game_type_select,
                 )
                     .in_set(ClientFlowSet::PresentFlow)
                     .before(present_flow),
@@ -851,6 +855,12 @@ impl Plugin for ClientFlowPlugin {
             )
                 .after(UiSystems::Layout)
                 .run_if(in_state(ClientFlow::Dashboard)),
+        );
+        app.add_systems(
+            PostUpdate,
+            keep_game_type_focus_visible
+                .after(UiSystems::Layout)
+                .run_if(in_state(ClientFlow::GameTypeSelect)),
         );
         app.add_systems(OnEnter(ClientFlow::Queue), spawn_queue);
         app.add_systems(OnEnter(ClientFlow::MatchLoading), spawn_match_loading);
@@ -4358,7 +4368,7 @@ fn dashboard_game_summary(game: &crate::lobby::AdvertisedGameType) -> String {
             safe_maximum_health,
             active_limit_ticks,
         } => format!(
-            "Destroy the {safe_maximum_health} HP safe - {}s limit",
+            "Destroy the {safe_maximum_health} HP enemy idol - {}s limit",
             active_limit_ticks / 60
         ),
     };
@@ -4386,8 +4396,10 @@ fn spawn_game_type_select(
     commands
         .spawn((
             FlowRoot,
+            GameTypeSelectRoot,
             DespawnOnExit(ClientFlow::GameTypeSelect),
             flow_root_node(),
+            ScrollPosition::default(),
             BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
             GlobalZIndex(410),
         ))
@@ -4450,7 +4462,7 @@ fn spawn_game_type_select(
                         safe_maximum_health,
                         active_limit_ticks,
                     } => format!(
-                        "{safe_maximum_health} HP safe; {}s limit",
+                        "{safe_maximum_health} HP idol; {}s limit",
                         active_limit_ticks / 60
                     ),
                 };
@@ -4489,6 +4501,94 @@ fn spawn_game_type_select(
                 None,
             );
         });
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+fn scroll_game_type_select(
+    flow: Res<State<ClientFlow>>,
+    mut wheel: MessageReader<MouseWheel>,
+    mut roots: Query<&mut ScrollPosition, With<GameTypeSelectRoot>>,
+) {
+    if *flow.get() != ClientFlow::GameTypeSelect {
+        return;
+    }
+    let delta = wheel
+        .read()
+        .map(|event| match event.unit {
+            MouseScrollUnit::Line => event.y * 24.0,
+            MouseScrollUnit::Pixel => event.y,
+        })
+        .sum::<f32>();
+    if delta.abs() <= f32::EPSILON {
+        return;
+    }
+    for mut position in &mut roots {
+        position.0.y = (position.0.y - delta).max(0.0);
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "computed UI bounds are available only after Bevy's layout pass"
+)]
+fn keep_game_type_focus_visible(
+    flow: Res<State<ClientFlow>>,
+    navigation: Res<FlowNavigation>,
+    buttons: Query<(&FlowButton, &ComputedNode, &UiGlobalTransform)>,
+    mut roots: Query<
+        (
+            Entity,
+            &ComputedNode,
+            &UiGlobalTransform,
+            &mut ScrollPosition,
+        ),
+        With<GameTypeSelectRoot>,
+    >,
+    mut prior: Local<Option<(Entity, usize)>>,
+) {
+    if *flow.get() != ClientFlow::GameTypeSelect {
+        *prior = None;
+        return;
+    }
+    let Some((root_entity, _, _, _)) = roots.iter_mut().next() else {
+        *prior = None;
+        return;
+    };
+    let focus_key = (root_entity, navigation.selected);
+    if prior.as_ref() == Some(&focus_key) {
+        return;
+    }
+    *prior = Some(focus_key);
+    let Some((_, focused_node, focused_transform)) = buttons
+        .iter()
+        .find(|(button, _, _)| button.index == navigation.selected)
+    else {
+        return;
+    };
+    if focused_node.is_empty() {
+        return;
+    }
+    let (_, _, focused_center) = focused_transform.to_scale_angle_translation();
+    let focused_half_height = focused_node.size().y * 0.5;
+    for (_, root_node, root_transform, mut scroll) in &mut roots {
+        if root_node.is_empty() {
+            continue;
+        }
+        let (_, _, root_center) = root_transform.to_scale_angle_translation();
+        let root_half_height = root_node.size().y * 0.5;
+        let visible_top = root_center.y - root_half_height + 8.0;
+        let visible_bottom = root_center.y + root_half_height - 8.0;
+        let focused_top = focused_center.y - focused_half_height;
+        let focused_bottom = focused_center.y + focused_half_height;
+        if focused_bottom > visible_bottom {
+            scroll.0.y += focused_bottom - visible_bottom;
+        } else if focused_top < visible_top {
+            scroll.0.y = (scroll.0.y - (visible_top - focused_top)).max(0.0);
+        }
+    }
 }
 
 #[allow(
@@ -9255,6 +9355,58 @@ mod tests {
                 .game_type_id
                 .as_ref(),
             Some(&second.id)
+        );
+    }
+
+    #[test]
+    fn game_type_select_scrolls_long_catalog_and_keeps_confirm_available() {
+        let mut app = flow_test_app();
+        let mut lobby = lobby_membership();
+        let prototype = lobby.game_types[0].clone();
+        lobby.game_types = (0..crate::lobby::MAX_GAME_TYPES)
+            .map(|index| {
+                let mut game = prototype.clone();
+                game.id = crate::lobby::GameTypeId::new(format!("test-game-{index}"))
+                    .expect("bounded test game ID");
+                game.display_name = format!("Test Game {index}");
+                game
+            })
+            .collect();
+        app.world_mut().spawn((Client, lobby));
+        *app.world_mut().resource_mut::<GameTypeSelectionDraft>() = GameTypeSelectionDraft {
+            selected_index: Some(crate::lobby::MAX_GAME_TYPES - 1),
+            unavailable_previous: false,
+        };
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::GameTypeSelect);
+        app.update();
+
+        let (root, confirm_disabled) = {
+            let world = app.world_mut();
+            let mut roots = world.query_filtered::<Entity, With<GameTypeSelectRoot>>();
+            let root = roots.single(world).unwrap();
+            let mut buttons = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
+            let confirm_disabled = buttons
+                .iter(world)
+                .find(|(button, _)| button.action == FlowUiAction::ConfirmGameType)
+                .map(|(_, disabled)| disabled)
+                .expect("Confirm button is rendered");
+            (root, confirm_disabled)
+        };
+        assert!(!confirm_disabled);
+        assert!(app.world().get::<ScrollPosition>(root).is_some());
+
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: -2.0,
+            window: Entity::PLACEHOLDER,
+            phase: bevy::input::touch::TouchPhase::Moved,
+        });
+        app.update();
+        assert!(
+            (app.world().get::<ScrollPosition>(root).unwrap().0.y - 48.0).abs() <= f32::EPSILON
         );
     }
 

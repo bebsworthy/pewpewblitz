@@ -1316,7 +1316,7 @@ mod tests {
             .world()
             .resource::<MapCatalogResource>()
             .0
-            .resolve_preset(super::super::BARREL_YARD_PRESET, MapInstanceId(11))
+            .resolve_preset(super::super::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(11))
             .unwrap();
         let snapshot = resolved.snapshot.clone();
         let root = app
@@ -1436,7 +1436,7 @@ mod tests {
             .world()
             .resource::<MapCatalogResource>()
             .0
-            .resolve_preset(super::super::CROSSROADS_PRESET, MapInstanceId(1))
+            .resolve_preset(super::super::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
             .unwrap();
         // Install directly without Lightyear replication in this focused rule test.
         let snapshot = resolved.snapshot.clone();
@@ -1454,7 +1454,7 @@ mod tests {
             ))
             .id();
         let catalog = app.world().resource::<MapCatalogResource>().0.clone();
-        for placement in resolved.dynamic_placements {
+        for placement in &resolved.dynamic_placements {
             let asset = catalog.asset(placement.asset_id).unwrap();
             spawn_dynamic_collider(
                 app.world_mut(),
@@ -1462,18 +1462,25 @@ mod tests {
                 1,
                 &snapshot,
                 asset,
-                &placement,
+                placement,
             );
         }
+        let target = resolved
+            .dynamic_placements
+            .iter()
+            .find(|placement| placement.placement_id == MapPlacementId(220))
+            .unwrap();
+        let target_asset = catalog.asset(target.asset_id).unwrap();
+        let target_center = placement_world_center(snapshot.dimensions, target_asset, target);
         app.world_mut()
             .resource_mut::<CombatWorldEffectFacts>()
             .0
-            .push(destruction_fact(Vec2::ZERO, 48.0));
+            .push(destruction_fact(target_center, 1.0));
         apply_map_destruction(app.world_mut());
         let state = app.world().get::<MapDynamicState>(root).unwrap();
         assert!(state.revision > 0);
         assert!(!state.terminal_states.is_empty());
-        assert!(state.terminal_states.len() < 36);
+        assert_eq!(state.terminal_states.len(), 1);
         assert!(
             state
                 .terminal_states
@@ -1492,7 +1499,7 @@ mod tests {
             let mut query = world.query::<&DestructibleMapCollider>();
             query.iter(world).count()
         };
-        assert_eq!(collider_count, 36);
+        assert_eq!(collider_count, 8);
         assert!(removed_count > 0);
         let telemetry = app.world().resource::<MapDynamicTelemetry>();
         assert_eq!(telemetry.destruction_requests, 1);
@@ -1510,13 +1517,13 @@ mod tests {
             .init_resource::<MapCatalogResource>();
         let catalog = app.world().resource::<MapCatalogResource>().0.clone();
         let resolved = catalog
-            .resolve_preset(super::super::TIDAL_GARDEN_PRESET, MapInstanceId(2))
+            .resolve_preset(super::super::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(2))
             .unwrap();
         let snapshot = resolved.snapshot.clone();
         let target = resolved
             .dynamic_placements
             .iter()
-            .find(|placement| placement.placement_id == MapPlacementId(302))
+            .find(|placement| placement.placement_id == MapPlacementId(200))
             .unwrap()
             .clone();
         let target_asset = catalog.asset(target.asset_id).unwrap();
@@ -1554,7 +1561,7 @@ mod tests {
         assert_eq!(
             state.terminal_states,
             vec![MapPlacementTransition {
-                placement_id: MapPlacementId(302),
+                placement_id: MapPlacementId(200),
                 outcome: MapPlacementOutcome::ReplacedWith(super::super::RUBBLE_ASSET),
             }]
         );
@@ -1563,7 +1570,7 @@ mod tests {
             let mut query = world.query::<&DestructibleMapCollider>();
             query.iter(world).count()
         };
-        assert_eq!(collider_count, 3);
+        assert_eq!(collider_count, 7);
 
         restore_map(app.world_mut());
         assert!(
@@ -1578,13 +1585,13 @@ mod tests {
             let mut query = world.query::<&DestructibleMapCollider>();
             query.iter(world).count()
         };
-        assert_eq!(restored_count, 4);
+        assert_eq!(restored_count, 8);
     }
 
     #[test]
     fn barrel_damage_explodes_once_chains_and_restart_restores_a_new_generation() {
         let (mut app, root) = barrel_test_app();
-        let target = barrel_identity(&mut app, 101);
+        let target = barrel_identity(&mut app, 240);
         let source = test_attack_source();
         app.world_mut()
             .resource_mut::<super::super::PendingWorldTargetDamages>()
@@ -1601,14 +1608,14 @@ mod tests {
 
         process_world_target_damage(app.world_mut());
 
-        assert_eq!(barrel_health(&mut app, 101), None);
-        assert_eq!(barrel_health(&mut app, 102), Some(25));
+        assert_eq!(barrel_health(&mut app, 240), None);
+        assert_eq!(barrel_health(&mut app, 241), Some(25));
         let state = app.world().get::<MapDynamicState>(root).unwrap();
         assert_eq!(state.revision, 1);
         assert_eq!(
             state.terminal_states,
             vec![MapPlacementTransition {
-                placement_id: MapPlacementId(101),
+                placement_id: MapPlacementId(240),
                 outcome: MapPlacementOutcome::ReplacedWith(super::super::BARREL_WOOD_DEBRIS_ASSET,),
             }]
         );
@@ -1674,14 +1681,14 @@ mod tests {
             .iter(world)
             .map(|(identity, health)| (identity.generation().generation, health.0))
             .collect();
-        assert_eq!(restored.len(), 6);
+        assert_eq!(restored.len(), 4);
         assert!(restored.iter().all(|entry| *entry == (2, 60)));
     }
 
     #[test]
     fn barrel_explosion_respects_authoritative_map_occlusion() {
         let (mut app, _) = barrel_test_app();
-        let target = barrel_identity(&mut app, 101);
+        let target = barrel_identity(&mut app, 240);
         let source_position = {
             let world = app.world_mut();
             let mut query = world.query::<(&super::super::DamageableTargetIdentity, &Position)>();
@@ -1693,7 +1700,7 @@ mod tests {
                 .0
         };
         let chained_position = {
-            let chained = barrel_identity(&mut app, 102);
+            let chained = barrel_identity(&mut app, 241);
             let world = app.world_mut();
             let mut query = world.query::<(&super::super::DamageableTargetIdentity, &Position)>();
             query
@@ -1729,13 +1736,13 @@ mod tests {
 
         process_world_target_damage(app.world_mut());
 
-        assert_eq!(barrel_health(&mut app, 102), Some(60));
+        assert_eq!(barrel_health(&mut app, 241), Some(60));
     }
 
     #[test]
     fn barrel_explosion_damages_combatants_as_environment_without_object_outcome_leakage() {
         let (mut app, _) = barrel_test_app();
-        let target = barrel_identity(&mut app, 101);
+        let target = barrel_identity(&mut app, 240);
         let position = {
             let world = app.world_mut();
             let mut query = world.query::<(&super::super::DamageableTargetIdentity, &Position)>();

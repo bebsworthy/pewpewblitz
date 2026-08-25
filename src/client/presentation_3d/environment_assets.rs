@@ -513,7 +513,17 @@ mod grid_catalog_tests {
                     super::MapVisualKind::Imported { path } => Some(path.as_str()),
                     _ => None,
                 }),
-            Some("brawler/models/kenney/blaster-kit/crate-wide.glb")
+            Some("brawler/models/kenney/mini-arena/statue.glb")
+        );
+        assert!(
+            (visuals
+                .profile(crate::map::MapVisualProfileId(39))
+                .unwrap()
+                .scale
+                - 88.0)
+                .abs()
+                < f32::EPSILON,
+            "the imported idol must remain inside the 96-by-64 authoritative footprint"
         );
     }
 }

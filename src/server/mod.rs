@@ -14,8 +14,8 @@ use crate::{
     config::{GameMode, MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
     map::{
-        AuthoritativeMapPlugin, CROSSROADS_HOT_ZONE_PRESET, CROSSROADS_PRESET, MapStartupSet,
-        ResolvedMap, ServerMapSelection, SpawnAssignment, SpawnPointCatalog,
+        AuthoritativeMapPlugin, FEATURE_YARD_HOT_ZONE_PRESET, FEATURE_YARD_WIPEOUT_PRESET,
+        MapStartupSet, ResolvedMap, ServerMapSelection, SpawnAssignment, SpawnPointCatalog,
     },
     matchplay::{
         AuthoritativeMatchPlugin, MatchLifecycleRules, MatchMember, MatchModeSetup,
@@ -1452,7 +1452,7 @@ fn install_server_game_mode(app: &mut App) {
                 },
             ))
             .insert_resource(ServerMapSelection {
-                preset_id: CROSSROADS_PRESET,
+                preset_id: FEATURE_YARD_WIPEOUT_PRESET,
             })
             .add_plugins(WipeoutModePlugin);
         }
@@ -1469,7 +1469,7 @@ fn install_server_game_mode(app: &mut App) {
             app.insert_resource(crate::matchplay::hot_zone_setup_for_composition())
                 .insert_resource(rules)
                 .insert_resource(ServerMapSelection {
-                    preset_id: CROSSROADS_HOT_ZONE_PRESET,
+                    preset_id: FEATURE_YARD_HOT_ZONE_PRESET,
                 })
                 .add_plugins(crate::matchplay::HotZoneModePlugin);
         }
@@ -1490,7 +1490,7 @@ fn install_server_game_mode(app: &mut App) {
             })
             .insert_resource(rules)
             .insert_resource(ServerMapSelection {
-                preset_id: crate::map::TWIN_VAULTS_PRESET,
+                preset_id: crate::map::FEATURE_YARD_HEIST_PRESET,
             })
             .add_plugins(crate::matchplay::HeistModePlugin);
         }

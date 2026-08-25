@@ -11,7 +11,7 @@ fn public_projection_count(app: &mut App) -> usize {
 
 #[test]
 fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
-    let mut harness = Harness::new_tidal_garden(2);
+    let mut harness = Harness::new_feature_yard(2);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
@@ -66,7 +66,7 @@ fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
         .server
         .world_mut()
         .entity_mut(observer)
-        .insert(Position::from_xy(grass_center.x + 320.0, grass_center.y));
+        .insert(Position::from_xy(grass_center.x, grass_center.y + 320.0));
 
     harness.step_until(|harness| {
         harness.client_ids(0).len() == 1
@@ -84,14 +84,14 @@ fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
         .server
         .world_mut()
         .entity_mut(observer)
-        .insert(Position::from_xy(grass_center.x + 160.0, grass_center.y));
+        .insert(Position::from_xy(grass_center.x, grass_center.y + 160.0));
     harness.step_until(|harness| harness.client_ids(0).len() == 2);
 
     harness
         .server
         .world_mut()
         .entity_mut(observer)
-        .insert(Position::from_xy(grass_center.x + 320.0, grass_center.y));
+        .insert(Position::from_xy(grass_center.x, grass_center.y + 320.0));
     harness.step_until(|harness| harness.client_ids(0).len() == 1);
     harness
         .server
@@ -160,7 +160,7 @@ fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
 
 #[test]
 fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
-    let mut harness = Harness::new_tidal_garden(2);
+    let mut harness = Harness::new_feature_yard(2);
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
@@ -322,7 +322,7 @@ fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
 
 #[test]
 fn concealment_field_is_public_hides_at_range_and_confirmation_does_not_fire() {
-    let mut harness = Harness::new_tidal_garden(2);
+    let mut harness = Harness::new_feature_yard(2);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()

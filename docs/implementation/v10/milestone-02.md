@@ -2,11 +2,15 @@
 
 ## Status
 
-`User playtest`
+`Complete`
 
 The user started M02 preparation on 2026-08-25 while M01 remained in `User playtest`. M01 completed
 with user acceptance later that day, including its feedback reruns and learning review. The user
-approved this specification and explicitly started production implementation on 2026-08-25.
+approved this specification and explicitly started production implementation on 2026-08-25. The
+user playtest confirmed the core Heist outcome on 2026-08-25 and returned M02 to `Feedback review`
+for the bounded selection-screen and objective-presentation corrections recorded below. Those
+corrections and affected automated/imported/primitive checks passed. The user accepted the focused
+rerun and closed M02 on 2026-08-25.
 
 ## Player-visible outcome
 
@@ -107,11 +111,11 @@ the existing authoritative planar collider owner; M02 adds no new physics API.
    recovery indistinguishable from incomplete replication. The entity remains at zero health in a
    terminal state, loses collision once, and is restored in-place during mode reset with the new
    match identity.
-5. **The safe needs its own visual language.** Reusing the Mini Dungeon chest is rejected. The
-   preferred imported core is Kenney Blaster Kit `crate-wide.glb`, composed on a much larger
-   team-coloured plinth/housing. It reads as a secured installation and is already compatible with
-   an established Kenney material path. The primitive fallback preserves that silhouette and is
-   not a cube.
+5. **The objective needs its own visual language.** Reusing the Mini Dungeon chest is rejected. The
+   initial specification selected Kenney Blaster Kit `crate-wide.glb` in a structural housing, but
+   the user playtest found that it neither read as a safe nor matched the hit footprint. The
+   accepted feedback revision uses the Mini Arena statue as a team idol on a footprint-exact
+   pedestal, with an equivalent primitive idol fallback.
 6. **Sentry behavior needs an explicit objective policy.** Merely allowing a stray sentry shot to
    hit a safe would leave the ultimate unable to pressure an undefended objective. The existing
    stable hostile-fighter selection remains first priority; the enemy safe is the sole fallback.
@@ -364,9 +368,11 @@ The top-right mode slot becomes an explicit three-mode dispatch. For Heist it sh
 maximum values and percentages, with local `DEFEND Tn` and opposing `ATTACK Tm` labels plus the
 common timer. It remains usable at supported window sizes and with controller focus elsewhere.
 
-The safe visual uses the promoted Kenney Blaster Kit `crate-wide.glb` as the secured core, mounted
-inside a larger 3-by-2-cell plinth/housing with team-coloured bands and structural ribs. The
-primitive path uses an equivalent wide vault/plinth silhouette. Both paths provide:
+The accepted feedback revision uses Kenney Mini Arena `statue.glb` as a team idol on a compact
+team-coloured pedestal. The imported statue's calibrated footprint and every primitive pedestal/
+fallback member remain inside the authoritative 96-by-64 world-unit collider. Internal protocol,
+mode, and ECS names retain `HeistSafe`; player-facing presentation calls the objective an idol.
+Both imported and primitive paths provide:
 
 - always-visible compact objective health;
 - unmistakable team ownership without relying on colour alone;
@@ -378,7 +384,7 @@ Reduced effects may simplify flashes, particles, and debris but preserve team, h
 destroyed, and collision meaning. Audio adds bounded distinct safe-hit, critical, and destroyed
 cues; frequent hit sounds are rate-limited and source privacy is preserved.
 
-The completed overlay states `SAFE DESTROYED`, `BOTH SAFES DESTROYED — DRAW`, `TIME EXPIRED`, or
+The completed overlay states `IDOL DESTROYED`, `BOTH IDOLS DESTROYED — DRAW`, `TIME EXPIRED`, or
 the common forfeit cause and shows final health for both safes. Requeue and replay continue through
 the existing common flow.
 
@@ -433,8 +439,8 @@ Implementation and automated/native verification completed on 2026-08-25. The de
 includes stable application and routed identities, Twin Vaults validation, two persistent public
 safes, all approved objective-damage sources, exact threshold/timeout/draw resolution, critical and
 terminal cues/audio, generation-safe HUD/readiness, restart, bounded telemetry, Balance Lab tuning,
-and exact routed 1v1/2v2/3v3 admission. It is now awaiting the required user playtest and feedback
-triage before closeout.
+and exact routed 1v1/2v2/3v3 admission. The user playtest and feedback disposition subsequently
+closed the milestone as recorded below.
 
 - [x] Add Heist IDs, rules/state/summary/cues, explicit mode plugin composition, and pure rule tests.
 - [x] Extend target identity/class and terminal fact without routing safes through map-object
@@ -453,7 +459,8 @@ triage before closeout.
 - [x] Evolve Balance Lab, validation, persistence, practice handoff, and UI for safe health.
 - [x] Run focused, full, separate-App, routed, capacity, native, and canonical verification; record
   exact evidence below.
-- [ ] Deliver a user playtest handoff and triage every feedback item before closeout.
+- [x] Deliver a user playtest handoff.
+- [x] Implement and verify every accepted feedback item before closeout.
 
 ## Verification plan
 
@@ -561,20 +568,20 @@ without inventing an unavailable API.
 
 ## Playtest handoff
 
-Run `just run 2`, choose **Heist 1v1** in both windows, select a brawler, join the same queue, and
-ready both fighters. Match controls are WASD/mouse, left click for primary fire, `E` for ultimate,
-and `Tab` for the scoreboard; controller uses the two sticks, right trigger, right bumper, and
-Select.
+Run `just run 2`. In the game-selection screen, use the mouse wheel or keyboard/controller
+navigation to reach the final entries, select **Heist 1v1**, and confirm it in both windows. Select a
+brawler, join the same queue, and ready both fighters. Match controls are WASD/mouse, left click for
+primary fire, `E` for ultimate, and `Tab` for the scoreboard; controller uses the two sticks, right
+trigger, right bumper, and Select.
 
-Please exercise both lanes and both objectives, damage a safe past 25%, destroy one safe, and ready
-for one restart. If practical, try a Sentry build near an undefended enemy safe. Report:
+Please report only the focused feedback rerun:
 
-1. whether each safe reads as a structural objective rather than the treasure chest reserved for
-   M03, including without relying only on colour;
-2. whether `DEFEND`/`ATTACK`, health, critical, destroyed, result, and restart feedback are clear;
-3. whether lanes, safe collision, travel time, spawn pressure, turtling, and comeback potential feel
-   reasonable; and
-4. whether ordinary-hit, critical, and destroyed audio/effects are useful without becoming noisy.
+1. whether the entire game list, Confirm, and Back remain reachable with mouse and keyboard or
+   controller focus;
+2. whether the statue on its team pedestal reads as the opposing team's destructible idol and is
+   unmistakably different from the treasure chest reserved for M03; and
+3. whether shots that visually intersect the idol/pedestal footprint now hit, while shots visibly
+   outside it pass.
 
 Known limitation: this is one simultaneous mirrored round on one map; role swaps, overtime,
 repair/regeneration, barrel-to-safe damage, and safe debris are intentionally outside M02.
@@ -588,8 +595,8 @@ M02 may enter `Complete` only when:
 3. Twin Vaults is admitted and playable through practice plus routed 1v1/2v2/3v3 product paths;
 4. authority, eligibility, threshold/timeout/draw/forfeit, restart, recovery, concealment privacy,
    boundedness, and Wipeout/Hot Zone regressions pass;
-5. the imported and primitive safes are clearly structural objectives and never resemble the M03
-   treasure chest or imply loot;
+5. the imported and primitive idols are clear team objectives, remain inside the authoritative hit
+   footprint, and never resemble the M03 treasure chest or imply loot;
 6. Balance Lab exposes and safely persists the owned safe-health tuning;
 7. performance/capacity evidence passes at maximum supported 3v3 content;
 8. user playtest feedback is implemented, deferred, rejected with rationale, or marked as needing
@@ -605,7 +612,17 @@ M02 may enter `Complete` only when:
 
 ## Feedback and closeout learning
 
-User feedback is pending. Implementation review found three reusable lessons:
+The user playtest confirmed that safe damage applies, zero health completes the match, and the core
+Heist loop is mostly working. Feedback dispositions are:
+
+| Feedback | Disposition |
+|---|---|
+| The long game/map list does not scroll, leaving Confirm unreachable | **Implemented now.** The root declared scroll overflow but owned no `ScrollPosition`, mouse-wheel handler, or focus-visibility pass. All three are present, and a maximum ten-entry catalog regression proves scrolling with Confirm enabled. |
+| The safe model does not read as a safe | **Implemented now.** Promoted Kenney Mini Arena `statue.glb` and present the mode objective as each team's idol while retaining internal `HeistSafe` protocol/ECS identities. The idol remains distinct from M03's treasure chest. |
+| Visible safe geometry extends beyond the hitbox | **Implemented now.** Preserved the validated authoritative 96-by-64 collider and fit the statue, pedestal, team status band, and primitive fallback entirely inside that footprint. A calibration regression covers both the authored collider and measured 0.7-by-0.7 GLB footprint. |
+| Too many focused maps appear as separate product choices | **Implement in M02b after M02 closes.** The prepared Feature Yard specification consolidates the product-visible family without stuffing the migration into M03. |
+
+Implementation review found three reusable lessons:
 
 1. A conceptual dependency feature is not an API guarantee. Verify the exact checked-in crate API
    before encoding a named component into the specification; M02's `ReplicationGroup` assumption
@@ -617,4 +634,20 @@ User feedback is pending. Implementation review found three reusable lessons:
    many convergence ticks can miss frame-scoped traffic, and a test-only capture must remain
    optional for synthetic client worlds that do not install it.
 
-The final feedback decisions and affected reruns will be appended before `Complete`.
+Affected rerun evidence on 2026-08-25:
+
+- the maximum ten-entry game-selection scroll/Confirm regression passed;
+- the idol/collider calibration, visual-catalog path/scale, promoted-asset, manifest, and GLB texture-
+  dependency regressions passed;
+- the complete client library suite passed `385 passed; 0 failed`;
+- client all-target Clippy passed with warnings denied;
+- imported routed native evidence passed at 2560x1440 Metal with 1,793 samples, p95 `17.052ms`, no
+  frame over 100ms, map recipe `6`, and mode `4`; artifact:
+  `target/v10-m02-heist-idol-render.txt` plus its peer report; and
+- forced-primitive routed native evidence passed with 1,800 samples, p95 `16.987ms`, no frame over
+  50ms, and the same map/mode identity; artifact:
+  `target/v10-m02-heist-idol-primitive-render.txt` plus its peer report.
+
+The user confirmed on 2026-08-25 that the corrected scrolling, idol presentation, and visual hit
+footprint work. All exit criteria are satisfied, and M02 is complete. The same instruction approved
+starting the prepared M02b consolidation specification.

@@ -769,8 +769,8 @@ fn final_heist_objective_line<'a>(
     let cause = match heist.completion {
         Some(crate::matchplay::HeistCompletion::SafeDestroyed {
             destroyed_teams: [true, true],
-        }) => "BOTH SAFES DESTROYED — DRAW",
-        Some(crate::matchplay::HeistCompletion::SafeDestroyed { .. }) => "SAFE DESTROYED",
+        }) => "BOTH IDOLS DESTROYED — DRAW",
+        Some(crate::matchplay::HeistCompletion::SafeDestroyed { .. }) => "IDOL DESTROYED",
         Some(crate::matchplay::HeistCompletion::Timeout { .. }) => "TIME EXPIRED",
         None => "HEIST COMPLETE",
     };
@@ -1210,7 +1210,10 @@ mod tests {
     fn heist_readiness_requires_matching_root_map_generation_and_two_safes() {
         let resolved = crate::map::MapContentCatalog::embedded()
             .unwrap()
-            .resolve_preset(crate::map::TWIN_VAULTS_PRESET, crate::map::MapInstanceId(9))
+            .resolve_preset(
+                crate::map::FEATURE_YARD_HEIST_PRESET,
+                crate::map::MapInstanceId(9),
+            )
             .unwrap();
         let generation = crate::map::MapDynamicGeneration {
             map_instance_id: crate::map::MapInstanceId(9),

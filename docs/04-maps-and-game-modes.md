@@ -204,10 +204,12 @@ compatible team slots, spawn capacity, playable space, and required anchors. Res
 their intersection and publishes the maximum active-fighter count used by admission and subsystem
 capacity checks.
 
-Supported routed product game types include exact 1v1, 2v2, and 3v3 Wipeout and Hot Zone matches.
-The operator catalog advertises a dedicated **Hot Zone 1v1** on Crossroads Facility for focused
-concealment/reveal testing. Its mirrored tall-grass strips touch the objective approaches so the
-test exercises terrain concealment during the mode's central fight rather than on an isolated map.
+Supported routed product game types include exact 1v1, 2v2, and 3v3 Wipeout, Hot Zone, and Heist
+matches. The operator catalog advertises one **Feature Yard** integration-map family. Its three
+ordinary recipes share identical geometry and differ only in stable identity, compatible mode, and
+the typed anchors required by that mode. Mirrored tall-grass groups touch contested approaches so
+the family exercises terrain concealment during live mode play rather than on an isolated map.
+Feature Yard is functional test content, not a fun, balanced, or release-ready map claim.
 Ordinary matches are expected to center on 3v3, while the architecture may support larger bounded
 arrangements such as twelve solo fighters, two teams of five, or three teams of three when a concrete
 mode, map, HUD, admission profile, and capacity evidence all allow it. No common subsystem may assume

@@ -555,9 +555,9 @@ impl LobbyState {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let map_preset = match self.mode {
-            GameMode::Wipeout => crate::map::CROSSROADS_PRESET,
-            GameMode::HotZone => crate::map::CROSSROADS_HOT_ZONE_PRESET,
-            GameMode::Heist => crate::map::TWIN_VAULTS_PRESET,
+            GameMode::Wipeout => crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+            GameMode::HotZone => crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
+            GameMode::Heist => crate::map::FEATURE_YARD_HEIST_PRESET,
         };
         let map_revision = crate::map::MapContentCatalog::embedded()
             .ok()

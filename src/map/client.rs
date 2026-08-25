@@ -491,7 +491,7 @@ mod tests {
     fn world_object_readiness_requires_exact_live_generation_and_accepts_terminal_absence() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let resolved = catalog
-            .resolve_preset(BARREL_YARD_PRESET, MapInstanceId(5))
+            .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(5))
             .unwrap();
         let snapshot = resolved.snapshot.clone();
         let mut app = App::new();
@@ -517,6 +517,11 @@ mod tests {
 
         let mut object_entities = std::collections::BTreeMap::new();
         for placement in resolved.dynamic_placements {
+            let asset = catalog.asset(placement.asset_id).unwrap();
+            let profile = catalog.profile(asset.gameplay_profile_id).unwrap();
+            if !matches!(profile.durability, MapDurabilityBehavior::HitPoints(_)) {
+                continue;
+            }
             let identity = DamageableTargetIdentity::MapObject {
                 generation: MapDynamicGeneration {
                     map_instance_id: MapInstanceId(5),
@@ -536,7 +541,7 @@ mod tests {
             ClientWorldObjectReadiness::Ready
         );
 
-        let terminal = MapPlacementId(101);
+        let terminal = MapPlacementId(240);
         app.world_mut()
             .entity_mut(object_entities[&terminal])
             .despawn();
@@ -546,7 +551,7 @@ mod tests {
             revision: 1,
             terminal_states: vec![MapPlacementTransition {
                 placement_id: terminal,
-                outcome: MapPlacementOutcome::Removed,
+                outcome: MapPlacementOutcome::ReplacedWith(BARREL_WOOD_DEBRIS_ASSET),
             }],
         });
         app.update();

@@ -50,6 +50,10 @@ const GROUND_AREA_HEIGHT: f32 = 1.0;
 const FIGHTER_FACING_TIP_RADIUS: f32 = 28.0;
 const FIGHTER_FACING_HALF_ANGLE: f32 = 0.22;
 const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
+const HEIST_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
+const HEIST_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
+#[cfg(test)]
+const KENNEY_STATUE_HALF_FOOTPRINT: f32 = 0.35;
 
 #[derive(Resource)]
 pub(crate) struct Primitive3dAssets {
@@ -320,14 +324,18 @@ fn spawn_heist_safe_visual(
                 ..default()
             },
             Visibility::default(),
-            Name::new("Heist structural safe"),
+            Name::new("Heist team idol"),
         ))
         .id();
     commands.entity(root).with_children(|parent| {
         parent.spawn((
             Mesh3d(assets.primitives.unit_cuboid.clone()),
             MeshMaterial3d(assets.materials.neutral.clone()),
-            Transform::from_xyz(0.0, 10.0, 0.0).with_scale(Vec3::new(108.0, 20.0, 76.0)),
+            Transform::from_xyz(0.0, 8.0, 0.0).with_scale(Vec3::new(
+                HEIST_IDOL_FOOTPRINT_WIDTH,
+                16.0,
+                HEIST_IDOL_FOOTPRINT_DEPTH,
+            )),
         ));
         if let (Some(scene), Some(profile)) = (assets.imported_core.as_ref(), assets.profile) {
             parent.spawn((
@@ -338,17 +346,24 @@ fn spawn_heist_safe_visual(
                 ]),
                 WorldAssetRoot(scene.clone()),
                 Transform {
-                    translation: Vec3::Y * (28.0 + profile.vertical_offset),
+                    translation: Vec3::Y * (22.0 + profile.vertical_offset),
                     rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
                     scale: Vec3::splat(profile.scale),
                 },
-                Name::new("imported Heist safe core"),
+                Name::new("imported Heist team idol"),
             ));
         } else {
             parent.spawn((
                 Mesh3d(assets.primitives.unit_cuboid.clone()),
                 MeshMaterial3d(assets.materials.neutral.clone()),
-                Transform::from_xyz(0.0, 34.0, 0.0).with_scale(Vec3::new(92.0, 28.0, 60.0)),
+                Transform::from_xyz(0.0, 54.0, 0.0).with_scale(Vec3::new(32.0, 64.0, 32.0)),
+                Name::new("primitive Heist idol body"),
+            ));
+            parent.spawn((
+                Mesh3d(assets.primitives.effect_sphere.clone()),
+                MeshMaterial3d(assets.materials.neutral.clone()),
+                Transform::from_xyz(0.0, 102.0, 0.0).with_scale(Vec3::splat(20.0)),
+                Name::new("primitive Heist idol head"),
             ));
         }
         parent.spawn((
@@ -358,15 +373,8 @@ fn spawn_heist_safe_visual(
             },
             Mesh3d(assets.primitives.unit_cuboid.clone()),
             MeshMaterial3d(team_material.clone()),
-            Transform::from_xyz(0.0, 49.0, 0.0).with_scale(Vec3::new(100.0, 8.0, 66.0)),
+            Transform::from_xyz(0.0, 19.0, 0.0).with_scale(Vec3::new(88.0, 6.0, 56.0)),
         ));
-        for x in [-50.0, 50.0] {
-            parent.spawn((
-                Mesh3d(assets.primitives.unit_cuboid.clone()),
-                MeshMaterial3d(team_material.clone()),
-                Transform::from_xyz(x, 32.0, 0.0).with_scale(Vec3::new(8.0, 64.0, 72.0)),
-            ));
-        }
     });
 }
 
@@ -1905,10 +1913,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn crossroads_hot_zone_anchor_materializes_at_exact_world_scale() {
+    fn feature_yard_hot_zone_anchor_materializes_at_exact_world_scale() {
         let resolved = crate::map::MapContentCatalog::embedded()
             .unwrap()
-            .resolve_preset(crate::map::MapPresetId(2), crate::map::MapInstanceId(1))
+            .resolve_preset(
+                crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
+                crate::map::MapInstanceId(1),
+            )
             .unwrap();
 
         assert_eq!(
@@ -1972,6 +1983,30 @@ mod tests {
             dynamic_visual_scale(crate::map::BARREL_WOOD_DEBRIS_ASSET, footprint, false),
             Vec3::new(0.5, 0.25, 0.5)
         );
+    }
+
+    #[test]
+    fn heist_idol_presentation_stays_inside_authoritative_footprint() {
+        let resolved = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(
+                crate::map::FEATURE_YARD_HEIST_PRESET,
+                crate::map::MapInstanceId(1),
+            )
+            .unwrap();
+        let safe = resolved.heist_safes.first().unwrap();
+        assert!((safe.half_extents.x * 2.0 - HEIST_IDOL_FOOTPRINT_WIDTH).abs() <= f32::EPSILON);
+        assert!((safe.half_extents.y * 2.0 - HEIST_IDOL_FOOTPRINT_DEPTH).abs() <= f32::EPSILON);
+
+        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = environment_assets::MapVisualCatalog::embedded(&catalog).unwrap();
+        let scale = visuals
+            .profile(crate::map::HEIST_SAFE_VISUAL_PROFILE)
+            .unwrap()
+            .scale;
+        let imported_diameter = KENNEY_STATUE_HALF_FOOTPRINT * 2.0 * scale;
+        assert!(imported_diameter <= HEIST_IDOL_FOOTPRINT_WIDTH);
+        assert!(imported_diameter <= HEIST_IDOL_FOOTPRINT_DEPTH);
     }
 
     #[test]

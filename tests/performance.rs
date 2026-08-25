@@ -412,8 +412,9 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
     let mut app = performance_app();
     let owners = spawn_headless_fighters(&mut app);
     // Make every path exercise the nearby fighter broad phase without allowing a friendly
-    // pass-through to terminate the projectile. The lanes remain clear of the resolved map's
-    // north/south cover while keeping perimeter map colliders in the broad-phase workload.
+    // pass-through to terminate the projectile. These central Feature Yard lanes pass through
+    // projectile-passable water while remaining clear of walls and damageable placements; the
+    // resolved perimeter and other map colliders still participate in broad-phase work.
     {
         let world = app.world_mut();
         let mut fighters = world.query::<&mut TeamId>();
@@ -421,7 +422,7 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
             team.0 = 0;
         }
     }
-    let lanes = [-500.0, -460.0, -420.0, -380.0, 380.0, 420.0, 460.0, 500.0];
+    let lanes = [-160.0, -128.0, -96.0, -64.0, 64.0, 96.0, 128.0, 160.0];
     let recipe = app
         .world()
         .resource::<brawler::combat::WeaponCatalogResource>()
@@ -847,7 +848,7 @@ fn hot_zone_performance_app() -> App {
         brawler::config::MatchRulesProfile::Production,
     ));
     app.insert_resource(brawler::map::ServerMapSelection {
-        preset_id: brawler::map::CROSSROADS_HOT_ZONE_PRESET,
+        preset_id: brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
     });
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,
@@ -977,7 +978,7 @@ fn heist_performance_app() -> App {
     });
     app.insert_resource(brawler::matchplay::HeistRules::default());
     app.insert_resource(brawler::map::ServerMapSelection {
-        preset_id: brawler::map::TWIN_VAULTS_PRESET,
+        preset_id: brawler::map::FEATURE_YARD_HEIST_PRESET,
     });
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,

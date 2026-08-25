@@ -60,7 +60,8 @@ command therefore preserves N independent local identities without concurrent wr
 manually launched client an explicit data directory.
 
 One client is sufficient for Practice. Multiplayer game types form only their exact advertised
-human roster, so the default First Blood path requires two clients.
+human roster; the default Feature Yard Wipeout 2v2 path therefore requires four clients. The
+Feature Yard catalog also exposes exact 1v1 and 3v3 Wipeout, Hot Zone, and Heist entries.
 
 For the development-only V6 Balance Lab, start the tuning-enabled routed server, connect one
 ordinary client, and enter Practice:
@@ -162,6 +163,10 @@ and bindings shape local intent before quantization and never become server auth
 Server game types live in [`config/server/game-types.ron`](config/server/game-types.ron). Each stable
 advertisement combines one mode, compatible map pool, exact team topology, and flat bounded match
 rules. Startup validates the catalog before the lobby advertises it or a match worker installs it.
+
+The product catalog currently presents one shared **Feature Yard** integration-map family through
+separate Wipeout, Hot Zone, and Heist recipes. Those recipes intentionally reuse identical geometry
+while retaining mode-specific validation and do not claim release-map balance or fun.
 
 Build-embedded, headless-safe gameplay definitions live under
 [`content/catalogs/`](content/catalogs/). Built-in sparse-grid map documents live under

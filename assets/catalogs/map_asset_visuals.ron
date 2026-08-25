@@ -25,6 +25,6 @@
         (id: MapVisualProfileId(36), kind: GeneratedDecoration, scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Decoration),
         (id: MapVisualProfileId(37), kind: Imported(path: "brawler/models/kenney/mini-dungeon/barrel.glb"), scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Barrel),
         (id: MapVisualProfileId(38), kind: Imported(path: "brawler/models/kenney/graveyard/debris-wood.glb"), scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Rubble, fitting: Contained),
-        (id: MapVisualProfileId(39), kind: Imported(path: "brawler/models/kenney/blaster-kit/crate-wide.glb"), scale: 96.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Cover, fitting: Contained),
+        (id: MapVisualProfileId(39), kind: Imported(path: "brawler/models/kenney/mini-arena/statue.glb"), scale: 88.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Cover, fitting: Contained),
     ],
 )

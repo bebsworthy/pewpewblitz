@@ -585,17 +585,17 @@ mod tests {
     }
 
     #[test]
-    fn manifest_admission_accepts_tidal_garden_through_the_grid_catalog() {
+    fn manifest_admission_accepts_feature_yard_wipeout_through_the_grid_catalog() {
         let config = ServerNetworkConfig::default();
         let catalog = MapContentCatalog::embedded().unwrap();
         let mut value = manifest();
-        value.map_preset = crate::map::TIDAL_GARDEN_PRESET.0;
-        value.map_revision = crate::map::TIDAL_GARDEN_ADMISSION_REVISION;
+        value.map_preset = crate::map::FEATURE_YARD_WIPEOUT_PRESET.0;
+        value.map_revision = crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION;
         assert!(validate_manifest_map_against_catalog(&config, &value, &catalog).is_ok());
     }
 
     #[test]
-    fn manifest_admission_accepts_converted_ashen_and_hot_zone_presets() {
+    fn manifest_admission_accepts_hidden_ashen_and_feature_yard_hot_zone_presets() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let mut wipeout = manifest();
         wipeout.map_preset = crate::map::ASHEN_COURT_PRESET.0;
@@ -611,8 +611,8 @@ mod tests {
 
         let mut hot_zone = wipeout;
         hot_zone.mode = brawler_routing::GameMode::HotZone;
-        hot_zone.map_preset = crate::map::CROSSROADS_HOT_ZONE_PRESET.0;
-        hot_zone.map_revision = crate::map::CROSSROADS_HOT_ZONE_ADMISSION_REVISION;
+        hot_zone.map_preset = crate::map::FEATURE_YARD_HOT_ZONE_PRESET.0;
+        hot_zone.map_revision = crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION;
         let config = ServerNetworkConfig {
             game_mode: GameMode::HotZone,
             ..default()
@@ -786,16 +786,16 @@ mod tests {
         assert_eq!(
             policy.for_mode(brawler_routing::GameMode::Wipeout),
             brawler_routing::ModeAllocationPolicy::new(
-                crate::map::CROSSROADS_PRESET.0,
-                crate::map::CROSSROADS_ADMISSION_REVISION,
+                crate::map::FEATURE_YARD_WIPEOUT_PRESET.0,
+                crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );
         assert_eq!(
             policy.for_mode(brawler_routing::GameMode::HotZone),
             brawler_routing::ModeAllocationPolicy::new(
-                crate::map::CROSSROADS_HOT_ZONE_PRESET.0,
-                crate::map::CROSSROADS_HOT_ZONE_ADMISSION_REVISION,
+                crate::map::FEATURE_YARD_HOT_ZONE_PRESET.0,
+                crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );

@@ -9,13 +9,6 @@
             document: "builtin/crossroads-facility.ron",
         ),
         (
-            id: MapPresetId(2),
-            key: "crossroads-facility-hot-zone",
-            display_name: "Crossroads Facility (Hot Zone)",
-            admission_revision: 3,
-            document: "builtin/crossroads-facility-hot-zone.ron",
-        ),
-        (
             id: MapPresetId(3),
             key: "ashen-court",
             display_name: "Ashen Court",
@@ -37,11 +30,25 @@
             document: "builtin/barrel-yard.ron",
         ),
         (
-            id: MapPresetId(6),
-            key: "twin-vaults",
-            display_name: "Twin Vaults",
+            id: MapPresetId(7),
+            key: "feature-yard-wipeout",
+            display_name: "Feature Yard (Wipeout)",
             admission_revision: 1,
-            document: "builtin/twin-vaults.ron",
+            document: "builtin/feature-yard-wipeout.ron",
+        ),
+        (
+            id: MapPresetId(8),
+            key: "feature-yard-hot-zone",
+            display_name: "Feature Yard (Hot Zone)",
+            admission_revision: 1,
+            document: "builtin/feature-yard-hot-zone.ron",
+        ),
+        (
+            id: MapPresetId(9),
+            key: "feature-yard-heist",
+            display_name: "Feature Yard (Heist)",
+            admission_revision: 1,
+            document: "builtin/feature-yard-heist.ron",
         ),
     ],
 )

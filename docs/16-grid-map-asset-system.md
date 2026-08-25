@@ -554,6 +554,13 @@ least one deliberately small reference-inspired proof layout to demonstrate irre
 vegetation, corners, default ground, and sparse authoring; it does not copy the drawings as shipped
 maps or claim their art/layout as original content.
 
+V10 M02b later consolidated the product-visible proofs into Feature Yard. Wipeout, Hot Zone, and
+Heist each retain a complete independently validated recipe, but their dimensions, theme, surface,
+placements, filled rectangles, and spawn geometry are identical. Mode anchors remain recipe-owned:
+Wipeout has none, Hot Zone has one capture circle, and Heist has two team idols. Older built-ins are
+not advertised; they remain embedded only where a focused regression still proves a named catalog,
+conversion, density, presentation-theme, or negative-validation contract.
+
 ## Removal invariant
 
 The completed cutover enforces that the following production concepts remain absent:

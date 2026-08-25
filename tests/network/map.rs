@@ -135,22 +135,22 @@ fn map_cover_destruction_converges_for_connected_and_late_joining_clients() {
 }
 
 #[test]
-fn tidal_barrier_replacement_converges_for_connected_and_late_joining_clients() {
+fn feature_yard_barrier_replacement_converges_for_connected_and_late_joining_clients() {
     let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
     let resolved = catalog
-        .resolve_preset(brawler::map::TIDAL_GARDEN_PRESET, MapInstanceId(1))
+        .resolve_preset(brawler::map::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
         .unwrap();
     let placement = resolved
         .dynamic_placements
         .iter()
-        .find(|placement| placement.placement_id == MapPlacementId(302))
+        .find(|placement| placement.placement_id == MapPlacementId(200))
         .unwrap();
     let center = brawler::map::placement_world_center(
         resolved.snapshot.dimensions,
         catalog.asset(placement.asset_id).unwrap(),
         placement,
     );
-    let mut harness = Harness::new_tidal_garden(1);
+    let mut harness = Harness::new_feature_yard(1);
     harness.step_until(|harness| {
         harness.client_is_active(0) && client_grid_state(harness, 0).is_some()
     });
@@ -160,7 +160,7 @@ fn tidal_barrier_replacement_converges_for_connected_and_late_joining_clients() 
         client_grid_state(harness, 0).is_some_and(|(_, state)| {
             state.terminal_states
                 == vec![brawler::map::MapPlacementTransition {
-                    placement_id: MapPlacementId(302),
+                    placement_id: MapPlacementId(200),
                     outcome: brawler::map::MapPlacementOutcome::ReplacedWith(
                         brawler::map::RUBBLE_ASSET,
                     ),
@@ -185,7 +185,7 @@ fn hot_zone_and_ashen_snapshots_converge_from_canonical_content() {
     let (hot_zone_snapshot, _) = client_grid_state(&mut hot_zone, 0).unwrap();
     assert_eq!(
         hot_zone_snapshot.identity.source_preset_id,
-        Some(ArenaPresetId(2))
+        Some(brawler::map::FEATURE_YARD_HOT_ZONE_PRESET)
     );
     assert_eq!(hot_zone_snapshot.mode_anchors.len(), 1);
 
@@ -260,7 +260,7 @@ fn client_local_snapshot_edit_has_no_authoritative_map_path() {
 
 #[test]
 fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
-    let mut harness = Harness::new_barrel_yard_match(2);
+    let mut harness = Harness::new_feature_yard_match(2);
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
     });
@@ -278,7 +278,7 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
     harness.step_until(|harness| {
         matches!(server_match_state(harness).phase, MatchPhase::Active { .. })
             && (0..2).all(|index| {
-                client_barrel_health(harness, index, 101) == Some(60)
+                client_barrel_health(harness, index, 240) == Some(60)
                     && *harness.clients[index]
                         .world()
                         .resource::<ClientWorldObjectReadiness>()
@@ -291,7 +291,7 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
         let mut objects = world.query::<&DamageableTargetIdentity>();
         let target = *objects
             .iter(world)
-            .find(|identity| identity.placement_id() == MapPlacementId(101))
+            .find(|identity| identity.placement_id() == MapPlacementId(240))
             .unwrap();
         let mut fighters = world
             .query_filtered::<(&PlayerId, &NetworkEntityId, &TeamId, &Position), With<Fighter>>();
@@ -332,7 +332,7 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
             effect_index: 0,
         });
     harness.step_until(|harness| {
-        (0..2).all(|index| client_barrel_health(harness, index, 101) == Some(40))
+        (0..2).all(|index| client_barrel_health(harness, index, 240) == Some(40))
     });
 
     harness
@@ -351,7 +351,7 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
         });
     harness.step_until(|harness| {
         (0..2).all(|index| {
-            client_barrel_health(harness, index, 101).is_none()
+            client_barrel_health(harness, index, 240).is_none()
                 && *harness.clients[index]
                     .world()
                     .resource::<ClientWorldObjectReadiness>()
@@ -363,7 +363,7 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
         .1
         .terminal_states
         .iter()
-        .find(|transition| transition.placement_id == MapPlacementId(101))
+        .find(|transition| transition.placement_id == MapPlacementId(240))
         .copied()
         .unwrap();
     assert_eq!(

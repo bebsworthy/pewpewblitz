@@ -22,7 +22,7 @@ pub struct ServerMapSelection {
 impl Default for ServerMapSelection {
     fn default() -> Self {
         Self {
-            preset_id: CROSSROADS_PRESET,
+            preset_id: FEATURE_YARD_WIPEOUT_PRESET,
         }
     }
 }

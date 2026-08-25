@@ -182,15 +182,23 @@ pub(super) struct Harness {
 
 impl Harness {
     pub(super) fn new(client_count: usize) -> Self {
-        Self::new_with_options(client_count, None, false)
+        let mut harness = Self::new_with_options(client_count, None, false);
+        // Generic movement/combat scenarios retain the focused V8 conversion fixture whose
+        // authored coordinates they exercise. Product match constructors use Feature Yard.
+        harness
+            .server
+            .insert_resource(brawler::map::ServerMapSelection {
+                preset_id: brawler::map::MapPresetId(1),
+            });
+        harness
     }
 
-    pub(super) fn new_tidal_garden(client_count: usize) -> Self {
+    pub(super) fn new_feature_yard(client_count: usize) -> Self {
         let mut harness = Self::new(client_count);
         harness
             .server
             .insert_resource(brawler::map::ServerMapSelection {
-                preset_id: brawler::map::TIDAL_GARDEN_PRESET,
+                preset_id: brawler::map::FEATURE_YARD_WIPEOUT_PRESET,
             });
         harness
     }
@@ -205,12 +213,12 @@ impl Harness {
         harness
     }
 
-    pub(super) fn new_barrel_yard_match(client_count: usize) -> Self {
+    pub(super) fn new_feature_yard_match(client_count: usize) -> Self {
         let mut harness = Self::new_match(client_count);
         harness
             .server
             .insert_resource(brawler::map::ServerMapSelection {
-                preset_id: brawler::map::BARREL_YARD_PRESET,
+                preset_id: brawler::map::FEATURE_YARD_WIPEOUT_PRESET,
             });
         harness
     }
@@ -396,7 +404,7 @@ impl Harness {
                         brawler::config::MatchRulesProfile::ProcessVerification,
                     ))
                     .insert_resource(brawler::map::ServerMapSelection {
-                        preset_id: brawler::map::CROSSROADS_HOT_ZONE_PRESET,
+                        preset_id: brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
                     });
             }
             HarnessMode::Heist => {
@@ -407,7 +415,7 @@ impl Harness {
                     })
                     .insert_resource(brawler::matchplay::HeistRules::default())
                     .insert_resource(brawler::map::ServerMapSelection {
-                        preset_id: brawler::map::TWIN_VAULTS_PRESET,
+                        preset_id: brawler::map::FEATURE_YARD_HEIST_PRESET,
                     });
             }
         }

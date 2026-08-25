@@ -18,18 +18,20 @@ pub const MAX_MAP_OBJECT_HEALTH: u16 = 1_000;
 pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 5;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 4;
 pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 6;
-pub const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
-pub const CROSSROADS_ADMISSION_REVISION: u16 = 5;
-pub const CROSSROADS_HOT_ZONE_PRESET: MapPresetId = MapPresetId(2);
-pub const CROSSROADS_HOT_ZONE_ADMISSION_REVISION: u16 = 3;
+#[cfg(test)]
+const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const ASHEN_COURT_PRESET: MapPresetId = MapPresetId(3);
 pub const ASHEN_COURT_ADMISSION_REVISION: u16 = 2;
-pub const TIDAL_GARDEN_PRESET: MapPresetId = MapPresetId(4);
-pub const TIDAL_GARDEN_ADMISSION_REVISION: u16 = 1;
-pub const BARREL_YARD_PRESET: MapPresetId = MapPresetId(5);
-pub const BARREL_YARD_ADMISSION_REVISION: u16 = 2;
-pub const TWIN_VAULTS_PRESET: MapPresetId = MapPresetId(6);
-pub const TWIN_VAULTS_ADMISSION_REVISION: u16 = 1;
+#[cfg(test)]
+const TIDAL_GARDEN_PRESET: MapPresetId = MapPresetId(4);
+#[cfg(test)]
+const BARREL_YARD_PRESET: MapPresetId = MapPresetId(5);
+pub const FEATURE_YARD_WIPEOUT_PRESET: MapPresetId = MapPresetId(7);
+pub const FEATURE_YARD_WIPEOUT_ADMISSION_REVISION: u16 = 1;
+pub const FEATURE_YARD_HOT_ZONE_PRESET: MapPresetId = MapPresetId(8);
+pub const FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION: u16 = 1;
+pub const FEATURE_YARD_HEIST_PRESET: MapPresetId = MapPresetId(9);
+pub const FEATURE_YARD_HEIST_ADMISSION_REVISION: u16 = 1;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
@@ -2096,6 +2098,117 @@ mod tests {
     use super::*;
 
     #[test]
+    fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let wipeout = &catalog.preset(FEATURE_YARD_WIPEOUT_PRESET).unwrap().recipe;
+        let hot_zone = &catalog.preset(FEATURE_YARD_HOT_ZONE_PRESET).unwrap().recipe;
+        let heist = &catalog.preset(FEATURE_YARD_HEIST_PRESET).unwrap().recipe;
+
+        for variant in [hot_zone, heist] {
+            assert_eq!(variant.presentation_theme_id, wipeout.presentation_theme_id);
+            assert_eq!(variant.dimensions, wipeout.dimensions);
+            assert_eq!(
+                variant.default_surface_asset_id,
+                wipeout.default_surface_asset_id
+            );
+            assert_eq!(variant.placements, wipeout.placements);
+            assert_eq!(variant.filled_rects, wipeout.filled_rects);
+        }
+        assert_eq!(wipeout.mode_definition_id, WIPEOUT_MODE_DEFINITION);
+        assert!(wipeout.mode_anchors.is_empty());
+        assert_eq!(hot_zone.mode_definition_id, HOT_ZONE_MODE_DEFINITION);
+        assert_eq!(hot_zone.mode_anchors.len(), 1);
+        assert!(matches!(
+            hot_zone.mode_anchors[0].kind,
+            MapModeAnchorKind::HotZoneCircle { .. }
+        ));
+        assert_eq!(heist.mode_definition_id, HEIST_MODE_DEFINITION);
+        assert_eq!(heist.mode_anchors.len(), 2);
+        assert!(
+            heist
+                .mode_anchors
+                .iter()
+                .all(|anchor| matches!(anchor.kind, MapModeAnchorKind::HeistSafe { .. }))
+        );
+
+        for preset in [
+            FEATURE_YARD_WIPEOUT_PRESET,
+            FEATURE_YARD_HOT_ZONE_PRESET,
+            FEATURE_YARD_HEIST_PRESET,
+        ] {
+            let resolved = catalog.resolve_preset(preset, MapInstanceId(1)).unwrap();
+            assert!(
+                resolved
+                    .spawn_points_by_team
+                    .values()
+                    .all(|spawns| spawns.len() == 3)
+            );
+        }
+    }
+
+    #[test]
+    fn feature_yard_contains_every_completed_map_capability_with_bounded_terminal_states() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let resolved = catalog
+            .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+            .unwrap();
+        let count = |asset_id| {
+            resolved
+                .snapshot
+                .placements
+                .iter()
+                .filter(|placement| placement.asset_id == asset_id)
+                .count()
+        };
+        assert_eq!(count(WATER_ASSET), 8);
+        assert_eq!(count(TALL_GRASS_ASSET), 8);
+        assert_eq!(count(BREAKABLE_BARRIER_ASSET), 4);
+        assert_eq!(count(DESTRUCTIBLE_COVER_ASSET), 4);
+        assert_eq!(count(OIL_BARREL_ASSET), 4);
+        assert_eq!(count(PLAYER_SPAWN_ASSET), 6);
+        assert_eq!(resolved.dynamic_placements.len(), 12);
+        assert_eq!(
+            resolved
+                .player_only_surface_rects
+                .iter()
+                .map(|rectangle| usize::from(rectangle.width) * usize::from(rectangle.height))
+                .sum::<usize>(),
+            8
+        );
+
+        for placement in &resolved.dynamic_placements {
+            let asset = catalog.asset(placement.asset_id).unwrap();
+            let profile = catalog.profile(asset.gameplay_profile_id).unwrap();
+            let terminal_asset = match profile.durability {
+                MapDurabilityBehavior::HitPoints(id) => {
+                    match catalog.damage_profile(id).unwrap().terminal {
+                        MapObjectTerminalBehavior::Explode {
+                            outcome: MapPlacementOutcome::ReplacedWith(id),
+                            ..
+                        } => Some(id),
+                        MapObjectTerminalBehavior::Explode {
+                            outcome: MapPlacementOutcome::Removed,
+                            ..
+                        } => None,
+                    }
+                }
+                MapDurabilityBehavior::Indestructible => match profile.destruction {
+                    MapDestructionBehavior::ReplaceOnMapDestruction(id) => Some(id),
+                    MapDestructionBehavior::RemoveOnMapDestruction => None,
+                    MapDestructionBehavior::Indestructible => {
+                        panic!("resolved dynamic placement must terminate")
+                    }
+                },
+            };
+            if let Some(terminal_asset) = terminal_asset {
+                let replacement = catalog.asset(terminal_asset).unwrap();
+                let replacement_profile = catalog.profile(replacement.gameplay_profile_id).unwrap();
+                assert_eq!(replacement_profile.player_collision, PlayerCollision::Pass);
+            }
+        }
+    }
+
+    #[test]
     fn crossroads_grid_resolves_exact_structural_bounds_and_counts() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let resolved = catalog
@@ -2270,20 +2383,20 @@ mod tests {
     }
 
     #[test]
-    fn converted_hot_zone_preserves_exact_objective_and_crossroads_topology() {
+    fn feature_yard_hot_zone_preserves_exact_objective_and_shared_topology() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let resolved = catalog
-            .resolve_preset(CROSSROADS_HOT_ZONE_PRESET, MapInstanceId(9))
+            .resolve_preset(FEATURE_YARD_HOT_ZONE_PRESET, MapInstanceId(9))
             .unwrap();
         assert_eq!(
             resolved.snapshot.dimensions,
             MapDimensions {
-                width: 56,
-                height: 36
+                width: 64,
+                height: 40
             }
         );
-        assert_eq!(resolved.static_colliders.len(), 6);
-        assert_eq!(resolved.dynamic_placements.len(), 36);
+        assert_eq!(resolved.static_colliders.len(), 4);
+        assert_eq!(resolved.dynamic_placements.len(), 12);
         let grass = resolved
             .snapshot
             .placements
@@ -2291,7 +2404,7 @@ mod tests {
             .filter(|placement| placement.asset_id == TALL_GRASS_ASSET)
             .map(|placement| placement.cell)
             .collect::<BTreeSet<_>>();
-        assert_eq!(grass.len(), 30);
+        assert_eq!(grass.len(), 8);
         assert_eq!(
             grass
                 .iter()
@@ -2312,10 +2425,10 @@ mod tests {
     }
 
     #[test]
-    fn twin_vaults_resolves_exact_mirrored_heist_safe_anchors() {
+    fn feature_yard_resolves_exact_mirrored_heist_safe_anchors() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let resolved = catalog
-            .resolve_preset(TWIN_VAULTS_PRESET, MapInstanceId(10))
+            .resolve_preset(FEATURE_YARD_HEIST_PRESET, MapInstanceId(10))
             .unwrap();
         assert_eq!(resolved.snapshot.mode_definition_id, HEIST_MODE_DEFINITION);
         assert!(resolved.objective_zone.is_none());
@@ -2339,7 +2452,7 @@ mod tests {
             (resolved.heist_safes[0].center.y - resolved.heist_safes[1].center.y).abs()
                 < f32::EPSILON
         );
-        assert_eq!(resolved.dynamic_placements.len(), 4);
+        assert_eq!(resolved.dynamic_placements.len(), 12);
         assert!(
             resolved
                 .spawn_points_by_team
@@ -2349,12 +2462,12 @@ mod tests {
     }
 
     #[test]
-    fn twin_vaults_rejects_safe_overlap_wrong_visual_and_sealed_access() {
+    fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let recipe = catalog
             .presets
             .iter()
-            .find(|preset| preset.id == TWIN_VAULTS_PRESET)
+            .find(|preset| preset.id == FEATURE_YARD_HEIST_PRESET)
             .unwrap()
             .recipe
             .clone();
@@ -2368,9 +2481,14 @@ mod tests {
             parameters: MapPlacementParameters::None,
         });
         assert!(
-            resolve_grid_recipe(&overlap, TWIN_VAULTS_PRESET, MapInstanceId(1), &catalog)
-                .unwrap_err()
-                .contains("safe reservation overlaps")
+            resolve_grid_recipe(
+                &overlap,
+                FEATURE_YARD_HEIST_PRESET,
+                MapInstanceId(1),
+                &catalog
+            )
+            .unwrap_err()
+            .contains("safe reservation overlaps")
         );
 
         let mut wrong_visual = recipe.clone();
@@ -2385,7 +2503,7 @@ mod tests {
         assert!(
             resolve_grid_recipe(
                 &wrong_visual,
-                TWIN_VAULTS_PRESET,
+                FEATURE_YARD_HEIST_PRESET,
                 MapInstanceId(1),
                 &catalog
             )
@@ -2415,9 +2533,14 @@ mod tests {
             });
         }
         assert!(
-            resolve_grid_recipe(&sealed, TWIN_VAULTS_PRESET, MapInstanceId(1), &catalog)
-                .unwrap_err()
-                .contains("fewer than two legal attack sectors")
+            resolve_grid_recipe(
+                &sealed,
+                FEATURE_YARD_HEIST_PRESET,
+                MapInstanceId(1),
+                &catalog
+            )
+            .unwrap_err()
+            .contains("fewer than two legal attack sectors")
         );
     }
 
@@ -2497,13 +2620,17 @@ mod tests {
         inert_collider.gameplay_profiles[0].collider_shape = MapColliderShape::FootprintRectangle;
         assert!(inert_collider.validate().is_err());
 
-        let hot_zone = catalog.presets[1].recipe.clone();
+        let hot_zone = catalog
+            .preset(FEATURE_YARD_HOT_ZONE_PRESET)
+            .unwrap()
+            .recipe
+            .clone();
         let mut missing = hot_zone.clone();
         missing.mode_anchors.clear();
         assert!(
             resolve_grid_recipe(
                 &missing,
-                CROSSROADS_HOT_ZONE_PRESET,
+                FEATURE_YARD_HOT_ZONE_PRESET,
                 MapInstanceId(1),
                 &catalog
             )
@@ -2517,7 +2644,7 @@ mod tests {
         assert!(
             resolve_grid_recipe(
                 &outside,
-                CROSSROADS_HOT_ZONE_PRESET,
+                FEATURE_YARD_HOT_ZONE_PRESET,
                 MapInstanceId(1),
                 &catalog
             )
@@ -2777,8 +2904,8 @@ mod tests {
         let catalog = MapContentCatalog::embedded().unwrap();
         for (preset_id, recipe_source) in [
             (
-                CROSSROADS_HOT_ZONE_PRESET,
-                include_str!("../../content/maps/builtin/crossroads-facility-hot-zone.ron"),
+                FEATURE_YARD_HOT_ZONE_PRESET,
+                include_str!("../../content/maps/builtin/feature-yard-hot-zone.ron"),
             ),
             (
                 ASHEN_COURT_PRESET,

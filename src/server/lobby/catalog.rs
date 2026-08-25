@@ -331,63 +331,59 @@ mod tests {
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local PewPew Blitz");
-        assert_eq!(catalog.game_types.len(), 10);
-        let tidal = &catalog.game_types[2];
-        assert_eq!(tidal.display_name, "Tidal Garden 2v2");
-        assert_eq!(tidal.map_preset_ids, vec![MapPresetId(4)]);
+        assert_eq!(catalog.game_types.len(), 9);
+        let wipeout_three_vs_three = &catalog.game_types[3];
+        assert_eq!(
+            wipeout_three_vs_three.display_name,
+            "Feature Yard Wipeout 3v3"
+        );
+        assert_eq!(wipeout_three_vs_three.map_preset_ids, vec![MapPresetId(7)]);
         let hot_zone_one_vs_one = &catalog.game_types[4];
         assert_eq!(hot_zone_one_vs_one.id.as_str(), "hot-zone-1v1");
-        assert_eq!(hot_zone_one_vs_one.display_name, "Hot Zone 1v1");
-        assert_eq!(hot_zone_one_vs_one.map_preset_ids, vec![MapPresetId(2)]);
+        assert_eq!(
+            hot_zone_one_vs_one.display_name,
+            "Feature Yard Hot Zone 1v1"
+        );
+        assert_eq!(hot_zone_one_vs_one.map_preset_ids, vec![MapPresetId(8)]);
         assert_eq!(hot_zone_one_vs_one.players_per_team, 1);
-        let first_blood = catalog
+        let wipeout_two_vs_two = catalog
             .game_types
             .iter()
-            .find(|game| game.id.as_str() == "first-blood")
+            .find(|game| game.id.as_str() == "wipeout-2v2")
             .unwrap();
-        assert_eq!(first_blood.display_name, "First Blood");
-        assert_eq!(first_blood.configuration_revision, 2);
-        assert_eq!(first_blood.map_preset_ids, vec![MapPresetId(3)]);
-        assert_eq!(first_blood.players_per_team, 1);
+        assert_eq!(wipeout_two_vs_two.configuration_revision, 2);
+        assert_eq!(wipeout_two_vs_two.map_preset_ids, vec![MapPresetId(7)]);
+        assert_eq!(wipeout_two_vs_two.players_per_team, 2);
         assert_eq!(
-            first_blood.rules_summary,
+            wipeout_two_vs_two.rules_summary,
             AdvertisedRulesSummary::Wipeout {
-                target_score: 1,
+                target_score: 10,
                 active_limit_ticks: MatchLifecycleRules::default().active_limit_ticks,
             }
         );
         assert_eq!(
-            catalog.rules(&first_blood.id),
+            catalog.rules(&wipeout_two_vs_two.id),
             Some(ResolvedGameRules {
-                objective_target: 1,
+                objective_target: 10,
                 match_duration_ticks: 10_800,
                 countdown_ticks: 180,
                 respawn_ticks: 180,
             })
         );
-        let barrel_yard = catalog
-            .game_types
-            .iter()
-            .find(|game| game.id.as_str() == "barrel-yard-1v1")
-            .unwrap();
-        assert_eq!(barrel_yard.id.as_str(), "barrel-yard-1v1");
-        assert_eq!(barrel_yard.configuration_revision, 2);
-        assert_eq!(barrel_yard.map_preset_ids, vec![MapPresetId(5)]);
-        assert_eq!(barrel_yard.players_per_team, 1);
         let heist = catalog
             .game_types
             .iter()
             .filter(|game| game.mode_definition_id == HEIST_MODE_DEFINITION)
             .collect::<Vec<_>>();
         assert_eq!(heist.len(), 3);
-        assert_eq!(heist[0].map_preset_ids, vec![MapPresetId(6)]);
+        assert_eq!(heist[0].map_preset_ids, vec![MapPresetId(9)]);
         assert_eq!(heist[2].players_per_team, 3);
         assert_eq!(
             catalog.revision.0,
             [
-                0x34, 0x2b, 0x32, 0xd0, 0xa8, 0xa9, 0x41, 0x85, 0xa3, 0x36, 0xe2, 0x50, 0x52, 0xde,
-                0xd7, 0x5b, 0xe7, 0xca, 0xc6, 0x1f, 0x88, 0x2f, 0xdf, 0x25, 0x70, 0x65, 0x58, 0x16,
-                0xc8, 0x4b, 0x9d, 0xfb,
+                0x95, 0x44, 0x79, 0x24, 0x25, 0xad, 0x92, 0x77, 0xcd, 0xa4, 0x5c, 0x8f, 0x0c, 0xf9,
+                0x3d, 0x2d, 0xd1, 0x31, 0xe3, 0xa2, 0xcd, 0xa8, 0x77, 0xc2, 0x3a, 0x29, 0xeb, 0x12,
+                0x62, 0x31, 0x3c, 0x41,
             ]
         );
     }
@@ -397,9 +393,9 @@ mod tests {
         for invalid in [
             VALID.replace("schema_version: 2", "schema_version: 2, surprise: true"),
             VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
-            VALID.replace("crossroads-facility\"", "missing-map\""),
+            VALID.replace("feature-yard-wipeout\"", "missing-map\""),
             VALID.replace("players_per_team: 2", "players_per_team: 4"),
-            VALID.replace("kills_to_win: 1", "kills_to_win: 0"),
+            VALID.replace("kills_to_win: 10", "kills_to_win: 0"),
             VALID.replace("capture_seconds: 30", "kills_to_win: 10"),
             VALID.replace("countdown_seconds: 3", "countdown_seconds: 0"),
         ] {
@@ -412,8 +408,8 @@ mod tests {
         let duplicate_id = VALID.replace("hot-zone-2v2", "wipeout-2v2");
         assert!(resolve_operator_catalog(duplicate_id.as_bytes()).is_err());
         let duplicate_map = VALID.replace(
-            "maps: [\"crossroads-facility\"]",
-            "maps: [\"crossroads-facility\", \"crossroads-facility\"]",
+            "maps: [\"feature-yard-wipeout\"]",
+            "maps: [\"feature-yard-wipeout\", \"feature-yard-wipeout\"]",
         );
         assert!(resolve_operator_catalog(duplicate_map.as_bytes()).is_err());
     }
