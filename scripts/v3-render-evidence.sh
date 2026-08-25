@@ -15,9 +15,9 @@ client_one_log=${report_path}.client-1.log
 client_two_log=${report_path}.client-2.log
 
 case "$game_mode" in
-    wipeout | hot-zone) ;;
+    wipeout | hot-zone | heist) ;;
     *)
-        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be wipeout or hot-zone' >&2
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be wipeout, hot-zone, or heist' >&2
         exit 2
         ;;
 esac
@@ -25,7 +25,13 @@ if [[ -z "$players_per_team" ]]; then
     if [[ "$game_mode" == hot-zone ]]; then players_per_team=2; else players_per_team=1; fi
 fi
 if [[ -z "$game_type" ]]; then
-    if [[ "$game_mode" == hot-zone ]]; then game_type=hot-zone-2v2; else game_type=first-blood; fi
+    if [[ "$game_mode" == hot-zone ]]; then
+        game_type=hot-zone-2v2
+    elif [[ "$game_mode" == heist ]]; then
+        game_type="heist-${players_per_team}v${players_per_team}"
+    else
+        game_type=first-blood
+    fi
 fi
 case "$players_per_team" in
     1) match_flag=--product-match-smoke-1v1 ;;

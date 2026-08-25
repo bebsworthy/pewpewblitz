@@ -26,6 +26,9 @@ enum SoundKind {
     Sentry,
     ChargeReady,
     Passive,
+    ObjectiveHit,
+    ObjectiveCritical,
+    ObjectiveDestroyed,
 }
 
 #[derive(Resource, Default)]
@@ -36,6 +39,7 @@ struct ClientAudioState {
     suppressed: u64,
     last_match: Option<(crate::matchplay::MatchId, MatchPhase, Option<[u16; 2]>)>,
     last_hot_zone: Option<HotZoneAudioMemory>,
+    last_objective_hit_tick: Option<u64>,
 }
 
 /// Per-match deduplication memory for objective cues; never gameplay truth.
@@ -56,6 +60,7 @@ impl Plugin for ClientAudioPlugin {
             Update,
             (
                 play_combat_audio,
+                play_heist_objective_audio,
                 play_ability_audio,
                 play_reload_audio,
                 play_session_audio,
@@ -64,6 +69,62 @@ impl Plugin for ClientAudioPlugin {
             )
                 .after(crate::map::MapPresentationSet::Readiness),
         );
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn play_heist_objective_audio(
+    mut commands: Commands,
+    handles: Option<Res<ClientAssetHandles>>,
+    asset_server: Res<AssetServer>,
+    mut cues: MessageReader<crate::matchplay::ReceivedHeistObjectiveCue>,
+    readiness: Res<hud::ClientHeistReadiness>,
+    mut state: ResMut<ClientAudioState>,
+    active: Query<(), With<ClientAudioOneShot>>,
+) {
+    let Some(handles) = handles else {
+        cues.clear();
+        return;
+    };
+    let ready = matches!(*readiness, hud::ClientHeistReadiness::Ready);
+    let mut active_count = active.iter().count();
+    for crate::matchplay::ReceivedHeistObjectiveCue(cue) in cues.read() {
+        if !ready {
+            continue;
+        }
+        let (kind, handle) = match cue.kind {
+            crate::matchplay::HeistObjectiveCueKind::Damaged => {
+                if state
+                    .last_objective_hit_tick
+                    .is_some_and(|last| cue.tick < last.saturating_add(6))
+                {
+                    continue;
+                }
+                state.last_objective_hit_tick = Some(cue.tick);
+                (SoundKind::ObjectiveHit, handles.impact.clone())
+            }
+            crate::matchplay::HeistObjectiveCueKind::Critical => {
+                (SoundKind::ObjectiveCritical, handles.ready.clone())
+            }
+            crate::matchplay::HeistObjectiveCueKind::Destroyed => {
+                (SoundKind::ObjectiveDestroyed, handles.defeat.clone())
+            }
+        };
+        let key = (kind, cue.event_id.0);
+        if state.recent.contains(&key) {
+            continue;
+        }
+        remember_audio_key(&mut state.recent, key);
+        if active_count >= live_limit_for(kind) || !asset_server.is_loaded(&handle) {
+            state.suppressed = state.suppressed.saturating_add(1);
+            continue;
+        }
+        commands.spawn((
+            ClientAudioOneShot,
+            AudioPlayer::new(handle),
+            PlaybackSettings::DESPAWN,
+        ));
+        active_count += 1;
     }
 }
 
@@ -327,9 +388,11 @@ fn play_combat_audio(
         }
         let Some(handle) = (match kind {
             SoundKind::Fire => Some(handles.fire.clone()),
-            SoundKind::Impact => Some(handles.impact.clone()),
-            SoundKind::Defeat => Some(handles.defeat.clone()),
-            SoundKind::Reset | SoundKind::Sentry => Some(handles.ready.clone()),
+            SoundKind::Impact | SoundKind::ObjectiveHit => Some(handles.impact.clone()),
+            SoundKind::Defeat | SoundKind::ObjectiveDestroyed => Some(handles.defeat.clone()),
+            SoundKind::Reset | SoundKind::Sentry | SoundKind::ObjectiveCritical => {
+                Some(handles.ready.clone())
+            }
             SoundKind::Ready
             | SoundKind::Error
             | SoundKind::Dash
@@ -354,6 +417,7 @@ const fn live_limit_for(kind: SoundKind) -> usize {
     match kind {
         SoundKind::Fire => MAX_ACTIVE_ONE_SHOTS - 4,
         SoundKind::Impact => MAX_ACTIVE_ONE_SHOTS - 2,
+        SoundKind::ObjectiveHit => 6,
         SoundKind::Defeat
         | SoundKind::Reset
         | SoundKind::Ready
@@ -361,7 +425,9 @@ const fn live_limit_for(kind: SoundKind) -> usize {
         | SoundKind::Dash
         | SoundKind::Sentry
         | SoundKind::ChargeReady
-        | SoundKind::Passive => MAX_ACTIVE_ONE_SHOTS,
+        | SoundKind::Passive
+        | SoundKind::ObjectiveCritical
+        | SoundKind::ObjectiveDestroyed => MAX_ACTIVE_ONE_SHOTS,
     }
 }
 

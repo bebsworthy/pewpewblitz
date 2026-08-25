@@ -21,8 +21,8 @@ if [[ "$match_rules" != "verification" && "$match_rules" != "production" ]]; the
     printf 'brawler match: BRAWLER_NETWORK_MATCH_RULES must be verification or production\n' >&2
     exit 2
 fi
-if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" ]]; then
-    printf 'brawler match: BRAWLER_NETWORK_GAME_MODE must be wipeout or hot-zone\n' >&2
+if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" && "$game_mode" != "heist" ]]; then
+    printf 'brawler match: BRAWLER_NETWORK_GAME_MODE must be wipeout, hot-zone, or heist\n' >&2
     exit 2
 fi
 if [[ ! "$simulation_ticks" =~ ^[1-9][0-9]*$ || ! "$match_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then

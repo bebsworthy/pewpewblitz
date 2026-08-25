@@ -77,7 +77,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("wipeout", "hot-zone"),
+        choices=("wipeout", "hot-zone", "heist"),
         default=os.environ.get("BRAWLER_PAIRED_EVIDENCE_MODE", "wipeout"),
         help="existing verification mode used by both launchers (default: wipeout)",
     )

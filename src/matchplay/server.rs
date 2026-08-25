@@ -1189,7 +1189,12 @@ fn publish_match_clock(
     }
 }
 
-#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    reason = "the summary system reads each installed mode's bounded terminal state in one post-outcome snapshot"
+)]
 fn capture_match_summary(
     tick: Res<SimulationTick>,
     rules: Res<MatchLifecycleRules>,
@@ -1203,6 +1208,7 @@ fn capture_match_summary(
         With<MatchRoot>,
     >,
     hot_zone_telemetry: Option<ResMut<super::hot_zone::HotZoneTelemetry>>,
+    heist_telemetry: Option<Res<super::HeistTelemetry>>,
     heist_safes: Query<(
         &super::HeistSafe,
         &crate::combat::CurrentHealth,
@@ -1241,6 +1247,18 @@ fn capture_match_summary(
                         final_health,
                         maximum_health,
                         completion: heist.completion,
+                        accepted_hits: heist_telemetry
+                            .as_deref()
+                            .map_or(0, |telemetry| telemetry.accepted_hits),
+                        applied_damage: heist_telemetry
+                            .as_deref()
+                            .map_or(0, |telemetry| telemetry.applied_damage),
+                        first_damage_tick: heist_telemetry
+                            .as_deref()
+                            .map_or([None; 2], |telemetry| telemetry.first_damage_tick),
+                        destroyed_at_tick: heist_telemetry
+                            .as_deref()
+                            .map_or([None; 2], |telemetry| telemetry.destroyed_at_tick),
                     })
                 }
                 (None, None, None) => panic!("an installed mode carries its state on the root"),

@@ -106,10 +106,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("wipeout", "hot-zone", "both", "crash-restart"),
+        choices=("wipeout", "hot-zone", "heist", "both", "all", "crash-restart"),
         default=os.environ.get("BRAWLER_ROUTED_EVIDENCE_MODE", "wipeout"),
         help=(
-            "evidence profile: one gameplay mode, both modes (cycles per mode), or the "
+            "evidence profile: one gameplay mode, both legacy modes, all modes, or the "
             "production-worker crash/restart process test (default: wipeout)"
         ),
     )
@@ -1334,7 +1334,12 @@ def main() -> int:
         print(f"routed evidence summary: {output}", file=sys.stderr)
         return 0 if summary["status"] == "pass" else 1
 
-    modes = ("wipeout", "hot-zone") if args.mode == "both" else (args.mode,)
+    if args.mode == "both":
+        modes = ("wipeout", "hot-zone")
+    elif args.mode == "all":
+        modes = ("wipeout", "hot-zone", "heist")
+    else:
+        modes = (args.mode,)
     cycles: list[dict[str, Any]] = []
     for mode in modes:
         for cycle in range(1, args.cycles + 1):

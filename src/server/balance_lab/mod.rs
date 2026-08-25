@@ -1068,6 +1068,7 @@ mod tests {
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut numeric = baseline.clone();
         numeric.weapons[0].recipe.fire_cooldown_ticks += 1;
+        numeric.heist.safe_maximum_health = 2_500;
         let UltimateParameters::SelfCloak { duration_ticks } = &mut numeric.ultimates[0].parameters
         else {
             panic!("first tunable ultimate is Self Cloak");
@@ -1078,6 +1079,19 @@ mod tests {
         };
         *range = 438.0;
         validate_snapshot(&numeric, &baseline, &builds, &weapons, &maps, &fighter).unwrap();
+        let mut invalid_heist = baseline.clone();
+        invalid_heist.heist.safe_maximum_health = 99;
+        assert!(
+            validate_snapshot(
+                &invalid_heist,
+                &baseline,
+                &builds,
+                &weapons,
+                &maps,
+                &fighter,
+            )
+            .is_err()
+        );
         let mut expanded_brush = baseline.clone();
         expanded_brush.weapons[2].recipe.world_effects =
             vec![WorldEffectDefinition::DestroyMap { radius: 128.0 }];
@@ -1128,6 +1142,8 @@ mod tests {
         assert!(json.contains("\"ultimates\""));
         assert!(json.contains("\"reveal_proximity_radius\""));
         assert!(json.contains("\"displayName\""));
+        assert!(json.contains("\"heist\""));
+        assert!(json.contains("\"safeMaximumHealth\":2000"));
     }
 
     #[test]

@@ -159,6 +159,7 @@ mod tests {
         let path = root.0.join("session-v1.json");
         let (validator, mut snapshot) = fixture();
         snapshot.fighter_profiles.default.maximum_health += 7;
+        snapshot.heist.safe_maximum_health = 2_750;
 
         save(&path, &snapshot, BalanceLabRevision(9)).unwrap();
         let loaded = load(&path, &validator).unwrap().unwrap();

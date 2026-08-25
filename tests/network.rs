@@ -68,6 +68,8 @@ use serde::{Deserialize, Serialize};
 mod harness;
 use harness::*;
 
+#[path = "network/heist.rs"]
+mod heist;
 #[path = "network/hot_zone.rs"]
 mod hot_zone;
 

@@ -145,6 +145,30 @@ fn activate_legacy_test_fighters(
 #[derive(Resource)]
 struct LegacySandboxActivation;
 
+#[derive(Resource, Default)]
+struct CaptureHeistObjectiveCues(Vec<brawler::matchplay::HeistObjectiveCue>);
+
+fn capture_heist_objective_cues(
+    mut capture: ResMut<CaptureHeistObjectiveCues>,
+    mut receivers: Query<
+        Option<&mut MessageReceiver<brawler::matchplay::HeistObjectiveCue>>,
+        With<Client>,
+    >,
+) {
+    for receiver in &mut receivers {
+        if let Some(mut receiver) = receiver {
+            capture.0.extend(receiver.receive());
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum HarnessMode {
+    Wipeout,
+    HotZone,
+    Heist,
+}
+
 pub(super) struct Harness {
     pub(super) server: App,
     pub(super) server_entity: Entity,
@@ -152,6 +176,7 @@ pub(super) struct Harness {
     pub(super) clients: Vec<App>,
     pub(super) client_entities: Vec<Entity>,
     pub(super) client_cues: Vec<Vec<CombatCue>>,
+    pub(super) client_heist_cues: Vec<Vec<brawler::matchplay::HeistObjectiveCue>>,
     pub(super) now: Instant,
 }
 
@@ -191,7 +216,8 @@ impl Harness {
     }
 
     pub(super) fn new_match(client_count: usize) -> Self {
-        let mut harness = Self::new_mode_with_options(client_count, None, false, false);
+        let mut harness =
+            Self::new_mode_with_options(client_count, None, false, HarnessMode::Wipeout);
         harness
             .server
             .world_mut()
@@ -200,7 +226,18 @@ impl Harness {
     }
 
     pub(super) fn new_hot_zone_match(client_count: usize) -> Self {
-        let mut harness = Self::new_mode_with_options(client_count, None, false, true);
+        let mut harness =
+            Self::new_mode_with_options(client_count, None, false, HarnessMode::HotZone);
+        harness
+            .server
+            .world_mut()
+            .remove_resource::<LegacySandboxActivation>();
+        harness
+    }
+
+    pub(super) fn new_heist_match(client_count: usize) -> Self {
+        let mut harness =
+            Self::new_mode_with_options(client_count, None, false, HarnessMode::Heist);
         harness
             .server
             .world_mut()
@@ -265,6 +302,7 @@ impl Harness {
             clients: Vec::with_capacity(client_count),
             client_entities: Vec::with_capacity(client_count),
             client_cues: Vec::with_capacity(client_count),
+            client_heist_cues: Vec::with_capacity(client_count),
             now: Instant::now(),
         };
         for client_id in 1..=client_count as u64 {
@@ -306,14 +344,19 @@ impl Harness {
         client_protocol_id: Option<u64>,
         extra_protocol: bool,
     ) -> Self {
-        Self::new_mode_with_options(client_count, client_protocol_id, extra_protocol, false)
+        Self::new_mode_with_options(
+            client_count,
+            client_protocol_id,
+            extra_protocol,
+            HarnessMode::Wipeout,
+        )
     }
 
     fn new_mode_with_options(
         client_count: usize,
         client_protocol_id: Option<u64>,
         extra_protocol: bool,
-        hot_zone: bool,
+        mode: HarnessMode,
     ) -> Self {
         let server_config = ServerNetworkConfig {
             transport: NetworkTransport::Crossbeam,
@@ -327,7 +370,7 @@ impl Harness {
             facing: 0.0,
         });
         server.insert_resource(LegacySandboxActivation);
-        let lifecycle = if hot_zone {
+        let lifecycle = if matches!(mode, HarnessMode::HotZone | HarnessMode::Heist) {
             // Shortened verification deadlines with a 1v1 capacity so deterministic
             // two-client scenarios can activate without changing rule semantics.
             brawler::matchplay::MatchLifecycleRules {
@@ -342,17 +385,31 @@ impl Harness {
         server
             .insert_resource(server_config.clone())
             .insert_resource(lifecycle);
-        if hot_zone {
-            server
-                .insert_resource(brawler::matchplay::hot_zone_setup_for_composition())
-                .insert_resource(brawler::matchplay::hot_zone_rules_for_profile(
-                    brawler::config::MatchRulesProfile::ProcessVerification,
-                ))
-                .insert_resource(brawler::map::ServerMapSelection {
-                    preset_id: brawler::map::CROSSROADS_HOT_ZONE_PRESET,
-                });
-        } else {
-            server.insert_resource(brawler::matchplay::WipeoutRules::default());
+        match mode {
+            HarnessMode::Wipeout => {
+                server.insert_resource(brawler::matchplay::WipeoutRules::default());
+            }
+            HarnessMode::HotZone => {
+                server
+                    .insert_resource(brawler::matchplay::hot_zone_setup_for_composition())
+                    .insert_resource(brawler::matchplay::hot_zone_rules_for_profile(
+                        brawler::config::MatchRulesProfile::ProcessVerification,
+                    ))
+                    .insert_resource(brawler::map::ServerMapSelection {
+                        preset_id: brawler::map::CROSSROADS_HOT_ZONE_PRESET,
+                    });
+            }
+            HarnessMode::Heist => {
+                server
+                    .insert_resource(brawler::matchplay::MatchModeSetup {
+                        mode_definition_id: brawler::map::HEIST_MODE_DEFINITION,
+                        rules_revision: brawler::matchplay::HEIST_RULES_REVISION,
+                    })
+                    .insert_resource(brawler::matchplay::HeistRules::default())
+                    .insert_resource(brawler::map::ServerMapSelection {
+                        preset_id: brawler::map::TWIN_VAULTS_PRESET,
+                    });
+            }
         }
         server.add_plugins((
             MinimalPlugins,
@@ -368,11 +425,11 @@ impl Harness {
             ServerNetworkPlugin,
             brawler::matchplay::AuthoritativeMatchPlugin,
         ));
-        if hot_zone {
-            server.add_plugins(brawler::matchplay::HotZoneModePlugin);
-        } else {
-            server.add_plugins(brawler::matchplay::WipeoutModePlugin);
-        }
+        match mode {
+            HarnessMode::Wipeout => server.add_plugins(brawler::matchplay::WipeoutModePlugin),
+            HarnessMode::HotZone => server.add_plugins(brawler::matchplay::HotZoneModePlugin),
+            HarnessMode::Heist => server.add_plugins(brawler::matchplay::HeistModePlugin),
+        };
         server.add_systems(
             bevy::prelude::Update,
             activate_legacy_test_fighters
@@ -389,6 +446,7 @@ impl Harness {
             clients: Vec::with_capacity(client_count),
             client_entities: Vec::with_capacity(client_count),
             client_cues: Vec::with_capacity(client_count),
+            client_heist_cues: Vec::with_capacity(client_count),
             now: Instant::now(),
         };
         for client_id in 1..=client_count as u64 {
@@ -454,6 +512,9 @@ impl Harness {
                 ),
             );
         client.insert_resource(CaptureCombatCues::default());
+        client
+            .init_resource::<CaptureHeistObjectiveCues>()
+            .add_systems(bevy::prelude::Update, capture_heist_objective_cues);
         client.add_plugins(ClientNetworkPlugin);
         client.finish();
         client.cleanup();
@@ -469,6 +530,7 @@ impl Harness {
         self.client_entities.push(client_entity);
         self.server_links.push(server_link);
         self.client_cues.push(Vec::new());
+        self.client_heist_cues.push(Vec::new());
     }
 
     pub(super) fn step(&mut self) {
@@ -478,6 +540,7 @@ impl Harness {
             client.insert_resource(TimeUpdateStrategy::ManualInstant(self.now));
             client.update();
             self.drain_client_cues(index);
+            self.drain_client_heist_cues(index);
         }
         self.server
             .insert_resource(TimeUpdateStrategy::ManualInstant(self.now));
@@ -500,6 +563,17 @@ impl Harness {
 
     pub(super) fn client_cues(&self, index: usize) -> &[CombatCue] {
         &self.client_cues[index]
+    }
+
+    pub(super) fn drain_client_heist_cues(&mut self, index: usize) {
+        let cues = {
+            let world = self.clients[index].world_mut();
+            let Some(mut capture) = world.get_resource_mut::<CaptureHeistObjectiveCues>() else {
+                return;
+            };
+            std::mem::take(&mut capture.0)
+        };
+        self.client_heist_cues[index].extend(cues);
     }
 
     #[cfg(feature = "owner-prediction")]

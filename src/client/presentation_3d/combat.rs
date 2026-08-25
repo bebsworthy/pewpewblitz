@@ -1484,6 +1484,85 @@ pub(super) fn consume_world_object_cues(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    reason = "the focused presentation system validates and materializes bounded objective cues"
+)]
+pub(super) fn consume_heist_objective_cues(
+    mut commands: Commands,
+    mut received: MessageReader<crate::matchplay::ReceivedHeistObjectiveCue>,
+    readiness: Res<hud::ClientHeistReadiness>,
+    matches: Query<&MatchState, With<MatchRoot>>,
+    safes: Query<&crate::map::DamageableTargetIdentity, With<crate::matchplay::HeistSafe>>,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    settings: Option<Res<ClientShellSettings>>,
+    effects: Query<(Entity, &CombatEffect3d)>,
+    mut sequence: Local<CombatEffectSequence>,
+) {
+    let ready = matches!(*readiness, hud::ClientHeistReadiness::Ready);
+    let match_id = matches.single().ok().map(|state| state.match_id);
+    let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
+    for crate::matchplay::ReceivedHeistObjectiveCue(cue) in received.read() {
+        if !ready
+            || !matches!(
+                cue.target,
+                crate::map::DamageableTargetIdentity::HeistSafe {
+                    match_id: cue_match,
+                    ..
+                } if Some(cue_match) == match_id
+            )
+            || !safes.iter().any(|identity| *identity == cue.target)
+        {
+            continue;
+        }
+        if effects.iter().count() >= MAX_EFFECTS
+            && let Some((oldest, _)) = effects.iter().min_by_key(|(_, effect)| effect.order)
+        {
+            commands.entity(oldest).despawn();
+        }
+        sequence.0 = sequence.0.saturating_add(1);
+        let (radius, duration, ring) = match cue.kind {
+            crate::matchplay::HeistObjectiveCueKind::Damaged => (12.0, 0.24, false),
+            crate::matchplay::HeistObjectiveCueKind::Critical => (30.0, 0.50, true),
+            crate::matchplay::HeistObjectiveCueKind::Destroyed => (72.0, 0.85, true),
+        };
+        commands.spawn((
+            CombatEffect3d {
+                timer: Timer::new(
+                    Duration::from_secs_f32(if reduced { duration * 0.5 } else { duration }),
+                    TimerMode::Once,
+                ),
+                expires_at_tick: None,
+                order: sequence.0,
+            },
+            Mesh3d(if ring {
+                primitives.area_ring.clone()
+            } else {
+                primitives.effect_sphere.clone()
+            }),
+            MeshMaterial3d(materials.effect_damage.clone()),
+            NotShadowCaster,
+            NotShadowReceiver,
+            Transform {
+                translation: ground_position(cue.position.as_vec2()) + Vec3::Y * PREVIEW_HEIGHT,
+                scale: if ring {
+                    Vec3::new(radius, 1.0, radius)
+                } else {
+                    Vec3::splat(radius)
+                },
+                ..default()
+            },
+            Name::new(match cue.kind {
+                crate::matchplay::HeistObjectiveCueKind::Damaged => "Heist safe hit cue",
+                crate::matchplay::HeistObjectiveCueKind::Critical => "Heist safe critical cue",
+                crate::matchplay::HeistObjectiveCueKind::Destroyed => "Heist safe destroyed cue",
+            }),
+        ));
+    }
+}
+
 fn reveal_ring_remaining_duration(
     activated_at_tick: u64,
     expires_at_tick: u64,

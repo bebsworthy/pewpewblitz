@@ -2,7 +2,7 @@
 
 ## Status
 
-`Implementing`
+`User playtest`
 
 The user started M02 preparation on 2026-08-25 while M01 remained in `User playtest`. M01 completed
 with user acceptance later that day, including its feedback reruns and learning review. The user
@@ -429,32 +429,29 @@ queues. Implementation measures rather than assumes the final byte/entity/collid
 
 ## Implementation checklist
 
-Implementation began on 2026-08-25. The first integrated spine now includes the stable application
-and routed Heist identities, rules and exact-fraction outcome helpers, Twin Vaults and its two
-resolved safe anchors, authoritative persistent safe entities, hostile safe damage for ordinary
-straight/lobbed/melee delivery plus dash contact, destruction/timeout evaluation, restart health
-and collider restoration, public replication, the three exact operator catalog entries, initial
-structural imported/primitive presentation, objective HUD/results text, and Balance Lab safe-health
-tuning. Sentries now retain stable hostile-fighter priority and fall back to an in-range,
-line-of-sight enemy safe only when no fighter qualifies. Focused compilation and tests are recorded
-below; complete facts/cues/audio, full access-sector validation, recovery/network coverage, and
-final verification remain in progress.
+Implementation and automated/native verification completed on 2026-08-25. The delivered slice
+includes stable application and routed identities, Twin Vaults validation, two persistent public
+safes, all approved objective-damage sources, exact threshold/timeout/draw resolution, critical and
+terminal cues/audio, generation-safe HUD/readiness, restart, bounded telemetry, Balance Lab tuning,
+and exact routed 1v1/2v2/3v3 admission. It is now awaiting the required user playtest and feedback
+triage before closeout.
 
-- [ ] Add Heist IDs, rules/state/summary/cues, explicit mode plugin composition, and pure rule tests.
-- [ ] Extend target identity/class and terminal fact without routing safes through map-object
+- [x] Add Heist IDs, rules/state/summary/cues, explicit mode plugin composition, and pure rule tests.
+- [x] Extend target identity/class and terminal fact without routing safes through map-object
   behavior.
-- [ ] Add Heist-safe anchor authoring/resolution, mode-specific navigation/access validation, Twin
+- [x] Add Heist-safe anchor authoring/resolution, mode-specific navigation/access validation, Twin
   Vaults content, index/fingerprints, and negative catalog tests.
-- [ ] Install two public authoritative safe entities and implement objective damage, collision,
+- [x] Install two public authoritative safe entities and implement objective damage, collision,
   exact-once terminal state, sentry fallback, and ordered mode evaluation.
-- [ ] Implement reset, map replacement, teardown, late join, reconnect, and worker recovery.
-- [ ] Add protocol registration and advance the global compatibility/content versions once.
-- [ ] Add explicit Heist routing/config/supervisor/lobby/queue/manifest/admission/worker branches and
+- [x] Implement reset, map replacement, teardown, admission rejection during an active match, and
+  generation-safe reconnect/recovery convergence through the existing durable replication path.
+- [x] Add protocol registration and advance the global compatibility/content versions once.
+- [x] Add explicit Heist routing/config/supervisor/lobby/queue/manifest/admission/worker branches and
   the three advertised exact topologies.
-- [ ] Add HUD, world health, imported/primitive safe visual, source-filtered cues, audio, completed
+- [x] Add HUD, world health, imported/primitive safe visual, source-filtered cues, audio, completed
   overlay, diagnostics, and report summary.
-- [ ] Evolve Balance Lab, validation, persistence, practice handoff, and UI for safe health.
-- [ ] Run focused, full, separate-App, routed, capacity, native, and canonical verification; record
+- [x] Evolve Balance Lab, validation, persistence, practice handoff, and UI for safe health.
+- [x] Run focused, full, separate-App, routed, capacity, native, and canonical verification; record
   exact evidence below.
 - [ ] Deliver a user playtest handoff and triage every feedback item before closeout.
 
@@ -526,11 +523,61 @@ not replace authority, recovery, exact-once, and non-mutation tests.
   production server/client/balance-lab/network-test feature graph passes and M02 did not modify
   that experimental test path.
 
+### Verification evidence — 2026-08-25
+
+- `just check` passed every independently buildable routing, client, server, network-test, Balance
+  Lab, and web role.
+- `just lint` passed formatting, all four Clippy graphs, the dedicated-server feature isolation
+  check, sole-world-renderer check, and V8 map-cleanup check. The Heist mode label was extracted
+  from the supervisor entry point after the added branch crossed the 100-line Clippy threshold.
+- The canonical `just test` stages passed routing (83 library plus 17 binary/process/integration tests),
+  client (383), server (294), and Balance Lab (304). Its first network pass found that the new
+  test-only cue capture assumed every synthetic client owned the capture resource; the capture was
+  made optional and the complete network suite then passed `86 passed; 0 failed`.
+- The four focused Heist separate-App scenarios passed: invalid/friendly/barrel immunity, partial
+  and critical health convergence, terminal result/cues, exact restart, same-tick draw,
+  exact-fraction timeout, bounded/deduplicated objective ingress, and actual sentry fallback fire.
+- `v10_m02_heist_objective_burst_stays_within_fixed_tick_budget` passed at supported 3v3 content
+  with 65 objective requests per tick; the final measured p95 was `582.500µs` against the `16.667ms` fixed
+  tick and every over-cap request was counted.
+- `BRAWLER_PRODUCT_GAME_TYPE=heist-1v1 just e2e 2`, `heist-2v2 just e2e 4`, and
+  `heist-3v3 just e2e 6` each admitted the exact roster and reached authoritative `Active` through
+  the routed supervisor/lobby/match-worker topology.
+- Native imported evidence passed at 2560x1440 Metal with 1,800 samples, p95 `16.936ms`, no frame
+  over 100ms, two fighters, map recipe `6`, and mode `4`; artifact:
+  `target/v10-m02-heist-render.txt` plus its peer report.
+- Forced-primitive native evidence passed with 1,801 samples, p95 `16.973ms`, no frame over 50ms,
+  and the same map/mode identity; artifact: `target/v10-m02-heist-primitive-render.txt` plus its
+  peer report.
+
+### Implementation variance
+
+The approved specification named a public Lightyear `ReplicationGroup` API for the match root and
+both safes. The checked-in Lightyear 0.29 dependency does not expose that public component. M02
+therefore uses ordinary reliable per-entity replication and an explicit match/map/generation
+readiness barrier across the root and exactly two safes. The HUD and safe presentation remain on
+`SYNCING OBJECTIVE` until that complete set agrees, preserving the intended player-facing atomicity
+without inventing an unavailable API.
+
 ## Playtest handoff
 
-Prepared after automated and native verification. It will name the canonical run command, exact
-game type, controls, threshold/timeout/draw scenarios, current limitations, and requested feedback
-on navigation, objective pressure, safe readability, audio, balance, and safe/chest distinction.
+Run `just run 2`, choose **Heist 1v1** in both windows, select a brawler, join the same queue, and
+ready both fighters. Match controls are WASD/mouse, left click for primary fire, `E` for ultimate,
+and `Tab` for the scoreboard; controller uses the two sticks, right trigger, right bumper, and
+Select.
+
+Please exercise both lanes and both objectives, damage a safe past 25%, destroy one safe, and ready
+for one restart. If practical, try a Sentry build near an undefended enemy safe. Report:
+
+1. whether each safe reads as a structural objective rather than the treasure chest reserved for
+   M03, including without relying only on colour;
+2. whether `DEFEND`/`ATTACK`, health, critical, destroyed, result, and restart feedback are clear;
+3. whether lanes, safe collision, travel time, spawn pressure, turtling, and comeback potential feel
+   reasonable; and
+4. whether ordinary-hit, critical, and destroyed audio/effects are useful without becoming noisy.
+
+Known limitation: this is one simultaneous mirrored round on one map; role swaps, overtime,
+repair/regeneration, barrel-to-safe damage, and safe debris are intentionally outside M02.
 
 ## Exit criteria
 
@@ -558,4 +605,16 @@ M02 may enter `Complete` only when:
 
 ## Feedback and closeout learning
 
-Completed during `Feedback review` after user playtest.
+User feedback is pending. Implementation review found three reusable lessons:
+
+1. A conceptual dependency feature is not an API guarantee. Verify the exact checked-in crate API
+   before encoding a named component into the specification; M02's `ReplicationGroup` assumption
+   was replaced by the tested readiness barrier.
+2. Every new mode evaluator must be explicitly ordered after `prepare_mode_rule_facts`; sharing
+   `MatchSet::ModeRules` alone is insufficient because unordered systems can clear a newly offered
+   outcome. The Heist evaluator now mirrors the established Wipeout/Hot Zone ordering.
+3. Transient network messages need a scheduled test capture. Reading a Lightyear receiver after
+   many convergence ticks can miss frame-scoped traffic, and a test-only capture must remain
+   optional for synthetic client worlds that do not install it.
+
+The final feedback decisions and affected reruns will be appended before `Complete`.

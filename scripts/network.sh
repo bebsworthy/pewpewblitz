@@ -56,8 +56,8 @@ if [[ "$headless" != "0" && "$headless" != "1" ]]; then
     printf 'brawler network: BRAWLER_NETWORK_HEADLESS must be 0 or 1\n' >&2
     exit 2
 fi
-if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" ]]; then
-    printf 'brawler network: BRAWLER_NETWORK_GAME_MODE must be wipeout or hot-zone\n' >&2
+if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" && "$game_mode" != "heist" ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_GAME_MODE must be wipeout, hot-zone, or heist\n' >&2
     exit 2
 fi
 if [[ "$combat_assert" != "0" && "$combat_assert" != "1" ]]; then

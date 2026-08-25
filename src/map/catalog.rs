@@ -33,6 +33,7 @@ pub const TWIN_VAULTS_ADMISSION_REVISION: u16 = 1;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
+pub const HEIST_SAFE_VISUAL_PROFILE: MapVisualProfileId = MapVisualProfileId(39);
 
 pub const GROUND_ASSET: MapAssetId = MapAssetId(1);
 pub const WALL_ARENA_ASSET: MapAssetId = MapAssetId(2);
@@ -1134,6 +1135,9 @@ fn resolve_grid_recipe(
     }
     validate_spawn_clearance(&placements, recipe.dimensions, catalog)?;
     validate_fighter_navigation(&placements, recipe.dimensions, catalog)?;
+    if recipe.mode_definition_id == HEIST_MODE_DEFINITION {
+        validate_heist_map_access(&placements, &mode_anchors, recipe.dimensions, catalog)?;
+    }
     let fingerprint_material = postcard::to_allocvec(&(
         MAP_FINGERPRINT_FORMAT_VERSION,
         MAP_RECIPE_SCHEMA_VERSION,
@@ -1241,57 +1245,8 @@ fn validate_and_resolve_mode_anchors(
             .ok_or_else(|| "Wipeout maps cannot contain mode anchors".to_string());
     }
     if mode == HEIST_MODE_DEFINITION {
-        if anchors.len() != 2 {
-            return Err("Heist maps require exactly two safe anchors".to_string());
-        }
-        let mut teams = BTreeSet::new();
-        let mut resolved = Vec::with_capacity(2);
-        for anchor in anchors {
-            if anchor.placement_id.0 == 0
-                || anchor.anchor_id.0 == 0
-                || !placement_ids.insert(anchor.placement_id)
-            {
-                return Err("invalid or duplicate mode anchor identity".to_string());
-            }
-            let MapModeAnchorKind::HeistSafe {
-                team_slot,
-                origin_cell,
-                width_cells,
-                height_cells,
-                quarter_turns,
-                objective_visual_profile_id,
-            } = anchor.kind
-            else {
-                return Err("Heist maps cannot contain non-safe anchors".to_string());
-            };
-            if team_slot > 1
-                || !teams.insert(team_slot)
-                || width_cells != 3
-                || height_cells != 2
-                || quarter_turns > 3
-                || objective_visual_profile_id.0 == 0
-                || origin_cell.x < 2
-                || origin_cell.y < 2
-                || origin_cell.x.saturating_add(width_cells).saturating_add(2) > dimensions.width
-                || origin_cell.y.saturating_add(height_cells).saturating_add(2) > dimensions.height
-            {
-                return Err("invalid Heist safe anchor topology".to_string());
-            }
-            let size =
-                Vec2::new(f32::from(width_cells), f32::from(height_cells)) * MAP_CELL_SIZE_WORLD;
-            let center = dimensions.cell_min(origin_cell) + size * 0.5;
-            resolved.push(ResolvedHeistSafeAnchor {
-                placement_id: anchor.placement_id,
-                anchor_id: anchor.anchor_id,
-                defending_team: crate::combat::TeamId(team_slot),
-                center,
-                half_extents: size * 0.5,
-                quarter_turns,
-                objective_visual_profile_id,
-            });
-        }
-        resolved.sort_by_key(|safe| safe.defending_team);
-        return Ok((None, resolved));
+        return resolve_heist_safe_anchors(dimensions, anchors, placement_ids)
+            .map(|resolved| (None, resolved));
     }
     if mode != HOT_ZONE_MODE_DEFINITION || anchors.len() != 1 {
         return Err("Hot Zone maps require exactly one objective anchor".to_string());
@@ -1335,6 +1290,62 @@ fn validate_and_resolve_mode_anchors(
         }),
         Vec::new(),
     ))
+}
+
+fn resolve_heist_safe_anchors(
+    dimensions: MapDimensions,
+    anchors: &[MapModeAnchorPlacement],
+    placement_ids: &mut BTreeSet<MapPlacementId>,
+) -> Result<Vec<ResolvedHeistSafeAnchor>, String> {
+    if anchors.len() != 2 {
+        return Err("Heist maps require exactly two safe anchors".to_string());
+    }
+    let mut teams = BTreeSet::new();
+    let mut resolved = Vec::with_capacity(2);
+    for anchor in anchors {
+        if anchor.placement_id.0 == 0
+            || anchor.anchor_id.0 == 0
+            || !placement_ids.insert(anchor.placement_id)
+        {
+            return Err("invalid or duplicate mode anchor identity".to_string());
+        }
+        let MapModeAnchorKind::HeistSafe {
+            team_slot,
+            origin_cell,
+            width_cells,
+            height_cells,
+            quarter_turns,
+            objective_visual_profile_id,
+        } = anchor.kind
+        else {
+            return Err("Heist maps cannot contain non-safe anchors".to_string());
+        };
+        if team_slot > 1
+            || !teams.insert(team_slot)
+            || width_cells != 3
+            || height_cells != 2
+            || quarter_turns > 3
+            || objective_visual_profile_id != HEIST_SAFE_VISUAL_PROFILE
+            || origin_cell.x < 2
+            || origin_cell.y < 2
+            || origin_cell.x.saturating_add(width_cells).saturating_add(2) > dimensions.width
+            || origin_cell.y.saturating_add(height_cells).saturating_add(2) > dimensions.height
+        {
+            return Err("invalid Heist safe anchor topology".to_string());
+        }
+        let size = Vec2::new(f32::from(width_cells), f32::from(height_cells)) * MAP_CELL_SIZE_WORLD;
+        resolved.push(ResolvedHeistSafeAnchor {
+            placement_id: anchor.placement_id,
+            anchor_id: anchor.anchor_id,
+            defending_team: crate::combat::TeamId(team_slot),
+            center: dimensions.cell_min(origin_cell) + size * 0.5,
+            half_extents: size * 0.5,
+            quarter_turns,
+            objective_visual_profile_id,
+        });
+    }
+    resolved.sort_by_key(|safe| safe.defending_team);
+    Ok(resolved)
 }
 
 #[derive(Clone, Copy)]
@@ -1590,6 +1601,197 @@ fn validate_fighter_navigation(
     } else {
         Err("fighter-radius navigation does not connect every spawn".to_string())
     }
+}
+
+#[derive(Clone)]
+struct HeistSafeAccessGeometry {
+    team_slot: u8,
+    footprint: BTreeSet<MapCell>,
+    shape: DerivedColliderShape,
+    sectors: [Vec<MapCell>; 4],
+}
+
+fn heist_safe_access_geometry(
+    anchor: &MapModeAnchorPlacement,
+    dimensions: MapDimensions,
+) -> Result<HeistSafeAccessGeometry, String> {
+    let MapModeAnchorKind::HeistSafe {
+        team_slot,
+        origin_cell,
+        width_cells,
+        height_cells,
+        ..
+    } = anchor.kind
+    else {
+        return Err("Heist maps cannot contain non-safe anchors".to_string());
+    };
+    let footprint = (0..height_cells)
+        .flat_map(|y| {
+            (0..width_cells).map(move |x| MapCell::new(origin_cell.x + x, origin_cell.y + y))
+        })
+        .collect::<BTreeSet<_>>();
+    let size = Vec2::new(f32::from(width_cells), f32::from(height_cells)) * MAP_CELL_SIZE_WORLD;
+    let left_x = origin_cell
+        .x
+        .checked_sub(2)
+        .ok_or_else(|| "Heist safe lacks a left attack sector".to_string())?;
+    let bottom_y = origin_cell
+        .y
+        .checked_sub(2)
+        .ok_or_else(|| "Heist safe lacks a lower attack sector".to_string())?;
+    let right_x = origin_cell
+        .x
+        .checked_add(width_cells)
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| "Heist safe right attack sector overflows".to_string())?;
+    let top_y = origin_cell
+        .y
+        .checked_add(height_cells)
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| "Heist safe upper attack sector overflows".to_string())?;
+    let vertical = |x| {
+        (0..height_cells)
+            .map(|y| MapCell::new(x, origin_cell.y + y))
+            .collect::<Vec<_>>()
+    };
+    let horizontal = |y| {
+        (0..width_cells)
+            .map(|x| MapCell::new(origin_cell.x + x, y))
+            .collect::<Vec<_>>()
+    };
+    Ok(HeistSafeAccessGeometry {
+        team_slot,
+        footprint,
+        shape: DerivedColliderShape::Rectangle {
+            center: dimensions.cell_min(origin_cell) + size * 0.5,
+            half_extents: size * 0.5,
+        },
+        sectors: [
+            vertical(left_x),
+            vertical(right_x),
+            horizontal(bottom_y),
+            horizontal(top_y),
+        ],
+    })
+}
+
+fn reachable_clear_cells(
+    spawn: MapCell,
+    center_is_clear: &impl Fn(MapCell) -> bool,
+) -> BTreeSet<MapCell> {
+    let mut reached = BTreeSet::from([spawn]);
+    let mut frontier = std::collections::VecDeque::from([spawn]);
+    while let Some(cell) = frontier.pop_front() {
+        for candidate in [
+            cell.y.checked_add(1).map(|y| MapCell::new(cell.x, y)),
+            cell.x.checked_add(1).map(|x| MapCell::new(x, cell.y)),
+            cell.y.checked_sub(1).map(|y| MapCell::new(cell.x, y)),
+            cell.x.checked_sub(1).map(|x| MapCell::new(x, cell.y)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if center_is_clear(candidate) && reached.insert(candidate) {
+                frontier.push_back(candidate);
+            }
+        }
+    }
+    reached
+}
+
+fn validate_heist_map_access(
+    placements: &[MapAssetPlacement],
+    anchors: &[MapModeAnchorPlacement],
+    dimensions: MapDimensions,
+    catalog: &MapContentCatalog,
+) -> Result<(), String> {
+    let mut safes = Vec::with_capacity(2);
+    for anchor in anchors {
+        safes.push(heist_safe_access_geometry(anchor, dimensions)?);
+    }
+    safes.sort_by_key(|safe| safe.team_slot);
+    if safes.len() != 2 || safes[0].team_slot != 0 || safes[1].team_slot != 1 {
+        return Err("Heist safe access requires exact team slots 0 and 1".to_string());
+    }
+    if !safes[0].footprint.is_disjoint(&safes[1].footprint) {
+        return Err("Heist safe reservations overlap".to_string());
+    }
+    for placement in placements {
+        let asset = catalog
+            .asset(placement.asset_id)
+            .ok_or_else(|| "placement references an unknown asset".to_string())?;
+        if asset.slot == MapAssetSlot::Surface {
+            continue;
+        }
+        let cells = placement_cells(dimensions, asset, placement)
+            .ok_or_else(|| "placement footprint disappeared".to_string())?;
+        if safes
+            .iter()
+            .any(|safe| cells.iter().any(|cell| safe.footprint.contains(cell)))
+        {
+            return Err("Heist safe reservation overlaps a map placement".to_string());
+        }
+    }
+
+    let mut blocked = blocking_shapes(placements, dimensions, catalog);
+    blocked.extend(safes.iter().map(|safe| safe.shape));
+    let center_is_clear = |cell: MapCell| {
+        dimensions.contains(cell)
+            && dimensions
+                .bounds()
+                .contains_with_inset(dimensions.cell_center(cell), 24.0)
+            && blocked.iter().all(|shape| {
+                !circle_overlaps_derived_shape(dimensions.cell_center(cell), 24.0, *shape)
+            })
+    };
+    for safe in &safes {
+        let open_sectors = safe
+            .sectors
+            .iter()
+            .filter(|sector| {
+                sector
+                    .windows(2)
+                    .any(|pair| pair.iter().copied().all(&center_is_clear))
+            })
+            .count();
+        if open_sectors < 2 {
+            return Err("Heist safe exposes fewer than two legal attack sectors".to_string());
+        }
+    }
+
+    let spawns = placements
+        .iter()
+        .filter_map(|placement| match placement.parameters {
+            MapPlacementParameters::PlayerSpawn { team_slot, .. } => {
+                Some((team_slot, placement.cell))
+            }
+            MapPlacementParameters::None => None,
+        })
+        .collect::<Vec<_>>();
+    for (spawn_team, spawn) in spawns {
+        if !center_is_clear(spawn) {
+            return Err("Heist spawn is not fighter-radius navigable".to_string());
+        }
+        let reached = reachable_clear_cells(spawn, &center_is_clear);
+        for safe in &safes {
+            let reaches_ring = safe
+                .sectors
+                .iter()
+                .flatten()
+                .any(|cell| reached.contains(cell) && center_is_clear(*cell));
+            if !reaches_ring {
+                let relation = if safe.team_slot == spawn_team {
+                    "defence"
+                } else {
+                    "attack"
+                };
+                return Err(format!(
+                    "Heist spawn cannot reach its required {relation} ring"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[allow(
@@ -2129,13 +2331,13 @@ mod tests {
             crate::combat::TeamId(1)
         );
         assert_eq!(resolved.heist_safes[0].half_extents, Vec2::new(48.0, 32.0));
-        assert_eq!(
-            resolved.heist_safes[0].center.x,
-            -resolved.heist_safes[1].center.x
+        assert!(
+            (resolved.heist_safes[0].center.x + resolved.heist_safes[1].center.x).abs()
+                < f32::EPSILON
         );
-        assert_eq!(
-            resolved.heist_safes[0].center.y,
-            resolved.heist_safes[1].center.y
+        assert!(
+            (resolved.heist_safes[0].center.y - resolved.heist_safes[1].center.y).abs()
+                < f32::EPSILON
         );
         assert_eq!(resolved.dynamic_placements.len(), 4);
         assert!(
@@ -2143,6 +2345,79 @@ mod tests {
                 .spawn_points_by_team
                 .values()
                 .all(|spawns| spawns.len() == 3)
+        );
+    }
+
+    #[test]
+    fn twin_vaults_rejects_safe_overlap_wrong_visual_and_sealed_access() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let recipe = catalog
+            .presets
+            .iter()
+            .find(|preset| preset.id == TWIN_VAULTS_PRESET)
+            .unwrap()
+            .recipe
+            .clone();
+
+        let mut overlap = recipe.clone();
+        overlap.placements.push(MapAssetPlacement {
+            placement_id: MapPlacementId(900),
+            cell: MapCell::new(3, 19),
+            asset_id: WALL_ARENA_ASSET,
+            quarter_turns: 0,
+            parameters: MapPlacementParameters::None,
+        });
+        assert!(
+            resolve_grid_recipe(&overlap, TWIN_VAULTS_PRESET, MapInstanceId(1), &catalog)
+                .unwrap_err()
+                .contains("safe reservation overlaps")
+        );
+
+        let mut wrong_visual = recipe.clone();
+        let MapModeAnchorKind::HeistSafe {
+            ref mut objective_visual_profile_id,
+            ..
+        } = wrong_visual.mode_anchors[0].kind
+        else {
+            unreachable!()
+        };
+        *objective_visual_profile_id = MapVisualProfileId(1);
+        assert!(
+            resolve_grid_recipe(
+                &wrong_visual,
+                TWIN_VAULTS_PRESET,
+                MapInstanceId(1),
+                &catalog
+            )
+            .is_err()
+        );
+
+        let mut sealed = recipe;
+        for (offset, cell) in [
+            MapCell::new(1, 19),
+            MapCell::new(1, 20),
+            MapCell::new(3, 17),
+            MapCell::new(4, 17),
+            MapCell::new(5, 17),
+            MapCell::new(3, 22),
+            MapCell::new(4, 22),
+            MapCell::new(5, 22),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            sealed.placements.push(MapAssetPlacement {
+                placement_id: MapPlacementId(910 + u32::try_from(offset).unwrap()),
+                cell,
+                asset_id: WALL_ARENA_ASSET,
+                quarter_turns: 0,
+                parameters: MapPlacementParameters::None,
+            });
+        }
+        assert!(
+            resolve_grid_recipe(&sealed, TWIN_VAULTS_PRESET, MapInstanceId(1), &catalog)
+                .unwrap_err()
+                .contains("fewer than two legal attack sectors")
         );
     }
 

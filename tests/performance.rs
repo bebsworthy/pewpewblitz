@@ -952,6 +952,154 @@ fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
     assert_eq!(after, before, "contested time advances neither team");
 }
 
+fn heist_performance_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        ServerPlugins {
+            tick_duration: SIMULATION_TICK,
+        },
+        GameplayPlugin,
+        ProtocolPlugin,
+        AvianNetworkPlugin,
+        AuthoritativeMapPlugin,
+        AuthoritativeMovementPlugin,
+        ServerNetworkPlugin,
+        brawler::matchplay::AuthoritativeMatchPlugin,
+    ));
+    app.insert_resource(brawler::server::match_lifecycle_rules_for_profile(
+        brawler::config::MatchRulesProfile::ProcessVerification,
+    ));
+    app.insert_resource(brawler::matchplay::MatchModeSetup {
+        mode_definition_id: brawler::map::HEIST_MODE_DEFINITION,
+        rules_revision: brawler::matchplay::HEIST_RULES_REVISION,
+    });
+    app.insert_resource(brawler::matchplay::HeistRules::default());
+    app.insert_resource(brawler::map::ServerMapSelection {
+        preset_id: brawler::map::TWIN_VAULTS_PRESET,
+    });
+    app.insert_resource(ServerNetworkConfig {
+        transport: NetworkTransport::Crossbeam,
+        ..default()
+    });
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(SIMULATION_TICK));
+    app.add_plugins(brawler::matchplay::HeistModePlugin);
+    app.update();
+    app
+}
+
+/// Exercise the bounded objective ingress at the supported 3v3 capacity. Each measured tick
+/// supplies one more request than the 64-hit transaction limit, proving both bounded rejection
+/// and fixed-tick cost without completing either safe.
+#[test]
+fn v10_m02_heist_objective_burst_stays_within_fixed_tick_budget() {
+    let mut app = heist_performance_app();
+    let match_id = {
+        let world = app.world_mut();
+        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
+        let mut state = roots.single_mut(world).expect("one match root");
+        state.phase = MatchPhase::Active {
+            ends_at_tick: u64::MAX,
+        };
+        state.match_id
+    };
+    let mut fighters = Vec::new();
+    for index in 0_u8..6 {
+        let team = TeamId(index % 2);
+        let entity = spawn_m05_fighter(
+            &mut app,
+            50_000 + u64::from(index),
+            1,
+            Vec2::new(-500.0 + f32::from(index) * 180.0, 300.0),
+            team,
+            false,
+        );
+        app.world_mut().entity_mut(entity).insert((
+            MatchParticipant {
+                match_id,
+                ready: true,
+                restart_ready: false,
+            },
+            MatchMember(match_id),
+            ActiveCombatant,
+        ));
+        fighters.push(entity);
+    }
+    app.update();
+    remove_benchmark_actions(&mut app, &fighters);
+
+    let (source, friendly_safe) = {
+        let world = app.world_mut();
+        let mut sources = world
+            .query_filtered::<(&PlayerId, &NetworkEntityId, &TeamId, &Position), With<Fighter>>();
+        let (player, network_id, team, position) = sources
+            .iter(world)
+            .find(|(_, _, team, _)| **team == TeamId(0))
+            .expect("team-zero benchmark source");
+        let source = AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(1),
+            player_id: *player,
+            owner_network_entity_id: *network_id,
+            team_id: *team,
+            recipe_fingerprint: brawler::combat::WeaponRecipeFingerprint::default(),
+            presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+            legacy_compatibility: false,
+            source_preset_id: None,
+            origin: WorldPoint::from(position.0),
+            facing: 0.0,
+        };
+        let mut safes = world.query::<&brawler::map::DamageableTargetIdentity>();
+        let target = *safes
+            .iter(world)
+            .find(|target| {
+                matches!(
+                    target,
+                    brawler::map::DamageableTargetIdentity::HeistSafe {
+                        defending_team: TeamId(0),
+                        ..
+                    }
+                )
+            })
+            .expect("friendly benchmark safe");
+        (source, target)
+    };
+
+    let mut samples = Vec::with_capacity(120);
+    for sample in 0_u64..120 {
+        let mut pending = app
+            .world_mut()
+            .resource_mut::<brawler::matchplay::PendingModeObjectiveDamages>();
+        for request in 0_u8..65 {
+            pending
+                .0
+                .push(brawler::matchplay::PendingModeObjectiveDamage {
+                    source: AttackSource {
+                        attack_id: AttackId(10_000 + sample * 65 + u64::from(request)),
+                        ..source
+                    },
+                    target: friendly_safe,
+                    requested_damage: 1,
+                    delivery_index: 0,
+                    bundle_index: 0,
+                    effect_index: request,
+                });
+        }
+        let started = Instant::now();
+        app.update();
+        samples.push(started.elapsed());
+    }
+    samples.sort_unstable();
+    let p95 = samples[(samples.len() * 95) / 100];
+    println!("v10-m02-heist-65-objective-hits: p95={p95:?}");
+    assert!(p95 < SIMULATION_TICK);
+    let telemetry = app.world().resource::<brawler::matchplay::HeistTelemetry>();
+    assert_eq!(telemetry.capacity_rejections, 120);
+    assert_eq!(telemetry.invalid_rejections, 64 * 120);
+    assert_eq!(telemetry.accepted_hits, 0);
+}
+
 #[test]
 fn map_dynamic_maximum_state_serialization_stays_bounded() {
     let state = brawler::map::MapDynamicState {

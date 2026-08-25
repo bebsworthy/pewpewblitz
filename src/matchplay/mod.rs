@@ -11,13 +11,18 @@ mod spawns;
 mod telemetry;
 mod wipeout;
 
+#[cfg(feature = "client")]
+pub use heist::ReceivedHeistObjectiveCue;
 pub use heist::{
-    HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HeistCompletion, HeistHealthComparison, HeistRules,
-    HeistSafe, HeistSafeIdentity, HeistState, HeistSummary, destroyed_safe_result,
-    remaining_health_comparison, timeout_result as heist_timeout_result,
+    HEIST_CRITICAL_HEALTH_PERCENT, HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HeistCompletion,
+    HeistHealthComparison, HeistObjectiveCue, HeistObjectiveCueKind, HeistRules, HeistSafe,
+    HeistSafeIdentity, HeistState, HeistSummary, MAX_HEIST_OBJECTIVE_CUES, destroyed_safe_result,
+    objective_cue_kind, remaining_health_comparison, timeout_result as heist_timeout_result,
 };
 #[cfg(feature = "server")]
-pub use heist::{HeistModePlugin, PendingModeObjectiveDamage, PendingModeObjectiveDamages};
+pub use heist::{
+    HeistModePlugin, HeistTelemetry, PendingModeObjectiveDamage, PendingModeObjectiveDamages,
+};
 #[cfg(feature = "server")]
 pub use hot_zone::HotZoneModePlugin;
 #[cfg(feature = "server")]

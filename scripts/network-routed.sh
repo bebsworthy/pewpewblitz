@@ -32,9 +32,9 @@ case "$match_rules" in
         ;;
 esac
 case "$game_mode" in
-    wipeout | hot-zone) ;;
+    wipeout | hot-zone | heist) ;;
     *)
-        echo "brawler routed network: game mode must be wipeout or hot-zone" >&2
+        echo "brawler routed network: game mode must be wipeout, hot-zone, or heist" >&2
         exit 2
         ;;
 esac

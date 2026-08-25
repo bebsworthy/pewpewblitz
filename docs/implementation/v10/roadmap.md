@@ -20,7 +20,7 @@ this prepared roadmap.
 | Field | Value |
 |---|---|
 | Status | Implementing |
-| Current milestone | M02 — Mirrored Heist and dedicated map (`Implementing`) |
+| Current milestone | M02 — Mirrored Heist and dedicated map (`User playtest`) |
 | Entry gate | Satisfied: V9 completed and was accepted on 2026-08-24, including final playtest, feedback triage, verification, documentation reconciliation, and learning review |
 | Completion gate | Oil barrels, mirrored Heist, treasure chests, and restoration pickups use one server-owned damageable-target contract; map/mode/object identity, collision, damage, terminal behavior, pickup, HUD/results, routed admission, recovery, boundedness, balance, native feedback, and learning gates all pass |
 
@@ -69,7 +69,7 @@ completed with user acceptance on 2026-08-25.
 | Milestone | Status | Player-visible deliverable | Plan |
 |---|---|---|---|
 | 01 | Complete | One accepted map contains damageable oil barrels: ordinary attacks damage them, zero health commits one readable bounded explosion and nonblocking terminal state, and every client/recovery path converges | Closed with accepted native presentation, affected verification, documentation reconciliation, and learning review on 2026-08-25 |
-| 02 | Implementing | One dedicated Heist mode and map, advertised as exact routed 1v1/2v2/3v3 game types, provide a complete simultaneous attack/defense loop with two distinct team safes, objective damage, HUD/audio/results, restart, and recovery | Implement the approved specification; M01's accepted damageable-target foundation is complete |
+| 02 | User playtest | One dedicated Heist mode and map, advertised as exact routed 1v1/2v2/3v3 game types, provide a complete simultaneous attack/defense loop with two distinct team safes, objective damage, HUD/audio/results, restart, and recovery | Implementation, canonical verification, all exact routed topologies, and imported/primitive native evidence pass; awaiting user playtest feedback and triage |
 | 03 | Not started | Treasure chests open exactly once and drop one contested restoration pickup; V10 then closes with full cross-feature lifecycle, balance, capacity, routed, native, feedback, documentation, and learning evidence | Create after M02 evidence and acceptance |
 
 ## Ordering rationale

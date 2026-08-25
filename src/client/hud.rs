@@ -5,6 +5,17 @@ use super::*;
 use crate::combat::TeamId;
 use std::collections::BTreeMap;
 
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ClientHeistReadiness {
+    #[default]
+    Waiting,
+    Ready,
+    Invalid(String),
+}
+
+#[derive(Resource, Default)]
+struct SeenHeistObjectiveCueIds(std::collections::VecDeque<crate::combat::CombatEventId>);
+
 #[derive(Component)]
 struct ReadinessHudText;
 
@@ -76,8 +87,137 @@ pub struct ClientReadinessHudPlugin;
 impl Plugin for ClientReadinessHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MatchRosterPresentation>()
+            .init_resource::<ClientHeistReadiness>()
+            .init_resource::<SeenHeistObjectiveCueIds>()
+            .add_message::<crate::matchplay::ReceivedHeistObjectiveCue>()
             .add_systems(Startup, spawn_readiness_hud)
-            .add_systems(Update, update_readiness_hud);
+            .add_systems(
+                Update,
+                (
+                    converge_heist_readiness,
+                    receive_heist_objective_cues,
+                    update_readiness_hud.after(converge_heist_readiness),
+                ),
+            );
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+fn converge_heist_readiness(
+    matches: Query<(&MatchState, Option<&crate::matchplay::HeistState>), With<MatchRoot>>,
+    maps: Query<
+        (
+            &crate::map::ResolvedMapSnapshot,
+            &crate::map::MapDynamicState,
+        ),
+        With<crate::map::MapRoot>,
+    >,
+    safes: Query<(
+        &crate::matchplay::HeistSafe,
+        &crate::map::DamageableTargetIdentity,
+        &crate::combat::CurrentHealth,
+        &crate::map::DamageableMaximumHealth,
+        &crate::map::DamageableLifeState,
+    )>,
+    mut readiness: ResMut<ClientHeistReadiness>,
+) {
+    let Ok((state, heist)) = matches.single() else {
+        *readiness = ClientHeistReadiness::Waiting;
+        return;
+    };
+    if state.mode_definition_id != crate::map::HEIST_MODE_DEFINITION {
+        *readiness = ClientHeistReadiness::Ready;
+        return;
+    }
+    let Some(heist) = heist else {
+        *readiness = ClientHeistReadiness::Waiting;
+        return;
+    };
+    let Ok((snapshot, map_state)) = maps.single() else {
+        *readiness = ClientHeistReadiness::Waiting;
+        return;
+    };
+    let generation = map_state.generation_id();
+    if heist.match_id != state.match_id
+        || heist.generation != generation
+        || snapshot.identity.instance_id != generation.map_instance_id
+        || snapshot.mode_definition_id != crate::map::HEIST_MODE_DEFINITION
+    {
+        *readiness =
+            ClientHeistReadiness::Invalid("Heist root and map generations disagree".to_string());
+        return;
+    }
+    let expected: std::collections::BTreeSet<_> = heist
+        .safes
+        .iter()
+        .map(|safe| (safe.anchor_id, safe.defending_team))
+        .collect();
+    if expected.len() != crate::matchplay::HEIST_SAFE_COUNT {
+        *readiness = ClientHeistReadiness::Invalid(
+            "Heist root does not declare two unique safes".to_string(),
+        );
+        return;
+    }
+    let mut actual = std::collections::BTreeSet::new();
+    for (safe, identity, health, maximum, life) in &safes {
+        if safe.match_id != state.match_id || safe.generation != generation {
+            continue;
+        }
+        if *identity
+            != (crate::map::DamageableTargetIdentity::HeistSafe {
+                match_id: state.match_id,
+                anchor_id: safe.anchor_id,
+                defending_team: safe.defending_team,
+            })
+            || maximum.0 == 0
+            || health.0 > maximum.0
+            || (health.0 == 0)
+                != matches!(*life, crate::map::DamageableLifeState::TerminalCommitted)
+        {
+            *readiness = ClientHeistReadiness::Invalid(
+                "replicated Heist safe state is inconsistent".to_string(),
+            );
+            return;
+        }
+        if !actual.insert((safe.anchor_id, safe.defending_team)) {
+            *readiness = ClientHeistReadiness::Invalid(
+                "replicated Heist safes contain a duplicate identity".to_string(),
+            );
+            return;
+        }
+    }
+    *readiness = if actual == expected {
+        ClientHeistReadiness::Ready
+    } else if actual.is_subset(&expected) {
+        ClientHeistReadiness::Waiting
+    } else {
+        ClientHeistReadiness::Invalid("replicated Heist safes do not match the root".to_string())
+    };
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn receive_heist_objective_cues(
+    mut receivers: Query<
+        Option<&mut MessageReceiver<crate::matchplay::HeistObjectiveCue>>,
+        With<Client>,
+    >,
+    mut output: MessageWriter<crate::matchplay::ReceivedHeistObjectiveCue>,
+    mut seen: ResMut<SeenHeistObjectiveCueIds>,
+) {
+    for receiver in &mut receivers {
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for cue in receiver.receive() {
+            if seen.0.contains(&cue.event_id) {
+                continue;
+            }
+            if seen.0.len() >= crate::matchplay::MAX_HEIST_OBJECTIVE_CUES {
+                seen.0.pop_front();
+            }
+            seen.0.push_back(cue.event_id);
+            output.write(crate::matchplay::ReceivedHeistObjectiveCue(cue));
+        }
     }
 }
 
@@ -174,6 +314,7 @@ fn update_readiness_hud(
     )>,
     clocks: Query<&crate::matchplay::MatchClock, With<MatchRoot>>,
     participants: Query<&crate::matchplay::PublicParticipantState>,
+    heist_readiness: Res<ClientHeistReadiness>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
     mut readiness_text: Query<
         (&mut Text, &mut Visibility),
@@ -273,7 +414,13 @@ fn update_readiness_hud(
     );
     let final_line = match_state.and_then(|(state, _)| {
         if state.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
-            final_heist_objective_line(state, heist_states.iter().next(), heist_safes.iter())
+            final_heist_objective_line(
+                state,
+                matches!(*heist_readiness, ClientHeistReadiness::Ready)
+                    .then(|| heist_states.iter().next())
+                    .flatten(),
+                heist_safes.iter(),
+            )
         } else {
             final_objective_line(match_state, hot_zones.iter().next())
         }
@@ -299,13 +446,15 @@ fn update_readiness_hud(
     }
     let score_view = match_state.and_then(|(state, _)| {
         if state.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
-            build_heist_score_view(
+            Some(build_heist_score_view(
                 state,
-                heist_states.iter().next(),
+                matches!(*heist_readiness, ClientHeistReadiness::Ready)
+                    .then(|| heist_states.iter().next())
+                    .flatten(),
                 heist_safes.iter(),
                 fighter.map(|(_, team)| *team),
                 clock,
-            )
+            ))
         } else {
             build_mode_score_view(match_state, hot_zones.iter().next(), clock)
         }
@@ -451,11 +600,11 @@ fn build_heist_score_view<'a>(
     >,
     local_team: Option<TeamId>,
     clock: Option<&crate::matchplay::MatchClock>,
-) -> Option<ModeScoreView> {
+) -> ModeScoreView {
     if clock.is_none_or(|clock| clock.match_id != state.match_id)
         || heist.is_none_or(|heist| heist.match_id != state.match_id)
     {
-        return Some(ModeScoreView::Syncing);
+        return ModeScoreView::Syncing;
     }
     let mut health = [0; 2];
     let mut maximum = [0; 2];
@@ -466,13 +615,13 @@ fn build_heist_score_view<'a>(
         }
         let index = usize::from(safe.defending_team.0);
         if seen[index] {
-            return Some(ModeScoreView::Syncing);
+            return ModeScoreView::Syncing;
         }
         seen[index] = true;
         health[index] = current.0;
         maximum[index] = max.0;
     }
-    Some(if seen.into_iter().all(|value| value) {
+    if seen.into_iter().all(|value| value) {
         ModeScoreView::Heist {
             health,
             maximum,
@@ -480,7 +629,7 @@ fn build_heist_score_view<'a>(
         }
     } else {
         ModeScoreView::Syncing
-    })
+    }
 }
 
 fn format_match_time(remaining_ticks: u64) -> String {
@@ -786,6 +935,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<MatchRosterPresentation>()
+            .init_resource::<ClientHeistReadiness>()
             .add_systems(Update, update_readiness_hud);
         app.world_mut()
             .spawn((ReadinessHudText, Text::new(""), Visibility::Hidden));
@@ -1054,5 +1204,100 @@ mod tests {
         )
         .unwrap();
         assert!(syncing.contains("SYNCING OBJECTIVE"));
+    }
+
+    #[test]
+    fn heist_readiness_requires_matching_root_map_generation_and_two_safes() {
+        let resolved = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(crate::map::TWIN_VAULTS_PRESET, crate::map::MapInstanceId(9))
+            .unwrap();
+        let generation = crate::map::MapDynamicGeneration {
+            map_instance_id: crate::map::MapInstanceId(9),
+            generation: 1,
+        };
+        let match_id = crate::matchplay::MatchId(7);
+        let safes = [
+            crate::matchplay::HeistSafeIdentity {
+                anchor_id: crate::map::ModeAnchorId(1),
+                defending_team: TeamId(0),
+            },
+            crate::matchplay::HeistSafeIdentity {
+                anchor_id: crate::map::ModeAnchorId(2),
+                defending_team: TeamId(1),
+            },
+        ];
+        let mut app = App::new();
+        app.init_resource::<ClientHeistReadiness>()
+            .add_systems(Update, converge_heist_readiness);
+        app.world_mut().spawn((
+            MatchRoot,
+            MatchState {
+                match_id,
+                mode_definition_id: crate::map::HEIST_MODE_DEFINITION,
+                phase: MatchPhase::Waiting,
+                rules_revision: 1,
+            },
+            crate::matchplay::HeistState {
+                match_id,
+                rules_revision: crate::matchplay::HEIST_RULES_REVISION,
+                generation,
+                safes,
+                completion: None,
+            },
+        ));
+        app.world_mut().spawn((
+            crate::map::MapRoot,
+            resolved.snapshot,
+            crate::map::MapDynamicState {
+                map_instance_id: generation.map_instance_id,
+                generation: generation.generation,
+                revision: 0,
+                terminal_states: Vec::new(),
+            },
+        ));
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientHeistReadiness>(),
+            ClientHeistReadiness::Waiting
+        );
+
+        for safe in safes {
+            app.world_mut().spawn((
+                crate::matchplay::HeistSafe {
+                    match_id,
+                    anchor_id: safe.anchor_id,
+                    defending_team: safe.defending_team,
+                    generation,
+                },
+                crate::map::DamageableTargetIdentity::HeistSafe {
+                    match_id,
+                    anchor_id: safe.anchor_id,
+                    defending_team: safe.defending_team,
+                },
+                crate::combat::CurrentHealth(2_000),
+                crate::map::DamageableMaximumHealth(2_000),
+                crate::map::DamageableLifeState::Live,
+            ));
+        }
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientHeistReadiness>(),
+            ClientHeistReadiness::Ready
+        );
+
+        let entity = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<Entity, With<crate::matchplay::HeistSafe>>();
+            query.iter(world).next().unwrap()
+        };
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(crate::combat::CurrentHealth(2_001));
+        app.update();
+        assert!(matches!(
+            *app.world().resource::<ClientHeistReadiness>(),
+            ClientHeistReadiness::Invalid(_)
+        ));
     }
 }

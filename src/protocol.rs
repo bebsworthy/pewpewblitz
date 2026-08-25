@@ -802,6 +802,8 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<crate::map::WorldObjectCue>()
             .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<crate::matchplay::HeistObjectiveCue>()
+            .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<CombatEvidenceCheckpoint>()
             .add_direction(NetworkDirection::ServerToClient);
         app.add_channel::<CombatChannel>(ChannelSettings {

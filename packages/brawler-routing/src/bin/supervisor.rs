@@ -100,14 +100,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         ManifestBody::from_lobby(&manifest)?,
     );
     if args.automatic_transition_driver {
-        let transition_mode = match args.mode {
-            GameMode::Wipeout => "wipeout",
-            GameMode::HotZone => "hot-zone",
-            GameMode::Heist => "heist",
-        };
         lobby_spec = lobby_spec
             .with_environment("BRAWLER_LOBBY_TRANSITION_DRIVER", "1")
-            .with_environment("BRAWLER_LOBBY_TRANSITION_MODE", transition_mode);
+            .with_environment("BRAWLER_LOBBY_TRANSITION_MODE", mode_label(args.mode));
     }
     runtime.spawn_worker(lobby_spec)?;
     let stop = runtime.stop_handle();
@@ -120,6 +115,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         write_metrics(&runtime, &path)?;
     }
     Ok(())
+}
+
+const fn mode_label(mode: GameMode) -> &'static str {
+    match mode {
+        GameMode::Wipeout => "wipeout",
+        GameMode::HotZone => "hot-zone",
+        GameMode::Heist => "heist",
+    }
 }
 
 fn read_catalog_file(path: &PathBuf) -> Result<Vec<u8>, Box<dyn Error>> {

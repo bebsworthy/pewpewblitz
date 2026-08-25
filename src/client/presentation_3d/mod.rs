@@ -239,12 +239,14 @@ impl Plugin for WorldPresentationPlugin {
                     reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
                     reconcile_dynamic_map_visuals,
                     reconcile_heist_safe_visuals,
+                    update_heist_safe_status_visuals,
                     update_damageable_map_visuals,
                     combat::reconcile_combat_visuals,
                     upgrade_fighters_to_imported_models,
                     combat::update_fighter_concealment_visuals,
                     combat::consume_combat_cues,
                     combat::consume_world_object_cues,
+                    combat::consume_heist_objective_cues,
                     combat::update_combat_visual_state,
                     update_character_animation,
                     combat::cleanup_combat_effects,
@@ -288,35 +290,129 @@ struct HeistSafeVisual {
     owner: Entity,
 }
 
+#[derive(Component)]
+struct HeistSafeStatusVisual {
+    owner: Entity,
+    team_material: Handle<StandardMaterial>,
+}
+
+struct HeistSafeVisualAssets<'a> {
+    primitives: &'a Primitive3dAssets,
+    materials: &'a Material3dAssets,
+    imported_core: Option<Handle<WorldAsset>>,
+    profile: Option<&'a environment_assets::MapVisualProfile>,
+}
+
+fn spawn_heist_safe_visual(
+    commands: &mut Commands,
+    owner: Entity,
+    position: Vec2,
+    vertical_scale: f32,
+    team_material: &Handle<StandardMaterial>,
+    assets: &HeistSafeVisualAssets<'_>,
+) {
+    let root = commands
+        .spawn((
+            HeistSafeVisual { owner },
+            Transform {
+                translation: ground_position(position),
+                scale: Vec3::new(1.0, vertical_scale, 1.0),
+                ..default()
+            },
+            Visibility::default(),
+            Name::new("Heist structural safe"),
+        ))
+        .id();
+    commands.entity(root).with_children(|parent| {
+        parent.spawn((
+            Mesh3d(assets.primitives.unit_cuboid.clone()),
+            MeshMaterial3d(assets.materials.neutral.clone()),
+            Transform::from_xyz(0.0, 10.0, 0.0).with_scale(Vec3::new(108.0, 20.0, 76.0)),
+        ));
+        if let (Some(scene), Some(profile)) = (assets.imported_core.as_ref(), assets.profile) {
+            parent.spawn((
+                environment_assets::EnvironmentMaterialTint([
+                    profile.tint.0,
+                    profile.tint.1,
+                    profile.tint.2,
+                ]),
+                WorldAssetRoot(scene.clone()),
+                Transform {
+                    translation: Vec3::Y * (28.0 + profile.vertical_offset),
+                    rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
+                    scale: Vec3::splat(profile.scale),
+                },
+                Name::new("imported Heist safe core"),
+            ));
+        } else {
+            parent.spawn((
+                Mesh3d(assets.primitives.unit_cuboid.clone()),
+                MeshMaterial3d(assets.materials.neutral.clone()),
+                Transform::from_xyz(0.0, 34.0, 0.0).with_scale(Vec3::new(92.0, 28.0, 60.0)),
+            ));
+        }
+        parent.spawn((
+            HeistSafeStatusVisual {
+                owner,
+                team_material: team_material.clone(),
+            },
+            Mesh3d(assets.primitives.unit_cuboid.clone()),
+            MeshMaterial3d(team_material.clone()),
+            Transform::from_xyz(0.0, 49.0, 0.0).with_scale(Vec3::new(100.0, 8.0, 66.0)),
+        ));
+        for x in [-50.0, 50.0] {
+            parent.spawn((
+                Mesh3d(assets.primitives.unit_cuboid.clone()),
+                MeshMaterial3d(team_material.clone()),
+                Transform::from_xyz(x, 32.0, 0.0).with_scale(Vec3::new(8.0, 64.0, 72.0)),
+            ));
+        }
+    });
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    reason = "Bevy injects the asset, readiness, safe, and visual state owned by this reconciliation phase"
+)]
 fn reconcile_heist_safe_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
+    readiness: Res<hud::ClientHeistReadiness>,
     safes: Query<(
         Entity,
         &crate::matchplay::HeistSafe,
         &Position,
         &crate::map::DamageableLifeState,
     )>,
-    mut visuals: Query<(Entity, &HeistSafeVisual, &mut Transform)>,
+    mut visuals: Query<(Entity, &HeistSafeVisual, &mut Transform, &mut Visibility)>,
 ) {
     let safe_entities: std::collections::BTreeSet<_> =
         safes.iter().map(|(entity, ..)| entity).collect();
     let mut existing = std::collections::BTreeSet::new();
-    for (visual_entity, visual, mut transform) in &mut visuals {
+    for (visual_entity, visual, mut transform, mut visibility) in &mut visuals {
         let Ok((_, _, position, life)) = safes.get(visual.owner) else {
             commands.entity(visual_entity).despawn();
             continue;
         };
         existing.insert(visual.owner);
+        *visibility = if matches!(*readiness, hud::ClientHeistReadiness::Ready) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
         transform.translation = ground_position(position.0);
         transform.scale.y = if matches!(life, crate::map::DamageableLifeState::Live) {
             1.0
         } else {
             0.35
         };
+    }
+    if !matches!(*readiness, hud::ClientHeistReadiness::Ready) {
+        return;
     }
     for (owner, safe, position, life) in &safes {
         if existing.contains(&owner) || !safe_entities.contains(&owner) {
@@ -327,7 +423,7 @@ fn reconcile_heist_safe_visuals(
         } else {
             materials.team_red.clone()
         };
-        let profile_id = crate::map::MapVisualProfileId(39);
+        let profile_id = crate::map::HEIST_SAFE_VISUAL_PROFILE;
         let imported_core = imported
             .as_deref()
             .and_then(|scenes| scenes.scene(profile_id))
@@ -335,67 +431,59 @@ fn reconcile_heist_safe_visuals(
         let profile = visual_catalog
             .as_deref()
             .and_then(|catalog| catalog.profile(profile_id));
-        let root = commands
-            .spawn((
-                HeistSafeVisual { owner },
-                Transform {
-                    translation: ground_position(position.0),
-                    scale: Vec3::new(
-                        1.0,
-                        if matches!(life, crate::map::DamageableLifeState::Live) {
-                            1.0
-                        } else {
-                            0.35
-                        },
-                        1.0,
-                    ),
-                    ..default()
-                },
-                Visibility::default(),
-                Name::new("Heist structural safe"),
-            ))
-            .id();
-        commands.entity(root).with_children(|parent| {
-            parent.spawn((
-                Mesh3d(primitives.unit_cuboid.clone()),
-                MeshMaterial3d(materials.neutral.clone()),
-                Transform::from_xyz(0.0, 10.0, 0.0).with_scale(Vec3::new(108.0, 20.0, 76.0)),
-            ));
-            if let (Some(scene), Some(profile)) = (imported_core.as_ref(), profile) {
-                parent.spawn((
-                    environment_assets::EnvironmentMaterialTint([
-                        profile.tint.0,
-                        profile.tint.1,
-                        profile.tint.2,
-                    ]),
-                    WorldAssetRoot(scene.clone()),
-                    Transform {
-                        translation: Vec3::Y * (28.0 + profile.vertical_offset),
-                        rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
-                        scale: Vec3::splat(profile.scale),
-                    },
-                    Name::new("imported Heist safe core"),
-                ));
+        spawn_heist_safe_visual(
+            &mut commands,
+            owner,
+            position.0,
+            if matches!(life, crate::map::DamageableLifeState::Live) {
+                1.0
             } else {
-                parent.spawn((
-                    Mesh3d(primitives.unit_cuboid.clone()),
-                    MeshMaterial3d(materials.neutral.clone()),
-                    Transform::from_xyz(0.0, 34.0, 0.0).with_scale(Vec3::new(92.0, 28.0, 60.0)),
-                ));
-            }
-            parent.spawn((
-                Mesh3d(primitives.unit_cuboid.clone()),
-                MeshMaterial3d(team_material.clone()),
-                Transform::from_xyz(0.0, 49.0, 0.0).with_scale(Vec3::new(100.0, 8.0, 66.0)),
-            ));
-            for x in [-50.0, 50.0] {
-                parent.spawn((
-                    Mesh3d(primitives.unit_cuboid.clone()),
-                    MeshMaterial3d(team_material.clone()),
-                    Transform::from_xyz(x, 32.0, 0.0).with_scale(Vec3::new(8.0, 64.0, 72.0)),
-                ));
-            }
-        });
+                0.35
+            },
+            &team_material,
+            &HeistSafeVisualAssets {
+                primitives: &primitives,
+                materials: &materials,
+                imported_core,
+                profile,
+            },
+        );
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are injected by value"
+)]
+fn update_heist_safe_status_visuals(
+    materials: Res<Material3dAssets>,
+    safes: Query<
+        (
+            &crate::combat::CurrentHealth,
+            &crate::map::DamageableMaximumHealth,
+            &crate::map::DamageableLifeState,
+        ),
+        With<crate::matchplay::HeistSafe>,
+    >,
+    mut status_visuals: Query<(
+        &HeistSafeStatusVisual,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+) {
+    for (status, mut material) in &mut status_visuals {
+        let Ok((health, maximum, life)) = safes.get(status.owner) else {
+            continue;
+        };
+        let critical = maximum.0 > 0
+            && u32::from(health.0) * 100
+                <= u32::from(maximum.0)
+                    * u32::from(crate::matchplay::HEIST_CRITICAL_HEALTH_PERCENT);
+        material.0 =
+            if critical || matches!(life, crate::map::DamageableLifeState::TerminalCommitted) {
+                materials.effect_damage.clone()
+            } else {
+                status.team_material.clone()
+            };
     }
 }
 
@@ -710,12 +798,14 @@ fn projected_object_health_top_left(viewport: Vec2, anchor: Vec2) -> Option<Vec2
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     clippy::type_complexity,
     reason = "the projection system reconciles replicated object health with dynamic world visuals and screen-space UI"
 )]
 fn project_damageable_object_health_ui(
     mut commands: Commands,
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
+    heist_readiness: Res<hud::ClientHeistReadiness>,
     objects: Query<
         (
             &crate::map::DamageableTargetIdentity,
@@ -778,20 +868,22 @@ fn project_damageable_object_health_ui(
                 .map(|fraction| (key, (transform.translation(), *fraction)))
         })
         .collect();
-    for (safe, position, health, maximum) in &safes {
-        if maximum.0 == 0 {
-            continue;
+    if matches!(*heist_readiness, hud::ClientHeistReadiness::Ready) {
+        for (safe, position, health, maximum) in &safes {
+            if maximum.0 == 0 {
+                continue;
+            }
+            desired.insert(
+                DamageableObjectHealthKey::HeistSafe {
+                    match_id: safe.match_id,
+                    anchor_id: safe.anchor_id,
+                },
+                (
+                    ground_position(position.0),
+                    f32::from(health.0) / f32::from(maximum.0),
+                ),
+            );
         }
-        desired.insert(
-            DamageableObjectHealthKey::HeistSafe {
-                match_id: safe.match_id,
-                anchor_id: safe.anchor_id,
-            },
-            (
-                ground_position(position.0),
-                f32::from(health.0) / f32::from(maximum.0),
-            ),
-        );
     }
     let projection = cameras.single().ok().and_then(|(camera, transform)| {
         camera

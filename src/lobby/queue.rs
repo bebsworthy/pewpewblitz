@@ -478,7 +478,9 @@ mod tests {
                 catalog_revision: revision,
                 state_revision: 1,
                 formation_availability: FormationAvailability::Available,
-                pools: (0..=8).map(row).collect(),
+                pools: (0..=u8::try_from(MAX_GAME_TYPES).unwrap())
+                    .map(row)
+                    .collect(),
             },
         ] {
             let encoded = postcard::to_allocvec(&snapshot).unwrap();
