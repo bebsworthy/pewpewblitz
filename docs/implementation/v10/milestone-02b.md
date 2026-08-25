@@ -329,6 +329,10 @@ evidence. All exit criteria are satisfied and M02b is `Complete`.
    compositor pressure rather than one client's map presentation. The harness still defaults to
    the canonical dual-client check, but controlled diagnosis can pace the live peer, validate only
    the primary report, and verify the physical resolution reported by the client.
+5. **A content migration must verify the envelope constant, not only the resulting fingerprint.**
+   The closeout audit found the specification and canonical catalog had advanced while
+   `GAMEPLAY_CONTENT_ENVELOPE_VERSION` still read `14`. It was corrected to `15`; future catalog
+   migrations must assert the expected envelope version explicitly alongside fingerprint goldens.
 
 ## Verification plan
 
