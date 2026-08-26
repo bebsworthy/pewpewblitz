@@ -17,18 +17,18 @@ four mutually exclusive asset slots per cell, concealment may cover every cell, 
 snapshots remain bounded at 32 MiB. Extreme-density rendering and lookup optimization are deferred
 until measured maps require them; this does not narrow the authoring contract.
 
-The first native map review found that imported environment scenes do not consistently agree with
-their authoritative cell footprints. M01 therefore remains open for one presentation correction:
-enforce the existing fitting policies from intrinsic scene bounds and replace the three maps'
-solid-block approximations with a small KayKit Block Bits family. This is map-playtest polish, not
-the M02 balancing-tool work.
+The first native map review found that imported environment scenes did not consistently agree with
+their authoritative cell footprints. M01 closed that feedback by enforcing fitting policies from
+intrinsic scene bounds and replacing the three maps' solid-block approximations with a small
+KayKit Block Bits family. The user accepted the corrected presentation on 2026-08-26. This was
+map-playtest polish, not M02 balancing-tool work.
 
 ## Version status
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M01 — three proper 3v3 maps |
+| Status | Not started |
+| Current milestone | M02 — balancing-tool improvements, awaiting the user's requirements |
 | Entry gate | Satisfied: V11 completed and was accepted on 2026-08-26 |
 | Completion gate | Three accepted 3v3 maps, the user-defined M02 balancing workflow, and feedback-driven fighter/weapon tuning pass their owning automated, routed, native, feedback, documentation, and learning gates |
 
@@ -36,7 +36,7 @@ the M02 balancing-tool work.
 
 | Milestone | Status | Player-visible deliverable |
 |---|---|---|
-| 01 | User playtest | One manually authored, grid-readable 3v3 map each for Wipeout, Hot Zone, and Heist, accepted through native playtest |
+| 01 | Complete | One manually authored, grid-readable 3v3 map each for Wipeout, Hot Zone, and Heist, accepted through native playtest |
 | 02 | Not started | Balancing-tool improvements defined by the user after playing the M01 maps |
 | 03 | Not started | Character and weapon balance/rework iterated from gameplay feedback on the accepted maps |
 
@@ -45,6 +45,11 @@ the M02 balancing-tool work.
 M01 comes first so gameplay and map feedback are not shaped around balancing-tool features the user
 has not requested. M02 begins only after the user specifies its operator workflow. M03 uses actual
 map play rather than speculative tuning targets.
+
+M01 completed on 2026-08-26 after the three maps, dimension/capacity policy, half-cell Hot Zone
+anchor, destructible cactus, intrinsic scene fitting, KayKit visual family, automated/routed/native
+evidence, feedback disposition, documentation reconciliation, and learn-from-errors review passed.
+M02 is the next milestone but remains unstarted and intentionally has no inferred specification.
 
 ## Version boundaries
 

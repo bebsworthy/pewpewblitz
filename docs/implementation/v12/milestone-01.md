@@ -2,11 +2,15 @@
 
 ## Status
 
-`User playtest`
+`Complete`
 
 The user selected the map-first sequence, supplied one image reference for each supported mode,
 directed manual conversion into existing Brawler assets, and approved server-configured map limits
 of 20 through 512 cells per axis on 2026-08-26.
+
+The user accepted the corrected grid-conformant presentation on 2026-08-26, reporting that the
+maps looked much better. This closed the final native readability gate without requesting another
+gameplay, topology, or asset-family change.
 
 ## Player-visible outcome
 
@@ -129,9 +133,9 @@ missing gameplay or presentation primitive blocks the playtest.
   static, dynamic, objective, and pickup presentation paths; invalid scenes use their fallback.
 - [x] Promote the approved KayKit Block Bits subset, add visual-only wall/cover variants, and revise
   the three recipes without changing collision, destruction, concealment, or objective behavior.
-- [ ] Run formatting, role checks, focused catalog/navigation/admission tests, canonical tests,
+- [x] Run formatting, role checks, focused catalog/navigation/admission tests, canonical tests,
   routed 3v3 and Practice evidence, and native rendering/playtest.
-- [ ] Triage gameplay feedback, rerun affected verification, reconcile durable documentation, and
+- [x] Triage gameplay feedback, rerun affected verification, reconcile durable documentation, and
   complete the learning review before closeout.
 
 ### Dimension-policy verification evidence — 2026-08-26
@@ -179,7 +183,8 @@ remains pending until the three recipes are authored.
 - Production-routed headless Practice reached Active with one human and five bots for
   `wipeout-3v3`, `hot-zone-3v3`, and `heist-3v3`; each supervisor/lobby/match-worker process tree
   shut down cleanly.
-- Native visual/gameplay acceptance remains the active user-playtest gate.
+- The initial native review produced the grid-fitting and KayKit correction specified below; the
+  corrected presentation was subsequently accepted.
 
 ### Feedback review — cactus visual variety — 2026-08-26
 
@@ -194,16 +199,17 @@ revision advances to `2`, and the Heist 3v3 game-type revision advances to `5`.
 Focused catalog tests prove both exact cells and gameplay-profile equality with destructible cover.
 Client tests prove visual-catalog resolution, promoted-file presence, manifest provenance, and GLB
 dependency coverage. Server/client all-target checks, exact manifest admission, the revised
-operator-catalog golden, and production-routed Heist 3v3 Practice all passed. Native appearance and
-scale remain part of the active user playtest.
+operator-catalog golden, and production-routed Heist 3v3 Practice all passed. The later
+grid-conformant presentation pass corrected the cactus scale, and the user accepted its native
+appearance with the other map assets.
 
 ## Feedback correction specification — grid-conformant imported assets
 
 ### Decision and research
 
-Status: **approved for implementation on 2026-08-26**. The user reported that the environment
-assets do not broadly read as occupying the same size and shape as their tiles, approved the
-fitting/KayKit plan, and directed implementation.
+Status: **implemented and accepted on 2026-08-26**. The user reported that the environment assets
+did not broadly read as occupying the same size and shape as their tiles, approved the
+fitting/KayKit plan, directed implementation, and accepted the corrected result.
 
 The audit found that a Brawler cell is 32×32 world units, while imported static scenes currently
 receive only a hand-authored scalar. `MapVisualFitting::{Exact, Tiled, Contained}` is parsed but does
@@ -401,8 +407,43 @@ Verification passed:
   three legacy non-square `Exact` wall profiles intentionally selected their footprint-correct
   primitive fallback.
 
-Automated implementation and rendering gates are complete. M01 now waits for the user's native
-readability/gameplay pass across all three maps.
+Automated implementation and rendering gates are complete. The user accepted the revised native
+presentation on 2026-08-26, completing the readability/gameplay pass across the map slice.
+
+### Feedback review — corrected map presentation — 2026-08-26
+
+Disposition: **accepted and complete**. After the grid-fitting correction and KayKit Block Bits
+content pass, the user reported that the maps looked much better. No further blocker/cover fit,
+cactus scale, visual-category, map-topology, objective, concealment, or gameplay-authority change
+was requested. The six-model KayKit subset, deterministic primitive degradation for incompatible
+legacy scenes, and the three revised 3v3 recipes are therefore the accepted M01 presentation.
+
+M02 remains `Not started`. This acceptance does not authorize or define any Balance Lab change.
+
+### Learn-from-errors review — 2026-08-26
+
+- **Mistake:** the first map pass relied on hand-authored imported-scene scales even though the
+  catalog already declared `Exact` and `Contained` fitting. Dynamic imports also inherited a
+  primitive parent's footprint scale, making the cactus especially undersized.
+  **Cause:** fitting metadata was parsed but never executed, and asset review considered nominal
+  model dimensions rather than the complete transformed hierarchy bound. **Prevention:** every
+  imported map path now resolves one cached full-hierarchy bound through the shared fitting helper;
+  owner roots remain at unit scale, exact aspect mismatches fail to the footprint-correct fallback,
+  and contained assets cannot overflow their authoritative box.
+- **Mistake:** the initial transcription used broad existing wall/cover approximations where the
+  references depended on visually distinct square block families. **Cause:** gameplay topology was
+  validated before the asset family was evaluated against a visible 32×32 tile reference.
+  **Prevention:** inspect candidate-model bounds, default scenes, provenance, and an in-game tile
+  comparison before promoting a concrete subset; lock reference-specific visual categories with
+  exact cell-set tests once accepted.
+- **Reusable lesson:** authoritative occupancy and client presentation fitting must stay separate.
+  A visual profile's scale is a bounded fill factor, never an alternative collider size. Promote
+  only the demonstrated asset subset, retain deterministic primitive degradation, and require a
+  native readability pass before closing a map-production milestone.
+
+The correction is covered by enduring catalog/fitting contracts, focused tests, provenance
+records, and the native playtest gate. No additional project skill or generalized asset framework
+is needed for this completed slice.
 
 ## Exit criteria
 
