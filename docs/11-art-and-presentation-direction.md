@@ -72,11 +72,19 @@ readiness. Final transforms are written after Lightyear interpolation and Avian 
 transform propagation; projected UI follows propagation.
 
 V8 grid-map presentation derives water shores, vegetation edges, and wall joins from canonical
-four-neighbor cell masks; recipes do not author visual variants or adjacency masks. Tidal Garden
-uses low generated water, deliberately short non-concealing tall grass, whole-placement barrier
-visuals, and a normal rubble replacement asset. Imported and primitive fallback paths must
-communicate the same walkability and destruction state. The accepted 32-unit destruction
-granularity must never leave a smaller visual or collision speck.
+four-neighbor cell masks; recipes do not author visual variants or adjacency masks. V9 promoted
+tall grass to explicit concealing terrain while retaining its public geometry, and whole-placement
+barriers use normal or rubble replacement visuals. Imported and primitive fallback paths must
+communicate the same walkability, concealment boundary, and destruction state. The accepted 32-unit
+destruction granularity must never leave a smaller visual or collision speck.
+
+V10's Feature Yard family reuses one normalized geometry across Wipeout, Hot Zone, and Heist while
+presenting only the active mode's objective. Damageable barrels and chests reconcile replicated
+health and terminal state; a destroyed chest disappears and its public restoration pickup uses a
+distinct potion silhouette and glow. Heist presents each typed safe objective as a team idol and
+pedestal fitted inside the authoritative footprint. Imported and primitive paths preserve object
+class, collision footprint, team ownership, damaged-only versus persistent health treatment, and
+terminal/pickup readability.
 
 ### Player Dashboard preview
 
@@ -140,6 +148,11 @@ assignment.
   position;
 - previews and telegraphs use shape-exact procedural geometry and distinguish allowed from blocked;
 - objective boundaries remain precise and cannot depend on a decorative model or decal;
+- Heist idols show persistent public team/objective health, while neutral barrels and chests show
+  compact health only when damaged; the idol, chest, barrel, and restoration pickup remain
+  unmistakable at gameplay scale;
+- destroyed chests disappear, pickups remain visibly available until authoritative collection or
+  expiry, and primitive fallbacks preserve the same footprint and state distinctions;
 - slow, knockback, dash, deployable, impact, damage, defeat, and reset feedback remain distinct;
 - reduced-effects mode decreases redundant effect size, lifetime, and count but never hides required
   objectives, previews, projectiles, statuses, or relationship identity.

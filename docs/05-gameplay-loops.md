@@ -125,8 +125,10 @@ Combat creates temporary advantages; a mode explains how those advantages become
 
 - In Wipeout, teams convert favorable fights into defeats and score while managing re-entry timing.
 - In Hot Zone, teams convert space and survival into uncontested or favorable objective occupancy.
-- Future modes may convert pressure into objective damage, carried resources, territory, rounds, or
-  survival, but each must define one readable conversion loop.
+- In Heist, teams convert pressure and lane control into damage on the opposing durable objective
+  while defending their own.
+- Future modes may convert pressure into carried resources, territory, rounds, or survival, but
+  each must define one readable conversion loop.
 
 An objective should concentrate decisions rather than replace combat. Players need enough time and
 space to choose approaches, defend counters, and understand progress. Scoring rules, contest state,

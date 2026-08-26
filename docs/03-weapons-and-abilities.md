@@ -212,6 +212,7 @@ The established weapon foundation supports:
 - no falloff and linear damage falloff;
 - hostile and bounded hostile-plus-owner recipient policies;
 - one bounded terrain-destruction world effect;
+- explicit positive-damage eligibility for live environment objects and hostile Heist objectives;
 - authoritative cooldown, reload or recharge, lifetime, collision, and outcome attribution;
 - stable presentation cues resolved independently by the client.
 
@@ -252,6 +253,13 @@ bounded landing point and flight deadline while clients may present an arc indep
 are deliveries without projectile entities. The fighter does not own the delivery after creation;
 stable source identity preserves attribution across entity lifecycles.
 
+Eligible V10 world targets reuse these accepted deliveries without becoming fighters. Straight,
+lobbed, and melee contact may apply positive damage to a live barrel or chest; hostile straight,
+lobbed, and melee contact may damage a Heist objective according to its mode-owned policy. Status,
+knockback, fighter passives, charge, and defeat semantics do not transfer merely because a target
+has health. The complete policy is owned by
+[Damageable world objects and Heist](./18-damageable-world-objects-and-heist.md).
+
 Possible future delivery families include:
 
 - charged or delayed projectiles with warning telegraphs;
@@ -281,6 +289,11 @@ Every delivery declares or derives bounded collision and completion behavior. Po
 Impact systems produce authoritative gameplay outcomes through components or registered messages as
 appropriate. They must not load or mutate particles, sounds, camera shake, controller feedback, or
 UI assets.
+
+The fighter-origin-to-muzzle clearance segment follows the same first-contact contract as the
+projectile sweep. If a live damageable object blocks that segment, the direct payload applies to
+that first object and no projectile is created beyond it. Static cover still blocks the delivery
+without becoming a damage target.
 
 ## Effects and status contributions
 

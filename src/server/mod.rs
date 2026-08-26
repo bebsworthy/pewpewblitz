@@ -1412,7 +1412,7 @@ fn build_authoritative_app(
             DedicatedServerPlugin,
             AuthoritativeMatchPlugin,
             crate::diagnostics::ProcessDiagnosticsPlugin,
-            practice::InertPracticeBotPlugin,
+            practice::PracticeBotPlugin,
         ));
     #[cfg(feature = "balance-lab")]
     app.add_plugins(balance_lab::BalanceLabPlugin);

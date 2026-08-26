@@ -10,6 +10,8 @@ mod input;
 pub use arena::*;
 #[cfg(feature = "server")]
 pub use input::InputValidationState;
+#[cfg(feature = "server")]
+pub(crate) use input::decoded_input_is_valid;
 pub use input::{
     InputFreshness, InputTuning, active_slow_multiplier, adrenaline_multiplier, committed_aim,
     decoded_move, desired_pose_step, input_should_neutralize, latest_present_remote_tick,

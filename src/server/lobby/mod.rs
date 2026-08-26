@@ -119,6 +119,41 @@ fn build_identity(preset_id: BuildPresetId) -> Result<LobbyBuildIdentity, String
     })
 }
 
+/// Resolve the code-owned V11 Practice bot recipe through the ordinary saved-brawler path.
+fn practice_bot_build_identity() -> Result<LobbyBuildIdentity, String> {
+    let builds = BuildCatalog::embedded()?;
+    let weapons = WeaponCatalog::embedded()?;
+    let fighters = FighterDefinitions::default();
+    let fighter = fighters
+        .get(STANDARD_FIGHTER_DEFINITION)
+        .ok_or_else(|| "standard fighter definition is missing".to_string())?;
+    let brawler = crate::profiles::SavedBrawler {
+        id: crate::profiles::SavedBrawlerId::new(u128::MAX)
+            .map_err(|error| format!("invalid canonical bot brawler id: {error}"))?,
+        creation_ordinal: u64::MAX,
+        name: "Practice Bot".to_string(),
+        fighter_profile_id: crate::profiles::FighterProfileId(1),
+        weapon_base_id: crate::profiles::WeaponBaseId(1),
+        ultimate_id: crate::builds::UltimateDefinitionId(1),
+        passive_ids: [
+            crate::builds::PassiveDefinitionId(3),
+            crate::builds::PassiveDefinitionId(4),
+        ],
+        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+        revision: crate::profiles::ProfileRevision::INITIAL,
+    };
+    let snapshot =
+        crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, fighter)
+            .map_err(|error| format!("canonical bot brawler resolution failed: {error:?}"))?;
+    let accepted_identity = snapshot.accepted_identity;
+    Ok(LobbyBuildIdentity {
+        source_build_preset: None,
+        recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
+        build_revision: accepted_identity.revision.0,
+        snapshot: snapshot.encode()?,
+    })
+}
+
 fn practice_bot_rows(
     team_count: u8,
     players_per_team: u8,
@@ -130,8 +165,7 @@ fn practice_bot_rows(
         let roster_index = ordinal + 1;
         let team = u8::try_from(roster_index / usize::from(players_per_team))
             .map_err(|_| Rejection::Internal)?;
-        let preset = BuildPresetId(u16::try_from((ordinal % 4) + 1).expect("bounded preset"));
-        let build = build_identity(preset).map_err(|_| Rejection::Internal)?;
+        let build = practice_bot_build_identity().map_err(|_| Rejection::Internal)?;
         bots.push(brawler_routing::AllocateBot {
             player_id: PlayerId::new(
                 u64::MAX
@@ -2677,6 +2711,12 @@ mod tests {
         );
         assert_eq!(request.bots.iter().filter(|bot| bot.team == 0).count(), 2);
         assert_eq!(request.bots.iter().filter(|bot| bot.team == 1).count(), 3);
+        let canonical = practice_bot_build_identity().unwrap();
+        assert!(request.bots.iter().all(|bot| {
+            bot.recipe_fingerprint == canonical.recipe_fingerprint
+                && bot.build_revision == canonical.build_revision
+                && bot.build_snapshot == canonical.snapshot
+        }));
     }
 
     #[test]

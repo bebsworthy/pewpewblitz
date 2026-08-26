@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process, time::Duration};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-7> (7=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-7> (7=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120>]"
     );
 }
 
@@ -69,6 +69,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut exit_after_lobby_welcome = false;
     let mut product_queue_smoke = false;
     let mut product_match_smoke = false;
+    let mut product_practice_smoke = false;
     let mut product_requeue_smoke = false;
     let mut product_match_players_per_team = 2;
     let mut product_match_game_type = None;
@@ -111,6 +112,10 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--product-match-smoke-3v3" => {
                 product_match_smoke = true;
                 product_match_players_per_team = 3;
+            }
+            "--product-practice-smoke" => {
+                product_match_smoke = true;
+                product_practice_smoke = true;
             }
             "--product-requeue-smoke" => {
                 product_match_smoke = true;
@@ -239,6 +244,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.exit_after_lobby_welcome = exit_after_lobby_welcome;
     config.product_queue_smoke = product_queue_smoke;
     config.product_match_smoke = product_match_smoke;
+    config.product_practice_smoke = product_practice_smoke;
     config.product_requeue_smoke = product_requeue_smoke;
     config.product_match_players_per_team = product_match_players_per_team;
     config.product_match_game_type = product_match_game_type;

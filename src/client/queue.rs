@@ -862,6 +862,7 @@ fn drive_headless_queue_smoke(
     config: Res<super::ClientNetworkConfig>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut model: ResMut<ClientQueueModel>,
+    mut practice: ResMut<ClientPracticeModel>,
     mut stage: ResMut<HeadlessQueueSmokeStage>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -884,41 +885,28 @@ fn drive_headless_queue_smoke(
         *stage = HeadlessQueueSmokeStage::Complete;
         return;
     }
+    if let Some(reason) = practice.take_rejection() {
+        error!(
+            ?reason,
+            "brawler product Practice smoke request was rejected"
+        );
+        exit.write(AppExit::error());
+        *stage = HeadlessQueueSmokeStage::Complete;
+        return;
+    }
     let Some(lobby) = memberships.iter().next() else {
         return;
     };
     match *stage {
         HeadlessQueueSmokeStage::AwaitingInitialSnapshot => {
-            let Some(game) = automation_game_type(
-                &lobby.game_types,
-                config.product_match_players_per_team,
-                config.product_match_game_type.as_ref(),
-            ) else {
-                return;
-            };
-            if model.snapshot().is_none() {
-                return;
-            }
-            let selection = super::flow::SelectedGameType {
-                catalog_revision: Some(lobby.catalog_revision),
-                game_type_id: Some(game.id.clone()),
-                configuration_revision: Some(game.configuration_revision),
-            };
-            let Some(brawler) = lobby.profile.selected_brawler_id.and_then(|id| {
-                lobby
-                    .profile
-                    .brawlers
-                    .iter()
-                    .find(|brawler| brawler.id == id)
-            }) else {
-                return;
-            };
-            if model.start_join(&selection, brawler.id, brawler.revision, time.elapsed()) {
-                debug!(
-                    game_type = game.id.as_str(),
-                    "product match automation joined queue"
-                );
-                *stage = HeadlessQueueSmokeStage::Joining;
+            if let Some(next) = start_headless_product_request(
+                &config,
+                lobby,
+                &mut model,
+                &mut practice,
+                time.elapsed(),
+            ) {
+                *stage = next;
             }
         }
         HeadlessQueueSmokeStage::Joining => {
@@ -952,6 +940,50 @@ fn drive_headless_queue_smoke(
             }
         }
         HeadlessQueueSmokeStage::Complete => {}
+    }
+}
+
+fn start_headless_product_request(
+    config: &super::ClientNetworkConfig,
+    lobby: &ClientLobbyMembership,
+    queue: &mut ClientQueueModel,
+    practice: &mut ClientPracticeModel,
+    now: Duration,
+) -> Option<HeadlessQueueSmokeStage> {
+    let game = automation_game_type(
+        &lobby.game_types,
+        config.product_match_players_per_team,
+        config.product_match_game_type.as_ref(),
+    )?;
+    queue.snapshot()?;
+    let selection = super::flow::SelectedGameType {
+        catalog_revision: Some(lobby.catalog_revision),
+        game_type_id: Some(game.id.clone()),
+        configuration_revision: Some(game.configuration_revision),
+    };
+    let brawler = lobby.profile.selected_brawler_id.and_then(|id| {
+        lobby
+            .profile
+            .brawlers
+            .iter()
+            .find(|brawler| brawler.id == id)
+    })?;
+    if config.product_practice_smoke && practice.start(&selection, brawler.id, brawler.revision) {
+        debug!(
+            game_type = game.id.as_str(),
+            "product Practice automation requested match"
+        );
+        Some(HeadlessQueueSmokeStage::AwaitingJoinedSnapshot)
+    } else if !config.product_practice_smoke
+        && queue.start_join(&selection, brawler.id, brawler.revision, now)
+    {
+        debug!(
+            game_type = game.id.as_str(),
+            "product match automation joined queue"
+        );
+        Some(HeadlessQueueSmokeStage::Joining)
+    } else {
+        None
     }
 }
 

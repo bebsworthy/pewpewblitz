@@ -131,7 +131,7 @@ pub(super) fn input_end_tick_is_acceptable(
 }
 
 #[cfg(feature = "server")]
-pub(super) fn decoded_input_is_valid(input: FighterInput) -> bool {
+pub(crate) fn decoded_input_is_valid(input: FighterInput) -> bool {
     input.is_valid()
         && input.move_axis.to_vec2().length_squared() <= 1.0002
         && input

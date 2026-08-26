@@ -202,6 +202,9 @@ leaves the empty list with Create available.
 Game Type Select edits a private draft from the current bounded server advertisement. Confirm
 commits an exact current `GameTypeId` and revision; Back discards the draft. The UI describes the
 advertised mode, topology, rules, and map pool without claiming which map formation will choose.
+Its bounded list remains vertically scrollable by pointer wheel and keyboard/controller focus;
+focused rows scroll into view, and Confirm plus Back remain reachable even at the maximum admitted
+catalog length.
 
 Creation starts from safe defaults, clearly identifies fighter profile and weapon base as permanent,
 and requires confirmation. An accepted create opens the new Brawler screen; rejection remains on
@@ -246,7 +249,7 @@ capacity for one authoritative match worker containing the player and manifest b
 same advertised game type, build validation, maps, modes, match rules, and lifecycle apply. A full
 server or incompatible game type is shown as unavailable rather than silently changing rules or
 creating a practice wait list. [Bots](./10-bots.md) owns the distinction between the established
-practice roster and envisioned playable bot behavior.
+practice roster and its implemented playable controller behavior.
 
 After reservation, Match Loading owns worker connection, selected-map and content synchronization,
 participant readiness, and the one authoritative countdown. Cancellation and formation races are

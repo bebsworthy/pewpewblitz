@@ -11,7 +11,10 @@ content.
 Use [Weapons and abilities](./03-weapons-and-abilities.md) and
 [Fighter and build specification](./02-fighter-model.md) for the gameplay property model. The
 [V6 roadmap](./implementation/v6/roadmap.md) and
-[milestone](./implementation/v6/milestone-01.md) retain implementation history and evidence.
+[milestone](./implementation/v6/milestone-01.md) retain the original implementation history and
+evidence. The completed [V10 roadmap](./implementation/v10/roadmap.md) and
+[M03 closeout](./implementation/v10/milestone-03.md) record the barrel, Heist-objective, chest, and
+restoration-pickup evolution.
 
 ## Operator workflow
 
@@ -84,11 +87,13 @@ Review this checklist:
 
 Primary implementation ownership currently lives in `src/server/balance_lab/`, with authored build
 tuning in `src/builds/definitions.rs`, weapon definitions and map-destruction bounds in
-`src/combat/definitions/`, and the operator application in `tools/balance-lab-web/`.
+`src/combat/definitions/`, object/chest definitions in `src/map/catalog.rs`, Heist safe rules in
+`src/matchplay/heist.rs`, and the operator application in `tools/balance-lab-web/`.
 
 ## Scope and limitations
 
 The service is compiled only by the `balance-lab` feature, binds to loopback, and is enabled only
 for the canonical local Practice formation. One Practice worker owns the endpoint at a time. Drafts
 do not mutate simulation until explicit apply. Remote access, authentication, canonical-content
-export, hot apply, charts, abilities, passives, and match-rule tuning are outside the current tool.
+export, hot apply, charts, new ability definitions, passives, and broad match-rule tuning beyond
+Heist safe health are outside the current tool.

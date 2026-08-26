@@ -692,10 +692,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn match_worker_materializes_manifest_bots_as_inert_ordinary_fighters() {
+    type BotWorkerRow = (String, u16, bool, crate::protocol::FighterInput, bool);
+
+    fn practice_worker_for_mode(
+        game_mode: GameMode,
+        map_preset: MapPresetId,
+        map_revision: u16,
+    ) -> App {
         let config = ServerNetworkConfig {
             bind_addr: "127.0.0.1:0".parse().unwrap(),
+            game_mode,
             ..default()
         };
         let mut direct = build_app_with_config(config.clone());
@@ -708,6 +714,9 @@ mod tests {
         .unwrap();
         let mut value = manifest();
         let template = value.participants[0];
+        value.mode = expected_routing_mode(game_mode);
+        value.map_preset = map_preset.0;
+        value.map_revision = map_revision;
         value.participants.truncate(1);
         value.bots = [(100, 0, "Bot 1"), (101, 1, "Bot 2"), (102, 1, "Bot 3")]
             .into_iter()
@@ -722,8 +731,10 @@ mod tests {
             .collect();
         value.common.protocol_registry_fingerprint = protocol;
         value.common.content_fingerprint = content.0;
+        build_match_worker_app(config, value).unwrap()
+    }
 
-        let mut worker = build_match_worker_app(config, value).unwrap();
+    fn activate_bot_worker(worker: &mut App) {
         worker
             .world_mut()
             .resource_mut::<BuildCatalogResource>()
@@ -733,29 +744,161 @@ mod tests {
             .maximum_health = 211;
         worker.update();
         let world = worker.world_mut();
+        let mut roots = world
+            .query_filtered::<&mut crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>(
+            );
+        roots.single_mut(world).unwrap().phase = crate::matchplay::MatchPhase::Active {
+            ends_at_tick: 10_000,
+        };
+        let bot_entities = world
+            .query_filtered::<Entity, With<crate::bots::PracticeBotController>>()
+            .iter(world)
+            .collect::<Vec<_>>();
+        for entity in bot_entities {
+            world
+                .entity_mut(entity)
+                .insert(crate::matchplay::ActiveCombatant);
+        }
+    }
+
+    fn drive_bot_schedules(worker: &mut App, ticks: usize) {
+        for _ in 0..ticks {
+            let world = worker.world_mut();
+            world.run_schedule(FixedUpdate);
+            world.run_schedule(FixedPostUpdate);
+        }
+    }
+
+    fn bot_worker_rows(worker: &mut App) -> Vec<BotWorkerRow> {
+        let world = worker.world_mut();
         let mut query = world.query_filtered::<(
             &crate::matchplay::FighterDisplayName,
             &crate::combat::CurrentHealth,
             Has<lightyear::prelude::ControlledBy>,
-            Has<lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>>,
+            &lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>,
+            Has<crate::bots::PracticeBotController>,
         ), With<crate::protocol::Fighter>>();
-        let rows = query
+        query
             .iter(world)
-            .map(|(name, health, controlled, has_neutral_input)| {
-                (name.0.clone(), health.0, controlled, has_neutral_input)
+            .map(|(name, health, controlled, input, has_controller)| {
+                (
+                    name.0.clone(),
+                    health.0,
+                    controlled,
+                    input.0,
+                    has_controller,
+                )
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
 
-        assert_eq!(rows.len(), 3);
-        assert!(rows.iter().all(|(_, health, _, _)| *health == 211));
-        assert!(rows.iter().all(|(_, _, controlled, _)| !controlled));
-        assert!(rows.iter().all(|(_, _, _, has_input)| *has_input));
-        let mut names = rows
-            .iter()
-            .map(|(name, _, _, _)| name.as_str())
-            .collect::<Vec<_>>();
-        names.sort_unstable();
-        assert_eq!(names, vec!["Bot 1", "Bot 2", "Bot 3"]);
+    #[test]
+    fn match_workers_control_manifest_bots_in_every_practice_mode() {
+        let cases = [
+            (
+                GameMode::Wipeout,
+                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION,
+            ),
+            (
+                GameMode::HotZone,
+                crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
+                crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION,
+            ),
+            (
+                GameMode::Heist,
+                crate::map::FEATURE_YARD_HEIST_PRESET,
+                crate::map::FEATURE_YARD_HEIST_ADMISSION_REVISION,
+            ),
+        ];
+        for (game_mode, map_preset, map_revision) in cases {
+            let mut worker = practice_worker_for_mode(game_mode, map_preset, map_revision);
+            activate_bot_worker(&mut worker);
+            drive_bot_schedules(&mut worker, 12);
+            let rows = bot_worker_rows(&mut worker);
+            assert_eq!(rows.len(), 3, "unexpected {game_mode:?} bot count");
+            assert!(rows.iter().all(|(_, health, _, _, _)| *health == 211));
+            assert!(rows.iter().all(|(_, _, controlled, _, _)| !controlled));
+            assert!(
+                rows.iter().any(|(_, _, _, input, _)| {
+                    input.move_axis.to_vec2() != Vec2::ZERO || input.gameplay_buttons != 0
+                }),
+                "{game_mode:?} bots stayed neutral after the reaction window"
+            );
+            assert!(
+                rows.iter()
+                    .all(|(_, _, _, _, has_controller)| *has_controller)
+            );
+            let mut names = rows
+                .iter()
+                .map(|(name, _, _, _, _)| name.as_str())
+                .collect::<Vec<_>>();
+            names.sort_unstable();
+            assert_eq!(names, vec!["Bot 1", "Bot 2", "Bot 3"]);
+        }
+    }
+
+    fn bot_input_points_toward(worker: &mut App, network_id: u64, target: Vec2) -> bool {
+        let world = worker.world_mut();
+        world
+            .query_filtered::<(
+                &crate::protocol::NetworkEntityId,
+                &avian2d::prelude::Position,
+                &lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>,
+            ), With<crate::bots::PracticeBotController>>()
+            .iter(world)
+            .find(|(id, _, _)| id.0 == network_id)
+            .is_some_and(|(_, position, input)| {
+                (target - position.0)
+                    .try_normalize()
+                    .is_some_and(|direction| input.0.move_axis.to_vec2().dot(direction) > 0.5)
+            })
+    }
+
+    #[test]
+    fn objective_bots_emit_hot_zone_and_heist_directed_input_in_real_schedules() {
+        let mut hot_zone = practice_worker_for_mode(
+            GameMode::HotZone,
+            crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
+            crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION,
+        );
+        activate_bot_worker(&mut hot_zone);
+        let zone_center = hot_zone
+            .world()
+            .resource::<crate::map::ResolvedMap>()
+            .objective_zone
+            .expect("Hot Zone worker has its objective")
+            .area
+            .center;
+        drive_bot_schedules(&mut hot_zone, 12);
+        assert!(bot_input_points_toward(&mut hot_zone, 100, zone_center));
+        assert!(bot_input_points_toward(&mut hot_zone, 102, zone_center));
+
+        let mut heist = practice_worker_for_mode(
+            GameMode::Heist,
+            crate::map::FEATURE_YARD_HEIST_PRESET,
+            crate::map::FEATURE_YARD_HEIST_ADMISSION_REVISION,
+        );
+        activate_bot_worker(&mut heist);
+        let safe_positions = {
+            let world = heist.world_mut();
+            world
+                .query::<(&crate::matchplay::HeistSafe, &avian2d::prelude::Position)>()
+                .iter(world)
+                .map(|(safe, position)| (safe.defending_team, position.0))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        drive_bot_schedules(&mut heist, 12);
+        assert!(bot_input_points_toward(
+            &mut heist,
+            100,
+            safe_positions[&crate::combat::TeamId(1)]
+        ));
+        assert!(bot_input_points_toward(
+            &mut heist,
+            102,
+            safe_positions[&crate::combat::TeamId(0)]
+        ));
     }
 
     #[test]

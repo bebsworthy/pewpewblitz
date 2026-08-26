@@ -56,12 +56,14 @@ The supported recipe model expresses:
 - explicit whole-cell destructible placements and optional replacement assets;
 - parameterized player-spawn marker assets and team slots;
 - the compatible mode definition;
-- typed mode-required anchors, currently the grid-vertex Hot Zone circle.
+- typed mode-required anchors, currently the grid-vertex Hot Zone circle and two team-owned Heist
+  objective anchors.
 
-The schema may grow to support additional approved pickups, hazards, concealment regions, movement
-surfaces, and other environment primitives. Adding a catalog capability is an explicit content and
-gameplay decision; unknown fields, IDs, or executable behavior are rejected rather than interpreted
-dynamically.
+The schema may grow to support additional authored pickups, hazards, concealment regions, movement
+surfaces, and other environment primitives. V10's restoration pickup is instead a runtime entity
+created by one chest terminal definition. Adding another catalog capability is an explicit content
+and gameplay decision; unknown fields, IDs, or executable behavior are rejected rather than
+interpreted dynamically.
 
 Presentation and gameplay layers are independent. A wall asset blocks only because its shared
 gameplay profile says so; its visual profile cannot change authority. Decorations remain inert,
@@ -106,9 +108,9 @@ An envisioned map builder may let a player:
 - validate and playtest a candidate recipe before saving or publishing it.
 
 It does not accept Rust, scripts, systems, arbitrary component data, new game modes, unrestricted
-assets, network references, or executable objective logic. Choosing Wipeout, Hot Zone, or another
-supported mode selects developer-authored rules and a validation schema; the player authors only a
-compatible layout.
+assets, network references, or executable objective logic. Choosing Wipeout, Hot Zone, Heist, or
+another supported mode selects developer-authored rules and a validation schema; the player authors
+only a compatible layout.
 
 The builder is an external authoring surface, not a second map representation. Editor state may
 include selections, handles, undo history, and invalid intermediate geometry, but only an accepted
@@ -122,6 +124,8 @@ The authoritative map runtime owns:
 - spawn and mode-anchor indexes derived from the resolved map;
 - profile-derived surface/feature collision and dynamic placement instances;
 - terminal destruction/replacement outcomes, colliders, revisions, and rebuild work;
+- live damageable environment-object identity, partial health, exact-once barrel/chest terminal
+  behavior, and restoration-pickup lifecycle;
 - installation, reset, recovery, and teardown of those map-owned facts.
 
 The authoritative mode runtime owns:
@@ -129,6 +133,7 @@ The authoritative mode runtime owns:
 - match phase and transition rules;
 - scoring, victory, timeout, and tie behavior;
 - objective progress and mode-specific timers;
+- Heist objective identity, team ownership, health, reset, and threshold/timeout evaluation;
 - respawn, elimination, or round policy;
 - mode-specific participant state and outcome summaries.
 
@@ -236,20 +241,28 @@ Its map schema requires bounded capture volumes, compatible spawns, and enough l
 space for entry and contest. Its runtime owns occupancy evaluation, progress, contest state, timeout
 resolution, victory, and the match summary.
 
+### Heist
+
+Heist is a simultaneous mirrored attack-and-defense mode. Each team owns one public durable
+objective and may damage only the opposing objective. Destroying exactly one objective wins;
+same-tick destruction draws; timeout compares exact remaining-health fractions before applying the
+common draw/forfeit rules.
+
+Its map schema requires exactly two typed team-objective anchors, compatible spawns, and validated
+attack/defense access. Its runtime owns objective health and team policy, threshold and timeout
+evaluation, critical state, reset, results, and the match summary. The shipped presentation uses
+team idols fitted inside the authoritative safe footprint; the internal `HeistSafe` identity is a
+mode contract and never implies treasure-chest loot.
+
 Together these modes prove that combat, fighter lifecycle, map installation, and common match phases
 are not coupled to one scoring model.
 
 ## Envisioned mode families
 
-These layouts do not become supported rules merely because they can be described. Heist has been
-selected for the gated, not-started [V10 roadmap](./implementation/v10/roadmap.md) and is governed by
-the [damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md);
-it remains unsupported until that roadmap is implemented and accepted. The other families remain
-product candidates:
-
-- **Heist:** teams attack an opposing durable objective while defending their own. It adds objective
-  health, attack/defense lanes, and objective-specific damage policy. The selected first version is
-  one simultaneous mirrored round with two typed team-safe anchors, not alternating roles.
+These layouts do not become supported rules merely because they can be described. Heist is the
+completed V10 proof governed by the
+[damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md).
+Other families remain product candidates:
 - **Gem Grab:** teams collect and carry a contested resource. It adds spawn cadence, carrier state,
   drops, visibility pressure, and a threshold/hold win sequence.
 - **Showdown:** solo fighters or teams survive until one remains. It adds elimination, distributed

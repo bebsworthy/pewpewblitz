@@ -285,7 +285,10 @@ process-local `Entity` identity on the wire.
 Server-hosted bots and autonomous sentries must consume the same permitted observer decision as
 human opponents. They may not query absolute hidden fighter positions through convenient server
 ECS access. A bot observation adapter may include a subject only when that bot would see it;
-temporary target memory requires a separate future rule and cannot contain current hidden motion.
+temporary target memory requires a separate explicit rule and cannot contain current hidden motion.
+The proposed [V11 bot specification](./implementation/v11/milestone-01.md) supplies that rule by
+retaining only a bounded last-permitted delayed pose with its source tick and expiry; hidden state
+never refreshes it.
 
 A sentry does not acquire or continue tracking a concealed enemy unless its owner/team currently
 has a rule that permits targeting that subject. Reveal scan enables normal targeting while active.

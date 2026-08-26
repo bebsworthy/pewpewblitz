@@ -37,12 +37,16 @@ test: _test-routing _test-client _test-server _test-balance-lab _test-network _t
 e2e clients="2":
     ./scripts/e2e.sh {{clients}}
 
+# Run one exact real-process Practice game with one human and manifest bots.
+practice-e2e game_type="wipeout-1v1":
+    ./scripts/e2e-practice.sh {{game_type}}
+
 # Record one bounded routed release-client render report at 1280x720.
 v3-render-evidence report="target/v3-render-evidence.txt":
     ./scripts/v3-render-evidence.sh {{report}}
 
-# Run the complete automated gate, including 2/4/6-client product matches.
-ci: lint test _e2e-matrix
+# Run the complete automated gate, including 2/4/6-client product matches and all Practice types.
+ci: lint test _e2e-matrix _practice-e2e-matrix
 
 # Remove Cargo build artifacts.
 clean:
@@ -114,3 +118,14 @@ _e2e-matrix:
     ./scripts/e2e.sh 2
     ./scripts/e2e.sh 4
     ./scripts/e2e.sh 6
+
+_practice-e2e-matrix:
+    ./scripts/e2e-practice.sh wipeout-1v1
+    ./scripts/e2e-practice.sh wipeout-2v2
+    ./scripts/e2e-practice.sh wipeout-3v3
+    ./scripts/e2e-practice.sh hot-zone-1v1
+    ./scripts/e2e-practice.sh hot-zone-2v2
+    ./scripts/e2e-practice.sh hot-zone-3v3
+    ./scripts/e2e-practice.sh heist-1v1
+    ./scripts/e2e-practice.sh heist-2v2
+    ./scripts/e2e-practice.sh heist-3v3

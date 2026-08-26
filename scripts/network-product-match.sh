@@ -12,6 +12,7 @@ players_per_team=${BRAWLER_PRODUCT_PLAYERS_PER_TEAM:-2}
 game_type=${BRAWLER_PRODUCT_GAME_TYPE:-}
 headless=${BRAWLER_NETWORK_HEADLESS:-1}
 requeue_smoke=${BRAWLER_PRODUCT_REQUEUE_SMOKE:-0}
+practice_smoke=${BRAWLER_PRODUCT_PRACTICE_SMOKE:-0}
 case "$headless" in
     0 | 1) ;;
     *)
@@ -26,6 +27,13 @@ case "$requeue_smoke" in
         exit 2
         ;;
 esac
+case "$practice_smoke" in
+    0 | 1) ;;
+    *)
+        echo "brawler product match: BRAWLER_PRODUCT_PRACTICE_SMOKE must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
 case "$players_per_team" in
     1) roster_size=2; match_flag=--product-match-smoke-1v1 ;;
     2) roster_size=4; match_flag=--product-match-smoke ;;
@@ -35,15 +43,27 @@ case "$players_per_team" in
         exit 2
         ;;
 esac
-client_count=${BRAWLER_PRODUCT_CLIENT_COUNT:-$roster_size}
+if [ "$practice_smoke" = 1 ]; then
+    if [ -z "$game_type" ]; then
+        echo "brawler product match: Practice smoke requires BRAWLER_PRODUCT_GAME_TYPE" >&2
+        exit 2
+    fi
+    client_count=${BRAWLER_PRODUCT_CLIENT_COUNT:-1}
+else
+    client_count=${BRAWLER_PRODUCT_CLIENT_COUNT:-$roster_size}
+fi
 case "$client_count" in
+    1) [ "$practice_smoke" = 1 ] || {
+        echo "brawler product match: one client is reserved for Practice smoke" >&2
+        exit 2
+    } ;;
     2 | 4 | 6) ;;
     *)
-        echo "brawler product match: client count must be 2, 4, or 6" >&2
+        echo "brawler product match: client count must be 1 for Practice or 2, 4, or 6" >&2
         exit 2
         ;;
 esac
-if [ $((client_count % roster_size)) -ne 0 ]; then
+if [ "$practice_smoke" = 0 ] && [ $((client_count % roster_size)) -ne 0 ]; then
     echo "brawler product match: client count must contain whole ${players_per_team}v${players_per_team} rosters" >&2
     exit 2
 fi
@@ -104,7 +124,17 @@ index=1
 while [ "$index" -le "$client_count" ]; do
     preset=$((1 + (index - 1) % 7))
     if [ "$headless" = 1 ]; then
-        if [ "$requeue_smoke" = 1 ]; then
+        if [ "$practice_smoke" = 1 ]; then
+            target/debug/brawler-client \
+                --client-id $((5000 + index)) \
+                --server "$bind_addr" \
+                --transport routed-udp \
+                --auto-connect \
+                --headless \
+                --product-practice-smoke \
+                --product-game-type "$game_type" \
+                --build-preset 1 &
+        elif [ "$requeue_smoke" = 1 ]; then
             if [ "$index" -eq 1 ]; then aim_axis=1,0; else aim_axis=-1,0; fi
             target/debug/brawler-client \
                 --client-id $((5000 + index)) \
@@ -194,7 +224,9 @@ wait "$supervisor_pid"
 supervisor_pid=
 if [ "$headless" = 1 ]; then
     roster_count=$((client_count / roster_size))
-    if [ "$requeue_smoke" = 1 ]; then
+    if [ "$practice_smoke" = 1 ]; then
+        echo "brawler product match: Practice $game_type reached Active with one human"
+    elif [ "$requeue_smoke" = 1 ]; then
         echo "brawler product match: Results -> Queue Again received a fresh Joined outcome"
     else
         echo "brawler product match: ${roster_count} exact ${players_per_team}v${players_per_team} roster(s) reached Active"

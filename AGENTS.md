@@ -7,35 +7,38 @@ Brawler is an original, cross-platform top-down arena shooter built around playe
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v10/roadmap.md`, `milestone-03.md`, and
+2. `docs/implementation/v11/roadmap.md`, `milestone-01.md`, and `docs/10-bots.md` for the completed
+   playable server-hosted Practice bots, fair delayed perception, bounded navigation, objective
+   behavior, feedback corrections, and V11 closeout.
+3. `docs/implementation/v10/roadmap.md`, `milestone-03.md`, and
    `docs/18-damageable-world-objects-and-heist.md` for the completed oil barrels, mirrored Heist,
    consolidated Feature Yard family, treasure chests, restoration pickups, and V10 closeout.
-3. `docs/implementation/v9/roadmap.md`, `milestone-03.md`, and `docs/17-concealment.md` for the
+4. `docs/implementation/v9/roadmap.md`, `milestone-03.md`, and `docs/17-concealment.md` for the
    completed authoritative terrain, Self Cloak, Concealment Field, reveal-proximity, Reveal Scan,
    server-advertised brawler catalog, and saved-brawler UI closeout.
-4. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
+5. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
    `docs/16-grid-map-asset-system.md` for the completed sparse map-asset system, domain-organized
    content, and legacy-removal evidence.
-5. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
+6. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
    brawlers, weapon bases, and four-slot weapon-part equipment.
-6. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
+7. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
    development-only authoritative Balance Lab and its enduring operator contract.
-7. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
+8. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
    responsive Player Dashboard, connected-loop convergence, recovery/lifecycle hardening, and V5
    closeout evidence.
-8. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
+9. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
    embedded map documents, semantic object placement, two reusable themes, routed admission,
    presentation hardening, and V4 closeout evidence.
-9. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
+10. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
-10. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
+11. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
    provenance, degradation, and future-art contracts.
-11. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-12. `docs/13-player-ux.md` for the canonical player experience and
+12. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
+13. `docs/13-player-ux.md` for the canonical player experience and
    `docs/14-multiplayer-server-architecture.md` for the routed-process decisions it relies on.
-13. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
+14. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
    baseline and closeout evidence.
-14. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
+15. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
    verification evidence, deferred release polish, and the direct-UDP comparison baseline.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
@@ -71,6 +74,12 @@ V10 completed and was accepted on 2026-08-25 after damageable oil barrels, mirro
 Feature Yard Wipeout/Hot Zone/Heist 1v1/2v2/3v3 family, treasure chests, restoration pickups,
 Balance Lab evolution, full routed/capacity/native verification, accepted presentation and point-
 blank collision feedback, documentation reconciliation, and its learning review passed closeout.
+
+V11 completed and was accepted on 2026-08-26 after playable deterministic server-hosted Practice
+bots, fair delayed perception and concealment, bounded resumable navigation, Pulse/Dash combat,
+Wipeout/Hot Zone/Heist objective behavior, full automated/routed/native verification, accepted
+objective-priority and perimeter-recovery feedback corrections, documentation reconciliation, and
+its learning review passed closeout.
 
 ## Technical stack
 
@@ -139,7 +148,9 @@ src/
     mod.rs                 map composition root, stable IDs/profiles, public re-exports
     model.rs               stable map identity, bounds, spawn, and shared placement types
     catalog.rs             map-asset catalogs, recipes, validation, resolution, and tests
-    runtime.rs             authoritative dynamic state, destruction, recovery, and colliders
+    objects.rs             damageable-target identities, health-state shapes, facts, and cues
+    pickups.rs             restoration-pickup authority, collection, expiry, reset, and telemetry
+    runtime.rs             authoritative dynamic state, destruction, object terminals, recovery, and colliders
     server.rs              selected-map startup and exact-generation lifecycle
     client.rs              replicated map convergence, recovery, and presentation readiness
   matchplay/
@@ -150,6 +161,7 @@ src/
     spawns.rs              mode-neutral team assignment and deterministic spawn selection
     wipeout.rs             Wipeout scoring and mode-owned reset
     hot_zone.rs            Hot Zone occupancy/progress and mode-owned reset
+    heist.rs               mirrored objective health, threshold/timeout outcomes, and mode reset
     telemetry.rs           bounded match/mode records and aggregates
     tests.rs               focused common/mode lifecycle tests
   movement/

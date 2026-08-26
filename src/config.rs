@@ -266,6 +266,9 @@ pub struct ClientNetworkConfig {
     pub product_queue_smoke: bool,
     /// Headless M05 evidence: join an exact product pool and exit only after authoritative Active.
     pub product_match_smoke: bool,
+    /// Headless V11 evidence: start Practice for one exact advertised game and exit only after
+    /// the ordinary routed match reaches authoritative Active.
+    pub product_practice_smoke: bool,
     /// Headless M06 evidence: complete a product match, return through Results, submit Queue Again,
     /// and exit only after the fresh queue Join is accepted.
     pub product_requeue_smoke: bool,
@@ -337,6 +340,7 @@ impl ClientNetworkConfig {
             exit_after_lobby_welcome: false,
             product_queue_smoke: false,
             product_match_smoke: false,
+            product_practice_smoke: false,
             product_requeue_smoke: false,
             product_match_players_per_team: 2,
             product_match_game_type: None,
@@ -461,6 +465,9 @@ impl ClientNetworkConfig {
     fn validate_product_game_type(&self) -> Result<(), String> {
         if self.product_match_game_type.is_some() && !self.product_match_smoke {
             return Err("--product-game-type requires match automation".to_string());
+        }
+        if self.product_practice_smoke && !self.product_match_smoke {
+            return Err("--product-practice-smoke requires product match automation".to_string());
         }
         Ok(())
     }
@@ -669,6 +676,9 @@ mod tests {
         config.product_match_smoke = true;
         config.transport = NetworkTransport::RoutedUdp;
         config.headless = true;
+        assert!(config.validate().is_ok());
+
+        config.product_practice_smoke = true;
         assert!(config.validate().is_ok());
     }
 }

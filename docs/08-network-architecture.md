@@ -231,7 +231,8 @@ Resolved map
   immutable server-validated placements, derived collision/spawns, presentation references, and mode ID
 
 Runtime map state
-  spawned colliders, objective state, and terminal placement outcomes owned by the server
+  spawned colliders, damageable-object health, pickups, objective state, and terminal placement
+  outcomes owned by the server
 ```
 
 Built-ins resolve through one sparse-grid catalog and recipe path. A future builder may produce a
@@ -257,7 +258,7 @@ The server normally exposes authoritative state through Lightyear-replicated ECS
 Replicated components
   stable player / match / definition identity
   fighter and projectile state
-  active effects and objective state
+  active effects, damageable-object health/life state, restoration pickups, and objective state
   scores, resolved map snapshot, and map dynamic generation/revision
 
 Gameplay message, when required
@@ -271,10 +272,18 @@ Do not introduce a custom aggregate `Snapshot` wrapper when Lightyear component 
 
 ## Dynamic map synchronization
 
-Map destruction is server-authoritative. An accepted world effect resolves its bounded radius
-against current destructible placements and commits each overlapping placement once as either
-removed or replaced. The same transaction updates authoritative colliders and increments one map
-revision; clients never rasterize collision or independently decide which cells were affected.
+Map destruction and V10 environment-object state are server-authoritative. An accepted world effect
+resolves its bounded radius against current destructible placements and commits each overlapping
+placement once as either removed or replaced. The same transaction updates authoritative colliders
+and increments one map revision; clients never rasterize collision or independently decide which
+cells were affected.
+
+Damageable barrels and chests retain stable generation/placement identity plus replicated current
+health and life state. Their terminal transaction commits the map placement outcome and collider
+change exactly once. A chest additionally creates one generation-derived public restoration pickup
+with replicated position, definition, availability, and expiry. Heist objectives use stable
+match/map/anchor/team identity and replicated public health but remain mode-owned rather than map
+placements. Clients never submit contact, damage, health, terminal, pickup, or objective outcomes.
 
 The map root replicates `ResolvedMapSnapshot` and the current `MapDynamicState` once for bootstrap
 and late join. Live ordered-reliable `MapMutationEvent`s carry an exact generation, revision, and
@@ -290,10 +299,17 @@ exhaustion are rejected. Recovery never replays unbounded destruction history. T
 responsible for collision and gameplay truth; client reconstruction is presentation and optional
 prediction support only.
 
+Damageable-object readiness joins the resolved map generation with the complete expected live
+object set; Heist readiness additionally requires the matching mode objective set. Live pickups are
+ordinary durable replicated entities and therefore converge for late join/reconnect without cue
+replay. A missing or generation-mismatched set keeps presentation in its explicit syncing state
+rather than showing stale health, collision, or loot availability.
+
 ## Interest management and concealment
 
-Future tall grass, smoke, darkness, and invisibility mechanics use server-owned network interest
-management as part of their gameplay rule. The server continues to simulate the absolute state of
+Concealing tall grass, Self Cloak, and Concealment Field use server-owned network visibility as part
+of their gameplay rule; future smoke or darkness must join the same observer-specific contract.
+The server continues to simulate the absolute state of
 the match, including hidden fighters and bots, but derives network visibility separately for every
 observer connection and potentially hidden spatial entity.
 
@@ -331,12 +347,18 @@ state, score updates, and telemetry can otherwise reveal a hidden subject even w
 culled. Owner control remains intact; permitted owners/allies receive the spatial fighter while
 opponents do not.
 
+V10 barrels, chests, restoration pickups, Heist objectives, and their health/availability facts are
+public and never become concealment subjects. A cue that carries an initiating fighter or other
+fighter-derived source still keeps that subject identity and passes through the observer-specific
+filter after the accepted attack/reveal transition; public object state cannot be used to copy a
+hidden source into an unfiltered field.
+
 This closes the normal packet-sniffing wallhack path for current hidden spatial state, but it is not
 a complete anti-cheat claim. Clients retain previously delivered state and can observe disappearance
 or reappearance timing; in-flight historical packets and traffic side channels require separate
 threat analysis if they become material.
 
-The implementing milestone must test hidden-before-join, visible-to-hidden despawn, owner/ally
+The completed concealment suite tests hidden-before-join, visible-to-hidden despawn, owner/ally
 exceptions, two observers with different outcomes, current-state reappearance, late join,
 reconnect, defeat/respawn, hierarchy cleanup, interpolation/prediction cleanup, and absence of
 subject-derived private components/messages while hidden. See

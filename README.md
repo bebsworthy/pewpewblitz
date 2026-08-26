@@ -5,7 +5,7 @@ builds, readable combat, meaningful tradeoffs, and short objective matches. The 
 supports Wipeout, Hot Zone, and Heist; bounded weapon/build recipes; abilities and passives;
 destructible and health-bearing map assets; treasure-chest restoration pickups; the consolidated
 Feature Yard test-map family; a fixed-camera 3D presentation; server-local multiplayer; and server-
-hosted practice matches with inert roster bots.
+hosted Practice matches with active deterministic Pulse/Dash bots.
 
 The windowed client presents the Player Dashboard and renders the world, HUD, audio, and local input.
 The routed supervisor and lobby own admission and server-local queues; isolated match workers own
@@ -93,8 +93,9 @@ Run `just` to list the supported everyday surface.
 | `just lint` | Run formatting, Clippy, server isolation, and renderer-boundary checks |
 | `just test` | Run deterministic routing, client, server, network, and performance suites |
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
+| `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
 | `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
-| `just ci` | Run lint, deterministic tests, and the complete 2/4/6-client E2E matrix |
+| `just ci` | Run lint, deterministic tests, the complete 2/4/6-client E2E matrix, and all nine Practice game types |
 | `just clean` | Remove Cargo build artifacts |
 
 E2E runs choose an unused loopback port by default and may run beside an interactive server. Set
@@ -116,7 +117,8 @@ eight starter part instances once. Tapping the Dashboard brawler card opens the 
 Brawlers List, then a full-screen Brawler screen; creation, ability customization, and weapon
 customization are full-screen child destinations. Delete is a small contextual confirmation over
 the invoking Brawler screen. Play enters the selected game type's multiplayer queue and Practice
-fills the remaining roster with inert `Bot N` fighters. Queue admission freezes the selected
+fills the remaining roster with active deterministic `Bot N` fighters using the canonical
+Pulse/Dash recipe. Queue admission freezes the selected
 brawler revision and resolved part modifiers for that match.
 
 Queue cancellation, loading cancellation, confirmed leave, and ordinary no-result return converge
@@ -177,8 +179,10 @@ sorted [`content/maps/index.ron`](content/maps/index.ron). Startup rejects disag
 index and embedded map sources.
 
 Map recipes reference stable `MapAssetId`s rather than client asset paths. The server derives
-surfaces, collision, destruction, spawns, and typed mode anchors from shared gameplay profiles and
-lowers them into a resolved authoritative snapshot. The client maps stable visual IDs through
+surfaces, collision, destruction, damageable-object durability, spawns, and typed mode anchors from
+shared gameplay profiles and lowers them into a resolved authoritative snapshot. Runtime barrels,
+chests, restoration pickups, and Heist objectives remain server-owned and replicate stable current
+state; the client maps stable visual IDs through
 [`assets/catalogs/`](assets/catalogs/) to art under [`assets/brawler/`](assets/brawler/). Exact source
 and CC0 provenance live in [`assets/manifest.ron`](assets/manifest.ron), with retained license texts
 under [`assets/licenses/`](assets/licenses/).
@@ -225,8 +229,8 @@ dedicated separate-App integration-test configuration.
 
 ## Verification and diagnostics
 
-`just test`, `just e2e`, and `just ci` are the canonical automated gates. For a focused live movement
-trace, run:
+`just test`, `just e2e`, `just practice-e2e`, and `just ci` are the canonical automated gates. For a
+focused live movement trace, run:
 
 ```sh
 BRAWLER_INPUT_TRACE=1 RUST_LOG=brawler=info just run 1

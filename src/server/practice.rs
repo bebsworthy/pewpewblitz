@@ -1,7 +1,7 @@
 //! Match-worker installation for server-hosted Practice participants.
 //!
-//! M08 bots are inert authoritative fighters. They own no connection and produce no decisions;
-//! the later bot-AI version can add behavior without changing this roster boundary.
+//! V11 bots remain ordinary connectionless authoritative fighters. A private controller observes
+//! permitted state and produces only validated local `FighterInput`.
 
 use super::ServerRoleResource;
 use crate::{
@@ -25,10 +25,11 @@ use bevy::prelude::*;
 use lightyear::prelude::input::native::ActionState;
 use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
 
-pub(super) struct InertPracticeBotPlugin;
+pub(super) struct PracticeBotPlugin;
 
-impl Plugin for InertPracticeBotPlugin {
+impl Plugin for PracticeBotPlugin {
     fn build(&self, app: &mut App) {
+        crate::bots::install_controller_systems(app);
         app.add_systems(
             Startup,
             install_manifest_bots
@@ -149,6 +150,7 @@ fn install_manifest_bots(
                 ),
                 ActionState::<FighterInput>::default(),
                 InputFreshness::default(),
+                crate::bots::PracticeBotController::new(bot.player_id.get()),
                 Replicate::to_clients(NetworkTarget::All),
                 InterpolationTarget::to_clients(NetworkTarget::All),
             ));

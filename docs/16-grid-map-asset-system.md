@@ -22,8 +22,9 @@ Historical milestone documents are evidence, not production content organization
   transforms, and materials; shared gameplay content never contains client asset paths.
 - [`src/map/catalog.rs`](../src/map/catalog.rs) parses, validates, fingerprints, and resolves map
   content. [`src/map/runtime.rs`](../src/map/runtime.rs) owns authoritative whole-asset destruction,
-  recovery, and colliders. [`src/map/client.rs`](../src/map/client.rs) owns client convergence and
-  readiness.
+  damageable-object terminals, recovery, and colliders; [`src/map/objects.rs`](../src/map/objects.rs)
+  owns shared target state/facts and [`src/map/pickups.rs`](../src/map/pickups.rs) owns restoration-
+  pickup lifecycle. [`src/map/client.rs`](../src/map/client.rs) owns client convergence and readiness.
 - Destructibility is a gameplay-profile property of a map asset. Destruction changes or removes
   the complete authored placement, preserving the accepted coarse 32-world-unit readability.
 - [`external_assets/map_images/`](../external_assets/map_images/) remains ignored design-reference
@@ -40,16 +41,16 @@ GRASS
 BUSH
 WATER
 SAND_FLOOR
-CHEST
-TELEPORT
+OIL_BARREL
+TREASURE_CHEST
 DECOR_SEASHELL
 PLAYER_SPAWN
 ```
 
 The author chooses an asset and places it in a cell. The asset definition supplies its footprint,
 legal rotation, placement slot, gameplay behavior, normal visual profile, and optional destroyed
-visual profile. The recipe supplies only instance facts such as cell, rotation, team, facing, or
-teleport channel. Neither a GLB path nor arbitrary executable behavior appears in a map recipe.
+visual profile. The recipe supplies only instance facts such as cell, rotation, team, and facing.
+Neither a GLB path nor arbitrary executable behavior appears in a map recipe.
 
 The target authoring model is:
 
@@ -133,7 +134,8 @@ texture, or Bevy asset. It joins one placement contract, one gameplay profile, a
 profile references.
 
 Examples include a sand surface, blocking stone wall, walkable concealing bush, non-walkable water,
-inert seashell, team spawn marker, or implemented teleporter.
+inert seashell, or team spawn marker. Teleporters remain a candidate family rather than implemented
+content.
 
 ### Gameplay profile
 
@@ -168,9 +170,9 @@ The rules are:
 
 - `Surface` assets replace the default surface in their covered cells. Examples: sand, stone floor,
   water.
-- `Feature` assets occupy physical/gameplay space above a surface. Examples: wall, bush, chest,
-  teleporter. Two features cannot occupy the same cell unless one future concrete asset explicitly
-  owns a compound footprint; V8 does not allow arbitrary feature stacking.
+- `Feature` assets occupy physical/gameplay space above a surface. Examples: wall, bush, chest, or
+  a future teleporter. Two features cannot occupy the same cell unless one future concrete asset
+  explicitly owns a compound footprint; V8 does not allow arbitrary feature stacking.
 - `Decoration` assets have no authoritative collision or gameplay effect. Their declared visual
   envelope must fit without obscuring required combat information. A decoration cannot be used to
   imply a wall, bush, pickup, or interactable.
@@ -279,7 +281,7 @@ candidate sets. It does not retain a second public 8-unit map-authoring grid. If
 work remains useful internally during migration, it is an implementation detail and cannot appear
 in recipes, shared IDs, recovery schemas, or authoring terminology at V8 closeout.
 
-The proposed V10 [damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md)
+The completed V10 [damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md)
 adds ordinary attack durability as a separate profile/runtime axis. It does not reinterpret these
 V8 destruction variants: a V10 hit-point placement is immune to `DestroyMap`, carries durable
 partial health, and commits one compatible terminal placement outcome only when its health reaches
@@ -307,20 +309,20 @@ Initial structural values are:
 ```text
 None
 PlayerSpawn
-Teleporter
 ```
 
 Only behavior completed by an accepted milestone may be present in the production catalog. Spawn placement
 parameters contain team slot, stable spawn ordinal, and facing quarter-turn. Teleporter placement
-parameters contain a bounded channel/link identity and exit facing policy. A teleporter behavior is
-not complete until authoritative entry, destination choice, cooldown/re-entry protection, collision
+parameters remain a candidate rather than a current enum value. A teleporter behavior is not
+complete until authoritative entry, destination choice, cooldown/re-entry protection, collision
 repair, replication, reset, and presentation are specified and tested.
 
-Chests, healing pads, launchers, pickups, and hazards follow the same rule: the asset model can host
-them later, but names in an example do not create unsupported runtime behavior. V10 has now
-selected one exact treasure-chest/restoration-pickup behavior, documented separately and still
-unsupported until the gated [V10 roadmap](./implementation/v10/roadmap.md) is implemented and
-accepted; this does not promote the other interaction families.
+Healing pads, launchers, authored pickups, and hazards follow the same rule: the asset model can
+host them later, but names in an example do not create unsupported runtime behavior. Completed V10
+implements one exact treasure-chest terminal that creates one server-owned restoration pickup;
+neither is a generic `MapInteractionBehavior`. This does not promote the other interaction
+families. See the completed [V10 roadmap](./implementation/v10/roadmap.md) and
+[damageable-object specification](./18-damageable-world-objects-and-heist.md).
 
 ## Client visual catalog
 
@@ -356,8 +358,8 @@ struct MapVisualProfile {
   authoritative footprint and readable gameplay meaning.
 
 Normal and destroyed visuals are stable references on the shared asset definition. Transient hit,
-break, splash, conceal/reveal, and teleport effects are client presentation facts emitted from
-authoritative outcomes; they are not map recipe fields.
+break, splash, and conceal/reveal effects are client presentation facts emitted from authoritative
+outcomes; they are not map recipe fields. A future teleporter would follow the same rule.
 
 ## Theme and defaults
 

@@ -4,8 +4,9 @@
 
 V10 promotes health-bearing world objects and Heist into the playable product. It delivers a
 target-aware authoritative damage foundation, one explosive oil-barrel environment slice, a
-simultaneous mirrored two-safe Heist mode with one dedicated map, and one treasure-chest/restoration-
-pickup slice. These concrete consumers share damage receipt and stable runtime identity without
+simultaneous mirrored two-safe Heist mode, one consolidated Feature Yard map family, and one
+treasure-chest/restoration-pickup slice. These concrete consumers share damage receipt and stable
+runtime identity without
 creating a universal object behavior framework or confusing a loot chest with a mode objective.
 
 The durable capability contract is
@@ -77,8 +78,9 @@ learn-from-errors review all passed.
     cannot be consumed at full health, expires, and creates no inventory or persistent reward.
 11. Barrels, chests, pickups, safes, and objective health are public facts. V9 concealment still
     protects hidden fighter state and source-derived facts according to its accepted observer rule.
-12. One dedicated Heist map is required for the complete mode slice. Further maps are evidence-
-    driven content, not an infrastructure prerequisite.
+12. M02 initially required one dedicated Heist recipe to prove the complete mode slice. M02b then
+    migrated that proof into Feature Yard's independently validated Heist variant and retired the
+    focused map; further maps remain evidence-driven content, not an infrastructure prerequisite.
 13. Environment-object and mode-objective damage use a dedicated bounded fact stream. Existing
     fighter/deployable combat facts remain fighter-centric; only environmental damage applied to a
     fighter or deployable enters that established stream.

@@ -98,6 +98,7 @@ and closeout learning.
 | V8 | Sparse-grid maps, unified map-asset/gameplay/visual catalogs, full built-in conversion, and retirement of the old production map system | [V8 roadmap](./implementation/v8/roadmap.md) |
 | V9 | Authoritative observer-specific concealment, terrain/proximity proof, cloak/reveal/field ultimates, server-advertised brawler metadata, and the full-screen saved-brawler flow | [V9 roadmap](./implementation/v9/roadmap.md) |
 | V10 | Damageable world objects, oil barrels, mirrored Heist, the consolidated Feature Yard family, treasure chests, restoration pickups, and cross-feature closeout | [V10 roadmap](./implementation/v10/roadmap.md) |
+| V11 | Playable deterministic server-hosted Practice bots with fair perception, map-aware navigation, objective play, Pulse/Dash behavior, and input-only authority | [V11 roadmap](./implementation/v11/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

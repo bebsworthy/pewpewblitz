@@ -14,6 +14,7 @@ measure_seconds=${BRAWLER_RENDER_MEASURE_SECONDS:-30}
 window_size=${BRAWLER_RENDER_WINDOW_SIZE:-1280x720}
 peer_render_profile=${BRAWLER_RENDER_PEER_PROFILE:-native}
 validate_peer=${BRAWLER_RENDER_VALIDATE_PEER:-1}
+practice_smoke=${BRAWLER_RENDER_PRACTICE:-0}
 client_one_log=${report_path}.client-1.log
 client_two_log=${report_path}.client-2.log
 
@@ -31,6 +32,16 @@ case "$validate_peer" in
         exit 2
         ;;
 esac
+case "$practice_smoke" in
+    0 | 1) ;;
+    *)
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_PRACTICE must be 0 or 1' >&2
+        exit 2
+        ;;
+esac
+if [[ "$practice_smoke" == 1 ]]; then
+    validate_peer=0
+fi
 if [[ -z "$players_per_team" ]]; then
     if [[ "$game_mode" == hot-zone ]]; then players_per_team=2; else players_per_team=1; fi
 fi
@@ -52,7 +63,11 @@ case "$players_per_team" in
         exit 2
         ;;
 esac
-roster_size=$((players_per_team * 2))
+if [[ "$practice_smoke" == 1 ]]; then
+    roster_size=1
+else
+    roster_size=$((players_per_team * 2))
+fi
 case "$timeout_seconds" in
     '' | *[!0-9]* | 0)
         printf '%s\n' 'brawler render evidence: timeout must be a positive integer' >&2
@@ -132,24 +147,35 @@ target/debug/brawler-supervisor \
     --bind "$bind_addr" &
 supervisor_pid=$!
 
-target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
-    --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
-    --window-size "$window_size" \
-    --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
-    --render-measure-seconds "$measure_seconds" \
-    >"$client_one_log" 2>&1 &
+if [[ "$practice_smoke" == 1 ]]; then
+    target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
+        --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis 1,0 \
+        --window-size "$window_size" \
+        --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
+        --render-measure-seconds "$measure_seconds" \
+        >"$client_one_log" 2>&1 &
+else
+    target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
+        --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
+        --window-size "$window_size" \
+        --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
+        --render-measure-seconds "$measure_seconds" \
+        >"$client_one_log" 2>&1 &
+fi
 measured_pid=$!
 # Match the canonical routed-product smoke: do not turn a two-client evidence run into a burst
 # against the deliberately small unauthenticated lobby ingress budget.
 sleep 2
-env BRAWLER_RENDER_PROFILE="$peer_render_profile" \
-    target/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
-    --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0' \
-    --window-size "$window_size" \
-    --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
-    --render-measure-seconds "$measure_seconds" \
-    >"$client_two_log" 2>&1 &
-peer_pid=$!
+if [[ "$practice_smoke" == 0 ]]; then
+    env BRAWLER_RENDER_PROFILE="$peer_render_profile" \
+        target/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
+        --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0' \
+        --window-size "$window_size" \
+        --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
+        --render-measure-seconds "$measure_seconds" \
+        >"$client_two_log" 2>&1 &
+    peer_pid=$!
+fi
 
 for ((client_id = 3; client_id <= roster_size; client_id++)); do
     sleep 1
@@ -174,7 +200,7 @@ wait "$watchdog_pid" 2>/dev/null || true
 watchdog_pid=
 
 completed_reports=("$report_path")
-if [[ "$validate_peer" == 1 ]]; then
+if [[ "$practice_smoke" == 0 && "$validate_peer" == 1 ]]; then
     completed_reports+=("$peer_report_path")
 fi
 for completed_report in "${completed_reports[@]}"; do
@@ -186,7 +212,9 @@ for completed_report in "${completed_reports[@]}"; do
         exit 1
     fi
 done
-if [[ "$validate_peer" == 1 ]]; then
+if [[ "$practice_smoke" == 1 ]]; then
+    printf 'brawler render evidence: Practice %s passed; report=%s\n' "$game_type" "$report_path"
+elif [[ "$validate_peer" == 1 ]]; then
     printf 'brawler render evidence: passed; reports=%s,%s\n' "$report_path" "$peer_report_path"
 else
     printf 'brawler render evidence: passed; report=%s; pacing-peer=%s\n' \

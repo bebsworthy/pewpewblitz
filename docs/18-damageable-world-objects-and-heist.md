@@ -75,10 +75,12 @@ One code-owned response committed exactly once when an environment object's heal
 V10 implements only the concrete behavior families it ships:
 
 ```text
-Break        -> remove or replace the authored placement
 Explode      -> emit one bounded explosion, then remove or replace the placement
 DropPickup   -> spawn one specified pickup, then remove or replace the placement
 ```
+
+Ordinary `DestroyMap` removal/replacement remains the separate `MapDestructionBehavior` path; it is
+not a health-bearing terminal variant.
 
 This is a closed enum with validated embedded profiles, not a script, callback list, arbitrary
 effect graph, dynamic component-reflection scheme, or map-authored property bag. A later object
@@ -128,7 +130,8 @@ DestroyMap world effect
   -> no partial health and no ordinary-damage attribution
 ```
 
-V10 adds a separate durability axis to an eligible `Feature` gameplay profile. Conceptually:
+V10 adds a separate durability axis to an eligible `Feature` gameplay profile. The implemented
+shapes are:
 
 ```rust
 enum MapDurabilityBehavior {
@@ -143,21 +146,19 @@ struct MapDamageProfile {
 }
 
 enum MapObjectTerminalBehavior {
-    Break(MapPlacementOutcome),
     Explode {
         explosion_profile_id: EnvironmentExplosionProfileId,
         outcome: MapPlacementOutcome,
     },
     DropPickup {
-        pickup_definition_id: PickupDefinitionId,
+        pickup_definition_id: RestorationPickupDefinitionId,
         outcome: MapPlacementOutcome,
     },
 }
 ```
 
-The exact Rust ownership may be refined during V10 M01 research, but the semantic separation is
-fixed. Health is not added to `MapDestructionBehavior`, and attack damage is not represented as a
-`MapInteractionBehavior`.
+The implemented Rust ownership preserves this semantic separation. Health is not added to
+`MapDestructionBehavior`, and attack damage is not represented as a `MapInteractionBehavior`.
 
 In V10, a hit-point object must be indestructible to `DestroyMap`. This prevents a world effect
 from bypassing health, terminal attribution, exact-once explosion/drop behavior, or Heist rules.
@@ -192,7 +193,7 @@ V10 promotes exact assets only when their full behavior exists:
 | Treasure chest | Ordinary `Feature` placement | Blocks players; intercepts eligible projectiles | Environment-object runtime | One restoration pickup, then removed state |
 | Heist safe | Typed Heist mode anchor, not an ordinary chest placement | Blocks players; intercepts eligible projectiles | Heist mode | Public destroyed objective state and mode outcome; no loot |
 
-The implementing milestones select original names, stable IDs, exact footprints, normal/damaged/
+V10 selected original names, stable IDs, exact footprints, normal/damaged/
 terminal visual profiles, and primitive fallbacks. Placeholder identity cannot erase the chest/safe
 distinction.
 
@@ -242,8 +243,8 @@ secondary damage applied to a fighter or deployable still emits the existing com
 with an environmental source, so fighter lifecycle, concealment reveal, match telemetry, and
 defeat attribution continue through their established owner.
 
-M01 must audit every existing combat-outcome reader before introducing the dedicated stream and
-prove that object/safe damage cannot enter fighter damage, defeat, charge, passive, Wipeout, Hot
+M01 audited every existing combat-outcome reader before introducing the dedicated stream and
+proved that object/safe damage cannot enter fighter damage, defeat, charge, passive, Wipeout, Hot
 Zone, or common match aggregates. A future unification requires an explicit migration of every
 reader; shared health alone is not permission to reuse a fighter-centric fact contract.
 
@@ -574,10 +575,10 @@ Heist is a complete routed product mode:
 All health-bearing objects are public, but information density remains bounded:
 
 - safes show persistent objective health because it is always decision-critical;
-- barrels and chests show compact world health only while damaged, recently hit, or targeted if
-  playtest confirms persistent bars are noisy;
+- barrels and chests show compact world health only while damaged;
 - hit, terminal, explosion, drop, pickup, safe-critical, and safe-destroyed cues have distinct
-  shapes/colors/audio and remain legible against every supported theme;
+  shapes/colors and remain legible against every supported theme; missing audio may degrade to
+  silence without changing state readability;
 - imported and primitive paths communicate identical footprint, collision, targetability, team,
   health, blast, pickup, and terminal facts;
 - reduced effects may simplify particles, debris, flashes, and animation but cannot hide blast
@@ -594,7 +595,8 @@ The Balance Lab exposes only values owned by completed V10 behavior:
 
 - barrel maximum health, explosion radius/damage, target policy, and terminal profile;
 - chest maximum health, restoration amount, pickup radius/lifetime, and terminal profile;
-- Heist safe maximum health, match duration, countdown, respawn delay, and supported topology;
+- Heist safe maximum health; match duration, countdown, respawn delay, and topology remain owned by
+  the advertised game-type configuration rather than this Balance Lab snapshot;
 - later tuning values only after their behavior is implemented.
 
 Authoritative telemetry distinguishes fighter, deployable, environment-object, and mode-objective
@@ -674,40 +676,36 @@ Native normal, primitive-fallback, reduced-effects, keyboard/mouse, and controll
 Visual verification complements authority and network tests; it cannot prove health, exact-once
 behavior, recovery, or client non-authority.
 
-## Initial implementation boundaries
+## Implemented ownership
 
-Likely production ownership is:
+Production ownership is:
 
 ```text
 src/map/
-  catalog.rs            durability profile IDs and map-authoring validation
-  runtime/ or objects/  environment-object install, identity, terminal state, reset, recovery
+  catalog.rs            durability, explosion, pickup definitions, and map-authoring validation
+  objects.rs            shared target identities, health/life shapes, facts, cues, and telemetry
+  runtime.rs            environment-object install, terminal transaction, reset, and recovery
+  pickups.rs            restoration spawn, overlap, collection, expiry, reset, and telemetry
 
 src/combat/
-  delivery.rs           damageable-target geometry/contact
+  attack.rs             origin-to-muzzle first-contact handling
+  delivery.rs           projectile/melee damageable-target geometry and contact
   effects/              target-aware damage and bounded secondary transaction
   outcomes.rs           existing fighter/deployable facts; environmental fighter damage only
-
-src/environment/ or focused map-owned module
-  outcomes.rs           dedicated bounded environment-object/objective facts and source lineage
-  barrel.rs             oil-barrel terminal reaction and telemetry
-  chest.rs              chest terminal reaction
-  pickup.rs             restoration spawn, overlap, collection, expiry
 
 src/matchplay/
   heist.rs              rules, safe ownership, outcome, restart, telemetry
 
 src/client/presentation_3d/
-  world-object and Heist-safe presentation bound to replicated state
+  map-object, restoration-pickup, and Heist-idol presentation bound to replicated state
 
 src/client/
   HUD, audio, results, and product-flow dispatch
 ```
 
-The exact split is decided from demonstrated ownership during V10 research. `map/mod.rs`,
-`combat/mod.rs`, and `matchplay/mod.rs` remain composition/public surfaces. Do not place all object
-behaviors in `map/runtime.rs`, widen one existing combat system without decomposition, create one
-plugin per data type, or add a new crate without a proven role/platform/reuse boundary.
+`map/mod.rs`, `combat/mod.rs`, and `matchplay/mod.rs` remain composition/public surfaces. Focused
+pickup ownership prevents collection/expiry from expanding `map/runtime.rs`; the muzzle-contact
+view and queues use one local `SystemParam` without creating a new plugin or crate.
 
 ## Deferred after V10
 
@@ -721,25 +719,26 @@ plugin per data type, or add a new crate without a proven role/platform/reuse bo
   scripting.
 - Concealed objects/pickups/objectives, spectator-specific objective permissions, replay, or kill
   cam.
-- More Heist maps or object content beyond the accepted reference slice unless playtest evidence
-  makes them necessary for V10 balance or closeout.
+- More Heist maps or object content beyond the accepted Feature Yard slice unless a later content
+  milestone deliberately owns and playtests them.
 
-## Preparation sources
+## Implementation and closeout sources
 
-Local, version-pinned sources inspected while preparing this contract:
+Local, version-pinned sources inspected while preparing and implementing this contract:
 
-- `src/map/catalog.rs`, `runtime.rs`, `server.rs`, and `client.rs` for sparse placements, typed mode
-  anchors, colliders, whole-placement mutation, generation/revision recovery, and client
-  convergence;
-- `src/combat/delivery.rs`, `effects/mod.rs`, `effects/application.rs`, `model.rs`, `cues.rs`, and
-  `outcomes.rs` for fighter/deployable targeting, composed payload staging, `CurrentHealth`, stable
+- `src/map/catalog.rs`, `objects.rs`, `runtime.rs`, `pickups.rs`, `server.rs`, and `client.rs` for
+  sparse placements, typed mode anchors, colliders, object health/terminals, restoration pickup,
+  generation/revision recovery, and client convergence;
+- `src/combat/attack.rs`, `delivery.rs`, `effects/mod.rs`, `effects/application.rs`, `model.rs`,
+  `cues.rs`, and `outcomes.rs` for fighter/deployable targeting, composed payload staging,
+  `CurrentHealth`, stable
   combat identity, existing environmental source shape, cue subject filtering, and fighter-centric
   outcome consumers;
 - `src/concealment/mod.rs`, `network.rs`, and `field.rs` for completed attack/damage reveal,
   connection-specific observer decisions, cue privacy, public entities, and replication ordering;
 - `src/profiles/catalog.rs` and `src/client/profile.rs` for the bounded server-advertised brawler
   catalog and authoritative resolved maximum-health source used by restoration pickups;
-- `src/gameplay.rs`, `src/matchplay/mod.rs`, `hot_zone.rs`, `wipeout.rs`, `server.rs`, and
+- `src/gameplay.rs`, `src/matchplay/mod.rs`, `hot_zone.rs`, `wipeout.rs`, `heist.rs`, `server.rs`, and
   `telemetry.rs` for fixed-post ordering, restart transactions, mode-owned state, deadline/
   threshold precedence, summaries, and result publication;
 - `src/protocol.rs`, `src/server/admission.rs`, `src/server/lobby/catalog.rs`, and routed game-mode
@@ -755,6 +754,6 @@ Local, version-pinned sources inspected while preparing this contract:
   [V1 roadmap](./implementation/v1/roadmap.md#v1-backlog).
 
 The checked-in Lightyear 0.29 material matches Brawler's Bevy 0.19 dependency. The checked-in Bevy
-source is 0.20-dev and was used only for plugin-structure guidance. No internet research was needed
-for this preparation; V10 M01 must recheck exact installed Bevy, Lightyear, and Avian APIs before
-implementation.
+source is 0.20-dev and was used only for plugin-structure guidance. Each implementing milestone
+rechecked the exact installed Bevy, Lightyear, and Avian seams it changed; the V10 milestone records
+retain those research and verification details.

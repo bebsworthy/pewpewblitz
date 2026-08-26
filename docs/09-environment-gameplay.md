@@ -30,12 +30,16 @@ provides:
 - mode-owned Hot Zone objective occupancy, progress, and scoring derived from a map anchor;
 - V9 observer-specific concealment from tall grass, Self Cloak, and public allied fields, with
   proximity, attack/damage, and Reveal Scan outcomes enforced before replication;
+- V10 health-bearing oil barrels and treasure chests, exact-once explosion/drop terminals, public
+  restoration pickups, and mirrored Heist objectives through explicit target and mode ownership;
 - client-owned visual profiles, themes, imported scenes, primitives, generated meshes,
   and deterministic fallbacks.
 
 The current map-asset catalog implements ground, blocking water, concealing tall grass, walls,
-round obstacles, destructible cover, rubble replacement, inert decorations, and spawn markers. It
-does not imply hazards, movement modifiers, or arbitrary scripted interactions.
+round obstacles, destructible cover, rubble replacement, health-bearing oil barrels and treasure
+chests, inert decorations, and spawn markers. Restoration pickups are server-owned runtime entities
+created by the chest terminal transaction rather than authored placements. These concrete
+capabilities do not imply hazards, movement modifiers, or arbitrary scripted interactions.
 
 A visible tile is not independently authoritative. Gameplay comes from the shared profile attached
 to a placed `MapAssetId`; client surfaces, props, vegetation, particles, materials, and shaders
@@ -149,12 +153,13 @@ Movement surfaces must additionally specify whether they change maximum speed, a
 turning, momentum, or add forced displacement. They should not collapse these distinct behaviors
 into one ambiguous speed multiplier.
 
-The first environmental damage capability is now selected as V10's oil-barrel slice. Its
+V10 completed the first environmental damage capability through its oil-barrel slice. Its
 [damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md)
-revisits `M08-ENV-SOURCE` in the [V1 backlog](./implementation/v1/roadmap.md#v1-backlog) so
+resolved `M08-ENV-SOURCE` in the [V1 backlog](./implementation/v1/roadmap.md#v1-backlog) so
 outcomes preserve the immediate object cause and bounded initiating-player lineage rather than
-appearing as unattributed map damage. The [V10 roadmap](./implementation/v10/roadmap.md) remains
-prepared and `Not started` until explicitly initiated.
+appearing as unattributed map damage. The same completed version added one exact chest/restoration-
+pickup behavior and kept Heist objective meaning in mode ownership. See the completed
+[V10 roadmap](./implementation/v10/roadmap.md) for delivery and closeout evidence.
 
 ## Concealment gameplay model
 

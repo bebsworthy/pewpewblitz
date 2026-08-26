@@ -192,11 +192,14 @@ defined in cell-relative coordinates and sampled between the inferred boundaries
 ### 2. Recognize ordinary surfaces
 
 The repeating checkerboard becomes the configured default surface and is not emitted once per cell.
-Explicit surface overrides such as water are detected per cell using color coverage and edge
-evidence.
+Explicit surface overrides such as water are matched against a reviewed tile-prototype index. Each
+prototype combines normalized RGBA pixels and horizontal/vertical edge evidence from the owning
+cell and the cell above. Exact pixel hashes are not used, so WebP compression and export resizing
+do not invalidate a match.
 
-Foreground sprites are masked when classifying the surface beneath them. A single center pixel is
-not sufficient evidence.
+The two checker parities are represented by reviewed floor prototypes. A source cell is accepted
+only when its nearest indexed class is within the class-specific distance threshold; otherwise it
+is reported rather than guessed.
 
 ### 3. Recognize projected sprites
 
@@ -205,9 +208,9 @@ Each known sprite class defines two separate shapes:
 - logical footprint: cells written to the RON recipe; and
 - visual envelope: pixels drawn by the sprite, including height above the footprint.
 
-The recognizer scans screen rows from bottom to top. This follows the image's painter order: sprites
-anchored lower on the screen may cover parts of sprites above them. Matching weights pixels around
-the owning baseline more heavily than pixels in the upward bleed.
+The recognizer indexes one logical owner cell at a time using a normalized `1 x 2` visual patch:
+the cell above carries projected height and the lower cell carries the logical owner. Reviewed
+prototype variants cover isolated, adjacent, and vertically stacked presentation contexts.
 
 Upward pixels never change logical ownership. For a footprint whose top screen row is `row`:
 
@@ -218,11 +221,15 @@ map_y = grid_height - row - footprint_height
 
 ### 4. Resolve candidate conflicts
 
-The tool keeps the highest-confidence non-conflicting recognition at each cell, subject to the
-known surface, feature, decoration, and marker slots. A candidate becomes unresolved when:
+Nearest indexed matches are candidates, not immediate placements. A deterministic resolver handles
+mode visuals and spawn rings first, then accepts high-confidence logical owner cells bottom-to-top.
+Accepted owners explain their projected caps and shadows, so those pixels cannot create another
+placement or an unresolved residual. Spawn-ring candidates use local-minimum suppression so one
+ring produces one marker even when its visual envelope crosses adjacent cells. A candidate becomes
+unresolved when:
 
 - its confidence is below the profile threshold;
-- two candidates have similar scores;
+- the nearest class exceeds its reviewed distance threshold;
 - its footprint conflicts with a stronger candidate; or
 - the sprite family has no supported PewPew asset mapping.
 
@@ -239,7 +246,7 @@ The initial profile can emit only assets that already have a reasonable current 
 | water | `MapAssetId(6)` / `water` | explicit surface cells |
 | vegetation | `MapAssetId(8)` / `tall-grass` | approximation when presentation differs |
 | solid brick wall | `MapAssetId(7)` / `garden-wall` | explicit feature cells |
-| exact two-cell barrier | `MapAssetId(9)` / `breakable-barrier` | only for matching `2 x 1` footprints |
+| barrier tile | `MapAssetId(9)` / `breakable-barrier` | one source checker cell maps to one `1 x 1` tile |
 | spawn rings | `MapAssetId(20)` / `player-spawn` | team, ordinal, and inward facing inferred from color/edge |
 | recognized supported decoration | matching configured ID | only exact family mappings |
 
@@ -285,7 +292,10 @@ The writer:
 - writes atomically through a temporary sibling file.
 
 For Wipeout, `mode_anchors` is empty. A supported Hot Zone import requires explicit CLI anchor
-options; the tool does not invent an objective from arbitrary blue circles.
+options; the tool does not invent an objective from arbitrary blue circles. V10 added Heist and
+typed team-objective anchors to the game, but not to this importer profile or CLI. Feature Yard's
+Heist recipe remains deliberately authored and validated through the normal RON path rather than
+inferred from an image.
 
 ## CLI
 
