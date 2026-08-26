@@ -269,6 +269,11 @@ The first planner uses deterministic bounded resumable routing:
   barrel does not become traversable knowledge before its delayed observation, while an unexpected
   authoritative collision may trigger ordinary stuck recovery.
 
+The standard fighter radius is 14 world units. Practice navigation adds one unit of conservative
+safety, so its effective 15-unit clearance still traverses a 32-unit one-cell passage with one
+unit remaining on each side. The allowance must not independently grow until it rejects geometry
+that an ordinary fighter is explicitly intended to use.
+
 Planning remains bounded without assuming a particular map size. Resolution validates declared
 navigation capacities; runtime owns bounded route-request queues, expansions per tick, total work
 per request, stored search state, route length, and route cache entries. Requests are processed by

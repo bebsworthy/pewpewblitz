@@ -122,6 +122,13 @@ Visual modules may span several cells. A future format revision may change the g
 through a deliberate migration and fingerprint/protocol review; individual maps do not choose
 incompatible cell sizes.
 
+The standard fighter occupies one cell without filling it: one canonical circular radius of 14
+world units produces a 28-unit body and four units of total clearance in a 32-unit passage. The
+same radius drives movement collision, combat hit detection, bounds containment, and resolver
+spawn/reachability clearance; maps cannot override it. One-cell corridors are therefore valid
+authoring geometry, while a 32-unit-diameter fighter would be only tangent to both sides and has no
+accepted safety margin.
+
 It does not preserve every old floating point placement as a cell center. In particular, point
 spawns and decorations on an even-sized map may currently sit on grid intersections. Conversion
 re-authors those points to reviewed nearby cells and verifies clearance, symmetry and presentation;

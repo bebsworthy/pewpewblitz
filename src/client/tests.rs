@@ -83,6 +83,21 @@ fn client_config_defaults_to_loopback_and_validates_roster_target() {
 }
 
 #[test]
+fn gameplay_window_defaults_to_reference_aspect_and_preserves_override() {
+    let default_resolution = gameplay_window_resolution(None);
+    assert!((default_resolution.width() - 1_591.0).abs() < f32::EPSILON);
+    assert!((default_resolution.height() - 720.0).abs() < f32::EPSILON);
+    assert!(
+        (default_resolution.width() / default_resolution.height() - 2_302.0 / 1_042.0).abs()
+            < 0.001
+    );
+
+    let override_resolution = gameplay_window_resolution(Some((960, 540)));
+    assert!((override_resolution.width() - 960.0).abs() < f32::EPSILON);
+    assert!((override_resolution.height() - 540.0).abs() < f32::EPSILON);
+}
+
+#[test]
 fn headless_custom_build_and_cover_lane_movement_are_bounded() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;

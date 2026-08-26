@@ -23,12 +23,16 @@ intrinsic scene bounds and replacing the three maps' solid-block approximations 
 KayKit Block Bits family. The user accepted the corrected presentation on 2026-08-26. This was
 map-playtest polish, not M02 balancing-tool work.
 
+M01 reopened later on 2026-08-26 for bounded framing corrections. Camera fit/follow is now decided
+independently per axis from each map's dimensions and the current viewport's conservative visible
+rectangle. M02 remains unstarted and unspecified.
+
 ## Version status
 
 | Field | Value |
 |---|---|
-| Status | Not started |
-| Current milestone | M02 — balancing-tool improvements, awaiting the user's requirements |
+| Status | User playtest |
+| Current milestone | M01 — framing and one-cell fighter correction |
 | Entry gate | Satisfied: V11 completed and was accepted on 2026-08-26 |
 | Completion gate | Three accepted 3v3 maps, the user-defined M02 balancing workflow, and feedback-driven fighter/weapon tuning pass their owning automated, routed, native, feedback, documentation, and learning gates |
 
@@ -36,7 +40,7 @@ map-playtest polish, not M02 balancing-tool work.
 
 | Milestone | Status | Player-visible deliverable |
 |---|---|---|
-| 01 | Complete | One manually authored, grid-readable 3v3 map each for Wipeout, Hot Zone, and Heist, accepted through native playtest |
+| 01 | User playtest | One manually authored, grid-readable 3v3 map each for Wipeout, Hot Zone, and Heist, accepted through native playtest, with per-axis framing and a matched one-cell fighter footprint |
 | 02 | Not started | Balancing-tool improvements defined by the user after playing the M01 maps |
 | 03 | Not started | Character and weapon balance/rework iterated from gameplay feedback on the accepted maps |
 
@@ -46,10 +50,12 @@ M01 comes first so gameplay and map feedback are not shaped around balancing-too
 has not requested. M02 begins only after the user specifies its operator workflow. M03 uses actual
 map play rather than speculative tuning targets.
 
-M01 completed on 2026-08-26 after the three maps, dimension/capacity policy, half-cell Hot Zone
-anchor, destructible cactus, intrinsic scene fitting, KayKit visual family, automated/routed/native
-evidence, feedback disposition, documentation reconciliation, and learn-from-errors review passed.
-M02 is the next milestone but remains unstarted and intentionally has no inferred specification.
+M01 originally completed on 2026-08-26 after the three maps, dimension/capacity policy, half-cell
+Hot Zone anchor, destructible cactus, intrinsic scene fitting, KayKit visual family,
+automated/routed/native evidence, feedback disposition, documentation reconciliation, and
+learn-from-errors review passed. It is temporarily reopened for native acceptance of the later
+framing and one-cell fighter-footprint corrections. M02 remains unstarted and intentionally has no
+inferred specification.
 
 ## Version boundaries
 

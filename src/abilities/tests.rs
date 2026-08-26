@@ -157,7 +157,11 @@ fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
                 NetworkEntityId(id),
                 Vec2::new(
                     f32::from(u16::try_from(id).unwrap()) * 20.0,
-                    if id == 12 { 49.0 } else { 0.0 },
+                    if id == 12 {
+                        crate::movement::STANDARD_FIGHTER_RADIUS * 2.0 + 1.0
+                    } else {
+                        0.0
+                    },
                 ),
                 id != 11,
             )

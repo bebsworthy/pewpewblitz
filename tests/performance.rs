@@ -92,7 +92,7 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
                     Rotation::IDENTITY,
                     LinearVelocity::default(),
                     AngularVelocity::default(),
-                    Collider::circle(24.0),
+                    Collider::circle(brawler::movement::STANDARD_FIGHTER_RADIUS),
                     RigidBody::Kinematic,
                 ))
                 .id();

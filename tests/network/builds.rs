@@ -1213,8 +1213,9 @@ fn dash_shape_cast_truncates_before_map_collision_and_blocks_primary_fire() {
         .get::<Position>(owner_entity)
         .unwrap()
         .0;
+    let nearest_legal_center = -(10.0 + brawler::movement::STANDARD_FIGHTER_RADIUS);
     assert!(
-        endpoint.x > -200.0 && endpoint.x <= -33.5,
+        endpoint.x > -200.0 && endpoint.x <= nearest_legal_center + 0.5,
         "endpoint={endpoint:?}"
     );
     let world = harness.server.world_mut();

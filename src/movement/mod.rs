@@ -18,6 +18,9 @@ pub use input::{
     radial_deadzone, trigger_pressed,
 };
 
+/// Canonical circular fighter footprint used by movement, combat, map clearance, and presentation.
+pub const STANDARD_FIGHTER_RADIUS: f32 = 14.0;
+
 /// Live input-trace switch and last-seen inputs. Read only by the server-gated coordinator.
 #[derive(Resource, Debug)]
 #[cfg_attr(not(feature = "server"), allow(dead_code))]
@@ -50,7 +53,7 @@ impl Default for MovementTuning {
     fn default() -> Self {
         Self {
             speed: 320.0,
-            radius: 24.0,
+            radius: STANDARD_FIGHTER_RADIUS,
             spawn_facing: 0.0,
             stale_input_ticks: 12,
             move_iterations: 4,

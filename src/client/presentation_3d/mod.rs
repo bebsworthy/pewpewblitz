@@ -43,13 +43,25 @@ pub(crate) const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
 const LOBBED_PROJECTILE_LAUNCH_HEIGHT: f32 = 20.0;
 const STRAIGHT_PROJECTILE_CATCH_UP_MULTIPLIER: f32 = 3.0;
-const FIGHTER_RING_INNER_RADIUS: f32 = 18.0;
-const FIGHTER_RING_OUTER_RADIUS: f32 = 22.0;
+const FIGHTER_FALLBACK_RADIUS: f32 = crate::movement::STANDARD_FIGHTER_RADIUS;
+const FIGHTER_RING_INNER_RADIUS: f32 = crate::movement::STANDARD_FIGHTER_RADIUS - 3.0;
+const FIGHTER_RING_OUTER_RADIUS: f32 = crate::movement::STANDARD_FIGHTER_RADIUS;
 const HOT_ZONE_RING_WIDTH: f32 = 10.0;
 const GROUND_AREA_HEIGHT: f32 = 1.0;
-const FIGHTER_FACING_TIP_RADIUS: f32 = 28.0;
+// The direction arrow is a flat UI marker rather than body geometry. Keep its tip inside the
+// fighter's one-cell allocation while extending it beyond the exact collision ring.
+const FIGHTER_FACING_TIP_RADIUS: f32 = crate::map::MAP_CELL_SIZE_WORLD * 0.5;
 const FIGHTER_FACING_HALF_ANGLE: f32 = 0.22;
 const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
+/// Reviewed maximum bind-pose ground radius of the promoted Kenney body/head mesh AABBs.
+const KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS: f32 = 0.420_55;
+/// Reviewed bind-pose height of the promoted Kenney character mesh.
+const KENNEY_CHARACTER_SOURCE_HEIGHT: f32 = 0.671_325;
+const KENNEY_CHARACTER_PLANAR_WORLD_SCALE: f32 =
+    crate::movement::STANDARD_FIGHTER_RADIUS / KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS;
+const KENNEY_CHARACTER_HEIGHT_WORLD_SCALE: f32 = 64.0;
+const KENNEY_CHARACTER_WORLD_HEIGHT: f32 =
+    KENNEY_CHARACTER_SOURCE_HEIGHT * KENNEY_CHARACTER_HEIGHT_WORLD_SCALE;
 const HEIST_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
 const HEIST_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
 
@@ -1038,7 +1050,7 @@ fn setup_3d_foundation(
     let primitives = Primitive3dAssets {
         cover_block: meshes.add(Cuboid::new(64.0, 32.0, 64.0)),
         map_entity: meshes.add(Cuboid::new(24.0, 24.0, 24.0)),
-        fighter: meshes.add(Sphere::new(24.0)),
+        fighter: meshes.add(Sphere::new(FIGHTER_FALLBACK_RADIUS)),
         sentry_direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
         fighter_facing: meshes.add(fighter_facing_mesh()),
         projectile: meshes.add(Cylinder::new(4.0, 28.0)),
@@ -1783,7 +1795,11 @@ fn upgrade_fighters_to_imported_models(
                 WorldAssetRoot(imported.character_scene.clone()),
                 Transform {
                     rotation: Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION),
-                    scale: Vec3::splat(64.0),
+                    scale: Vec3::new(
+                        KENNEY_CHARACTER_PLANAR_WORLD_SCALE,
+                        KENNEY_CHARACTER_HEIGHT_WORLD_SCALE,
+                        KENNEY_CHARACTER_PLANAR_WORLD_SCALE,
+                    ),
                     ..default()
                 },
                 Name::new("V3 imported fighter"),
@@ -2189,6 +2205,30 @@ mod tests {
             assert!(point[0] < FIGHTER_FACING_TIP_RADIUS);
         }
         assert!((positions[1][1] + positions.last().unwrap()[1]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn fighter_visual_footprint_matches_the_authoritative_body() {
+        assert!(
+            (FIGHTER_FALLBACK_RADIUS - crate::movement::STANDARD_FIGHTER_RADIUS).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (FIGHTER_RING_OUTER_RADIUS - crate::movement::STANDARD_FIGHTER_RADIUS).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (FIGHTER_FACING_TIP_RADIUS - crate::map::MAP_CELL_SIZE_WORLD * 0.5).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (KENNEY_CHARACTER_PLANAR_WORLD_SCALE * KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS
+                - crate::movement::STANDARD_FIGHTER_RADIUS)
+                .abs()
+                < 1e-4
+        );
+        assert!((KENNEY_CHARACTER_WORLD_HEIGHT - 42.965).abs() < 0.001);
+        assert!((KENNEY_CHARACTER_HEIGHT_WORLD_SCALE - 64.0).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -26,7 +26,8 @@ pub fn stable_dash_contacts(
         .filter(|(id, position, eligible)| {
             *eligible
                 && !already_hit.contains(id)
-                && distance_to_segment(*position, segment_start, segment_end) <= 48.0
+                && distance_to_segment(*position, segment_start, segment_end)
+                    <= crate::movement::STANDARD_FIGHTER_RADIUS * 2.0
         })
         .map(|(id, _, _)| id)
         .collect();
@@ -214,7 +215,7 @@ pub(crate) fn activate_dash(
         )
         .with_excluded_entities([entity]);
         let collision = spatial_query.cast_shape(
-            &Collider::circle(24.0),
+            &Collider::circle(crate::movement::STANDARD_FIGHTER_RADIUS),
             position.0,
             rotation.as_radians(),
             direction_dir,

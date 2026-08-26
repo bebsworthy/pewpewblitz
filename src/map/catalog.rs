@@ -1699,10 +1699,13 @@ fn validate_spawn_clearance(
             MapPlacementParameters::PlayerSpawn { .. }
         ) {
             let center = dimensions.cell_center(placement.cell);
-            if blocked
-                .iter()
-                .any(|shape| circle_overlaps_derived_shape(center, 24.0, *shape))
-            {
+            if blocked.iter().any(|shape| {
+                circle_overlaps_derived_shape(
+                    center,
+                    crate::movement::STANDARD_FIGHTER_RADIUS,
+                    *shape,
+                )
+            }) {
                 return Err("spawn overlaps blocking feature".to_string());
             }
             if !dimensions.bounds().contains_with_inset(center, 32.0) {
@@ -1721,10 +1724,16 @@ fn validate_fighter_navigation(
     let blocked = blocking_shapes(placements, dimensions, catalog);
     let center_is_clear = |cell: MapCell| {
         let center = dimensions.cell_center(cell);
-        dimensions.bounds().contains_with_inset(center, 24.0)
-            && blocked
-                .iter()
-                .all(|shape| !circle_overlaps_derived_shape(center, 24.0, *shape))
+        dimensions
+            .bounds()
+            .contains_with_inset(center, crate::movement::STANDARD_FIGHTER_RADIUS)
+            && blocked.iter().all(|shape| {
+                !circle_overlaps_derived_shape(
+                    center,
+                    crate::movement::STANDARD_FIGHTER_RADIUS,
+                    *shape,
+                )
+            })
     };
     let spawns: Vec<_> = placements
         .iter()
@@ -1903,11 +1912,16 @@ fn validate_heist_map_access(
     blocked.extend(safes.iter().map(|safe| safe.shape));
     let center_is_clear = |cell: MapCell| {
         dimensions.contains(cell)
-            && dimensions
-                .bounds()
-                .contains_with_inset(dimensions.cell_center(cell), 24.0)
+            && dimensions.bounds().contains_with_inset(
+                dimensions.cell_center(cell),
+                crate::movement::STANDARD_FIGHTER_RADIUS,
+            )
             && blocked.iter().all(|shape| {
-                !circle_overlaps_derived_shape(dimensions.cell_center(cell), 24.0, *shape)
+                !circle_overlaps_derived_shape(
+                    dimensions.cell_center(cell),
+                    crate::movement::STANDARD_FIGHTER_RADIUS,
+                    *shape,
+                )
             })
     };
     for safe in &safes {
@@ -2289,6 +2303,36 @@ fn valid_key(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_fighter_fits_a_one_cell_passage_with_safety_margin() {
+        let passage_center = Vec2::new(MAP_CELL_SIZE_WORLD * 0.5, 0.0);
+        let left_wall = DerivedColliderShape::Rectangle {
+            center: Vec2::new(-MAP_CELL_SIZE_WORLD * 0.5, 0.0),
+            half_extents: Vec2::splat(MAP_CELL_SIZE_WORLD * 0.5),
+        };
+        let right_wall = DerivedColliderShape::Rectangle {
+            center: Vec2::new(MAP_CELL_SIZE_WORLD * 1.5, 0.0),
+            half_extents: Vec2::splat(MAP_CELL_SIZE_WORLD * 0.5),
+        };
+
+        for wall in [left_wall, right_wall] {
+            assert!(!circle_overlaps_derived_shape(
+                passage_center,
+                crate::movement::STANDARD_FIGHTER_RADIUS,
+                wall
+            ));
+            assert!(!circle_overlaps_derived_shape(passage_center, 15.0, wall));
+            assert!(
+                !circle_overlaps_derived_shape(passage_center, 16.0, wall),
+                "an exact-cell body is only tangent and has no movement safety margin"
+            );
+        }
+        assert!(
+            (MAP_CELL_SIZE_WORLD - crate::movement::STANDARD_FIGHTER_RADIUS * 2.0 - 4.0).abs()
+                < f32::EPSILON
+        );
+    }
 
     #[test]
     fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {

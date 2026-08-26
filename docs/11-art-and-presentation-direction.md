@@ -48,10 +48,21 @@ The gameplay camera is fixed, tilted, and uses restrained perspective. There is 
 authoritative height, jumping, or walkable wall top. The depth buffer owns visual occlusion; render
 height, animation, particles, audio, and UI never feed back into simulation.
 
-The accepted gameplay framing targets approximately 14 map cells vertically. With the current
-27-degree vertical field of view and 55-degree elevation, the camera uses a 743-unit distance; at
-16:9 this exposes approximately 23.82 by 14 cells. Map authors must not widen authoritative bounds
-merely to compensate for camera presentation.
+The accepted gameplay framing targets approximately 14 map cells vertically. The camera uses a
+15-degree vertical field of view, 62-degree elevation, and 1,495-unit distance. The default native
+gameplay content area is 1591×720 (approximately 2.21:1, matching the supplied mobile reference),
+while explicit window-size overrides and live resizing remain supported. At the default aspect the
+conservative visible ground rectangle is approximately 25.40 by 14 cells. Map authors must not
+widen authoritative bounds merely to compensate for camera presentation.
+
+Camera fit and follow are decided independently for each axis from the presented map dimensions and
+current logical viewport. Because the tilted perspective ground view is trapezoidal, the client uses
+the narrow near-edge width for its conservative fit rectangle rather than claiming the wider far
+edge. If a complete map axis fits, that camera axis is locked to the map center; otherwise it follows
+the controlled player and clamps at the map edge so the player remains visible. Thus a 25×37 map at
+the default aspect centers its width and scrolls vertically, while larger maps can scroll on both
+axes. Recipe-owned padding remains part of the authoritative bounds, and the camera does not change
+map authority or collision.
 
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or
@@ -123,12 +134,20 @@ bursts from becoming an unbounded entity or channel lifecycle.
 - allies use blue;
 - enemies use red;
 - the ring is a flat, unlit, non-shadow-receiving annulus slightly above the ground;
-- a small arrowhead integrated into the ring communicates facing without protruding from the body;
+- a small flat arrowhead extends from the exact ring to no farther than the edge of the fighter's
+  one-cell allocation; it communicates facing but is UI, not body geometry;
 - imported materials, environment themes, and future skins may not override these relation cues.
 
 The imported character's model-space forward direction is corrected once at its visual root. The
 weapon attaches inside that corrected hierarchy, and animation-specific transforms remain below
-it. A sphere matching the authoritative body radius is the deterministic fighter fallback and a
+it. The standard fighter has one canonical 14-unit authoritative radius: its circular hitbox,
+28-unit imported torso/feet footprint, exact outer ground-ring edge, and fallback sphere agree.
+The imported model scales X/Z to that footprint but uses an independent reviewed Y scale, producing
+an approximately 43-unit-tall readable silhouette without enlarging planar collision. That leaves
+two units of clearance on each side of a 32-unit map-cell passage. Attached weapons and animated
+limbs may cross the ground circle, but must not make the visible ground occupancy contradict it.
+Projected overhead placement derives from the corrected visual height rather than an obsolete
+fixed 86-unit anchor. The matching sphere remains the deterministic fallback and a
 geometry-verification aid.
 
 ### Overhead information

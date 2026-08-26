@@ -18,6 +18,16 @@ use lightyear::input::input_buffer::Compressed;
 use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 
 #[test]
+fn standard_fighter_has_clearance_inside_one_map_cell() {
+    assert!((STANDARD_FIGHTER_RADIUS - 14.0).abs() < f32::EPSILON);
+    assert!(
+        (crate::map::MAP_CELL_SIZE_WORLD - STANDARD_FIGHTER_RADIUS * 2.0 - 4.0).abs()
+            < f32::EPSILON
+    );
+    assert!((MovementTuning::default().radius - STANDARD_FIGHTER_RADIUS).abs() < f32::EPSILON);
+}
+
+#[test]
 fn radial_deadzone_remaps_and_clamps_diagonal_input() {
     assert_eq!(radial_deadzone(Vec2::splat(0.1), 0.2), Vec2::ZERO);
     let diagonal = radial_deadzone(Vec2::splat(1.0), 0.2);
@@ -104,8 +114,8 @@ fn camera_and_spawn_bounds_are_stable() {
         Vec2::new(752.0, 272.0)
     );
     assert_eq!(
-        bounds.clamp_circle(Vec2::new(9_000.0, -9_000.0), 24.0),
-        Vec2::new(872.0, -552.0)
+        bounds.clamp_circle(Vec2::new(9_000.0, -9_000.0), STANDARD_FIGHTER_RADIUS),
+        Vec2::new(882.0, -562.0)
     );
 }
 
@@ -115,9 +125,24 @@ fn pose_validation_uses_fighter_center_bounds() {
         min: Vec2::new(-896.0, -576.0),
         max: Vec2::new(896.0, 576.0),
     });
-    assert!(pose_is_valid(Vec2::new(872.0, 0.0), 0.0, bounds, 24.0));
-    assert!(!pose_is_valid(Vec2::new(896.0, 0.0), 0.0, bounds, 24.0));
-    assert!(!pose_is_valid(Vec2::new(0.0, -576.0), 0.0, bounds, 24.0));
+    assert!(pose_is_valid(
+        Vec2::new(882.0, 0.0),
+        0.0,
+        bounds,
+        STANDARD_FIGHTER_RADIUS
+    ));
+    assert!(!pose_is_valid(
+        Vec2::new(896.0, 0.0),
+        0.0,
+        bounds,
+        STANDARD_FIGHTER_RADIUS
+    ));
+    assert!(!pose_is_valid(
+        Vec2::new(0.0, -576.0),
+        0.0,
+        bounds,
+        STANDARD_FIGHTER_RADIUS
+    ));
 }
 
 #[cfg(feature = "server")]
@@ -312,11 +337,23 @@ fn repaired_pose_clamps_finite_positions_and_resets_non_finite_facing() {
         min: Vec2::new(-500.0, -300.0),
         max: Vec2::new(500.0, 300.0),
     });
-    let (position, facing) = repaired_pose(Vec2::new(600.0, 0.0), 1.0, &bounds, 24.0, 0.5);
-    assert_eq!(position, Vec2::new(476.0, 0.0));
+    let (position, facing) = repaired_pose(
+        Vec2::new(600.0, 0.0),
+        1.0,
+        &bounds,
+        STANDARD_FIGHTER_RADIUS,
+        0.5,
+    );
+    assert_eq!(position, Vec2::new(486.0, 0.0));
     assert!((facing - 1.0).abs() < f32::EPSILON);
 
-    let (position, facing) = repaired_pose(Vec2::INFINITY, f32::NAN, &bounds, 24.0, 0.5);
+    let (position, facing) = repaired_pose(
+        Vec2::INFINITY,
+        f32::NAN,
+        &bounds,
+        STANDARD_FIGHTER_RADIUS,
+        0.5,
+    );
     assert_eq!(position, Vec2::ZERO);
     assert!((facing - 0.5).abs() < f32::EPSILON);
 }

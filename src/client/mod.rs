@@ -48,6 +48,11 @@ use lightyear::prelude::{ConfirmedHistory, Controlled, Interpolated};
 use lightyear::prelude::{MessageReceiver, MessageSender, PingManager, ReplicationReceiver, UdpIo};
 use std::env;
 
+const DEFAULT_GAMEPLAY_WINDOW_WIDTH: u32 = 1_591;
+const DEFAULT_GAMEPLAY_WINDOW_HEIGHT: u32 = 720;
+const DEFAULT_GAMEPLAY_VIEWPORT: Vec2 = Vec2::new(1_591.0, 720.0);
+const DEFAULT_GAMEPLAY_WINDOW_ASPECT: f32 = 1_591.0 / 720.0;
+
 mod assets;
 mod audio;
 mod build_editor;
@@ -595,9 +600,7 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
                     primary_window: Some(Window {
                         title: "PewPew Blitz".to_string(),
                         present_mode,
-                        resolution: window_size.map_or_else(Default::default, |(width, height)| {
-                            WindowResolution::new(u32::from(width), u32::from(height))
-                        }),
+                        resolution: gameplay_window_resolution(window_size),
                         ..default()
                     }),
                     ..default()
@@ -656,6 +659,17 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         }
     }
     app
+}
+
+fn gameplay_window_resolution(window_size: Option<(u16, u16)>) -> WindowResolution {
+    let (width, height) = window_size.map_or(
+        (
+            DEFAULT_GAMEPLAY_WINDOW_WIDTH,
+            DEFAULT_GAMEPLAY_WINDOW_HEIGHT,
+        ),
+        |(width, height)| (u32::from(width), u32::from(height)),
+    );
+    WindowResolution::new(width, height)
 }
 
 /// In-process frame capture state for windowed visual verification.

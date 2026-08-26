@@ -2,7 +2,7 @@
 
 ## Status
 
-`Complete`
+`User playtest`
 
 The user selected the map-first sequence, supplied one image reference for each supported mode,
 directed manual conversion into existing Brawler assets, and approved server-configured map limits
@@ -11,6 +11,11 @@ of 20 through 512 cells per axis on 2026-08-26.
 The user accepted the corrected grid-conformant presentation on 2026-08-26, reporting that the
 maps looked much better. This closed the final native readability gate without requesting another
 gameplay, topology, or asset-family change.
+
+The milestone reopened later on 2026-08-26 for bounded framing corrections after the user
+compared the start view with the supplied mobile reference. This does not reopen map content or
+authorize M02: it makes the camera decide fit-versus-follow independently per axis from each map's
+dimensions and the current viewport.
 
 ## Player-visible outcome
 
@@ -35,11 +40,12 @@ The three references each encode a 23×35 logical grid. Production adds one symm
 every side, yielding a 25×37 recipe without scaling or rotating the supplied layout. Image rows are
 flipped into Brawler's positive-Y map coordinates and translated by the one-cell inset.
 
-The user identified the original mobile combat framing as approximately 14 visible tiles vertically.
-At the existing 27-degree vertical field of view and 55-degree elevation, a camera distance of 743
-world units yields approximately 23.82×14.00 visible cells at 16:9. This nearly fills the padded map
-width while retaining vertical follow, so wider authoritative padding must not be used to compensate
-for presentation framing.
+The user identified the original mobile combat framing as approximately 14 visible tiles vertically
+and supplied a 2302×1042 reference viewport, approximately 2.21:1. The corrected client default is
+1591×720 at the same aspect. At a 15-degree vertical field of view, 62-degree elevation, and
+1,495-unit distance, its conservative inscribed ground rectangle is approximately 25.40×14.00
+cells. This fits the complete 25-cell map width while retaining vertical follow across the 37-cell
+height; wider authoritative padding must not be used to compensate for presentation framing.
 
 ## Validated dimension contract
 
@@ -444,6 +450,221 @@ M02 remains `Not started`. This acceptance does not authorize or define any Bala
 The correction is covered by enduring catalog/fitting contracts, focused tests, provenance
 records, and the native playtest gate. No additional project skill or generalized asset framework
 is needed for this completed slice.
+
+### Post-acceptance feedback correction — map/viewport-derived framing — 2026-08-26
+
+Status: **feedback correction in user playtest**. The reference comparison shows that the 14-cell lens
+is not itself the defect. The camera first expanded every map bound by 224 world units, or seven
+cells, before applying its otherwise viewport-derived clamp. That margin was accepted with the old
+1,600-unit camera distance and approximately 30-cell vertical footprint; retaining it with the
+743-unit, approximately 14-cell footprint permitted a disproportionate amount of non-playable
+outer ground and left the controlled fighter near screen center at an edge spawn.
+
+Framing will use the authoritative map dimensions, which already include the accepted one-cell
+authored perimeter, and the current logical viewport:
+
+1. Derive the asymmetric ground-plane footprint from the fixed lens and current viewport aspect.
+2. Clamp the player-follow target so that footprint remains inside the map's camera bounds on every
+   axis; do not add a fixed exterior expansion.
+3. If a map dimension is smaller than the corresponding footprint, center that axis on the map.
+4. Recompute naturally when the window aspect changes. Do not infer a team direction, rotate input,
+   change projection, alter map authority, or add presentation metadata to the protocol.
+
+Focused tests must cover the production 25×37 map at lower and upper edge spawns, horizontal edge
+clamping, 4:3/16:9/21:9 viewports, and an axis smaller than the visible footprint. Verification then
+runs formatting, the focused client camera tests, client all-target checking, and warnings-denied
+client Clippy before returning the start framing for native review.
+
+Implementation removed the fixed `PRESENTATION_MARGIN` expansion and now passes each presented
+map's own camera bounds directly to the existing viewport-derived clamp. Five focused camera tests
+pass: the approximately 14-cell lens contract, 25×37 lower/upper spawn edges, horizontal edges,
+dynamic 4:3/16:9/21:9 behavior, and centering when a map axis is smaller than the viewport
+footprint. No server, recipe, catalog, protocol, input, or projection code changed.
+
+Automated verification passed:
+
+- `cargo fmt --all -- --check`;
+- all five focused client camera tests;
+- the complete 410-test client library suite and client binary target;
+- client all-target checking and warnings-denied Clippy;
+- the sole-world-renderer boundary audit; and
+- `git diff --check`.
+
+The reusable correction lesson is that a presentation allowance expressed only in world units can
+silently change meaning when the lens or expected map size changes. Camera-bound tests must combine
+the production lens, representative map dimensions, real edge-spawn positions, and multiple
+viewport aspects rather than validating each value independently. The remaining gate is the
+user's native start-framing review on the revised map.
+
+#### Native feedback — map sides remain clipped
+
+Disposition: **implemented now**. The first dynamic-clamp pass was internally consistent but used
+the wrong framing extent. At the fixed 743-unit distance, a 16:9 ground footprint is approximately
+23.82 cells wide while the production map is 25 cells wide. Clamping that footprint to the exact
+authoritative bounds left only 1.18 cells of lateral camera travel and pinned the decorative
+perimeter on the viewport clip edge. The user's screenshot correctly rejected the result.
+
+The corrected framing contract retains the accepted 743-unit/14-cell lens and derives follow limits
+from each map and viewport:
+
+1. expand the map's presentation bounds by exactly one cell on every side so its perimeter can
+   enter the view without restoring the obsolete seven-cell exterior band;
+2. derive the asymmetric ground footprint from the current logical viewport aspect;
+3. clamp the player-follow target inside those presentation bounds; and
+4. center an axis when its presentation bounds are smaller than the footprint.
+
+For the 25-cell-wide production map at 16:9, this produces a 27-cell presentation extent around the
+23.82-cell footprint and therefore 3.18 cells of bounded lateral camera travel instead of 1.18.
+Fitting the complete 27-cell width into the narrow near edge of this perspective lens would expose
+approximately 22.3 cells vertically and violate the accepted 14-cell target, so this correction
+reveals the relevant side through bounded follow rather than zooming the entire map out. Camera
+angles, distance, map authority, recipe dimensions, input, and protocol remain unchanged.
+
+The second correction's automated verification passed:
+
+- six focused camera tests covering the 14-cell lens, exact one-cell presentation allowance,
+  lower/upper and left/right edge clamps, 4:3/16:9/21:9 adaptation, and undersized-axis centering;
+- the complete 411-test client library suite and client binary target;
+- client all-target checking and warnings-denied Clippy;
+- formatting, the sole-world-renderer boundary audit, and `git diff --check`.
+
+The remaining gate is a native check that moving toward either lateral edge reveals its perimeter
+without restoring the large outer-ground band or changing the accepted gameplay scale.
+
+#### Native feedback — axis fit and player-follow contract were wrong
+
+Disposition: **implemented now; user playtest**. The second correction is rejected. It still used
+the far edge of the tilted camera's trapezoidal ground footprint as though that width were available
+everywhere in the view. As a result, the fit decision could center an axis even though the nearer,
+narrower part of the view clipped that axis. Its one-cell exterior allowance also answered a
+presentation symptom rather than the required gameplay rule.
+
+The replacement contract is map- and viewport-dependent on each axis independently:
+
+1. use the current logical gameplay viewport and the camera's conservative inscribed ground
+   rectangle, whose horizontal extent is the narrow near edge rather than the wide far edge;
+2. when a complete map axis fits in that rectangle, lock that camera axis to the map center;
+3. when it does not fit, follow the controlled player on that axis and clamp the camera so the map
+   edge and player remain inside the viewport;
+4. retain vertical following for the 25-by-37-cell production maps because their height exceeds the
+   visible vertical extent, while centering their width when it fits; and
+5. make the default native gameplay content area approximately 2.21:1, matching the supplied
+   2302-by-1042 reference, while preserving explicit `--window-size` overrides and dynamic resize
+   behavior.
+
+The camera elevation/distance may be corrected together to match the reference's more top-down
+view while keeping approximately fourteen cells visible vertically. This is client presentation
+only: map dimensions, collision, authority, protocol, recipes, input, and movement remain unchanged.
+Focused tests must prove the reference aspect, conservative-width calculation, width-centering plus
+vertical-follow behavior for the 25-by-37 map, two-axis following for a larger map, player
+containment at every clamped edge, resize adaptation, and explicit window-size override behavior.
+
+Implementation changes the default content resolution from Bevy's 1280×720 default to 1591×720,
+which differs from the supplied 2302×1042 aspect by less than 0.001. Explicit `--window-size`
+continues to win. The lens is now 27-degree vertical FOV, 70-degree elevation, and 870-unit distance;
+this retains approximately 14 visible cells vertically while making the view more top-down. The
+fit rectangle uses the near-edge half-width, removes all exterior camera-bound expansion, and feeds
+the existing per-axis center-or-clamp decision. At the default aspect the production map's 25-cell
+width fits inside the conservative 26.52-cell width and centers, while its 37-cell height follows.
+A 50×50 representative map follows on both axes.
+
+Automated verification passed:
+
+- five focused camera tests cover the conservative 26.52×14-cell reference footprint, production
+  width-centering with vertical following, larger-map two-axis following, player containment at all
+  four clamped edges, and resize-driven fit/follow changes;
+- one focused window test covers the 1591×720 default/reference aspect and explicit 960×540
+  override;
+- the complete 411-test client library suite and client binary target;
+- client all-target checking and warnings-denied Clippy;
+- formatting, the sole-world-renderer boundary audit, and `git diff --check`.
+
+The remaining gate is the user's native review at the new default size: confirm both lateral map
+edges are visible together, horizontal movement never lets the player leave the viewport, and the
+camera continues to scroll vertically toward both team ends.
+
+### Feedback correction — one-cell fighter footprint
+
+Status: **user playtest**. The user rejected the 48-unit/1.5-cell fighter footprint because the
+reference maps visibly contain one-cell passages, then required the combat hitbox to match the
+visual ground footprint so collision and hit registration do not feel deceptive.
+
+The accepted contract is:
+
+1. retain the 32×32 map cell and all 1:1 map recipes;
+2. use one canonical 14-unit authoritative fighter radius, producing a 28-unit circular body with
+   two units of clearance on each side of a one-cell passage;
+3. use that same radius for movement collision, combat hit detection, dash/melee target padding,
+   bounds containment, map clearance validation, primitive fallback geometry, and the exact outer
+   edge of the fighter ground ring;
+4. fit the imported character's ground footprint to the same 28-unit diameter; attached weapon and
+   animated limbs may extend outside the ground circle, but the torso/feet occupancy may not;
+   the flat facing arrow is UI rather than body geometry and may extend from the exact ring to the
+   edge of the fighter's one-cell allocation;
+5. reduce the Practice-bot navigation safety allowance from two units to one, so its effective
+   15-unit clearance remains conservative without rejecting a 32-unit passage; and
+6. keep weapon damage, timing, projectile size, range, and movement speed unchanged until the
+   feedback-driven balancing milestone. Existing muzzle offsets remain valid.
+
+The resolver must stop embedding an independent 24-unit clearance and consume the canonical
+fighter radius. Focused tests must prove a 32-unit passage accepts the 28-unit fighter, a 30-unit
+body would remain representable while a 32-unit body has no safety margin, all three production
+maps retain connected spawn navigation, the bot clearance can route a one-cell passage, and visual
+fallback/ring/imported scale constants agree with the authoritative radius. Affected server,
+client, map, bot, combat, routed Practice, formatting, and warnings-denied checks follow before
+native review.
+
+Implementation and verification completed on 2026-08-26:
+
+- `STANDARD_FIGHTER_RADIUS` now owns the 14-unit standard radius consumed by movement defaults,
+  combat definitions, dash casts/contacts, resolver clearance, tests, and performance fixtures;
+- the fallback sphere, exact outer ring, and reviewed Kenney planar model fit agree with the
+  28-unit authoritative body; the flat facing tip remains inside the 32-unit cell allocation;
+- Practice navigation uses a one-unit safety allowance and focused tests prove both the standard
+  fighter and the effective bot clearance traverse a one-cell passage;
+- all three production map topologies resolve with fighter-radius reachability;
+- the complete client suite passed: 414 tests; the complete server suite passed: 328 tests; the
+  serial network suite passed: 88 tests; and all 12 performance gates passed;
+- client and server warnings-denied Clippy passed, formatting passed, and production-routed
+  `wipeout-3v3`, `hot-zone-3v3`, and `heist-3v3` Practice each reached Active with one human and
+  five server-hosted bots.
+
+The remaining gate is native play: confirm that the imported fighter and exact ring read as the
+same body, one-cell passages are comfortable rather than sticky, and hits at the visual edge feel
+honest. Weapon balance remains M03 feedback work.
+
+### Native feedback — perspective and fighter silhouette
+
+Status: **user playtest**. The next comparison confirmed that the 70-degree elevation is too
+overhead and that uniformly fitting the Kenney character to the 28-unit ground circle makes its
+screen silhouette too short. The user approved the reviewed correction.
+
+The correction keeps the accepted gameplay contracts intact:
+
+1. retain approximately 14 visible cells vertically and keep the complete 25-cell production-map
+   width inside the conservative near-edge footprint at the 1591×720 reference aspect;
+2. lower the camera elevation to 62 degrees while narrowing the vertical field of view to 15
+   degrees and moving the camera to 1,495 units, producing approximately 25.4 visible cells at the
+   near edge without returning to the clipped 55-degree/27-degree combination;
+3. keep the imported character's X/Z scale fitted to the authoritative 28-unit ground footprint,
+   but restore a 64-unit source-height scale on Y so the silhouette is readable without enlarging
+   collision;
+4. derive the fighter projection anchor and overhead anchor from the corrected visual height so
+   the name/health cluster no longer exaggerates the size mismatch; and
+5. do not change authority, hitboxes, rings, movement, weapons, map recipes, viewport aspect, or
+   per-axis fit/follow behavior.
+
+Focused tests cover the recalibrated 14-cell/25-cell lens, non-uniform character scale, exact X/Z
+footprint, and height-derived projection anchors before the complete affected client verification.
+
+Implementation and verification completed on 2026-08-26. The lens now resolves to approximately
+25.40×14.00 cells at the reference aspect, so the production width remains centered and height
+still follows. The promoted Kenney model retains the exact reviewed X/Z fit while its Y scale
+restores an approximately 42.965-unit silhouette; fighter and overhead projection anchors now
+derive from that height. All four focused lens/scale/overhead tests, the complete 414-test client
+suite, warnings-denied client Clippy, formatting, the sole-renderer audit, and `git diff --check`
+passed. The remaining gate is native comparison of pitch, fighter readability, and overhead
+spacing.
 
 ## Exit criteria
 

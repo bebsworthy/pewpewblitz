@@ -4,7 +4,7 @@
 //! Gates (milestone-03): reduce p95 input-to-visible latency by at least two fixed ticks
 //! at the 100 ms-RTT-equivalent profile, converge to within one world unit within twelve
 //! ticks after an impairment/correction, never cross or persistently penetrate map collision,
-//! and keep p95 render-space correction within the 24-unit fighter radius.
+//! and keep p95 render-space correction within the canonical fighter radius.
 
 use super::harness::Harness;
 use bevy::prelude::{With, Without};
@@ -19,7 +19,7 @@ use lightyear::prelude::Controlled;
 /// Receive-delay ticks per profile: 0 (local), 1 (~33 ms RTT), 3 (~100 ms RTT at 60 Hz).
 const PROFILES: [(&str, usize); 3] = [("local", 0), ("typical", 1), ("adverse", 3)];
 /// Fighter radius used by the correction-magnitude gate.
-const FIGHTER_RADIUS: f32 = 24.0;
+const FIGHTER_RADIUS: f32 = brawler::movement::STANDARD_FIGHTER_RADIUS;
 /// Movement displacement that counts as visibly moved for the latency probe.
 const VISIBLE_DELTA_UNITS: f32 = 1.0;
 /// Convergence window and bound after a correction.
@@ -155,7 +155,7 @@ fn owner_prediction_corrections_stay_within_the_fighter_radius() {
         );
         assert!(
             p95 <= FIGHTER_RADIUS,
-            "gate: p95 correction {p95:.2} exceeds the 24-unit fighter radius"
+            "gate: p95 correction {p95:.2} exceeds the canonical fighter radius"
         );
     }
 }

@@ -223,7 +223,7 @@ impl Default for FighterDefinitions {
                 id: STANDARD_FIGHTER_DEFINITION,
                 maximum_health: 100,
                 movement_speed: 320.0,
-                body_radius: 24.0,
+                body_radius: crate::movement::STANDARD_FIGHTER_RADIUS,
                 spawn_facing: 0.0,
                 defeat_reset_delay_ticks: 90,
             }],

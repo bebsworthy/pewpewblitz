@@ -37,7 +37,10 @@ fn native_input_moves_the_server_owned_fighter_and_replicates_position() {
     let final_positions = harness.server_positions();
     assert_eq!(final_positions.len(), 1);
     assert!(final_positions[0].1.0.x > initial[0].1.0.x + 1.0);
-    assert!(final_positions[0].1.0.x <= 800.0 - 24.0 + f32::EPSILON);
+    assert!(
+        final_positions[0].1.0.x
+            <= 800.0 - brawler::movement::STANDARD_FIGHTER_RADIUS + f32::EPSILON
+    );
 }
 
 #[test]
@@ -524,8 +527,11 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         harness.step();
     }
     let wall_pose = harness.server_poses()[0];
+    let expected_positive_x_edge = 896.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
+    let contact_skin_tolerance = 2.5;
     assert!(
-        (870.5..=872.0).contains(&wall_pose.1.0.x),
+        (expected_positive_x_edge - contact_skin_tolerance..=expected_positive_x_edge)
+            .contains(&wall_pose.1.0.x),
         "wall_pose={wall_pose:?}"
     );
 
@@ -538,14 +544,25 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         harness.step();
     }
     let after_slide = harness.server_poses()[0].1.0;
-    assert!((870.5..=872.0).contains(&after_slide.x));
+    assert!(
+        (expected_positive_x_edge - contact_skin_tolerance..=expected_positive_x_edge)
+            .contains(&after_slide.x)
+    );
     assert!(after_slide.y > before_slide.y + 100.0);
     for _ in 0..240 {
         harness.step();
     }
     let corner_pose = harness.server_poses()[0].1.0;
-    assert!((870.5..=872.0).contains(&corner_pose.x));
-    assert!((550.5..=552.0).contains(&corner_pose.y));
+    assert!(
+        (expected_positive_x_edge - contact_skin_tolerance..=expected_positive_x_edge)
+            .contains(&corner_pose.x)
+    );
+    let expected_positive_y_edge = 576.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
+    assert!(
+        (expected_positive_y_edge - contact_skin_tolerance..=expected_positive_y_edge)
+            .contains(&corner_pose.y),
+        "corner_pose={corner_pose:?}"
+    );
 
     let mut overlap = Harness::new(2);
     overlap.step_until(|harness| {
@@ -586,7 +603,8 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     }
     let overlap_poses = overlap.server_poses();
     assert!(
-        (overlap_poses[0].1.0 - overlap_poses[1].1.0).length() < 48.0,
+        (overlap_poses[0].1.0 - overlap_poses[1].1.0).length()
+            < brawler::movement::STANDARD_FIGHTER_RADIUS * 2.0,
         "overlap_poses={overlap_poses:?}"
     );
 }
@@ -655,5 +673,8 @@ fn authoritative_move_and_slide_depenetrates_a_spawned_inside_cover_fighter() {
         harness.step();
     }
     let pose = harness.server_poses()[0].1.0;
-    assert!(pose.x.abs() >= 184.0 || (pose.y + 256.0).abs() >= 56.0);
+    assert!(
+        pose.x.abs() >= 160.0 + brawler::movement::STANDARD_FIGHTER_RADIUS
+            || (pose.y + 256.0).abs() >= 32.0 + brawler::movement::STANDARD_FIGHTER_RADIUS
+    );
 }

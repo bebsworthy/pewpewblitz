@@ -421,3 +421,36 @@ impl PartialOrd for OpenNode {
         Some(self.cmp(other))
     }
 }
+
+#[cfg(test)]
+mod clearance_tests {
+    use super::*;
+
+    #[test]
+    fn one_unit_passage_remains_open_with_bot_safety_allowance() {
+        let point = Vec2::new(16.0, 0.0);
+        let wall = MapShape::Rectangle {
+            half_extents: Vec2::splat(16.0),
+        };
+        let clearance = crate::movement::STANDARD_FIGHTER_RADIUS + 1.0;
+
+        assert!(!shape_contains_with_clearance(
+            Vec2::new(-16.0, 0.0),
+            wall,
+            point,
+            clearance
+        ));
+        assert!(!shape_contains_with_clearance(
+            Vec2::new(48.0, 0.0),
+            wall,
+            point,
+            clearance
+        ));
+        assert!(shape_contains_with_clearance(
+            Vec2::new(-16.0, 0.0),
+            wall,
+            point,
+            16.0
+        ));
+    }
+}

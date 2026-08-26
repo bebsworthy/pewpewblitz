@@ -5,13 +5,13 @@ use crate::combat::client::{DeduplicatedCombatCue, MAX_PREVIEW_SEGMENTS, preview
 use std::collections::{HashMap, HashSet};
 
 const PREVIEW_HEIGHT: f32 = 2.5;
-const OVERHEAD_WORLD_HEIGHT: f32 = 86.0;
+const FIGHTER_BODY_WORLD_HEIGHT: f32 = KENNEY_CHARACTER_WORLD_HEIGHT;
+const OVERHEAD_WORLD_HEIGHT: f32 = FIGHTER_BODY_WORLD_HEIGHT + 12.0;
 const OVERHEAD_WIDTH: f32 = 104.0;
 const OVERHEAD_HEALTH_HEIGHT: f32 = 37.0;
 const OVERHEAD_AMMO_HEIGHT: f32 = 50.0;
 const HEALTH_BAR_WIDTH: f32 = 76.8;
 const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
-const FIGHTER_BODY_WORLD_HEIGHT: f32 = 24.0;
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const MAX_EFFECTS: usize = 96;
 const CONCEALED_FIGHTER_ALPHA: f32 = 0.52;
@@ -530,7 +530,7 @@ fn spawn_fighter(
             V3FallbackVisual { owner },
             Mesh3d(primitives.fighter.clone()),
             MeshMaterial3d(team_material(identity.team, materials)),
-            Transform::from_xyz(0.0, 24.0, 0.0),
+            Transform::from_xyz(0.0, FIGHTER_FALLBACK_RADIUS, 0.0),
             Name::new("V3 fighter fallback"),
         ));
         parent.spawn((
@@ -2107,6 +2107,8 @@ mod tests {
         assert!((PLAYER_NAME_FONT_SIZE - 12.8).abs() < f32::EPSILON);
         assert!((overhead_height(false) - OVERHEAD_HEALTH_HEIGHT).abs() < f32::EPSILON);
         assert!(overhead_height(false) < overhead_height(true));
+        assert!((FIGHTER_BODY_WORLD_HEIGHT - KENNEY_CHARACTER_WORLD_HEIGHT).abs() < f32::EPSILON);
+        assert!((OVERHEAD_WORLD_HEIGHT - FIGHTER_BODY_WORLD_HEIGHT - 12.0).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -138,7 +138,7 @@ fn capture_observations(
         return;
     };
     if navigation.map_instance_id != Some(map.snapshot.identity.instance_id) {
-        navigation.snapshot = BotNavigationSnapshot::from_map(&map, movement.radius + 2.0);
+        navigation.snapshot = BotNavigationSnapshot::from_map(&map, movement.radius + 1.0);
         navigation.map_instance_id = Some(map.snapshot.identity.instance_id);
     }
     let Some(_navigation) = navigation.snapshot.as_ref() else {
