@@ -349,9 +349,9 @@ mod tests {
         let wipeout_three_vs_three = &catalog.game_types[3];
         assert_eq!(
             wipeout_three_vs_three.display_name,
-            "Feature Yard Wipeout 3v3"
+            "Verdant Crossfire Wipeout 3v3"
         );
-        assert_eq!(wipeout_three_vs_three.map_preset_ids, vec![MapPresetId(7)]);
+        assert_eq!(wipeout_three_vs_three.map_preset_ids, vec![MapPresetId(10)]);
         let hot_zone_one_vs_one = &catalog.game_types[4];
         assert_eq!(hot_zone_one_vs_one.id.as_str(), "hot-zone-1v1");
         assert_eq!(
@@ -360,6 +360,16 @@ mod tests {
         );
         assert_eq!(hot_zone_one_vs_one.map_preset_ids, vec![MapPresetId(8)]);
         assert_eq!(hot_zone_one_vs_one.players_per_team, 1);
+        let hot_zone_three_vs_three = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == "hot-zone-3v3")
+            .unwrap();
+        assert_eq!(hot_zone_three_vs_three.configuration_revision, 4);
+        assert_eq!(
+            hot_zone_three_vs_three.map_preset_ids,
+            vec![MapPresetId(11)]
+        );
         let wipeout_two_vs_two = catalog
             .game_types
             .iter()
@@ -392,12 +402,13 @@ mod tests {
         assert_eq!(heist.len(), 3);
         assert_eq!(heist[0].map_preset_ids, vec![MapPresetId(9)]);
         assert_eq!(heist[2].players_per_team, 3);
+        assert_eq!(heist[2].map_preset_ids, vec![MapPresetId(12)]);
         assert_eq!(
             catalog.revision.0,
             [
-                0xc4, 0x08, 0x2f, 0x86, 0xee, 0x4c, 0xee, 0xd6, 0x1a, 0x9b, 0x95, 0x31, 0x00, 0x2a,
-                0xdc, 0x94, 0xe3, 0x4a, 0x07, 0x1f, 0x67, 0x1d, 0x60, 0x12, 0x1c, 0xc8, 0x44, 0xd2,
-                0x68, 0x6d, 0xb0, 0xf8,
+                0x78, 0x8b, 0xa1, 0x87, 0x6f, 0x46, 0x6b, 0x7d, 0x91, 0x85, 0x09, 0xba, 0xee, 0x36,
+                0x7b, 0x88, 0x86, 0xac, 0x91, 0x5b, 0x66, 0x72, 0x2e, 0xa5, 0x89, 0xa8, 0xff, 0x93,
+                0x6a, 0x4d, 0xc3, 0x98,
             ]
         );
     }

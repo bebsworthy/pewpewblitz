@@ -2,7 +2,7 @@
 
 ## Status
 
-`Implementing`
+`User playtest`
 
 The user selected the map-first sequence, supplied one image reference for each supported mode,
 directed manual conversion into existing Brawler assets, and approved server-configured map limits
@@ -92,6 +92,21 @@ canonical fingerprint formats advance from 4/7 to 5/8. There is no legacy decode
 - Update the map index and only the 3v3 advertised game types; 1v1/2v2 remain unchanged unless the
   user later expands scope.
 
+## Implemented map conversion
+
+- Wipeout advertises **Verdant Crossfire** (`MapPresetId(10)`), derived from Think Ahead.
+- Hot Zone advertises **Switchback Basin** (`MapPresetId(11)`), derived from Back Shuffle, with the
+  exact half-cell objective center `(25, 37)` and radius `7`.
+- Heist advertises **Powderline Vault** (`MapPresetId(12)`), derived from Hot Potato, with mirrored
+  three-by-two safe anchors centered at world Y `-400` and `400`.
+
+Each recipe uses one empty-cell perimeter around the transcribed 23×35 reference. Existing garden
+walls carry the collision role of themed blocks, metal barriers, rope fences, and blocking cacti;
+existing destructible cover carries the orange/green box role; and tall grass preserves every
+reviewed concealment group. The Wipeout reference's central Bounty star is omitted because Wipeout
+has no corresponding pickup/scoring rule. Exact rope-fence, cactus, skull-block, and themed-barrel
+models are the remaining visual asset gaps; no missing gameplay primitive blocks the playtest.
+
 ## Implementation and verification
 
 - [x] Move map minimum/maximum dimensions into validated server operator configuration.
@@ -101,9 +116,9 @@ canonical fingerprint formats advance from 4/7 to 5/8. There is no legacy decode
 - [x] Replace fixed placement/concealment counts with 512×512 dimension-derived structural bounds.
 - [x] Add bounded half-cell precision for Hot Zone centers and radii, migrate schema 5 recipes, and
   retain cell alignment for ordinary placements.
-- [ ] Author, index, resolve, and advertise the Wipeout 3v3 map.
-- [ ] Author, index, resolve, and advertise the Hot Zone 3v3 map with one typed capture anchor.
-- [ ] Author, index, resolve, and advertise the Heist 3v3 map with two typed team safes.
+- [x] Author, index, resolve, and advertise the Wipeout 3v3 map.
+- [x] Author, index, resolve, and advertise the Hot Zone 3v3 map with one typed capture anchor.
+- [x] Author, index, resolve, and advertise the Heist 3v3 map with two typed team safes.
 - [ ] Run formatting, role checks, focused catalog/navigation/admission tests, canonical tests,
   routed 3v3 and Practice evidence, and native rendering/playtest.
 - [ ] Triage gameplay feedback, rerun affected verification, reconcile durable documentation, and
@@ -138,6 +153,23 @@ remains pending until the three recipes are authored.
 - All 14 protocol unit tests passed under the combined network-test role after advancing the global
   compatibility version to 29.
 - Server and client all-target role checks, formatting, and `git diff --check` passed.
+
+### Three-map implementation verification — 2026-08-26
+
+- All 25 map-catalog unit tests passed under the client role. The new exact-topology test resolves
+  all three 25×37 maps, checks three spawns per team, requires concealment, rejects mode-anchor
+  drift, and proves the mirrored Heist safe centers at world Y `-400` and `400`.
+- All 12 server admission tests passed, including exact preset/revision admission for the three new
+  maps and real-schedule objective-bot coverage. The four operator-catalog tests passed with the
+  revised golden advertisement and revision digest.
+- The focused client 3D test passed for Switchback Basin's exact `3.5`-cell visual radius. The
+  focused lobby Practice test proves Hot Zone 3v3 allocates Switchback Basin and five named bots.
+- Server, client, and combined network-test all-target checks passed. Server and client Clippy
+  passed with warnings denied. Formatting, canonical V8 map-cleanup, and `git diff --check` passed.
+- Production-routed headless Practice reached Active with one human and five bots for
+  `wipeout-3v3`, `hot-zone-3v3`, and `heist-3v3`; each supervisor/lobby/match-worker process tree
+  shut down cleanly.
+- Native visual/gameplay acceptance remains the active user-playtest gate.
 
 ## Exit criteria
 

@@ -30,12 +30,14 @@ pub use catalog::{
     MapModeAnchorKind, MapModeAnchorPlacement, MapMutationEvent, MapObjectTerminalBehavior,
     MapPlacementOutcome, MapPlacementParameterKind, MapPlacementParameters, MapPlacementTransition,
     MapPreset, MapRecipe, MapSurfaceTagId, MapVisualProfileId, OIL_BARREL_ASSET,
-    PLAYER_SPAWN_ASSET, PlayerCollision, ProjectileCollision, RUBBLE_ASSET,
-    ResolvedHeistSafeAnchor, ResolvedMap, ResolvedMapSnapshot, RestorationPickupDefinition,
-    RestorationPickupDefinitionId, SAND_FLOOR_ASSET, TALL_GRASS_ASSET, TREASURE_CHEST_ASSET,
-    WALL_ARENA_ASSET, WALL_DUNGEON_ASSET, WATER_ASSET, WIPEOUT_MODE_DEFINITION,
-    cardinal_adjacency_mask, circle_overlaps_blocking_map, placement_cells, placement_world_center,
-    resolve_circle_against_blocking_map,
+    PLAYER_SPAWN_ASSET, POWDERLINE_VAULT_ADMISSION_REVISION, POWDERLINE_VAULT_PRESET,
+    PlayerCollision, ProjectileCollision, RUBBLE_ASSET, ResolvedHeistSafeAnchor, ResolvedMap,
+    ResolvedMapSnapshot, RestorationPickupDefinition, RestorationPickupDefinitionId,
+    SAND_FLOOR_ASSET, SWITCHBACK_BASIN_ADMISSION_REVISION, SWITCHBACK_BASIN_PRESET,
+    TALL_GRASS_ASSET, TREASURE_CHEST_ASSET, VERDANT_CROSSFIRE_ADMISSION_REVISION,
+    VERDANT_CROSSFIRE_PRESET, WALL_ARENA_ASSET, WALL_DUNGEON_ASSET, WATER_ASSET,
+    WIPEOUT_MODE_DEFINITION, cardinal_adjacency_mask, circle_overlaps_blocking_map,
+    placement_cells, placement_world_center, resolve_circle_against_blocking_map,
 };
 #[cfg(feature = "client")]
 pub use client::{

@@ -2039,6 +2039,22 @@ mod tests {
     }
 
     #[test]
+    fn switchback_basin_anchor_materializes_half_cell_radius() {
+        let resolved = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(
+                crate::map::SWITCHBACK_BASIN_PRESET,
+                crate::map::MapInstanceId(1),
+            )
+            .unwrap();
+
+        assert_eq!(
+            hot_zone_visual_geometry(&resolved.snapshot),
+            Some((Vec2::ZERO, 3.5 * crate::map::MAP_CELL_SIZE_WORLD))
+        );
+    }
+
+    #[test]
     fn imported_character_front_aligns_with_fighter_root_facing() {
         let corrected_front = Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION) * Vec3::Z;
 

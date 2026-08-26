@@ -621,6 +621,41 @@ mod tests {
     }
 
     #[test]
+    fn manifest_admission_accepts_all_proper_three_vs_three_map_presets() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        for (game_mode, routing_mode, preset, revision) in [
+            (
+                GameMode::Wipeout,
+                brawler_routing::GameMode::Wipeout,
+                crate::map::VERDANT_CROSSFIRE_PRESET,
+                crate::map::VERDANT_CROSSFIRE_ADMISSION_REVISION,
+            ),
+            (
+                GameMode::HotZone,
+                brawler_routing::GameMode::HotZone,
+                crate::map::SWITCHBACK_BASIN_PRESET,
+                crate::map::SWITCHBACK_BASIN_ADMISSION_REVISION,
+            ),
+            (
+                GameMode::Heist,
+                brawler_routing::GameMode::Heist,
+                crate::map::POWDERLINE_VAULT_PRESET,
+                crate::map::POWDERLINE_VAULT_ADMISSION_REVISION,
+            ),
+        ] {
+            let mut value = manifest();
+            value.mode = routing_mode;
+            value.map_preset = preset.0;
+            value.map_revision = revision;
+            let config = ServerNetworkConfig {
+                game_mode,
+                ..default()
+            };
+            assert!(validate_manifest_map_against_catalog(&config, &value, &catalog).is_ok());
+        }
+    }
+
+    #[test]
     fn manifest_admission_preserves_stable_team_and_build_selection() {
         let value = manifest();
         let participant = admit_manifest_client(

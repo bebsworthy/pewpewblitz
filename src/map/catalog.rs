@@ -33,6 +33,12 @@ pub const FEATURE_YARD_HOT_ZONE_PRESET: MapPresetId = MapPresetId(8);
 pub const FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION: u16 = 2;
 pub const FEATURE_YARD_HEIST_PRESET: MapPresetId = MapPresetId(9);
 pub const FEATURE_YARD_HEIST_ADMISSION_REVISION: u16 = 2;
+pub const VERDANT_CROSSFIRE_PRESET: MapPresetId = MapPresetId(10);
+pub const VERDANT_CROSSFIRE_ADMISSION_REVISION: u16 = 1;
+pub const SWITCHBACK_BASIN_PRESET: MapPresetId = MapPresetId(11);
+pub const SWITCHBACK_BASIN_ADMISSION_REVISION: u16 = 1;
+pub const POWDERLINE_VAULT_PRESET: MapPresetId = MapPresetId(12);
+pub const POWDERLINE_VAULT_ADMISSION_REVISION: u16 = 1;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
@@ -2550,6 +2556,75 @@ mod tests {
                 shape: MapShape::Circle { radius: 112.0 },
             }
         );
+    }
+
+    #[test]
+    fn proper_three_vs_three_maps_resolve_exact_mode_topology() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let wipeout = catalog
+            .resolve_preset(VERDANT_CROSSFIRE_PRESET, MapInstanceId(10))
+            .unwrap();
+        let hot_zone = catalog
+            .resolve_preset(SWITCHBACK_BASIN_PRESET, MapInstanceId(11))
+            .unwrap();
+        let heist = catalog
+            .resolve_preset(POWDERLINE_VAULT_PRESET, MapInstanceId(12))
+            .unwrap();
+
+        for resolved in [&wipeout, &hot_zone, &heist] {
+            assert_eq!(
+                resolved.snapshot.dimensions,
+                MapDimensions {
+                    width: 25,
+                    height: 37,
+                }
+            );
+            assert_eq!(resolved.spawn_points_by_team.len(), 2);
+            assert!(
+                resolved
+                    .spawn_points_by_team
+                    .values()
+                    .all(|spawns| spawns.len() == 3)
+            );
+            assert!(
+                resolved
+                    .snapshot
+                    .placements
+                    .iter()
+                    .any(|placement| placement.asset_id == TALL_GRASS_ASSET)
+            );
+        }
+
+        assert_eq!(wipeout.snapshot.mode_definition_id, WIPEOUT_MODE_DEFINITION);
+        assert!(wipeout.objective_zone.is_none());
+        assert!(wipeout.heist_safes.is_empty());
+
+        assert_eq!(
+            hot_zone.snapshot.mode_definition_id,
+            HOT_ZONE_MODE_DEFINITION
+        );
+        assert_eq!(
+            hot_zone.objective_zone.unwrap().area,
+            crate::map::NormalizedArea {
+                center: Vec2::ZERO,
+                shape: MapShape::Circle { radius: 112.0 },
+            }
+        );
+        assert!(hot_zone.heist_safes.is_empty());
+
+        assert_eq!(heist.snapshot.mode_definition_id, HEIST_MODE_DEFINITION);
+        assert!(heist.objective_zone.is_none());
+        assert_eq!(heist.heist_safes.len(), 2);
+        assert_eq!(
+            heist.heist_safes[0].defending_team,
+            crate::combat::TeamId(0)
+        );
+        assert_eq!(
+            heist.heist_safes[1].defending_team,
+            crate::combat::TeamId(1)
+        );
+        assert_eq!(heist.heist_safes[0].center, Vec2::new(0.0, -400.0));
+        assert_eq!(heist.heist_safes[1].center, Vec2::new(0.0, 400.0));
     }
 
     #[test]

@@ -62,7 +62,8 @@ manually launched client an explicit data directory.
 
 One client is sufficient for Practice. Multiplayer game types form only their exact advertised
 human roster; the default Feature Yard Wipeout 2v2 path therefore requires four clients. The
-Feature Yard catalog also exposes exact 1v1 and 3v3 Wipeout, Hot Zone, and Heist entries.
+catalog exposes exact 1v1, 2v2, and 3v3 Wipeout, Hot Zone, and Heist entries. The 1v1/2v2 paths use
+Feature Yard; 3v3 uses Verdant Crossfire, Switchback Basin, and Powderline Vault respectively.
 
 For the development-only V6 Balance Lab, start the tuning-enabled routed server, connect one
 ordinary client, and enter Practice:

@@ -223,11 +223,17 @@ their intersection and publishes the maximum active-fighter count used by admiss
 capacity checks.
 
 Supported routed product game types include exact 1v1, 2v2, and 3v3 Wipeout, Hot Zone, and Heist
-matches. The operator catalog advertises one **Feature Yard** integration-map family. Its three
-ordinary recipes share identical geometry and differ only in stable identity, compatible mode, and
-the typed anchors required by that mode. Mirrored tall-grass groups touch contested approaches so
-the family exercises terrain concealment during live mode play rather than on an isolated map.
-Feature Yard is functional test content, not a fun, balanced, or release-ready map claim.
+matches. The 1v1/2v2 paths retain the **Feature Yard** integration-map family. Its three ordinary
+recipes share identical geometry and differ only in stable identity, compatible mode, and the typed
+anchors required by that mode. Mirrored tall-grass groups touch contested approaches so the family
+exercises terrain concealment during live mode play rather than on an isolated map. Feature Yard is
+functional test content, not a fun, balanced, or release-ready map claim.
+
+The 3v3 paths instead advertise **Verdant Crossfire** for Wipeout, **Switchback Basin** for Hot
+Zone, and **Powderline Vault** for Heist. Each is an independent padded 25×37 sparse recipe with
+three safe spawns per team and mode-owned objective topology. Their first-pass layouts preserve the
+supplied references' lanes, blocker silhouettes, concealment groups, and objective positions using
+existing Brawler assets; final geometry and presentation remain subject to native playtest feedback.
 Ordinary matches are expected to center on 3v3, while the architecture may support larger bounded
 arrangements such as twelve solo fighters, two teams of five, or three teams of three when a concrete
 mode, map, HUD, admission profile, and capacity evidence all allow it. No common subsystem may assume

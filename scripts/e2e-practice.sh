@@ -7,7 +7,7 @@ case "$game_type" in
     hot-zone-1v1 | hot-zone-2v2 | hot-zone-3v3 | \
     heist-1v1 | heist-2v2 | heist-3v3) ;;
     *)
-        printf '%s\n' 'brawler Practice e2e: expected an advertised Feature Yard game-type ID' >&2
+        printf '%s\n' 'brawler Practice e2e: expected an advertised game-type ID' >&2
         exit 2
         ;;
 esac

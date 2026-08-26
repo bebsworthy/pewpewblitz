@@ -50,5 +50,26 @@
             admission_revision: 2,
             document: "builtin/feature-yard-heist.ron",
         ),
+        (
+            id: MapPresetId(10),
+            key: "verdant-crossfire",
+            display_name: "Verdant Crossfire",
+            admission_revision: 1,
+            document: "builtin/verdant-crossfire.ron",
+        ),
+        (
+            id: MapPresetId(11),
+            key: "switchback-basin",
+            display_name: "Switchback Basin",
+            admission_revision: 1,
+            document: "builtin/switchback-basin.ron",
+        ),
+        (
+            id: MapPresetId(12),
+            key: "powderline-vault",
+            display_name: "Powderline Vault",
+            admission_revision: 1,
+            document: "builtin/powderline-vault.ron",
+        ),
     ],
 )

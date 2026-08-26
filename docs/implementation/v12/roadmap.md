@@ -21,7 +21,7 @@ until measured maps require them; this does not narrow the authoring contract.
 
 | Field | Value |
 |---|---|
-| Status | Implementing |
+| Status | User playtest |
 | Current milestone | M01 — three proper 3v3 maps |
 | Entry gate | Satisfied: V11 completed and was accepted on 2026-08-26 |
 | Completion gate | Three accepted 3v3 maps, the user-defined M02 balancing workflow, and feedback-driven fighter/weapon tuning pass their owning automated, routed, native, feedback, documentation, and learning gates |
@@ -30,7 +30,7 @@ until measured maps require them; this does not narrow the authoring contract.
 
 | Milestone | Status | Player-visible deliverable |
 |---|---|---|
-| 01 | Implementing | One manually authored 3v3 map each for Wipeout, Hot Zone, and Heist, converted to Brawler's existing map assets and accepted through native playtest |
+| 01 | User playtest | One manually authored 3v3 map each for Wipeout, Hot Zone, and Heist, converted to Brawler's existing map assets and accepted through native playtest |
 | 02 | Not started | Balancing-tool improvements defined by the user after playing the M01 maps |
 | 03 | Not started | Character and weapon balance/rework iterated from gameplay feedback on the accepted maps |
 

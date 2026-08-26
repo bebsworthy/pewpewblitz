@@ -2699,6 +2699,8 @@ mod tests {
             .unwrap();
         let request = &lobby.pending.as_ref().unwrap().body;
         assert_eq!(started.ticket_id, None);
+        assert_eq!(started.map_preset_id, crate::map::SWITCHBACK_BASIN_PRESET);
+        assert_eq!(request.map_preset, crate::map::SWITCHBACK_BASIN_PRESET.0);
         assert_eq!(request.participants.len(), 1);
         assert_eq!(request.bots.len(), 5);
         assert_eq!(
