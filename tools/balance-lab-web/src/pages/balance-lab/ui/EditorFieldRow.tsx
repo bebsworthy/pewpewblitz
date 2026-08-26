@@ -35,6 +35,7 @@ export function EditorFieldRow({
   const appliedDisplay = displayNumber(applied, field);
   const baselineDisplay = displayNumber(baseline, field);
   const changed = storedNumber(draft, field) !== storedNumber(applied, field);
+  const differsFromDefault = storedNumber(draft, field) !== storedNumber(baseline, field);
   const [text, setText] = useState(formatNumber(display));
 
   useEffect(() => setText(formatNumber(display)), [display]);
@@ -45,11 +46,12 @@ export function EditorFieldRow({
   };
 
   return (
-    <div className={`field-row ${changed ? "changed" : ""} ${error ? "invalid" : ""}`}>
+    <div className={`field-row ${changed ? "changed" : ""} ${differsFromDefault ? "non-default" : ""} ${error ? "invalid" : ""}`}>
       <div className="field-copy">
         <div className="field-title">
           <label htmlFor={pathKey(field.path)}>{field.label}</label>
           {changed && <span className="changed-badge">Changed</span>}
+          {differsFromDefault && <span className="default-difference-badge">Non-default</span>}
         </div>
         <p>
           Applied {formatNumber(appliedDisplay)} · Default {formatNumber(baselineDisplay)} {field.unit}

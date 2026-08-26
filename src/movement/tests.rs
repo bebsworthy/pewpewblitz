@@ -25,6 +25,7 @@ fn standard_fighter_has_clearance_inside_one_map_cell() {
             < f32::EPSILON
     );
     assert!((MovementTuning::default().radius - STANDARD_FIGHTER_RADIUS).abs() < f32::EPSILON);
+    assert!((MovementTuning::default().speed - 100.0).abs() < f32::EPSILON);
 }
 
 #[test]

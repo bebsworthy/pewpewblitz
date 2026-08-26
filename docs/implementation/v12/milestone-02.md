@@ -82,6 +82,33 @@ for context and can be collapsed before editing. The match worker receives canon
 weapon modifiers rather than individual equipped weapon-part identities, so the UI deliberately
 shows the effective result and does not imply unavailable part names.
 
+### Accepted playtest feedback: canonical-default differences
+
+The user requested an at-a-glance indication of values that no longer match the server defaults and
+an export suitable for sharing or recording a tuning pass. The editor now compares the current
+draft against the server-supplied canonical baseline: non-default field rows, badges, and exact
+inputs use a distinct red treatment, while the existing **Changed** state continues to mean draft
+versus currently applied state. A summary reports the non-default count and **Copy differences**
+copies a readable list containing each field's semantic context, exact snapshot path, default
+value, current draft value, and gameplay unit. This remains descriptive operator assistance; it
+does not recommend or automatically apply balance changes.
+
+### Accepted playtest feedback: canonical movement pace
+
+The user initially identified a post-playtest movement-speed change, then explicitly directed that
+it be applied immediately. M02 therefore accepts one narrow canonical balance correction without
+starting the broader M03 character and weapon rework: Default is `100`, Lightweight is `110`, and
+Reinforced is `90` world units per second. The authored build balance revision advances from `2` to
+`3`; the code-owned standard-fighter and unresolved-movement fallbacks also become `100` so no
+transient or diagnostic path retains the superseded default pace.
+
+The same feedback review found that the inherited fighter-profile editor limits mislabeled balance
+policy as engine safety. The user directed movement validation to accept every finite positive
+value, with `1` as the whole-step UI minimum, and maximum health to accept the full nonzero `u16`
+range through `65,535`. The server validator and server-owned editor manifest now share the true
+remaining movement ceiling while removing the unsupported `80` speed floor and `1,000` fighter-
+health cap. The `1,200` speed ceiling and world-object health remain separately owned contracts.
+
 ## Proposed implementation specification
 
 ### 1. Server-owned editor manifest
@@ -224,6 +251,9 @@ it. Once the state contract is proven, a short debounce is straightforward UI wo
 - [x] Add focused Rust, HTTP, frontend, cross-worker, and routed regressions.
 - [x] Run canonical check/lint/test and real-browser desktop/narrow-width operator review.
 - [x] Expose the authoritative Practice roster and admitted loadouts as collapsible reference data.
+- [x] Highlight draft values that differ from canonical server defaults and copy their readable diff.
+- [x] Apply the user-directed 100/110/90 canonical fighter movement speeds and synchronized defaults.
+- [x] Replace the inherited fighter speed/health policy limits with representation-backed bounds.
 - [ ] Record user feedback and complete the learning review before closeout.
 
 ## Verification evidence
@@ -234,8 +264,8 @@ Automated verification passed on 2026-08-26:
 - `just lint`
 - `just test`, including 342 Balance Lab-feature tests, the focused revised-catalog network case,
   all 88 network scenarios, and all 12 performance gates
-- eight frontend descriptor/path/conversion/validation/change/error-association and loadout-
-  formatting tests through the canonical `_balance-lab-web` gate
+- ten frontend descriptor/path/conversion/validation/change/error-association, loadout-formatting,
+  and canonical-difference tests through the canonical `_balance-lab-web` gate
 - `git diff --check`
 
 A real in-app browser smoke used the production Vite application with a representative
@@ -251,6 +281,20 @@ labels. Desktop rendered one three-player row per team; 390×844 rendered one re
 without horizontal overflow. The collapse control revealed the tuning workspace immediately, and
 the browser console remained clear.
 
+The canonical-default comparison received a production-build desktop browser pass using an actual
+server-shaped 3v3 state with two non-default fighter values. It showed the correct count, red field
+treatment, unchanged styling for canonical values, and successful **Copied 2** interaction. The
+copied formatting also has focused coverage for semantic labels, exact paths, values, and units.
+
+The immediate movement correction passed the focused build-resolution, combat-default, and
+movement suites (41 tests total). The active Balance Lab worker then accepted the same 100/110/90
+snapshot through its authoritative apply endpoint as revision 14, preserving the operator's other
+persisted tuning while resetting the current Practice epoch.
+
+The subsequent bounds correction passed 10 build-catalog tests, four Balance Lab manifest tests,
+all ten frontend validation tests and its production build, plus warnings-denied Clippy for both
+the ordinary and Balance Lab feature graphs.
+
 ## User playtest handoff
 
 1. Run `just balance-lab`; it opens the default browser immediately. Then use the client it launches
@@ -260,7 +304,8 @@ the browser console remained clear.
    Field values.
 3. Confirm **Players & loadouts** contains every human and bot on the correct team with the expected
    fighter, weapon, ultimate, passives, and effective weapon modifiers; then collapse it.
-4. Change one fighter or weapon value, confirm the changed marker/applied/default comparison, use
+4. Change one fighter or weapon value, confirm the changed marker/applied/default comparison and red
+   non-default treatment, then use **Copy differences** and inspect the readable copied list. Use
    the field Reset once, then apply a final draft and confirm the clean Practice reset.
 5. Enter Heist, change safe maximum health, apply it, and confirm the new safe health survives a new
    Heist Practice worker. Then enter Wipeout or Hot Zone and confirm an unrelated edit is accepted.

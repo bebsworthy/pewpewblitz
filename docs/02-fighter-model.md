@@ -135,6 +135,14 @@ attribute map.
 - ultimate definition and cost;
 - two passive definitions and their resolved grants.
 
+The current canonical fighter-profile movement speeds are expressed in world units per second:
+
+| Profile | Movement speed |
+|---|---:|
+| Default | 100 |
+| Lightweight | 110 |
+| Reinforced | 90 |
+
 ### Supported runtime state
 
 - current health and alive/defeated state;

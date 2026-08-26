@@ -15,6 +15,15 @@ fn authored_catalogs_validate_and_have_expected_values() {
             .maximum_health,
         100
     );
+    assert!(
+        (fighters
+            .get(STANDARD_FIGHTER_DEFINITION)
+            .unwrap()
+            .movement_speed
+            - 100.0)
+            .abs()
+            < f32::EPSILON
+    );
     assert_eq!(
         weapons
             .get(PULSE_SIDEARM_DEFINITION)

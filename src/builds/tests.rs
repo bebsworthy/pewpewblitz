@@ -16,6 +16,7 @@ fn catalogs() -> (
 #[test]
 fn embedded_catalog_resolves_seven_legal_named_builds_and_new_ultimate_parameters() {
     let (builds, weapons, fighter) = catalogs();
+    assert_eq!(builds.balance_revision, BuildRevision(3));
     assert_eq!(builds.presets.len(), 7);
     assert_eq!(builds.ultimates.len(), 5);
     for preset in &builds.presets {
@@ -133,7 +134,7 @@ fn candidate_rejects_unknown_ids_and_resolves_exact_budget_and_body_stats() {
     .unwrap();
     assert_eq!(controller.total_points, BUILD_POINT_BUDGET);
     assert_eq!(controller.fighter_stats.maximum_health, 100);
-    assert!((controller.fighter_stats.movement_speed - 320.0).abs() < f32::EPSILON);
+    assert!((controller.fighter_stats.movement_speed - 100.0).abs() < f32::EPSILON);
 
     let mut unknown = builds.presets[0].recipe;
     unknown.ultimate = UltimateDefinitionId(999);
@@ -167,7 +168,7 @@ fn candidate_rejects_unknown_ids_and_resolves_exact_budget_and_body_stats() {
     )
     .unwrap();
     assert_eq!(runner.fighter_stats.maximum_health, 85);
-    assert!((runner.fighter_stats.movement_speed - 360.0).abs() < f32::EPSILON);
+    assert!((runner.fighter_stats.movement_speed - 110.0).abs() < f32::EPSILON);
     let bruiser = resolve_build_recipe(
         &builds,
         &weapons,
@@ -177,7 +178,7 @@ fn candidate_rejects_unknown_ids_and_resolves_exact_budget_and_body_stats() {
     )
     .unwrap();
     assert_eq!(bruiser.fighter_stats.maximum_health, 120);
-    assert!((bruiser.fighter_stats.movement_speed - 288.0).abs() < f32::EPSILON);
+    assert!((bruiser.fighter_stats.movement_speed - 90.0).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -323,8 +324,21 @@ fn catalog_rejects_count_identity_cost_and_cross_reference_mutations() {
 #[test]
 fn catalog_rejects_non_finite_and_out_of_policy_balance_values() {
     let (builds, _, _) = catalogs();
+    let mut valid = builds.clone();
+    valid.fighter_profiles.default.maximum_health = u16::MAX;
+    valid.fighter_profiles.default.movement_speed = 0.5;
+    assert!(valid.validate().is_ok());
+
     let mut invalid = builds.clone();
     invalid.fighter_profiles.lightweight.movement_speed = f32::NAN;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.fighter_profiles.lightweight.movement_speed = 0.0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.fighter_profiles.lightweight.movement_speed = MAX_FIGHTER_MOVEMENT_SPEED + 0.1;
     assert!(invalid.validate().is_err());
 
     let mut invalid = builds.clone();

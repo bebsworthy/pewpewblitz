@@ -18,6 +18,7 @@ pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 5;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
+pub const MAX_FIGHTER_MOVEMENT_SPEED: f32 = 1_200.0;
 pub const MIN_REVEAL_PROXIMITY_RADIUS: f32 = 32.0;
 pub const MAX_REVEAL_PROXIMITY_RADIUS: f32 = 1_024.0;
 pub const MAX_REVEAL_PROXIMITY_FLAT_MILLIUNITS: i32 = 512_000;
@@ -214,9 +215,9 @@ impl BuildCatalog {
             ("reinforced", self.fighter_profiles.reinforced),
         ] {
             if profile.maximum_health == 0
-                || profile.maximum_health > 1_000
                 || !profile.movement_speed.is_finite()
-                || !(80.0..=1_200.0).contains(&profile.movement_speed)
+                || profile.movement_speed <= 0.0
+                || profile.movement_speed > MAX_FIGHTER_MOVEMENT_SPEED
                 || !profile.reveal_proximity_radius.is_finite()
                 || !(MIN_REVEAL_PROXIMITY_RADIUS..=MAX_REVEAL_PROXIMITY_RADIUS)
                     .contains(&profile.reveal_proximity_radius)

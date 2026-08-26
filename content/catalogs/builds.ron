@@ -1,10 +1,10 @@
 (
     schema_version: 5,
-    balance_revision: BuildRevision(2),
+    balance_revision: BuildRevision(3),
     fighter_profiles: (
-        default: (maximum_health: 100, movement_speed: 320.0, reveal_proximity_radius: 160.0),
-        lightweight: (maximum_health: 85, movement_speed: 360.0, reveal_proximity_radius: 192.0),
-        reinforced: (maximum_health: 120, movement_speed: 288.0, reveal_proximity_radius: 128.0),
+        default: (maximum_health: 100, movement_speed: 100.0, reveal_proximity_radius: 160.0),
+        lightweight: (maximum_health: 85, movement_speed: 110.0, reveal_proximity_radius: 192.0),
+        reinforced: (maximum_health: 120, movement_speed: 90.0, reveal_proximity_radius: 128.0),
     ),
     custom_pulse: (
         light: (damage: 20, fire_cooldown_ticks: 9),

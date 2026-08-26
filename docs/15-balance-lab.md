@@ -28,8 +28,13 @@ restoration-pickup evolution.
    passives, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
 5. Choose a gameplay section and one fighter, weapon, ultimate, world object, or mode. Edit the
    focused draft using the displayed gameplay units and authoritative bounds.
-6. Review the changed marker plus applied/default comparison, then choose **Apply & reset match**.
-7. Use a field's **Reset** action to restore its applied value, **Revert draft** to discard all
+6. Review the changed marker plus applied/default comparison. Values that differ from the
+   canonical server defaults are highlighted in red independently of whether they are newly edited
+   or already applied. Use **Copy differences** to copy a readable list of every current draft value
+   that differs from those defaults, including its field path, default value, current value, and
+   gameplay unit.
+7. Choose **Apply & reset match** when the draft is ready.
+8. Use a field's **Reset** action to restore its applied value, **Revert draft** to discard all
    unapplied edits, or **Restore canonical defaults** to remove the persisted override and reset to
    canonical content.
 
@@ -75,6 +80,12 @@ world units, and associates a path-qualified server rejection with its field. Th
 revalidates the complete stored snapshot. Authored policy may remain narrower for ordinary content
 while Balance Lab uses a wider proven-safe engine ceiling. Expanding a real engine ceiling requires
 updating the affected runtime, wire, client-convergence, and capacity tests together.
+
+For fighter profiles, maximum health accepts the complete nonzero `u16` representation
+(`1..=65,535`). Movement speed must be finite and greater than zero; the ordinary UI starts at `1`
+world unit per second because its control advances in whole-unit steps. These are representation and
+runtime invariants rather than shipping balance policy. The existing `1,200` movement ceiling and
+world-object health bounds remain separately owned constraints pending their own review.
 
 ## Required maintenance contract
 

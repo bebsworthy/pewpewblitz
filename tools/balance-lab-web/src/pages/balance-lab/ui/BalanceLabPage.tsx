@@ -1,5 +1,6 @@
 import { useBalanceLabController } from "../model/useBalanceLabController";
 import { BalanceLabToast } from "./BalanceLabToast";
+import { CanonicalDiffSummary } from "./CanonicalDiffSummary";
 import { EditorWorkspace } from "./EditorWorkspace";
 import { PlayerLoadouts } from "./PlayerLoadouts";
 
@@ -53,6 +54,12 @@ export function BalanceLabPage() {
       )}
 
       <PlayerLoadouts players={state.players} />
+
+      <CanonicalDiffSummary
+        differenceCount={controller.defaultDifferenceCount}
+        copied={controller.copiedDefaultDifferences}
+        onCopy={() => void controller.copyDefaultDifferences()}
+      />
 
       <EditorWorkspace
         fields={state.editorManifest.fields}

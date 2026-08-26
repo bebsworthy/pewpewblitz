@@ -1,6 +1,9 @@
 use super::BalanceLabSnapshotV3;
 use crate::{
-    builds::{MAX_REVEAL_PROXIMITY_RADIUS, MIN_REVEAL_PROXIMITY_RADIUS, UltimateParameters},
+    builds::{
+        MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS, MIN_REVEAL_PROXIMITY_RADIUS,
+        UltimateParameters,
+    },
     combat::{
         DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadEffectDefinition,
         RecipientPolicy, TargetSelection, WeaponCatalog, WeaponEconomy, WorldEffectDefinition,
@@ -240,7 +243,7 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             label,
             "Core stats",
             "Maximum health",
-            NumberSpec::integer(1, 1_000, "health"),
+            NumberSpec::integer(1, u32::from(u16::MAX), "health"),
         );
         add_field(
             fields,
@@ -250,7 +253,13 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             label,
             "Core stats",
             "Movement speed",
-            NumberSpec::decimal(80.0, 1_200.0, 1.0, "world units/s").ranged(),
+            NumberSpec::decimal(
+                1.0,
+                f64::from(MAX_FIGHTER_MOVEMENT_SPEED),
+                1.0,
+                "world units/s",
+            )
+            .ranged(),
         );
         add_field(
             fields,
@@ -874,6 +883,29 @@ mod tests {
                 .iter()
                 .any(|path| path.contains("pickup_definition_id"))
         );
+    }
+
+    #[test]
+    fn fighter_bounds_follow_runtime_representation_not_balance_policy() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let health = manifest
+            .fields
+            .iter()
+            .find(|field| path_key(&field.path) == "fighterProfiles/default/maximum_health")
+            .unwrap();
+        assert!((health.minimum - 1.0).abs() < f64::EPSILON);
+        assert!((health.maximum - f64::from(u16::MAX)).abs() < f64::EPSILON);
+        assert_eq!(health.control, EditorControl::Number);
+
+        let speed = manifest
+            .fields
+            .iter()
+            .find(|field| path_key(&field.path) == "fighterProfiles/default/movement_speed")
+            .unwrap();
+        assert!((speed.minimum - 1.0).abs() < f64::EPSILON);
+        assert!((speed.maximum - f64::from(MAX_FIGHTER_MOVEMENT_SPEED)).abs() < f64::EPSILON);
+        assert!((speed.step - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

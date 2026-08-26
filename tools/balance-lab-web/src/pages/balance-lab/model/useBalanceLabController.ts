@@ -13,6 +13,10 @@ import {
   toStoredNumber,
   validateDisplayNumber,
 } from "../lib/editorFields";
+import {
+  canonicalDifferences,
+  formatCanonicalDifferences,
+} from "../lib/canonicalDiff";
 import type {
   BalanceLabSnapshot,
   BalanceLabState,
@@ -20,6 +24,22 @@ import type {
 } from "./balanceLab";
 
 const clone = <T,>(value: T): T => structuredClone(value);
+
+async function writeClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("clipboard copy was rejected");
+}
 
 export function useBalanceLabController() {
   const [state, setState] = useState<BalanceLabState | null>(null);
@@ -29,6 +49,7 @@ export function useBalanceLabController() {
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [lastTransaction, setLastTransaction] = useState<BalanceLabState["lastTransaction"]>(null);
+  const [copiedDefaultDifferences, setCopiedDefaultDifferences] = useState(false);
   const synchronizedWorker = useRef<string | null>(null);
   const observedMatch = useRef<string | null>(null);
   const observedTransaction = useRef<number | null>(null);
@@ -170,6 +191,21 @@ export function useBalanceLabController() {
   const changed = state && draft
     ? changedFields(state.editorManifest.fields, draft, state.applied)
     : [];
+  const defaultDifferences = state && draft
+    ? canonicalDifferences(state.editorManifest.fields, draft, state.baseline)
+    : [];
+  useEffect(() => setCopiedDefaultDifferences(false), [draft]);
+  const copyDefaultDifferences = useCallback(async () => {
+    if (defaultDifferences.length === 0) return;
+    try {
+      await writeClipboard(formatCanonicalDifferences(defaultDifferences));
+      setCopiedDefaultDifferences(true);
+      setError(null);
+    } catch {
+      setCopiedDefaultDifferences(false);
+      setError("Could not copy the server-default differences to the clipboard.");
+    }
+  }, [defaultDifferences]);
   const dirty = changed.length > 0;
   return {
     state,
@@ -179,6 +215,8 @@ export function useBalanceLabController() {
     connected,
     dirty,
     changedCount: changed.length,
+    defaultDifferenceCount: defaultDifferences.length,
+    copiedDefaultDifferences,
     fieldErrors,
     hasFieldErrors: Object.keys(fieldErrors).length > 0,
     submitting,
@@ -187,5 +225,6 @@ export function useBalanceLabController() {
     apply,
     restore,
     revert,
+    copyDefaultDifferences,
   };
 }

@@ -52,7 +52,7 @@ pub struct MovementTuning {
 impl Default for MovementTuning {
     fn default() -> Self {
         Self {
-            speed: 320.0,
+            speed: 100.0,
             radius: STANDARD_FIGHTER_RADIUS,
             spawn_facing: 0.0,
             stale_input_ticks: 12,

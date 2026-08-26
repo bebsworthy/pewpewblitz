@@ -24,7 +24,7 @@ const health = {
   storageKind: "integer",
   storageScale: 1,
   minimum: 1,
-  maximum: 1_000,
+  maximum: 65_535,
   minimumExclusive: false,
   step: 1,
   unit: "health",
@@ -71,7 +71,8 @@ test("authoritative bounds drive inline validation", () => {
   assert.equal(validateDisplayNumber(100, health), null);
   assert.match(validateDisplayNumber(100.5, health), /increments of/);
   assert.match(validateDisplayNumber(0, health), /at least 1 health/);
-  assert.match(validateDisplayNumber(1_001, health), /at most 1000 health/);
+  assert.equal(validateDisplayNumber(65_535, health), null);
+  assert.match(validateDisplayNumber(65_536, health), /at most 65535 health/);
 });
 
 test("changed field count ignores non-editable metadata", () => {

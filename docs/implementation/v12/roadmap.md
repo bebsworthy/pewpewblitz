@@ -60,6 +60,19 @@ learn-from-errors review passed. Its later framing, one-cell fighter-footprint, 
 and overhead-anchor corrections passed the affected automated/routed checks and were accepted in
 the final native review before commit `8e7f751`.
 
+## Immediate gameplay feedback applied
+
+The user initially queued these values for M03, then explicitly directed that they be applied
+immediately during M02 feedback review:
+
+- Default movement speed: `100` world units per second.
+- Lightweight movement speed: `110` world units per second.
+- Reinforced movement speed: `90` world units per second.
+
+These absolute authored values replace `320`/`360`/`288`, preserve the requested
+100%/110%/90% relationship, and advance the build balance revision to `3`. The narrow correction
+does not begin the wider M03 character and weapon rework.
+
 ## Version boundaries
 
 - M01 does not redesign Balance Lab, tune fighters or weapons, add a map editor, or introduce new
