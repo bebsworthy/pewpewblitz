@@ -56,8 +56,8 @@ The supported recipe model expresses:
 - explicit whole-cell destructible placements and optional replacement assets;
 - parameterized player-spawn marker assets and team slots;
 - the compatible mode definition;
-- typed mode-required anchors, currently the grid-vertex Hot Zone circle and two team-owned Heist
-  objective anchors.
+- typed mode-required anchors, currently the half-cell-precision Hot Zone circle and two
+  cell-aligned team-owned Heist objective anchors.
 
 The schema may grow to support additional authored pickups, hazards, concealment regions, movement
 surfaces, and other environment primitives. V10's restoration pickup is instead a runtime entity

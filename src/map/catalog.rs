@@ -17,8 +17,8 @@ pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
 pub const MAX_MAP_OBJECT_HEALTH: u16 = 1_000;
 pub const MAX_RESOLVED_MAP_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 6;
-pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 4;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 7;
+pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 5;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 8;
 #[cfg(test)]
 const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const ASHEN_COURT_PRESET: MapPresetId = MapPresetId(3);
@@ -519,26 +519,29 @@ pub struct MapFilledRect {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Ord, PartialOrd)]
 #[serde(deny_unknown_fields)]
-pub struct MapGridVertex {
+pub struct MapHalfCellPoint {
     pub x: u16,
     pub y: u16,
 }
 
 impl MapDimensions {
     #[must_use]
-    pub fn vertex_world(self, vertex: MapGridVertex) -> Option<Vec2> {
-        (vertex.x <= self.width && vertex.y <= self.height).then(|| {
-            self.bounds().min
-                + Vec2::new(f32::from(vertex.x), f32::from(vertex.y)) * MAP_CELL_SIZE_WORLD
-        })
+    pub fn half_cell_world(self, point: MapHalfCellPoint) -> Option<Vec2> {
+        (u32::from(point.x) <= u32::from(self.width) * 2
+            && u32::from(point.y) <= u32::from(self.height) * 2)
+            .then(|| {
+                self.bounds().min
+                    + Vec2::new(f32::from(point.x), f32::from(point.y))
+                        * (MAP_CELL_SIZE_WORLD * 0.5)
+            })
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum MapModeAnchorKind {
     HotZoneCircle {
-        center_vertex: MapGridVertex,
-        radius_cells: u16,
+        center_half_cell: MapHalfCellPoint,
+        radius_half_cells: u16,
     },
     HeistSafe {
         team_slot: u8,
@@ -1409,19 +1412,19 @@ fn validate_and_resolve_mode_anchors(
         return Err("invalid or duplicate mode anchor identity".to_string());
     }
     let MapModeAnchorKind::HotZoneCircle {
-        center_vertex,
-        radius_cells,
+        center_half_cell,
+        radius_half_cells,
     } = anchor.kind
     else {
         return Err("Hot Zone maps cannot contain non-zone anchors".to_string());
     };
-    if radius_cells == 0 || radius_cells > 32 {
+    if radius_half_cells == 0 || radius_half_cells > 64 {
         return Err("invalid Hot Zone objective radius".to_string());
     }
     let center = dimensions
-        .vertex_world(center_vertex)
+        .half_cell_world(center_half_cell)
         .ok_or_else(|| "Hot Zone objective center is out of bounds".to_string())?;
-    let radius = f32::from(radius_cells) * MAP_CELL_SIZE_WORLD;
+    let radius = f32::from(radius_half_cells) * (MAP_CELL_SIZE_WORLD * 0.5);
     let bounds = dimensions.bounds();
     if center.x - radius < bounds.min.x
         || center.x + radius > bounds.max.x
@@ -2494,6 +2497,62 @@ mod tests {
     }
 
     #[test]
+    fn half_cell_points_represent_odd_grid_centers_exactly() {
+        let dimensions = MapDimensions {
+            width: 25,
+            height: 37,
+        };
+
+        assert_eq!(
+            dimensions.half_cell_world(MapHalfCellPoint { x: 25, y: 37 }),
+            Some(Vec2::ZERO)
+        );
+        assert_eq!(
+            dimensions.half_cell_world(MapHalfCellPoint { x: 25, y: 37 }),
+            Some(dimensions.cell_center(MapCell::new(12, 18)))
+        );
+        assert_eq!(
+            dimensions.half_cell_world(MapHalfCellPoint { x: 50, y: 74 }),
+            Some(dimensions.bounds().max)
+        );
+        assert_eq!(
+            dimensions.half_cell_world(MapHalfCellPoint { x: 51, y: 37 }),
+            None
+        );
+    }
+
+    #[test]
+    fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
+        let anchors = [MapModeAnchorPlacement {
+            placement_id: MapPlacementId(1),
+            anchor_id: ModeAnchorId(1),
+            kind: MapModeAnchorKind::HotZoneCircle {
+                center_half_cell: MapHalfCellPoint { x: 25, y: 37 },
+                radius_half_cells: 7,
+            },
+        }];
+        let (objective, heist_safes) = validate_and_resolve_mode_anchors(
+            HOT_ZONE_MODE_DEFINITION,
+            MapDimensions {
+                width: 25,
+                height: 37,
+            },
+            &anchors,
+            &mut BTreeSet::new(),
+        )
+        .unwrap();
+
+        assert!(heist_safes.is_empty());
+        assert_eq!(
+            objective.unwrap().area,
+            crate::map::NormalizedArea {
+                center: Vec2::ZERO,
+                shape: MapShape::Circle { radius: 112.0 },
+            }
+        );
+    }
+
+    #[test]
     fn map_dimensions_separate_engine_safety_from_server_policy() {
         let limits = MapDimensionLimits::default();
         assert_eq!(limits.minimum_width, 20);
@@ -2908,8 +2967,8 @@ mod tests {
         );
         let mut outside = hot_zone;
         outside.mode_anchors[0].kind = MapModeAnchorKind::HotZoneCircle {
-            center_vertex: MapGridVertex { x: 0, y: 0 },
-            radius_cells: 5,
+            center_half_cell: MapHalfCellPoint { x: 0, y: 0 },
+            radius_half_cells: 10,
         };
         assert!(
             resolve_grid_recipe(

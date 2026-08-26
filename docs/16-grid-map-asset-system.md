@@ -425,9 +425,13 @@ or filled rectangles, but the canonical resolved recipe expands them into bounde
 fingerprinting. There is one parser and canonical representation; a convenience construct does not
 create another runtime path.
 
-Mode anchors use integer cell coordinates and bounded cell dimensions. Team spawn areas disappear;
-spawn capacity comes from placed spawn assets. An area mode anchor remains a dedicated typed layout
-fact because the selected mode owns its meaning and scoring.
+Ordinary surface, feature, decoration, spawn, and damageable-object placements remain aligned to
+integer cells. Geometric mode anchors may use integer half-cell units: `(2x + 1, 2y + 1)` names the
+center of cell `(x, y)`, while even coordinates name grid vertices. Hot Zone centers and radii use
+that representation, preserving exact half-cell geometry without serialized floats or permitting
+arbitrary offsets for ordinary assets. Heist safe footprints remain cell-aligned. Team spawn areas
+disappear; spawn capacity comes from placed spawn assets. An area mode anchor remains a dedicated
+typed layout fact because the selected mode owns its meaning and scoring.
 
 ## Resolution and validation
 

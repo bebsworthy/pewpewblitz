@@ -1,5 +1,5 @@
 (
-    recipe_id: MapRecipeId(8), revision: 2, recipe_version: 4,
+    recipe_id: MapRecipeId(8), revision: 2, recipe_version: 5,
     mode_definition_id: ModeDefinitionId(3), presentation_theme_id: MapPresentationThemeId(1),
     dimensions: (width: 64, height: 40), default_surface_asset_id: MapAssetId(1),
     placements: [
@@ -46,5 +46,5 @@
         (first_placement_id: MapPlacementId(524), min: (x: 26, y: 18), width: 2, height: 2, asset_id: MapAssetId(8), quarter_turns: 0),
         (first_placement_id: MapPlacementId(536), min: (x: 36, y: 18), width: 2, height: 2, asset_id: MapAssetId(8), quarter_turns: 0),
     ],
-    mode_anchors: [(placement_id: MapPlacementId(1200), anchor_id: ModeAnchorId(1), kind: HotZoneCircle(center_vertex: (x: 32, y: 20), radius_cells: 5))],
+    mode_anchors: [(placement_id: MapPlacementId(1200), anchor_id: ModeAnchorId(1), kind: HotZoneCircle(center_half_cell: (x: 64, y: 40), radius_half_cells: 10))],
 )

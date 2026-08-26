@@ -1496,19 +1496,19 @@ fn materialize_map_static_visuals(
 fn hot_zone_visual_geometry(snapshot: &crate::map::ResolvedMapSnapshot) -> Option<(Vec2, f32)> {
     snapshot.mode_anchors.iter().find_map(|anchor| {
         let crate::map::MapModeAnchorKind::HotZoneCircle {
-            center_vertex,
-            radius_cells,
+            center_half_cell,
+            radius_half_cells,
         } = anchor.kind
         else {
             return None;
         };
         snapshot
             .dimensions
-            .vertex_world(center_vertex)
+            .half_cell_world(center_half_cell)
             .map(|center| {
                 (
                     center,
-                    f32::from(radius_cells) * crate::map::MAP_CELL_SIZE_WORLD,
+                    f32::from(radius_half_cells) * (crate::map::MAP_CELL_SIZE_WORLD * 0.5),
                 )
             })
     })

@@ -1,5 +1,5 @@
 (
-    recipe_id: MapRecipeId(7), revision: 2, recipe_version: 4,
+    recipe_id: MapRecipeId(7), revision: 2, recipe_version: 5,
     mode_definition_id: ModeDefinitionId(2), presentation_theme_id: MapPresentationThemeId(1),
     dimensions: (width: 64, height: 40), default_surface_asset_id: MapAssetId(1),
     placements: [

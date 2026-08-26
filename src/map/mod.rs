@@ -26,7 +26,7 @@ pub use catalog::{
     MapDamageProfileId, MapDestructionBehavior, MapDimensionLimits, MapDimensions,
     MapDurabilityBehavior, MapDynamicGeneration, MapDynamicRecoveryRequest,
     MapDynamicRecoverySnapshot, MapDynamicResetEvent, MapDynamicState, MapFilledRect, MapFootprint,
-    MapGameplayProfile, MapGameplayProfileId, MapGridVertex, MapInteractionBehavior,
+    MapGameplayProfile, MapGameplayProfileId, MapHalfCellPoint, MapInteractionBehavior,
     MapModeAnchorKind, MapModeAnchorPlacement, MapMutationEvent, MapObjectTerminalBehavior,
     MapPlacementOutcome, MapPlacementParameterKind, MapPlacementParameters, MapPlacementTransition,
     MapPreset, MapRecipe, MapSurfaceTagId, MapVisualProfileId, OIL_BARREL_ASSET,

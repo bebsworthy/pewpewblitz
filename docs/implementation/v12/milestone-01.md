@@ -59,6 +59,25 @@ slots, concealment may cover every cell, and the bounded resolved snapshot ceili
 a 512×512 recipe may contain 262,144 concealing cells; rendering and lookup optimization remain
 evidence-driven work rather than an authoring restriction.
 
+## Validated objective-anchor precision
+
+The padded 25×37 Hot Zone reference has its objective at the exact center of the middle cell and a
+radius of approximately 3.5 cells. Recipe schema 5 therefore represents Hot Zone centers and radii
+as unsigned integer half-cell units. `(2x + 1, 2y + 1)` is the center of cell `(x, y)`, so Back
+Shuffle uses center `(25, 37)` and radius `7`; resolution converts those values to authoritative
+world coordinates without floating-point authoring ambiguity.
+
+This precision is reusable for geometric mode anchors, where sub-cell geometry has a demonstrated
+need. It is deliberately not generalized to walls, grass, cover, spawns, safes, decorations, or
+filled rectangles: those assets retain integer-cell placement, footprint, collision, canonical
+ordering, and overlap rules. The existing Feature Yard Hot Zone recipe is migrated losslessly from
+center `(32, 20)`, radius `5` cells to half-cell values `(64, 40)`, radius `10`.
+
+Because `ResolvedMapSnapshot` replicates the anchor enum and the same three integers now carry
+half-cell semantics, this is an incompatible meaning change even though its binary width is
+unchanged. The one global application protocol therefore advances from 28 to 29; recipe schema and
+canonical fingerprint formats advance from 4/7 to 5/8. There is no legacy decoder.
+
 ## Map-authoring contract
 
 - Manually transcribe the references into ordinary sparse `MapRecipe` RON documents.
@@ -80,6 +99,8 @@ evidence-driven work rather than an authoring restriction.
 - [x] Keep Practice navigation representable at the configured maximum and add focused limit tests.
 - [x] Set and test the accepted 14-cell vertical gameplay-camera target.
 - [x] Replace fixed placement/concealment counts with 512×512 dimension-derived structural bounds.
+- [x] Add bounded half-cell precision for Hot Zone centers and radii, migrate schema 5 recipes, and
+  retain cell alignment for ordinary placements.
 - [ ] Author, index, resolve, and advertise the Wipeout 3v3 map.
 - [ ] Author, index, resolve, and advertise the Hot Zone 3v3 map with one typed capture anchor.
 - [ ] Author, index, resolve, and advertise the Heist 3v3 map with two typed team safes.
@@ -107,6 +128,16 @@ revision, the focused 512×512 dimension-policy, invalid-envelope, 1,048,576-slo
 Server and client all-target role checks, formatting, and `git diff --check` also passed. The
 14-cell camera-footprint test passed separately under the client role. Full closeout verification
 remains pending until the three recipes are authored.
+
+### Objective-anchor precision verification — 2026-08-26
+
+- All 24 map-catalog unit tests passed under the client role, including exact odd-grid half-cell
+  conversion, a `(25, 37)` center with radius `7`, lossless Feature Yard migration, embedded recipe
+  parsing, canonical fingerprinting, and invalid-anchor rejection.
+- All four Hot Zone-filtered authoritative, HUD, and 3D-presentation tests passed.
+- All 14 protocol unit tests passed under the combined network-test role after advancing the global
+  compatibility version to 29.
+- Server and client all-target role checks, formatting, and `git diff --check` passed.
 
 ## Exit criteria
 

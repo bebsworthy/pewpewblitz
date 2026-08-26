@@ -1,7 +1,7 @@
 (
     recipe_id: MapRecipeId(1),
     revision: 5,
-    recipe_version: 4,
+    recipe_version: 5,
     mode_definition_id: ModeDefinitionId(2),
     presentation_theme_id: MapPresentationThemeId(1),
     dimensions: (width: 56, height: 36),
