@@ -1,0 +1,15 @@
+KayKit: Block Bits (1.0)
+
+Created/distributed by Kay Lousberg (www.kaylousberg.com)
+Creation date: 27/03/2025 15:00
+
+License: Creative Commons Zero (CC0)
+http://creativecommons.org/publicdomain/zero/1.0/
+
+This content is free to use in personal, educational and commercial projects.
+
+Support by crediting Kay Lousberg, www.kaylousberg.com (this is not mandatory, but is
+appreciated).
+
+Source license retained from:
+external_assets/KayKit_BlockBits_1.0_FREE/License.txt

@@ -388,6 +388,12 @@ mod tests {
                 "missing GLB dependency: {dependency}"
             );
         }
+        assert!(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/licenses/kaykit-block-bits.txt")
+                .is_file(),
+            "missing retained KayKit Block Bits license"
+        );
     }
 
     #[test]

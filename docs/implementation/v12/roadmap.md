@@ -17,6 +17,12 @@ four mutually exclusive asset slots per cell, concealment may cover every cell, 
 snapshots remain bounded at 32 MiB. Extreme-density rendering and lookup optimization are deferred
 until measured maps require them; this does not narrow the authoring contract.
 
+The first native map review found that imported environment scenes do not consistently agree with
+their authoritative cell footprints. M01 therefore remains open for one presentation correction:
+enforce the existing fitting policies from intrinsic scene bounds and replace the three maps'
+solid-block approximations with a small KayKit Block Bits family. This is map-playtest polish, not
+the M02 balancing-tool work.
+
 ## Version status
 
 | Field | Value |
@@ -30,7 +36,7 @@ until measured maps require them; this does not narrow the authoring contract.
 
 | Milestone | Status | Player-visible deliverable |
 |---|---|---|
-| 01 | User playtest | One manually authored 3v3 map each for Wipeout, Hot Zone, and Heist, converted to Brawler's existing map assets and accepted through native playtest |
+| 01 | User playtest | One manually authored, grid-readable 3v3 map each for Wipeout, Hot Zone, and Heist, accepted through native playtest |
 | 02 | Not started | Balancing-tool improvements defined by the user after playing the M01 maps |
 | 03 | Not started | Character and weapon balance/rework iterated from gameplay feedback on the accepted maps |
 
@@ -43,7 +49,8 @@ map play rather than speculative tuning targets.
 ## Version boundaries
 
 - M01 does not redesign Balance Lab, tune fighters or weapons, add a map editor, or introduce new
-  gameplay-object families.
+  gameplay-object families. Presentation-only wall and cover variants may reuse existing gameplay
+  profiles when a supplied map reference demonstrates a distinct visual role.
 - M02 scope is not inferred from the existing Balance Lab backlog.
 - M03 changes canonical balance only through recorded gameplay feedback and affected verification.
 - Server authority, sparse recipes, stable identities, typed mode anchors, routed admission,

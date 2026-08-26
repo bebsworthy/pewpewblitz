@@ -4,6 +4,10 @@ use super::*;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+mod fitting;
+
+use fitting::{SceneBounds, fit_scene_to_footprint, world_asset_scene_bounds};
+
 const MAP_VISUAL_CATALOG: &str = include_str!("../../../assets/catalogs/map_asset_visuals.ron");
 const MAP_THEME_CATALOG: &str =
     include_str!("../../../assets/catalogs/map_presentation_themes.ron");
@@ -151,7 +155,7 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
         .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
     let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
         .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
-    if source.schema_version != 3 || themes.schema_version != 3 {
+    if source.schema_version != 4 || themes.schema_version != 3 {
         return Err("unsupported client map catalog schema".to_string());
     }
     let expected = expected_visual_profiles(catalog);
@@ -201,6 +205,7 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
             || !actual.insert(profile.id)
             || !profile.scale.is_finite()
             || profile.scale <= 0.0
+            || matches!(&profile.kind, MapVisualKind::Imported { .. }) && profile.scale > 1.0
             || !profile.yaw_degrees.is_finite()
             || !profile.vertical_offset.is_finite()
             || !kind_matches_fallback
@@ -410,9 +415,21 @@ pub(super) struct EnvironmentTintedMaterials {
     handles: HashMap<(AssetId<StandardMaterial>, [u32; 3]), Handle<StandardMaterial>>,
 }
 
+#[derive(Clone)]
+struct EnvironmentImportedScene {
+    scene: Handle<WorldAsset>,
+    bounds: SceneBounds,
+}
+
+pub(super) struct FittedEnvironmentScene {
+    pub(super) scene: Handle<WorldAsset>,
+    pub(super) transform: Transform,
+}
+
 #[derive(Resource, Default)]
 pub(super) struct EnvironmentImportedScenes {
-    scenes: BTreeMap<crate::map::MapVisualProfileId, Handle<WorldAsset>>,
+    scenes: BTreeMap<crate::map::MapVisualProfileId, EnvironmentImportedScene>,
+    rejected: BTreeSet<crate::map::MapVisualProfileId>,
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
@@ -424,8 +441,26 @@ pub(super) enum EnvironmentAssetReadiness {
 }
 
 impl EnvironmentImportedScenes {
-    pub(super) fn scene(&self, id: crate::map::MapVisualProfileId) -> Option<&Handle<WorldAsset>> {
-        self.scenes.get(&id)
+    pub(super) fn fitted(
+        &self,
+        id: crate::map::MapVisualProfileId,
+        profile: &MapVisualProfile,
+        footprint_world: Vec2,
+    ) -> Option<FittedEnvironmentScene> {
+        let imported = self.scenes.get(&id)?;
+        let transform = fit_scene_to_footprint(
+            imported.bounds,
+            profile.fitting,
+            profile.scale,
+            footprint_world,
+            profile.yaw_degrees.to_radians(),
+            profile.vertical_offset,
+        )
+        .ok()?;
+        Some(FittedEnvironmentScene {
+            scene: imported.scene.clone(),
+            transform,
+        })
     }
 }
 
@@ -490,15 +525,12 @@ mod grid_catalog_tests {
                 }),
             Some("brawler/models/kenney/mini-dungeon/barrel.glb")
         );
-        assert!(
-            (visuals
+        assert_eq!(
+            visuals
                 .profile(crate::map::MapVisualProfileId(37))
                 .unwrap()
-                .scale
-                - 64.0)
-                .abs()
-                < f32::EPSILON,
-            "the imported barrel must fill its 32-unit tile like its radius-16 collider"
+                .fitting,
+            super::MapVisualFitting::Contained
         );
         assert_eq!(
             visuals
@@ -514,10 +546,9 @@ mod grid_catalog_tests {
                 .profile(crate::map::MapVisualProfileId(38))
                 .unwrap()
                 .scale
-                - 64.0)
+                - 1.0)
                 .abs()
-                < f32::EPSILON,
-            "the imported debris must fill its 32-unit terminal tile without root downscaling"
+                < f32::EPSILON
         );
         assert_eq!(
             visuals
@@ -533,7 +564,7 @@ mod grid_catalog_tests {
                 .profile(crate::map::MapVisualProfileId(39))
                 .unwrap()
                 .scale
-                - 88.0)
+                - 0.9625)
                 .abs()
                 < f32::EPSILON,
             "the imported idol must remain inside the 96-by-64 authoritative footprint"
@@ -553,13 +584,13 @@ mod grid_catalog_tests {
             .unwrap()
             .scale;
 
-        assert!((chest_scale - 64.0).abs() < f32::EPSILON);
+        assert!((chest_scale - 1.0).abs() < f32::EPSILON);
         assert!(
             visuals
                 .profile(crate::map::MapVisualProfileId(41))
                 .is_none()
         );
-        assert!((potion_scale - 72.0).abs() < f32::EPSILON);
+        assert!((potion_scale - 0.738).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -575,8 +606,35 @@ mod grid_catalog_tests {
             },
             Some("brawler/models/kenney/graveyard/trunk.glb")
         );
-        assert!((cactus.scale - 48.0).abs() < f32::EPSILON);
+        assert!((cactus.scale - 0.90).abs() < f32::EPSILON);
         assert_eq!(cactus.fitting, super::MapVisualFitting::Contained);
+    }
+
+    #[test]
+    fn proper_three_vs_three_maps_use_exact_kaykit_block_bits_visuals() {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
+        let expected = [
+            (44, "decorative-block-green.glb"),
+            (45, "bricks-a.glb"),
+            (46, "metal.glb"),
+            (47, "wood.glb"),
+            (48, "striped-block-yellow.glb"),
+            (49, "striped-block-green.glb"),
+        ];
+
+        for (id, file_name) in expected {
+            let profile = visuals.profile(crate::map::MapVisualProfileId(id)).unwrap();
+            let super::MapVisualKind::Imported { path } = &profile.kind else {
+                panic!("KayKit profile {id} must use an imported GLB");
+            };
+            assert_eq!(
+                path,
+                &format!("brawler/models/kaykit/block-bits/{file_name}")
+            );
+            assert!((profile.scale - 1.0).abs() < f32::EPSILON);
+            assert_eq!(profile.fitting, super::MapVisualFitting::Exact);
+        }
     }
 }
 
@@ -629,13 +687,20 @@ fn multiply_color(color: Color, tint: [f32; 3]) -> Color {
     )
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    reason = "the parameters are distinct Bevy resources owned by this asset-readiness system"
+)]
 pub(super) fn prepare_environment_scenes(
     mut commands: Commands,
     handles: Option<Res<EnvironmentAssetHandles>>,
     current: Option<Res<EnvironmentImportedScenes>>,
     asset_server: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
+    world_assets: Res<Assets<WorldAsset>>,
+    map_catalog: Res<crate::map::MapCatalogResource>,
+    visual_catalog: Res<MapVisualCatalog>,
     fallback_policy: Res<ImportedWorldFallbackPolicy>,
     mut readiness: Option<ResMut<EnvironmentAssetReadiness>>,
 ) {
@@ -646,19 +711,45 @@ pub(super) fn prepare_environment_scenes(
         return;
     }
     let Some(handles) = handles else { return };
-    let mut scenes = current
-        .as_deref()
-        .map_or_else(BTreeMap::new, |current| current.scenes.clone());
+    let (mut scenes, mut rejected) = current.as_deref().map_or_else(
+        || (BTreeMap::new(), BTreeSet::new()),
+        |current| (current.scenes.clone(), current.rejected.clone()),
+    );
     let previous_len = scenes.len();
+    let previous_rejected_len = rejected.len();
     for (id, handle) in &handles.handles {
-        if scenes.contains_key(id) || !asset_server.is_loaded_with_dependencies(handle) {
+        if scenes.contains_key(id)
+            || rejected.contains(id)
+            || !asset_server.is_loaded_with_dependencies(handle)
+        {
             continue;
         }
-        if let Some(scene) = gltfs
+        let Some(scene) = gltfs
             .get(handle)
             .and_then(|gltf| gltf.default_scene.clone())
-        {
-            scenes.insert(*id, scene);
+        else {
+            warn!(
+                visual_profile = id.0,
+                "imported environment GLB has no default scene"
+            );
+            rejected.insert(*id);
+            continue;
+        };
+        let Some(world_asset) = world_assets.get(&scene) else {
+            continue;
+        };
+        let admission = world_asset_scene_bounds(world_asset).and_then(|bounds| {
+            validate_scene_against_owned_map_assets(*id, bounds, &map_catalog.0, &visual_catalog)?;
+            Ok(EnvironmentImportedScene { scene, bounds })
+        });
+        match admission {
+            Ok(imported) => {
+                scenes.insert(*id, imported);
+            }
+            Err(error) => {
+                warn!(visual_profile = id.0, %error, "imported environment scene rejected");
+                rejected.insert(*id);
+            }
         }
     }
     if let Some(readiness) = readiness.as_deref_mut() {
@@ -673,23 +764,59 @@ pub(super) fn prepare_environment_scenes(
                 .then_some(*id)
             })
             .collect::<Vec<_>>();
-        *readiness = if !failed.is_empty() {
-            EnvironmentAssetReadiness::Degraded(failed)
-        } else if scenes.len() == handles.handles.len() {
+        let degraded = failed
+            .into_iter()
+            .chain(rejected.iter().copied())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let terminal_count = scenes.len() + degraded.len();
+        *readiness = if terminal_count < handles.handles.len() {
+            EnvironmentAssetReadiness::Loading
+        } else if degraded.is_empty() {
             EnvironmentAssetReadiness::Ready
         } else {
-            EnvironmentAssetReadiness::Loading
+            EnvironmentAssetReadiness::Degraded(degraded)
         };
     }
-    if scenes.len() != previous_len {
+    if scenes.len() != previous_len || rejected.len() != previous_rejected_len {
         info!(
             ready = scenes.len(),
             total = handles.handles.len(),
             "environment GLB scenes became ready"
         );
-        commands.insert_resource(EnvironmentImportedScenes { scenes });
+        commands.insert_resource(EnvironmentImportedScenes { scenes, rejected });
         commands.remove_resource::<Presented3dMap>();
     }
+}
+
+fn validate_scene_against_owned_map_assets(
+    visual_id: crate::map::MapVisualProfileId,
+    bounds: SceneBounds,
+    map_catalog: &crate::map::MapContentCatalog,
+    visual_catalog: &MapVisualCatalog,
+) -> Result<(), String> {
+    let profile = visual_catalog
+        .profile(visual_id)
+        .ok_or_else(|| "imported scene has no visual profile".to_string())?;
+    for asset in map_catalog
+        .assets
+        .iter()
+        .filter(|asset| asset.visual_profile_id == visual_id)
+    {
+        fit_scene_to_footprint(
+            bounds,
+            profile.fitting,
+            profile.scale,
+            Vec2::new(
+                f32::from(asset.footprint_cells.width) * crate::map::MAP_CELL_SIZE_WORLD,
+                f32::from(asset.footprint_cells.height) * crate::map::MAP_CELL_SIZE_WORLD,
+            ),
+            profile.yaw_degrees.to_radians(),
+            profile.vertical_offset,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -352,6 +352,7 @@ mod tests {
             "Verdant Crossfire Wipeout 3v3"
         );
         assert_eq!(wipeout_three_vs_three.map_preset_ids, vec![MapPresetId(10)]);
+        assert_eq!(wipeout_three_vs_three.configuration_revision, 4);
         let hot_zone_one_vs_one = &catalog.game_types[4];
         assert_eq!(hot_zone_one_vs_one.id.as_str(), "hot-zone-1v1");
         assert_eq!(
@@ -365,7 +366,7 @@ mod tests {
             .iter()
             .find(|game| game.id.as_str() == "hot-zone-3v3")
             .unwrap();
-        assert_eq!(hot_zone_three_vs_three.configuration_revision, 4);
+        assert_eq!(hot_zone_three_vs_three.configuration_revision, 5);
         assert_eq!(
             hot_zone_three_vs_three.map_preset_ids,
             vec![MapPresetId(11)]
@@ -402,14 +403,14 @@ mod tests {
         assert_eq!(heist.len(), 3);
         assert_eq!(heist[0].map_preset_ids, vec![MapPresetId(9)]);
         assert_eq!(heist[2].players_per_team, 3);
-        assert_eq!(heist[2].configuration_revision, 5);
+        assert_eq!(heist[2].configuration_revision, 6);
         assert_eq!(heist[2].map_preset_ids, vec![MapPresetId(12)]);
         assert_eq!(
             catalog.revision.0,
             [
-                0x9e, 0x28, 0x2f, 0x23, 0x55, 0xc1, 0xf6, 0x3d, 0x0b, 0x94, 0x73, 0x2a, 0x54, 0xf5,
-                0x85, 0xc6, 0xbe, 0x35, 0x42, 0xe0, 0xf3, 0x72, 0x6a, 0xc7, 0xe1, 0x4f, 0x3e, 0x39,
-                0x88, 0x9a, 0x6c, 0xa9,
+                0x4f, 0xe0, 0x8f, 0x5b, 0x69, 0xcb, 0x3d, 0x54, 0xac, 0x96, 0x0e, 0x68, 0x13, 0xac,
+                0x4a, 0x5c, 0x35, 0x18, 0xca, 0xfb, 0xe1, 0x44, 0x76, 0x72, 0xab, 0x55, 0xc3, 0x9c,
+                0xb4, 0x49, 0x88, 0x32,
             ]
         );
     }

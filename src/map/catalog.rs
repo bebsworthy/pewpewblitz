@@ -34,11 +34,11 @@ pub const FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION: u16 = 2;
 pub const FEATURE_YARD_HEIST_PRESET: MapPresetId = MapPresetId(9);
 pub const FEATURE_YARD_HEIST_ADMISSION_REVISION: u16 = 2;
 pub const VERDANT_CROSSFIRE_PRESET: MapPresetId = MapPresetId(10);
-pub const VERDANT_CROSSFIRE_ADMISSION_REVISION: u16 = 1;
+pub const VERDANT_CROSSFIRE_ADMISSION_REVISION: u16 = 2;
 pub const SWITCHBACK_BASIN_PRESET: MapPresetId = MapPresetId(11);
-pub const SWITCHBACK_BASIN_ADMISSION_REVISION: u16 = 1;
+pub const SWITCHBACK_BASIN_ADMISSION_REVISION: u16 = 2;
 pub const POWDERLINE_VAULT_PRESET: MapPresetId = MapPresetId(12);
-pub const POWDERLINE_VAULT_ADMISSION_REVISION: u16 = 2;
+pub const POWDERLINE_VAULT_ADMISSION_REVISION: u16 = 3;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
@@ -65,6 +65,12 @@ pub const OIL_BARREL_ASSET: MapAssetId = MapAssetId(24);
 pub const BARREL_WOOD_DEBRIS_ASSET: MapAssetId = MapAssetId(25);
 pub const TREASURE_CHEST_ASSET: MapAssetId = MapAssetId(26);
 pub const CACTUS_ASSET: MapAssetId = MapAssetId(28);
+pub const GREEN_SYMBOL_WALL_ASSET: MapAssetId = MapAssetId(29);
+pub const RED_BRICK_WALL_ASSET: MapAssetId = MapAssetId(30);
+pub const METAL_WALL_ASSET: MapAssetId = MapAssetId(31);
+pub const WOOD_WALL_ASSET: MapAssetId = MapAssetId(32);
+pub const YELLOW_STRIPED_COVER_ASSET: MapAssetId = MapAssetId(33);
+pub const GREEN_STRIPED_COVER_ASSET: MapAssetId = MapAssetId(34);
 
 macro_rules! grid_id {
     ($name:ident) => {
@@ -2597,6 +2603,7 @@ mod tests {
         }
 
         assert_eq!(wipeout.snapshot.mode_definition_id, WIPEOUT_MODE_DEFINITION);
+        assert_eq!(wipeout.snapshot.identity.recipe_revision, 2);
         assert!(wipeout.objective_zone.is_none());
         assert!(wipeout.heist_safes.is_empty());
 
@@ -2604,6 +2611,7 @@ mod tests {
             hot_zone.snapshot.mode_definition_id,
             HOT_ZONE_MODE_DEFINITION
         );
+        assert_eq!(hot_zone.snapshot.identity.recipe_revision, 2);
         assert_eq!(
             hot_zone.objective_zone.unwrap().area,
             crate::map::NormalizedArea {
@@ -2614,6 +2622,7 @@ mod tests {
         assert!(hot_zone.heist_safes.is_empty());
 
         assert_eq!(heist.snapshot.mode_definition_id, HEIST_MODE_DEFINITION);
+        assert_eq!(heist.snapshot.identity.recipe_revision, 3);
         assert!(heist.objective_zone.is_none());
         assert_eq!(heist.heist_safes.len(), 2);
         assert_eq!(
@@ -2644,6 +2653,71 @@ mod tests {
                 .unwrap()
                 .gameplay_profile_id
         );
+    }
+
+    #[test]
+    fn proper_three_vs_three_maps_resolve_the_kaykit_visual_variants() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let wipeout = catalog
+            .resolve_preset(VERDANT_CROSSFIRE_PRESET, MapInstanceId(10))
+            .unwrap();
+        let hot_zone = catalog
+            .resolve_preset(SWITCHBACK_BASIN_PRESET, MapInstanceId(11))
+            .unwrap();
+        let heist = catalog
+            .resolve_preset(POWDERLINE_VAULT_PRESET, MapInstanceId(12))
+            .unwrap();
+
+        for asset_id in [GREEN_SYMBOL_WALL_ASSET, YELLOW_STRIPED_COVER_ASSET] {
+            assert!(
+                wipeout
+                    .snapshot
+                    .placements
+                    .iter()
+                    .any(|placement| placement.asset_id == asset_id)
+            );
+        }
+        for asset_id in [RED_BRICK_WALL_ASSET, GREEN_STRIPED_COVER_ASSET] {
+            assert!(
+                hot_zone
+                    .snapshot
+                    .placements
+                    .iter()
+                    .any(|placement| placement.asset_id == asset_id)
+            );
+        }
+
+        let cells_for_asset = |asset_id| {
+            heist
+                .snapshot
+                .placements
+                .iter()
+                .filter(|placement| placement.asset_id == asset_id)
+                .map(|placement| placement.cell)
+                .collect::<BTreeSet<_>>()
+        };
+        let expected_metal_cells = (18..=25)
+            .map(|y| MapCell::new(20, y))
+            .chain((12..=18).map(|y| MapCell::new(4, y)))
+            .chain((2..=4).map(|x| MapCell::new(x, 22)))
+            .chain((20..=22).map(|x| MapCell::new(x, 14)))
+            .collect::<BTreeSet<_>>();
+        let expected_wood_cells = (22..=26)
+            .map(|y| MapCell::new(17, y))
+            .chain((10..=14).map(|y| MapCell::new(7, y)))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(cells_for_asset(METAL_WALL_ASSET), expected_metal_cells);
+        assert_eq!(cells_for_asset(WOOD_WALL_ASSET), expected_wood_cells);
+        assert!(!cells_for_asset(RED_BRICK_WALL_ASSET).is_empty());
+        assert!(!cells_for_asset(YELLOW_STRIPED_COVER_ASSET).is_empty());
+        for resolved in [&wipeout, &hot_zone, &heist] {
+            assert!(resolved.snapshot.placements.iter().all(|placement| {
+                !matches!(
+                    placement.asset_id,
+                    GARDEN_WALL_ASSET | DESTRUCTIBLE_COVER_ASSET
+                )
+            }));
+        }
     }
 
     #[test]

@@ -186,6 +186,15 @@ Asset paths, tints, transforms, and fallbacks remain client-only and do not cont
 details to the gameplay protocol. Presentation reconciliation keys include the accepted map
 instance, recipe fingerprint, and theme so replacement cannot retain stale geometry or materials.
 
+For imported map scenes, the client computes one hierarchy-aware intrinsic bound from every mesh
+AABB after the scene and its dependencies load. `Exact` profiles uniformly fill an
+aspect-compatible authoritative footprint; `Contained` profiles uniformly fit, recenter, ground,
+and optionally under-fill it. Their catalog `scale` is a dimensionless fill factor in `(0, 1]`,
+not a model-space correction. Imported `Tiled` content is unsupported until a real placement
+requires it; generated water and vegetation retain their tiled presentation. Missing, empty,
+non-finite, or shape-incompatible imports select the profile's deterministic fallback without
+delaying gameplay readiness.
+
 Occlusion should first be solved through camera elevation, wall height, material value, and map
 composition. Selective fade, outlines, x-ray rendering, decals, or custom gameplay-world pipelines
 require evidence that these simpler controls are insufficient.

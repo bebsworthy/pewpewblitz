@@ -33,7 +33,7 @@ use camera::{
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
 
-const WALL_HEIGHT: f32 = 72.0;
+const WALL_HEIGHT: f32 = 32.0;
 // Kenney's Mini Characters face local +Z, while Brawler fighter roots face local +X.
 pub(crate) const KENNEY_CHARACTER_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
 // Blaster Kit barrels also point local +Z, so the corrected character hierarchy needs no extra yaw.
@@ -52,8 +52,6 @@ const FIGHTER_FACING_HALF_ANGLE: f32 = 0.22;
 const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
 const HEIST_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
 const HEIST_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
-#[cfg(test)]
-const KENNEY_STATUE_HALF_FOOTPRINT: f32 = 0.35;
 
 #[derive(Resource)]
 pub(crate) struct Primitive3dAssets {
@@ -311,7 +309,7 @@ struct HeistSafeStatusVisual {
 struct HeistSafeVisualAssets<'a> {
     primitives: &'a Primitive3dAssets,
     materials: &'a Material3dAssets,
-    imported_core: Option<Handle<WorldAsset>>,
+    imported_core: Option<environment_assets::FittedEnvironmentScene>,
     profile: Option<&'a environment_assets::MapVisualProfile>,
 }
 
@@ -345,19 +343,17 @@ fn spawn_heist_safe_visual(
                 HEIST_IDOL_FOOTPRINT_DEPTH,
             )),
         ));
-        if let (Some(scene), Some(profile)) = (assets.imported_core.as_ref(), assets.profile) {
+        if let (Some(fitted), Some(profile)) = (assets.imported_core.as_ref(), assets.profile) {
+            let mut transform = fitted.transform;
+            transform.translation.y += 16.0;
             parent.spawn((
                 environment_assets::EnvironmentMaterialTint([
                     profile.tint.0,
                     profile.tint.1,
                     profile.tint.2,
                 ]),
-                WorldAssetRoot(scene.clone()),
-                Transform {
-                    translation: Vec3::Y * (22.0 + profile.vertical_offset),
-                    rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
-                    scale: Vec3::splat(profile.scale),
-                },
+                WorldAssetRoot(fitted.scene.clone()),
+                transform,
                 Name::new("imported Heist team idol"),
             ));
         } else {
@@ -440,13 +436,18 @@ fn reconcile_heist_safe_visuals(
             materials.team_red.clone()
         };
         let profile_id = crate::map::HEIST_SAFE_VISUAL_PROFILE;
-        let imported_core = imported
-            .as_deref()
-            .and_then(|scenes| scenes.scene(profile_id))
-            .cloned();
         let profile = visual_catalog
             .as_deref()
             .and_then(|catalog| catalog.profile(profile_id));
+        let imported_core = profile.and_then(|profile| {
+            imported.as_deref().and_then(|scenes| {
+                scenes.fitted(
+                    profile_id,
+                    profile,
+                    Vec2::new(HEIST_IDOL_FOOTPRINT_WIDTH, HEIST_IDOL_FOOTPRINT_DEPTH),
+                )
+            })
+        });
         spawn_heist_safe_visual(
             &mut commands,
             owner,
@@ -599,23 +600,27 @@ fn reconcile_dynamic_map_visuals(
         let profile = map_visuals
             .as_deref()
             .and_then(|visuals| visuals.profile(asset.visual_profile_id));
+        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
         let imported_requested = profile.is_some_and(|profile| {
             matches!(
                 profile.kind,
                 environment_assets::MapVisualKind::Imported { .. }
             )
         });
-        let imported_scene = imported_scenes
-            .as_deref()
-            .and_then(|scenes| scenes.scene(asset.visual_profile_id));
-        let imported_visual = profile.is_some_and(|profile| {
-            matches!(
-                profile.kind,
-                environment_assets::MapVisualKind::Imported { .. }
-            )
-        }) && imported_scene.is_some();
+        let fitted = profile.and_then(|profile| {
+            imported_scenes.as_deref().and_then(|scenes| {
+                scenes.fitted(
+                    asset.visual_profile_id,
+                    profile,
+                    Vec2::new(
+                        f32::from(footprint.width) * crate::map::MAP_CELL_SIZE_WORLD,
+                        f32::from(footprint.height) * crate::map::MAP_CELL_SIZE_WORLD,
+                    ),
+                )
+            })
+        });
         if imported_requested
-            && imported_scene.is_none()
+            && fitted.is_none()
             && imported_readiness.as_deref().is_some_and(|readiness| {
                 matches!(
                     readiness,
@@ -625,7 +630,6 @@ fn reconcile_dynamic_map_visuals(
         {
             continue;
         }
-        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
         let center = crate::map::placement_world_center(snapshot.dimensions, asset, placement);
         let terminal_debris = asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET;
         let material = if asset_id == crate::map::OIL_BARREL_ASSET {
@@ -644,17 +648,17 @@ fn reconcile_dynamic_map_visuals(
                     asset_id,
                 },
                 Transform {
-                    translation: ground_position(center) + Vec3::Y * dynamic_visual_lift(asset_id),
+                    translation: ground_position(center),
                     rotation: Quat::from_rotation_y(
                         f32::from(placement.quarter_turns) * core::f32::consts::FRAC_PI_2,
                     ),
-                    scale: dynamic_visual_scale(asset_id, footprint, imported_visual),
+                    scale: Vec3::ONE,
                 },
                 Visibility::default(),
                 Name::new("dynamic map asset"),
             ))
             .id();
-        if let (Some(profile), Some(scene)) = (profile, imported_scene) {
+        if let (Some(profile), Some(fitted)) = (profile, fitted) {
             commands.entity(visual).with_children(|parent| {
                 parent.spawn((
                     environment_assets::EnvironmentMaterialTint([
@@ -662,25 +666,24 @@ fn reconcile_dynamic_map_visuals(
                         profile.tint.1,
                         profile.tint.2,
                     ]),
-                    WorldAssetRoot(scene.clone()),
-                    Transform {
-                        translation: Vec3::Y
-                            * (profile.vertical_offset - dynamic_visual_lift(asset_id)),
-                        rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
-                        scale: Vec3::splat(profile.scale),
-                    },
+                    WorldAssetRoot(fitted.scene),
+                    fitted.transform,
                     Name::new("imported dynamic map asset"),
                 ));
             });
         } else {
-            commands.entity(visual).insert((
-                Mesh3d(if asset_id == crate::map::OIL_BARREL_ASSET {
-                    primitives.barrel_body.clone()
-                } else {
-                    primitives.cover_block.clone()
-                }),
-                MeshMaterial3d(material),
-            ));
+            commands.entity(visual).with_children(|parent| {
+                parent.spawn((
+                    Mesh3d(if asset_id == crate::map::OIL_BARREL_ASSET {
+                        primitives.barrel_body.clone()
+                    } else {
+                        primitives.cover_block.clone()
+                    }),
+                    MeshMaterial3d(material),
+                    primitive_dynamic_visual_transform(asset_id, footprint),
+                    Name::new("primitive dynamic map asset"),
+                ));
+            });
         }
     }
 }
@@ -730,9 +733,15 @@ fn reconcile_restoration_pickup_visuals(
         let profile = visual_catalog
             .as_deref()
             .and_then(|visuals| visuals.profile(definition.visual_profile_id));
-        let scene = imported
-            .as_deref()
-            .and_then(|scenes| scenes.scene(definition.visual_profile_id));
+        let fitted = profile.and_then(|profile| {
+            imported.as_deref().and_then(|scenes| {
+                scenes.fitted(
+                    definition.visual_profile_id,
+                    profile,
+                    Vec2::splat(crate::map::MAP_CELL_SIZE_WORLD),
+                )
+            })
+        });
         let root = commands
             .spawn((
                 RestorationPickupVisual { owner },
@@ -748,19 +757,15 @@ fn reconcile_restoration_pickup_visuals(
                 Transform::from_xyz(0.0, -15.0, 0.0).with_scale(Vec3::splat(36.0)),
                 Name::new("restoration pickup ground glow"),
             ));
-            if let (Some(profile), Some(scene)) = (profile, scene) {
+            if let (Some(profile), Some(fitted)) = (profile, fitted) {
                 parent.spawn((
                     environment_assets::EnvironmentMaterialTint([
                         profile.tint.0,
                         profile.tint.1,
                         profile.tint.2,
                     ]),
-                    WorldAssetRoot(scene.clone()),
-                    Transform {
-                        translation: Vec3::Y * profile.vertical_offset,
-                        rotation: Quat::from_rotation_y(profile.yaw_degrees.to_radians()),
-                        scale: Vec3::splat(profile.scale),
-                    },
+                    WorldAssetRoot(fitted.scene),
+                    fitted.transform,
                     Name::new("imported restoration potion"),
                 ));
             } else {
@@ -775,44 +780,24 @@ fn reconcile_restoration_pickup_visuals(
     }
 }
 
-fn dynamic_visual_lift(asset_id: crate::map::MapAssetId) -> f32 {
-    if asset_id == crate::map::OIL_BARREL_ASSET {
-        14.0
-    } else if asset_id == crate::map::TREASURE_CHEST_ASSET {
-        10.0
-    } else if asset_id == crate::map::RUBBLE_ASSET
-        || asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET
-    {
-        4.0
-    } else {
-        16.0
-    }
-}
-
-fn dynamic_visual_scale(
+fn primitive_dynamic_visual_transform(
     asset_id: crate::map::MapAssetId,
     footprint: crate::map::MapFootprint,
-    imported_visual: bool,
-) -> Vec3 {
-    if asset_id == crate::map::OIL_BARREL_ASSET
-        || (asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET && imported_visual)
-        || (asset_id == crate::map::TREASURE_CHEST_ASSET && imported_visual)
-    {
-        Vec3::ONE
-    } else if asset_id == crate::map::TREASURE_CHEST_ASSET {
-        Vec3::splat(0.75)
+) -> Transform {
+    if asset_id == crate::map::OIL_BARREL_ASSET {
+        Transform::from_translation(Vec3::Y * 14.0)
     } else {
-        Vec3::new(
-            f32::from(footprint.width) * 0.5,
-            if asset_id == crate::map::RUBBLE_ASSET
-                || asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET
-            {
-                0.25
-            } else {
-                1.0
-            },
-            f32::from(footprint.height) * 0.5,
-        )
+        let low = asset_id == crate::map::RUBBLE_ASSET
+            || asset_id == crate::map::BARREL_WOOD_DEBRIS_ASSET;
+        Transform {
+            translation: Vec3::Y * if low { 4.0 } else { 16.0 },
+            scale: Vec3::new(
+                f32::from(footprint.width) * 0.5,
+                if low { 0.25 } else { 1.0 },
+                f32::from(footprint.height) * 0.5,
+            ),
+            ..default()
+        }
     }
 }
 
@@ -1424,28 +1409,21 @@ fn materialize_map_static_visuals(
             .map(|candidate| candidate.cell)
             .collect();
         let adjacency = crate::map::cardinal_adjacency_mask(placement.cell, &adjacent_cells);
-        let scene = imported.and_then(|scenes| scenes.scene(asset.visual_profile_id));
-        if let (Some(profile), Some(scene)) = (profile, scene)
-            && matches!(
-                profile.kind,
-                environment_assets::MapVisualKind::Imported { .. }
-            )
-        {
-            commands.spawn((
-                marker,
-                environment_assets::EnvironmentMaterialTint([
-                    profile.tint.0,
-                    profile.tint.1,
-                    profile.tint.2,
-                ]),
-                WorldAssetRoot(scene.clone()),
-                Transform {
-                    translation: ground_position(center) + Vec3::Y * profile.vertical_offset,
-                    rotation: Quat::from_rotation_y(rotation + profile.yaw_degrees.to_radians()),
-                    scale: Vec3::splat(profile.scale),
-                },
-                Name::new("imported map asset"),
-            ));
+        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
+        let fitted = profile.and_then(|profile| {
+            imported.and_then(|scenes| {
+                scenes.fitted(
+                    asset.visual_profile_id,
+                    profile,
+                    Vec2::new(
+                        f32::from(footprint.width) * crate::map::MAP_CELL_SIZE_WORLD,
+                        f32::from(footprint.height) * crate::map::MAP_CELL_SIZE_WORLD,
+                    ),
+                )
+            })
+        });
+        if let (Some(profile), Some(fitted)) = (profile, fitted) {
+            spawn_imported_map_asset(commands, marker, center, rotation, profile, fitted);
         } else if placement.asset_id == crate::map::WATER_ASSET {
             spawn_map_water(commands, primitives, materials, marker, center, adjacency);
         } else if placement.asset_id == crate::map::TALL_GRASS_ASSET {
@@ -1453,7 +1431,6 @@ fn materialize_map_static_visuals(
                 commands, primitives, materials, marker, center, rotation, adjacency,
             );
         } else if asset.slot == crate::map::MapAssetSlot::Feature {
-            let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
             commands.spawn((
                 marker,
                 Mesh3d(primitives.cover_block.clone()),
@@ -1491,6 +1468,40 @@ fn materialize_map_static_visuals(
         snapshot.dimensions.bounds(),
     );
     materialize_hot_zone_objective(commands, meshes, presentation_materials, marker, snapshot);
+}
+
+fn spawn_imported_map_asset(
+    commands: &mut Commands,
+    marker: crate::map::MapPresentationMember,
+    center: Vec2,
+    rotation: f32,
+    profile: &environment_assets::MapVisualProfile,
+    fitted: environment_assets::FittedEnvironmentScene,
+) {
+    let root = commands
+        .spawn((
+            marker,
+            Transform {
+                translation: ground_position(center),
+                rotation: Quat::from_rotation_y(rotation),
+                ..default()
+            },
+            Visibility::default(),
+            Name::new("imported map asset root"),
+        ))
+        .id();
+    commands.entity(root).with_children(|parent| {
+        parent.spawn((
+            environment_assets::EnvironmentMaterialTint([
+                profile.tint.0,
+                profile.tint.1,
+                profile.tint.2,
+            ]),
+            WorldAssetRoot(fitted.scene),
+            fitted.transform,
+            Name::new("imported map asset"),
+        ));
+    });
 }
 
 fn hot_zone_visual_geometry(snapshot: &crate::map::ResolvedMapSnapshot) -> Option<(Vec2, f32)> {
@@ -2087,45 +2098,32 @@ mod tests {
     }
 
     #[test]
-    fn barrel_debris_uses_a_low_terminal_visual_origin() {
-        assert!((dynamic_visual_lift(crate::map::OIL_BARREL_ASSET) - 14.0).abs() < f32::EPSILON);
-        assert!(
-            (dynamic_visual_lift(crate::map::BARREL_WOOD_DEBRIS_ASSET) - 4.0).abs() < f32::EPSILON
-        );
-    }
-
-    #[test]
-    fn imported_barrel_debris_uses_its_world_calibrated_profile_scale() {
+    fn primitive_barrel_and_debris_are_grounded_at_their_actual_half_heights() {
         let footprint = crate::map::MapFootprint {
             width: 1,
             height: 1,
         };
+        let barrel = primitive_dynamic_visual_transform(crate::map::OIL_BARREL_ASSET, footprint);
+        let debris =
+            primitive_dynamic_visual_transform(crate::map::BARREL_WOOD_DEBRIS_ASSET, footprint);
 
-        assert_eq!(
-            dynamic_visual_scale(crate::map::BARREL_WOOD_DEBRIS_ASSET, footprint, true),
-            Vec3::ONE
-        );
-        assert_eq!(
-            dynamic_visual_scale(crate::map::BARREL_WOOD_DEBRIS_ASSET, footprint, false),
-            Vec3::new(0.5, 0.25, 0.5)
-        );
+        assert_eq!(barrel.translation, Vec3::Y * 14.0);
+        assert_eq!(barrel.scale, Vec3::ONE);
+        assert_eq!(debris.translation, Vec3::Y * 4.0);
+        assert_eq!(debris.scale, Vec3::new(0.5, 0.25, 0.5));
     }
 
     #[test]
-    fn primitive_chest_uses_the_feedback_enlarged_scale() {
+    fn primitive_chest_matches_its_one_cell_authoritative_footprint() {
         let footprint = crate::map::MapFootprint {
             width: 1,
             height: 1,
         };
+        let transform =
+            primitive_dynamic_visual_transform(crate::map::TREASURE_CHEST_ASSET, footprint);
 
-        assert_eq!(
-            dynamic_visual_scale(crate::map::TREASURE_CHEST_ASSET, footprint, false),
-            Vec3::splat(0.75)
-        );
-        assert_eq!(
-            dynamic_visual_scale(crate::map::TREASURE_CHEST_ASSET, footprint, true),
-            Vec3::ONE
-        );
+        assert_eq!(transform.translation, Vec3::Y * 16.0);
+        assert_eq!(transform.scale, Vec3::new(0.5, 1.0, 0.5));
     }
 
     #[test]
@@ -2143,13 +2141,14 @@ mod tests {
 
         let catalog = crate::map::MapContentCatalog::embedded().unwrap();
         let visuals = environment_assets::MapVisualCatalog::embedded(&catalog).unwrap();
-        let scale = visuals
+        let profile = visuals
             .profile(crate::map::HEIST_SAFE_VISUAL_PROFILE)
-            .unwrap()
-            .scale;
-        let imported_diameter = KENNEY_STATUE_HALF_FOOTPRINT * 2.0 * scale;
-        assert!(imported_diameter <= HEIST_IDOL_FOOTPRINT_WIDTH);
-        assert!(imported_diameter <= HEIST_IDOL_FOOTPRINT_DEPTH);
+            .unwrap();
+        assert_eq!(
+            profile.fitting,
+            environment_assets::MapVisualFitting::Contained
+        );
+        assert!(profile.scale <= 1.0);
     }
 
     #[test]
