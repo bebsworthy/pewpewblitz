@@ -28,5 +28,6 @@
         (id: MapVisualProfileId(39), kind: Imported(path: "brawler/models/kenney/mini-arena/statue.glb"), scale: 88.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Cover, fitting: Contained),
         (id: MapVisualProfileId(40), kind: Imported(path: "brawler/models/kenney/mini-dungeon/chest.glb"), scale: 64.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Cover, fitting: Contained),
         (id: MapVisualProfileId(42), kind: Imported(path: "brawler/models/kenney/mini-dungeon/potion.glb"), scale: 72.0, yaw_degrees: 0.0, vertical_offset: 5.0, tint: (0.35, 1.0, 0.52), fallback: Decoration, fitting: Contained),
+        (id: MapVisualProfileId(43), kind: Imported(path: "brawler/models/kenney/graveyard/trunk.glb"), scale: 48.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (0.42, 0.90, 0.38), fallback: Cover, fitting: Contained),
     ],
 )

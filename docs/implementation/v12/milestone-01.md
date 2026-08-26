@@ -101,11 +101,13 @@ canonical fingerprint formats advance from 4/7 to 5/8. There is no legacy decode
   three-by-two safe anchors centered at world Y `-400` and `400`.
 
 Each recipe uses one empty-cell perimeter around the transcribed 23×35 reference. Existing garden
-walls carry the collision role of themed blocks, metal barriers, rope fences, and blocking cacti;
-existing destructible cover carries the orange/green box role; and tall grass preserves every
-reviewed concealment group. The Wipeout reference's central Bounty star is omitted because Wipeout
-has no corresponding pickup/scoring rule. Exact rope-fence, cactus, skull-block, and themed-barrel
-models are the remaining visual asset gaps; no missing gameplay primitive blocks the playtest.
+walls carry the collision role of themed blocks, metal barriers, and rope fences; existing
+destructible cover carries the orange/green box role; and tall grass preserves every reviewed
+concealment group. Powderline Vault's two blocking cacti use a dedicated destructible one-cell
+asset with the Kenney Graveyard Kit `trunk.glb` visual, green tint, and the same removal behavior as
+destructible cover. The Wipeout reference's central Bounty star is omitted because Wipeout has no
+corresponding pickup/scoring rule. Exact rope-fence, skull-block, and themed-barrel models are the
+remaining visual asset gaps; no missing gameplay primitive blocks the playtest.
 
 ## Implementation and verification
 
@@ -170,6 +172,22 @@ remains pending until the three recipes are authored.
   `wipeout-3v3`, `hot-zone-3v3`, and `heist-3v3`; each supervisor/lobby/match-worker process tree
   shut down cleanly.
 - Native visual/gameplay acceptance remains the active user-playtest gate.
+
+### Feedback review — cactus visual variety — 2026-08-26
+
+Disposition: **implemented now**. The user clarified that each cactus is a destructible wall used
+for visual variety and selected Kenney Graveyard Kit `trunk.glb` as an acceptable source. The shared
+catalog now owns stable cactus asset `28`, which is a one-cell blocking feature on sand and reuses
+the exact destructible-cover gameplay profile. Client visual profile `43` uses the promoted trunk
+model with a green tint and contained one-cell fitting. Powderline Vault recipe revision `2`
+replaces the two former garden-wall approximations at cells `(9, 20)` and `(15, 17)`; its admission
+revision advances to `2`, and the Heist 3v3 game-type revision advances to `5`.
+
+Focused catalog tests prove both exact cells and gameplay-profile equality with destructible cover.
+Client tests prove visual-catalog resolution, promoted-file presence, manifest provenance, and GLB
+dependency coverage. Server/client all-target checks, exact manifest admission, the revised
+operator-catalog golden, and production-routed Heist 3v3 Practice all passed. Native appearance and
+scale remain part of the active user playtest.
 
 ## Exit criteria
 

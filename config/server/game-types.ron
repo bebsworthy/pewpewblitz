@@ -16,6 +16,6 @@
     (id: "hot-zone-3v3", revision: 4, name: "Switchback Basin Hot Zone 3v3", mode: "hot-zone", maps: ["switchback-basin"], teams: 2, players_per_team: 3, capture_seconds: 30, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "heist-1v1", revision: 3, name: "Feature Yard Heist 1v1", mode: "heist", maps: ["feature-yard-heist"], teams: 2, players_per_team: 1, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "heist-2v2", revision: 3, name: "Feature Yard Heist 2v2", mode: "heist", maps: ["feature-yard-heist"], teams: 2, players_per_team: 2, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
-    (id: "heist-3v3", revision: 4, name: "Powderline Vault Heist 3v3", mode: "heist", maps: ["powderline-vault"], teams: 2, players_per_team: 3, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
+    (id: "heist-3v3", revision: 5, name: "Powderline Vault Heist 3v3", mode: "heist", maps: ["powderline-vault"], teams: 2, players_per_team: 3, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
   ],
 )

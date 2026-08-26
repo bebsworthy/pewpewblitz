@@ -176,5 +176,12 @@
             allowed_quarter_turns: 15, surface_tag: None,
             allowed_surface_tags: [MapSurfaceTagId(1)], parameter_kind: None,
         ),
+        (
+            id: MapAssetId(28), key: "cactus", display_name: "Cactus", slot: Feature,
+            gameplay_profile_id: MapGameplayProfileId(3), visual_profile_id: MapVisualProfileId(43),
+            footprint_cells: (width: 1, height: 1),
+            allowed_quarter_turns: 15, surface_tag: None,
+            allowed_surface_tags: [MapSurfaceTagId(2)], parameter_kind: None,
+        ),
     ],
 )

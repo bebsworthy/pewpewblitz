@@ -38,7 +38,7 @@ pub const VERDANT_CROSSFIRE_ADMISSION_REVISION: u16 = 1;
 pub const SWITCHBACK_BASIN_PRESET: MapPresetId = MapPresetId(11);
 pub const SWITCHBACK_BASIN_ADMISSION_REVISION: u16 = 1;
 pub const POWDERLINE_VAULT_PRESET: MapPresetId = MapPresetId(12);
-pub const POWDERLINE_VAULT_ADMISSION_REVISION: u16 = 1;
+pub const POWDERLINE_VAULT_ADMISSION_REVISION: u16 = 2;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
@@ -64,6 +64,7 @@ pub const LANTERN_DECORATION_ASSET: MapAssetId = MapAssetId(23);
 pub const OIL_BARREL_ASSET: MapAssetId = MapAssetId(24);
 pub const BARREL_WOOD_DEBRIS_ASSET: MapAssetId = MapAssetId(25);
 pub const TREASURE_CHEST_ASSET: MapAssetId = MapAssetId(26);
+pub const CACTUS_ASSET: MapAssetId = MapAssetId(28);
 
 macro_rules! grid_id {
     ($name:ident) => {
@@ -2625,6 +2626,24 @@ mod tests {
         );
         assert_eq!(heist.heist_safes[0].center, Vec2::new(0.0, -400.0));
         assert_eq!(heist.heist_safes[1].center, Vec2::new(0.0, 400.0));
+        let cactus_cells = heist
+            .snapshot
+            .placements
+            .iter()
+            .filter(|placement| placement.asset_id == CACTUS_ASSET)
+            .map(|placement| placement.cell)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            cactus_cells,
+            BTreeSet::from([MapCell::new(9, 20), MapCell::new(15, 17)])
+        );
+        assert_eq!(
+            catalog.asset(CACTUS_ASSET).unwrap().gameplay_profile_id,
+            catalog
+                .asset(DESTRUCTIBLE_COVER_ASSET)
+                .unwrap()
+                .gameplay_profile_id
+        );
     }
 
     #[test]

@@ -561,6 +561,23 @@ mod grid_catalog_tests {
         );
         assert!((potion_scale - 72.0).abs() < f32::EPSILON);
     }
+
+    #[test]
+    fn cactus_uses_the_promoted_graveyard_trunk_visual() {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
+        let cactus = visuals.profile(crate::map::MapVisualProfileId(43)).unwrap();
+
+        assert_eq!(
+            match &cactus.kind {
+                super::MapVisualKind::Imported { path } => Some(path.as_str()),
+                _ => None,
+            },
+            Some("brawler/models/kenney/graveyard/trunk.glb")
+        );
+        assert!((cactus.scale - 48.0).abs() < f32::EPSILON);
+        assert_eq!(cactus.fitting, super::MapVisualFitting::Contained);
+    }
 }
 
 #[allow(
