@@ -2,7 +2,7 @@
 
 ## Status
 
-`User playtest`
+`Complete`
 
 The user selected the map-first sequence, supplied one image reference for each supported mode,
 directed manual conversion into existing Brawler assets, and approved server-configured map limits
@@ -16,6 +16,9 @@ The milestone reopened later on 2026-08-26 for bounded framing corrections after
 compared the start view with the supplied mobile reference. This does not reopen map content or
 authorize M02: it makes the camera decide fit-versus-follow independently per axis from each map's
 dimensions and the current viewport.
+
+The user accepted the final pitch, fighter scale, hitbox agreement, and overhead presentation and
+requested commit `8e7f751`, closing the reopened review.
 
 ## Player-visible outcome
 
@@ -666,6 +669,10 @@ suite, warnings-denied client Clippy, formatting, the sole-renderer audit, and `
 passed. The remaining gate is native comparison of pitch, fighter readability, and overhead
 spacing.
 
+The user accepted the corrected native presentation and requested its commit on 2026-08-26.
+Commit `8e7f751` records the framing, fighter-footprint, pitch, silhouette, and overhead-anchor
+corrections. This closes the reopened playtest gate and returns M01 to `Complete`.
+
 ## Exit criteria
 
 - all three maps resolve through the ordinary server-owned catalog and exact 3v3 admission path;
@@ -676,4 +683,5 @@ spacing.
   native playtest;
 - the configured dimension envelope fails closed and does not become a client-authored rule;
 - the user can play each map and every feedback item receives an explicit disposition; and
-- M02 remains unstarted and unspecified until the user defines the balancing-tool changes.
+- M02 begins only from the subsequently user-defined Balance Lab correctness and presentation
+  scope recorded in its own milestone.

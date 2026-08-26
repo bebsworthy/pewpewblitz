@@ -1,5 +1,36 @@
 export type JsonObject = { [key: string]: JsonValue };
 export type JsonValue = null | boolean | number | string | JsonObject | JsonValue[];
+export type EditorPath = (string | number)[];
+
+export type EditorSection =
+  | "fighters"
+  | "weapons"
+  | "ultimates"
+  | "world-objects"
+  | "modes";
+
+export interface EditorFieldDescriptor {
+  path: EditorPath;
+  section: EditorSection;
+  subjectKey: string;
+  subjectLabel: string;
+  group: string;
+  label: string;
+  storageKind: "integer" | "decimal";
+  unit: string;
+  storageScale: number;
+  minimum: number;
+  maximum: number;
+  minimumExclusive: boolean;
+  step: number;
+  control: "number" | "range-and-number";
+  help?: string;
+}
+
+export interface BalanceLabEditorManifest {
+  schemaVersion: number;
+  fields: EditorFieldDescriptor[];
+}
 
 export interface FighterStats extends JsonObject {
   maximum_health: number;
@@ -58,10 +89,49 @@ export interface TransactionView {
   message: string;
 }
 
+export interface LoadoutChoice {
+  id: number;
+  key: string;
+  displayName: string;
+}
+
+export interface ScalarModifier {
+  flat: number;
+  percentBasisPoints: number;
+}
+
+export interface SlowModifier {
+  penaltyBasisPoints: number;
+  durationTicks: number;
+}
+
+export interface WeaponModifiers {
+  capacity: ScalarModifier;
+  damage: ScalarModifier;
+  fireInterval: ScalarModifier;
+  refillInterval: ScalarModifier;
+  reachMilliunits: ScalarModifier;
+  slow: SlowModifier | null;
+}
+
+export interface PlayerLoadout {
+  playerId: string;
+  displayName: string;
+  team: number;
+  participantType: "human" | "bot";
+  fighterProfile: LoadoutChoice;
+  weaponBase: LoadoutChoice;
+  ultimate: LoadoutChoice;
+  passives: [LoadoutChoice, LoadoutChoice];
+  weaponModifiers: WeaponModifiers;
+}
+
 export interface BalanceLabState {
   schemaVersion: number;
   matchId: string;
   revision: number;
+  players: PlayerLoadout[];
+  editorManifest: BalanceLabEditorManifest;
   baseline: BalanceLabSnapshot;
   applied: BalanceLabSnapshot;
   pending: TransactionView | null;

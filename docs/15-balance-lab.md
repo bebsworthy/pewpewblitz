@@ -19,18 +19,29 @@ restoration-pickup evolution.
 ## Operator workflow
 
 1. Run `just balance-lab`.
-2. Run `just client`, connect locally, and enter Practice.
-3. Open <http://127.0.0.1:5123>.
-4. Edit the draft, then choose **Apply & reset**.
-5. Use **Revert draft** to discard unapplied edits or **Restore defaults** to remove the persisted
-   override and reset to canonical content.
+2. The launcher immediately opens <http://127.0.0.1:5123> in the default browser. The initial page
+   may report that the endpoint is unavailable because only Practice workers host Balance Lab.
+3. Use the launched client to connect locally and enter Practice. The launcher opens the URL again
+   when the worker's Balance Lab endpoint becomes ready.
+4. Review **Players & loadouts** for the authoritative human and bot roster admitted to this
+   Practice worker. Each card identifies the team, fighter profile, weapon base, ultimate, two
+   passives, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
+5. Choose a gameplay section and one fighter, weapon, ultimate, world object, or mode. Edit the
+   focused draft using the displayed gameplay units and authoritative bounds.
+6. Review the changed marker plus applied/default comparison, then choose **Apply & reset match**.
+7. Use a field's **Reset** action to restore its applied value, **Revert draft** to discard all
+   unapplied edits, or **Restore canonical defaults** to remove the persisted override and reset to
+   canonical content.
 
 Accepted tuning is stored in `target/balance-lab/session-v2.json`. The page reconnects to later
 Practice workers at the same loopback URL, and each worker validates the persisted snapshot before
-installing it. Deleting build artifacts or using **Restore defaults** removes the override.
+installing it. Deleting build artifacts or using **Restore canonical defaults** removes the override.
 
-The current snapshot schema is version 8 and the persistence envelope is version 4. It exposes the
-three permanent fighter profiles, four canonical weapon-base recipes, the bounded parameters of
+The current snapshot schema is version 8, the persistence envelope is version 4, and the
+non-persisted editor-manifest schema is version 1. The server manifest explicitly identifies every
+editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
+control. The browser does not infer editability or limits from serialized field names. It exposes
+the three permanent fighter profiles, four canonical weapon-base recipes, the bounded parameters of
 all five supported ultimates, oil-barrel health/explosion tuning, Heist safe health, and treasure-
 chest/restoration-pickup health, restoration, radius, and lifetime. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Persistence envelope 3 is
@@ -38,6 +49,13 @@ migrated by filling canonical chest defaults before validation. The retired Cust
 named build presets, point budget, and frame passives are not Balance Lab surfaces. Apply validation
 re-resolves the complete 3×4 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
+
+The roster view is also non-persisted and read-only. It is projected from the worker's authoritative
+admission manifest rather than inferred from client state. The routed match snapshot contains each
+selected fighter profile, weapon base, ultimate, passive pair, and the canonical aggregate of all
+equipped weapon parts. It does not retain the individual weapon-part identities, so Balance Lab
+truthfully presents their effective capacity, damage, timing, reach, and slow modifiers instead of
+inventing part names.
 
 ## Validation principle
 
@@ -52,10 +70,11 @@ named invariant:
 - immutable recipe topology or an implemented runtime capability;
 - arithmetic and lifecycle safety such as non-overflowing deadlines.
 
-The UI should expose such a bound before submission and the server error should name the concrete
-constraint. Authored policy may remain narrower for ordinary content while Balance Lab uses a wider
-proven-safe engine ceiling. Expanding a real engine ceiling requires updating the affected runtime,
-wire, client-convergence, and capacity tests together.
+The UI exposes these bounds before submission, converts ticks to seconds and ultimate milliunits to
+world units, and associates a path-qualified server rejection with its field. The server still
+revalidates the complete stored snapshot. Authored policy may remain narrower for ordinary content
+while Balance Lab uses a wider proven-safe engine ceiling. Expanding a real engine ceiling requires
+updating the affected runtime, wire, client-convergence, and capacity tests together.
 
 ## Required maintenance contract
 
@@ -95,5 +114,8 @@ tuning in `src/builds/definitions.rs`, weapon definitions and map-destruction bo
 The service is compiled only by the `balance-lab` feature, binds to loopback, and is enabled only
 for the canonical local Practice formation. One Practice worker owns the endpoint at a time. Drafts
 do not mutate simulation until explicit apply. Remote access, authentication, canonical-content
-export, hot apply, charts, new ability definitions, passives, and broad match-rule tuning beyond
-Heist safe health are outside the current tool.
+export, hot/live apply, charts, balancing advice, new ability definitions, passives, and broad
+match-rule tuning beyond Heist safe health are outside the current tool. Apply remains an explicit
+clean-epoch transaction. A persisted Heist safe value is installed into a new Heist worker, remains
+unchanged during unrelated Wipeout/Hot Zone edits, and can be cleared from every Practice mode
+through **Restore canonical defaults**.

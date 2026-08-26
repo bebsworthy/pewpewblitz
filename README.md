@@ -65,17 +65,21 @@ human roster; the default Feature Yard Wipeout 2v2 path therefore requires four 
 catalog exposes exact 1v1, 2v2, and 3v3 Wipeout, Hot Zone, and Heist entries. The 1v1/2v2 paths use
 Feature Yard; 3v3 uses Verdant Crossfire, Switchback Basin, and Powderline Vault respectively.
 
-For the development-only V6 Balance Lab, start the tuning-enabled routed server, connect one
-ordinary client, and enter Practice:
+For the development-only Balance Lab, start the tuning-enabled routed server and one interactive
+client, then use that client to enter Practice:
 
 ```sh
 just balance-lab
 ```
 
-Open <http://127.0.0.1:5123> after entering Practice. Keep the page open while returning to the
-menu; it waits for and reconnects to the next Practice worker. Accepted overrides are validated and
-persisted under `target/balance-lab/session-v2.json`, and **Restore Defaults** removes that local
-override without changing canonical authored content.
+The launcher opens <http://127.0.0.1:5123> in the default browser immediately. The endpoint does not
+exist until the client enters Practice, so the launcher opens the URL again as soon as that worker
+is ready. Keep the working page open while returning to the menu; it waits for and reconnects to the
+next Practice worker. Accepted overrides are validated and persisted under
+`target/balance-lab/session-v2.json`, and **Restore canonical defaults** removes that local override
+without changing canonical authored content. The page also shows the authoritative human/bot roster,
+teams, admitted fighter/weapon/ability choices, and effective weapon-part modifiers for the current
+Practice worker.
 See the [Balance Lab operator and maintenance guide](./docs/15-balance-lab.md) for validation rules,
 limitations, and the required checklist when fighter or weapon properties change.
 
@@ -86,7 +90,7 @@ Run `just` to list the supported everyday surface.
 | Command | Purpose |
 |---|---|
 | `just server` | Start the routed supervisor and production lobby on localhost |
-| `just balance-lab` | Build and start the development-only Practice Balance Lab topology |
+| `just balance-lab` | Start Balance Lab, one interactive client, and its default-browser page |
 | `just client` | Open one interactive product client against the local server |
 | `just run <N>` | Build once, start the routed server, and open exactly 1–16 interactive clients |
 | `just fmt` | Format all Rust sources |

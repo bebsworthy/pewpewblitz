@@ -361,7 +361,10 @@ mod tests {
     use crate::{
         builds::BuildCatalog,
         combat::{FighterDefinitions, WeaponCatalog},
-        server::balance_lab::{BalanceLabRevision, BalanceLabSnapshotV3, BalanceLabValidator},
+        server::balance_lab::{
+            BalanceLabRevision, BalanceLabSnapshotV3, BalanceLabValidator,
+            editor::BalanceLabEditorManifest,
+        },
     };
     use std::{
         io::Write as _,
@@ -410,6 +413,8 @@ mod tests {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             match_id: u128::MAX.to_string(),
             revision: BalanceLabRevision::default(),
+            players: Vec::new(),
+            editor_manifest: BalanceLabEditorManifest::from_catalogs(&baseline, &weapons),
             baseline: baseline.clone(),
             applied: baseline.clone(),
             pending: None,
@@ -535,6 +540,20 @@ mod tests {
         let response = request(address, "GET", "/api/v1/state", &[]);
         assert_status(&response, 200);
         assert!(response.contains(&format!("\"matchId\":\"{}\"", u128::MAX)));
+        assert!(response.contains("\"editorManifest\""));
+        assert!(response.contains("\"storageScale\":1000.0"));
+        let body: serde_json::Value = serde_json::from_str(
+            response
+                .split_once("\r\n\r\n")
+                .expect("HTTP response contains a body")
+                .1,
+        )
+        .unwrap();
+        assert!(
+            !body["editorManifest"]
+                .to_string()
+                .contains("visual_profile_id")
+        );
 
         let mut invalid = baseline.clone();
         invalid.fighter_profiles.default.maximum_health = 0;

@@ -4,22 +4,22 @@ import {
   fetchBalanceLabState,
   restoreBalanceLabDefaults,
 } from "../api/balanceLabApi";
-import type { BalanceLabSnapshot, BalanceLabState, JsonValue } from "./balanceLab";
+import {
+  changedFields,
+  fieldFromServerError,
+  pathKey,
+  replaceAtPath,
+  storedNumber,
+  toStoredNumber,
+  validateDisplayNumber,
+} from "../lib/editorFields";
+import type {
+  BalanceLabSnapshot,
+  BalanceLabState,
+  EditorFieldDescriptor,
+} from "./balanceLab";
 
 const clone = <T,>(value: T): T => structuredClone(value);
-
-function replaceAtPath(value: JsonValue, path: (string | number)[], next: number): JsonValue {
-  if (path.length === 0) return next;
-  const [head, ...tail] = path;
-  if (Array.isArray(value)) {
-    const copy = [...value];
-    copy[Number(head)] = replaceAtPath(copy[Number(head)], tail, next);
-    return copy;
-  }
-  const copy = { ...(value as Record<string, JsonValue>) };
-  copy[String(head)] = replaceAtPath(copy[String(head)], tail, next);
-  return copy;
-}
 
 export function useBalanceLabController() {
   const [state, setState] = useState<BalanceLabState | null>(null);
@@ -27,6 +27,7 @@ export function useBalanceLabController() {
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [lastTransaction, setLastTransaction] = useState<BalanceLabState["lastTransaction"]>(null);
   const synchronizedWorker = useRef<string | null>(null);
   const observedMatch = useRef<string | null>(null);
@@ -48,11 +49,24 @@ export function useBalanceLabController() {
       ) {
         observedTransaction.current = next.lastTransaction.id;
         setLastTransaction(next.lastTransaction);
+        if (next.lastTransaction.status === "rejected") {
+          const identified = fieldFromServerError(
+            next.lastTransaction.message,
+            next.editorManifest.fields,
+          );
+          if (identified) {
+            setFieldErrors((current) => ({
+              ...current,
+              [pathKey(identified.field.path)]: identified.message,
+            }));
+          }
+        }
       }
       const workerKey = `${next.matchId}:${next.revision}`;
       if (synchronizedWorker.current !== workerKey) {
         synchronizedWorker.current = workerKey;
         setDraft(clone(next.applied));
+        setFieldErrors({});
       }
     } catch (reason) {
       setConnected(false);
@@ -70,16 +84,54 @@ export function useBalanceLabController() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const setNumber = useCallback((path: (string | number)[], value: number) => {
+  const setFieldText = useCallback((field: EditorFieldDescriptor, text: string) => {
+    const key = pathKey(field.path);
+    const display = Number(text);
+    const validation = text.trim() === "" ? "Enter a number." : validateDisplayNumber(display, field);
+    setFieldErrors((current) => {
+      const next = { ...current };
+      if (validation) next[key] = validation;
+      else delete next[key];
+      return next;
+    });
+    if (validation) return;
     setError(null);
     setLastTransaction(null);
     setDraft((current) =>
-      current ? (replaceAtPath(current, path, value) as BalanceLabSnapshot) : current,
+      current
+        ? (replaceAtPath(
+            current,
+            field.path,
+            toStoredNumber(display, field),
+          ) as BalanceLabSnapshot)
+        : current,
     );
   }, []);
 
+  const resetField = useCallback(
+    (field: EditorFieldDescriptor) => {
+      if (!state) return;
+      const key = pathKey(field.path);
+      setFieldErrors((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      setDraft((current) =>
+        current
+          ? (replaceAtPath(
+              current,
+              field.path,
+              storedNumber(state.applied, field),
+            ) as BalanceLabSnapshot)
+          : current,
+      );
+    },
+    [state],
+  );
+
   const apply = useCallback(async () => {
-    if (!state || !draft) return;
+    if (!state || !draft || Object.keys(fieldErrors).length > 0) return;
     setSubmitting(true);
     try {
       await applyBalanceLabSnapshot(state.revision, draft);
@@ -90,7 +142,7 @@ export function useBalanceLabController() {
     } finally {
       setSubmitting(false);
     }
-  }, [draft, refresh, state]);
+  }, [draft, fieldErrors, refresh, state]);
 
   const restore = useCallback(async () => {
     if (!state) return;
@@ -111,10 +163,14 @@ export function useBalanceLabController() {
       setError(null);
       setLastTransaction(null);
       setDraft(clone(state.applied));
+      setFieldErrors({});
     }
   }, [state]);
 
-  const dirty = Boolean(state && draft && JSON.stringify(state.applied) !== JSON.stringify(draft));
+  const changed = state && draft
+    ? changedFields(state.editorManifest.fields, draft, state.applied)
+    : [];
+  const dirty = changed.length > 0;
   return {
     state,
     draft,
@@ -122,8 +178,12 @@ export function useBalanceLabController() {
     lastTransaction,
     connected,
     dirty,
+    changedCount: changed.length,
+    fieldErrors,
+    hasFieldErrors: Object.keys(fieldErrors).length > 0,
     submitting,
-    setNumber,
+    setFieldText,
+    resetField,
     apply,
     restore,
     revert,

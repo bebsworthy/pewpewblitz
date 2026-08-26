@@ -81,29 +81,31 @@ case "$mode" in
         ;;
     balance-lab)
         build_balance_lab
+        build_client
         supervisor_args
-        BRAWLER_BALANCE_LAB=1 \
-            BRAWLER_BALANCE_LAB_ASSETS="$project_dir/tools/balance-lab-web/dist" \
-            BRAWLER_BALANCE_LAB_ADDR="$balance_lab_addr" \
-            BRAWLER_BALANCE_LAB_STATE="$balance_lab_state" \
-            exec target/debug/brawler-supervisor "${SUPERVISOR_ARGS[@]}"
+        client_count=1
         ;;
     client)
         build_client
         exec target/debug/brawler-client --server "$bind_addr" --transport routed-udp
         ;;
+    run)
+        build_server
+        build_client
+        supervisor_args
+        ;;
 esac
-
-build_server
-build_client
-supervisor_args
 
 supervisor_pid=
 client_pids=()
+browser_launcher_pid=
 
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
+    if [[ -n "$browser_launcher_pid" ]] && kill -0 "$browser_launcher_pid" 2>/dev/null; then
+        kill -TERM "$browser_launcher_pid" 2>/dev/null || true
+    fi
     for pid in "${client_pids[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null || true
@@ -115,6 +117,9 @@ cleanup() {
     for pid in "${client_pids[@]}"; do
         wait "$pid" 2>/dev/null || true
     done
+    if [[ -n "$browser_launcher_pid" ]]; then
+        wait "$browser_launcher_pid" 2>/dev/null || true
+    fi
     if [[ -n "$supervisor_pid" ]]; then
         wait "$supervisor_pid" 2>/dev/null || true
     fi
@@ -124,7 +129,15 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-target/debug/brawler-supervisor "${SUPERVISOR_ARGS[@]}" &
+if [[ "$mode" == balance-lab ]]; then
+    BRAWLER_BALANCE_LAB=1 \
+        BRAWLER_BALANCE_LAB_ASSETS="$project_dir/tools/balance-lab-web/dist" \
+        BRAWLER_BALANCE_LAB_ADDR="$balance_lab_addr" \
+        BRAWLER_BALANCE_LAB_STATE="$balance_lab_state" \
+        target/debug/brawler-supervisor "${SUPERVISOR_ARGS[@]}" &
+else
+    target/debug/brawler-supervisor "${SUPERVISOR_ARGS[@]}" &
+fi
 supervisor_pid=$!
 
 for ((index = 1; index <= client_count; index++)); do
@@ -134,8 +147,31 @@ for ((index = 1; index <= client_count; index++)); do
     client_pids+=("$!")
 done
 
-printf 'brawler dev: running %s interactive client(s) against %s with stable slots under %s; press Ctrl-C to stop\n' \
-    "$client_count" "$bind_addr" "$dev_data_dir/clients"
+if [[ "$mode" == balance-lab ]]; then
+    balance_lab_url="http://$balance_lab_addr"
+    if ! open "$balance_lab_url"; then
+        printf 'brawler dev: could not open the default browser; open %s manually\n' \
+            "$balance_lab_url" >&2
+    fi
+    (
+        while kill -0 "$supervisor_pid" 2>/dev/null; do
+            if curl --fail --silent --max-time 1 --output /dev/null "$balance_lab_url"; then
+                if ! open "$balance_lab_url"; then
+                    printf 'brawler dev: could not open the default browser; open %s manually\n' \
+                        "$balance_lab_url" >&2
+                fi
+                exit 0
+            fi
+            sleep 0.25
+        done
+    ) &
+    browser_launcher_pid=$!
+    printf 'brawler dev: running Balance Lab at %s and one interactive client against %s; the page is reopened when Practice is ready; press Ctrl-C to stop both\n' \
+        "$balance_lab_addr" "$bind_addr"
+else
+    printf 'brawler dev: running %s interactive client(s) against %s with stable slots under %s; press Ctrl-C to stop\n' \
+        "$client_count" "$bind_addr" "$dev_data_dir/clients"
+fi
 
 job_is_running() {
     jobs -pr | grep -qx "$1"

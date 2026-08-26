@@ -8,7 +8,7 @@ help:
 server:
     ./scripts/dev.sh server
 
-# Run the routed server with the loopback V6 Practice Balance Lab enabled.
+# Run the Practice Balance Lab topology with one interactive client.
 balance-lab:
     ./scripts/dev.sh balance-lab
 
@@ -69,6 +69,7 @@ _check-routing:
 
 _balance-lab-web:
     npm ci --prefix tools/balance-lab-web
+    npm run --prefix tools/balance-lab-web test
     npm run --prefix tools/balance-lab-web build
 
 _check-balance-lab: _balance-lab-web

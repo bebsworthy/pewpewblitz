@@ -1,7 +1,9 @@
 //! Development-only, server-authoritative Practice balance tuning.
 
+mod editor;
 mod http;
 mod persistence;
+mod roster;
 
 use crate::{
     builds::{
@@ -203,6 +205,8 @@ struct BalanceLabStateView {
     schema_version: u16,
     match_id: String,
     revision: BalanceLabRevision,
+    players: Vec<roster::PlayerLoadoutView>,
+    editor_manifest: editor::BalanceLabEditorManifest,
     baseline: BalanceLabSnapshotV3,
     applied: BalanceLabSnapshotV3,
     pending: Option<TransactionView>,
@@ -261,6 +265,18 @@ struct BalanceLabStartupConfig {
     persistence_path: PathBuf,
 }
 
+fn projected_player_loadouts(
+    world: &World,
+    builds: &BuildCatalog,
+    weapons: &WeaponCatalog,
+) -> Result<Vec<roster::PlayerLoadoutView>, String> {
+    let manifest = world
+        .resource::<ServerRoleResource>()
+        .manifest()
+        .ok_or_else(|| "Practice manifest disappeared during startup".to_string())?;
+    roster::from_manifest(manifest, builds, weapons)
+}
+
 fn start_balance_lab(world: &mut World) {
     let config = match startup_config(world) {
         Ok(Some(config)) => config,
@@ -273,11 +289,22 @@ fn start_balance_lab(world: &mut World) {
     let builds = world.resource::<BuildCatalogResource>().0.clone();
     let weapons = world.resource::<WeaponCatalogResource>().0.clone();
     let maps = world.resource::<crate::map::MapCatalogResource>().0.clone();
-    let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
+    let player_loadouts = match projected_player_loadouts(world, &builds, &weapons) {
+        Ok(players) => players,
+        Err(error) => {
+            warn!(%error, "Balance Lab ignored: admitted roster could not be presented");
+            return;
+        }
+    };
+    let mut baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
+    if let Some(rules) = world.get_resource::<crate::matchplay::HeistRules>() {
+        baseline.heist.safe_maximum_health = rules.safe_maximum_health;
+    }
     let fighter = *world
         .resource::<FighterDefinitions>()
         .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
         .expect("validated standard fighter definition");
+    let editor_manifest = editor::BalanceLabEditorManifest::from_catalogs(&baseline, &weapons);
     let validator = BalanceLabValidator {
         baseline: baseline.clone(),
         builds,
@@ -307,10 +334,15 @@ fn start_balance_lab(world: &mut World) {
             (baseline.clone(), BalanceLabRevision::default())
         }
     };
+    if let Some(mut rules) = world.get_resource_mut::<crate::matchplay::HeistRules>() {
+        install_heist_tuning(&mut rules, &applied);
+    }
     let state = BalanceLabStateView {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         match_id: config.match_id.to_string(),
         revision,
+        players: player_loadouts,
+        editor_manifest,
         baseline: baseline.clone(),
         applied: applied.clone(),
         pending: None,
@@ -490,14 +522,13 @@ fn apply_balance_lab_transaction(
             return;
         }
     };
-    if candidate.heist != runtime.baseline.heist
-        && state.mode_definition_id != crate::map::HEIST_MODE_DEFINITION
-    {
-        reject(
-            runtime,
-            transaction_id,
-            "Heist tuning requires a Heist practice match",
-        );
+    if let Err(error) = validate_mode_specific_tuning(
+        &candidate,
+        &runtime.applied,
+        state.mode_definition_id,
+        restore_defaults,
+    ) {
+        reject(runtime, transaction_id, error);
         return;
     }
     let selections = match manifest_selections(manifest) {
@@ -581,7 +612,7 @@ fn apply_balance_lab_transaction(
     weapons.0 = next_weapons;
     maps.0 = next_maps;
     if let Some(rules) = heist_rules.as_deref_mut() {
-        rules.safe_maximum_health = candidate.heist.safe_maximum_health;
+        install_heist_tuning(rules, &candidate);
     }
     for (entity, loadout) in resolved {
         let (mut selected, mut current, mut health, mut weapon) = fighters
@@ -600,6 +631,25 @@ fn apply_balance_lab_transaction(
     runtime.applied = candidate;
     let message = format!("applied revision {}", runtime.revision.0);
     publish_result(runtime, transaction_id, TransactionStatus::Applied, message);
+}
+
+fn install_heist_tuning(rules: &mut crate::matchplay::HeistRules, snapshot: &BalanceLabSnapshotV3) {
+    rules.safe_maximum_health = snapshot.heist.safe_maximum_health;
+}
+
+fn validate_mode_specific_tuning(
+    candidate: &BalanceLabSnapshotV3,
+    applied: &BalanceLabSnapshotV3,
+    mode_definition_id: crate::map::ModeDefinitionId,
+    restore_defaults: bool,
+) -> Result<(), &'static str> {
+    if !restore_defaults
+        && candidate.heist != applied.heist
+        && mode_definition_id != crate::map::HEIST_MODE_DEFINITION
+    {
+        return Err("field /heist/safeMaximumHealth: Heist tuning requires a Heist Practice match");
+    }
+    Ok(())
 }
 
 fn manifest_selections(
@@ -1096,6 +1146,32 @@ mod tests {
     }
 
     #[test]
+    fn roster_projection_exposes_human_and_bot_loadouts_with_catalog_names() {
+        let builds = BuildCatalog::embedded().unwrap();
+        let weapons = WeaponCatalog::embedded().unwrap();
+        let fighter = FighterDefinitions::default().entries[0];
+        let (human, _) = admitted_brawler(&builds, &weapons, &fighter, 2, 1);
+        let (bot, _) = admitted_brawler(&builds, &weapons, &fighter, 3, 2);
+        let players =
+            roster::from_manifest(&practice_manifest(&human, &bot), &builds, &weapons).unwrap();
+        let json = serde_json::to_value(players).unwrap();
+
+        assert_eq!(json[0]["displayName"], "Operator");
+        assert_eq!(json[0]["participantType"], "human");
+        assert_eq!(json[0]["team"], 0);
+        assert_eq!(json[0]["fighterProfile"]["displayName"], "Lightweight");
+        assert_eq!(json[0]["weaponBase"]["displayName"], "Pulse Sidearm");
+        assert_eq!(json[0]["ultimate"]["displayName"], "Dash");
+        assert_eq!(json[0]["passives"][0]["displayName"], "Adrenal Response");
+        assert_eq!(json[1]["displayName"], "Bot 1");
+        assert_eq!(json[1]["participantType"], "bot");
+        assert_eq!(json[1]["team"], 1);
+        assert_eq!(json[1]["fighterProfile"]["displayName"], "Reinforced");
+        assert_eq!(json[1]["weaponBase"]["displayName"], "Scatter Cannon");
+        assert_eq!(json[1]["weaponModifiers"]["capacity"]["flat"], 0);
+    }
+
+    #[test]
     fn snapshot_rejects_recipe_topology_changes_and_accepts_numeric_changes() {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
@@ -1183,6 +1259,50 @@ mod tests {
     }
 
     #[test]
+    fn persisted_heist_tuning_installs_and_only_new_cross_mode_changes_are_rejected() {
+        let builds = BuildCatalog::embedded().unwrap();
+        let weapons = WeaponCatalog::embedded().unwrap();
+        let maps = crate::map::MapContentCatalog::embedded().unwrap();
+        let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
+        let mut persisted = baseline.clone();
+        persisted.heist.safe_maximum_health = 2_750;
+
+        let mut rules = crate::matchplay::HeistRules::default();
+        install_heist_tuning(&mut rules, &persisted);
+        assert_eq!(rules.safe_maximum_health, 2_750);
+
+        assert!(
+            validate_mode_specific_tuning(
+                &persisted,
+                &persisted,
+                crate::map::WIPEOUT_MODE_DEFINITION,
+                false,
+            )
+            .is_ok()
+        );
+        let mut changed = persisted.clone();
+        changed.heist.safe_maximum_health += 1;
+        assert_eq!(
+            validate_mode_specific_tuning(
+                &changed,
+                &persisted,
+                crate::map::WIPEOUT_MODE_DEFINITION,
+                false,
+            ),
+            Err("field /heist/safeMaximumHealth: Heist tuning requires a Heist Practice match")
+        );
+        assert!(
+            validate_mode_specific_tuning(
+                &baseline,
+                &persisted,
+                crate::map::WIPEOUT_MODE_DEFINITION,
+                true,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)]
     fn fixed_tick_apply_re_resolves_the_complete_practice_roster_atomically() {
         let builds = BuildCatalog::embedded().unwrap();
@@ -1194,7 +1314,9 @@ mod tests {
         let (bot_snapshot, bot_loadout) = admitted_brawler(&builds, &weapons, &fighter, 3, 2);
         let manifest = practice_manifest(&human_snapshot, &bot_snapshot);
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
-        let mut candidate = baseline.clone();
+        let mut applied = baseline.clone();
+        applied.heist.safe_maximum_health = 2_750;
+        let mut candidate = applied.clone();
         candidate.fighter_profiles.lightweight.maximum_health = 211;
         candidate.fighter_profiles.reinforced.maximum_health = 233;
         candidate.weapons[0].recipe.fire_cooldown_ticks += 1;
@@ -1204,8 +1326,10 @@ mod tests {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             match_id: "40".into(),
             revision: BalanceLabRevision::default(),
+            players: Vec::new(),
+            editor_manifest: editor::BalanceLabEditorManifest::from_catalogs(&baseline, &weapons),
             baseline: baseline.clone(),
-            applied: baseline.clone(),
+            applied: applied.clone(),
             pending: Some(TransactionView {
                 id: 1,
                 status: TransactionStatus::Pending,
@@ -1234,7 +1358,7 @@ mod tests {
         app.add_systems(FixedUpdate, apply_balance_lab_transaction)
             .insert_resource(BalanceLabRuntime {
                 baseline: baseline.clone(),
-                applied: baseline,
+                applied,
                 revision: BalanceLabRevision::default(),
                 persistence_path: persistence_path.clone(),
                 receiver: Mutex::new(receiver),
