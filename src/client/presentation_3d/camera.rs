@@ -4,7 +4,8 @@ use super::*;
 
 pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 27.0_f32.to_radians();
 pub(super) const CAMERA_ELEVATION_RADIANS: f32 = 55.0_f32.to_radians();
-pub(super) const CAMERA_DISTANCE: f32 = 1_600.0;
+/// Matches the accepted mobile-combat target of approximately fourteen map cells vertically.
+pub(super) const CAMERA_DISTANCE: f32 = 743.0;
 /// Keep a visible environment band beyond authoritative containment when following edge players.
 const PRESENTATION_MARGIN: f32 = 224.0;
 
@@ -123,5 +124,19 @@ pub(super) fn perspective_ground_footprint(aspect: f32) -> crate::map::AxisAlign
     crate::map::AxisAlignedMapRect {
         min: Vec2::new(-far_half_width, near_y),
         max: Vec2::new(far_half_width, far_y),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn landscape_camera_matches_the_fourteen_cell_mobile_target() {
+        let footprint = perspective_ground_footprint(16.0 / 9.0);
+        let visible_cells = footprint.size() / crate::map::MAP_CELL_SIZE_WORLD;
+
+        assert!((visible_cells.y - 14.0).abs() < 0.01);
+        assert!((visible_cells.x - 23.82).abs() < 0.02);
     }
 }

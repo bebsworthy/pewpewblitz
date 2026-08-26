@@ -6,8 +6,8 @@ use crate::{
         MAX_MAPS_PER_GAME_TYPE, catalog_revision, validate_catalog, validate_presentation_name,
     },
     map::{
-        HEIST_MODE_DEFINITION, HOT_ZONE_MODE_DEFINITION, MapInstanceId, MapPresetId,
-        WIPEOUT_MODE_DEFINITION,
+        HEIST_MODE_DEFINITION, HOT_ZONE_MODE_DEFINITION, MapDimensionLimits, MapInstanceId,
+        MapPresetId, WIPEOUT_MODE_DEFINITION,
     },
     matchplay::{HeistRules, HotZoneRules, MatchLifecycleRules, WipeoutRules},
 };
@@ -15,12 +15,13 @@ use bevy::prelude::Resource;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 2;
+pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 3;
 pub const MAX_OPERATOR_CATALOG_BYTES: usize = 16 * 1024;
 
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub(crate) struct ResolvedLobbyCatalog {
     pub server_name: String,
+    pub map_dimension_limits: MapDimensionLimits,
     pub revision: CatalogRevision,
     pub game_types: Vec<AdvertisedGameType>,
     pub brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog,
@@ -51,6 +52,7 @@ impl ResolvedLobbyCatalog {
 struct OperatorCatalog {
     schema_version: u16,
     server_name: String,
+    map_dimension_limits: MapDimensionLimits,
     game_types: Vec<OperatorGameType>,
 }
 
@@ -92,6 +94,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
     let server_name = validate_presentation_name(&operator.server_name)
         .map_err(|error| format!("invalid server name: {error}"))?;
+    operator.map_dimension_limits.validate()?;
     if operator.game_types.is_empty() || operator.game_types.len() > MAX_GAME_TYPES {
         return Err(format!(
             "game-type catalog must contain 1..={MAX_GAME_TYPES} entries"
@@ -99,6 +102,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
 
     let maps = crate::map::MapContentCatalog::embedded()?;
+    let map_dimension_limits = operator.map_dimension_limits;
     let map_admission_revisions: BTreeMap<_, _> = maps
         .presets
         .iter()
@@ -232,6 +236,14 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 ));
             }
             let preset = preset.expect("resolved preset exists");
+            map_dimension_limits
+                .validate_dimensions(preset.recipe.dimensions)
+                .map_err(|error| {
+                    format!(
+                        "game type {} map {key} is outside the configured map dimensions: {error}",
+                        id.as_str()
+                    )
+                })?;
             if preset.recipe.mode_definition_id != mode_definition_id {
                 return Err(format!(
                     "game type {} map {key} is incompatible with its mode",
@@ -313,6 +325,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
     Ok(ResolvedLobbyCatalog {
         server_name,
+        map_dimension_limits,
         revision,
         game_types: advertised,
         brawler_catalog,
@@ -331,6 +344,7 @@ mod tests {
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local PewPew Blitz");
+        assert_eq!(catalog.map_dimension_limits, MapDimensionLimits::default());
         assert_eq!(catalog.game_types.len(), 9);
         let wipeout_three_vs_three = &catalog.game_types[3];
         assert_eq!(
@@ -391,16 +405,26 @@ mod tests {
     #[test]
     fn catalog_rejects_unknown_fields_modes_maps_objectives_and_unsupported_topology() {
         for invalid in [
-            VALID.replace("schema_version: 2", "schema_version: 2, surprise: true"),
+            VALID.replace("schema_version: 3", "schema_version: 3, surprise: true"),
             VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
             VALID.replace("feature-yard-wipeout\"", "missing-map\""),
             VALID.replace("players_per_team: 2", "players_per_team: 4"),
             VALID.replace("kills_to_win: 10", "kills_to_win: 0"),
             VALID.replace("capture_seconds: 30", "kills_to_win: 10"),
             VALID.replace("countdown_seconds: 3", "countdown_seconds: 0"),
+            VALID.replace("minimum_width: 20", "minimum_width: 0"),
+            VALID.replace("maximum_width: 512", "maximum_width: 513"),
+            VALID.replace("minimum_height: 20", "minimum_height: 513"),
         ] {
             assert!(resolve_operator_catalog(invalid.as_bytes()).is_err());
         }
+    }
+
+    #[test]
+    fn catalog_applies_configured_map_dimension_limits_to_advertised_maps() {
+        let excludes_feature_yard = VALID.replace("minimum_width: 20", "minimum_width: 65");
+        let error = resolve_operator_catalog(excludes_feature_yard.as_bytes()).unwrap_err();
+        assert!(error.contains("outside the configured map dimensions"));
     }
 
     #[test]

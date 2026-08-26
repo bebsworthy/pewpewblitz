@@ -87,6 +87,19 @@ cover at least:
 - headless operation without client assets;
 - deterministic identity and content fingerprints needed by admission and recovery.
 
+Map dimensions have two distinct bounds. Shared map parsing enforces the hard engine ceiling of
+`1..=512` cells per axis so clients and workers fail closed on structurally unsafe content. The
+server operator catalog independently declares the map envelope it will admit and advertise. The
+checked-in policy is `20..=512` wide by `20..=512` high. Operators may narrow that envelope but may
+not exceed the hard ceiling. Spawn capacity, clearance, reachability, mode anchors, placement and
+byte ceilings remain independent validation and can reject a map whose dimensions are permitted.
+
+Placement and concealment are bounded structurally rather than aesthetically. One asset of each
+slot may occupy a cell, so a maximum-size map admits up to 1,048,576 total placements; one
+concealing feature may occupy each of its 262,144 cells. The resolved snapshot ceiling is 32 MiB.
+Damageable objects and other mutable families keep smaller independent bounds, and admission at
+the structural maximum is not a performance claim for the current per-placement renderer.
+
 Resolution produces an immutable `ResolvedMap` and contributes to a
 `ResolvedMatchComposition`. Mutable runtime state never flows back into the authored recipe. A map
 author cannot publish a placement revision, objective score, fighter position, or other live match

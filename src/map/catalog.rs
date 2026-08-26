@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
 pub const MAX_MAP_OBJECT_HEALTH: u16 = 1_000;
+pub const MAX_RESOLVED_MAP_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 6;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 4;
 pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 7;
@@ -123,12 +124,89 @@ pub struct MapDimensions {
     pub height: u16,
 }
 
-impl MapDimensions {
+/// Hard engine ceiling for either authored map axis.
+///
+/// Server operator policy may choose a narrower envelope, but it may not widen this bound without
+/// extending the measured map/runtime capacity contract.
+pub const MAX_MAP_DIMENSION_CELLS: u16 = 512;
+const MAP_ASSET_SLOT_COUNT: usize = 4;
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MapDimensionLimits {
+    pub minimum_width: u16,
+    pub minimum_height: u16,
+    pub maximum_width: u16,
+    pub maximum_height: u16,
+}
+
+impl Default for MapDimensionLimits {
+    fn default() -> Self {
+        Self {
+            minimum_width: 20,
+            minimum_height: 20,
+            maximum_width: MAX_MAP_DIMENSION_CELLS,
+            maximum_height: MAX_MAP_DIMENSION_CELLS,
+        }
+    }
+}
+
+impl MapDimensionLimits {
     pub fn validate(self) -> Result<(), String> {
-        if !(32..=128).contains(&self.width) || !(24..=96).contains(&self.height) {
-            return Err("grid map dimensions exceed the supported bounds".to_string());
+        if self.minimum_width == 0
+            || self.minimum_height == 0
+            || self.minimum_width > self.maximum_width
+            || self.minimum_height > self.maximum_height
+            || self.maximum_width > MAX_MAP_DIMENSION_CELLS
+            || self.maximum_height > MAX_MAP_DIMENSION_CELLS
+        {
+            return Err(format!(
+                "map dimension limits must be positive, ordered, and no greater than {MAX_MAP_DIMENSION_CELLS} cells per axis"
+            ));
         }
         Ok(())
+    }
+
+    pub fn validate_dimensions(self, dimensions: MapDimensions) -> Result<(), String> {
+        self.validate()?;
+        dimensions.validate()?;
+        if !(self.minimum_width..=self.maximum_width).contains(&dimensions.width)
+            || !(self.minimum_height..=self.maximum_height).contains(&dimensions.height)
+        {
+            return Err(format!(
+                "map dimensions {}x{} fall outside the server envelope {}..={} by {}..={} cells",
+                dimensions.width,
+                dimensions.height,
+                self.minimum_width,
+                self.maximum_width,
+                self.minimum_height,
+                self.maximum_height
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl MapDimensions {
+    pub fn validate(self) -> Result<(), String> {
+        if !(1..=MAX_MAP_DIMENSION_CELLS).contains(&self.width)
+            || !(1..=MAX_MAP_DIMENSION_CELLS).contains(&self.height)
+        {
+            return Err(format!(
+                "grid map dimensions must be 1..={MAX_MAP_DIMENSION_CELLS} cells per axis"
+            ));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn cell_count(self) -> usize {
+        self.width as usize * self.height as usize
+    }
+
+    #[must_use]
+    const fn placement_capacity(self) -> usize {
+        self.cell_count() * MAP_ASSET_SLOT_COUNT
     }
 
     #[must_use]
@@ -1070,9 +1148,6 @@ fn resolve_grid_recipe(
             });
         }
     }
-    if placements.len() > 512 {
-        return Err("grid map exceeds the expanded placement ceiling".to_string());
-    }
     let concealment_placement_count = placements
         .iter()
         .filter(|placement| {
@@ -1082,9 +1157,11 @@ fn resolve_grid_recipe(
                 .is_some_and(|profile| profile.concealment == MapConcealmentBehavior::HideOccupants)
         })
         .count();
-    if concealment_placement_count > 128 {
-        return Err("grid map exceeds the concealment placement ceiling".to_string());
-    }
+    validate_placement_capacity(
+        recipe.dimensions,
+        placements.len(),
+        concealment_placement_count,
+    )?;
     let mut ids = BTreeSet::new();
     let mut occupied: BTreeMap<(MapCell, MapAssetSlot), MapPlacementId> = BTreeMap::new();
     let mut spawn_ordinals = BTreeSet::new();
@@ -1230,7 +1307,7 @@ fn resolve_grid_recipe(
     };
     let bytes = postcard::to_allocvec(&snapshot)
         .map_err(|error| format!("map snapshot serialization failed: {error}"))?;
-    if bytes.len() > 64 * 1024 {
+    if bytes.len() > MAX_RESOLVED_MAP_SNAPSHOT_BYTES {
         return Err("map snapshot exceeds the byte ceiling".to_string());
     }
     let damageable_count = placements
@@ -1289,6 +1366,20 @@ fn resolve_grid_recipe(
         objective_zone,
         heist_safes,
     })
+}
+
+fn validate_placement_capacity(
+    dimensions: MapDimensions,
+    placement_count: usize,
+    concealment_placement_count: usize,
+) -> Result<(), String> {
+    if placement_count > dimensions.placement_capacity() {
+        return Err("grid map exceeds the per-cell asset-slot capacity".to_string());
+    }
+    if concealment_placement_count > dimensions.cell_count() {
+        return Err("grid map exceeds one concealment feature per cell".to_string());
+    }
+    Ok(())
 }
 
 fn validate_and_resolve_mode_anchors(
@@ -2400,6 +2491,90 @@ mod tests {
             dimensions.cell_center(MapCell::new(51, 26)),
             Vec2::new(752.0, 272.0)
         );
+    }
+
+    #[test]
+    fn map_dimensions_separate_engine_safety_from_server_policy() {
+        let limits = MapDimensionLimits::default();
+        assert_eq!(limits.minimum_width, 20);
+        assert_eq!(limits.minimum_height, 20);
+        assert_eq!(limits.maximum_width, 512);
+        assert_eq!(limits.maximum_height, 512);
+        assert!(limits.validate().is_ok());
+        assert!(
+            limits
+                .validate_dimensions(MapDimensions {
+                    width: 20,
+                    height: 20,
+                })
+                .is_ok()
+        );
+        assert!(
+            limits
+                .validate_dimensions(MapDimensions {
+                    width: 512,
+                    height: 512,
+                })
+                .is_ok()
+        );
+        assert!(
+            limits
+                .validate_dimensions(MapDimensions {
+                    width: 19,
+                    height: 20,
+                })
+                .is_err()
+        );
+        assert!(
+            MapDimensions {
+                width: 1,
+                height: 1,
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            MapDimensions {
+                width: 513,
+                height: 512,
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn map_dimension_policy_rejects_invalid_operator_envelopes() {
+        for limits in [
+            MapDimensionLimits {
+                minimum_width: 0,
+                ..MapDimensionLimits::default()
+            },
+            MapDimensionLimits {
+                minimum_width: 100,
+                maximum_width: 99,
+                ..MapDimensionLimits::default()
+            },
+            MapDimensionLimits {
+                maximum_height: 513,
+                ..MapDimensionLimits::default()
+            },
+        ] {
+            assert!(limits.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn placement_capacity_scales_with_map_cells_and_asset_slots() {
+        let dimensions = MapDimensions {
+            width: 512,
+            height: 512,
+        };
+        assert_eq!(dimensions.cell_count(), 262_144);
+        assert_eq!(dimensions.placement_capacity(), 1_048_576);
+        assert!(validate_placement_capacity(dimensions, 1_048_576, 262_144).is_ok());
+        assert!(validate_placement_capacity(dimensions, 1_048_577, 262_144).is_err());
+        assert!(validate_placement_capacity(dimensions, 262_144, 262_145).is_err());
     }
 
     #[test]

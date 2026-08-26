@@ -346,16 +346,16 @@ fn decision_trace_is_bounded_and_counts_drops() {
 #[test]
 fn large_navigation_is_bounded_and_exhaustion_fails_closed() {
     let dimensions = MapDimensions {
-        width: 128,
-        height: 96,
+        width: 512,
+        height: 512,
     };
     let navigation = BotNavigationSnapshot {
         dimensions,
-        blocked: BTreeSet::from([48 * u32::from(dimensions.width) + 64]),
+        blocked: BTreeSet::from([256 * u32::from(dimensions.width) + 256]),
     };
     let start = dimensions.cell_center(crate::map::MapCell::new(0, 0));
-    let goal = dimensions.cell_center(crate::map::MapCell::new(127, 95));
-    assert!(navigation.route(start, goal, &[], 16_384, 1_024).is_some());
+    let goal = dimensions.cell_center(crate::map::MapCell::new(511, 511));
+    assert!(navigation.route(start, goal, &[], 65_536, 2_048).is_some());
     assert!(navigation.route(start, goal, &[], 1, 1_024).is_none());
     let outside = Vec2::splat(100_000.0);
     let clamped = navigation.clamp_goal(outside);

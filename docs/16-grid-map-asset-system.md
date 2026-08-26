@@ -455,6 +455,23 @@ runtime is not required to spawn one ECS entity per map cell. Contiguous static 
 merged Avian colliders; repeated visuals may become instanced or generated chunk meshes; sparse
 interactive assets retain stable runtime owners where their lifecycle needs them.
 
+Shared resolution accepts positive dimensions no greater than 512 cells on either axis. Server
+admission applies the independently validated operator envelope from
+`config/server/game-types.ron`; the checked-in range is 20 through 512 cells for both width and
+height. Dimension admission does not replace the placement, serialized-size, spawn, navigation,
+mode, collider, recovery, or dynamic-state ceilings.
+
+Static authored coverage is not restricted by a style-specific tile count. Resolved placement
+capacity is derived from map area and the four mutually exclusive asset slots, while concealing
+features may cover every cell. At the 512×512 ceiling this permits 262,144 concealing cells and up
+to 1,048,576 total slot placements. Damageable objects and other mutable runtime families retain
+their smaller independent safety bounds. The resolved snapshot remains bounded at 32 MiB; compact
+authoring such as one filled rectangle can describe full-map coverage without a large source file.
+The existing 64 KiB assertions remain a performance gate for the checked-in built-in maps, not the
+global validity ceiling. Current resolution and client presentation may still expand and
+materialize dense rectangles per placement; accepting maximum structural density is explicitly not
+a claim that the maximum is performant before measured chunking or instancing work.
+
 ## Resolved snapshot and networking
 
 The resolved map snapshot carries only stable shared facts:

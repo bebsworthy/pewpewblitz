@@ -165,7 +165,15 @@ and bindings shape local intent before quantization and never become server auth
 
 Server game types live in [`config/server/game-types.ron`](config/server/game-types.ron). Each stable
 advertisement combines one mode, compatible map pool, exact team topology, and flat bounded match
-rules. Startup validates the catalog before the lobby advertises it or a match worker installs it.
+rules. The same operator catalog declares the admitted minimum and maximum map width and height;
+the checked-in server accepts `20×20` through `512×512` cells. Startup validates the envelope and
+every advertised map before the lobby advertises it or a match worker installs it.
+
+Placement capacity follows the map area and four mutually exclusive asset slots rather than a
+style-specific count. A `512×512` map may therefore conceal all 262,144 cells and may resolve up to
+1,048,576 total slot placements. Resolved snapshots are bounded at 32 MiB; damageable and other
+mutable object families retain their tighter independent limits. Extreme-density rendering and
+lookup optimization are deferred until measured content requires them.
 
 The product catalog currently presents one shared **Feature Yard** integration-map family through
 separate Wipeout, Hot Zone, and Heist recipes. Those recipes intentionally reuse identical geometry

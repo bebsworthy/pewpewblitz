@@ -1,11 +1,14 @@
-use crate::map::{MAP_CELL_SIZE_WORLD, MapDimensions, MapShape, ResolvedMap};
+use crate::map::{
+    MAP_CELL_SIZE_WORLD, MAX_MAP_DIMENSION_CELLS, MapDimensions, MapShape, ResolvedMap,
+};
 use bevy::prelude::*;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{BTreeSet, BinaryHeap},
 };
 
-const MAX_NAVIGATION_NODES: usize = 32_768;
+const MAX_NAVIGATION_NODES: usize =
+    MAX_MAP_DIMENSION_CELLS as usize * MAX_MAP_DIMENSION_CELLS as usize;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct BotNavigationSnapshot {

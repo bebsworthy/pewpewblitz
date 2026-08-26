@@ -236,10 +236,11 @@ must not describe a client World as one coherent authoritative snapshot without 
 
 ## Navigation contract
 
-The map-navigation contract must not encode the current `MapDimensions` validation of `32..=128`
-by `24..=96`. In particular, **"maps are bounded grids, at most 128×96 cells" is an implementation
-artifact, not a product constraint or bot design invariant**. That limit is expected to change.
-The bot policy must neither allocate by those maxima nor use them as a complexity guarantee.
+The map-navigation contract must not treat the server's configured `MapDimensionLimits` as a bot
+design invariant or difficulty guarantee. The checked-in server currently admits `20..=512` cells
+per axis within the shared hard 512-cell engine ceiling, but operators may narrow that envelope.
+Navigation derives and bounds work from the resolved topology; policy decisions must not assume
+today's configured minimum, maximum, or built-in-map dimensions.
 
 At map installation, a server-owned builder derives an immutable `BotNavigationSnapshot` from the
 resolved authoritative playable bounds and collision geometry. The snapshot has a map-generation
@@ -440,8 +441,8 @@ A first playable bot milestone must include:
   objective or committed movement may continue;
 - fixed-schedule traces proving lifecycle/deferred changes precede observation and one input install,
   while authoritative movement/fire follow it;
-- navigation derivation tests proving results depend on resolved geometry/topology rather than the
-  current `128×96` validation, including a synthetic topology larger than current built-in maps;
+- navigation derivation tests proving results depend on resolved geometry/topology rather than
+  built-in-map dimensions, including the configured 512×512 engine ceiling;
 - navigation behavior tests for direct travel, multi-turn paths, stable equal-cost choices, no
   diagonal corner cutting, route smoothing, stuck recovery, and navigation-revision invalidation;
 - budget tests for stable queued/incremental path work, safe exhaustion, bounded retained search

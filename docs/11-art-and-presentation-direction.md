@@ -48,6 +48,11 @@ The gameplay camera is fixed, tilted, and uses restrained perspective. There is 
 authoritative height, jumping, or walkable wall top. The depth buffer owns visual occlusion; render
 height, animation, particles, audio, and UI never feed back into simulation.
 
+The accepted gameplay framing targets approximately 14 map cells vertically. With the current
+27-degree vertical field of view and 55-degree elevation, the camera uses a 743-unit distance; at
+16:9 this exposes approximately 23.82 by 14 cells. Map authors must not widen authoritative bounds
+merely to compensate for camera presentation.
+
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or
 material handles, client-local entity identities, render height, or other renderer details.
@@ -264,6 +269,11 @@ A presentation asset or family is admitted only when:
 The baseline remains deliberately simple: cached meshes and materials, bounded map-asset visuals,
 transients, restrained shadows, limited lighting, and Bevy's normal culling. Instancing, LOD, GPU
 particles, bloom, deferred rendering, or custom gameplay-world pipelines require measured need.
+
+The authoring contract permits dense coverage up to every cell of a 512×512 map, but the current
+renderer may still materialize repeated static tiles individually. Structural validity therefore
+does not claim acceptable native performance at the maximum. Chunked or instanced vegetation and
+faster concealment lookup become required when measured content approaches that scale.
 
 Automated verification should cover coordinate conversion, exact footprints, projectile origins,
 asset/catalog validation, lifecycle cleanup, animation recovery, relationship colors, projected-UI

@@ -2,7 +2,7 @@
 
 ## Decision status
 
-`Python tool implemented; engine-limit rework and content adoption remain separate`
+`Python tool implemented; engine dimension rework completed; content adoption remains separate`
 
 This document specifies a small external Python tool that reads a grid-based map image and writes a
 PewPew Blitz `MapRecipe` RON file.
@@ -364,38 +364,44 @@ contain:
 
 The `.ron` remains the primary output. An operator may edit it manually like any other map recipe.
 
-## Engine changes required for generated maps
+## Engine support for generated maps
 
 The Python tool itself requires no engine changes. Brawler separately needs to accept the map sizes
 and densities that the tool can discover.
 
 ### Dimensions
 
-Change `MapDimensions::validate` from:
+Shared map validation now accepts:
 
 ```text
-32..=128 wide, 24..=96 high
+1..=512 wide, 1..=512 high
 ```
 
-to:
+The server operator catalog independently defaults to:
 
 ```text
-1..=128 wide, 1..=96 high
+20..=512 wide, 20..=512 high
 ```
 
-This allows `hyacinth_house.webp` to remain `23 x 35` without padding. Spawn clearance,
-reachability, mode topology, camera behavior, and normal map validation still determine whether a
-particular small map is playable.
+This allows a `23 x 35` recipe without padding while retaining a server-owned admission policy.
+Spawn clearance, reachability, mode topology, camera behavior, placement/byte ceilings, and normal
+map validation still determine whether a dimensionally permitted map is playable.
 
 ### Placement density
 
-Remove the independent `placements.len() > 512` rejection. Bound work instead by:
+The former independent `placements.len() > 512` rejection is removed. Work is bounded instead by:
 
-- checked expansion no greater than the map's cell/slot capacity;
-- existing source-RON and resolved-snapshot byte ceilings;
+- checked expansion no greater than the map's four-slot-per-cell capacity;
+- at most one concealing feature per cell;
+- the 96 KiB source-RON and 32 MiB resolved-snapshot byte ceilings;
 - existing slot-conflict and footprint validation;
 - measured dynamic-state, collider, generated-mesh, render, CPU, and memory limits; and
 - early rejection before allocating structurally impossible expansions.
+
+At 512×512 this permits 262,144 concealing cells and 1,048,576 total slot placements. A full grass
+map can remain compact source text by using one filled rectangle. The current resolver and renderer
+may still expand or materialize that coverage per placement, so structural acceptance is not an
+extreme-density performance guarantee.
 
 These are engine changes to support dense authored recipes generally. They are not Python
 integration points.
@@ -424,7 +430,9 @@ integration points.
 
 - Existing built-ins retain their fingerprints and behavior after the dimension-limit change.
 - A legal `23 x 35` recipe resolves without padding.
-- A legal recipe with more than 512 placements resolves within byte/performance limits.
+- Legal recipes may exceed 512 placements up to their dimension-derived cell/slot capacity.
+- A full-map concealment rectangle is structurally legal, with extreme-density runtime performance
+  tracked only when measured content requires optimization.
 - Narrow-map perimeter, camera, cursor projection, spawn clearance, and presentation pass native
   checks.
 - Dense-map resolution, collider generation, snapshot size, render cost, and memory stay bounded.
@@ -454,11 +462,14 @@ are not added to Brawler automatically.
 
 ### Step 2 — Engine limits
 
-- Remove the artificial minimum dimensions and 512-placement cap.
-- Add narrow and dense fixtures plus measured safety gates.
+- Separate the shared positive dimension floor from the server-owned 20-cell admission minimum.
+- Replace the 512-placement and 128-concealment caps with dimension-derived structural capacity.
+- Raise the hard dimension ceiling to 512×512 and the resolved snapshot ceiling to 32 MiB.
+- Retain the 64 KiB built-in snapshot performance gate and independent dynamic-object ceilings.
 - Do not add image-related code or dependencies to Brawler.
 
-Status: not part of the external-tool implementation. No Brawler engine code changed.
+Status: complete on 2026-08-26 as general Brawler map support. The change is independent of the
+external tool and does not add image-related runtime or build dependencies.
 
 ### Step 3 — Content adoption
 
@@ -466,7 +477,8 @@ Status: not part of the external-tool implementation. No Brawler engine code cha
 - Manually resolve or accept unsupported omissions.
 - Add it through Brawler's normal map-content and playtest workflow.
 
-Status: not started; this requires choosing and manually reviewing a generated map.
+Status: the V12 maps use manually reviewed image references and hand-authored recipes; importer
+output is intentionally not part of that production path.
 
 ## Acceptance criteria
 
@@ -480,5 +492,5 @@ Status: not started; this requires choosing and manually reviewing a generated m
 - Unsupported items are omitted and clearly reported.
 - Repeated runs produce identical RON.
 - Hyacinth House can be emitted as `23 x 35` without padding.
-- Brawler can separately accept a legal narrow recipe and a legal recipe exceeding 512 placements
-  after the engine-limit rework.
+- Brawler separately accepts legal dimensions through 512×512 and dimension-derived placement and
+  concealment capacity after the engine-limit rework.

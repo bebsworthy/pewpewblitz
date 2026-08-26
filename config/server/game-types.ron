@@ -1,6 +1,12 @@
 (
-  schema_version: 2,
+  schema_version: 3,
   server_name: "Local PewPew Blitz",
+  map_dimension_limits: (
+    minimum_width: 20,
+    minimum_height: 20,
+    maximum_width: 512,
+    maximum_height: 512,
+  ),
   game_types: [
     (id: "wipeout-2v2", revision: 3, name: "Feature Yard Wipeout 2v2", mode: "wipeout", maps: ["feature-yard-wipeout"], teams: 2, players_per_team: 2, kills_to_win: 10, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "hot-zone-2v2", revision: 3, name: "Feature Yard Hot Zone 2v2", mode: "hot-zone", maps: ["feature-yard-hot-zone"], teams: 2, players_per_team: 2, capture_seconds: 30, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
