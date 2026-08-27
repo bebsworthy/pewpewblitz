@@ -57,3 +57,24 @@ The main action arbitration coordinator and enduring dashboard/brawler/game-sele
 
 - Full combined client/server library suite passes: 581 tests.
 - Client check and Clippy pass after the input-policy and game-select moves.
+
+
+## Responsibility split completion (2026-08-27)
+
+- `flow/input.rs` now owns the complete input-collection system in addition to its pure focus, editor, and arbitration policies.
+- `flow/reducer.rs` now owns the complete action-resolution coordinator and its decision helpers, alongside deferred commit and teardown.
+- `flow/screens/dashboard.rs` owns dashboard construction, live facts, responsive layout, scrolling/focus visibility, and the dashboard menu.
+- `flow/screens/brawlers.rs` owns saved-brawler list, creation, details, editing, deletion confirmation, weapon equipment, and their local focus/scroll policies.
+- `flow/screens/game_select.rs` continues to own the game-type selection screen.
+- `flow.rs` is reduced from 7,925 to 3,371 lines and remains the single plugin/schedule composition point plus shared UI and focused tests.
+
+Behavior and ordering remain unchanged: the existing `ClientFlowSet` chain, `ApplyDeferred` boundary, action arbitration slots, and deferred `FlowCommit` mutation are preserved.
+
+Verification after the complete moves:
+
+- `cargo fmt --all`
+- `cargo clippy --locked --no-default-features --features client --lib -- -D warnings`
+- `cargo test --locked --no-default-features --features client --lib client::flow::tests -- --nocapture` — 39 passed
+- `cargo test --locked --no-default-features --features client --lib` — 416 passed
+
+Remaining closeout evidence: relevant native dashboard, game-select, and saved-brawler UI smoke verification.
