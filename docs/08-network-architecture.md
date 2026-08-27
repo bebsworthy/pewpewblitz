@@ -198,8 +198,12 @@ Resolved match loadout
   replicated as stable identity plus the bounded public configuration needed for HUD/presentation
 
 Runtime weapon state
-  ammo/charges, cooldowns, projectiles, effects; mutated only by server simulation
+  ammo/charges, fire cooldown, and next-ammunition start/target ticks; mutated only by server simulation
 ```
+
+The client derives a filling ammunition segment from the replicated interval and its latest
+authoritative tick. It may extrapolate presentation, but it never restores ammunition locally;
+fire intent continues normally and the server alone accepts or rejects it from current state.
 
 V7 clients request admission with a selected `SavedBrawlerId` and expected brawler revision. The
 lobby resolves the authored fighter profile, weapon base, four or fewer owned part instances,

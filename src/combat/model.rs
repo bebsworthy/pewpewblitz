@@ -161,18 +161,63 @@ pub struct TeamId(pub u8);
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub struct CurrentHealth(pub u16);
 
-/// The weapon phase is replicated together with ammo and its authoritative deadline.
+/// Server-only fixed-point health-recovery progress and attack-idle origin.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HealthRecoveryState {
+    pub last_accepted_attack_tick: u64,
+    /// Numerator in health-points-per-second ticks; always less than the simulation frequency.
+    pub recovery_remainder: u64,
+}
+
+impl HealthRecoveryState {
+    #[must_use]
+    pub const fn starting_at(tick: u64) -> Self {
+        Self {
+            last_accepted_attack_tick: tick,
+            recovery_remainder: 0,
+        }
+    }
+}
+
+/// Fire gating only. Ammunition recovery advances independently in [`WeaponState`].
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub enum WeaponPhase {
     Ready,
     Cooldown { ready_at_tick: u64 },
-    Reloading { ready_at_tick: u64 },
+}
+
+/// One server-authored ammunition recovery interval.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+pub struct AmmoRecovery {
+    pub started_at_tick: u64,
+    pub ready_at_tick: u64,
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub struct WeaponState {
     pub ammo: u8,
     pub phase: WeaponPhase,
+    pub ammo_recovery: Option<AmmoRecovery>,
+}
+
+impl WeaponState {
+    #[must_use]
+    pub const fn ready(ammo: u8) -> Self {
+        Self {
+            ammo,
+            phase: WeaponPhase::Ready,
+            ammo_recovery: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn can_fire(self, tick: u64) -> bool {
+        self.ammo > 0
+            && match self.phase {
+                WeaponPhase::Ready => true,
+                WeaponPhase::Cooldown { ready_at_tick } => tick >= ready_at_tick,
+            }
+    }
 }
 
 /// The latest authoritative server tick observed alongside replicated fighter state.

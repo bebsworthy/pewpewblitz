@@ -3,6 +3,145 @@
 use super::*;
 
 #[test]
+fn health_recovers_after_attack_idle_delay_and_damage_does_not_restart_it() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.selection_is_complete(0)
+    });
+    harness.set_controlled_input(0, FighterInput::default());
+    let player_id = harness.controlled_player_id(0);
+    let start_tick = harness.server_simulation_tick();
+    {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<
+            (&PlayerId, &mut CurrentHealth, &mut HealthRecoveryState),
+            With<Fighter>,
+        >();
+        let (_, mut health, mut recovery) = query
+            .iter_mut(world)
+            .find(|(candidate, _, _)| **candidate == player_id)
+            .expect("controlled fighter");
+        health.0 = 50;
+        *recovery = HealthRecoveryState::starting_at(start_tick);
+    }
+
+    for _ in 0..90 {
+        harness.step();
+    }
+    // Receiving damage is deliberately irrelevant to the attack-idle clock.
+    {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&PlayerId, &mut CurrentHealth), With<Fighter>>();
+        let (_, mut health) = query
+            .iter_mut(world)
+            .find(|(candidate, _)| **candidate == player_id)
+            .expect("controlled fighter");
+        health.0 = 40;
+    }
+    for _ in 0..90 {
+        harness.step();
+    }
+    assert_eq!(controlled_server_health(&mut harness, player_id), 40);
+    for _ in 0..60 {
+        harness.step();
+    }
+    assert_eq!(controlled_server_health(&mut harness, player_id), 50);
+
+    let previous_attack_tick = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&PlayerId, &HealthRecoveryState), With<Fighter>>();
+        query
+            .iter(world)
+            .find(|(candidate, _)| **candidate == player_id)
+            .map(|(_, recovery)| recovery.last_accepted_attack_tick)
+            .expect("controlled fighter recovery")
+    };
+    harness.set_controlled_input(
+        0,
+        FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
+    );
+    harness.step_until(|harness| {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&PlayerId, &HealthRecoveryState), With<Fighter>>();
+        query.iter(world).any(|(candidate, recovery)| {
+            *candidate == player_id && recovery.last_accepted_attack_tick > previous_attack_tick
+        })
+    });
+    harness.set_controlled_input(0, FighterInput::default());
+    let accepted_attack_tick = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&PlayerId, &HealthRecoveryState), With<Fighter>>();
+        query
+            .iter(world)
+            .find(|(candidate, _)| **candidate == player_id)
+            .map(|(_, recovery)| recovery.last_accepted_attack_tick)
+            .expect("accepted attack reset")
+    };
+    assert!(accepted_attack_tick > previous_attack_tick);
+    {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<(&PlayerId, &mut CurrentHealth), With<Fighter>>();
+        let (_, mut health) = query
+            .iter_mut(world)
+            .find(|(candidate, _)| **candidate == player_id)
+            .expect("controlled fighter");
+        health.0 = 40;
+    }
+    for _ in 0..180 {
+        harness.step();
+    }
+    assert_eq!(controlled_server_health(&mut harness, player_id), 40);
+}
+
+fn controlled_server_health(harness: &mut Harness, player_id: PlayerId) -> u16 {
+    let world = harness.server.world_mut();
+    let mut query = world.query_filtered::<(&PlayerId, &CurrentHealth), With<Fighter>>();
+    query
+        .iter(world)
+        .find(|(candidate, _)| **candidate == player_id)
+        .map(|(_, health)| health.0)
+        .expect("controlled fighter health")
+}
+
+#[test]
+fn firing_again_does_not_restart_in_progress_ammo_recovery() {
+    let mut harness = Harness::new(1);
+    harness.step_until(|harness| {
+        harness.client_is_active(0)
+            && harness.server_ids().len() == 1
+            && harness.selection_is_complete(0)
+    });
+    let player_id = harness.controlled_player_id(0);
+    let fire = FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE);
+    harness.set_controlled_input(0, fire);
+    harness.step_until(|harness| server_ammo_state(harness, player_id).ammo == 5);
+    harness.set_controlled_input(0, FighterInput::default());
+    let first_recovery = server_ammo_state(&mut harness, player_id)
+        .ammo_recovery
+        .expect("first shot starts recovery");
+    for _ in 0..20 {
+        harness.step();
+    }
+    harness.set_controlled_input(0, fire);
+    harness.step_until(|harness| server_ammo_state(harness, player_id).ammo == 4);
+    harness.set_controlled_input(0, FighterInput::default());
+    let after_second_shot = server_ammo_state(&mut harness, player_id);
+    assert_eq!(after_second_shot.ammo_recovery, Some(first_recovery));
+}
+
+fn server_ammo_state(harness: &mut Harness, player_id: PlayerId) -> WeaponState {
+    let world = harness.server.world_mut();
+    let mut query = world.query_filtered::<(&PlayerId, &WeaponState), With<Fighter>>();
+    query
+        .iter(world)
+        .find(|(candidate, _)| **candidate == player_id)
+        .map(|(_, weapon)| *weapon)
+        .expect("controlled fighter ammunition")
+}
+
+#[test]
 fn late_join_recovers_active_projectile_and_defeated_durable_state() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| {
@@ -47,7 +186,7 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
 }
 
 #[test]
-fn late_join_recovers_in_progress_reload_state() {
+fn late_join_recovers_in_progress_ammo_recovery_state() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -68,9 +207,7 @@ fn late_join_recovers_in_progress_reload_state() {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(&NetworkEntityId, &WeaponState), With<Fighter>>();
         query.iter(world).any(|(network_id, weapon)| {
-            *network_id == player_network_id
-                && matches!(weapon.phase, WeaponPhase::Reloading { .. })
-                && weapon.ammo == 0
+            *network_id == player_network_id && weapon.ammo == 0 && weapon.ammo_recovery.is_some()
         })
     });
 
@@ -78,13 +215,11 @@ fn late_join_recovers_in_progress_reload_state() {
     harness.step_until(|harness| {
         harness.client_is_active(1)
             && harness.client_ids(1).len() == 2
-            && matches!(
-                harness
-                    .client_fighter_combat_state(1, player_network_id)
-                    .1
-                    .phase,
-                WeaponPhase::Reloading { .. }
-            )
+            && harness
+                .client_fighter_combat_state(1, player_network_id)
+                .1
+                .ammo_recovery
+                .is_some()
     });
 }
 

@@ -120,7 +120,10 @@ pub(crate) fn activate_dash(
             &crate::protocol::NetworkEntityId,
             &crate::combat::TeamId,
             &crate::movement::InputFreshness,
-            &mut crate::builds::AbilityState,
+            (
+                &mut crate::builds::AbilityState,
+                &mut crate::combat::HealthRecoveryState,
+            ),
             Option<&lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>>,
             Option<&crate::combat::Defeated>,
             Option<&crate::matchplay::ActiveCombatant>,
@@ -141,7 +144,7 @@ pub(crate) fn activate_dash(
         network_id,
         team,
         freshness,
-        mut ability,
+        (mut ability, mut health_recovery),
         action,
         defeated,
         active,
@@ -250,6 +253,8 @@ pub(crate) fn activate_dash(
             charge: 0,
             phase: crate::builds::AbilityPhase::Dashing { ends_at_tick },
         };
+        health_recovery.last_accepted_attack_tick = tick.0;
+        health_recovery.recovery_remainder = 0;
         let source = crate::combat::AttackSource {
             kind: crate::combat::CombatSourceKind::Ultimate {
                 ultimate_id: loadout.ultimate.id,

@@ -952,6 +952,7 @@ mod tests {
             weapon_state: Some(WeaponState {
                 ammo: 2,
                 phase: WeaponPhase::Cooldown { ready_at_tick: 99 },
+                ammo_recovery: None,
             }),
             active_effects: Some(ActiveEffects {
                 slow: Some(SlowEffect {

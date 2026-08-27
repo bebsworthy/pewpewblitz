@@ -16,7 +16,7 @@ fn catalogs() -> (
 #[test]
 fn embedded_catalog_resolves_seven_legal_named_builds_and_new_ultimate_parameters() {
     let (builds, weapons, fighter) = catalogs();
-    assert_eq!(builds.balance_revision, BuildRevision(3));
+    assert_eq!(builds.balance_revision, BuildRevision(4));
     assert_eq!(builds.presets.len(), 7);
     assert_eq!(builds.ultimates.len(), 5);
     for preset in &builds.presets {

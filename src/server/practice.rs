@@ -7,8 +7,8 @@ use super::ServerRoleResource;
 use crate::{
     builds::{AbilityState, BuildCatalogResource, PassiveRuntimeState},
     combat::{
-        ActiveEffects, AuthoritativeTick, CurrentHealth, FighterDefinitions, SpawnState,
-        WeaponCatalogResource, WeaponPhase, WeaponState, default_fighter_runtime,
+        ActiveEffects, AuthoritativeTick, CurrentHealth, FighterDefinitions, HealthRecoveryState,
+        SpawnState, WeaponCatalogResource, WeaponState, default_fighter_runtime,
     },
     map::{MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
     matchplay::{
@@ -112,10 +112,7 @@ fn install_manifest_bots(
                 loadout.clone(),
                 AbilityState::default(),
                 PassiveRuntimeState::default(),
-                WeaponState {
-                    ammo: loadout.primary_weapon.recipe.economy.capacity(),
-                    phase: WeaponPhase::Ready,
-                },
+                WeaponState::ready(loadout.primary_weapon.recipe.economy.capacity()),
                 ActiveEffects::default(),
                 AuthoritativeTick::default(),
                 SpawnState {
@@ -124,6 +121,7 @@ fn install_manifest_bots(
                 },
             ))
             .insert((
+                HealthRecoveryState::default(),
                 Position::from_xy(spawn_point.position.x, spawn_point.position.y),
                 Rotation::radians(spawn_point.facing),
                 LinearVelocity::default(),

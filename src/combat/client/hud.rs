@@ -111,23 +111,33 @@ pub(crate) fn update_combat_hud(
             },
             |preset| preset.display_name.as_str(),
         );
-    let phase = match state.phase {
-        WeaponPhase::Ready => "READY".to_string(),
-        WeaponPhase::Cooldown { ready_at_tick } | WeaponPhase::Reloading { ready_at_tick }
-            if authoritative_tick.is_some() =>
-        {
-            let label = if matches!(state.phase, WeaponPhase::Cooldown { .. }) {
-                "COOLDOWN"
+    let phase = authoritative_tick.map_or_else(
+        || {
+            if matches!(state.phase, WeaponPhase::Cooldown { .. }) || state.ammo_recovery.is_some()
+            {
+                "SYNCING".to_string()
             } else {
-                "RELOADING"
+                "READY".to_string()
+            }
+        },
+        |now| {
+            let fire = match state.phase {
+                WeaponPhase::Ready => "READY".to_string(),
+                WeaponPhase::Cooldown { ready_at_tick } => {
+                    format!("COOLDOWN {}t", ready_at_tick.saturating_sub(now.0))
+                }
             };
-            format!(
-                "{label} {}t",
-                ready_at_tick.saturating_sub(authoritative_tick.expect("checked above").0)
-            )
-        }
-        WeaponPhase::Cooldown { .. } | WeaponPhase::Reloading { .. } => "SYNCING".to_string(),
-    };
+            state.ammo_recovery.map_or(fire.clone(), |recovery| {
+                let duration = recovery
+                    .ready_at_tick
+                    .saturating_sub(recovery.started_at_tick)
+                    .max(1);
+                let elapsed = now.0.saturating_sub(recovery.started_at_tick).min(duration);
+                let percent = elapsed.saturating_mul(100) / duration;
+                format!("{fire} · AMMO {percent}%")
+            })
+        },
+    );
     let phase = defeated.map_or(phase, |_| "DEFEATED".to_string());
     let maximum_health = loadout.map_or(100, |loadout| loadout.fighter_stats.maximum_health);
     let _ = build_catalog;

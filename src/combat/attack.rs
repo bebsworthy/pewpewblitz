@@ -33,17 +33,22 @@ pub(super) fn advance_composed_weapon_state(
     state: &mut WeaponState,
     recipe: &WeaponRecipe,
     tick: u64,
-) {
+) -> bool {
     match state.phase {
         WeaponPhase::Cooldown { ready_at_tick } if tick >= ready_at_tick => {
             state.phase = WeaponPhase::Ready;
         }
-        WeaponPhase::Reloading { ready_at_tick } if tick >= ready_at_tick => {
-            state.ammo = recipe.economy.capacity();
-            state.phase = WeaponPhase::Ready;
-        }
         _ => {}
     }
+    let Some(recovery) = state.ammo_recovery else {
+        return false;
+    };
+    if tick < recovery.ready_at_tick {
+        return false;
+    }
+    state.ammo = state.ammo.saturating_add(1).min(recipe.economy.capacity());
+    state.ammo_recovery = None;
+    true
 }
 
 #[cfg(feature = "server")]
@@ -639,9 +644,7 @@ pub(super) fn authoritative_composed_fire(
     mut passive_states: Query<&mut crate::builds::PassiveRuntimeState>,
     query: Query<
         (
-            Entity,
-            &Position,
-            &Rotation,
+            (Entity, &Position, &Rotation),
             &crate::builds::SelectedBuild,
             &crate::builds::ResolvedMatchLoadout,
             &TeamId,
@@ -649,7 +652,7 @@ pub(super) fn authoritative_composed_fire(
             &NetworkEntityId,
             Option<&lightyear::prelude::ControlledBy>,
             &crate::movement::InputFreshness,
-            &mut WeaponState,
+            (&mut WeaponState, &mut HealthRecoveryState),
             Option<&ActionState<FighterInput>>,
             Option<&Defeated>,
             Option<&AwaitingPostSelectionInput>,
@@ -660,9 +663,7 @@ pub(super) fn authoritative_composed_fire(
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
     for (
-        entity,
-        position,
-        rotation,
+        (entity, position, rotation),
         _build_identity,
         loadout,
         team,
@@ -670,18 +671,13 @@ pub(super) fn authoritative_composed_fire(
         network_id,
         controlled_by,
         freshness,
-        mut state,
+        (mut state, mut health_recovery),
         action,
         defeated,
         activation_barrier,
         match_participant,
     ) in query
     {
-        if dashing.contains(entity)
-            || controlled_by.is_some_and(|controlled| disconnected.contains(&controlled.owner))
-        {
-            continue;
-        }
         if defeated.is_some()
             || activation_barrier.is_some()
             || (match_participant.is_some() && !active_combatants.contains(entity))
@@ -691,6 +687,20 @@ pub(super) fn authoritative_composed_fire(
         let resolved = &loadout.primary_weapon;
         let recipe = &resolved.recipe;
         advance_composed_weapon_state(&mut state, recipe, tick.0);
+        ensure_ammo_recovery(
+            entity,
+            *network_id,
+            tick.0,
+            &mut state,
+            recipe,
+            &mut passive_states,
+            &mut gameplay_telemetry.ability,
+        );
+        if dashing.contains(entity)
+            || controlled_by.is_some_and(|controlled| disconnected.contains(&controlled.owner))
+        {
+            continue;
+        }
         let input = action.map_or(FighterInput::default(), |value| value.0);
         let targeted_ultimate_requested = input.gameplay_buttons & FighterInput::ULTIMATE != 0
             && loadout.ultimate.kind.activation_style()
@@ -700,31 +710,9 @@ pub(super) fn authoritative_composed_fire(
             && !targeted_ultimate_requested
             && input.gameplay_buttons & FighterInput::PRIMARY_FIRE != 0;
         if !held || !matches!(state.phase, WeaponPhase::Ready) {
-            if held && state.ammo == 0 && matches!(state.phase, WeaponPhase::Ready) {
-                state.phase = WeaponPhase::Reloading {
-                    ready_at_tick: tick.0.saturating_add(consume_quick_cycle(
-                        entity,
-                        *network_id,
-                        tick.0,
-                        recipe.economy.refill_ticks(),
-                        &mut passive_states,
-                        &mut gameplay_telemetry.ability,
-                    )),
-                };
-            }
             continue;
         }
         if state.ammo == 0 {
-            state.phase = WeaponPhase::Reloading {
-                ready_at_tick: tick.0.saturating_add(consume_quick_cycle(
-                    entity,
-                    *network_id,
-                    tick.0,
-                    recipe.economy.refill_ticks(),
-                    &mut passive_states,
-                    &mut gameplay_telemetry.ability,
-                )),
-            };
             continue;
         }
         let origin = position.0;
@@ -768,22 +756,20 @@ pub(super) fn authoritative_composed_fire(
         };
         let mut blocked_event_cursor = 1 + usize::from(legacy_compatibility);
         state.ammo = state.ammo.saturating_sub(1);
-        state.phase = if state.ammo == 0 {
-            WeaponPhase::Reloading {
-                ready_at_tick: tick.0.saturating_add(consume_quick_cycle(
-                    entity,
-                    *network_id,
-                    tick.0,
-                    recipe.economy.refill_ticks(),
-                    &mut passive_states,
-                    &mut gameplay_telemetry.ability,
-                )),
-            }
-        } else {
-            WeaponPhase::Cooldown {
-                ready_at_tick: tick.0.saturating_add(recipe.fire_cooldown_ticks),
-            }
+        state.phase = WeaponPhase::Cooldown {
+            ready_at_tick: tick.0.saturating_add(recipe.fire_cooldown_ticks),
         };
+        ensure_ammo_recovery(
+            entity,
+            *network_id,
+            tick.0,
+            &mut state,
+            recipe,
+            &mut passive_states,
+            &mut gameplay_telemetry.ability,
+        );
+        health_recovery.last_accepted_attack_tick = tick.0;
+        health_recovery.recovery_remainder = 0;
         let preset_id = resolved.source_preset_id;
         let source = AttackSource {
             kind: CombatSourceKind::PrimaryWeapon,
@@ -877,6 +863,33 @@ fn consume_quick_cycle(
         });
     }
     ticks
+}
+
+#[cfg(feature = "server")]
+fn ensure_ammo_recovery(
+    entity: Entity,
+    owner_network_id: NetworkEntityId,
+    tick: u64,
+    state: &mut WeaponState,
+    recipe: &WeaponRecipe,
+    passive_states: &mut Query<&mut crate::builds::PassiveRuntimeState>,
+    telemetry: &mut crate::abilities::AbilityTelemetry,
+) {
+    if state.ammo >= recipe.economy.capacity() || state.ammo_recovery.is_some() {
+        return;
+    }
+    let duration = consume_quick_cycle(
+        entity,
+        owner_network_id,
+        tick,
+        recipe.economy.refill_ticks(),
+        passive_states,
+        telemetry,
+    );
+    state.ammo_recovery = Some(AmmoRecovery {
+        started_at_tick: tick,
+        ready_at_tick: tick.saturating_add(duration),
+    });
 }
 
 #[cfg(feature = "server")]

@@ -4,9 +4,9 @@
 use super::*;
 #[cfg(test)]
 use crate::combat::AttackId;
-use crate::combat::{CombatCue, DeduplicatedCombatCue, WeaponPhase, WeaponState};
+use crate::combat::{CombatCue, DeduplicatedCombatCue, WeaponState};
 use bevy::audio::{AudioPlayer, PlaybackSettings};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 const MAX_ACTIVE_ONE_SHOTS: usize = 24;
 const MAX_RECENT_AUDIO_KEYS: usize = 128;
@@ -440,8 +440,9 @@ fn play_reload_audio(
     mut commands: Commands,
     handles: Option<Res<ClientAssetHandles>>,
     asset_server: Res<AssetServer>,
-    weapons: Query<&WeaponState, (With<Fighter>, With<Controlled>, Changed<WeaponState>)>,
+    weapons: Query<(Entity, &WeaponState), (With<Fighter>, With<Controlled>)>,
     active: Query<(), With<ClientAudioOneShot>>,
+    mut observed_ammo: Local<HashMap<Entity, u8>>,
 ) {
     let Some(handles) = handles else {
         return;
@@ -449,10 +450,16 @@ fn play_reload_audio(
     if !asset_server.is_loaded(&handles.ready) {
         return;
     }
-    let reloads = weapons
-        .iter()
-        .filter(|state| matches!(state.phase, WeaponPhase::Reloading { .. }))
-        .count();
+    let mut reloads = 0;
+    for (entity, state) in &weapons {
+        if observed_ammo
+            .insert(entity, state.ammo)
+            .is_some_and(|previous| state.ammo > previous)
+        {
+            reloads += 1;
+        }
+    }
+    observed_ammo.retain(|entity, _| weapons.get(*entity).is_ok());
     let available = MAX_ACTIVE_ONE_SHOTS.saturating_sub(active.iter().count());
     for _ in 0..reloads.min(available) {
         commands.spawn((

@@ -58,6 +58,22 @@ pub(super) fn load(
         value["snapshot"]["chest"] = serde_json::to_value(validator.baseline.chest)
             .map_err(|error| format!("canonical chest migration failed: {error}"))?;
     }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(u64::from(PERSISTENCE_SCHEMA_VERSION))
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(8)
+    {
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
+            .map_err(|error| format!("canonical fighter recovery migration failed: {error}"))?;
+        for profile in ["default", "lightweight", "reinforced"] {
+            for field in ["health_recovery_rate", "idle_attack_delay_ticks"] {
+                value["snapshot"]["fighterProfiles"][profile][field] =
+                    canonical_profiles[profile][field].clone();
+            }
+        }
+    }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
     if persisted.schema_version != PERSISTENCE_SCHEMA_VERSION
@@ -212,6 +228,42 @@ mod tests {
 
         assert_eq!(builds.fighter_profiles.lightweight.maximum_health, 86);
         assert!((builds.fighter_profiles.lightweight.movement_speed - 220.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn snapshot_eight_gains_canonical_fighter_recovery_without_losing_tuning() {
+        let root = TestPath::create();
+        let path = root.0.join("session-v1.json");
+        let (validator, mut snapshot) = fixture();
+        snapshot.fighter_profiles.lightweight.movement_speed = 217.0;
+        save(&path, &snapshot, BalanceLabRevision(5)).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["snapshot"]["schemaVersion"] = serde_json::json!(8);
+        for profile in ["default", "lightweight", "reinforced"] {
+            value["snapshot"]["fighterProfiles"][profile]
+                .as_object_mut()
+                .unwrap()
+                .remove("health_recovery_rate");
+            value["snapshot"]["fighterProfiles"][profile]
+                .as_object_mut()
+                .unwrap()
+                .remove("idle_attack_delay_ticks");
+        }
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let loaded = load(&path, &validator).unwrap().unwrap();
+        assert_eq!(loaded.revision, BalanceLabRevision(5));
+        assert_eq!(loaded.snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert!(
+            (loaded.snapshot.fighter_profiles.lightweight.movement_speed - 217.0).abs()
+                < f32::EPSILON
+        );
+        assert_eq!(
+            loaded.snapshot.fighter_profiles,
+            loaded.builds.fighter_profiles
+        );
     }
 
     #[test]

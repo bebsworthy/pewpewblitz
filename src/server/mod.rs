@@ -7,8 +7,8 @@ use crate::{
     builds::{AbilityState, PassiveRuntimeState},
     combat::{
         ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
-        CombatTelemetry, CurrentHealth, SelectingBuild, ServerCombatPlugin, SpawnState, TeamId,
-        WeaponCatalogResource, WeaponPhase, WeaponPresetId, WeaponState, WeaponTelemetry,
+        CombatTelemetry, CurrentHealth, HealthRecoveryState, SelectingBuild, ServerCombatPlugin,
+        SpawnState, TeamId, WeaponCatalogResource, WeaponPresetId, WeaponState, WeaponTelemetry,
         WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
     },
     config::{GameMode, MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
@@ -762,10 +762,9 @@ fn process_client_hellos(
                                     );
                                 if let Some(loadout) = manifest_loadout.as_ref() {
                                     health = CurrentHealth(loadout.fighter_stats.maximum_health);
-                                    weapon = WeaponState {
-                                        ammo: loadout.primary_weapon.recipe.economy.capacity(),
-                                        phase: WeaponPhase::Ready,
-                                    };
+                                    weapon = WeaponState::ready(
+                                        loadout.primary_weapon.recipe.economy.capacity(),
+                                    );
                                 }
                                 let fighter_entity = commands
                                     .spawn((
@@ -792,6 +791,7 @@ fn process_client_hellos(
                                     ))
                                     .id();
                                 commands.entity(fighter_entity).insert((
+                                    HealthRecoveryState::default(),
                                     crate::matchplay::FighterDisplayName(display_name),
                                     MatchParticipant {
                                         match_id: match_state.match_id,

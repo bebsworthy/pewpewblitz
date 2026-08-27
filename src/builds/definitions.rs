@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 5;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 5;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 6;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 6;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -218,6 +218,8 @@ impl BuildCatalog {
                 || !profile.movement_speed.is_finite()
                 || profile.movement_speed <= 0.0
                 || profile.movement_speed > MAX_FIGHTER_MOVEMENT_SPEED
+                || profile.health_recovery_rate == 0
+                || profile.idle_attack_delay_ticks == 0
                 || !profile.reveal_proximity_radius.is_finite()
                 || !(MIN_REVEAL_PROXIMITY_RADIUS..=MAX_REVEAL_PROXIMITY_RADIUS)
                     .contains(&profile.reveal_proximity_radius)
@@ -258,11 +260,7 @@ impl BuildCatalog {
             self.custom_pulse.standard_magazine,
             self.custom_pulse.expanded,
         ] {
-            if magazine.capacity == 0
-                || magazine.capacity > 32
-                || magazine.refill_ticks == 0
-                || magazine.refill_ticks > 3_600
-            {
+            if magazine.capacity == 0 || magazine.capacity > 32 || magazine.refill_ticks == 0 {
                 return Err("invalid custom Pulse magazine tuning".into());
             }
         }

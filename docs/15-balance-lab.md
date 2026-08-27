@@ -42,15 +42,17 @@ Accepted tuning is stored in `target/balance-lab/session-v2.json`. The page reco
 Practice workers at the same loopback URL, and each worker validates the persisted snapshot before
 installing it. Deleting build artifacts or using **Restore canonical defaults** removes the override.
 
-The current snapshot schema is version 8, the persistence envelope is version 4, and the
-non-persisted editor-manifest schema is version 1. The server manifest explicitly identifies every
+The current snapshot schema is version 9, the persistence envelope is version 4, and the
+non-persisted editor-manifest schema is version 2. The server manifest explicitly identifies every
 editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
 control. The browser does not infer editability or limits from serialized field names. It exposes
 the three permanent fighter profiles, four canonical weapon-base recipes, the bounded parameters of
 all five supported ultimates, oil-barrel health/explosion tuning, Heist safe health, and treasure-
 chest/restoration-pickup health, restoration, radius, and lifetime. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Persistence envelope 3 is
-migrated by filling canonical chest defaults before validation. The retired Custom Pulse axes,
+migrated by filling canonical chest defaults before validation. Snapshot 8 is migrated inside the
+current envelope by filling the new fighter-recovery fields from canonical content while retaining
+existing tuning. The retired Custom Pulse axes,
 named build presets, point budget, and frame passives are not Balance Lab surfaces. Apply validation
 re-resolves the complete 3×4 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
@@ -61,6 +63,11 @@ selected fighter profile, weapon base, ultimate, passive pair, and the canonical
 equipped weapon parts. It does not retain the individual weapon-part identities, so Balance Lab
 truthfully presents their effective capacity, damage, timing, reach, and slow modifiers instead of
 inventing part names.
+
+Fighter tuning also exposes health recovery per second and the accepted-attack idle delay. Weapon
+refill/recharge timing is labeled as recovery for one round or charge. These durations require a
+positive authoritative tick value but have no invented balance ceiling; the exact numeric input
+remains available beyond the editor's ordinary playtest range.
 
 ## Validation principle
 

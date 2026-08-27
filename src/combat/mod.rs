@@ -18,6 +18,8 @@ pub mod evidence;
 pub mod model;
 pub mod outcomes;
 #[cfg(feature = "server")]
+mod recovery;
+#[cfg(feature = "server")]
 pub mod server;
 pub mod telemetry;
 #[cfg(feature = "server")]
@@ -46,6 +48,8 @@ pub(crate) use evidence::{
 };
 #[cfg(feature = "server")]
 use evidence::{capture_server_combat_checkpoints, send_combat_evidence_checkpoints};
+#[cfg(feature = "server")]
+use recovery::restore_attack_idle_health;
 
 pub use crate::builds::SelectingBuild;
 pub use crate::content::GameplayContentFingerprint;
@@ -202,7 +206,7 @@ pub struct WeaponDefinition {
     pub direct_damage: u16,
     pub magazine_capacity: u8,
     pub fire_cooldown_ticks: u64,
-    pub reload_duration_ticks: u64,
+    pub ammo_recovery_ticks: u64,
     pub projectile_speed: f32,
     pub projectile_radius: f32,
     pub maximum_range: f32,
@@ -284,7 +288,7 @@ impl Default for WeaponDefinitions {
                 direct_damage: 25,
                 magazine_capacity: 6,
                 fire_cooldown_ticks: 12,
-                reload_duration_ticks: 60,
+                ammo_recovery_ticks: 78,
                 projectile_speed: 900.0,
                 projectile_radius: 6.0,
                 maximum_range: 900.0,
@@ -316,7 +320,7 @@ impl WeaponDefinitions {
             if definition.direct_damage == 0
                 || definition.magazine_capacity == 0
                 || definition.fire_cooldown_ticks == 0
-                || definition.reload_duration_ticks == 0
+                || definition.ammo_recovery_ticks == 0
                 || definition.maximum_lifetime_ticks == 0
                 || !definition.projectile_speed.is_finite()
                 || definition.projectile_speed <= 0.0
@@ -469,6 +473,7 @@ pub fn default_fighter_runtime(
         WeaponState {
             ammo: weapon.magazine_capacity,
             phase: WeaponPhase::Ready,
+            ammo_recovery: None,
         },
     )
 }

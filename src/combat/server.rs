@@ -91,6 +91,7 @@ impl Plugin for ServerCombatPlugin {
                         .run_if(resource_exists::<TestDummyFixture>)
                         .in_set(GameplaySet::Lifecycle),
                     expire_runtime_effects.in_set(GameplaySet::Lifecycle),
+                    restore_attack_idle_health.in_set(GameplaySet::Simulation),
                     authoritative_composed_fire.in_set(GameplaySet::Fire),
                     ApplyDeferred.after(GameplaySet::Fire),
                 ),

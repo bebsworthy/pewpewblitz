@@ -92,7 +92,7 @@ pub struct MatchBuildSnapshotV1 {
 }
 
 impl MatchBuildSnapshotV1 {
-    pub const SCHEMA_VERSION: u8 = 4;
+    pub const SCHEMA_VERSION: u8 = 5;
 
     pub fn encode(self) -> Result<brawler_routing::MatchBuildSnapshot, String> {
         let bytes = postcard::to_allocvec(&self)
@@ -126,6 +126,10 @@ pub struct SelectingBuild;
 pub struct ResolvedFighterStats {
     pub maximum_health: u16,
     pub movement_speed: f32,
+    /// Integer health points restored per second after the attack-idle delay.
+    pub health_recovery_rate: u16,
+    /// Consecutive authoritative ticks without an accepted player attack before recovery starts.
+    pub idle_attack_delay_ticks: u64,
     /// Observer-owned distance at which an enemy's terrain concealment is revealed.
     pub reveal_proximity_radius: f32,
 }

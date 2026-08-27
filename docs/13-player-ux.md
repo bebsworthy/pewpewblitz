@@ -139,6 +139,10 @@ Gameplay HUD elements such as countdown, phase messages, health, ammunition, coo
 state, and roster score are Match sublayers rather than navigation destinations. Developer
 diagnostics and legacy direct-UDP controls are not product screens.
 
+During a windowed session, one rebindable screenshot action immediately captures the rendered
+frame and a matching bounded JSON record of client-visible gameplay state. It opens no menu and
+shows only a short non-modal saved/failure message.
+
 Substantial navigation and editing surfaces are screens: they occupy the full viewport, use an
 opaque background, own a clear Back action, and use the available space for hierarchy rather than
 appearing as centered dialogs over an unrelated destination. Modal overlays are reserved for small,

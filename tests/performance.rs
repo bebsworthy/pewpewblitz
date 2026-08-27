@@ -7,9 +7,9 @@ use brawler::{
     builds::SelectingBuild,
     combat::{
         ActiveEffects, AttackId, AttackSource, CombatSourceKind, ComposedProjectileRuntime,
-        CurrentHealth, ExternalMotion, FighterDefinitionId, FighterDefinitions, LobbedFlight,
-        Projectile, SlowEffect, TeamId, WeaponDefinitions, WeaponPhase, WeaponPresetId,
-        WeaponState, WorldPoint, default_fighter_runtime,
+        CurrentHealth, ExternalMotion, FighterDefinitionId, FighterDefinitions,
+        HealthRecoveryState, LobbedFlight, Projectile, SlowEffect, TeamId, WeaponDefinitions,
+        WeaponPhase, WeaponPresetId, WeaponState, WorldPoint, default_fighter_runtime,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -161,9 +161,11 @@ fn spawn_m05_fighter(
             loadout.clone(),
             team,
             CurrentHealth(fighter.maximum_health),
+            HealthRecoveryState::starting_at(0),
             WeaponState {
                 ammo: loadout.primary_weapon.recipe.economy.capacity(),
                 phase: WeaponPhase::Ready,
+                ammo_recovery: None,
             },
         ))
         .id();

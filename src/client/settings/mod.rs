@@ -21,6 +21,14 @@ pub const MAX_CALIBRATION: f32 = 0.5;
 /// collapse the hysteresis band below this.
 pub const MIN_TRIGGER_HYSTERESIS: f32 = 0.05;
 
+const fn default_screenshot_key() -> KeyCode {
+    KeyCode::F12
+}
+
+const fn default_screenshot_button() -> GamepadButton {
+    GamepadButton::North
+}
+
 /// One rebindable keyboard action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KeyboardAction {
@@ -33,6 +41,7 @@ pub enum KeyboardAction {
     Interact,
     Pause,
     Scoreboard,
+    Screenshot,
 }
 
 impl KeyboardAction {
@@ -48,11 +57,12 @@ impl KeyboardAction {
             Self::Interact => "Interact",
             Self::Pause => "Pause",
             Self::Scoreboard => "Scoreboard",
+            Self::Screenshot => "Screenshot",
         }
     }
 
     /// Every rebindable keyboard action in stable display order.
-    pub const ALL: [KeyboardAction; 9] = [
+    pub const ALL: [KeyboardAction; 10] = [
         KeyboardAction::MoveUp,
         KeyboardAction::MoveDown,
         KeyboardAction::MoveLeft,
@@ -62,6 +72,7 @@ impl KeyboardAction {
         KeyboardAction::Interact,
         KeyboardAction::Pause,
         KeyboardAction::Scoreboard,
+        KeyboardAction::Screenshot,
     ];
 }
 
@@ -96,6 +107,8 @@ pub struct KeyboardBindings {
     pub interact: KeyCode,
     pub pause: KeyCode,
     pub scoreboard: KeyCode,
+    #[serde(default = "default_screenshot_key")]
+    pub screenshot: KeyCode,
 }
 
 impl Default for KeyboardBindings {
@@ -110,6 +123,7 @@ impl Default for KeyboardBindings {
             interact: KeyCode::Space,
             pause: KeyCode::Escape,
             scoreboard: KeyCode::Tab,
+            screenshot: default_screenshot_key(),
         }
     }
 }
@@ -127,6 +141,7 @@ impl KeyboardBindings {
             KeyboardAction::Interact => self.interact,
             KeyboardAction::Pause => self.pause,
             KeyboardAction::Scoreboard => self.scoreboard,
+            KeyboardAction::Screenshot => self.screenshot,
         }
     }
 
@@ -146,6 +161,7 @@ impl KeyboardBindings {
             KeyboardAction::Interact => self.interact = key,
             KeyboardAction::Pause => self.pause = key,
             KeyboardAction::Scoreboard => self.scoreboard = key,
+            KeyboardAction::Screenshot => self.screenshot = key,
         }
         Ok(())
     }
@@ -201,6 +217,8 @@ pub struct GamepadBindings {
     pub pause: GamepadButton,
     pub cancel: GamepadButton,
     pub scoreboard: GamepadButton,
+    #[serde(default = "default_screenshot_button")]
+    pub screenshot: GamepadButton,
 }
 
 impl Default for GamepadBindings {
@@ -213,6 +231,7 @@ impl Default for GamepadBindings {
             pause: GamepadButton::Start,
             cancel: GamepadButton::East,
             scoreboard: GamepadButton::Select,
+            screenshot: default_screenshot_button(),
         }
     }
 }
@@ -228,12 +247,13 @@ impl GamepadBindings {
             GamepadAction::Pause => self.pause,
             GamepadAction::Cancel => self.cancel,
             GamepadAction::Scoreboard => self.scoreboard,
+            GamepadAction::Screenshot => self.screenshot,
         }
     }
 
     /// The full binding set as (action, button) rows for overlay rendering.
     #[must_use]
-    pub fn rows(self) -> [(GamepadAction, GamepadButton); 7] {
+    pub fn rows(self) -> [(GamepadAction, GamepadButton); 8] {
         [
             (GamepadAction::Primary, self.primary),
             (GamepadAction::ActiveItem, self.active_item),
@@ -242,6 +262,7 @@ impl GamepadBindings {
             (GamepadAction::Pause, self.pause),
             (GamepadAction::Cancel, self.cancel),
             (GamepadAction::Scoreboard, self.scoreboard),
+            (GamepadAction::Screenshot, self.screenshot),
         ]
     }
 }
@@ -256,6 +277,7 @@ pub enum GamepadAction {
     Pause,
     Cancel,
     Scoreboard,
+    Screenshot,
 }
 
 impl GamepadAction {
@@ -269,6 +291,7 @@ impl GamepadAction {
             Self::Pause => "Pause",
             Self::Cancel => "Cancel",
             Self::Scoreboard => "Scoreboard",
+            Self::Screenshot => "Screenshot",
         }
     }
 }
@@ -484,6 +507,7 @@ impl ClientInputSettings {
             GamepadAction::Pause => self.gamepad.pause = button,
             GamepadAction::Cancel => self.gamepad.cancel = button,
             GamepadAction::Scoreboard => self.gamepad.scoreboard = button,
+            GamepadAction::Screenshot => self.gamepad.screenshot = button,
         }
         self.revision = self.revision.saturating_add(1);
     }
@@ -683,6 +707,8 @@ mod tests {
     #[test]
     fn conflicts_are_reported_and_reset_restores_defaults() {
         let mut settings = ClientInputSettings::default();
+        assert_eq!(settings.keyboard.screenshot, KeyCode::F12);
+        assert_eq!(settings.gamepad.screenshot, GamepadButton::North);
         settings
             .rebind(KeyboardAction::Ultimate, KeyCode::KeyQ)
             .expect("rebind applies");
@@ -782,7 +808,7 @@ mod tests {
         );
         assert_eq!(settings.revision, 2);
 
-        settings.rebind_gamepad(GamepadAction::Ultimate, GamepadButton::North);
+        settings.rebind_gamepad(GamepadAction::Ultimate, GamepadButton::West);
         assert!(settings.gamepad_conflicts().is_empty());
         assert_eq!(settings.revision, 3);
     }

@@ -16,6 +16,7 @@ client = [
   "dep:arboard",
   "dep:atomic-write-file",
   "dep:directories",
+  "dep:serde_json",
   "bevy-client",
   "avian2d/serialize",
   "lightyear/client",

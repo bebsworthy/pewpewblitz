@@ -183,7 +183,9 @@ pub(super) fn reset_due_fighters(
                 WeaponState {
                     ammo: capacity,
                     phase: WeaponPhase::Ready,
+                    ammo_recovery: None,
                 },
+                HealthRecoveryState::starting_at(tick.0),
                 Position::from_xy(position.x, position.y),
                 Rotation::radians(spawn.facing),
                 fighter_collision_layers(),

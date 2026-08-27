@@ -1,10 +1,10 @@
 (
-    schema_version: 5,
-    balance_revision: BuildRevision(3),
+    schema_version: 6,
+    balance_revision: BuildRevision(4),
     fighter_profiles: (
-        default: (maximum_health: 100, movement_speed: 100.0, reveal_proximity_radius: 160.0),
-        lightweight: (maximum_health: 85, movement_speed: 110.0, reveal_proximity_radius: 192.0),
-        reinforced: (maximum_health: 120, movement_speed: 90.0, reveal_proximity_radius: 128.0),
+        default: (maximum_health: 100, movement_speed: 100.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0),
+        lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0),
+        reinforced: (maximum_health: 120, movement_speed: 90.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 128.0),
     ),
     custom_pulse: (
         light: (damage: 20, fire_cooldown_ticks: 9),
@@ -13,8 +13,8 @@
         compact: (speed: 1020.0, range: 750.0),
         standard: (speed: 900.0, range: 900.0),
         long: (speed: 780.0, range: 1050.0),
-        quick: (capacity: 4, refill_ticks: 42),
-        standard_magazine: (capacity: 6, refill_ticks: 60),
+        quick: (capacity: 4, refill_ticks: 78),
+        standard_magazine: (capacity: 6, refill_ticks: 78),
         expanded: (capacity: 8, refill_ticks: 78),
     ),
     weapon_costs: [

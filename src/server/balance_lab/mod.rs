@@ -5,6 +5,8 @@ mod http;
 mod persistence;
 mod roster;
 
+#[cfg(test)]
+use crate::combat::WeaponPhase;
 use crate::{
     builds::{
         BuildCatalog, BuildCatalogResource, FighterStatProfiles, ResolvedMatchLoadout,
@@ -12,8 +14,8 @@ use crate::{
     },
     combat::{
         CurrentHealth, DamageFalloff, DeliveryMethod, FighterDefinitions, FiringPattern,
-        PayloadEffectDefinition, RecipientPolicy, TargetSelection, WeaponCatalog,
-        WeaponCatalogResource, WeaponConfiguration, WeaponPhase, WeaponPresetId, WeaponRecipe,
+        HealthRecoveryState, PayloadEffectDefinition, RecipientPolicy, TargetSelection,
+        WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponPresetId, WeaponRecipe,
         WeaponState, WorldEffectDefinition,
     },
     matchplay::{
@@ -34,7 +36,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 8;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 9;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -452,6 +454,7 @@ fn apply_balance_lab_transaction(
         &mut ResolvedMatchLoadout,
         &mut CurrentHealth,
         &mut WeaponState,
+        &mut HealthRecoveryState,
     )>,
 ) {
     let Some(runtime) = runtime.as_deref_mut() else {
@@ -615,15 +618,13 @@ fn apply_balance_lab_transaction(
         install_heist_tuning(rules, &candidate);
     }
     for (entity, loadout) in resolved {
-        let (mut selected, mut current, mut health, mut weapon) = fighters
+        let (mut selected, mut current, mut health, mut weapon, mut recovery) = fighters
             .get_mut(entity)
             .expect("prevalidated fighter runtime remains available during atomic apply");
         *selected = loadout.identity;
         *health = CurrentHealth(loadout.fighter_stats.maximum_health);
-        *weapon = WeaponState {
-            ammo: loadout.primary_weapon.recipe.economy.capacity(),
-            phase: WeaponPhase::Ready,
-        };
+        *weapon = WeaponState::ready(loadout.primary_weapon.recipe.economy.capacity());
+        *recovery = HealthRecoveryState::starting_at(tick.0);
         *current = loadout.clone();
     }
     *restart_policy = RestartBuildPolicy::Retain;
@@ -1394,7 +1395,9 @@ mod tests {
                 WeaponState {
                     ammo: 0,
                     phase: WeaponPhase::Cooldown { ready_at_tick: 999 },
+                    ammo_recovery: None,
                 },
+                HealthRecoveryState::starting_at(0),
             ))
             .id();
         let bot = app
@@ -1407,8 +1410,13 @@ mod tests {
                 CurrentHealth(1),
                 WeaponState {
                     ammo: 0,
-                    phase: WeaponPhase::Reloading { ready_at_tick: 999 },
+                    phase: WeaponPhase::Ready,
+                    ammo_recovery: Some(crate::combat::AmmoRecovery {
+                        started_at_tick: 0,
+                        ready_at_tick: 999,
+                    }),
                 },
+                HealthRecoveryState::starting_at(0),
             ))
             .id();
 

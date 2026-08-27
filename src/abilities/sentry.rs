@@ -199,7 +199,10 @@ pub(crate) fn activate_sentry(
             &crate::combat::TeamId,
             &crate::matchplay::MatchParticipant,
             &crate::movement::InputFreshness,
-            &mut crate::builds::AbilityState,
+            (
+                &mut crate::builds::AbilityState,
+                &mut crate::combat::HealthRecoveryState,
+            ),
             Option<&lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>>,
             Option<&mut crate::abilities::UltimateInputLatch>,
             Option<&crate::combat::Defeated>,
@@ -229,7 +232,7 @@ pub(crate) fn activate_sentry(
         team,
         participant,
         freshness,
-        mut ability,
+        (mut ability, mut health_recovery),
         action,
         latch,
         defeated,
@@ -373,6 +376,8 @@ pub(crate) fn activate_sentry(
                 expires_at_tick,
             },
         };
+        health_recovery.last_accepted_attack_tick = tick.0;
+        health_recovery.recovery_remainder = 0;
         commands
             .entity(owner)
             .remove::<crate::matchplay::SpawnProtection>();

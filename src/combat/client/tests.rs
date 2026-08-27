@@ -156,7 +156,11 @@ fn combat_hud_reports_replicated_reload_and_defeat_without_reveal_text() {
         },
         WeaponState {
             ammo: 0,
-            phase: WeaponPhase::Reloading { ready_at_tick: 25 },
+            phase: WeaponPhase::Ready,
+            ammo_recovery: Some(AmmoRecovery {
+                started_at_tick: 10,
+                ready_at_tick: 25,
+            }),
         },
     ));
 
@@ -167,7 +171,7 @@ fn combat_hud_reports_replicated_reload_and_defeat_without_reveal_text() {
     );
     assert_eq!(
         app.world().get::<Text>(abilities).expect("ability HUD").0,
-        "Pulse  0/6  RELOADING 15t\nULT --"
+        "Pulse  0/6  READY · AMMO 0%\nULT --"
     );
 
     app.world_mut().entity_mut(hud).insert(Text::new("stale"));

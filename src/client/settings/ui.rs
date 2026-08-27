@@ -20,7 +20,7 @@ pub enum InputSettingsField {
 
 impl InputSettingsField {
     /// Every overlay row in stable cycling order.
-    pub const ALL: [InputSettingsField; 22] = [
+    pub const ALL: [InputSettingsField; 24] = [
         InputSettingsField::Calibration(CalibrationField::MoveDeadzone),
         InputSettingsField::Calibration(CalibrationField::AimDeadzone),
         InputSettingsField::Calibration(CalibrationField::AimCommitThreshold),
@@ -35,6 +35,7 @@ impl InputSettingsField {
         InputSettingsField::Keyboard(KeyboardAction::Interact),
         InputSettingsField::Keyboard(KeyboardAction::Pause),
         InputSettingsField::Keyboard(KeyboardAction::Scoreboard),
+        InputSettingsField::Keyboard(KeyboardAction::Screenshot),
         InputSettingsField::MousePrimary,
         InputSettingsField::Gamepad(GamepadAction::Primary),
         InputSettingsField::Gamepad(GamepadAction::ActiveItem),
@@ -43,6 +44,7 @@ impl InputSettingsField {
         InputSettingsField::Gamepad(GamepadAction::Pause),
         InputSettingsField::Gamepad(GamepadAction::Cancel),
         InputSettingsField::Gamepad(GamepadAction::Scoreboard),
+        InputSettingsField::Gamepad(GamepadAction::Screenshot),
     ];
 
     #[must_use]
@@ -142,7 +144,7 @@ fn keyboard_line(settings: &ClientInputSettings, selected: InputSettingsField) -
         )
     };
     format!(
-        "Keys up={} down={} left={} right={} item={} ult={} use={} pause={} score={}",
+        "Keys up={} down={} left={} right={} item={} ult={} use={} pause={} score={} shot={}",
         mark(settings.keyboard.move_up, KeyboardAction::MoveUp),
         mark(settings.keyboard.move_down, KeyboardAction::MoveDown),
         mark(settings.keyboard.move_left, KeyboardAction::MoveLeft),
@@ -152,6 +154,7 @@ fn keyboard_line(settings: &ClientInputSettings, selected: InputSettingsField) -
         mark(settings.keyboard.interact, KeyboardAction::Interact),
         mark(settings.keyboard.pause, KeyboardAction::Pause),
         mark(settings.keyboard.scoreboard, KeyboardAction::Scoreboard),
+        mark(settings.keyboard.screenshot, KeyboardAction::Screenshot),
     )
 }
 
@@ -163,7 +166,7 @@ fn gamepad_line(settings: &ClientInputSettings, selected: InputSettingsField) ->
         )
     };
     format!(
-        "Pad fire={} item={} ult={} use={} pause={} cancel={} score={}",
+        "Pad fire={} item={} ult={} use={} pause={} cancel={} score={} shot={}",
         mark(settings.gamepad.primary, GamepadAction::Primary),
         mark(settings.gamepad.active_item, GamepadAction::ActiveItem),
         mark(settings.gamepad.ultimate, GamepadAction::Ultimate),
@@ -171,6 +174,7 @@ fn gamepad_line(settings: &ClientInputSettings, selected: InputSettingsField) ->
         mark(settings.gamepad.pause, GamepadAction::Pause),
         mark(settings.gamepad.cancel, GamepadAction::Cancel),
         mark(settings.gamepad.scoreboard, GamepadAction::Scoreboard),
+        mark(settings.gamepad.screenshot, GamepadAction::Screenshot),
     )
 }
 

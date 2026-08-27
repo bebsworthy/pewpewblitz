@@ -131,6 +131,7 @@ attribute map.
 
 - maximum health;
 - movement speed;
+- health recovery rate and accepted-attack idle delay;
 - weapon damage, reach, speed, economy, and recovery values through the resolved weapon;
 - ultimate definition and cost;
 - two passive definitions and their resolved grants.
@@ -143,11 +144,15 @@ The current canonical fighter-profile movement speeds are expressed in world uni
 | Lightweight | 110 |
 | Reinforced | 90 |
 
+All three canonical profiles initially recover 10 health per second after 3 seconds without a
+server-accepted player attack. Taking damage does not restart that attack-idle delay. Recovery is
+server-owned, fixed-tick accumulated, clamped to maximum health, and reset with fighter lifecycle.
+
 ### Supported runtime state
 
 - current health and alive/defeated state;
 - authoritative planar position and facing;
-- ammo or charges, cooldown, reload, and recharge deadlines;
+- ammo or charges, fire cooldown, and the independent next-ammunition recovery interval;
 - ultimate charge and execution phase;
 - passive trigger windows and other bounded effect state;
 - team and match participation state.

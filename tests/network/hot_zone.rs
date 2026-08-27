@@ -120,7 +120,9 @@ fn stage_outside_zone(harness: &mut Harness, index: usize) -> PlayerId {
 }
 
 fn release_into_zone(harness: &mut Harness, index: usize, player: PlayerId) {
-    for _ in 0..200 {
+    // The canonical 100-unit movement speed needs more ticks than the historical 320-unit speed
+    // to route around the staging cover and enter the zone.
+    for _ in 0..800 {
         step_toward(harness, index, player, Vec2::ZERO);
         let occupants = server_hot_zone(harness).occupants;
         if occupants[index.min(1)] > 0 {
@@ -129,6 +131,33 @@ fn release_into_zone(harness: &mut Harness, index: usize, player: PlayerId) {
         }
     }
     panic!("staged fighter never entered the objective");
+}
+
+fn release_both_into_zone(harness: &mut Harness, players: [PlayerId; 2]) {
+    for _ in 0..800 {
+        let occupants = server_hot_zone(harness).occupants;
+        if occupants == [1, 1] {
+            for index in 0..2 {
+                harness.set_controlled_input(index, FighterInput::default());
+            }
+            return;
+        }
+        for (index, player) in players.into_iter().enumerate() {
+            if occupants[index] == 0 {
+                let position = server_position(harness, player);
+                let axis = (-position).normalize_or_zero();
+                harness.set_controlled_input(index, FighterInput::from_axes(axis, Some(axis), 0));
+            } else {
+                harness.set_controlled_input(index, FighterInput::default());
+            }
+        }
+        harness.step();
+    }
+    panic!(
+        "staged fighters never contested the objective; occupants={:?}, positions={:?}",
+        server_hot_zone(harness).occupants,
+        players.map(|player| server_position(harness, player))
+    );
 }
 
 /// Pin the match to complete within a few ticks while keeping occupancy ineligible, so
@@ -225,9 +254,7 @@ fn hot_zone_contested_control_advances_neither_team() {
     ];
     // Release both from symmetric staging points; neither side can accumulate the short
     // verification threshold before the other arrives.
-    for (index, player) in players.iter().enumerate() {
-        release_into_zone(&mut harness, index, *player);
-    }
+    release_both_into_zone(&mut harness, players);
     let contested = server_hot_zone(&mut harness);
     assert_eq!(contested.occupants, [1, 1]);
     assert_eq!(

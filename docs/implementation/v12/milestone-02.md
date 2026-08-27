@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Feedback review |
+| Status | Complete |
 | Depends on | Accepted V12 M01 maps and the completed V6–V10 server-authoritative Balance Lab |
 | User direction | Fix correctness first, review ease of use, defer balancing assistance, and assess real-time application before deciding whether to build it |
 | Outcome | The Balance Lab exposes only genuinely editable values with authoritative units and bounds, presents them through a clear operator workflow, and preserves its explicit Apply-and-reset authority contract |
@@ -254,7 +254,7 @@ it. Once the state contract is proven, a short debounce is straightforward UI wo
 - [x] Highlight draft values that differ from canonical server defaults and copy their readable diff.
 - [x] Apply the user-directed 100/110/90 canonical fighter movement speeds and synchronized defaults.
 - [x] Replace the inherited fighter speed/health policy limits with representation-backed bounds.
-- [ ] Record user feedback and complete the learning review before closeout.
+- [x] Record user feedback and complete the learning review before closeout.
 
 ## Verification evidence
 
@@ -333,3 +333,23 @@ unit/bound that looks wrong, and whether Apply/Revert/Restore consequences are c
   and presents every loadout fact retained at the match-worker boundary without inventing missing
   weapon-part identity.
 - Balancing assistance and live gameplay mutation remain absent unless separately accepted.
+
+## Closeout and learning review
+
+The user accepted the final canonical-default comparison and requested commit `3c46d94` on
+2026-08-26. M02 is complete; balance analytics and live mutation remain deliberately deferred.
+
+The main mistakes and reusable lessons were:
+
+- Field-name heuristics cannot own authoritative editability, units, or bounds. The server-owned
+  descriptor manifest must change with every new Balance Lab tuning field.
+- Applied-state differences and canonical-default differences answer different operator questions
+  and need independent labels and styling.
+- A development launcher must wait for the service it intends to open and use the operating
+  system's default-browser mechanism; browser brand assumptions are not part of the workflow.
+- A balance tool needs authoritative admitted-loadout context beside numeric controls. Catalog
+  labels and effective modifiers are preferable to inventing part identity absent from the worker.
+- Representation bounds must not be presented as balance policy, and historical arbitrary limits
+  should be challenged when their safety justification no longer exists.
+- Desktop-only inspection misses practical operator defects. Every Balance Lab presentation pass
+  keeps one narrow-width real-browser check and explicit horizontal-overflow inspection.

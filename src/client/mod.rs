@@ -59,6 +59,7 @@ mod build_editor;
 mod build_persistence;
 mod connection_persistence;
 mod dashboard;
+mod evidence_capture;
 mod flow;
 mod hud;
 mod input;
@@ -633,7 +634,10 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         crate::diagnostics::install_panic_failure_hook(path);
     }
     if !headless {
-        app.add_plugins(ClientPresentationPlugin);
+        app.add_plugins((
+            ClientPresentationPlugin,
+            evidence_capture::ClientEvidenceCapturePlugin,
+        ));
         if app
             .world()
             .resource::<ClientNetworkConfig>()

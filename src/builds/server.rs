@@ -4,7 +4,7 @@
 //! epochs, resolves a server-owned candidate, cleans deployables and transients, installs
 //! the loadout and runtime state, records telemetry, and responds idempotently.
 
-use crate::combat::{ActiveEffects, WeaponCatalogResource, WeaponPhase, WeaponState};
+use crate::combat::{ActiveEffects, HealthRecoveryState, WeaponCatalogResource, WeaponState};
 use crate::matchplay::{MatchParticipant, MatchPhase, MatchRoot, MatchState};
 use crate::protocol::{
     BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest, FighterInput,
@@ -208,10 +208,8 @@ pub fn process_build_selection(
                                     crate::combat::CurrentHealth(
                                         resolved.fighter_stats.maximum_health,
                                     ),
-                                    WeaponState {
-                                        ammo: capacity,
-                                        phase: WeaponPhase::Ready,
-                                    },
+                                    WeaponState::ready(capacity),
+                                    HealthRecoveryState::starting_at(tick.0),
                                     ActiveEffects::default(),
                                     crate::combat::AwaitingPostSelectionInput {
                                         accepted_at_tick: tick.0,

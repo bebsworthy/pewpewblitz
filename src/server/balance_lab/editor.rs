@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::Serialize;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 1;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -263,6 +263,26 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
         );
         add_field(
             fields,
+            path!["fighterProfiles", key, "health_recovery_rate"],
+            EditorSection::Fighters,
+            key,
+            label,
+            "Recovery",
+            "Health recovery rate",
+            NumberSpec::integer(1, u32::from(u16::MAX), "health/s"),
+        );
+        add_field(
+            fields,
+            path!["fighterProfiles", key, "idle_attack_delay_ticks"],
+            EditorSection::Fighters,
+            key,
+            label,
+            "Recovery",
+            "Attack-idle delay",
+            NumberSpec::ticks(1, u64::from(u32::MAX)),
+        );
+        add_field(
+            fields,
             path!["fighterProfiles", key, "reveal_proximity_radius"],
             EditorSection::Fighters,
             key,
@@ -321,8 +341,8 @@ fn add_weapon_fields(
             add(
                 path!["economy", "Magazine", "refill_ticks"],
                 "Economy",
-                "Reload time",
-                NumberSpec::ticks(1, policy.max_refill_ticks),
+                "Ammo recovery per round",
+                NumberSpec::ticks(1, u64::from(u32::MAX)),
             );
         }
         WeaponEconomy::Charges { .. } => {
@@ -335,8 +355,8 @@ fn add_weapon_fields(
             add(
                 path!["economy", "Charges", "recharge_ticks"],
                 "Economy",
-                "Recharge time",
-                NumberSpec::ticks(1, policy.max_refill_ticks),
+                "Ammo recovery per charge",
+                NumberSpec::ticks(1, u64::from(u32::MAX)),
             );
         }
     }
@@ -861,11 +881,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_exposes_only_the_seventy_three_supported_numeric_leaves() {
+    fn manifest_exposes_only_the_seventy_nine_supported_numeric_leaves() {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 73);
+        assert_eq!(manifest.fields.len(), 79);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()
@@ -906,6 +926,23 @@ mod tests {
         assert!((speed.minimum - 1.0).abs() < f64::EPSILON);
         assert!((speed.maximum - f64::from(MAX_FIGHTER_MOVEMENT_SPEED)).abs() < f64::EPSILON);
         assert!((speed.step - 1.0).abs() < f64::EPSILON);
+
+        let recovery = manifest
+            .fields
+            .iter()
+            .find(|field| path_key(&field.path) == "fighterProfiles/default/health_recovery_rate")
+            .unwrap();
+        assert_eq!(recovery.unit, "health/s");
+
+        let delay = manifest
+            .fields
+            .iter()
+            .find(|field| {
+                path_key(&field.path) == "fighterProfiles/default/idle_attack_delay_ticks"
+            })
+            .unwrap();
+        assert_eq!(delay.unit, "s");
+        assert!((delay.storage_scale - 60.0).abs() < f64::EPSILON);
     }
 
     #[test]

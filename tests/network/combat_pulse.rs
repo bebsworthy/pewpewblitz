@@ -102,9 +102,11 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             CurrentHealth(1),
             WeaponState {
                 ammo: 0,
-                phase: WeaponPhase::Reloading {
+                phase: WeaponPhase::Ready,
+                ammo_recovery: Some(AmmoRecovery {
+                    started_at_tick: reset_at_tick,
                     ready_at_tick: reset_at_tick.saturating_add(10),
-                },
+                }),
             },
         ));
     }
@@ -231,7 +233,9 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             FighterInput::from_axes(Vec2::ZERO, Some(dummy_aim), FighterInput::PRIMARY_FIRE),
         );
         let mut saw_defeat = false;
-        for _ in 0..240 {
+        // Per-round recovery deliberately spaces sustained shots, and the idle dummy now
+        // recovers health while it is not attacking. Keep this a bounded eventual-defeat check.
+        for _ in 0..600 {
             harness.step();
             let world = harness.server.world_mut();
             let mut query = world.query_filtered::<Entity, With<Defeated>>();
@@ -384,7 +388,7 @@ fn newly_spawned_projectile_can_hit_the_target_in_its_first_fixed_tick() {
 }
 
 #[test]
-fn fixed_schedule_reload_completion_refills_and_fires_on_the_ready_tick() {
+fn fixed_schedule_ammo_recovery_restores_one_round_and_fires_on_the_ready_tick() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -400,22 +404,18 @@ fn fixed_schedule_reload_completion_refills_and_fires_on_the_ready_tick() {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(&PlayerId, &WeaponState), With<Fighter>>();
         query.iter(world).any(|(candidate, state)| {
-            *candidate == player_id
-                && state.ammo == 0
-                && matches!(state.phase, WeaponPhase::Reloading { .. })
+            *candidate == player_id && state.ammo == 0 && state.ammo_recovery.is_some()
         })
     });
-    let reload_at_tick = {
+    let recovery_at_tick = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(&PlayerId, &WeaponState), With<Fighter>>();
         query
             .iter(world)
             .find(|(candidate, _)| **candidate == player_id)
-            .and_then(|(_, state)| match state.phase {
-                WeaponPhase::Reloading { ready_at_tick } => Some(ready_at_tick),
-                _ => None,
-            })
-            .expect("reload deadline")
+            .and_then(|(_, state)| state.ammo_recovery)
+            .map(|recovery| recovery.ready_at_tick)
+            .expect("ammunition recovery deadline")
     };
     let shot_count_before_reload = harness
         .server
@@ -463,15 +463,17 @@ fn fixed_schedule_reload_completion_refills_and_fires_on_the_ready_tick() {
         )
     };
     assert_eq!(shots_after_reload, shots_before_reload + 1);
-    assert_eq!(reload_shot_tick, reload_at_tick);
+    assert_eq!(reload_shot_tick, recovery_at_tick);
     assert_eq!(
         harness.server_simulation_tick(),
         reload_shot_tick.saturating_add(1)
     );
     assert!(matches!(
         state_after_reload.phase,
-        WeaponPhase::Cooldown { .. } | WeaponPhase::Reloading { .. }
+        WeaponPhase::Cooldown { .. }
     ));
+    assert_eq!(state_after_reload.ammo, 0);
+    assert!(state_after_reload.ammo_recovery.is_some());
 }
 
 #[test]

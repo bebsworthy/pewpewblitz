@@ -35,6 +35,8 @@ export interface BalanceLabEditorManifest {
 export interface FighterStats extends JsonObject {
   maximum_health: number;
   movement_speed: number;
+  health_recovery_rate: number;
+  idle_attack_delay_ticks: number;
   reveal_proximity_radius: number;
 }
 

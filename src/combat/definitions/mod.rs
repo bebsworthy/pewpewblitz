@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 3;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 4;
 pub const FINGERPRINT_FORMAT_VERSION: u16 = 2;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
@@ -37,7 +37,6 @@ pub struct EngineWeaponLimits {
     pub max_angle_degrees: f32,
     pub max_targets_per_delivery: u8,
     pub max_fire_cooldown_ticks: u64,
-    pub max_refill_ticks: u64,
     pub max_effect_duration_ticks: u64,
     pub max_speed: f32,
     pub max_distance: f32,
@@ -61,7 +60,6 @@ impl Default for EngineWeaponLimits {
             max_angle_degrees: 180.0,
             max_targets_per_delivery: 16,
             max_fire_cooldown_ticks: 3_600,
-            max_refill_ticks: 3_600,
             max_effect_duration_ticks: 3_600,
             max_speed: 4_096.0,
             max_distance: 4_096.0,
@@ -143,7 +141,6 @@ pub struct WeaponRecipePolicy {
     pub permitted_recipient_policies: Vec<RecipientPolicyKind>,
     pub max_capacity: u8,
     pub max_fire_cooldown_ticks: u64,
-    pub max_refill_ticks: u64,
     pub max_effect_duration_ticks: u64,
     pub max_projectile_lifetime_ticks: u64,
     pub max_damage: u16,
@@ -185,7 +182,6 @@ impl Default for WeaponRecipePolicy {
             ],
             max_capacity: 32,
             max_fire_cooldown_ticks: 3_600,
-            max_refill_ticks: 3_600,
             max_effect_duration_ticks: 3_600,
             max_projectile_lifetime_ticks: 600,
             max_damage: 1_000,
@@ -497,8 +493,6 @@ impl WeaponConfiguration {
             || capacity > limits.max_capacity
             || capacity > policy.max_capacity
             || refill_ticks == 0
-            || refill_ticks > limits.max_deadline_ticks
-            || refill_ticks > policy.max_refill_ticks
         {
             return Err("invalid weapon economy".to_string());
         }
@@ -779,8 +773,6 @@ fn validate_policy(policy: &WeaponRecipePolicy, limits: EngineWeaponLimits) -> R
         || policy.max_capacity > limits.max_capacity
         || policy.max_fire_cooldown_ticks == 0
         || policy.max_fire_cooldown_ticks > limits.max_fire_cooldown_ticks
-        || policy.max_refill_ticks == 0
-        || policy.max_refill_ticks > limits.max_refill_ticks
         || policy.max_effect_duration_ticks == 0
         || policy.max_effect_duration_ticks > limits.max_effect_duration_ticks
         || policy.max_projectile_lifetime_ticks == 0
@@ -894,7 +886,6 @@ fn limits_within_engine_ceiling(limits: EngineWeaponLimits) -> bool {
         && limits.max_angle_degrees <= ceiling.max_angle_degrees
         && limits.max_targets_per_delivery <= ceiling.max_targets_per_delivery
         && limits.max_fire_cooldown_ticks <= ceiling.max_fire_cooldown_ticks
-        && limits.max_refill_ticks <= ceiling.max_refill_ticks
         && limits.max_effect_duration_ticks <= ceiling.max_effect_duration_ticks
         && limits.max_speed.is_finite()
         && limits.max_speed <= ceiling.max_speed

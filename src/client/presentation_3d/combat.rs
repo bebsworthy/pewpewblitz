@@ -80,6 +80,7 @@ pub(super) struct FighterOverheadUi {
     fill: Entity,
     ammo_row: Entity,
     ammo_segments: Vec<Entity>,
+    ammo_fills: Vec<Entity>,
 }
 
 #[derive(Component)]
@@ -93,6 +94,9 @@ pub(super) struct FighterAmmoRowUi;
 
 #[derive(Component)]
 pub(super) struct FighterAmmoSegmentUi;
+
+#[derive(Component)]
+pub(super) struct FighterAmmoSegmentFillUi;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct StatusVisual3d(StatusKind);
@@ -733,6 +737,7 @@ fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity) {
                 fill,
                 ammo_row,
                 ammo_segments: Vec::new(),
+                ammo_fills: Vec::new(),
             },
             Node {
                 position_type: PositionType::Absolute,
@@ -815,6 +820,25 @@ fn ammo_segment_color(available: bool) -> Color {
     } else {
         Color::srgb(0.10, 0.14, 0.22)
     }
+}
+
+#[allow(clippy::cast_precision_loss)] // Tick precision beyond an on-screen percentage is irrelevant.
+fn ammo_recovery_progress(
+    state: Option<&crate::combat::WeaponState>,
+    observed_tick: Option<u64>,
+) -> f32 {
+    let Some((recovery, tick)) = state
+        .and_then(|state| state.ammo_recovery)
+        .zip(observed_tick)
+    else {
+        return 0.0;
+    };
+    let duration = recovery
+        .ready_at_tick
+        .saturating_sub(recovery.started_at_tick)
+        .max(1);
+    let elapsed = tick.saturating_sub(recovery.started_at_tick).min(duration);
+    elapsed as f32 / duration as f32
 }
 
 fn overhead_height(has_ammunition: bool) -> f32 {
@@ -983,7 +1007,10 @@ pub(super) fn update_combat_visual_state(
         (&CombatVisualOwner, &mut FighterOverheadUi, &mut Visibility),
         Without<WeaponPreviewVisual3d>,
     >,
-    mut fill_nodes: Query<&mut Node, With<FighterHealthFillUi>>,
+    mut fill_nodes: Query<
+        &mut Node,
+        Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentFillUi>)>,
+    >,
     mut overhead_texts: Query<(&mut Text, &mut TextColor), With<FighterOverheadTextUi>>,
     mut overhead_colors: Query<
         &mut BackgroundColor,
@@ -1049,6 +1076,7 @@ pub(super) fn update_combat_visual_state(
             },
             |value| value.fighter_stats.maximum_health,
         );
+        let observed_tick = authoritative_tick.map(|tick| tick.0);
         // Forced reveal is a public status wherever the subject is otherwise legally present.
         // Observer-specific entity visibility still prevents this marker leaking a hidden target.
         let revealed = concealment
@@ -1070,6 +1098,7 @@ pub(super) fn update_combat_visual_state(
                 display_name.map_or("Player", |name| name.0.as_str()),
                 weapon.map_or(0, |state| state.ammo),
                 loadout.map_or(0, |value| value.primary_weapon.recipe.economy.capacity()),
+                ammo_recovery_progress(weapon, observed_tick),
                 revealed,
             ),
         );
@@ -1126,8 +1155,18 @@ pub(super) fn update_combat_visual_state(
     }
 
     for (owner, mut overhead, mut visibility) in &mut overhead_roots {
-        let Some((_, current, maximum, defeated, relation, name, ammo, capacity, _revealed)) =
-            fighter_data.get(&owner.0)
+        let Some((
+            _,
+            current,
+            maximum,
+            defeated,
+            relation,
+            name,
+            ammo,
+            capacity,
+            ammo_progress,
+            _revealed,
+        )) = fighter_data.get(&owner.0)
         else {
             *visibility = Visibility::Hidden;
             continue;
@@ -1170,28 +1209,55 @@ pub(super) fn update_combat_visual_state(
             for segment in overhead.ammo_segments.drain(..) {
                 commands.entity(segment).despawn();
             }
+            overhead.ammo_fills.clear();
             commands.entity(overhead.ammo_row).with_children(|parent| {
                 for _ in 0..desired_segments {
+                    let mut fill = None;
                     let segment = parent
                         .spawn((
                             FighterAmmoSegmentUi,
                             Node {
                                 flex_grow: 1.0,
                                 height: percent(100.0),
+                                overflow: Overflow::clip(),
                                 border_radius: BorderRadius::all(px(2.5)),
                                 ..default()
                             },
                             BackgroundColor(ammo_segment_color(false)),
                             Name::new("V3 fighter ammunition segment"),
                         ))
+                        .with_children(|segment| {
+                            fill = Some(
+                                segment
+                                    .spawn((
+                                        FighterAmmoSegmentFillUi,
+                                        Node {
+                                            width: percent(0.0),
+                                            height: percent(100.0),
+                                            ..default()
+                                        },
+                                        BackgroundColor(ammo_segment_color(true)),
+                                        Name::new("V3 fighter ammunition segment fill"),
+                                    ))
+                                    .id(),
+                            );
+                        })
                         .id();
                     overhead.ammo_segments.push(segment);
+                    overhead
+                        .ammo_fills
+                        .push(fill.expect("ammunition segment creates one fill"));
                 }
             });
         }
-        for (index, segment) in overhead.ammo_segments.iter().enumerate() {
-            if let Ok(mut color) = overhead_colors.get_mut(*segment) {
-                color.0 = ammo_segment_color(index < usize::from(*ammo));
+        for (index, fill) in overhead.ammo_fills.iter().enumerate() {
+            if let Ok(mut node) = fill_nodes.get_mut(*fill) {
+                let ratio = match index.cmp(&usize::from(*ammo)) {
+                    std::cmp::Ordering::Less => 1.0,
+                    std::cmp::Ordering::Equal => *ammo_progress,
+                    std::cmp::Ordering::Greater => 0.0,
+                };
+                node.width = percent(ratio.clamp(0.0, 1.0) * 100.0);
             }
         }
     }
@@ -2099,6 +2165,22 @@ mod tests {
     #[test]
     fn ammunition_segments_distinguish_available_shots() {
         assert_ne!(ammo_segment_color(true), ammo_segment_color(false));
+    }
+
+    #[test]
+    fn ammunition_progress_uses_the_replicated_interval_and_clamps() {
+        let state = crate::combat::WeaponState {
+            ammo: 4,
+            phase: crate::combat::WeaponPhase::Ready,
+            ammo_recovery: Some(crate::combat::AmmoRecovery {
+                started_at_tick: 100,
+                ready_at_tick: 178,
+            }),
+        };
+        assert!(ammo_recovery_progress(Some(&state), Some(100)).abs() < f32::EPSILON);
+        assert!((ammo_recovery_progress(Some(&state), Some(139)) - 0.5).abs() < f32::EPSILON);
+        assert!((ammo_recovery_progress(Some(&state), Some(200)) - 1.0).abs() < f32::EPSILON);
+        assert!(ammo_recovery_progress(None, Some(139)).abs() < f32::EPSILON);
     }
 
     #[test]

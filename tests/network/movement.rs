@@ -430,7 +430,11 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
             forged_build,
             WeaponState {
                 ammo: 0,
-                phase: WeaponPhase::Reloading { ready_at_tick: 1 },
+                phase: WeaponPhase::Ready,
+                ammo_recovery: Some(AmmoRecovery {
+                    started_at_tick: 0,
+                    ready_at_tick: 1,
+                }),
             },
             Position::from_xy(9_000.0, 9_000.0),
             forged_loadout,
@@ -523,7 +527,9 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         .entity_mut(wall_fighter)
         .insert(Position::from_xy(-768.0, -420.0));
     harness.set_controlled_input(wall_client, FighterInput::from_axes(Vec2::X, None, 0));
-    for _ in 0..360 {
+    // At the canonical 100-unit movement speed, crossing from the negative spawn lane to the
+    // positive wall takes just under one thousand fixed ticks.
+    for _ in 0..1_200 {
         harness.step();
     }
     let wall_pose = harness.server_poses()[0];
@@ -548,8 +554,8 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         (expected_positive_x_edge - contact_skin_tolerance..=expected_positive_x_edge)
             .contains(&after_slide.x)
     );
-    assert!(after_slide.y > before_slide.y + 100.0);
-    for _ in 0..240 {
+    assert!(after_slide.y > before_slide.y + 40.0);
+    for _ in 0..1_000 {
         harness.step();
     }
     let corner_pose = harness.server_poses()[0].1.0;
@@ -597,8 +603,8 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         };
         overlap.set_controlled_input(index, FighterInput::from_axes(direction, None, 0));
     }
-    // Runner's resolved 360-unit movement speed reaches the midpoint after the input epoch clears.
-    for _ in 0..126 {
+    // Runner's canonical 110-unit movement speed reaches the midpoint after the input epoch clears.
+    for _ in 0..361 {
         overlap.step();
     }
     let overlap_poses = overlap.server_poses();

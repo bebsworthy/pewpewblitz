@@ -96,16 +96,21 @@ fn fire_economy_boundaries_are_integer_and_deterministic() {
     let mut state = WeaponState {
         ammo: 1,
         phase: WeaponPhase::Ready,
+        ammo_recovery: None,
     };
     state.ammo -= 1;
-    state.phase = WeaponPhase::Reloading { ready_at_tick: 61 };
+    state.ammo_recovery = Some(AmmoRecovery {
+        started_at_tick: 1,
+        ready_at_tick: 61,
+    });
     assert_eq!(state.ammo, 0);
     advance_composed_weapon_state(&mut state, &recipe, 60);
     assert_eq!(state.ammo, 0);
-    assert_eq!(state.phase, WeaponPhase::Reloading { ready_at_tick: 61 });
+    assert!(state.ammo_recovery.is_some());
     advance_composed_weapon_state(&mut state, &recipe, 61);
-    assert_eq!(state.ammo, recipe.economy.capacity());
+    assert_eq!(state.ammo, 1);
     assert_eq!(state.phase, WeaponPhase::Ready);
+    assert_eq!(state.ammo_recovery, None);
     state.phase = WeaponPhase::Cooldown { ready_at_tick: 73 };
     advance_composed_weapon_state(&mut state, &recipe, 72);
     assert_eq!(state.phase, WeaponPhase::Cooldown { ready_at_tick: 73 });

@@ -160,11 +160,16 @@ The complete navigation, recovery, and accessibility contract lives in the
 | Active item | Q, reserved until a supported active-item capability exists | Left trigger, reserved |
 | Match menu | Escape | Start |
 | Hold scoreboard | Tab | Select |
+| Capture frame + client state | F12 | North face button |
 
 The match menu does not pause authoritative simulation. It suppresses local gameplay intent and
 offers Resume, Settings, Scoreboard, and confirmed Leave Match while the match continues. Settings
 opened from the product shell or match menu are validated and persisted locally; input calibration
 and bindings shape local intent before quantization and never become server authority.
+
+Evidence captures are saved as matching PNG/JSON pairs under the platform Pictures directory at
+`PewPew Blitz/Captures` (or the application data directory when Pictures is unavailable).
+`BRAWLER_CAPTURE_DIR` overrides that destination for troubleshooting and automation.
 
 ## Server configuration and authored content
 

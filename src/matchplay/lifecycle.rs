@@ -6,8 +6,8 @@ use super::{
 };
 use crate::{
     combat::{
-        ActiveEffects, CurrentHealth, Defeated, FighterDefinitions, SpawnState, WeaponDefinitions,
-        WeaponPhase, WeaponState,
+        ActiveEffects, CurrentHealth, Defeated, FighterDefinitions, HealthRecoveryState,
+        SpawnState, WeaponDefinitions, WeaponState,
     },
     protocol::NetworkEntityId,
     timing::SimulationTick,
@@ -41,6 +41,7 @@ pub(crate) struct FighterReset {
     pub collision_mask: LayerMask,
     pub protection_until: Option<u64>,
     pub active: bool,
+    pub recovery_started_at_tick: u64,
 }
 
 pub(crate) fn fighter_runtime_values(
@@ -74,10 +75,8 @@ pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, res
     fighter
         .insert((
             CurrentHealth(reset.maximum_health),
-            WeaponState {
-                ammo: reset.ammunition,
-                phase: WeaponPhase::Ready,
-            },
+            WeaponState::ready(reset.ammunition),
+            HealthRecoveryState::starting_at(reset.recovery_started_at_tick),
             Position::from_xy(reset.position.x, reset.position.y),
             Rotation::radians(reset.facing),
             LinearVelocity::ZERO,
@@ -195,6 +194,7 @@ fn respawn_due_fighters(
                     | crate::movement::DESTRUCTIBLE_MAP_LAYER,
                 protection_until: Some(tick.0.saturating_add(config.spawn_protection_ticks)),
                 active: true,
+                recovery_started_at_tick: tick.0,
             },
         );
         commands

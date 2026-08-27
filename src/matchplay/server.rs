@@ -690,6 +690,7 @@ fn activate_started_match(
                     | crate::movement::DESTRUCTIBLE_MAP_LAYER,
                 protection_until: Some(tick.0.saturating_add(rules.spawn_protection_ticks)),
                 active: true,
+                recovery_started_at_tick: tick.0,
             },
         );
         commands
@@ -906,6 +907,7 @@ fn commit_match_restart(
                 collision_mask: avian2d::prelude::LayerMask::NONE,
                 protection_until: None,
                 active: false,
+                recovery_started_at_tick: slot.restart_tick,
             },
         );
         commands

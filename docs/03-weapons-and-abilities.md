@@ -35,7 +35,7 @@ ResolvedWeapon
   Immutable server-validated configuration, identity, and fingerprint
 
 WeaponState
-  Ammo or charges, cooldown, reload, and recharge state during play
+  Ammo or charges, fire cooldown, and next-ammunition recovery interval during play
 ```
 
 The supported selection contract does not submit a low-level operational recipe. The custom Pulse
@@ -192,9 +192,11 @@ them:
 3. **Entitlement validation:** the account may use the selected options. This belongs to a future
    arsenal/account boundary, not to combat execution.
 
-Code-owned engine ceilings bound collection sizes, numeric fields, target counts, deadlines, and
+Code-owned engine ceilings bound collection sizes, numeric fields, target counts, combat-effect deadlines, and
 serialized resolved data. Authored policy may narrow those limits but cannot widen them. Stable
 fingerprints derive from canonical operational data, not local ECS identity or display names.
+Per-ammunition refill/recharge duration has no gameplay tuning ceiling; it must only be positive
+and representable by the authoritative tick deadline.
 
 Presentation-profile IDs are approved as part of server-known content or server resolution. A
 client may request a legal cosmetic choice when that product capability exists, but it cannot attach
@@ -213,7 +215,7 @@ The established weapon foundation supports:
 - hostile and bounded hostile-plus-owner recipient policies;
 - one bounded terrain-destruction world effect;
 - explicit positive-damage eligibility for live environment objects and hostile Heist objectives;
-- authoritative cooldown, reload or recharge, lifetime, collision, and outcome attribution;
+- authoritative fire cooldown, one-at-a-time ammunition recovery, lifetime, collision, and outcome attribution;
 - stable presentation cues resolved independently by the client.
 
 The four reference presets are:
@@ -224,6 +226,10 @@ The four reference presets are:
 | Scatter cannon | Short spread of pellets | Excellent close-range burst | Poor range and falloff |
 | Arc launcher | Lobbed splash projectile | Punishes cover and groups | Slow delivery and recovery |
 | Impact blade | Melee arc | Strong duel pressure and displacement | Must enter danger range |
+
+All four currently recover one spent round or charge every 78 authoritative ticks (1.3 seconds).
+One interval runs whenever ammunition is below capacity. Firing consumes stock but never restarts
+an interval already in progress; fire cooldown and ammunition recovery advance independently.
 
 They exercise reusable composition primitives and are not permanent weapon classes. In V7 they
 become the initial permanent weapon-base choices; the named Runner, Bruiser, Controller, and Duelist
