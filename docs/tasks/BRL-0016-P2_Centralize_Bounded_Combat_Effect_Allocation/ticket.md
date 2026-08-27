@@ -1,13 +1,14 @@
 ---
 id: BRL-0016
 title: 'P2: Centralize bounded combat effect allocation'
-status: backlog
+status: todo
 theme: quality
 release:
+priority: none
 created: 2026-08-27T18:15:31Z
-modified: 2026-08-27T18:15:33Z
+modified: 2026-08-27T20:54:52Z
 closed:
-revision: 21e2cd7d4651bf6d
+revision: 18e55ff75820d1fa
 blocks: []
 related: [BRL-0002]
 ---

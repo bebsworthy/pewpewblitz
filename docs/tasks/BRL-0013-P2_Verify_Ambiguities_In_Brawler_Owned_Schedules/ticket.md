@@ -1,13 +1,14 @@
 ---
 id: BRL-0013
 title: 'P2: Verify ambiguities in Brawler-owned schedules'
-status: backlog
+status: todo
 theme: quality
 release:
+priority: none
 created: 2026-08-27T18:15:30Z
-modified: 2026-08-27T18:15:32Z
+modified: 2026-08-27T20:54:31Z
 closed:
-revision: 8d5e9c44ebe2ecf2
+revision: 3d5607613df1c724
 blocks: []
 related: [BRL-0002]
 ---

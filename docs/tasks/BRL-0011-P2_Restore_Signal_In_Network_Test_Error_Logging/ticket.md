@@ -1,13 +1,14 @@
 ---
 id: BRL-0011
 title: 'P2: Restore signal in network-test error logging'
-status: backlog
+status: todo
 theme: quality
 release:
+priority: none
 created: 2026-08-27T18:15:29Z
-modified: 2026-08-27T18:15:31Z
+modified: 2026-08-27T20:54:25Z
 closed:
-revision: 710eb689c056e239
+revision: a7dddfe1264e5ca4
 blocks: []
 related: [BRL-0002]
 ---

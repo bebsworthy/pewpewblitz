@@ -1,8 +1,7 @@
 # Outcome
 
-Deliver one future gameplay version in which Cold/Freeze, Poison, Fire, and Healing are meaningful saved-brawler choices. Each family is available through a weapon effect and through a targeted ultimate-created area, subject to final user decisions below. The server remains the only authority for contributions, damage, healing, freeze, overlap, resistance, defeat, and cleanup.
+Deliver Cold/Freeze, Poison, Fire, and Healing as meaningful saved-brawler choices. Each family is available through a weapon effect and a targeted ultimate-created area under the accepted decisions below. The server remains the only authority for contributions, damage, healing, freeze, overlap, resistance, defeat, and cleanup.
 
-This ticket is pre-roadmap planning. It does not supersede the current V12 closeout or V13 specification gate and authorizes no production implementation.
 
 # Product interpretation
 
@@ -94,7 +93,7 @@ Recommended differentiation:
 - Each uses its own resistance and may coexist with the other.
 - Both retain the source that currently owns the active condition so tick damage, defeat, ultimate charge policy, telemetry, and cues have stable attribution.
 
-No anti-heal, spreading, explosion, panic, armor reduction, stacking count, or environmental ignition is implied in the first version.
+No anti-heal, spreading, explosion, panic, armor reduction, stacking count, or environmental ignition is implied in this feature.
 
 ## Healing
 
@@ -137,25 +136,24 @@ The exact same-tick ordering of direct defeat, healing, and condition ticks must
 - Presentation may degrade, but missing effects never change authority.
 - Concealment privacy remains intact; fields and conditions expose only facts allowed for the observing client.
 
-# Proposed milestone order
+# Implementation sequence
 
-## M01 — Fire and Poison weapon/field vertical slice
+## Slice 1 — Fire and Poison weapon/field vertical slice
 
 Implement the shared bounded damage-over-time record, two resistances, two weapon parts, two targeted field ultimates, attribution, cues, HUD, Balance Lab, bot observation, and complete lifecycle. This proves both carriers with the simpler ongoing-effect model.
 
-## M02 — Cold/Freeze weapon/field vertical slice
+## Slice 2 — Cold/Freeze weapon/field vertical slice
 
 Add cold contribution, meter/decay/threshold, Freeze, immunity, Cryogenic Module and Field, input/movement interruption, presentation, resistance, bots, and recovery evidence.
 
-## M03 — Healing weapon/field vertical slice and version balance
+## Slice 3 — Healing weapon/field vertical slice and feature balance
 
 Add the approved healing-gun behavior, allied recipient/contact policy, Restoration Field, healing outcomes, UI/cues, bot use, full 3v3/routed/recovery/performance evidence, balance pass, feedback triage, documentation reconciliation, and learning review.
 
-Each milestone must end in usable gun and ultimate content; none is an infrastructure-only status framework milestone.
+Each slice must end in usable gun and ultimate content; none is an infrastructure-only status framework milestone.
 
 # Prerequisites and boundaries
 
-- Close V12 M03 and the projectile geometry ticket before production implementation.
 - Reconcile the legacy full-build path before expanding weapon/ultimate/passive catalogs so new content has one saved-brawler authority path.
 - Update build, weapon-part, protocol, content, Balance Lab, routed snapshot, evidence, telemetry, bot observation/action, and client presentation schemas together.
 - No active-item slot, resurrection, shields, armor, lifesteal, anti-heal, status spreading, elemental terrain reaction, arbitrary effect graph, client prediction, or client authority is included.
@@ -181,7 +179,7 @@ The user accepted all three recommended decisions:
 
 The user added one Poison rule: an actively poisoned fighter cannot receive passive healing.
 
-For the first version, "passive healing" means the implemented attack-idle fighter health recovery only. Poison does not block a Healing Module projectile, Restoration Field pulse, or another future explicit allied healing action. While Poison is active:
+For this feature, "passive healing" means the implemented attack-idle fighter health recovery only. Poison does not block a Healing Module projectile, Restoration Field pulse, or another future explicit allied healing action. While Poison is active:
 
 - the server-owned recovery system applies no recovery health;
 - the last-accepted-attack origin continues to age;
@@ -189,3 +187,17 @@ For the first version, "passive healing" means the implemented attack-idle fight
 - when Poison expires, recovery resumes immediately if the attack-idle delay is already satisfied.
 
 Defeat, respawn, restart, build replacement, and teardown still reset recovery and conditions through their ordinary lifecycle. Poison suppression must be represented in Balance Lab, evidence, telemetry, HUD/status feedback, bot observation, and focused same-tick tests. A later anti-heal capability that reduces or blocks active healing would be a separate mechanic and is not implied by Poison.
+
+# Acceptance criteria
+
+- Four selectable weapon-part effects deliver Cryogenic, Incendiary, Toxin, and Healing behavior through the resolved saved-brawler weapon recipe with explicit sidegrade costs.
+- Four selectable targeted ultimates create Cryogenic, Fire, Poison, and Restoration fields through one bounded server-owned area carrier with typed effects and stable identities.
+- Cold contribution, decay, resistance, threshold, Freeze, thaw, and immunity follow the accepted rule; Freeze roots movement, rejects primary/ultimate activation, preserves facing/aim, and interrupts Dash.
+- Fire and Poison use bounded separately resisted damage-over-time records, remain visually and mechanically distinguishable, coexist safely, and retain exact source attribution.
+- Poison suppresses only passive attack-idle health recovery while active, preserves its timer and fractional progress, and does not block Healing Module or Restoration Field healing.
+- Healing projectiles resolve allied healing contact and hostile damage contact explicitly; healing is clamped, cannot resurrect, and produces no damage-based ultimate charge.
+- Three mutually exclusive resistance passives expose Cold, Poison, and Fire resistance through saved-brawler resolution and Balance Lab.
+- Defeat, respawn, restart, build replacement, disconnect, late join, field expiry, and worker teardown leave bounded authoritative state and converge through the routed protocol.
+- Bots observe and use the implemented content through permitted authoritative facts and ordinary validated input without a parallel gameplay path.
+- Focused rule/ECS tests, representative network tests, canonical checks, maximum-overlap performance evidence, and native 3v3 readability/balance playtesting pass.
+- Durable gameplay, network, UX, Balance Lab, bot, and presentation documentation reflects the accepted behavior; feedback and substantial-work learning are recorded before the ticket moves to done.
