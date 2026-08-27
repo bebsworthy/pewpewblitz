@@ -2,6 +2,10 @@
 
 use super::*;
 
+fn install_launcher_loadout(harness: &mut Harness) {
+    harness.install_saved_brawler_loadout(0, 3, 2, [5, 6]);
+}
+
 #[test]
 fn launcher_uses_bounded_focal_distance_instead_of_always_using_maximum_range() {
     let mut harness = Harness::new(1);
@@ -14,6 +18,7 @@ fn launcher_uses_bounded_focal_distance_instead_of_always_using_maximum_range() 
             && harness.server_ids().len() == 1
             && harness.loadout_is_ready(0)
     });
+    install_launcher_loadout(&mut harness);
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
     harness.set_controlled_input(
@@ -61,6 +66,7 @@ fn launcher_explosion_does_not_damage_or_knock_back_its_owner() {
             && harness.server_ids().len() == 1
             && harness.loadout_is_ready(0)
     });
+    install_launcher_loadout(&mut harness);
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
     let player = harness.controlled_player_id(0);
@@ -122,6 +128,7 @@ fn launcher_replication_preserves_flight_deadline_and_durable_slow_state() {
             && harness.server_ids().len() == 1
             && harness.loadout_is_ready(0)
     });
+    install_launcher_loadout(&mut harness);
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
     {

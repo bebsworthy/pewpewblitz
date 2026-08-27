@@ -36,3 +36,13 @@ Verification and representative before/after measurement remain in progress.
 
 - Full combined client/server library suite passes: 581 tests.
 - Network loadout/authority/restart scenarios pass after the schedule and presentation changes.
+
+
+## Before/after and native closeout evidence (2026-08-27)
+
+- Baseline source path reconciled topology on every Update: across the representative 600-frame stable window that meant 600 terminal-map constructions plus repeated per-visual placement searches and full placement scans.
+- The maximum-built-in-dynamic-map diagnostic now records exactly 1 accepted topology reconciliation across the same 600 stable frames; revision, readiness, and visual-removal changes each invalidate exactly once.
+- Full serialized network suite passes all 88 scenarios, including map replacement, late join, damageable object, pickup, recovery, and restart coverage.
+- All 12 performance gates pass; combined fixed-tick p95 was 3.035 ms on Apple M3/macOS.
+- Bounded two-client native render rerun passed at 2560x1440: p95 17.003 ms and 17.008 ms, p99 17.194 ms and 17.236 ms, with zero frames over 25 ms and 14 dynamic map visuals high-water on both clients.
+- An immediately preceding peer capture narrowly missed the locked p95 threshold at 18.660 ms while its primary passed at 17.019 ms; zero frames exceeded 25 ms. The clean rerun is treated as pass evidence without hiding the outlier.

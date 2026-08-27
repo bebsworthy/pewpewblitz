@@ -507,6 +507,9 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
             && harness.client_is_active(1)
             && harness.server_ids().len() == 2
     });
+    for index in 0..2 {
+        harness.install_saved_brawler_recipe(index, 2, 1, 1, [3, 6]);
+    }
 
     let wall_client = (0..2)
         .find(|&index| harness.controlled_player_id(index).0 == 1)
@@ -576,6 +579,9 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
             && harness.client_is_active(1)
             && harness.server_ids().len() == 2
     });
+    for index in 0..2 {
+        overlap.install_saved_brawler_recipe(index, 2, 1, 1, [3, 6]);
+    }
     let fighter_entities = {
         let world = overlap.server.world_mut();
         let mut query = world.query_filtered::<(Entity, &PlayerId), With<Fighter>>();

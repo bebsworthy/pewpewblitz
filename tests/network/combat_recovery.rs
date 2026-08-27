@@ -10,6 +10,7 @@ fn health_recovers_after_attack_idle_delay_and_damage_does_not_restart_it() {
             && harness.server_ids().len() == 1
             && harness.loadout_is_ready(0)
     });
+    harness.install_saved_brawler_recipe(0, 2, 1, 1, [3, 6]);
     harness.set_controlled_input(0, FighterInput::default());
     let player_id = harness.controlled_player_id(0);
     let start_tick = harness.server_simulation_tick();

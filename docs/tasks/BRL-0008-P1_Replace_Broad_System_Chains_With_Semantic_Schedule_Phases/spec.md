@@ -35,3 +35,12 @@ Client session/server lifecycle phase decomposition, ambiguity verification, sch
 - Retained strict combat-reconcile/import-upgrade, fighter-state/animation, client AppExit observation, interpolation trace, and server verification subchains where systems share mutable state or require deferred visibility.
 - Full combined client/server library suite passes: 581 tests.
 - Combined client/server check and Clippy remain clean after the final phase refinement.
+
+
+## Closeout verification (2026-08-27)
+
+- Presentation, client-session, and server-session phase-order tests pass under owned-schedule ambiguity rejection.
+- Full role suites pass: 416 client, 332 server, and 349 Balance Lab tests, plus routing process suites.
+- Full serialized network suite passes: 88 scenarios, including recovery and same-tick authority cases.
+- Routed product and Practice 1v1 processes both reached Active and shut down cleanly.
+- All 12 existing fixed-tick performance gates pass. No executor speedup is claimed from the semantic phase split; its measured value in this ticket is removal of false serialization with explicit causal order.

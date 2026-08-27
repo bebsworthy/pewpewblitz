@@ -1,14 +1,14 @@
 ---
 id: BRL-0008
 title: 'P1: Replace broad system chains with semantic schedule phases'
-status: doing
+status: done
 theme: quality
 release:
 priority: none
 created: 2026-08-27T18:15:29Z
-modified: 2026-08-27T20:28:47Z
-closed:
-revision: 2d6ff9e40237a444
+modified: 2026-08-27T21:13:48Z
+closed: 2026-08-27T21:13:48Z
+revision: f22809dc4f43408d
 blocks: []
 related: [BRL-0002]
 ---

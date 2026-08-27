@@ -529,6 +529,9 @@ fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
             && harness.client_ids(0).len() == 2
             && harness.client_ids(1).len() == 2
     });
+    for index in 0..2 {
+        harness.install_saved_brawler_recipe(index, 2, 1, 1, [3, 6]);
+    }
 
     {
         let world = harness.server.world_mut();

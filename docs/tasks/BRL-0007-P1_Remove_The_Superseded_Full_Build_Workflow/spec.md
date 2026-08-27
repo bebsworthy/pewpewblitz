@@ -36,3 +36,16 @@ Full routed/recovery/native product evidence remains before closeout.
 
 - Full combined client/server library suite now passes: 581 tests.
 - Converted network loadout/authority/restart scenarios pass again after subsequent schedule and presentation changes.
+
+
+## Complete deterministic and routed verification (2026-08-27)
+
+- The canonical gate exposed two incomplete compatibility-floor fixtures: the combined `network-test,balance-lab` graph lacked a qualified `ResolvedMatchLoadout`, and eight scenarios still depended on the removed full-build selection side effect.
+- Added a saved-brawler recipe fixture that accepts an explicit fighter profile. Launcher, concealment, recovery, pulse, projectile, and movement scenarios now install their exact weapon base, ultimate, passives, and profile rather than mutating obsolete client selection configuration.
+- Combined Balance Lab/network loadout regression passes.
+- Full serialized network suite: 88 passed.
+- Routed product `just e2e 2`: one exact 1v1 roster reached Active and shut down cleanly.
+- Routed Practice `just practice-e2e wipeout-1v1`: one human match reached Active and shut down cleanly.
+- Canonical routing, client, server, and Balance Lab suites passed (83+4+5+5+3 routing tests, 416 client tests, 332 server tests, 349 Balance Lab tests).
+- All 12 performance gates passed.
+- Bounded native two-client gameplay render rerun passed. The saved-brawler/dashboard product UI still needs its explicit native smoke before this ticket closes.

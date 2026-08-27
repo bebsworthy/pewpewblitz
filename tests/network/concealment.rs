@@ -175,6 +175,8 @@ fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
             && harness.loadout_is_ready(0)
             && harness.loadout_is_ready(1)
     });
+    harness.install_saved_brawler_loadout(0, 2, 4, [5, 6]);
+    harness.install_saved_brawler_loadout(1, 1, 3, [4, 6]);
     let (observer, subject, subject_id) = {
         let mut query = harness.server.world_mut().query_filtered::<(
             Entity,
@@ -333,6 +335,7 @@ fn concealment_field_is_public_hides_at_range_and_confirmation_does_not_fire() {
             && harness.loadout_is_ready(0)
             && harness.loadout_is_ready(1)
     });
+    harness.install_saved_brawler_loadout(1, 3, 5, [5, 6]);
     let (observer, caster, caster_id) = {
         let mut query = harness.server.world_mut().query_filtered::<(
             Entity,

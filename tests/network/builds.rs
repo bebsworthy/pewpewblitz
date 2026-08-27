@@ -83,7 +83,7 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
         let entity = harness.controlled_entity(0);
         harness.clients[0]
             .world()
-            .get::<ResolvedMatchLoadout>(entity)
+            .get::<brawler::builds::ResolvedMatchLoadout>(entity)
             .is_some_and(|loadout| loadout == &server_loadout)
     });
 }

@@ -684,6 +684,17 @@ impl Harness {
         ultimate: u16,
         passives: [u16; 2],
     ) {
+        self.install_saved_brawler_recipe(index, 1, weapon_base, ultimate, passives);
+    }
+
+    pub(super) fn install_saved_brawler_recipe(
+        &mut self,
+        index: usize,
+        fighter_profile: u16,
+        weapon_base: u16,
+        ultimate: u16,
+        passives: [u16; 2],
+    ) {
         let owner = self.server_links[index];
         let fighter_entity = {
             let world = self.server.world_mut();
@@ -707,7 +718,7 @@ impl Harness {
             &builds,
             &weapons,
             fighter,
-            brawler::profiles::FighterProfileId(1),
+            brawler::profiles::FighterProfileId(fighter_profile),
             brawler::profiles::WeaponBaseId(weapon_base),
             brawler::builds::UltimateDefinitionId(ultimate),
             passives.map(brawler::builds::PassiveDefinitionId),
