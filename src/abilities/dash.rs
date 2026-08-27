@@ -127,7 +127,6 @@ pub(crate) fn activate_dash(
             Option<&lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>>,
             Option<&crate::combat::Defeated>,
             Option<&crate::matchplay::ActiveCombatant>,
-            Option<&crate::combat::AwaitingPostSelectionInput>,
             Option<&mut crate::abilities::UltimateInputLatch>,
         ),
         bevy::prelude::With<crate::protocol::Fighter>,
@@ -148,7 +147,6 @@ pub(crate) fn activate_dash(
         action,
         defeated,
         active,
-        activation_barrier,
         latch,
     ) in &mut fighters
     {
@@ -160,7 +158,6 @@ pub(crate) fn activate_dash(
                 && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
         });
         let held = requested
-            && activation_barrier.is_none()
             && !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
         if let Some(mut latch) = latch {

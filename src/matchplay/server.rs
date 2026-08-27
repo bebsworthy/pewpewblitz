@@ -917,15 +917,6 @@ fn commit_match_restart(
                 crate::builds::PassiveRuntimeState::default(),
             ))
             .remove::<crate::abilities::UltimateGeneration>();
-        if retain_builds {
-            commands
-                .entity(entity)
-                .remove::<crate::builds::SelectingBuild>();
-        } else {
-            commands
-                .entity(entity)
-                .insert(crate::builds::SelectingBuild);
-        }
     }
     state.match_id = slot.next_id;
     state.phase = MatchPhase::Waiting;

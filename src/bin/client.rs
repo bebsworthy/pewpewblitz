@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process, time::Duration};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--build-preset <1-7> (7=custom)] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <1-4>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120>]"
     );
 }
 
@@ -79,7 +79,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut headless_fire = false;
     let mut headless_ultimate = false;
     let mut headless_simulation_ticks = None;
-    let mut build_preset = None;
+    let mut weapon_preset = None;
     let mut windowed_combat_demo = false;
     let mut windowed_controller_demo = false;
     let mut window_size = None;
@@ -139,8 +139,8 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--simulation-ticks" => {
                 headless_simulation_ticks = Some(parse_value(&flag, args.next())?);
             }
-            "--build-preset" | "--weapon-preset" | "--weapon" => {
-                build_preset = Some(parse_value(&flag, args.next())?);
+            "--weapon-preset" | "--weapon" => {
+                weapon_preset = Some(parse_value(&flag, args.next())?);
             }
             "--combat-demo" => windowed_combat_demo = true,
             "--controller-demo" => windowed_controller_demo = true,
@@ -260,7 +260,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.headless_fire = headless_fire;
     config.headless_ultimate = headless_ultimate;
     config.headless_simulation_ticks = headless_simulation_ticks;
-    config.build_preset = build_preset;
+    config.weapon_preset = weapon_preset;
     config.windowed_combat_demo = windowed_combat_demo.then_some(WindowedCombatDemo);
     config.windowed_controller_demo = windowed_controller_demo.then_some(WindowedControllerDemo);
     config.window_size = window_size;

@@ -557,16 +557,28 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
         &builds,
         &weapons,
         &fighter_definition,
-        builds.presets[0].recipe,
-        Some(builds.presets[0].id),
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(3),
+            ],
+        },
     )
     .unwrap();
     let controller = crate::builds::resolve_build_recipe(
         &builds,
         &weapons,
         &fighter_definition,
-        builds.presets[2].recipe,
-        Some(builds.presets[2].id),
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
+            ultimate: crate::builds::UltimateDefinitionId(2),
+            passives: [
+                crate::builds::PassiveDefinitionId(5),
+                crate::builds::PassiveDefinitionId(6),
+            ],
+        },
     )
     .unwrap();
     let mut app = App::new();

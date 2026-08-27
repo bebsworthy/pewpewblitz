@@ -10,7 +10,6 @@ use bevy::{
     time::TimeUpdateStrategy,
 };
 use brawler::{
-    builds::{BuildPresetId, SelectedBuild as SelectedBrawlerBuild},
     client::{
         ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions,
         spawn_crossbeam_client,
@@ -21,9 +20,9 @@ use brawler::{
         CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind,
         CombatTelemetry, ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
         FighterDefinitions, HealthRecoveryState, MeleeAttack, PendingDelivery, PendingPayload,
-        Projectile, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, SelectingBuild,
-        SpawnState, TeamId, TestDummy, TestDummyFixture, TestDummyResetDeadline, WeaponPhase,
-        WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
+        Projectile, ProjectileDeadline, ReplicatedAttackSource, SpawnState, TeamId, TestDummy,
+        TestDummyFixture, TestDummyResetDeadline, WeaponPhase, WeaponPresetId,
+        WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -44,10 +43,9 @@ use brawler::{
         InputValidationState, MovementTuning,
     },
     protocol::{
-        BuildSelection, BuildSelectionDecision, BuildSelectionRequest, Fighter, FighterInput,
-        MatchCommand, MatchCommandDecision, MatchCommandRequest, NetworkEntityId,
-        PlaceholderPlayer, PlayerId, ProtocolPlugin, SessionChannel, TestNativeInputMessage,
-        send_forged_native_input_for_test,
+        Fighter, FighterInput, MatchCommand, MatchCommandDecision, MatchCommandRequest,
+        NetworkEntityId, PlaceholderPlayer, PlayerId, ProtocolPlugin, SessionChannel,
+        TestNativeInputMessage, send_forged_native_input_for_test,
     },
     server::{
         ServerNetworkPlugin, ServerSession, ServerSessionPhase, spawn_crossbeam_link,
@@ -90,6 +88,8 @@ mod concealment;
 mod lifecycle;
 #[path = "network/lifecycle_roster.rs"]
 mod lifecycle_roster;
+#[path = "network/loadouts.rs"]
+mod loadouts;
 #[path = "network/map.rs"]
 mod map;
 #[path = "network/match.rs"]
@@ -103,7 +103,5 @@ mod movement_input;
 mod prediction;
 #[path = "network/queue.rs"]
 mod queue;
-#[path = "network/selection.rs"]
-mod selection;
 #[path = "network/soaks.rs"]
 mod soaks;

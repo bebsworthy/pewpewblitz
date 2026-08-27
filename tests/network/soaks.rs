@@ -6,14 +6,10 @@
 //! complete/restart/roster transaction without waiting on combat outcomes.
 
 use super::harness::Harness;
-use bevy::prelude::{Has, With, Without};
-use brawler::builds::BuildPresetId;
+use bevy::prelude::{With, Without};
 use brawler::combat::TestDummy;
 use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState, WipeoutState};
-use brawler::protocol::{
-    BuildSelection, BuildSelectionDecision, BuildSelectionRequest, MatchCommand,
-    MatchCommandRequest,
-};
+use brawler::protocol::{MatchCommand, MatchCommandRequest};
 
 /// Soak length per mode: the M11 locked budget of 25 completed matches.
 const MATCH_SOAK_ROUNDS: usize = 25;
@@ -46,35 +42,8 @@ fn client_match(harness: &mut Harness, index: usize) -> Option<MatchState> {
     query.iter(world).next().copied()
 }
 
-fn select_builds_and_ready(harness: &mut Harness, clients: usize, sequence: &mut u64) {
+fn ready_participants(harness: &mut Harness, clients: usize, sequence: &mut u64) {
     let waiting = server_match(harness);
-    let selection_request_id = *sequence;
-    for index in 0..clients {
-        harness.send_build_selection(
-            index,
-            BuildSelectionRequest {
-                request_id: selection_request_id,
-                match_id: waiting.match_id,
-                selection: BuildSelection::Preset(BuildPresetId(
-                    u16::try_from(index % 4 + 1).unwrap(),
-                )),
-            },
-        );
-    }
-    step_until_labelled(harness, "selection outcomes accepted", |harness| {
-        harness.server_links.iter().all(|link| {
-            harness
-                .server
-                .world()
-                .get::<brawler::server::ServerSession>(*link)
-                .and_then(|session| session.last_selection_response)
-                .is_some_and(|outcome| {
-                    outcome.request_id == selection_request_id
-                        && outcome.decision == BuildSelectionDecision::Accepted
-                })
-        })
-    });
-    *sequence += 1;
     let ready_request_id = *sequence;
     for index in 0..clients {
         harness.send_match_command(
@@ -87,7 +56,7 @@ fn select_builds_and_ready(harness: &mut Harness, clients: usize, sequence: &mut
         );
     }
     *sequence += 1;
-    step_until_labelled(harness, "selection ready -> active", |harness| {
+    step_until_labelled(harness, "ready -> active", |harness| {
         matches!(server_match(harness).phase, MatchPhase::Active { .. })
     });
 }
@@ -147,59 +116,15 @@ fn run_match_soak(harness: &mut Harness, clients: usize, hot_zone: bool) {
     let started = std::time::Instant::now();
     let mut sequence = 10_u64;
     harness.step_until(|harness| {
-        (0..clients)
-            .all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..clients).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
-    select_builds_and_ready(harness, clients, &mut sequence);
+    ready_participants(harness, clients, &mut sequence);
     let mut last_match_id = server_match(harness).match_id.0;
     let mut baseline: Option<ServerBounds> = None;
     for round in 0..MATCH_SOAK_ROUNDS {
         if round > 0 {
-            // The restart reinstates selection. Re-select and re-ready with fresh
-            // monotonic ids above every automation retry; wait on the authoritative
-            // phase so automation replays cannot race the assertion.
-            let waiting = server_match(harness);
             sequence += 1;
-            let selection_request_id = sequence;
-            for index in 0..clients {
-                harness.send_build_selection(
-                    index,
-                    BuildSelectionRequest {
-                        request_id: selection_request_id,
-                        match_id: waiting.match_id,
-                        selection: BuildSelection::Preset(BuildPresetId(
-                            u16::try_from(index % 4 + 1).unwrap(),
-                        )),
-                    },
-                );
-            }
-            // Wait on the authoritative fighter state: the client automation's low-id
-            // retries keep overwriting the session's last response with Stale replays.
-            step_until_labelled(harness, "re-selection installed", |harness| {
-                let world = harness.server.world_mut();
-                let mut query = world
-                    .query_filtered::<Has<brawler::builds::ResolvedMatchLoadout>, (
-                        With<brawler::protocol::Fighter>,
-                        Without<TestDummy>,
-                        Without<brawler::combat::SelectingBuild>,
-                    )>();
-                query.iter(world).count() == clients
-            });
-            sequence += 1;
-            let ready_request_id = sequence;
-            for index in 0..clients {
-                harness.send_match_command(
-                    index,
-                    MatchCommandRequest {
-                        request_id: ready_request_id,
-                        match_id: waiting.match_id,
-                        command: MatchCommand::SetReady(true),
-                    },
-                );
-            }
-            step_until_labelled(harness, "re-readied to active", |harness| {
-                matches!(server_match(harness).phase, MatchPhase::Active { .. })
-            });
+            ready_participants(harness, clients, &mut sequence);
         }
         let _active = server_match(harness);
         if hot_zone {
@@ -295,37 +220,15 @@ fn reconnect_soak_alternates_disconnect_and_clean_new_sessions() {
     let mut harness = Harness::new_match(2);
     let mut sequence = 10_u64;
     step_until_labelled(&mut harness, "initial join", |harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let static_count = harness.server_static_arena_count();
     // Client worlds accumulate as sessions reconnect; track the two live indices.
     let mut live = vec![0_usize, 1_usize];
 
     for round in 0..RECONNECT_SOAK_ROUNDS {
-        // Select and ready through the same authoritative-state waits the match soaks use.
+        // Ready the server-resolved saved-brawler loadouts.
         let waiting = server_match(&mut harness);
-        sequence += 1;
-        let selection_request_id = sequence;
-        harness.send_build_selection(
-            live[1],
-            BuildSelectionRequest {
-                request_id: selection_request_id,
-                match_id: waiting.match_id,
-                selection: BuildSelection::Preset(BuildPresetId(2)),
-            },
-        );
-        step_until_labelled(&mut harness, "reconnect selection installed", |harness| {
-            let world = harness.server.world_mut();
-            let mut query = world.query_filtered::<(
-                &brawler::protocol::PlayerId,
-                Has<brawler::builds::ResolvedMatchLoadout>,
-            ), (
-                With<brawler::protocol::Fighter>,
-                Without<TestDummy>,
-                Without<brawler::combat::SelectingBuild>,
-            )>();
-            query.iter(world).count() == 2
-        });
         sequence += 1;
         let ready_request_id = sequence;
         for index in [live[0], live[1]] {

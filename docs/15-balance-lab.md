@@ -52,8 +52,8 @@ chest/restoration-pickup health, restoration, radius, and lifetime. Structural I
 topology, replacement assets, and pickup visual identity remain locked. Persistence envelope 3 is
 migrated by filling canonical chest defaults before validation. A version-8 snapshot inside the
 current envelope migrates to snapshot 9 by filling the new fighter-recovery fields from canonical
-content while retaining existing tuning. The retired Custom Pulse axes,
-named build presets, point budget, and frame passives are not Balance Lab surfaces. Apply validation
+content while retaining existing tuning. The removed full-build workflow is not a Balance Lab
+surface. Apply validation
 re-resolves the complete 3×4 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
 

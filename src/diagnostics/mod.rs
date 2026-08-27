@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 /// the observed-checkpoint count distinct from the declared scenario contract, the
 /// map-destruction no-op brush counter, and includes the declared scenario counts in the shared
 /// run identity.
-pub const CLOSEOUT_SCHEMA_VERSION: u16 = 3;
+pub const CLOSEOUT_SCHEMA_VERSION: u16 = 4;
 
 /// Upper bound on manifest identity strings; rejects oversized or runaway scripted fields.
 pub const MAX_IDENTITY_BYTES: usize = 96;
@@ -232,7 +232,7 @@ impl RunManifestV1 {
 
 /// The gameplay-aggregate block of one closeout report: the bounded telemetry summaries
 /// the process consolidated at terminal observation. The authoritative
-/// match/mode/weapon/ability aggregates and build selections exist only in the server
+/// match/mode/weapon/ability aggregates exist only in the server
 /// process, while map-destruction aggregates exist in both roles (the client records its own
 /// convergence facts), so a client legitimately reports zeros outside map dynamics.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -262,9 +262,6 @@ pub struct GameplayAggregatesV1 {
     pub hot_zone_contested_ticks: Option<u64>,
     pub hot_zone_control_gained_transitions: Option<[u32; 2]>,
     pub hot_zone_longest_control_ticks: Option<[u64; 2]>,
-    /// Build selections accepted by this process's build telemetry.
-    pub build_selections: u32,
-    pub build_dropped_records: u64,
     pub ability_attempts: u64,
     pub ability_accepts: u64,
     pub dash_uses: u64,
@@ -481,8 +478,6 @@ impl GameplayAggregatesV1 {
                 self.first_hostile_damage_tick
                     .map_or_else(|| "none".to_string(), |tick| tick.to_string())
             ),
-            format!("build_selections={}", self.build_selections),
-            format!("build_dropped_records={}", self.build_dropped_records),
             format!("ability_attempts={}", self.ability_attempts),
             format!("ability_accepts={}", self.ability_accepts),
             format!("dash_uses={}", self.dash_uses),
@@ -554,8 +549,6 @@ impl GameplayAggregatesV1 {
             team_a_defeats: parse_typed_field(lines, "team_a_defeats", "u32")?,
             team_b_defeats: parse_typed_field(lines, "team_b_defeats", "u32")?,
             first_hostile_damage_tick: parse_optional_tick("first_hostile_damage_tick")?,
-            build_selections: parse_typed_field(lines, "build_selections", "u32")?,
-            build_dropped_records: parse_typed_field(lines, "build_dropped_records", "u64")?,
             ability_attempts: parse_typed_field(lines, "ability_attempts", "u64")?,
             ability_accepts: parse_typed_field(lines, "ability_accepts", "u64")?,
             dash_uses: parse_typed_field(lines, "dash_uses", "u64")?,
@@ -759,7 +752,7 @@ pub fn split_report_lines(contents: &str) -> Result<Vec<(&str, &str)>, String> {
 /// Every non-participant field a schema-3 closeout report carries exactly once. The reader
 /// rejects reports that drop, duplicate, or oversize any of these fields, mirroring
 /// `CloseoutReportV1::to_report_lines`.
-const REPORT_REQUIRED_KEYS: [&str; 82] = [
+const REPORT_REQUIRED_KEYS: [&str; 80] = [
     "schema_version",
     "scenario_id",
     "scenario_revision",
@@ -826,8 +819,6 @@ const REPORT_REQUIRED_KEYS: [&str; 82] = [
     "team_a_defeats",
     "team_b_defeats",
     "first_hostile_damage_tick",
-    "build_selections",
-    "build_dropped_records",
     "ability_attempts",
     "ability_accepts",
     "dash_uses",

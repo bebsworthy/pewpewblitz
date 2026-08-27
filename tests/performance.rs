@@ -4,7 +4,6 @@ use avian2d::prelude::{
 };
 use bevy::{prelude::*, time::TimeUpdateStrategy};
 use brawler::{
-    builds::SelectingBuild,
     combat::{
         ActiveEffects, AttackId, AttackSource, CombatSourceKind, ComposedProjectileRuntime,
         CurrentHealth, ExternalMotion, FighterDefinitionId, FighterDefinitions,
@@ -84,7 +83,6 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
                     PlayerId(player_id),
                     NetworkEntityId(player_id),
                     fighter_id,
-                    SelectingBuild,
                     team,
                     health,
                     weapon,
@@ -134,20 +132,17 @@ fn spawn_m05_fighter(
         .clone();
     let build_catalog =
         brawler::builds::BuildCatalog::embedded().expect("embedded build catalog is valid");
-    let base_recipe = build_catalog
-        .preset(brawler::builds::BuildPresetId(1))
-        .expect("build preset 1 exists")
-        .recipe;
-    let recipe = brawler::builds::BrawlerBuildRecipe {
-        weapon: brawler::builds::WeaponChoice::Preset(WeaponPresetId(preset_id)),
-        ..base_recipe
-    };
-    let loadout = brawler::builds::resolve_build_recipe(
+    let loadout = brawler::builds::resolve_saved_brawler_recipe(
         &build_catalog,
         &weapon_catalog,
         &fighter,
-        recipe,
-        None,
+        brawler::profiles::FighterProfileId(1),
+        brawler::profiles::WeaponBaseId(preset_id),
+        brawler::builds::UltimateDefinitionId(1),
+        [
+            brawler::builds::PassiveDefinitionId(3),
+            brawler::builds::PassiveDefinitionId(4),
+        ],
     )
     .expect("benchmark loadout resolves");
     let entity = app
@@ -347,8 +342,14 @@ fn m08_four_sentries_target_fire_and_cleanup_within_fixed_tick_budget() {
         &build_catalog,
         &weapon_catalog,
         &fighter_definition,
-        build_catalog.presets[2].recipe,
-        Some(build_catalog.presets[2].id),
+        brawler::builds::BrawlerBuildRecipe {
+            weapon: brawler::builds::WeaponChoice::Preset(WeaponPresetId(3)),
+            ultimate: brawler::builds::UltimateDefinitionId(2),
+            passives: [
+                brawler::builds::PassiveDefinitionId(5),
+                brawler::builds::PassiveDefinitionId(6),
+            ],
+        },
     )
     .unwrap();
     let mut owners = Vec::new();

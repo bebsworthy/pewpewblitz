@@ -291,7 +291,7 @@ fn create_automation_default_brawler(
         return;
     };
     let requested_weapon = config
-        .build_preset
+        .weapon_preset
         .and_then(|id| catalog.weapon(crate::profiles::WeaponBaseId(id)))
         .or_else(|| catalog.weapon_bases.first());
     let Some((fighter, weapon, ultimate, passive_ids)) = catalog

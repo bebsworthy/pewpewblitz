@@ -72,7 +72,7 @@ supervisor/router process (no gameplay World)
 ```
 
 The supervisor is infrastructure authority, not Bevy gameplay or lobby authority. The lobby worker
-owns authenticated lobby sessions, advertised game types, build selection, queues, and allocation
+owns authenticated lobby sessions, advertised game types, saved profiles, queues, and allocation
 requests. Each match worker owns exactly one match's mutable gameplay, mode, map, terrain, physics,
 replication, outcomes, and cleanup. A client owns local session state and presentation of the
 authority to which it is currently connected.

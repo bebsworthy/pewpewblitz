@@ -224,10 +224,43 @@ struct DamageableObjectHealthUi {
 #[derive(Component)]
 struct DamageableObjectHealthFillUi;
 
+#[derive(Resource, Default)]
+struct DamageableObjectHealthUiIndex(std::collections::BTreeMap<DamageableObjectHealthKey, Entity>);
+
 /// Client-only 3D world composition. Gameplay authority remains planar and server-owned.
 pub(super) struct WorldPresentationPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum WorldPresentationSet {
+    PrepareAssets,
+    MaterializeTopology,
+    ReconcileState,
+    ConsumeCues,
+    Animate,
+    Cleanup,
+}
+
+fn configure_world_presentation_schedule(app: &mut App) {
+    app.configure_sets(
+        Update,
+        (
+            WorldPresentationSet::PrepareAssets,
+            WorldPresentationSet::MaterializeTopology,
+            WorldPresentationSet::ReconcileState,
+            WorldPresentationSet::ConsumeCues,
+            WorldPresentationSet::Animate,
+            WorldPresentationSet::Cleanup,
+        )
+            .chain()
+            .after(CombatClientSet::Sync),
+    );
+}
+
 impl Plugin for WorldPresentationPlugin {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the plugin build method is the visible composition point for six documented presentation phases"
+    )]
     fn build(&self, app: &mut App) {
         if let Some(config) = app
             .world()
@@ -237,9 +270,11 @@ impl Plugin for WorldPresentationPlugin {
         {
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
+        configure_world_presentation_schedule(app);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
+            .init_resource::<DamageableObjectHealthUiIndex>()
             .insert_resource(GlobalAmbientLight {
                 color: Color::srgb(0.72, 0.78, 0.9),
                 brightness: 350.0,
@@ -252,26 +287,58 @@ impl Plugin for WorldPresentationPlugin {
                 (
                     prepare_imported_assets,
                     environment_assets::prepare_environment_scenes,
-                    reconcile_3d_map.in_set(crate::map::MapPresentationSet::Materialize3d),
+                )
+                    .chain()
+                    .in_set(WorldPresentationSet::PrepareAssets),
+            )
+            .add_systems(
+                Update,
+                reconcile_3d_map
+                    .in_set(crate::map::MapPresentationSet::Materialize3d)
+                    .in_set(WorldPresentationSet::MaterializeTopology),
+            )
+            .add_systems(
+                Update,
+                (
                     reconcile_dynamic_map_visuals,
                     reconcile_restoration_pickup_visuals,
                     reconcile_heist_safe_visuals,
-                    update_heist_safe_status_visuals,
-                    update_damageable_map_visuals,
-                    combat::reconcile_combat_visuals,
-                    upgrade_fighters_to_imported_models,
-                    combat::update_fighter_concealment_visuals,
+                    (
+                        combat::reconcile_combat_visuals,
+                        upgrade_fighters_to_imported_models,
+                    )
+                        .chain(),
+                )
+                    .in_set(WorldPresentationSet::ReconcileState),
+            )
+            .add_systems(
+                Update,
+                (
                     combat::consume_combat_cues,
                     combat::consume_world_object_cues,
                     combat::consume_pickup_cues,
                     combat::consume_heist_objective_cues,
-                    combat::update_combat_visual_state,
-                    update_character_animation,
-                    combat::cleanup_combat_effects,
+                )
+                    .in_set(WorldPresentationSet::ConsumeCues),
+            )
+            .add_systems(
+                Update,
+                (
+                    update_heist_safe_status_visuals,
+                    update_damageable_map_visuals,
+                    (
+                        combat::update_fighter_concealment_visuals,
+                        combat::update_combat_visual_state,
+                        update_character_animation,
+                    )
+                        .chain(),
                     tint_3d_zone,
                 )
-                    .chain()
-                    .after(CombatClientSet::Sync),
+                    .in_set(WorldPresentationSet::Animate),
+            )
+            .add_systems(
+                Update,
+                combat::cleanup_combat_effects.in_set(WorldPresentationSet::Cleanup),
             )
             .add_systems(
                 PostUpdate,
@@ -301,6 +368,31 @@ struct DynamicMapVisual {
     placement_id: crate::map::MapPlacementId,
     generation: u64,
     asset_id: crate::map::MapAssetId,
+}
+
+#[derive(Default)]
+struct DynamicMapReconcileState {
+    stamp: Option<DynamicMapReconcileStamp>,
+}
+
+impl DynamicMapReconcileState {
+    fn accepts(&mut self, stamp: DynamicMapReconcileStamp) -> bool {
+        if self.stamp == Some(stamp) {
+            return false;
+        }
+        self.stamp = Some(stamp);
+        true
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DynamicMapReconcileStamp {
+    source_root: Entity,
+    instance_id: crate::map::MapInstanceId,
+    generation: u64,
+    revision: u64,
+    imported_readiness: u8,
+    visual_count: usize,
 }
 
 #[derive(Component)]
@@ -415,8 +507,6 @@ fn reconcile_heist_safe_visuals(
     )>,
     mut visuals: Query<(Entity, &HeistSafeVisual, &mut Transform, &mut Visibility)>,
 ) {
-    let safe_entities: std::collections::BTreeSet<_> =
-        safes.iter().map(|(entity, ..)| entity).collect();
     let mut existing = std::collections::BTreeSet::new();
     for (visual_entity, visual, mut transform, mut visibility) in &mut visuals {
         let Ok((_, _, position, life)) = safes.get(visual.owner) else {
@@ -440,7 +530,7 @@ fn reconcile_heist_safe_visuals(
         return;
     }
     for (owner, safe, position, life) in &safes {
-        if existing.contains(&owner) || !safe_entities.contains(&owner) {
+        if existing.contains(&owner) {
             continue;
         }
         let team_material = if safe.defending_team.0 == 0 {
@@ -483,20 +573,21 @@ fn reconcile_heist_safe_visuals(
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::type_complexity,
     reason = "Bevy system parameters are injected by value"
 )]
 fn update_heist_safe_status_visuals(
     materials: Res<Material3dAssets>,
     safes: Query<
         (
-            &crate::combat::CurrentHealth,
-            &crate::map::DamageableMaximumHealth,
-            &crate::map::DamageableLifeState,
+            Ref<crate::combat::CurrentHealth>,
+            Ref<crate::map::DamageableMaximumHealth>,
+            Ref<crate::map::DamageableLifeState>,
         ),
         With<crate::matchplay::HeistSafe>,
     >,
     mut status_visuals: Query<(
-        &HeistSafeStatusVisual,
+        Ref<HeistSafeStatusVisual>,
         &mut MeshMaterial3d<StandardMaterial>,
     )>,
 ) {
@@ -504,12 +595,16 @@ fn update_heist_safe_status_visuals(
         let Ok((health, maximum, life)) = safes.get(status.owner) else {
             continue;
         };
+        if !status.is_added() && !health.is_changed() && !maximum.is_changed() && !life.is_changed()
+        {
+            continue;
+        }
         let critical = maximum.0 > 0
             && u32::from(health.0) * 100
                 <= u32::from(maximum.0)
                     * u32::from(crate::matchplay::HEIST_CRITICAL_HEALTH_PERCENT);
         material.0 =
-            if critical || matches!(life, crate::map::DamageableLifeState::TerminalCommitted) {
+            if critical || matches!(*life, crate::map::DamageableLifeState::TerminalCommitted) {
                 materials.effect_damage.clone()
             } else {
                 status.team_material.clone()
@@ -553,6 +648,7 @@ fn reconcile_dynamic_map_visuals(
         &crate::map::MapPresentationMember,
         &DynamicMapVisual,
     )>,
+    mut reconciliation: Local<DynamicMapReconcileState>,
 ) {
     let Some(accepted) = accepted else {
         return;
@@ -560,10 +656,32 @@ fn reconcile_dynamic_map_visuals(
     let Ok((snapshot, state)) = grids.get(accepted.source_root) else {
         return;
     };
+    let imported_readiness_stamp = match imported_readiness.as_deref() {
+        None => 0,
+        Some(environment_assets::EnvironmentAssetReadiness::Loading) => 1,
+        Some(environment_assets::EnvironmentAssetReadiness::Ready) => 2,
+        Some(environment_assets::EnvironmentAssetReadiness::Degraded(_)) => 3,
+    };
+    let stamp = DynamicMapReconcileStamp {
+        source_root: accepted.source_root,
+        instance_id: snapshot.identity.instance_id,
+        generation: state.generation,
+        revision: state.revision,
+        imported_readiness: imported_readiness_stamp,
+        visual_count: existing.iter().count(),
+    };
+    if !reconciliation.accepts(stamp) {
+        return;
+    }
     let terminal: std::collections::BTreeMap<_, _> = state
         .terminal_states
         .iter()
         .map(|transition| (transition.placement_id, transition.outcome))
+        .collect();
+    let placements_by_id: std::collections::BTreeMap<_, _> = snapshot
+        .placements
+        .iter()
+        .map(|placement| (placement.placement_id, placement))
         .collect();
     let desired_asset =
         |placement: &crate::map::MapAssetPlacement| match terminal.get(&placement.placement_id) {
@@ -573,11 +691,9 @@ fn reconcile_dynamic_map_visuals(
         };
     let mut present = std::collections::BTreeSet::new();
     for (entity, member, visual) in &existing {
-        let desired = snapshot
-            .placements
-            .iter()
-            .find(|placement| placement.placement_id == visual.placement_id)
-            .and_then(desired_asset);
+        let desired = placements_by_id
+            .get(&visual.placement_id)
+            .and_then(|placement| desired_asset(placement));
         if member.instance_id != snapshot.identity.instance_id
             || visual.generation != state.generation
             || desired != Some(visual.asset_id)
@@ -714,30 +830,25 @@ fn reconcile_restoration_pickup_visuals(
     visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
     catalog: Res<crate::map::MapCatalogResource>,
-    pickups: Query<
-        (
-            Entity,
-            &Position,
-            &crate::map::RestorationPickupDefinitionId,
-        ),
-        With<crate::map::RestorationPickup>,
-    >,
+    pickups: Query<(
+        Entity,
+        &Position,
+        &crate::map::RestorationPickupDefinitionId,
+        Ref<crate::map::RestorationPickup>,
+    )>,
     mut visuals: Query<(Entity, &RestorationPickupVisual, &mut Transform)>,
 ) {
-    let owners: std::collections::BTreeSet<_> = pickups.iter().map(|(entity, ..)| entity).collect();
-    let mut present = std::collections::BTreeSet::new();
     for (visual_entity, visual, mut transform) in &mut visuals {
-        let Ok((_, position, _)) = pickups.get(visual.owner) else {
+        let Ok((_, position, _, _)) = pickups.get(visual.owner) else {
             commands.entity(visual_entity).despawn();
             continue;
         };
-        present.insert(visual.owner);
         let bob = (time.elapsed_secs() * 2.8).sin() * 3.0;
         transform.translation = ground_position(position.0) + Vec3::Y * (16.0 + bob);
         transform.rotation = Quat::from_rotation_y(time.elapsed_secs() * 0.8);
     }
-    for (owner, position, definition_id) in &pickups {
-        if !owners.contains(&owner) || present.contains(&owner) {
+    for (owner, position, definition_id, pickup) in &pickups {
+        if !pickup.is_added() || visuals.iter().any(|(_, visual, _)| visual.owner == owner) {
             continue;
         }
         let Some(definition) = catalog.0.restoration_pickup(*definition_id) else {
@@ -816,6 +927,7 @@ fn primitive_dynamic_visual_transform(
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::type_complexity,
     reason = "Bevy systems receive resource system parameters by value"
 )]
 fn update_damageable_map_visuals(
@@ -823,25 +935,27 @@ fn update_damageable_map_visuals(
     objects: Query<
         (
             &crate::map::DamageableTargetIdentity,
-            &crate::combat::CurrentHealth,
-            &crate::map::DamageableMaximumHealth,
+            Ref<crate::combat::CurrentHealth>,
+            Ref<crate::map::DamageableMaximumHealth>,
         ),
         With<crate::map::DamageableWorldObject>,
     >,
-    mut visuals: Query<(&DynamicMapVisual, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut visuals: Query<(Ref<DynamicMapVisual>, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
-    let health_by_placement: std::collections::BTreeMap<_, _> = objects
-        .iter()
-        .map(|(identity, health, maximum)| (identity.placement_id(), (health.0, maximum.0)))
-        .collect();
     for (visual, mut material) in &mut visuals {
         if visual.asset_id != crate::map::OIL_BARREL_ASSET {
             continue;
         }
-        material.0 = if health_by_placement
-            .get(&visual.placement_id)
-            .is_some_and(|(health, maximum)| health < maximum)
-        {
+        let Some((_, health, maximum)) = objects
+            .iter()
+            .find(|(identity, ..)| identity.placement_id() == visual.placement_id)
+        else {
+            continue;
+        };
+        if !visual.is_added() && !health.is_changed() && !maximum.is_changed() {
+            continue;
+        }
+        material.0 = if health.0 < maximum.0 {
             materials.barrel_damaged.clone()
         } else {
             materials.barrel.clone()
@@ -856,6 +970,7 @@ fn damageable_object_health_fraction(current: u16, maximum: u16) -> Option<f32> 
 
 fn spawn_damageable_object_health_ui(
     commands: &mut Commands,
+    index: &mut DamageableObjectHealthUiIndex,
     key: DamageableObjectHealthKey,
     fraction: f32,
 ) {
@@ -872,7 +987,7 @@ fn spawn_damageable_object_health_ui(
             Name::new("damageable object floating health fill"),
         ))
         .id();
-    commands
+    let root = commands
         .spawn((
             DamageableObjectHealthUi { key, fill },
             Node {
@@ -889,7 +1004,9 @@ fn spawn_damageable_object_health_ui(
             Visibility::Hidden,
             Name::new("damageable object projected floating health bar"),
         ))
-        .add_child(fill);
+        .add_child(fill)
+        .id();
+    index.0.insert(key, root);
 }
 
 fn projected_object_health_top_left(viewport: Vec2, anchor: Vec2) -> Option<Vec2> {
@@ -913,6 +1030,7 @@ fn projected_object_health_top_left(viewport: Vec2, anchor: Vec2) -> Option<Vec2
 )]
 fn project_damageable_object_health_ui(
     mut commands: Commands,
+    mut index: ResMut<DamageableObjectHealthUiIndex>,
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
     heist_readiness: Res<hud::ClientHeistReadiness>,
     objects: Query<
@@ -934,12 +1052,7 @@ fn project_damageable_object_health_ui(
         &crate::map::MapPresentationMember,
         &GlobalTransform,
     )>,
-    mut overheads: Query<(
-        Entity,
-        &DamageableObjectHealthUi,
-        &mut Node,
-        &mut Visibility,
-    )>,
+    mut overheads: Query<(&DamageableObjectHealthUi, &mut Node, &mut Visibility)>,
     mut fills: Query<
         &mut Node,
         (
@@ -999,16 +1112,26 @@ fn project_damageable_object_health_ui(
             .logical_viewport_size()
             .map(|viewport| (camera, transform, viewport))
     });
-    let mut existing = std::collections::BTreeSet::new();
-    for (entity, overhead, mut node, mut visibility) in &mut overheads {
-        let Some((world_position, fraction)) = desired.get(&overhead.key) else {
-            commands.entity(entity).despawn();
+    let stale: Vec<_> = index
+        .0
+        .iter()
+        .filter_map(|(key, entity)| (!desired.contains_key(key)).then_some((*key, *entity)))
+        .collect();
+    for (key, entity) in stale {
+        commands.entity(entity).try_despawn();
+        index.0.remove(&key);
+    }
+    for (key, (world_position, fraction)) in &desired {
+        let Some(entity) = index.0.get(key).copied() else {
+            spawn_damageable_object_health_ui(&mut commands, &mut index, *key, *fraction);
             continue;
         };
-        if !existing.insert(overhead.key) {
-            commands.entity(entity).despawn();
+        let Ok((overhead, mut node, mut visibility)) = overheads.get_mut(entity) else {
+            index.0.remove(key);
+            spawn_damageable_object_health_ui(&mut commands, &mut index, *key, *fraction);
             continue;
-        }
+        };
+        debug_assert_eq!(overhead.key, *key);
         if let Ok(mut fill) = fills.get_mut(overhead.fill) {
             fill.width = percent(fraction * 100.0);
         }
@@ -1030,12 +1153,6 @@ fn project_damageable_object_health_ui(
         node.left = px(top_left.x);
         node.top = px(top_left.y);
         *visibility = Visibility::Inherited;
-    }
-    for (key, (_, fraction)) in desired {
-        if existing.contains(&key) {
-            continue;
-        }
-        spawn_damageable_object_health_ui(&mut commands, key, fraction);
     }
 }
 
@@ -2049,6 +2166,93 @@ fn tint_3d_zone(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Resource, Default)]
+    struct PresentationScheduleTrace(Vec<&'static str>);
+
+    fn presentation_probe(
+        label: &'static str,
+    ) -> impl FnMut(ResMut<PresentationScheduleTrace>) + 'static {
+        move |mut trace: ResMut<PresentationScheduleTrace>| trace.0.push(label)
+    }
+
+    #[test]
+    fn presentation_phases_preserve_sync_and_semantic_order() {
+        let mut app = App::new();
+        crate::test_app::reject_owned_schedule_ambiguities(&mut app);
+        app.init_resource::<PresentationScheduleTrace>();
+        configure_world_presentation_schedule(&mut app);
+        app.add_systems(
+            Update,
+            (
+                presentation_probe("sync").in_set(CombatClientSet::Sync),
+                presentation_probe("assets").in_set(WorldPresentationSet::PrepareAssets),
+                presentation_probe("topology").in_set(WorldPresentationSet::MaterializeTopology),
+                presentation_probe("state").in_set(WorldPresentationSet::ReconcileState),
+                presentation_probe("cues").in_set(WorldPresentationSet::ConsumeCues),
+                presentation_probe("animate").in_set(WorldPresentationSet::Animate),
+                presentation_probe("cleanup").in_set(WorldPresentationSet::Cleanup),
+            ),
+        );
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<PresentationScheduleTrace>().0,
+            vec![
+                "sync", "assets", "topology", "state", "cues", "animate", "cleanup"
+            ]
+        );
+    }
+
+    #[test]
+    fn maximum_builtin_dynamic_map_reconciles_once_across_stable_frames() {
+        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+        let maximum_dynamic_visuals = catalog
+            .presets
+            .iter()
+            .map(|preset| {
+                let resolved = catalog
+                    .resolve_preset(preset.id, crate::map::MapInstanceId(1))
+                    .unwrap();
+                resolved
+                    .snapshot
+                    .placements
+                    .iter()
+                    .filter(|placement| {
+                        catalog
+                            .asset(placement.asset_id)
+                            .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
+                            .is_some_and(map_profile_has_dynamic_runtime)
+                    })
+                    .count()
+            })
+            .max()
+            .unwrap();
+        assert!(maximum_dynamic_visuals > 0);
+
+        let mut reconciliation = DynamicMapReconcileState::default();
+        let mut stamp = DynamicMapReconcileStamp {
+            source_root: Entity::PLACEHOLDER,
+            instance_id: crate::map::MapInstanceId(1),
+            generation: 1,
+            revision: 0,
+            imported_readiness: 2,
+            visual_count: maximum_dynamic_visuals,
+        };
+        let stable_runs = (0..600).filter(|_| reconciliation.accepts(stamp)).count();
+        assert_eq!(
+            stable_runs, 1,
+            "stable topology does one reconciliation pass"
+        );
+
+        stamp.revision = 1;
+        assert!(reconciliation.accepts(stamp));
+        stamp.imported_readiness = 3;
+        assert!(reconciliation.accepts(stamp));
+        stamp.visual_count -= 1;
+        assert!(reconciliation.accepts(stamp));
+    }
 
     #[test]
     fn feature_yard_hot_zone_anchor_materializes_at_exact_world_scale() {

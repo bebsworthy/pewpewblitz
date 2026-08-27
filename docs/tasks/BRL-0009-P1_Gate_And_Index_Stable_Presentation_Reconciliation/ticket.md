@@ -1,13 +1,14 @@
 ---
 id: BRL-0009
 title: 'P1: Gate and index stable presentation reconciliation'
-status: backlog
+status: doing
 theme: quality
 release:
+priority: none
 created: 2026-08-27T18:15:29Z
-modified: 2026-08-27T18:15:31Z
+modified: 2026-08-27T20:28:47Z
 closed:
-revision: 09e8d1e3ed6bcdb8
+revision: ac51da509dab6dce
 blocks: []
 related: [BRL-0002]
 ---

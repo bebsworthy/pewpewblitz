@@ -657,7 +657,6 @@ pub(super) fn authoritative_composed_fire(
             (&mut WeaponState, &mut HealthRecoveryState),
             Option<&ActionState<FighterInput>>,
             Option<&Defeated>,
-            Option<&AwaitingPostSelectionInput>,
             Option<&crate::matchplay::MatchParticipant>,
         ),
         With<Fighter>,
@@ -676,12 +675,10 @@ pub(super) fn authoritative_composed_fire(
         (mut state, mut health_recovery),
         action,
         defeated,
-        activation_barrier,
         match_participant,
     ) in query
     {
         if defeated.is_some()
-            || activation_barrier.is_some()
             || (match_participant.is_some() && !active_combatants.contains(entity))
         {
             continue;

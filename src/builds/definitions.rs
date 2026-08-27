@@ -1,6 +1,6 @@
 use super::{
-    BrawlerBuildRecipe, BuildPresetId, BuildRecipeFingerprint, BuildRevision, PassiveDefinitionId,
-    PassiveKind, PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout,
+    BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, PassiveDefinitionId, PassiveKind,
+    PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout,
     ResolvedPassive, ResolvedUltimate, RevealProximityModifier, SelectedBuild,
     UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
 };
@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 6;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 6;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 7;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 7;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -34,7 +34,6 @@ pub struct BuildCatalog {
     pub weapon_costs: Vec<WeaponPointCost>,
     pub ultimates: Vec<UltimateDefinition>,
     pub passives: Vec<PassiveDefinition>,
-    pub presets: Vec<BuildPresetDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -100,14 +99,6 @@ pub struct PassiveDefinition {
     pub point_cost: u8,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct BuildPresetDefinition {
-    pub id: BuildPresetId,
-    pub key: String,
-    pub display_name: String,
-    pub recipe: BrawlerBuildRecipe,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BuildResolutionError {
     UnknownId,
@@ -130,19 +121,14 @@ impl BuildCatalog {
             return Err("unsupported build catalog schema/revision".into());
         }
         self.validate_tuning()?;
-        if self.weapon_costs.len() != 4
-            || self.ultimates.len() != 5
-            || self.passives.len() != 6
-            || self.presets.len() != 7
-        {
+        if self.weapon_costs.len() != 4 || self.ultimates.len() != 5 || self.passives.len() != 6 {
             return Err(
-                "V9 M03 requires four weapon costs, five ultimates, six passives, and seven presets"
+                "the build catalog requires four weapon costs, five ultimates, and six passives"
                     .into(),
             );
         }
         validate_metadata(&self.ultimates, |d| d.id.0, |d| &d.key, |d| &d.display_name)?;
         validate_metadata(&self.passives, |d| d.id.0, |d| &d.key, |d| &d.display_name)?;
-        validate_metadata(&self.presets, |d| d.id.0, |d| &d.key, |d| &d.display_name)?;
         let expected_weapon_costs = [
             (WeaponPresetId(1), 4),
             (WeaponPresetId(2), 5),
@@ -173,13 +159,8 @@ impl BuildCatalog {
             .all(|(definition, expected)| {
                 (definition.id, definition.kind, definition.point_cost) == expected
             })
-            || !self.presets.iter().enumerate().all(|(index, preset)| {
-                preset.id.0 == u16::try_from(index + 1).expect("four presets fit u16")
-            })
         {
-            return Err(
-                "passive or preset inventory does not match the M08 engine contract".into(),
-            );
+            return Err("passive inventory does not match the engine contract".into());
         }
         if self
             .ultimates
@@ -195,12 +176,6 @@ impl BuildCatalog {
                 .any(|d| d.point_cost == 0 || d.point_cost > BUILD_POINT_BUDGET)
         {
             return Err("invalid authored point cost".into());
-        }
-        let weapons = WeaponCatalog::embedded()?;
-        let fighter = crate::combat::FighterDefinitions::default().entries[0];
-        for preset in &self.presets {
-            resolve_build_recipe(self, &weapons, &fighter, preset.recipe, Some(preset.id))
-                .map_err(|error| format!("illegal build preset {}: {error:?}", preset.key))?;
         }
         if postcard::to_allocvec(self).map_or(true, |bytes| bytes.len() > 16 * 1024) {
             return Err("build catalog exceeds engine size ceiling".into());
@@ -265,11 +240,6 @@ impl BuildCatalog {
             }
         }
         Ok(())
-    }
-
-    #[must_use]
-    pub fn preset(&self, id: BuildPresetId) -> Option<&BuildPresetDefinition> {
-        self.presets.iter().find(|definition| definition.id == id)
     }
 
     #[must_use]
@@ -414,9 +384,8 @@ pub fn resolve_build_recipe(
     weapons: &WeaponCatalog,
     fighter: &FighterDefinition,
     recipe: BrawlerBuildRecipe,
-    source_preset_id: Option<BuildPresetId>,
 ) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
-    resolve_build_recipe_inner(catalog, weapons, fighter, recipe, source_preset_id, None)
+    resolve_build_recipe_inner(catalog, weapons, fighter, recipe, None)
 }
 
 /// Resolve V7's authored saved-brawler recipe without the retired point-budget or frame-passive
@@ -459,7 +428,6 @@ pub fn resolve_saved_brawler_recipe(
             ultimate,
             passives,
         },
-        None,
         Some((fighter_profile_id.0, fighter_stats)),
     )
 }
@@ -470,17 +438,8 @@ fn resolve_build_recipe_inner(
     weapons: &WeaponCatalog,
     fighter: &FighterDefinition,
     recipe: BrawlerBuildRecipe,
-    source_preset_id: Option<BuildPresetId>,
     explicit_fighter_profile: Option<(u16, ResolvedFighterStats)>,
 ) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
-    if let Some(preset_id) = source_preset_id {
-        let preset = catalog
-            .preset(preset_id)
-            .ok_or(BuildResolutionError::UnknownId)?;
-        if preset.recipe != recipe {
-            return Err(BuildResolutionError::InvalidCombination);
-        }
-    }
     if postcard::to_allocvec(&recipe).map_or(true, |bytes| bytes.len() > MAX_BUILD_CANDIDATE_BYTES)
     {
         return Err(BuildResolutionError::CandidateTooLarge);
@@ -561,7 +520,6 @@ fn resolve_build_recipe_inner(
     }
     .map_err(|_| BuildResolutionError::ResolutionFailed)?;
     let identity = SelectedBuild {
-        source_build_preset_id: source_preset_id,
         recipe_fingerprint: BuildRecipeFingerprint(fnv1a64(&fingerprint_bytes)),
         revision: catalog.balance_revision,
     };

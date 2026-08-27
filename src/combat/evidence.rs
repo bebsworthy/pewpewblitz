@@ -824,7 +824,7 @@ pub fn record_headless_combat_observation(
     }
     if !observation.wrote_ready && observation.waiting_reported_at_tick.is_none() {
         let required = config
-            .build_preset
+            .weapon_preset
             .map(required_client_checkpoints)
             .unwrap_or_default();
         let missing = required
@@ -861,7 +861,7 @@ pub fn record_headless_combat_observation(
     if observation.wrote_ready
         || !observation.saw_defeat
         || !observation.saw_reset
-        || config.build_preset.is_some_and(|preset| {
+        || config.weapon_preset.is_some_and(|preset| {
             required_client_checkpoints(preset)
                 .iter()
                 .any(|checkpoint| !observation.checkpoints.contains_key(*checkpoint))
@@ -956,7 +956,6 @@ mod tests {
         CombatFighterSnapshot {
             network_entity_id,
             selected_build: Some(crate::builds::SelectedBuild {
-                source_build_preset_id: Some(crate::builds::BuildPresetId(3)),
                 recipe_fingerprint: crate::builds::BuildRecipeFingerprint(77),
                 revision: crate::builds::BuildRevision(1),
             }),

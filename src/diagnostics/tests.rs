@@ -617,16 +617,14 @@ fn failure_records_are_bounded_and_render_deterministically() {
 
 #[test]
 fn participant_identity_passes_manifest_validation() {
-    use crate::builds::{BuildPresetId, BuildRecipeFingerprint, BuildRevision, SelectedBuild};
+    use crate::builds::{BuildRecipeFingerprint, BuildRevision, SelectedBuild};
 
     let builds = [
         SelectedBuild {
-            source_build_preset_id: Some(BuildPresetId(3)),
             recipe_fingerprint: BuildRecipeFingerprint(u64::MAX),
             revision: BuildRevision(u16::MAX),
         },
         SelectedBuild {
-            source_build_preset_id: None,
             recipe_fingerprint: BuildRecipeFingerprint(0),
             revision: BuildRevision(0),
         },
@@ -1168,7 +1166,7 @@ fn common_window_uses_fixed_authoritative_tick_boundaries() {
 #[test]
 fn manifest_participants_are_cached_while_fighters_live_and_survive_shutdown() {
     use super::process::ProcessDiagnosticsState;
-    use crate::builds::{BuildPresetId, BuildRecipeFingerprint, BuildRevision, SelectedBuild};
+    use crate::builds::{BuildRecipeFingerprint, BuildRevision, SelectedBuild};
     use crate::protocol::{Fighter, PlayerId};
 
     fn rows(app: &App) -> Vec<ManifestParticipant> {
@@ -1178,7 +1176,6 @@ fn manifest_participants_are_cached_while_fighters_live_and_survive_shutdown() {
             .clone()
     }
     let build = |revision: u16| SelectedBuild {
-        source_build_preset_id: Some(BuildPresetId(3)),
         recipe_fingerprint: BuildRecipeFingerprint(7),
         revision: BuildRevision(revision),
     };

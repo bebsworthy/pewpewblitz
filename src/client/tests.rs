@@ -3,31 +3,6 @@
 use super::*;
 
 #[test]
-fn build_editor_stick_has_independent_vertical_and_horizontal_edges() {
-    let mut x_ready = true;
-    let mut y_ready = true;
-    assert_eq!(
-        editor_axis_edges(Vec2::new(0.0, 0.8), &mut x_ready, &mut y_ready),
-        (false, false, true, false),
-    );
-    assert_eq!(
-        editor_axis_edges(Vec2::new(0.0, 0.8), &mut x_ready, &mut y_ready),
-        (false, false, false, false),
-        "a held stick must not repeat without crossing the neutral hysteresis",
-    );
-    let _ = editor_axis_edges(Vec2::ZERO, &mut x_ready, &mut y_ready);
-    assert_eq!(
-        editor_axis_edges(Vec2::new(0.8, 0.0), &mut x_ready, &mut y_ready),
-        (false, true, false, false),
-    );
-    let _ = editor_axis_edges(Vec2::ZERO, &mut x_ready, &mut y_ready);
-    assert_eq!(
-        editor_axis_edges(Vec2::new(0.0, -0.8), &mut x_ready, &mut y_ready),
-        (false, false, false, true),
-    );
-}
-
-#[test]
 fn automatic_match_ready_waits_for_the_requested_roster() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;
@@ -98,14 +73,14 @@ fn gameplay_window_defaults_to_reference_aspect_and_preserves_override() {
 }
 
 #[test]
-fn headless_custom_build_and_cover_lane_movement_are_bounded() {
+fn headless_weapon_preset_and_cover_lane_movement_are_bounded() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;
-    config.build_preset = Some(7);
+    config.weapon_preset = Some(4);
     assert!(config.validate().is_ok());
-    config.build_preset = Some(8);
+    config.weapon_preset = Some(5);
     assert!(config.validate().is_err());
-    config.build_preset = Some(7);
+    config.weapon_preset = Some(4);
     config.window_size = Some((960, 540));
     assert!(config.validate().is_ok());
     config.window_size = Some((639, 540));
@@ -566,7 +541,6 @@ fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
                 crate::builds::PassiveDefinitionId(6),
             ],
         },
-        None,
     )
     .expect("arc launcher loadout resolves")
 }
@@ -587,7 +561,6 @@ fn resolved_reveal_scan_loadout() -> crate::builds::ResolvedMatchLoadout {
                 crate::builds::PassiveDefinitionId(6),
             ],
         },
-        None,
     )
     .expect("reveal scan loadout resolves")
 }

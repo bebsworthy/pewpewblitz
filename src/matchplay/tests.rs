@@ -488,7 +488,6 @@ fn two_preset_telemetry_context() -> MatchTelemetryContext {
                 network_entity_id,
                 team,
                 selected_build: crate::builds::SelectedBuild {
-                    source_build_preset_id: None,
                     recipe_fingerprint: crate::builds::BuildRecipeFingerprint(0),
                     revision: crate::builds::BuildRevision(1),
                 },

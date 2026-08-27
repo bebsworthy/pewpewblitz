@@ -59,7 +59,6 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
         resolved.ultimate.kind,
         crate::builds::UltimateKind::RevealScan
     );
-    assert_eq!(resolved.identity.source_build_preset_id, None);
     let snapshot =
         MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, &fighter).unwrap();
     let decoded = MatchBuildSnapshotV3::decode(&snapshot.encode().unwrap()).unwrap();

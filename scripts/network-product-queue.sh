@@ -2,13 +2,13 @@
 set -eu
 
 # M04 production queue smoke: one real routed lobby client observes the initial full snapshot,
-# joins with a bounded build, observes the admission revision, cancels, observes the removal
+# joins with a saved brawler, observes the admission revision, cancels, observes the removal
 # revision, and exits. The production lobby composition installs no allocation driver.
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
 timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-30}
-build_preset=${BRAWLER_QUEUE_BUILD_PRESET:-1}
+weapon_preset=${BRAWLER_QUEUE_WEAPON_PRESET:-1}
 supervisor_pid=
 client_pid=
 watchdog_pid=
@@ -61,7 +61,7 @@ target/debug/brawler-client \
     --auto-connect \
     --headless \
     --product-queue-smoke \
-    --build-preset "$build_preset" &
+    --weapon-preset "$weapon_preset" &
 client_pid=$!
 
 parent_pid=$$

@@ -1,5 +1,5 @@
 (
-    schema_version: 6,
+    schema_version: 7,
     balance_revision: BuildRevision(5),
     fighter_profiles: (
         default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0),
@@ -37,14 +37,5 @@
         (id: PassiveDefinitionId(4), key: "close-quarters", display_name: "Close Quarters", kind: CloseQuarters, point_cost: 2),
         (id: PassiveDefinitionId(5), key: "quick-cycle", display_name: "Quick Cycle", kind: QuickCycle, point_cost: 2),
         (id: PassiveDefinitionId(6), key: "tenacity", display_name: "Tenacity", kind: Tenacity, point_cost: 1),
-    ],
-    presets: [
-        (id: BuildPresetId(1), key: "runner", display_name: "Runner", recipe: (weapon: Preset(WeaponPresetId(1)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(1), PassiveDefinitionId(3)))),
-        (id: BuildPresetId(2), key: "bruiser", display_name: "Bruiser", recipe: (weapon: Preset(WeaponPresetId(2)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(2), PassiveDefinitionId(6)))),
-        (id: BuildPresetId(3), key: "controller", display_name: "Controller", recipe: (weapon: Preset(WeaponPresetId(3)), ultimate: UltimateDefinitionId(2), passives: (PassiveDefinitionId(5), PassiveDefinitionId(6)))),
-        (id: BuildPresetId(4), key: "duelist", display_name: "Duelist", recipe: (weapon: Preset(WeaponPresetId(4)), ultimate: UltimateDefinitionId(1), passives: (PassiveDefinitionId(4), PassiveDefinitionId(1)))),
-        (id: BuildPresetId(5), key: "infiltrator", display_name: "Infiltrator", recipe: (weapon: Preset(WeaponPresetId(1)), ultimate: UltimateDefinitionId(3), passives: (PassiveDefinitionId(4), PassiveDefinitionId(6)))),
-        (id: BuildPresetId(6), key: "tracker", display_name: "Tracker", recipe: (weapon: Preset(WeaponPresetId(2)), ultimate: UltimateDefinitionId(4), passives: (PassiveDefinitionId(5), PassiveDefinitionId(6)))),
-        (id: BuildPresetId(7), key: "veilkeeper", display_name: "Veilkeeper", recipe: (weapon: Preset(WeaponPresetId(3)), ultimate: UltimateDefinitionId(5), passives: (PassiveDefinitionId(5), PassiveDefinitionId(6)))),
     ],
 )

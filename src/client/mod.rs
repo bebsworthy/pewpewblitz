@@ -3,15 +3,14 @@
 use crate::{
     VERSION,
     combat::{
-        AuthoritativeTick, BuildSelectionText, ClientCombatEvidenceStatus, ClientCombatPlugin,
-        CombatAbilityHudText, CombatHudText, SelectingBuild,
+        AuthoritativeTick, ClientCombatEvidenceStatus, ClientCombatPlugin, CombatAbilityHudText,
+        CombatHudText,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     gameplay::GameplayPlugin,
     matchplay::{MatchParticipant, MatchPhase, MatchRoot, MatchState},
     movement::AvianNetworkPlugin,
     protocol::{
-        BuildSelection, BuildSelectionDecision, BuildSelectionOutcome, BuildSelectionRequest,
         Fighter, FighterInput, LobbyHello, LobbyJoinOutcome, LobbyServerIdentity, MatchCommand,
         MatchCommandOutcome, MatchCommandRequest, MatchHello, MatchJoinOutcome, MatchJoinRejection,
         MatchLoadingClientAction, MatchLoadingClientMessage, MatchLoadingServerMessage,
@@ -55,8 +54,6 @@ const DEFAULT_GAMEPLAY_WINDOW_ASPECT: f32 = 1_591.0 / 720.0;
 
 mod assets;
 mod audio;
-mod build_editor;
-mod build_persistence;
 mod connection_persistence;
 mod dashboard;
 mod evidence_capture;
@@ -75,11 +72,6 @@ mod session;
 mod settings;
 mod shell;
 pub(crate) use assets::ClientAssetHandles;
-pub use build_editor::{
-    BuildEditorField, BuildEditorState, BuildPreview, compare_build_alternative,
-    resolve_build_preview,
-};
-pub use build_persistence::{BuildFileV1, ClientBuildPath, load_build, save_build};
 pub use flow::{
     CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,
     FlowErrorAction, FlowErrorKind, SelectedGameType, SessionPurpose,
@@ -293,51 +285,11 @@ pub struct HeadlessAutomation {
     pub(crate) elapsed_ticks: u32,
 }
 
-#[derive(Resource, Debug)]
-struct BuildSelectionState {
-    next_request_id: u64,
-    current_index: usize,
-    last_sent: Option<u64>,
-    last_outcome: Option<BuildSelectionOutcome>,
-    last_match_id: Option<crate::matchplay::MatchId>,
-    analog_x_ready: bool,
-    analog_y_ready: bool,
-    custom_field: usize,
-    custom_recipe: crate::builds::BrawlerBuildRecipe,
-}
-
 #[derive(Resource, Debug, Default)]
 struct MatchCommandState {
     next_request_id: u64,
     sent_for_phase: Option<(crate::matchplay::MatchId, MatchPhase)>,
     last_outcome: Option<MatchCommandOutcome>,
-}
-
-impl Default for BuildSelectionState {
-    fn default() -> Self {
-        Self {
-            next_request_id: 0,
-            current_index: 0,
-            last_sent: None,
-            last_outcome: None,
-            last_match_id: None,
-            analog_x_ready: true,
-            analog_y_ready: true,
-            custom_field: 0,
-            custom_recipe: crate::builds::BrawlerBuildRecipe {
-                weapon: crate::builds::WeaponChoice::CustomPulse {
-                    power: crate::builds::PulsePower::Balanced,
-                    reach: crate::builds::PulseReach::Standard,
-                    magazine: crate::builds::PulseMagazine::Standard,
-                },
-                ultimate: crate::builds::UltimateDefinitionId(1),
-                passives: [
-                    crate::builds::PassiveDefinitionId(1),
-                    crate::builds::PassiveDefinitionId(6),
-                ],
-            },
-        }
-    }
 }
 
 impl FromWorld for HeadlessAutomation {

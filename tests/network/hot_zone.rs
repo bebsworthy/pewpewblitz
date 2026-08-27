@@ -60,18 +60,7 @@ fn step_until_budget(
 
 fn select_ready_and_activate(harness: &mut Harness, request_base: u64) {
     harness.step_until(|harness| (0..2).all(|index| harness.client_is_active(index)));
-    let waiting = server_match(harness);
-    for index in 0..2 {
-        harness.send_build_selection(
-            index,
-            BuildSelectionRequest {
-                request_id: request_base,
-                match_id: waiting.match_id,
-                selection: BuildSelection::Preset(BuildPresetId(u16::try_from(index + 1).unwrap())),
-            },
-        );
-    }
-    harness.step_until(|harness| (0..2).all(|index| harness.selection_is_complete(index)));
+    harness.step_until(|harness| (0..2).all(|index| harness.loadout_is_ready(index)));
     let waiting = server_match(harness);
     for index in 0..2 {
         harness.send_match_command(
@@ -407,18 +396,7 @@ fn hot_zone_client_forgery_cannot_mutate_authority_and_clock_generation_recovers
 fn hot_zone_disconnected_fighter_inside_zone_loses_occupancy_while_active() {
     let mut harness = Harness::new_hot_zone_match(3);
     harness.step_until(|harness| (0..3).all(|index| harness.client_is_active(index)));
-    let waiting = server_match(&mut harness);
-    for index in 0..3 {
-        harness.send_build_selection(
-            index,
-            BuildSelectionRequest {
-                request_id: 1,
-                match_id: waiting.match_id,
-                selection: BuildSelection::Preset(BuildPresetId(u16::try_from(index + 1).unwrap())),
-            },
-        );
-    }
-    harness.step_until(|harness| (0..3).all(|index| harness.selection_is_complete(index)));
+    harness.step_until(|harness| (0..3).all(|index| harness.loadout_is_ready(index)));
     let waiting = server_match(&mut harness);
     for index in 0..3 {
         harness.send_match_command(

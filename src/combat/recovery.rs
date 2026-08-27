@@ -2,7 +2,7 @@
 
 use super::{CurrentHealth, Defeated, HealthRecoveryState};
 use crate::{
-    builds::{ResolvedMatchLoadout, SelectingBuild},
+    builds::ResolvedMatchLoadout,
     matchplay::{ActiveCombatant, MatchParticipant},
     protocol::Fighter,
     timing::{SIMULATION_TICK_HZ, SimulationTick},
@@ -42,7 +42,7 @@ pub(super) fn restore_attack_idle_health(
             &mut HealthRecoveryState,
             Option<&MatchParticipant>,
         ),
-        (With<Fighter>, Without<Defeated>, Without<SelectingBuild>),
+        (With<Fighter>, Without<Defeated>),
     >,
 ) {
     for (entity, loadout, mut health, mut recovery, participant) in &mut fighters {

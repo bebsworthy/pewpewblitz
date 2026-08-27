@@ -17,8 +17,8 @@ fn two_clients_connect_and_receive_the_same_server_owned_roster() {
             && harness.server_ids().len() == 2
             && harness.client_ids(0).len() == 2
             && harness.client_ids(1).len() == 2
-            && harness.selection_is_complete(0)
-            && harness.selection_is_complete(1)
+            && harness.loadout_is_ready(0)
+            && harness.loadout_is_ready(1)
     });
 
     let server_ids = harness.server_ids();

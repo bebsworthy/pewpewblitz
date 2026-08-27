@@ -668,11 +668,60 @@ impl Harness {
             .any(|status| matches!(status.phase, ClientJoinPhase::Active { .. }))
     }
 
-    pub(super) fn selection_is_complete(&mut self, index: usize) -> bool {
+    pub(super) fn loadout_is_ready(&mut self, index: usize) -> bool {
         let world = self.clients[index].world_mut();
-        let mut query =
-            world.query_filtered::<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>();
-        query.iter(world).next().is_none()
+        let mut query = world.query_filtered::<&brawler::builds::ResolvedMatchLoadout, (
+            With<Fighter>,
+            With<Controlled>,
+        )>();
+        query.iter(world).next().is_some()
+    }
+
+    pub(super) fn install_saved_brawler_loadout(
+        &mut self,
+        index: usize,
+        weapon_base: u16,
+        ultimate: u16,
+        passives: [u16; 2],
+    ) {
+        let owner = self.server_links[index];
+        let fighter_entity = {
+            let world = self.server.world_mut();
+            let mut query = world.query_filtered::<(Entity, &lightyear::prelude::ControlledBy), (
+                With<Fighter>,
+                Without<TestDummy>,
+            )>();
+            query
+                .iter(world)
+                .find(|(_, controlled)| controlled.owner == owner)
+                .map(|(entity, _)| entity)
+                .expect("client owns one authoritative fighter")
+        };
+        let builds = brawler::builds::BuildCatalog::embedded().unwrap();
+        let weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
+        let definitions = FighterDefinitions::default();
+        let fighter = definitions
+            .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
+            .unwrap();
+        let loadout = brawler::builds::resolve_saved_brawler_recipe(
+            &builds,
+            &weapons,
+            fighter,
+            brawler::profiles::FighterProfileId(1),
+            brawler::profiles::WeaponBaseId(weapon_base),
+            brawler::builds::UltimateDefinitionId(ultimate),
+            passives.map(brawler::builds::PassiveDefinitionId),
+        )
+        .unwrap();
+        let capacity = loadout.primary_weapon.recipe.economy.capacity();
+        self.server.world_mut().entity_mut(fighter_entity).insert((
+            loadout.identity,
+            loadout.clone(),
+            brawler::builds::AbilityState::default(),
+            brawler::builds::PassiveRuntimeState::default(),
+            CurrentHealth(loadout.fighter_stats.maximum_health),
+            WeaponState::ready(capacity),
+        ));
     }
 
     pub(super) fn active_server_sessions(&mut self) -> usize {
@@ -766,15 +815,6 @@ impl Harness {
             .get_mut::<MessageSender<TestNativeInputMessage>>(client_entity)
             .expect("client link should have native input sender");
         send_forged_native_input_for_test(&mut sender, target, end_tick, input);
-    }
-
-    pub(super) fn send_build_selection(&mut self, index: usize, request: BuildSelectionRequest) {
-        let client_entity = self.client_entities[index];
-        let world = self.clients[index].world_mut();
-        let mut sender = world
-            .get_mut::<MessageSender<BuildSelectionRequest>>(client_entity)
-            .expect("client selection sender");
-        sender.send::<SessionChannel>(request);
     }
 
     pub(super) fn send_match_command(&mut self, index: usize, request: MatchCommandRequest) {

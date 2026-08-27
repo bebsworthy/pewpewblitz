@@ -1116,7 +1116,6 @@ mod tests {
             peer_id: PeerId::new(u128::from(value)).unwrap(),
             team: 0,
             build: super::super::LobbyBuildIdentity {
-                source_build_preset: Some(1),
                 recipe_fingerprint: 1,
                 build_revision: 1,
                 snapshot: super::super::default_build_identity().unwrap().snapshot,
@@ -1171,20 +1170,18 @@ mod tests {
                         &fighters,
                     );
                 }
-                let definition = builds.preset(crate::builds::BuildPresetId(preset)).unwrap();
-                let weapon_base_id = match definition.recipe.weapon {
-                    crate::builds::WeaponChoice::Preset(id) => crate::profiles::WeaponBaseId(id.0),
-                    crate::builds::WeaponChoice::CustomPulse { .. } => {
-                        crate::profiles::WeaponBaseId(1)
-                    }
-                };
+                let weapon_base_id = crate::profiles::WeaponBaseId(preset);
                 let brawler = crate::profiles::SavedBrawler {
                     id: join.brawler_id,
                     creation_ordinal: 1,
                     name: "Test Brawler".into(),
                     fighter_profile_id: crate::profiles::FighterProfileId(1),
                     weapon_base_id,
-                    ultimate_id: definition.recipe.ultimate,
+                    ultimate_id: crate::builds::UltimateDefinitionId(if preset == 3 {
+                        2
+                    } else {
+                        1
+                    }),
                     passive_ids: [
                         crate::builds::PassiveDefinitionId(3),
                         crate::builds::PassiveDefinitionId(4),
@@ -1239,10 +1236,7 @@ mod tests {
             decision => panic!("unexpected decision: {decision:?}"),
         };
         assert_eq!(membership.admitted_at_pool_state_revision, 2);
-        assert_eq!(
-            membership.accepted_build.identity.source_build_preset_id,
-            None
-        );
+        assert_ne!(membership.accepted_build.identity.recipe_fingerprint.0, 0);
         assert_eq!(queue.snapshot().pools[0].queued, 1);
 
         assert_eq!(

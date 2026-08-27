@@ -378,7 +378,7 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
             && harness.client_ids(0).len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
     let player_id = harness.controlled_player_id(0);
     let (

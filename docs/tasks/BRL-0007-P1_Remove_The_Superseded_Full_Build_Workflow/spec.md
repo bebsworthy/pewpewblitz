@@ -13,3 +13,26 @@ Remove the superseded named full-build selection workflow in one focused compati
 # Constraints
 
 Promote through milestone specification review before implementation. Do not retain compatibility decoders.
+
+## Implementation progress (2026-08-27)
+
+- Removed the unreachable Build Editor, its standalone persistence file, client overlay/action/rendering paths, and obsolete tests.
+- Removed the direct-session build-selection messages, client state/UI, server transaction, session replay state, replicated selection gate, and selection telemetry.
+- Saved-brawler snapshots now install every authoritative fighter loadout at admission; the direct diagnostic topology resolves explicit server-owned saved-brawler recipes.
+- Removed named full-build catalog presets and IDs, advanced build catalog/fingerprint schema 6 -> 7, protocol compatibility 30 -> 31, and closeout schema 3 -> 4.
+- Renamed automation to active weapon-preset terminology, converted network fixtures to admitted loadouts or explicit saved-brawler recipes, and removed legacy report fields/copy.
+- Verification in progress: combined client/server check passed before the catalog cutover; full test compilation is running after fixture conversion.
+
+## Verification update (2026-08-27)
+
+- No removed workflow vocabulary or symbols remain in active source, tests, scripts, config, README, or content.
+- Combined client/server test compilation and all 577 library tests pass.
+- The network-test graph compiles; direct-admission loadout, authority-tamper, and three-match restart scenarios pass.
+- Balance Lab all-target check and Clippy pass.
+
+Full routed/recovery/native product evidence remains before closeout.
+
+## Verification update (2026-08-27)
+
+- Full combined client/server library suite now passes: 581 tests.
+- Converted network loadout/authority/restart scenarios pass again after subsequent schedule and presentation changes.

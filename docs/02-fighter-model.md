@@ -21,9 +21,8 @@ data-model distinction, not a requirement for separate crates or architectural l
    legal bounds, slots, effects, costs, and stable presentation references.
 2. **Saved brawler:** server-owned persistent player choice composed from stable fighter-profile,
    weapon-base, ultimate, passive, and equipped-part identities.
-3. **Selected brawler identity:** the accepted saved-brawler ID and revision used across process and
-   network boundaries. The superseded full-build preset/recipe identity remains only in legacy
-   internals pending `MAINT-LEGACY-BUILD-SYSTEM` removal.
+3. **Accepted loadout identity:** the canonical recipe fingerprint and balance revision resolved
+   from the admitted saved-brawler ID and revision at the server authority boundary.
 4. **Resolved match loadout:** the immutable, server-validated gameplay snapshot used to instantiate
    a fighter for one match.
 5. **Runtime fighter state:** mutable ECS state such as health, pose, weapon economy, ability charge,

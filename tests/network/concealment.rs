@@ -15,8 +15,8 @@ fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
-            && harness.selection_is_complete(0)
-            && harness.selection_is_complete(1)
+            && harness.loadout_is_ready(0)
+            && harness.loadout_is_ready(1)
             && public_projection_count(&mut harness.clients[0]) == 2
             && public_projection_count(&mut harness.clients[1]) == 2
     });
@@ -164,16 +164,16 @@ fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(6);
+        .weapon_preset = Some(2);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(5);
+        .weapon_preset = Some(1);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
-            && harness.selection_is_complete(0)
-            && harness.selection_is_complete(1)
+            && harness.loadout_is_ready(0)
+            && harness.loadout_is_ready(1)
     });
     let (observer, subject, subject_id) = {
         let mut query = harness.server.world_mut().query_filtered::<(
@@ -326,12 +326,12 @@ fn concealment_field_is_public_hides_at_range_and_confirmation_does_not_fire() {
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(7);
+        .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
-            && harness.selection_is_complete(0)
-            && harness.selection_is_complete(1)
+            && harness.loadout_is_ready(0)
+            && harness.loadout_is_ready(1)
     });
     let (observer, caster, caster_id) = {
         let mut query = harness.server.world_mut().query_filtered::<(

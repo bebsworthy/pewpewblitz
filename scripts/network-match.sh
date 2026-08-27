@@ -8,15 +8,10 @@ if [[ "$target_dir" != /* ]]; then
     target_dir="$repo_root/$target_dir"
 fi
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5200}"
-custom_build_client="${BRAWLER_NETWORK_CUSTOM_BUILD_CLIENT:-0}"
 match_rules="${BRAWLER_NETWORK_MATCH_RULES:-verification}"
 game_mode="${BRAWLER_NETWORK_GAME_MODE:-wipeout}"
 simulation_ticks="${BRAWLER_NETWORK_SIMULATION_TICKS:-6000}"
 match_timeout_seconds="${BRAWLER_NETWORK_MATCH_TIMEOUT_SECONDS:-90}"
-if [[ ! "$custom_build_client" =~ ^[0-4]$ ]]; then
-    printf 'brawler match: BRAWLER_NETWORK_CUSTOM_BUILD_CLIENT must be between 0 and 4\n' >&2
-    exit 2
-fi
 if [[ "$match_rules" != "verification" && "$match_rules" != "production" ]]; then
     printf 'brawler match: BRAWLER_NETWORK_MATCH_RULES must be verification or production\n' >&2
     exit 2
@@ -88,13 +83,10 @@ for client_id in 1 2 3 4; do
     if ((client_id % 2 == 0)); then
         move_axis="-1,0"
     fi
-    build_preset="$client_id"
-    if ((custom_build_client == client_id)); then
-        build_preset="5"
-    fi
+    weapon_preset="$client_id"
     client_args=(
         --server "$network_addr" --client-id "$client_id" --headless
-        --exit-after-roster 4 --simulation-ticks "$simulation_ticks" --build-preset "$build_preset"
+        --exit-after-roster 4 --simulation-ticks "$simulation_ticks" --weapon-preset "$weapon_preset"
         --move-axis "$move_axis" --aim-dummy --fire --ultimate
     )
     (trap '' INT; exec "$target_dir/debug/brawler-client" "${client_args[@]}") &
@@ -127,10 +119,10 @@ for required in initial_match_id restarted_match_id participant_count mode_defin
     summary_participant_count map_instance_id map_recipe_fingerprint content_fingerprint rules_revision \
     final_score_team_1 final_score_team_2 result active_duration_ticks defeats respawns participant_active_ticks_team_1 \
     participant_active_ticks_team_2 records dropped_records summary_count \
-    weapon_aggregate_count weapon_preset_ids build_preset_ids custom_builds build_fingerprints \
+    weapon_aggregate_count weapon_preset_ids build_fingerprints \
     build_total_points ultimate_ids passive_ids first_full_charge_ticks first_full_charge_active_ticks ability_uses_by_owner \
     charge_dealt_by_owner charge_received_by_owner passive_triggers accepted_attacks \
-    attacks_with_hostile_contact build_selections build_dropped_records ability_attempts \
+    attacks_with_hostile_contact ability_attempts \
     ability_accepts dash_uses sentry_uses \
     sentry_shots ability_dropped_records; do
     if ! grep -q "^${required}=" "$report_file"; then
@@ -154,21 +146,6 @@ if [[ "$(awk -F= '/^defeats=/{print $2}' "$report_file")" -lt 1 \
     printf 'brawler match: process run did not prove defeat and respawn\n' >&2
     exit 1
 fi
-if ((custom_build_client == 0)) && ! awk -F= '
-    /^build_preset_ids=/ {
-        count = split($2, ids, ",");
-        for (i = 1; i <= count; i++) seen[ids[i]] = 1;
-    }
-    END { exit seen[1] && seen[2] && seen[3] && seen[4] ? 0 : 1 }
-' "$report_file"; then
-    printf 'brawler match: summary omitted the four named build presets\n' >&2
-    exit 1
-fi
-if ((custom_build_client != 0)) \
-    && [[ "$(awk -F= '/^custom_builds=/{print $2}' "$report_file")" -lt 1 ]]; then
-    printf 'brawler match: summary omitted the custom build\n' >&2
-    exit 1
-fi
 if [[ "$(awk -F= '/^accepted_attacks=/{print $2}' "$report_file")" -lt 1 ]]; then
     printf 'brawler match: summary omitted accepted attacks\n' >&2
     exit 1
@@ -184,9 +161,8 @@ if [[ -z "$(awk -F= '/^first_full_charge_ticks=/{print $2}' "$report_file")" \
     printf 'brawler match: per-owner charge/use evidence is incomplete\n' >&2
     exit 1
 fi
-if [[ "$(awk -F= '/^ability_dropped_records=/{print $2}' "$report_file")" != "0" \
-    || "$(awk -F= '/^build_dropped_records=/{print $2}' "$report_file")" != "0" ]]; then
-    printf 'brawler match: build or ability telemetry dropped records\n' >&2
+if [[ "$(awk -F= '/^ability_dropped_records=/{print $2}' "$report_file")" != "0" ]]; then
+    printf 'brawler match: ability telemetry dropped records\n' >&2
     exit 1
 fi
 cat "$report_file"

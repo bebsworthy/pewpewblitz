@@ -12,8 +12,8 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             && harness.server_ids().len() == 2
             && harness.client_ids(0).len() == 2
             && harness.client_ids(1).len() == 2
-            && harness.selection_is_complete(0)
-            && harness.selection_is_complete(1)
+            && harness.loadout_is_ready(0)
+            && harness.loadout_is_ready(1)
     });
     let player_id = harness.controlled_player_id(0);
     {

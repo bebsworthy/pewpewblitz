@@ -2,6 +2,38 @@
 
 use super::*;
 
+#[derive(Resource, Default)]
+struct SessionScheduleTrace(Vec<&'static str>);
+
+fn session_probe(label: &'static str) -> impl FnMut(ResMut<SessionScheduleTrace>) + 'static {
+    move |mut trace: ResMut<SessionScheduleTrace>| trace.0.push(label)
+}
+
+#[test]
+fn server_session_phases_have_one_explicit_authority_order() {
+    let mut app = App::new();
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app);
+    app.init_resource::<SessionScheduleTrace>();
+    configure_server_session_schedule(&mut app);
+    app.add_systems(
+        Update,
+        (
+            session_probe("receive").in_set(ServerSessionSet::ReceiveAndValidate),
+            session_probe("commit").in_set(ServerSessionSet::CommitCommands),
+            session_probe("enforce").in_set(ServerSessionSet::Enforce),
+            session_probe("observe").in_set(ServerSessionSet::Observe),
+            session_probe("terminal").in_set(ServerSessionSet::Terminal),
+        ),
+    );
+
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<SessionScheduleTrace>().0,
+        vec!["receive", "commit", "enforce", "observe", "terminal"]
+    );
+}
+
 #[test]
 fn checked_ids_start_at_one_and_never_wrap() {
     let mut ids = NextSessionIds::default();
@@ -27,8 +59,7 @@ fn production_startup_instantiates_wipeout_map_and_match_without_practice_dummy(
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         ..default()
     });
-    app.finish();
-    app.cleanup();
+    crate::test_app::finalize(&mut app);
     app.update();
     assert!(app.world().contains_resource::<ResolvedMap>());
     let world = app.world_mut();

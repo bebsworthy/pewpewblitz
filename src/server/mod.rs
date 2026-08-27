@@ -7,8 +7,8 @@ use crate::{
     builds::{AbilityState, PassiveRuntimeState},
     combat::{
         ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
-        CombatTelemetry, CurrentHealth, HealthRecoveryState, SelectingBuild, ServerCombatPlugin,
-        SpawnState, TeamId, WeaponCatalogResource, WeaponPresetId, WeaponState, WeaponTelemetry,
+        CombatTelemetry, CurrentHealth, HealthRecoveryState, ServerCombatPlugin, SpawnState,
+        TeamId, WeaponCatalogResource, WeaponPresetId, WeaponState, WeaponTelemetry,
         WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
     },
     config::{GameMode, MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
@@ -27,12 +27,11 @@ use crate::{
         MovementTuning,
     },
     protocol::{
-        BuildSelectionOutcome, BuildSelectionRequest, DEVELOPMENT_PRIVATE_KEY, Fighter,
-        MatchCommand, MatchCommandDecision, MatchCommandOutcome, MatchCommandRequest, MatchHello,
-        MatchJoinOutcome, MatchJoinRejection, MatchLoadingClientAction, MatchLoadingClientMessage,
-        MatchLoadingServerMessage, MatchLoadingServerOutcome, MatchLoadingStatus, NetworkEntityId,
-        PlaceholderState, PlayerId, ProtocolFingerprint, ProtocolPlugin, QueueSnapshotChannel,
-        SessionChannel,
+        DEVELOPMENT_PRIVATE_KEY, Fighter, MatchCommand, MatchCommandDecision, MatchCommandOutcome,
+        MatchCommandRequest, MatchHello, MatchJoinOutcome, MatchJoinRejection,
+        MatchLoadingClientAction, MatchLoadingClientMessage, MatchLoadingServerMessage,
+        MatchLoadingServerOutcome, MatchLoadingStatus, NetworkEntityId, PlaceholderState, PlayerId,
+        ProtocolFingerprint, ProtocolPlugin, QueueSnapshotChannel, SessionChannel,
     },
 };
 use avian2d::prelude::{
@@ -114,9 +113,6 @@ pub struct ServerSession {
     pub deadline: Duration,
     pub last_outcome: Option<MatchJoinOutcome>,
     pub disconnect_requested: bool,
-    pub last_selection_request: Option<BuildSelectionRequest>,
-    pub last_selection_outcome: Option<BuildSelectionOutcome>,
-    pub last_selection_response: Option<BuildSelectionOutcome>,
     pub last_match_request: Option<MatchCommandRequest>,
     pub last_match_outcome: Option<MatchCommandOutcome>,
 }
@@ -295,6 +291,29 @@ fn log_server_startup(config: Option<Res<ServerNetworkConfig>>) {
 /// Installs the server Lightyear group, protocol, endpoint, and authoritative session systems.
 pub struct ServerNetworkPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ServerSessionSet {
+    ReceiveAndValidate,
+    CommitCommands,
+    Enforce,
+    Observe,
+    Terminal,
+}
+
+fn configure_server_session_schedule(app: &mut App) {
+    app.configure_sets(
+        Update,
+        (
+            ServerSessionSet::ReceiveAndValidate,
+            ServerSessionSet::CommitCommands,
+            ServerSessionSet::Enforce,
+            ServerSessionSet::Observe,
+            ServerSessionSet::Terminal,
+        )
+            .chain(),
+    );
+}
+
 /// Classify a server error exit, append the bounded local failure record when the
 /// `BRAWLER_FAILURE_REPORT` control selects one, and request the error exit. Every
 /// server error path funnels through here so exit categories and failure records
@@ -320,6 +339,7 @@ pub(super) fn record_server_failure(
 
 impl Plugin for ServerNetworkPlugin {
     fn build(&self, app: &mut App) {
+        configure_server_session_schedule(app);
         app.insert_resource(FallbackErrorHandler(error))
             .init_resource::<ServerRoleResource>()
             .init_resource::<NextSessionIds>()
@@ -329,7 +349,6 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ProcessMovementCheck>()
             .init_resource::<ProcessCombatCheck>()
             .init_resource::<ProcessMatchCheck>()
-            .init_resource::<crate::builds::BuildTelemetry>()
             .init_resource::<crate::diagnostics::ProcessExitClassification>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
             .add_observer(configure_new_link)
@@ -343,20 +362,41 @@ impl Plugin for ServerNetworkPlugin {
                     observe_server_endpoint,
                     initialize_sessions,
                     process_client_hellos,
-                    crate::builds::server::process_build_selection,
                     crate::abilities::cleanup_requested_sentries,
                     ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(ServerSessionSet::ReceiveAndValidate),
+            )
+            .add_systems(
+                Update,
+                (
                     process_match_loading_messages,
                     process_match_commands,
                     ApplyDeferred,
-                    enforce_session_deadlines,
-                    disconnect_rejected_sessions,
+                )
+                    .chain()
+                    .in_set(ServerSessionSet::CommitCommands),
+            )
+            .add_systems(
+                Update,
+                (enforce_session_deadlines, disconnect_rejected_sessions)
+                    .chain()
+                    .in_set(ServerSessionSet::Enforce),
+            )
+            .add_systems(
+                Update,
+                (
                     verify_process_movement,
                     verify_process_combat,
                     verify_process_match,
-                    exit_after_verification,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(ServerSessionSet::Observe),
+            )
+            .add_systems(
+                Update,
+                exit_after_verification.in_set(ServerSessionSet::Terminal),
             )
             .add_systems(
                 FixedUpdate,
@@ -524,9 +564,6 @@ fn initialize_sessions(
                 deadline: now.saturating_add(config.handshake_timeout),
                 last_outcome: None,
                 disconnect_requested: false,
-                last_selection_request: None,
-                last_selection_outcome: None,
-                last_selection_response: None,
                 last_match_request: None,
                 last_match_outcome: None,
             });
@@ -694,7 +731,7 @@ fn process_client_hellos(
                                         }),
                                     network_entity_id: baseline_network_entity_id,
                                 };
-                                let (assigned_team, manifest_loadout) = if let Some(participant) =
+                                let (assigned_team, loadout) = if let Some(participant) =
                                     worker_participant.as_ref()
                                 {
                                     let team = TeamId(participant.team);
@@ -713,14 +750,36 @@ fn process_client_hellos(
                                             fighter,
                                         )
                                         .expect("validated manifest build resolution");
-                                    (team, Some(loadout))
+                                    (team, loadout)
                                 } else {
                                     let assigned_team = assigned_team(
                                         team_counts,
                                         lifecycle_rules.maximum_participants_per_team,
                                     )
                                     .expect("capacity was checked before identifier allocation");
-                                    (assigned_team, None)
+                                    let fighter = content
+                                        .fighters
+                                        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
+                                        .expect("validated standard fighter definition");
+                                    let loadout = crate::builds::resolve_saved_brawler_recipe(
+                                        &content.builds.0,
+                                        &content.weapon_catalog.0,
+                                        fighter,
+                                        crate::profiles::FighterProfileId(1),
+                                        crate::profiles::WeaponBaseId(
+                                            u16::try_from(
+                                                baseline_player_id.0.saturating_sub(1) % 4 + 1,
+                                            )
+                                            .expect("four diagnostic weapon bases fit u16"),
+                                        ),
+                                        crate::builds::UltimateDefinitionId(1),
+                                        [
+                                            crate::builds::PassiveDefinitionId(3),
+                                            crate::builds::PassiveDefinitionId(4),
+                                        ],
+                                    )
+                                    .expect("validated direct-diagnostic brawler recipe");
+                                    (assigned_team, loadout)
                                 };
                                 let player_id = worker_participant
                                     .map_or(baseline_player_id, |participant| {
@@ -754,18 +813,15 @@ fn process_client_hellos(
                                 .expect("validated map has a finite spawn for each Wipeout team");
                                 let spawn_position = spawn_point.position;
                                 let spawn_facing = spawn_point.facing;
-                                let (fighter_definition, team, mut health, mut weapon) =
-                                    default_fighter_runtime(
-                                        assigned_team,
-                                        &content.fighters,
-                                        &content.weapons,
-                                    );
-                                if let Some(loadout) = manifest_loadout.as_ref() {
-                                    health = CurrentHealth(loadout.fighter_stats.maximum_health);
-                                    weapon = WeaponState::ready(
-                                        loadout.primary_weapon.recipe.economy.capacity(),
-                                    );
-                                }
+                                let (fighter_definition, team, _, _) = default_fighter_runtime(
+                                    assigned_team,
+                                    &content.fighters,
+                                    &content.weapons,
+                                );
+                                let health = CurrentHealth(loadout.fighter_stats.maximum_health);
+                                let weapon = WeaponState::ready(
+                                    loadout.primary_weapon.recipe.economy.capacity(),
+                                );
                                 let fighter_entity = commands
                                     .spawn((
                                         Fighter,
@@ -777,7 +833,6 @@ fn process_client_hellos(
                                         fighter_definition,
                                         team,
                                         health,
-                                        SelectingBuild,
                                         ActiveEffects::default(),
                                         AuthoritativeTick::default(),
                                         SpawnState {
@@ -820,19 +875,14 @@ fn process_client_hellos(
                                         lifetime: Lifetime::SessionBased,
                                     },
                                 ));
-                                if let Some(loadout) = manifest_loadout {
-                                    commands
-                                        .entity(fighter_entity)
-                                        .insert((
-                                            loadout.identity,
-                                            loadout,
-                                            AbilityState::default(),
-                                            PassiveRuntimeState::default(),
-                                            weapon,
-                                            ActiveEffects::default(),
-                                        ))
-                                        .remove::<SelectingBuild>();
-                                }
+                                commands.entity(fighter_entity).insert((
+                                    loadout.identity,
+                                    loadout,
+                                    AbilityState::default(),
+                                    PassiveRuntimeState::default(),
+                                    weapon,
+                                    ActiveEffects::default(),
+                                ));
                                 session.phase = ServerSessionPhase::Active {
                                     player_id,
                                     network_entity_id,
@@ -1139,7 +1189,6 @@ fn process_match_commands(
             &ControlledBy,
             &mut MatchParticipant,
             Option<&crate::builds::ResolvedMatchLoadout>,
-            Option<&SelectingBuild>,
         ),
         With<Fighter>,
     >,
@@ -1176,19 +1225,17 @@ fn process_match_commands(
             }
             let participant = fighters
                 .iter_mut()
-                .find(|(controlled, _, _, _)| controlled.owner == connection);
+                .find(|(controlled, _, _)| controlled.owner == connection);
             let decision = if request.match_id != match_state.match_id {
                 MatchCommandDecision::WrongMatch
-            } else if let Some((_, mut participant, selected, selecting)) = participant {
+            } else if let Some((_, mut participant, selected)) = participant {
                 match (request.command, match_state.phase) {
-                    (MatchCommand::SetReady(value), MatchPhase::Waiting)
-                        if selected.is_some() && selecting.is_none() =>
-                    {
+                    (MatchCommand::SetReady(value), MatchPhase::Waiting) if selected.is_some() => {
                         participant.ready = value;
                         MatchCommandDecision::Accepted
                     }
                     (MatchCommand::SetReady(value), MatchPhase::Countdown { .. })
-                        if selected.is_some() && selecting.is_none() =>
+                        if selected.is_some() =>
                     {
                         participant.ready = value;
                         MatchCommandDecision::Accepted

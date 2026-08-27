@@ -270,7 +270,7 @@ fn client_local_snapshot_edit_has_no_authoritative_map_path() {
 fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
     let mut harness = Harness::new_feature_yard_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match_state(&mut harness);
     for index in 0..2 {
@@ -384,7 +384,7 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
 fn chest_drop_and_collection_converge_for_two_clients() {
     let mut harness = Harness::new_feature_yard_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match_state(&mut harness);
     for index in 0..2 {
@@ -515,7 +515,7 @@ fn chest_drop_and_collection_converge_for_two_clients() {
 fn point_blank_shots_damage_the_first_chest_or_barrel_without_passing_through() {
     let mut harness = Harness::new_feature_yard_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match_state(&mut harness);
     for index in 0..2 {

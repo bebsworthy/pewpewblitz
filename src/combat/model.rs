@@ -53,11 +53,6 @@ pub struct ReplicatedAttackSource {
     pub attack: AttackSource,
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AwaitingPostSelectionInput {
-    pub accepted_at_tick: u64,
-}
-
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlowEffect {
     pub source_attack_id: AttackId,

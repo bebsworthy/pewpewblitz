@@ -9,7 +9,7 @@ fn lost_input_repeats_briefly_then_neutralizes_without_server_pause() {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
             && harness.client_ids(0).len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
 
     harness.set_controlled_input(0, FighterInput::from_axes(Vec2::X, None, 0));

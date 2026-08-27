@@ -31,7 +31,6 @@ pub(crate) fn activate_self_cloak(
             Option<&mut UltimateGeneration>,
             Has<crate::combat::Defeated>,
             Has<crate::matchplay::ActiveCombatant>,
-            Has<crate::combat::AwaitingPostSelectionInput>,
             Has<crate::concealment::ObjectiveCarrier>,
         ),
         With<crate::protocol::Fighter>,
@@ -48,7 +47,6 @@ pub(crate) fn activate_self_cloak(
         generation,
         defeated,
         active,
-        barrier,
         objective_carrier,
     ) in &mut fighters
     {
@@ -75,8 +73,7 @@ pub(crate) fn activate_self_cloak(
             owner_network_id: *network_id,
             kind: crate::abilities::AbilityTelemetryKind::ActivationAttempt,
         });
-        let held = !barrier
-            && !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
+        let held = !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
         let rejection = if !held {
             Some(crate::abilities::AbilityRejectionReason::StaleInput)
         } else if defeated {

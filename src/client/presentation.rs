@@ -76,23 +76,6 @@ pub(super) fn spawn_client_hud(mut commands: Commands) {
         BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.92)),
     ));
     commands.spawn((
-        BuildSelectionText,
-        Text::new("Select weapon: A/D or arrows | Space / South to confirm\nPulse Sidearm"),
-        TextFont::from_font_size(22.0),
-        TextColor(Color::srgb(0.85, 0.95, 1.0)),
-        GlobalZIndex(200),
-        BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.88)),
-        Visibility::Inherited,
-        Node {
-            position_type: PositionType::Absolute,
-            left: percent(22.0),
-            right: percent(22.0),
-            top: percent(18.0),
-            padding: UiRect::all(px(12.0)),
-            ..default()
-        },
-    ));
-    commands.spawn((
         ScoreboardOverlay,
         Text::new("SCOREBOARD"),
         TextFont::from_font_size(20.0),

@@ -18,7 +18,7 @@ pub(crate) use catalog::resolve_operator_catalog;
 use super::{LobbyControlInbox, LobbyControlOutbox, RoutedPeer, ServerRoleResource};
 use crate::{
     VERSION,
-    builds::{BuildCatalog, BuildPresetId},
+    builds::BuildCatalog,
     combat::{FighterDefinitions, STANDARD_FIGHTER_DEFINITION, WeaponCatalog},
     config::GameMode,
     content::GameplayContentFingerprint,
@@ -67,7 +67,6 @@ pub const MAX_ALLOCATED_LOBBY_CLIENT_IDS: usize = MAX_AUTHENTICATED_LOBBY_SESSIO
 /// Build identity carried in the supervisor allocation request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LobbyBuildIdentity {
-    pub source_build_preset: Option<u16>,
     pub recipe_fingerprint: u64,
     pub build_revision: u16,
     pub snapshot: brawler_routing::MatchBuildSnapshot,
@@ -75,31 +74,20 @@ pub struct LobbyBuildIdentity {
 
 /// Resolve the embedded default build without installing any gameplay authority.
 pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
-    build_identity(BuildPresetId(1))
-}
-
-fn build_identity(preset_id: BuildPresetId) -> Result<LobbyBuildIdentity, String> {
     let builds = BuildCatalog::embedded()?;
     let weapons = WeaponCatalog::embedded()?;
     let fighters = FighterDefinitions::default();
     let fighter = fighters
         .get(STANDARD_FIGHTER_DEFINITION)
         .ok_or_else(|| "standard fighter definition is missing".to_string())?;
-    let preset = builds
-        .preset(preset_id)
-        .ok_or_else(|| format!("build preset {} is missing", preset_id.0))?;
-    let weapon_base_id = match preset.recipe.weapon {
-        crate::builds::WeaponChoice::Preset(id) => crate::profiles::WeaponBaseId(id.0),
-        crate::builds::WeaponChoice::CustomPulse { .. } => crate::profiles::WeaponBaseId(1),
-    };
     let brawler = crate::profiles::SavedBrawler {
-        id: crate::profiles::SavedBrawlerId::new(u128::from(preset_id.0))
+        id: crate::profiles::SavedBrawlerId::new(1)
             .map_err(|error| format!("invalid built-in brawler id: {error}"))?,
-        creation_ordinal: u64::from(preset_id.0),
-        name: format!("Bot {}", preset_id.0),
+        creation_ordinal: 1,
+        name: "Default Brawler".to_string(),
         fighter_profile_id: crate::profiles::FighterProfileId(1),
-        weapon_base_id,
-        ultimate_id: preset.recipe.ultimate,
+        weapon_base_id: crate::profiles::WeaponBaseId(1),
+        ultimate_id: crate::builds::UltimateDefinitionId(1),
         passive_ids: [
             crate::builds::PassiveDefinitionId(3),
             crate::builds::PassiveDefinitionId(4),
@@ -112,7 +100,6 @@ fn build_identity(preset_id: BuildPresetId) -> Result<LobbyBuildIdentity, String
             .map_err(|error| format!("built-in brawler resolution failed: {error:?}"))?;
     let accepted_identity = snapshot.accepted_identity;
     Ok(LobbyBuildIdentity {
-        source_build_preset: None,
         recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
         build_revision: accepted_identity.revision.0,
         snapshot: snapshot.encode()?,
@@ -147,7 +134,6 @@ fn practice_bot_build_identity() -> Result<LobbyBuildIdentity, String> {
             .map_err(|error| format!("canonical bot brawler resolution failed: {error:?}"))?;
     let accepted_identity = snapshot.accepted_identity;
     Ok(LobbyBuildIdentity {
-        source_build_preset: None,
         recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
         build_revision: accepted_identity.revision.0,
         snapshot: snapshot.encode()?,
@@ -2565,7 +2551,6 @@ mod tests {
 
     fn build() -> LobbyBuildIdentity {
         LobbyBuildIdentity {
-            source_build_preset: Some(1),
             recipe_fingerprint: 123,
             build_revision: 4,
             snapshot: default_build_identity().unwrap().snapshot,
@@ -2655,14 +2640,13 @@ mod tests {
             brawler_revision: crate::profiles::ProfileRevision::INITIAL,
         };
         let fighter = FighterDefinitions::default();
-        let definition = builds.preset(BuildPresetId(1)).unwrap();
         let brawler = crate::profiles::SavedBrawler {
             id: command.brawler_id,
             creation_ordinal: 1,
             name: "Practice".into(),
             fighter_profile_id: crate::profiles::FighterProfileId(1),
             weapon_base_id: crate::profiles::WeaponBaseId(1),
-            ultimate_id: definition.recipe.ultimate,
+            ultimate_id: crate::builds::UltimateDefinitionId(1),
             passive_ids: [
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
@@ -2687,7 +2671,7 @@ mod tests {
         let accepted = crate::builds::AcceptedBuildSummary {
             canonical_recipe: crate::builds::BrawlerBuildRecipe {
                 weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
-                ultimate: definition.recipe.ultimate,
+                ultimate: brawler.ultimate_id,
                 passives: brawler.passive_ids,
             },
             identity: resolved.identity,

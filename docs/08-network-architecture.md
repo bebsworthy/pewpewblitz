@@ -149,9 +149,9 @@ InputFrame
   interact
 ```
 
-Build selection and weapon editing are not per-tick combat input. They use ordered, idempotent
-requests tied to the receiving authenticated/session connection. A request never authoritatively
-names another fighter or installs ECS runtime state.
+Saved-brawler and weapon-equipment edits are not per-tick combat input. They use ordered,
+idempotent profile requests tied to the receiving authenticated lobby connection. A request never
+authoritatively names another fighter or installs match ECS runtime state.
 
 ### Lobby profile and brawler-catalog installation
 

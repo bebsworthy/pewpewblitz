@@ -207,7 +207,6 @@ pub(crate) fn activate_sentry(
             Option<&mut crate::abilities::UltimateInputLatch>,
             Option<&crate::combat::Defeated>,
             Option<&crate::matchplay::ActiveCombatant>,
-            Option<&crate::combat::AwaitingPostSelectionInput>,
         ),
         With<crate::protocol::Fighter>,
     >,
@@ -237,7 +236,6 @@ pub(crate) fn activate_sentry(
         latch,
         defeated,
         active,
-        activation_barrier,
     ) in &mut fighters
     {
         if loadout.ultimate.kind != crate::builds::UltimateKind::Sentry {
@@ -248,7 +246,6 @@ pub(crate) fn activate_sentry(
                 && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
         });
         let held = requested
-            && activation_barrier.is_none()
             && !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
         if let Some(mut latch) = latch {

@@ -8,11 +8,11 @@ fn launcher_uses_bounded_focal_distance_instead_of_always_using_maximum_range() 
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(3);
+        .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
@@ -55,11 +55,11 @@ fn launcher_explosion_does_not_damage_or_knock_back_its_owner() {
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(3);
+        .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
@@ -116,11 +116,11 @@ fn launcher_replication_preserves_flight_deadline_and_durable_slow_state() {
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(3);
+        .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();

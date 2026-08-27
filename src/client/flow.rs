@@ -4,12 +4,8 @@ use super::{
     ClientJoinPhase, ClientJoinStatus, ClientLobbyFailure, ClientLobbyMembership,
     ClientNetworkConfig, ClientSettingsUiSet, RoutedClientLifecycle, RoutedClientPhase,
     RoutedClientSession, RuntimeLobbyTarget,
-    connection_persistence::{
-        ClientConnectionsPath, ConnectionsFileV1, load_connections, save_connections,
-    },
-    server_select::{
-        LogicalServerAddress, MAX_RESOLVED_CANDIDATES, ServerAddressHost, parse_server_address,
-    },
+    connection_persistence::{ClientConnectionsPath, save_connections},
+    server_select::{LogicalServerAddress, MAX_RESOLVED_CANDIDATES, ServerAddressHost},
     session::{ProductLobbyAttempt, spawn_product_lobby_connection},
 };
 use bevy::{
@@ -20,27 +16,56 @@ use bevy::{
         mouse::{MouseScrollUnit, MouseWheel},
     },
     prelude::*,
-    tasks::{IoTaskPool, Task, block_on, poll_once},
+    tasks::{block_on, poll_once},
     ui::{InteractionDisabled, ScrollPosition, UiScale, UiSystems},
     window::PrimaryWindow,
 };
-use lightyear::prelude::client::{Client, Disconnect};
-use lightyear::prelude::{Unlink, UnlinkReason};
-use std::{
-    collections::BTreeSet,
-    net::{SocketAddr, ToSocketAddrs as _},
-    time::Duration,
-};
-use unicode_segmentation::UnicodeSegmentation as _;
+use lightyear::prelude::client::Client;
+use std::time::Duration;
 
-const DNS_DEADLINE: Duration = Duration::from_secs(5);
-const ATTEMPT_DEADLINE: Duration = Duration::from_secs(10);
+mod actions;
+mod connection;
+mod input;
+mod model;
+mod persistence;
+mod reducer;
+mod screens;
+
+#[cfg(test)]
+use super::connection_persistence::ConnectionsFileV1;
+use actions::{FlowCommit, FlowUiAction, OverlayCommit, PendingFlowActions, SessionObservation};
+#[cfg(test)]
+use connection::{
+    AttemptDeadlineExpiry, bound_resolved_candidates, candidate_time_share, netcode_timeout_ceiling,
+};
+use connection::{
+    ConnectionGeneration, ConnectionStage, PendingConnection, ResolverState, accepted_observation,
+    attempt_deadline_expiry, begin_connection_target, connection_presentation, has_next_candidate,
+    observation_for_expiry, spawn_current_candidate, validate_target,
+};
+use input::{
+    dashboard_focus_neighbor, edited_value, edited_value_mut, insert_brawler_name_text,
+    insert_editor_text, next_caret, overlay_allows_button, previous_caret, queue_ui_action,
+    repair_dashboard_focus,
+};
+pub use model::{
+    CancelMatchStartConfirmation, ClientFlow, ClientOverlay, FlowError, FlowErrorAction,
+    FlowErrorKind, SelectedGameType, SessionPurpose,
+};
+use persistence::load_connection_state;
+#[cfg(test)]
+use persistence::startup_server_address;
+pub(super) use persistence::{ClientLocalLoadFailures, ConnectionPersistence, local_load_error};
+use reducer::{commit_flow, favorite_focus_after_removal, teardown_session};
+#[cfg(test)]
+use screens::results::MatchCompletionRoot;
+use screens::{
+    game_select::{keep_game_type_focus_visible, scroll_game_type_select, spawn_game_type_select},
+    results::{clear_results, present_match_completion, spawn_results},
+    server_select::{refresh_server_select, spawn_server_select},
+};
+
 const ERROR_BUTTON_BASE: usize = 1_000;
-const BUILD_EDITOR_CHOICE_BASE: usize = 2_000;
-const BUILD_EDITOR_FIELD_BASE: usize = 2_010;
-const BUILD_EDITOR_OPTION_BASE: usize = 2_030;
-const BUILD_EDITOR_JOIN_INDEX: usize = 2_100;
-const BUILD_EDITOR_BACK_INDEX: usize = 2_101;
 const GAME_TYPE_CONFIRM_INDEX: usize = 1_000;
 const GAME_TYPE_BACK_INDEX: usize = 1_001;
 const DASHBOARD_PLAY_INDEX: usize = 0;
@@ -52,94 +77,6 @@ const DASHBOARD_MENU_INDEX: usize = 5;
 const DASHBOARD_COMPACT_WIDTH: f32 = 1_000.0;
 const DASHBOARD_COMPACT_HEIGHT: f32 = 640.0;
 
-#[derive(States, Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub enum ClientFlow {
-    #[default]
-    Connecting,
-    ServerSelect,
-    Dashboard,
-    GameTypeSelect,
-    Queue,
-    MatchLoading,
-    Match,
-    Results,
-}
-
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SessionPurpose {
-    #[default]
-    Multiplayer,
-    Practice,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CancelMatchStartConfirmation {
-    pub reservation_id: crate::lobby::MatchReservationId,
-    pub generation: u32,
-}
-
-#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
-pub enum ClientOverlay {
-    #[default]
-    None,
-    Settings,
-    Credits,
-    BuildEditor,
-    DashboardMenu,
-    BrawlerList,
-    BrawlerDetails(crate::profiles::SavedBrawlerId),
-    BrawlerCreation,
-    BrawlerEditor,
-    WeaponEquipment,
-    DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
-    Confirmation(CancelMatchStartConfirmation),
-    ChangeServerConfirmation,
-    LeaveConfirmation,
-    Error(FlowError),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FlowError {
-    pub kind: FlowErrorKind,
-    pub message: String,
-    pub return_flow: ClientFlow,
-    pub actions: [Option<FlowErrorAction>; 2],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FlowErrorKind {
-    Connection,
-    Queue,
-    Persistence,
-    Content,
-    Practice,
-}
-
-impl FlowErrorKind {
-    const fn title(self) -> &'static str {
-        match self {
-            Self::Connection => "CONNECTION ERROR",
-            Self::Queue => "QUEUE ERROR",
-            Self::Persistence => "SAVE ERROR",
-            Self::Content => "CONTENT ERROR",
-            Self::Practice => "PRACTICE ERROR",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FlowErrorAction {
-    RetryConnection,
-    EditName,
-    Back,
-    RetrySave,
-    ContinueWithoutSaving,
-    ContinueWithDefaults,
-    RetryQueue,
-    TryAgainQueue,
-    Disconnect,
-}
-
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum ClientFlowSet {
     BeginFlowFrame,
@@ -149,141 +86,6 @@ pub(super) enum ClientFlowSet {
     TeardownSession,
     CommitFlow,
     PresentFlow,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum FlowUiAction {
-    EditAddress,
-    EditName,
-    Connect,
-    Back,
-    Cancel,
-    Retry,
-    RetrySave,
-    ContinueWithoutSaving,
-    DismissError,
-    JoinSaved(String),
-    RemoveFavorite(String),
-    SelectGameTypeDraft(usize),
-    ConfirmGameType,
-    CancelGameType,
-    Disconnect,
-    RequestChangeServer,
-    OpenDashboardMenu,
-    CloseDashboardMenu,
-    KeepServer,
-    ConfirmChangeServer,
-    Quit,
-    OpenSettings,
-    OpenCredits,
-    ToggleFavoriteServer,
-    OpenBrawlerList,
-    CloseBrawlerList,
-    OpenBrawlerDetails(crate::profiles::SavedBrawlerId),
-    BackToBrawlerList,
-    SelectBrawler(crate::profiles::SavedBrawlerId),
-    CreateBrawler,
-    CycleCreationProfile,
-    CycleCreationWeapon,
-    CycleCreationUltimate,
-    ConfirmCreateBrawler,
-    CancelCreateBrawler,
-    OpenBrawlerEditor(crate::profiles::SavedBrawlerId),
-    OpenWeaponEquipment(crate::profiles::SavedBrawlerId),
-    BeginBrawlerNameEdit,
-    CycleBrawlerUltimate,
-    CycleBrawlerPassiveOne,
-    CycleBrawlerPassiveTwo,
-    ConfirmBrawlerEdit,
-    CancelBrawlerEdit,
-    SelectEquipmentSlot(usize),
-    EquipWeaponPart(crate::weapon_parts::WeaponPartInstanceId),
-    UnequipWeaponPart,
-    ConfirmWeaponEquipment,
-    CancelWeaponEquipment,
-    DeleteBrawler(crate::profiles::SavedBrawlerId),
-    CancelDeleteBrawler,
-    ConfirmDeleteBrawler,
-    ChooseBuild(usize),
-    FocusBuildField(usize),
-    ChooseBuildFieldValue {
-        field_index: usize,
-        value_index: usize,
-    },
-    CancelBuildEditor,
-    SaveBuild,
-    JoinQueue,
-    StartPractice,
-    CancelQueue,
-    RetryQueue,
-    TryAgainQueue,
-    RequestCancelMatchStart,
-    KeepLoading,
-    ConfirmCancelMatchStart,
-    QueueAgain,
-    OpenGameTypeSelect,
-    ReturnToDashboard,
-    KeepPlaying,
-    ConfirmLeaveMatch,
-}
-
-#[derive(Clone, Debug)]
-enum SessionObservation {
-    Accepted,
-    Rejected(ClientLobbyFailure),
-    ResolverCompleted {
-        generation: u64,
-        result: Result<Vec<SocketAddr>, String>,
-    },
-    CandidateFailed,
-    CandidateTimedOut,
-    DnsTimedOut,
-    UnexpectedLoss,
-    TimedOut,
-    QueueOutcome(crate::lobby::QueueCommandOutcome),
-    QueueProtocolFailure,
-    QueueTimedOut,
-    ReservationStarted,
-    MatchStartReturned,
-    CountdownObserved,
-    FreshLobbyReturn,
-    MatchFailed,
-    PracticeRejected(crate::lobby::PracticeStartRejection),
-}
-
-#[derive(Resource, Default)]
-struct PendingFlowActions {
-    session: Option<SessionObservation>,
-    explicit: Option<FlowUiAction>,
-    ordinary: Option<FlowUiAction>,
-}
-
-#[derive(Resource, Default)]
-struct FlowCommit {
-    next_flow: Option<ClientFlow>,
-    start_target: Option<ValidatedConnectionTarget>,
-    teardown: bool,
-    advance_candidate: bool,
-    error: Option<FlowError>,
-    overlay: Option<OverlayCommit>,
-    refresh_server_select: Option<usize>,
-    focus_index: Option<usize>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OverlayCommit {
-    Clear,
-    Settings,
-    Credits,
-    DashboardMenu,
-    BrawlerList,
-    BrawlerDetails(crate::profiles::SavedBrawlerId),
-    BrawlerCreation,
-    BrawlerEditor,
-    WeaponEquipment,
-    DeleteBrawlerConfirmation(crate::profiles::SavedBrawlerId),
-    Confirmation(CancelMatchStartConfirmation),
-    ChangeServerConfirmation,
 }
 
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
@@ -357,52 +159,6 @@ impl Default for BrawlerEditDraft {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ValidatedConnectionTarget {
-    logical_address: LogicalServerAddress,
-    proposed_display_name: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConnectionStage {
-    ResolvingAddress,
-    ContactingServer { current: usize, total: usize },
-    JoiningLobby,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AttemptDeadlineExpiry {
-    Dns,
-    Overall,
-    Candidate,
-}
-
-#[derive(Resource, Clone, Debug)]
-struct PendingConnection {
-    generation: u64,
-    target: ValidatedConnectionTarget,
-    candidates: Vec<SocketAddr>,
-    current_candidate: usize,
-    overall_deadline: Duration,
-    dns_deadline: Option<Duration>,
-    candidate_deadline: Option<Duration>,
-    current_entity: Option<Entity>,
-    stage: ConnectionStage,
-}
-
-#[derive(Resource, Default)]
-struct ConnectionGeneration(u64);
-
-struct ResolverTask {
-    generation: u64,
-    task: Task<Result<Vec<SocketAddr>, String>>,
-}
-
-#[derive(Resource, Default)]
-struct ResolverState {
-    task: Option<ResolverTask>,
-}
-
 #[derive(Resource, Clone, Debug)]
 struct ServerSelectModel {
     address: String,
@@ -417,57 +173,6 @@ struct ServerSelectModel {
 enum EditingField {
     Address,
     Name,
-}
-
-#[derive(Resource, Clone, Debug)]
-pub(super) struct ConnectionPersistence {
-    pub(super) state: ConnectionsFileV1,
-    pub(super) dirty_error: Option<String>,
-}
-
-#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct ClientLocalLoadFailures {
-    pub settings_failed: bool,
-    pub connections_failed: bool,
-    pub build_failed: bool,
-}
-
-pub(super) fn local_load_error(failures: ClientLocalLoadFailures) -> Option<FlowError> {
-    let mut sources = Vec::new();
-    if failures.settings_failed {
-        sources.push("Settings");
-    }
-    if failures.connections_failed {
-        sources.push("connection data");
-    }
-    if failures.build_failed {
-        sources.push("saved build");
-    }
-    if sources.is_empty() {
-        return None;
-    }
-    let message = format!(
-        "{} could not be loaded; safe defaults are active",
-        match sources.as_slice() {
-            [one] => (*one).to_string(),
-            [first, second] => format!("{first} and {second}"),
-            [first, second, third] => format!("{first}, {second}, and {third}"),
-            _ => unreachable!("three closed persistence sources"),
-        }
-    );
-    Some(FlowError {
-        kind: FlowErrorKind::Persistence,
-        message,
-        return_flow: ClientFlow::ServerSelect,
-        actions: [Some(FlowErrorAction::ContinueWithDefaults), None],
-    })
-}
-
-#[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
-pub struct SelectedGameType {
-    pub catalog_revision: Option<crate::lobby::CatalogRevision>,
-    pub game_type_id: Option<crate::lobby::GameTypeId>,
-    pub configuration_revision: Option<u32>,
 }
 
 #[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
@@ -538,7 +243,6 @@ struct FlowButton {
     index: usize,
     action: FlowUiAction,
     error_action: bool,
-    build_editor_action: bool,
 }
 
 #[derive(Component)]
@@ -549,21 +253,6 @@ struct RateLimitTryAgain;
 
 #[derive(Component)]
 struct RateLimitTryAgainLabel;
-
-#[derive(Component)]
-struct BuildEditorRoot;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "the render key snapshots four independent visible editor conditions"
-)]
-struct BuildEditorRenderKey {
-    selected_choice: usize,
-    custom_recipe: crate::builds::BrawlerBuildRecipe,
-    focused_field: super::BuildEditorField,
-    inline_error: Option<String>,
-}
 
 #[derive(Component)]
 struct GamePopulationLabel(usize);
@@ -680,9 +369,6 @@ enum DashboardButtonStyle {
     Play,
 }
 
-#[derive(Component)]
-struct MatchCompletionRoot;
-
 #[derive(Component, Clone, Copy)]
 enum FieldLabel {
     Address,
@@ -710,9 +396,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<ConnectionGeneration>()
             .init_resource::<ResolverState>()
             .init_resource::<ClientConnectionsPath>()
-            .init_resource::<super::ClientBuildPath>()
             .init_resource::<ClientLocalLoadFailures>()
-            .init_resource::<super::BuildEditorState>()
             .init_resource::<super::ClientQueueModel>()
             .init_resource::<super::ClientPracticeModel>()
             .init_resource::<super::ClientMatchLoadingModel>()
@@ -796,17 +480,6 @@ impl Plugin for ClientFlowPlugin {
                         .in_set(ClientFlowSet::PresentFlow)
                         .after(present_flow_error_overlay)
                         .before(present_flow),
-                    present_build_editor_overlay
-                        .in_set(ClientFlowSet::PresentFlow)
-                        .before(present_flow),
-                    scroll_build_editor
-                        .in_set(ClientFlowSet::PresentFlow)
-                        .after(present_build_editor_overlay)
-                        .before(present_flow),
-                    keep_build_editor_focus_visible
-                        .in_set(ClientFlowSet::PresentFlow)
-                        .after(scroll_build_editor)
-                        .before(present_flow),
                     update_queue_cancel_button
                         .in_set(ClientFlowSet::PresentFlow)
                         .before(present_flow),
@@ -873,52 +546,6 @@ fn enter_match_input(mut context: ResMut<super::ClientInputContext>) {
 
 fn exit_match_input(mut context: ResMut<super::ClientInputContext>) {
     *context = super::ClientInputContext::Shell;
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are runtime-owned"
-)]
-fn load_connection_state(
-    mut commands: Commands,
-    path: Res<ClientConnectionsPath>,
-    config: Res<ClientNetworkConfig>,
-    mut failures: ResMut<ClientLocalLoadFailures>,
-) {
-    let state = match load_connections(&path.0) {
-        Ok(Some(state)) => state,
-        Ok(None) => ConnectionsFileV1::empty(),
-        Err(_) => {
-            failures.connections_failed = true;
-            ConnectionsFileV1::empty()
-        }
-    };
-    let name = state
-        .preferred_display_name
-        .clone()
-        .unwrap_or_else(|| crate::lobby::generated_display_name(config.client_id));
-    let address = startup_server_address(&config, &state);
-    commands.insert_resource(ServerSelectModel {
-        address,
-        committed_name: name.clone(),
-        name,
-        editing: None,
-        caret: 0,
-        inline_error: None,
-    });
-    commands.insert_resource(ConnectionPersistence {
-        state,
-        dirty_error: None,
-    });
-}
-
-fn startup_server_address(config: &ClientNetworkConfig, state: &ConnectionsFileV1) -> String {
-    config.product_server_prefill.clone().unwrap_or_else(|| {
-        state.recents.first().map_or_else(
-            || "127.0.0.1:5000".to_string(),
-            |recent| recent.address.clone(),
-        )
-    })
 }
 
 #[allow(
@@ -1147,7 +774,6 @@ fn collect_flow_input(
     buttons: Query<(&FlowButton, &Interaction, Has<InteractionDisabled>)>,
     dashboard_layout: Query<&DashboardLayoutClass, With<DashboardRoot>>,
     mut actions: ResMut<PendingFlowActions>,
-    queue: Res<super::ClientQueueModel>,
     mut brawler_edit: ResMut<BrawlerEditDraft>,
 ) {
     for (button, interaction, disabled) in &buttons {
@@ -1349,14 +975,7 @@ fn collect_flow_input(
         queue_ui_action(&mut actions, button.action.clone());
     }
     if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
-        let action = if matches!(overlay.as_ref(), ClientOverlay::BuildEditor) {
-            if queue.pending().is_some_and(|pending| {
-                matches!(pending.command, crate::lobby::QueueCommand::Join(_))
-            }) {
-                return;
-            }
-            FlowUiAction::CancelBuildEditor
-        } else if matches!(overlay.as_ref(), ClientOverlay::ChangeServerConfirmation) {
+        let action = if matches!(overlay.as_ref(), ClientOverlay::ChangeServerConfirmation) {
             FlowUiAction::KeepServer
         } else if matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
             FlowUiAction::CloseDashboardMenu
@@ -1396,102 +1015,6 @@ fn collect_flow_input(
             }
         };
         queue_ui_action(&mut actions, action);
-    }
-}
-
-fn repair_dashboard_focus(current: usize, available: &[usize]) -> usize {
-    if available.contains(&current) {
-        return current;
-    }
-    [
-        DASHBOARD_PLAY_INDEX,
-        DASHBOARD_PRACTICE_INDEX,
-        DASHBOARD_GAME_INDEX,
-        DASHBOARD_BUILD_INDEX,
-        DASHBOARD_SETTINGS_INDEX,
-        DASHBOARD_MENU_INDEX,
-    ]
-    .into_iter()
-    .find(|index| available.contains(index))
-    .unwrap_or(current)
-}
-
-fn dashboard_focus_neighbor(
-    class: DashboardLayoutClass,
-    current: usize,
-    direction: DashboardNavigationDirection,
-    available: &[usize],
-) -> usize {
-    let raw_neighbor = |index| match direction {
-        DashboardNavigationDirection::Left => match index {
-            DASHBOARD_PLAY_INDEX => Some(DASHBOARD_PRACTICE_INDEX),
-            DASHBOARD_PRACTICE_INDEX => Some(DASHBOARD_GAME_INDEX),
-            DASHBOARD_MENU_INDEX => Some(DASHBOARD_SETTINGS_INDEX),
-            _ => None,
-        },
-        DashboardNavigationDirection::Right => match index {
-            DASHBOARD_GAME_INDEX => Some(DASHBOARD_PRACTICE_INDEX),
-            DASHBOARD_PRACTICE_INDEX => Some(DASHBOARD_PLAY_INDEX),
-            DASHBOARD_SETTINGS_INDEX => Some(DASHBOARD_MENU_INDEX),
-            _ => None,
-        },
-        DashboardNavigationDirection::Up => match (class, index) {
-            (DashboardLayoutClass::Compact, DASHBOARD_PLAY_INDEX) => Some(DASHBOARD_PRACTICE_INDEX),
-            (DashboardLayoutClass::Compact, DASHBOARD_PRACTICE_INDEX) => Some(DASHBOARD_GAME_INDEX),
-            (_, DASHBOARD_PLAY_INDEX | DASHBOARD_PRACTICE_INDEX | DASHBOARD_GAME_INDEX) => {
-                Some(DASHBOARD_BUILD_INDEX)
-            }
-            (_, DASHBOARD_BUILD_INDEX) => Some(DASHBOARD_SETTINGS_INDEX),
-            _ => None,
-        },
-        DashboardNavigationDirection::Down => match (class, index) {
-            (_, DASHBOARD_SETTINGS_INDEX | DASHBOARD_MENU_INDEX) => Some(DASHBOARD_BUILD_INDEX),
-            (_, DASHBOARD_BUILD_INDEX) => Some(DASHBOARD_GAME_INDEX),
-            (DashboardLayoutClass::Compact, DASHBOARD_GAME_INDEX) => Some(DASHBOARD_PRACTICE_INDEX),
-            (DashboardLayoutClass::Compact, DASHBOARD_PRACTICE_INDEX) => Some(DASHBOARD_PLAY_INDEX),
-            _ => None,
-        },
-    };
-    let mut candidate = current;
-    while let Some(next) = raw_neighbor(candidate) {
-        if available.contains(&next) {
-            return next;
-        }
-        candidate = next;
-    }
-    current
-}
-
-fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
-    match overlay {
-        ClientOverlay::Error(_)
-        | ClientOverlay::Confirmation(_)
-        | ClientOverlay::BrawlerCreation
-        | ClientOverlay::BrawlerEditor
-        | ClientOverlay::BrawlerList
-        | ClientOverlay::BrawlerDetails(_)
-        | ClientOverlay::WeaponEquipment
-        | ClientOverlay::DeleteBrawlerConfirmation(_)
-        | ClientOverlay::DashboardMenu
-        | ClientOverlay::ChangeServerConfirmation
-        | ClientOverlay::LeaveConfirmation => button.error_action,
-        ClientOverlay::BuildEditor => button.build_editor_action,
-        ClientOverlay::Settings | ClientOverlay::Credits => false,
-        ClientOverlay::None => !button.error_action && !button.build_editor_action,
-    }
-}
-
-fn queue_ui_action(actions: &mut PendingFlowActions, action: FlowUiAction) {
-    if matches!(
-        action,
-        FlowUiAction::Cancel
-            | FlowUiAction::Disconnect
-            | FlowUiAction::ConfirmChangeServer
-            | FlowUiAction::CancelBuildEditor
-    ) {
-        actions.explicit = Some(action);
-    } else {
-        actions.ordinary = Some(action);
     }
 }
 
@@ -1543,12 +1066,6 @@ fn resolve_flow_action(
         MessageWriter<AppExit>,
         Res<ClientLocalLoadFailures>,
     ),
-    build_editor: (
-        ResMut<super::BuildEditorState>,
-        Res<crate::builds::BuildCatalogResource>,
-        Res<crate::combat::WeaponCatalogResource>,
-        Res<super::ClientBuildPath>,
-    ),
 ) {
     let (
         mut selection,
@@ -1561,7 +1078,6 @@ fn resolve_flow_action(
         mut brawler_edit,
         mut equipment_draft,
     ) = dashboard;
-    let (mut editor, builds, weapons, build_path) = build_editor;
     let (
         mut queue,
         mut practice,
@@ -1650,12 +1166,6 @@ fn resolve_flow_action(
                 *game_draft = GameTypeSelectionDraft::default();
                 dashboard_notice.0 = None;
                 result_state.context = None;
-                editor.close_without_acceptance();
-            }
-            FlowUiAction::CancelBuildEditor => {
-                editor.close_without_acceptance();
-                commit.overlay = Some(OverlayCommit::Clear);
-                commit.focus_index = Some(DASHBOARD_BUILD_INDEX);
             }
             _ => {}
         }
@@ -1762,7 +1272,6 @@ fn resolve_flow_action(
                 *game_draft = GameTypeSelectionDraft::default();
                 dashboard_notice.0 = None;
                 result_state.context = None;
-                editor.close_without_acceptance();
                 fail_to_server_select(
                     &mut commit,
                     "The lobby connection was lost unexpectedly".to_string(),
@@ -1784,7 +1293,6 @@ fn resolve_flow_action(
             }
             SessionObservation::QueueProtocolFailure => {
                 commit.teardown = true;
-                editor.close_without_acceptance();
                 *selection = SelectedGameType::default();
                 fail_to_server_select_with_kind(
                     &mut commit,
@@ -2059,16 +1567,7 @@ fn resolve_flow_action(
             Err(error) => model.inline_error = Some(error),
         },
         FlowUiAction::RetrySave => {
-            let result = if *flow.get() == ClientFlow::Queue {
-                super::save_build(
-                    &build_path.0,
-                    super::BuildFileV1::new(builds.0.balance_revision, editor.loaded_selection),
-                    &builds.0,
-                    &weapons.0,
-                )
-            } else {
-                save_connections(&path.0, &persistence.state)
-            };
+            let result = save_connections(&path.0, &persistence.state);
             match result {
                 Ok(()) => {
                     persistence.dirty_error = None;
@@ -2462,52 +1961,6 @@ fn resolve_flow_action(
             let _ = profile.delete(*brawler_id);
             commit.overlay = Some(OverlayCommit::BrawlerList);
         }
-        FlowUiAction::ChooseBuild(index) => {
-            editor.selected_choice = index.min(builds.0.presets.len());
-            editor.inline_error = None;
-        }
-        FlowUiAction::FocusBuildField(index) => {
-            editor.selected_choice = builds.0.presets.len();
-            editor.focused_field = super::BuildEditorField::from_index(index);
-            editor.inline_error = None;
-        }
-        FlowUiAction::ChooseBuildFieldValue {
-            field_index,
-            value_index,
-        } => {
-            editor.selected_choice = builds.0.presets.len();
-            editor.set_field_value(
-                &builds.0,
-                super::BuildEditorField::from_index(field_index),
-                value_index,
-            );
-        }
-        FlowUiAction::SaveBuild => {
-            let draft = editor.selection(&builds.0);
-            match super::resolve_build_preview(draft, &builds.0, &weapons.0) {
-                Ok(_) => {
-                    editor.accept(draft);
-                    commit.overlay = Some(OverlayCommit::Clear);
-                    commit.focus_index = Some(DASHBOARD_BUILD_INDEX);
-                    let file = super::BuildFileV1::new(builds.0.balance_revision, draft);
-                    if let Err(error) =
-                        super::save_build(&build_path.0, file, &builds.0, &weapons.0)
-                    {
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Persistence,
-                            message: format!(
-                                "The brawler was selected, but could not be saved: {error}"
-                            ),
-                            return_flow: ClientFlow::Dashboard,
-                            actions: [Some(FlowErrorAction::Back), None],
-                        });
-                    }
-                }
-                Err(error) => {
-                    editor.inline_error = Some(super::build_editor::build_error_copy(&error));
-                }
-            }
-        }
         FlowUiAction::JoinQueue => {
             if *flow.get() != ClientFlow::Dashboard || practice.pending() {
                 return;
@@ -2522,10 +1975,8 @@ fn resolve_flow_action(
                         .find(|brawler| brawler.id == id)
                 })
             });
-            if let Some(brawler) = selected
-                && queue.start_join(&selection, brawler.id, brawler.revision, time.elapsed())
-            {
-                editor.inline_error = None;
+            if let Some(brawler) = selected {
+                let _ = queue.start_join(&selection, brawler.id, brawler.revision, time.elapsed());
             }
         }
         FlowUiAction::StartPractice => {
@@ -2542,10 +1993,8 @@ fn resolve_flow_action(
                         .find(|brawler| brawler.id == id)
                 })
             });
-            if let Some(brawler) = selected
-                && practice.start(&selection, brawler.id, brawler.revision)
-            {
-                editor.inline_error = None;
+            if let Some(brawler) = selected {
+                let _ = practice.start(&selection, brawler.id, brawler.revision);
             }
         }
         FlowUiAction::QueueAgain => {
@@ -2688,10 +2137,7 @@ fn resolve_flow_action(
                 commit.overlay = Some(OverlayCommit::Clear);
             }
         }
-        FlowUiAction::CancelBuildEditor
-        | FlowUiAction::Cancel
-        | FlowUiAction::Disconnect
-        | FlowUiAction::ConfirmChangeServer => {}
+        FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer => {}
     }
     let _ = flow;
 }
@@ -2787,482 +2233,6 @@ fn rejection_flow_error(reason: ClientLobbyFailure) -> FlowError {
         return_flow: ClientFlow::ServerSelect,
         actions,
     }
-}
-
-fn favorite_focus_after_removal(removed_index: Option<usize>, remaining: usize) -> usize {
-    removed_index.map_or(0, |index| {
-        if index < remaining {
-            3 + index * 2
-        } else if index > 0 {
-            3 + (index - 1) * 2
-        } else {
-            0
-        }
-    })
-}
-
-fn edited_value(model: &ServerSelectModel, field: EditingField) -> &str {
-    match field {
-        EditingField::Address => &model.address,
-        EditingField::Name => &model.name,
-    }
-}
-
-fn edited_value_mut(model: &mut ServerSelectModel, field: EditingField) -> &mut String {
-    match field {
-        EditingField::Address => &mut model.address,
-        EditingField::Name => &mut model.name,
-    }
-}
-
-fn previous_caret(value: &str, caret: usize, field: EditingField) -> usize {
-    if caret == 0 {
-        return 0;
-    }
-    match field {
-        EditingField::Address => caret.saturating_sub(1),
-        EditingField::Name => value[..caret]
-            .grapheme_indices(true)
-            .next_back()
-            .map_or(0, |(index, _)| index),
-    }
-}
-
-fn next_caret(value: &str, caret: usize, field: EditingField) -> usize {
-    if caret >= value.len() {
-        return value.len();
-    }
-    match field {
-        EditingField::Address => caret + 1,
-        EditingField::Name => value[caret..]
-            .grapheme_indices(true)
-            .nth(1)
-            .map_or(value.len(), |(index, _)| caret + index),
-    }
-}
-
-fn insert_editor_text(model: &mut ServerSelectModel, field: EditingField, text: &str) {
-    let allowed = match field {
-        EditingField::Address => text.is_ascii() && !text.chars().any(char::is_control),
-        EditingField::Name => !text.chars().any(|character| {
-            character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
-        }),
-    };
-    let maximum = match field {
-        EditingField::Address => 255,
-        EditingField::Name => 64,
-    };
-    if !allowed || edited_value(model, field).len().saturating_add(text.len()) > maximum {
-        model.inline_error = Some("Text exceeds this field's bounds".to_string());
-        return;
-    }
-    let caret = model.caret;
-    edited_value_mut(model, field).insert_str(caret, text);
-    model.caret = caret + text.len();
-    model.inline_error = None;
-}
-
-fn insert_brawler_name_text(draft: &mut BrawlerEditDraft, text: &str) {
-    let allowed = !text
-        .chars()
-        .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'));
-    if !allowed || draft.name.len().saturating_add(text.len()) > 64 {
-        draft.inline_error = Some("Name exceeds this field's bounds".to_string());
-        return;
-    }
-    draft.name.insert_str(draft.name_caret, text);
-    draft.name_caret += text.len();
-    draft.inline_error = None;
-}
-
-fn validate_target(address: &str, name: &str) -> Result<ValidatedConnectionTarget, String> {
-    Ok(ValidatedConnectionTarget {
-        logical_address: parse_server_address(address)
-            .map_err(|error| format!("Invalid server address: {error:?}"))?,
-        proposed_display_name: crate::lobby::normalize_proposed_display_name(name)
-            .map_err(|error| format!("Invalid display name: {error}"))?,
-    })
-}
-
-fn attempt_deadline_expiry(
-    now: Duration,
-    pending: &PendingConnection,
-) -> Option<AttemptDeadlineExpiry> {
-    if pending.dns_deadline.is_some_and(|deadline| now > deadline) {
-        Some(AttemptDeadlineExpiry::Dns)
-    } else if now > pending.overall_deadline {
-        Some(AttemptDeadlineExpiry::Overall)
-    } else if pending
-        .candidate_deadline
-        .is_some_and(|deadline| now > deadline)
-    {
-        Some(AttemptDeadlineExpiry::Candidate)
-    } else {
-        None
-    }
-}
-
-fn observation_for_expiry(expiry: AttemptDeadlineExpiry) -> SessionObservation {
-    match expiry {
-        AttemptDeadlineExpiry::Dns => SessionObservation::DnsTimedOut,
-        AttemptDeadlineExpiry::Overall => SessionObservation::TimedOut,
-        AttemptDeadlineExpiry::Candidate => SessionObservation::CandidateTimedOut,
-    }
-}
-
-fn accepted_observation(
-    now: Duration,
-    pending: &PendingConnection,
-    disconnected: bool,
-) -> SessionObservation {
-    if disconnected {
-        SessionObservation::UnexpectedLoss
-    } else if let Some(expiry) = attempt_deadline_expiry(now, pending) {
-        observation_for_expiry(expiry)
-    } else {
-        SessionObservation::Accepted
-    }
-}
-
-fn has_next_candidate(pending: &PendingConnection) -> bool {
-    pending.current_candidate.saturating_add(1) < pending.candidates.len()
-}
-
-fn candidate_time_share(remaining: Duration, remaining_candidates: u32) -> Duration {
-    debug_assert!(remaining_candidates > 0);
-    remaining.div_f64(f64::from(remaining_candidates.max(1)))
-}
-
-fn netcode_timeout_ceiling(remaining: Duration) -> Duration {
-    Duration::from_secs(
-        remaining
-            .as_secs()
-            .saturating_add(u64::from(remaining.subsec_nanos() != 0))
-            .max(1),
-    )
-}
-
-fn bound_resolved_candidates(candidates: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
-    let mut unique = BTreeSet::new();
-    candidates
-        .into_iter()
-        .filter(|address| unique.insert(*address))
-        .take(MAX_RESOLVED_CANDIDATES)
-        .collect()
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are runtime-owned"
-)]
-fn teardown_session(
-    mut commands: Commands,
-    commit: Res<FlowCommit>,
-    clients: Query<Entity, With<RoutedClientSession>>,
-    mut routed: ResMut<RoutedClientLifecycle>,
-) {
-    if !commit.teardown {
-        return;
-    }
-    for entity in &clients {
-        commands.trigger(Disconnect { entity });
-        commands.trigger(Unlink {
-            entity,
-            reason: UnlinkReason::UserRequested(None),
-        });
-        commands.entity(entity).despawn();
-    }
-    routed.phase = RoutedClientPhase::Disabled;
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    clippy::needless_pass_by_value,
-    reason = "the flow commit phase coordinates runtime-owned Bevy resources"
-)]
-fn commit_flow(
-    mut commands: Commands,
-    time: Res<Time<Real>>,
-    config: Res<ClientNetworkConfig>,
-    mut generation: ResMut<ConnectionGeneration>,
-    mut resolver: ResMut<ResolverState>,
-    mut routed: ResMut<RoutedClientLifecycle>,
-    pending: Option<ResMut<PendingConnection>>,
-    commit: Res<FlowCommit>,
-    mut next_flow: ResMut<NextState<ClientFlow>>,
-    mut overlay: ResMut<ClientOverlay>,
-    mut navigation: ResMut<FlowNavigation>,
-) {
-    if let Some(error) = &commit.error {
-        *overlay = ClientOverlay::Error(error.clone());
-    } else if let Some(overlay_commit) = commit.overlay {
-        *overlay = match overlay_commit {
-            OverlayCommit::Clear => ClientOverlay::None,
-            OverlayCommit::Settings => ClientOverlay::Settings,
-            OverlayCommit::Credits => ClientOverlay::Credits,
-            OverlayCommit::DashboardMenu => ClientOverlay::DashboardMenu,
-            OverlayCommit::BrawlerList => ClientOverlay::BrawlerList,
-            OverlayCommit::BrawlerDetails(value) => ClientOverlay::BrawlerDetails(value),
-            OverlayCommit::BrawlerCreation => ClientOverlay::BrawlerCreation,
-            OverlayCommit::BrawlerEditor => ClientOverlay::BrawlerEditor,
-            OverlayCommit::WeaponEquipment => ClientOverlay::WeaponEquipment,
-            OverlayCommit::DeleteBrawlerConfirmation(value) => {
-                ClientOverlay::DeleteBrawlerConfirmation(value)
-            }
-            OverlayCommit::Confirmation(value) => ClientOverlay::Confirmation(value),
-            OverlayCommit::ChangeServerConfirmation => ClientOverlay::ChangeServerConfirmation,
-        };
-    }
-    if let Some(index) = commit.focus_index {
-        navigation.selected = index;
-    }
-    if let Some(target) = commit.start_target.clone()
-        && let Err(error) = begin_connection_target(
-            &mut commands,
-            &config,
-            time.elapsed(),
-            &mut generation,
-            &mut resolver,
-            &mut routed,
-            target,
-        )
-    {
-        *overlay = ClientOverlay::Error(FlowError {
-            kind: FlowErrorKind::Connection,
-            message: error,
-            return_flow: ClientFlow::ServerSelect,
-            actions: [
-                Some(FlowErrorAction::RetryConnection),
-                Some(FlowErrorAction::Back),
-            ],
-        });
-        next_flow.set(ClientFlow::ServerSelect);
-        return;
-    } else if commit.advance_candidate
-        && let Some(mut pending) = pending
-    {
-        if pending.current_entity.is_some() {
-            pending.current_candidate = pending.current_candidate.saturating_add(1);
-        }
-        pending.current_entity = None;
-        spawn_current_candidate(
-            &mut commands,
-            &config,
-            time.elapsed(),
-            &mut routed,
-            &mut pending,
-        );
-    }
-    if let Some(flow) = commit.next_flow {
-        next_flow.set(flow);
-        if flow != ClientFlow::Connecting {
-            commands.remove_resource::<PendingConnection>();
-        }
-    }
-}
-
-fn begin_connection_target(
-    commands: &mut Commands,
-    config: &ClientNetworkConfig,
-    now: Duration,
-    generation: &mut ConnectionGeneration,
-    resolver: &mut ResolverState,
-    routed: &mut RoutedClientLifecycle,
-    target: ValidatedConnectionTarget,
-) -> Result<(), String> {
-    generation.0 = generation.0.saturating_add(1).max(1);
-    let mut connection = PendingConnection {
-        generation: generation.0,
-        target,
-        candidates: Vec::new(),
-        current_candidate: 0,
-        overall_deadline: now.saturating_add(ATTEMPT_DEADLINE),
-        dns_deadline: None,
-        candidate_deadline: None,
-        current_entity: None,
-        stage: ConnectionStage::ResolvingAddress,
-    };
-    if let Some(socket) = connection.target.logical_address.numeric_socket() {
-        connection.candidates.push(socket);
-        connection.stage = ConnectionStage::ContactingServer {
-            current: 1,
-            total: 1,
-        };
-        spawn_current_candidate(commands, config, now, routed, &mut connection);
-    } else {
-        if resolver.task.is_some() {
-            return Err("A previous operating-system address lookup is still busy".to_string());
-        }
-        let ServerAddressHost::Dns(host) = &connection.target.logical_address.host else {
-            unreachable!("non-numeric logical server host is DNS")
-        };
-        let task_generation = connection.generation;
-        let query = format!("{}:{}", host, connection.target.logical_address.port);
-        resolver.task = Some(ResolverTask {
-            generation: task_generation,
-            task: IoTaskPool::get().spawn(async move {
-                bound_resolved_candidates(
-                    query
-                        .to_socket_addrs()
-                        .map_err(|error| format!("Address resolution failed: {error}"))?,
-                )
-                .pipe(Ok)
-            }),
-        });
-        connection.dns_deadline = Some(now.saturating_add(DNS_DEADLINE));
-    }
-    commands.insert_resource(connection);
-    Ok(())
-}
-
-fn spawn_current_candidate(
-    commands: &mut Commands,
-    config: &ClientNetworkConfig,
-    now: Duration,
-    routed: &mut RoutedClientLifecycle,
-    pending: &mut PendingConnection,
-) {
-    let Some(server_addr) = pending.candidates.get(pending.current_candidate).copied() else {
-        return;
-    };
-    let remaining_candidates = pending
-        .candidates
-        .len()
-        .saturating_sub(pending.current_candidate)
-        .max(1);
-    let remaining = pending.overall_deadline.saturating_sub(now);
-    let divisor = u32::try_from(remaining_candidates).expect("candidate bound fits u32");
-    let share = candidate_time_share(remaining, divisor);
-    pending.candidate_deadline = Some(now.saturating_add(share));
-    pending.stage = ConnectionStage::ContactingServer {
-        current: pending.current_candidate + 1,
-        total: pending.candidates.len(),
-    };
-    pending.current_entity = spawn_product_lobby_connection(
-        commands,
-        config,
-        routed,
-        ProductLobbyAttempt {
-            started_at: now,
-            server_addr,
-            logical_address: pending.target.logical_address.canonical().to_string(),
-            proposed_display_name: pending.target.proposed_display_name.clone(),
-            netcode_timeout: netcode_timeout_ceiling(remaining),
-        },
-    )
-    .ok();
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are runtime-owned"
-)]
-fn spawn_server_select(
-    mut commands: Commands,
-    model: Res<ServerSelectModel>,
-    persistence: Res<ConnectionPersistence>,
-    mut navigation: ResMut<FlowNavigation>,
-) {
-    spawn_server_select_root(&mut commands, &model, &persistence, &mut navigation, None);
-}
-
-fn spawn_server_select_root(
-    commands: &mut Commands,
-    model: &ServerSelectModel,
-    persistence: &ConnectionPersistence,
-    navigation: &mut FlowNavigation,
-    requested_selection: Option<usize>,
-) {
-    navigation.selected = requested_selection.unwrap_or(2);
-    commands
-        .spawn((
-            FlowRoot,
-            DespawnOnExit(ClientFlow::ServerSelect),
-            flow_root_node(),
-            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
-            GlobalZIndex(410),
-        ))
-        .with_children(|root| {
-            spawn_heading(root, "SERVER SELECT");
-            spawn_flow_button(
-                root,
-                0,
-                FlowUiAction::EditAddress,
-                "",
-                Some(FieldLabel::Address),
-            );
-            spawn_flow_button(root, 1, FlowUiAction::EditName, "", Some(FieldLabel::Name));
-            spawn_flow_button(root, 2, FlowUiAction::Connect, "CONNECT", None);
-            let mut index = 3;
-            for favorite in &persistence.state.favorites {
-                spawn_flow_button(
-                    root,
-                    index,
-                    FlowUiAction::JoinSaved(favorite.address.clone()),
-                    &format!("JOIN {} - {}", favorite.name, favorite.address),
-                    None,
-                );
-                index += 1;
-                spawn_flow_button(
-                    root,
-                    index,
-                    FlowUiAction::RemoveFavorite(favorite.address.clone()),
-                    &format!("REMOVE {}", favorite.name),
-                    None,
-                );
-                index += 1;
-            }
-            for recent in &persistence.state.recents {
-                spawn_flow_button(
-                    root,
-                    index,
-                    FlowUiAction::JoinSaved(recent.address.clone()),
-                    &format!("RECENT {} - {}", recent.server_name, recent.address),
-                    None,
-                );
-                index += 1;
-            }
-            spawn_flow_button(root, index, FlowUiAction::OpenSettings, "SETTINGS", None);
-            spawn_flow_button(root, index + 1, FlowUiAction::Quit, "QUIT", None);
-            if let Some(error) = model.inline_error.as_ref() {
-                root.spawn((
-                    Text::new(error.clone()),
-                    TextColor(Color::srgb(1.0, 0.55, 0.45)),
-                ));
-            }
-        });
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    clippy::needless_pass_by_value,
-    reason = "the bounded rebuild phase owns one complete server-select root replacement"
-)]
-fn refresh_server_select(
-    mut commands: Commands,
-    commit: Res<FlowCommit>,
-    flow: Res<State<ClientFlow>>,
-    roots: Query<Entity, With<FlowRoot>>,
-    model: Res<ServerSelectModel>,
-    persistence: Res<ConnectionPersistence>,
-    mut navigation: ResMut<FlowNavigation>,
-) {
-    let Some(selection) = commit.refresh_server_select else {
-        return;
-    };
-    if *flow.get() != ClientFlow::ServerSelect {
-        return;
-    }
-    for entity in &roots {
-        commands.entity(entity).despawn();
-    }
-    spawn_server_select_root(
-        &mut commands,
-        &model,
-        &persistence,
-        &mut navigation,
-        Some(selection),
-    );
 }
 
 #[allow(
@@ -3386,416 +2356,6 @@ fn update_rate_limit_try_again(
         } else {
             format!("TRY AGAIN IN {:.1}s", remaining.as_secs_f32())
         };
-    }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::needless_pass_by_value,
-    reason = "the product editor overlay renders one bounded draft from authored catalogs"
-)]
-fn present_build_editor_overlay(
-    mut commands: Commands,
-    overlay: Res<ClientOverlay>,
-    flow: Res<State<ClientFlow>>,
-    editor: Res<super::BuildEditorState>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
-    roots: Query<(Entity, &ScrollPosition), With<BuildEditorRoot>>,
-    mut navigation: ResMut<FlowNavigation>,
-    mut rendered: Local<Option<BuildEditorRenderKey>>,
-) {
-    if !matches!(overlay.as_ref(), ClientOverlay::BuildEditor)
-        || *flow.get() != ClientFlow::Dashboard
-    {
-        for (entity, _) in &roots {
-            commands.entity(entity).despawn();
-        }
-        *rendered = None;
-        return;
-    }
-    let render_key = BuildEditorRenderKey {
-        selected_choice: editor.selected_choice,
-        custom_recipe: editor.custom_recipe,
-        focused_field: editor.focused_field,
-        inline_error: editor.inline_error.clone(),
-    };
-    if !roots.is_empty() && rendered.as_ref() == Some(&render_key) {
-        return;
-    }
-    let first_spawn = roots.is_empty();
-    let scroll = roots
-        .iter()
-        .next()
-        .map_or_else(ScrollPosition::default, |(_, scroll)| scroll.clone());
-    for (entity, _) in &roots {
-        commands.entity(entity).despawn();
-    }
-    if first_spawn && !is_build_editor_focus_index(navigation.selected) {
-        navigation.selected = BUILD_EDITOR_CHOICE_BASE + editor.selected_choice;
-    }
-    let draft = editor.selection(&builds.0);
-    let preview = super::resolve_build_preview(draft, &builds.0, &weapons.0);
-    let budget_summary = super::build_editor::build_budget_summary(draft, &builds.0).ok();
-    commands
-        .spawn((
-            BuildEditorRoot,
-            scroll,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                display: Display::Flex,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: px(8),
-                padding: UiRect::all(px(20)),
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.02, 0.035, 0.06, 0.98)),
-            GlobalZIndex(480),
-        ))
-        .with_children(|root| {
-            spawn_heading(root, "BUILD EDITOR");
-            for (index, preset) in builds.0.presets.iter().enumerate() {
-                let points = super::resolve_build_preview(
-                    crate::builds::BuildSelection::Preset(preset.id),
-                    &builds.0,
-                    &weapons.0,
-                )
-                .map_or(0, |preview| preview.total_points);
-                spawn_build_editor_button(
-                    root,
-                    BUILD_EDITOR_CHOICE_BASE + index,
-                    FlowUiAction::ChooseBuild(index),
-                    &format!("{} — {points} points", preset.display_name),
-                    false,
-                );
-            }
-            spawn_build_editor_button(
-                root,
-                BUILD_EDITOR_CHOICE_BASE + builds.0.presets.len(),
-                FlowUiAction::ChooseBuild(builds.0.presets.len()),
-                "CUSTOM — edit all six fields below",
-                false,
-            );
-            if editor.selected_choice == builds.0.presets.len() {
-                for index in 0..6 {
-                    spawn_build_editor_button(
-                        root,
-                        BUILD_EDITOR_FIELD_BASE + index,
-                        FlowUiAction::FocusBuildField(index),
-                        &custom_field_label(
-                            super::BuildEditorField::from_index(index),
-                            editor.custom_recipe,
-                            &builds.0,
-                        ),
-                        false,
-                    );
-                }
-                let field = editor.focused_field;
-                root.spawn((
-                    Text::new(format!("OPTIONS — {}", custom_field_name(field))),
-                    TextColor(Color::srgb(0.25, 0.9, 1.0)),
-                ));
-                for value_index in
-                    0..super::build_editor::custom_field_option_count(field, &builds.0)
-                {
-                    let Some(option) = super::build_editor::custom_field_option_label(
-                        field,
-                        value_index,
-                        &builds.0,
-                    ) else {
-                        continue;
-                    };
-                    let detail = editor
-                        .selection_with_field_value(field, value_index, &builds.0)
-                        .map_or_else(
-                            || "Unavailable".to_string(),
-                            |alternative| {
-                                super::compare_build_alternative(
-                                    draft,
-                                    alternative,
-                                    &builds.0,
-                                    &weapons.0,
-                                )
-                                .map_or_else(|error| error, |lines| lines.join(" · "))
-                            },
-                        );
-                    spawn_build_editor_button(
-                        root,
-                        BUILD_EDITOR_OPTION_BASE + value_index,
-                        FlowUiAction::ChooseBuildFieldValue {
-                            field_index: field.index(),
-                            value_index,
-                        },
-                        &format!("{option} — {detail}"),
-                        false,
-                    );
-                }
-            }
-            match &preview {
-                Ok(preview) => {
-                    root.spawn((
-                        Text::new(format!(
-                            "{}\n\n{}",
-                            budget_summary.as_deref().unwrap_or("Budget unavailable"),
-                            preview.lines.join("\n"),
-                        )),
-                        TextFont::from_font_size(16.0),
-                        TextColor(Color::srgb(0.86, 0.94, 1.0)),
-                        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
-                        Node {
-                            width: percent(88),
-                            max_width: px(820),
-                            ..default()
-                        },
-                    ));
-                }
-                Err(error) => {
-                    let copy = budget_summary.as_ref().map_or_else(
-                        || super::build_editor::build_error_copy(error),
-                        |budget| {
-                            format!(
-                                "{budget}\n\n{}",
-                                super::build_editor::build_error_copy(error)
-                            )
-                        },
-                    );
-                    root.spawn((Text::new(copy), TextColor(Color::srgb(1.0, 0.55, 0.45))));
-                }
-            }
-            if let Some(error) = &editor.inline_error {
-                root.spawn((
-                    Text::new(error.clone()),
-                    TextColor(Color::srgb(1.0, 0.55, 0.45)),
-                ));
-            }
-            spawn_build_editor_button(
-                root,
-                BUILD_EDITOR_JOIN_INDEX,
-                FlowUiAction::SaveBuild,
-                "SELECT BRAWLER",
-                preview.is_err(),
-            );
-            spawn_build_editor_button(
-                root,
-                BUILD_EDITOR_BACK_INDEX,
-                FlowUiAction::CancelBuildEditor,
-                "BACK",
-                false,
-            );
-        });
-    *rendered = Some(render_key);
-}
-
-fn scroll_build_editor(
-    mut wheel: MessageReader<MouseWheel>,
-    mut roots: Query<&mut ScrollPosition, With<BuildEditorRoot>>,
-) {
-    let delta = wheel
-        .read()
-        .map(|event| match event.unit {
-            MouseScrollUnit::Line => event.y * 24.0,
-            MouseScrollUnit::Pixel => event.y,
-        })
-        .sum::<f32>();
-    if delta.abs() <= f32::EPSILON {
-        return;
-    }
-    for mut position in &mut roots {
-        position.0.y = (position.0.y - delta).max(0.0);
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are runtime-owned"
-)]
-fn keep_build_editor_focus_visible(
-    navigation: Res<FlowNavigation>,
-    buttons: Query<(&FlowButton, &ComputedNode, &UiGlobalTransform)>,
-    mut roots: Query<
-        (
-            Entity,
-            &ComputedNode,
-            &UiGlobalTransform,
-            &mut ScrollPosition,
-        ),
-        With<BuildEditorRoot>,
-    >,
-    mut prior_focus: Local<Option<(usize, Entity)>>,
-) {
-    let Some(root_entity) = roots.iter_mut().next().map(|(entity, _, _, _)| entity) else {
-        *prior_focus = None;
-        return;
-    };
-    let focus_key = (navigation.selected, root_entity);
-    if prior_focus.as_ref() == Some(&focus_key) {
-        return;
-    }
-    *prior_focus = Some(focus_key);
-    let Some((_, button_node, button_transform)) = buttons
-        .iter()
-        .find(|(button, _, _)| button.build_editor_action && button.index == navigation.selected)
-    else {
-        return;
-    };
-    if button_node.is_empty() {
-        return;
-    }
-    let (_, _, button_center) = button_transform.to_scale_angle_translation();
-    let button_half_height = button_node.size().y * 0.5;
-    for (_, root_node, root_transform, mut scroll) in &mut roots {
-        if root_node.is_empty() {
-            continue;
-        }
-        let (_, _, root_center) = root_transform.to_scale_angle_translation();
-        let root_half_height = root_node.size().y * 0.5;
-        let top = root_center.y - root_half_height;
-        let bottom = root_center.y + root_half_height;
-        let button_top = button_center.y - button_half_height;
-        let button_bottom = button_center.y + button_half_height;
-        if button_top < top {
-            scroll.0.y = (scroll.0.y - (top - button_top)).max(0.0);
-        } else if button_bottom > bottom {
-            scroll.0.y += button_bottom - bottom;
-        }
-    }
-}
-
-const fn custom_field_name(field: super::BuildEditorField) -> &'static str {
-    match field {
-        super::BuildEditorField::Power => "POWER",
-        super::BuildEditorField::Reach => "REACH",
-        super::BuildEditorField::Magazine => "MAGAZINE",
-        super::BuildEditorField::Ultimate => "ULTIMATE",
-        super::BuildEditorField::PassiveOne => "PASSIVE 1",
-        super::BuildEditorField::PassiveTwo => "PASSIVE 2",
-    }
-}
-
-const fn is_build_editor_focus_index(index: usize) -> bool {
-    index >= BUILD_EDITOR_CHOICE_BASE && index <= BUILD_EDITOR_BACK_INDEX
-}
-
-fn spawn_build_editor_button(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    disabled: bool,
-) {
-    let mut entity = parent.spawn((
-        Button,
-        FlowButton {
-            index,
-            action,
-            error_action: false,
-            build_editor_action: true,
-        },
-        Node {
-            width: percent(88),
-            max_width: px(820),
-            min_height: px(40),
-            padding: UiRect::axes(px(12), px(7)),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            border: UiRect::all(px(2)),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(0.09, 0.14, 0.2)),
-        BorderColor::all(Color::NONE),
-    ));
-    if disabled {
-        entity.insert(InteractionDisabled);
-    }
-    entity.with_child((Text::new(label), TextFont::from_font_size(16.0)));
-}
-
-fn custom_field_label(
-    field: super::BuildEditorField,
-    recipe: crate::builds::BrawlerBuildRecipe,
-    builds: &crate::builds::BuildCatalog,
-) -> String {
-    use crate::builds::{PulseMagazine, PulsePower, PulseReach, WeaponChoice};
-    let WeaponChoice::CustomPulse {
-        power,
-        reach,
-        magazine,
-    } = recipe.weapon
-    else {
-        return "Custom weapon unavailable".to_string();
-    };
-    match field {
-        super::BuildEditorField::Power => format!(
-            "POWER: {} | Light +0 · Balanced +0 · Heavy +1",
-            match power {
-                PulsePower::Light => "Light",
-                PulsePower::Balanced => "Balanced",
-                PulsePower::Heavy => "Heavy",
-            }
-        ),
-        super::BuildEditorField::Reach => format!(
-            "REACH: {} | Compact +0 · Standard +0 · Long +1",
-            match reach {
-                PulseReach::Compact => "Compact",
-                PulseReach::Standard => "Standard",
-                PulseReach::Long => "Long",
-            }
-        ),
-        super::BuildEditorField::Magazine => format!(
-            "MAGAZINE: {} | Quick +0 · Standard +0 · Expanded +1",
-            match magazine {
-                PulseMagazine::Quick => "Quick",
-                PulseMagazine::Standard => "Standard",
-                PulseMagazine::Expanded => "Expanded",
-            }
-        ),
-        super::BuildEditorField::Ultimate => {
-            let selected = builds
-                .ultimates
-                .iter()
-                .find(|definition| definition.id == recipe.ultimate)
-                .map_or("Unknown", |definition| definition.display_name.as_str());
-            format!(
-                "ULTIMATE: {selected} | {}",
-                builds
-                    .ultimates
-                    .iter()
-                    .map(|definition| format!(
-                        "{} {}pt",
-                        definition.display_name, definition.point_cost
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            )
-        }
-        super::BuildEditorField::PassiveOne | super::BuildEditorField::PassiveTwo => {
-            let slot = usize::from(matches!(field, super::BuildEditorField::PassiveTwo));
-            let selected = builds
-                .passives
-                .iter()
-                .find(|definition| definition.id == recipe.passives[slot])
-                .map_or("Unknown", |definition| definition.display_name.as_str());
-            format!(
-                "PASSIVE {}: {selected} | {}",
-                slot + 1,
-                builds
-                    .passives
-                    .iter()
-                    .map(|definition| format!(
-                        "{} {}pt",
-                        definition.display_name, definition.point_cost
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            )
-        }
     }
 }
 
@@ -4108,7 +2668,6 @@ fn spawn_dashboard(
                             FlowUiAction::CreateBrawler
                         },
                         error_action: false,
-                        build_editor_action: false,
                     },
                     Node {
                         width: percent(54),
@@ -4143,7 +2702,6 @@ fn spawn_dashboard(
                             FlowUiAction::CreateBrawler
                         },
                         error_action: false,
-                        build_editor_action: false,
                     },
                     Node {
                         width: percent(30),
@@ -4232,7 +2790,6 @@ fn spawn_dashboard(
                         index: DASHBOARD_GAME_INDEX,
                         action: FlowUiAction::OpenGameTypeSelect,
                         error_action: false,
-                        build_editor_action: false,
                     },
                     Node {
                         width: percent(44),
@@ -4373,222 +2930,6 @@ fn dashboard_game_summary(game: &crate::lobby::AdvertisedGameType) -> String {
         ),
     };
     format!("{rules}\nMap pool: {maps}")
-}
-
-#[allow(
-    clippy::too_many_lines,
-    clippy::needless_pass_by_value,
-    reason = "the bounded game-select root renders the complete catalog card contract"
-)]
-fn spawn_game_type_select(
-    mut commands: Commands,
-    memberships: Query<&ClientLobbyMembership, With<Client>>,
-    mut navigation: ResMut<FlowNavigation>,
-    draft: Res<GameTypeSelectionDraft>,
-    queue: Res<super::ClientQueueModel>,
-) {
-    let Some(membership) = memberships.iter().next() else {
-        return;
-    };
-    let selected_index = draft.selected_index.unwrap_or(0);
-    navigation.selected = selected_index;
-    let map_catalog = crate::map::MapContentCatalog::embedded().ok();
-    commands
-        .spawn((
-            FlowRoot,
-            GameTypeSelectRoot,
-            DespawnOnExit(ClientFlow::GameTypeSelect),
-            flow_root_node(),
-            ScrollPosition::default(),
-            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
-            GlobalZIndex(410),
-        ))
-        .with_children(|root| {
-            spawn_heading(root, "SELECT GAME TYPE");
-            root.spawn(Text::new(format!(
-                "{} · {}",
-                membership.server_name, membership.accepted_display_name
-            )));
-            if draft.unavailable_previous {
-                root.spawn((
-                    Text::new("Your previous game is no longer available. Choose a replacement."),
-                    TextColor(Color::srgb(1.0, 0.72, 0.28)),
-                ));
-            }
-            for (index, game_type) in membership.game_types.iter().enumerate() {
-                let mode_name =
-                    if game_type.mode_definition_id == crate::map::WIPEOUT_MODE_DEFINITION {
-                        "Wipeout"
-                    } else if game_type.mode_definition_id == crate::map::HOT_ZONE_MODE_DEFINITION {
-                        "Hot Zone"
-                    } else if game_type.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
-                        "Heist"
-                    } else {
-                        "Unknown mode"
-                    };
-                let map_names = game_type
-                    .map_preset_ids
-                    .iter()
-                    .map(|id| {
-                        map_catalog
-                            .as_ref()
-                            .and_then(|catalog| {
-                                catalog.presets.iter().find(|preset| preset.id == *id)
-                            })
-                            .map_or_else(
-                                || format!("Map {}", id.0),
-                                |preset| preset.display_name.clone(),
-                            )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let rules = match game_type.rules_summary {
-                    crate::lobby::AdvertisedRulesSummary::Wipeout {
-                        target_score,
-                        active_limit_ticks,
-                    } => format!(
-                        "first to {target_score}; {}s limit",
-                        active_limit_ticks / 60
-                    ),
-                    crate::lobby::AdvertisedRulesSummary::HotZone {
-                        target_progress_ticks,
-                        active_limit_ticks,
-                    } => format!(
-                        "hold {}s; {}s limit",
-                        target_progress_ticks / 60,
-                        active_limit_ticks / 60
-                    ),
-                    crate::lobby::AdvertisedRulesSummary::Heist {
-                        safe_maximum_health,
-                        active_limit_ticks,
-                    } => format!(
-                        "{safe_maximum_health} HP idol; {}s limit",
-                        active_limit_ticks / 60
-                    ),
-                };
-                spawn_flow_button(
-                    root,
-                    index,
-                    FlowUiAction::SelectGameTypeDraft(index),
-                    &format!(
-                        "{} | {mode_name} | {}v{} | {map_names} | {rules}",
-                        game_type.display_name,
-                        game_type.players_per_team,
-                        game_type.players_per_team,
-                    ),
-                    None,
-                );
-                root.spawn((
-                    GamePopulationLabel(index),
-                    Text::new(queue_population(&queue, game_type)),
-                    TextFont::from_font_size(15.0),
-                    TextColor(Color::srgb(0.68, 0.78, 0.86)),
-                ));
-            }
-            spawn_flow_button_disabled(
-                root,
-                GAME_TYPE_CONFIRM_INDEX,
-                FlowUiAction::ConfirmGameType,
-                "CONFIRM",
-                None,
-                draft.selected_index.is_none(),
-            );
-            spawn_flow_button(
-                root,
-                GAME_TYPE_BACK_INDEX,
-                FlowUiAction::CancelGameType,
-                "BACK",
-                None,
-            );
-        });
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are runtime-owned"
-)]
-fn scroll_game_type_select(
-    flow: Res<State<ClientFlow>>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut roots: Query<&mut ScrollPosition, With<GameTypeSelectRoot>>,
-) {
-    if *flow.get() != ClientFlow::GameTypeSelect {
-        return;
-    }
-    let delta = wheel
-        .read()
-        .map(|event| match event.unit {
-            MouseScrollUnit::Line => event.y * 24.0,
-            MouseScrollUnit::Pixel => event.y,
-        })
-        .sum::<f32>();
-    if delta.abs() <= f32::EPSILON {
-        return;
-    }
-    for mut position in &mut roots {
-        position.0.y = (position.0.y - delta).max(0.0);
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "computed UI bounds are available only after Bevy's layout pass"
-)]
-fn keep_game_type_focus_visible(
-    flow: Res<State<ClientFlow>>,
-    navigation: Res<FlowNavigation>,
-    buttons: Query<(&FlowButton, &ComputedNode, &UiGlobalTransform)>,
-    mut roots: Query<
-        (
-            Entity,
-            &ComputedNode,
-            &UiGlobalTransform,
-            &mut ScrollPosition,
-        ),
-        With<GameTypeSelectRoot>,
-    >,
-    mut prior: Local<Option<(Entity, usize)>>,
-) {
-    if *flow.get() != ClientFlow::GameTypeSelect {
-        *prior = None;
-        return;
-    }
-    let Some((root_entity, _, _, _)) = roots.iter_mut().next() else {
-        *prior = None;
-        return;
-    };
-    let focus_key = (root_entity, navigation.selected);
-    if prior.as_ref() == Some(&focus_key) {
-        return;
-    }
-    *prior = Some(focus_key);
-    let Some((_, focused_node, focused_transform)) = buttons
-        .iter()
-        .find(|(button, _, _)| button.index == navigation.selected)
-    else {
-        return;
-    };
-    if focused_node.is_empty() {
-        return;
-    }
-    let (_, _, focused_center) = focused_transform.to_scale_angle_translation();
-    let focused_half_height = focused_node.size().y * 0.5;
-    for (_, root_node, root_transform, mut scroll) in &mut roots {
-        if root_node.is_empty() {
-            continue;
-        }
-        let (_, _, root_center) = root_transform.to_scale_angle_translation();
-        let root_half_height = root_node.size().y * 0.5;
-        let visible_top = root_center.y - root_half_height + 8.0;
-        let visible_bottom = root_center.y + root_half_height - 8.0;
-        let focused_top = focused_center.y - focused_half_height;
-        let focused_bottom = focused_center.y + focused_half_height;
-        if focused_bottom > visible_bottom {
-            scroll.0.y += focused_bottom - visible_bottom;
-        } else if focused_top < visible_top {
-            scroll.0.y = (scroll.0.y - (visible_top - focused_top)).max(0.0);
-        }
-    }
 }
 
 #[allow(
@@ -4991,7 +3332,6 @@ fn spawn_brawler_list_row(
             index,
             action: FlowUiAction::OpenBrawlerDetails(brawler.id),
             error_action: true,
-            build_editor_action: false,
         },
         Node {
             width: percent(100),
@@ -5056,7 +3396,6 @@ fn spawn_brawler_screen_button(
             index,
             action,
             error_action: true,
-            build_editor_action: false,
         },
         Node {
             width,
@@ -6868,161 +5207,6 @@ fn present_dashboard_menu(
         });
 }
 
-#[allow(clippy::needless_pass_by_value)]
-fn present_match_completion(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    matches: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
-    roots: Query<Entity, With<MatchCompletionRoot>>,
-) {
-    if *flow.get() != ClientFlow::Match || roots.iter().next().is_some() {
-        return;
-    }
-    let Some(result) = matches.iter().find_map(|state| match state.phase {
-        crate::matchplay::MatchPhase::Completed { result, .. } => Some(result),
-        _ => None,
-    }) else {
-        return;
-    };
-    let result = match result {
-        crate::matchplay::MatchResult::TeamVictory { team } => {
-            format!("TEAM {} WINS", team.0 + 1)
-        }
-        crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
-        crate::matchplay::MatchResult::Forfeit { winner, .. } => {
-            format!("TEAM {} WINS BY FORFEIT", winner.0 + 1)
-        }
-    };
-    commands
-        .spawn((
-            MatchCompletionRoot,
-            DespawnOnExit(ClientFlow::Match),
-            flow_root_node(),
-            BackgroundColor(Color::srgba(0.025, 0.04, 0.07, 0.96)),
-            GlobalZIndex(450),
-        ))
-        .with_children(|root| {
-            spawn_heading(root, "MATCH COMPLETE");
-            root.spawn((
-                Text::new(result),
-                TextFont::from_font_size(28.0),
-                TextColor(Color::srgb(0.9, 0.95, 1.0)),
-            ));
-            root.spawn((
-                Text::new("RETURNING TO LOBBY…"),
-                TextFont::from_font_size(18.0),
-                TextColor(Color::srgb(0.58, 0.66, 0.74)),
-            ));
-        });
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn spawn_results(
-    mut commands: Commands,
-    result_state: Res<super::ClientMatchResultState>,
-    mut navigation: ResMut<FlowNavigation>,
-    purpose: Res<SessionPurpose>,
-    routed: Res<RoutedClientLifecycle>,
-    memberships: Query<(&ClientLobbyMembership, &RoutedClientSession), With<Client>>,
-) {
-    let Some(context) = result_state.context.as_ref() else {
-        return;
-    };
-    let replay_available = context.game_type_id.as_ref().is_some_and(|game_type_id| {
-        memberships.iter().any(|(membership, session)| {
-            session.kind == super::RoutedClientSessionKind::Lobby
-                && session.generation == routed.generation
-                && membership
-                    .game_types
-                    .iter()
-                    .any(|game| &game.id == game_type_id)
-        })
-    });
-    navigation.selected = 0;
-    let outcome = match context.result {
-        crate::matchplay::MatchResult::TeamVictory { team } => {
-            if context.local_team == Some(team) {
-                "VICTORY".to_string()
-            } else if context.local_team.is_some() {
-                "DEFEAT".to_string()
-            } else {
-                format!("TEAM {} WINS", team.0 + 1)
-            }
-        }
-        crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
-        crate::matchplay::MatchResult::Forfeit { winner, .. } => {
-            if context.local_team == Some(winner) {
-                "VICTORY BY FORFEIT".to_string()
-            } else if context.local_team.is_some() {
-                "DEFEAT BY FORFEIT".to_string()
-            } else {
-                format!("TEAM {} WINS BY FORFEIT", winner.0 + 1)
-            }
-        }
-    };
-    commands
-        .spawn((
-            FlowRoot,
-            DespawnOnExit(ClientFlow::Results),
-            flow_root_node(),
-            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
-            GlobalZIndex(410),
-        ))
-        .with_children(|root| {
-            spawn_heading(root, "RESULTS");
-            root.spawn((
-                Text::new(outcome),
-                TextFont::from_font_size(30.0),
-                TextColor(Color::srgb(0.9, 0.95, 1.0)),
-            ));
-            if let Some(name) = context.game_name.as_deref() {
-                root.spawn((
-                    Text::new(name.to_string()),
-                    TextColor(Color::srgb(0.68, 0.78, 0.86)),
-                ));
-            }
-            if let Some(team) = context.local_team {
-                root.spawn((
-                    Text::new(format!("YOU — T{}", team.0 + 1)),
-                    TextColor(Color::srgb(0.85, 0.9, 0.96)),
-                ));
-            }
-            if let Some(score) = context.final_score {
-                root.spawn((
-                    Text::new(super::hud::mode_score_text(score)),
-                    TextFont::from_font_size(22.0),
-                    TextColor(Color::WHITE),
-                    TextLayout::new(Justify::Center, LineBreak::WordBoundary),
-                ));
-            }
-            if !replay_available {
-                root.spawn((
-                    Text::new("The previous game is not available on this server."),
-                    TextColor(Color::srgb(1.0, 0.72, 0.28)),
-                ));
-            }
-            spawn_flow_button_disabled(
-                root,
-                0,
-                FlowUiAction::QueueAgain,
-                if !replay_available {
-                    "REPLAY UNAVAILABLE"
-                } else if *purpose == SessionPurpose::Practice {
-                    "PRACTICE AGAIN"
-                } else {
-                    "PLAY AGAIN"
-                },
-                None,
-                !replay_available,
-            );
-            spawn_flow_button(root, 1, FlowUiAction::ReturnToDashboard, "DASHBOARD", None);
-        });
-}
-
-fn clear_results(mut result_state: ResMut<super::ClientMatchResultState>) {
-    result_state.context = None;
-}
-
 fn queue_population(
     queue: &super::ClientQueueModel,
     game: &crate::lobby::AdvertisedGameType,
@@ -7244,12 +5428,6 @@ fn queue_membership_text(
         .map_or(membership.game_type_id.as_str(), |game| {
             game.display_name.as_str()
         });
-    let build_name = membership
-        .accepted_build
-        .identity
-        .source_build_preset_id
-        .and_then(|id| builds.preset(id))
-        .map_or("Custom", |preset| preset.display_name.as_str());
     let recipe = membership.accepted_build.canonical_recipe;
     let ultimate = builds
         .ultimates
@@ -7268,7 +5446,7 @@ fn queue_membership_text(
             })
     });
     format!(
-        "{game_name}\n{population}\nBuild: {build_name} · {} points\n{ultimate} · {} / {}",
+        "{game_name}\n{population}\nSaved brawler · {} points\n{ultimate} · {} / {}",
         membership.accepted_build.total_points, passives[0], passives[1],
     )
 }
@@ -7282,7 +5460,6 @@ fn spawn_queue_cancel_button(parent: &mut ChildSpawnerCommands) {
                 index: 0,
                 action: FlowUiAction::CancelQueue,
                 error_action: false,
-                build_editor_action: false,
             },
             Node {
                 width: percent(88),
@@ -7714,7 +5891,6 @@ fn spawn_dashboard_button(
             index,
             action,
             error_action: false,
-            build_editor_action: false,
         },
         Node {
             width,
@@ -7849,7 +6025,6 @@ fn spawn_flow_button_disabled(
             index,
             action,
             error_action: false,
-            build_editor_action: false,
         },
         Node {
             width: percent(88),
@@ -7897,7 +6072,6 @@ fn spawn_flow_error_button_disabled(
             index,
             action,
             error_action: true,
-            build_editor_action: false,
         },
         Node {
             width: percent(92),
@@ -7931,7 +6105,6 @@ fn spawn_rate_limit_try_again_button(
                 index,
                 action,
                 error_action: true,
-                build_editor_action: false,
             },
             Node {
                 width: percent(92),
@@ -8068,7 +6241,6 @@ fn present_flow(
     )>,
     mut fields: Query<(&FieldLabel, &mut Text)>,
     mut connecting: Query<&mut Text, (With<ConnectingLabel>, Without<FieldLabel>)>,
-    editor: Res<super::BuildEditorState>,
     queue: Res<super::ClientQueueModel>,
     builds: Res<crate::builds::BuildCatalogResource>,
     mut population_labels: Query<
@@ -8100,15 +6272,11 @@ fn present_flow(
             FlowUiAction::SelectGameTypeDraft(index) => game_draft.selected_index == Some(index),
             _ => false,
         };
-        let selected_build = matches!(
-            button.action,
-            FlowUiAction::ChooseBuild(index) if index == editor.selected_choice
-        );
         let selected_brawler = matches!(
             button.action,
             FlowUiAction::OpenBrawlerDetails(id) if Some(id) == selected_brawler_id
         );
-        let selected = selected_game || selected_build || selected_brawler;
+        let selected = selected_game || selected_brawler;
         let dashboard_style = dashboard_style.copied();
         background.0 =
             flow_button_background(disabled, *interaction, focused, selected, dashboard_style);
@@ -8152,27 +6320,6 @@ fn present_flow(
     }
 }
 
-fn connection_presentation(pending: &PendingConnection, now: Duration) -> String {
-    let dots = "."
-        .repeat(usize::try_from((now.as_millis() / 350) % 3 + 1).expect("pulse width is bounded"));
-    let remaining = pending.overall_deadline.saturating_sub(now);
-    let remaining_seconds = remaining
-        .as_secs()
-        .saturating_add(u64::from(remaining.subsec_nanos() != 0));
-    let address = pending.target.logical_address.canonical();
-    match pending.stage {
-        ConnectionStage::ResolvingAddress => format!(
-            "STEP 1 OF 3\nResolving server address{dots}\n{address}\nUp to {remaining_seconds}s remaining"
-        ),
-        ConnectionStage::ContactingServer { current, total } => format!(
-            "STEP 2 OF 3\nOpening routed connection{dots}\n{address}\nCandidate {current} of {total}  -  up to {remaining_seconds}s remaining"
-        ),
-        ConnectionStage::JoiningLobby => format!(
-            "STEP 3 OF 3\nChecking compatibility and game list{dots}\n{address}\nUp to {remaining_seconds}s remaining"
-        ),
-    }
-}
-
 fn render_editor_value(model: &ServerSelectModel, field: EditingField) -> String {
     let value = edited_value(model, field);
     if model.editing != Some(field) {
@@ -8181,14 +6328,6 @@ fn render_editor_value(model: &ServerSelectModel, field: EditingField) -> String
     let caret = model.caret.min(value.len());
     format!("{}|{}", &value[..caret], &value[caret..])
 }
-
-trait Pipe: Sized {
-    fn pipe<T>(self, function: impl FnOnce(Self) -> T) -> T {
-        function(self)
-    }
-}
-
-impl<T> Pipe for T {}
 
 #[cfg(test)]
 mod tests {
@@ -9211,118 +7350,6 @@ mod tests {
     }
 
     #[test]
-    fn build_editor_retains_root_and_scroll_until_render_state_changes() {
-        let mut app = flow_test_app();
-        app.world_mut().spawn((Client, lobby_membership()));
-        app.world_mut()
-            .resource_mut::<NextState<ClientFlow>>()
-            .set(ClientFlow::Dashboard);
-        app.update();
-        let builds = app
-            .world()
-            .resource::<crate::builds::BuildCatalogResource>()
-            .0
-            .clone();
-        app.world_mut()
-            .resource_mut::<super::super::BuildEditorState>()
-            .open(&builds);
-        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BuildEditor;
-        app.update();
-
-        let first = {
-            let world = app.world_mut();
-            let mut query = world.query_filtered::<Entity, With<BuildEditorRoot>>();
-            query.single(world).unwrap()
-        };
-        app.world_mut()
-            .entity_mut(first)
-            .get_mut::<ScrollPosition>()
-            .unwrap()
-            .0
-            .y = 120.0;
-        app.update();
-        let unchanged = {
-            let world = app.world_mut();
-            let mut query = world.query_filtered::<Entity, With<BuildEditorRoot>>();
-            query.single(world).unwrap()
-        };
-        assert_eq!(unchanged, first);
-        assert!(
-            (app.world().get::<ScrollPosition>(unchanged).unwrap().0.y - 120.0).abs()
-                <= f32::EPSILON
-        );
-
-        app.world_mut()
-            .resource_mut::<super::super::BuildEditorState>()
-            .selected_choice = builds.presets.len();
-        app.update();
-        let rebuilt = {
-            let world = app.world_mut();
-            let mut query = world.query_filtered::<Entity, With<BuildEditorRoot>>();
-            query.single(world).unwrap()
-        };
-        assert_ne!(rebuilt, first);
-        assert!(
-            (app.world().get::<ScrollPosition>(rebuilt).unwrap().0.y - 120.0).abs() <= f32::EPSILON
-        );
-    }
-
-    #[test]
-    fn cancelling_build_editor_restores_visible_build_and_join_focus() {
-        let mut app = flow_test_app();
-        app.world_mut().spawn((
-            Client,
-            lobby_membership(),
-            RoutedClientSession {
-                generation: 1,
-                kind: super::super::RoutedClientSessionKind::Lobby,
-            },
-            RuntimeLobbyTarget {
-                logical_address: "localhost:5000".to_string(),
-                proposed_display_name: "Player".to_string(),
-            },
-        ));
-        app.world_mut()
-            .resource_mut::<NextState<ClientFlow>>()
-            .set(ClientFlow::Dashboard);
-        app.update();
-        let builds = app
-            .world()
-            .resource::<crate::builds::BuildCatalogResource>()
-            .0
-            .clone();
-        app.world_mut()
-            .resource_mut::<super::super::BuildEditorState>()
-            .open(&builds);
-        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BuildEditor;
-        app.update();
-        assert!(app.world().resource::<FlowNavigation>().selected >= BUILD_EDITOR_CHOICE_BASE);
-
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Escape);
-        app.update();
-
-        assert_eq!(
-            *app.world().resource::<ClientOverlay>(),
-            ClientOverlay::None
-        );
-        assert_eq!(
-            app.world().resource::<FlowNavigation>().selected,
-            DASHBOARD_BUILD_INDEX
-        );
-        let focused_action = {
-            let world = app.world_mut();
-            let mut query = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
-            query
-                .iter(world)
-                .find(|(button, _)| button.index == DASHBOARD_BUILD_INDEX)
-                .map(|(button, disabled)| (button.action.clone(), disabled))
-        };
-        assert_eq!(focused_action, Some((FlowUiAction::CreateBrawler, false)));
-    }
-
-    #[test]
     fn returning_to_game_select_preserves_a_still_advertised_game() {
         let mut app = flow_test_app();
         let mut lobby = lobby_membership();
@@ -9502,9 +7529,16 @@ mod tests {
     }
 
     #[test]
-    fn queue_copy_uses_advertised_game_and_accepted_build_names() {
+    fn queue_copy_uses_advertised_game_and_saved_brawler_recipe() {
         let builds = crate::builds::BuildCatalog::embedded().unwrap();
-        let preset = builds.preset(crate::builds::BuildPresetId(1)).unwrap();
+        let recipe = crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+        };
         let membership = crate::lobby::QueueMembership {
             ticket_id: crate::lobby::QueueTicketId::new(1).unwrap(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
@@ -9513,9 +7547,8 @@ mod tests {
             brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
             brawler_revision: crate::profiles::ProfileRevision::INITIAL,
             accepted_build: crate::builds::AcceptedBuildSummary {
-                canonical_recipe: preset.recipe,
+                canonical_recipe: recipe,
                 identity: crate::builds::SelectedBuild {
-                    source_build_preset_id: Some(preset.id),
                     recipe_fingerprint: crate::builds::BuildRecipeFingerprint(1),
                     revision: builds.balance_revision,
                 },
@@ -9530,7 +7563,7 @@ mod tests {
             &builds,
         );
         assert!(copy.contains("Wipeout 2v2"));
-        assert!(copy.contains(&preset.display_name));
+        assert!(copy.contains("Saved brawler"));
         assert!(copy.contains("Updating queue"));
     }
 
@@ -9815,13 +7848,11 @@ mod tests {
             index: 1,
             action: FlowUiAction::Connect,
             error_action: false,
-            build_editor_action: false,
         };
         let error = FlowButton {
             index: 1_000,
             action: FlowUiAction::DismissError,
             error_action: true,
-            build_editor_action: false,
         };
         assert!(!overlay_allows_button(&overlay, &underlying));
         assert!(overlay_allows_button(&overlay, &error));

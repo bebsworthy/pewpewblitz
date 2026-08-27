@@ -8,7 +8,7 @@ fn health_recovers_after_attack_idle_delay_and_damage_does_not_restart_it() {
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
     harness.set_controlled_input(0, FighterInput::default());
     let player_id = harness.controlled_player_id(0);
@@ -111,7 +111,7 @@ fn firing_again_does_not_restart_in_progress_ammo_recovery() {
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
     let player_id = harness.controlled_player_id(0);
     let fire = FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE);
@@ -148,7 +148,7 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
             && harness.client_ids(0).len() == 1
-            && harness.selection_is_complete(0)
+            && harness.loadout_is_ready(0)
     });
     harness
         .server

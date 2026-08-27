@@ -1,64 +1,21 @@
 use super::*;
-use brawler::builds::{
-    BrawlerBuildRecipe, BuildPresetId, PassiveDefinitionId, PulseMagazine, PulsePower, PulseReach,
-    ResolvedMatchLoadout, UltimateDefinitionId, WeaponChoice,
-};
-
-#[derive(Clone, Debug, PartialEq)]
-struct BuildRuntimeSnapshot {
-    identity: brawler::builds::SelectedBuild,
-    loadout: ResolvedMatchLoadout,
-    weapon: ResolvedWeapon,
-    ability: brawler::builds::AbilityState,
-    passives: brawler::builds::PassiveRuntimeState,
-    health: CurrentHealth,
-    weapon_state: WeaponState,
-    effects: ActiveEffects,
-}
-
-fn build_runtime_snapshot(world: &bevy::prelude::World, entity: Entity) -> BuildRuntimeSnapshot {
-    BuildRuntimeSnapshot {
-        identity: *world.get::<brawler::builds::SelectedBuild>(entity).unwrap(),
-        loadout: world.get::<ResolvedMatchLoadout>(entity).unwrap().clone(),
-        weapon: world
-            .get::<ResolvedMatchLoadout>(entity)
-            .unwrap()
-            .primary_weapon
-            .clone(),
-        ability: *world.get::<brawler::builds::AbilityState>(entity).unwrap(),
-        passives: *world
-            .get::<brawler::builds::PassiveRuntimeState>(entity)
-            .unwrap(),
-        health: *world.get::<CurrentHealth>(entity).unwrap(),
-        weapon_state: *world.get::<WeaponState>(entity).unwrap(),
-        effects: *world.get::<ActiveEffects>(entity).unwrap(),
-    }
-}
-
-fn custom(power: PulsePower, reach: PulseReach, magazine: PulseMagazine) -> BrawlerBuildRecipe {
-    BrawlerBuildRecipe {
-        weapon: WeaponChoice::CustomPulse {
-            power,
-            reach,
-            magazine,
-        },
-        ultimate: UltimateDefinitionId(1),
-        passives: [PassiveDefinitionId(1), PassiveDefinitionId(6)],
-    }
-}
-
 #[cfg(feature = "balance-lab")]
 #[test]
 fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values() {
     let canonical_builds = brawler::builds::BuildCatalog::embedded().unwrap();
     let canonical_weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
     let fighter = FighterDefinitions::default().entries[0];
-    let canonical = brawler::builds::resolve_build_recipe(
+    let canonical = brawler::builds::resolve_saved_brawler_recipe(
         &canonical_builds,
         &canonical_weapons,
         &fighter,
-        canonical_builds.presets[0].recipe,
-        Some(BuildPresetId(1)),
+        brawler::profiles::FighterProfileId(1),
+        brawler::profiles::WeaponBaseId(1),
+        brawler::builds::UltimateDefinitionId(1),
+        [
+            brawler::builds::PassiveDefinitionId(3),
+            brawler::builds::PassiveDefinitionId(4),
+        ],
     )
     .unwrap();
 
@@ -66,8 +23,8 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(1);
-    harness.step_until(|harness| harness.client_is_active(0) && harness.selection_is_complete(0));
+        .weapon_preset = Some(1);
+    harness.step_until(|harness| harness.client_is_active(0) && harness.loadout_is_ready(0));
     let server_entity = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<Entity, (With<Fighter>, Without<TestDummy>)>();
@@ -88,7 +45,7 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
             .recipe
             .fire_cooldown_ticks += 1;
     }
-    let server_loadout = brawler::builds::resolve_build_recipe(
+    let server_loadout = brawler::builds::resolve_saved_brawler_recipe(
         &harness
             .server
             .world()
@@ -100,8 +57,13 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
             .resource::<brawler::combat::WeaponCatalogResource>()
             .0,
         &fighter,
-        canonical_builds.presets[0].recipe,
-        Some(BuildPresetId(1)),
+        brawler::profiles::FighterProfileId(1),
+        brawler::profiles::WeaponBaseId(1),
+        brawler::builds::UltimateDefinitionId(1),
+        [
+            brawler::builds::PassiveDefinitionId(3),
+            brawler::builds::PassiveDefinitionId(4),
+        ],
     )
     .unwrap();
     harness
@@ -131,14 +93,15 @@ fn active_sentry_fixture() -> (Harness, Entity, brawler::abilities::SentryIdenti
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(3);
+        .weapon_preset = Some(3);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(1);
+        .weapon_preset = Some(1);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
+    harness.install_saved_brawler_loadout(0, 3, 2, [5, 6]);
     let match_id = {
         let world = harness.server.world_mut();
         let mut roots = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
@@ -314,320 +277,21 @@ fn sentry_projectile_travels_and_damages_a_hostile_fighter() {
         )
     }));
 }
-
-#[test]
-fn custom_build_replacement_is_authoritative_and_over_budget_is_atomic() {
-    let mut harness = Harness::new(1);
-    harness.step_until(|harness| harness.client_is_active(0) && harness.selection_is_complete(0));
-    let (fighter, match_id, previous, player_id, network_id, team_id) = {
-        let world = harness.server.world_mut();
-        let mut query = world.query_filtered::<(
-            Entity,
-            &MatchParticipant,
-            &ResolvedMatchLoadout,
-            &PlayerId,
-            &NetworkEntityId,
-            &TeamId,
-        ), With<Fighter>>();
-        let (entity, participant, loadout, player, network, team) = query.single(world).unwrap();
-        (
-            entity,
-            participant.match_id,
-            loadout.clone(),
-            *player,
-            *network,
-            *team,
-        )
-    };
-    let replacement_sentry = harness
-        .server
-        .world_mut()
-        .spawn((
-            brawler::abilities::Sentry,
-            brawler::abilities::SentryIdentity {
-                deployable_id: brawler::builds::DeployableId(99),
-                owner_player_id: player_id,
-                owner_network_id: network_id,
-                team_id,
-                ultimate_id: UltimateDefinitionId(2),
-                match_id,
-            },
-        ))
-        .id();
-    let dirty_tick = harness.server.world().resource::<SimulationTick>().0;
-    harness.server.world_mut().entity_mut(fighter).insert((
-        lightyear::prelude::input::native::ActionState(FighterInput::from_axes(
-            Vec2::X,
-            Some(Vec2::X),
-            FighterInput::PRIMARY_FIRE,
-        )),
-        brawler::movement::InputFreshness {
-            last_fresh_tick: Some(dirty_tick.saturating_add(100)),
-        },
-    ));
-    harness.send_build_selection(
-        0,
-        BuildSelectionRequest {
-            request_id: 2,
-            match_id,
-            selection: BuildSelection::Custom(custom(
-                PulsePower::Heavy,
-                PulseReach::Standard,
-                PulseMagazine::Standard,
-            )),
-        },
-    );
-    harness.step_until(|harness| {
-        harness
-            .server
-            .world()
-            .get::<ServerSession>(harness.server_links[0])
-            .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| outcome.request_id == 2)
-    });
-    let accepted = harness
-        .server
-        .world()
-        .get::<ResolvedMatchLoadout>(fighter)
-        .unwrap()
-        .clone();
-    assert!(
-        harness
-            .server
-            .world()
-            .get_entity(replacement_sentry)
-            .is_err(),
-        "accepted waiting replacement must clean its prior deployable"
-    );
-    assert_eq!(
-        harness
-            .server
-            .world()
-            .get::<lightyear::prelude::input::native::ActionState<FighterInput>>(fighter)
-            .unwrap()
-            .0,
-        FighterInput::default()
-    );
-    assert_eq!(
-        harness
-            .server
-            .world()
-            .get::<brawler::movement::InputFreshness>(fighter),
-        Some(&brawler::movement::InputFreshness::default())
-    );
-    assert!(
-        harness
-            .server
-            .world()
-            .get::<brawler::combat::AwaitingPostSelectionInput>(fighter)
-            .is_some()
-    );
-    assert_ne!(accepted.identity, previous.identity);
-    assert_eq!(accepted.primary_weapon.source_preset_id, None);
-    assert_eq!(accepted.fighter_stats.maximum_health, 85);
-    let accepted_snapshot = build_runtime_snapshot(harness.server.world(), fighter);
-
-    harness.send_build_selection(
-        0,
-        BuildSelectionRequest {
-            request_id: 3,
-            match_id,
-            selection: BuildSelection::Custom(custom(
-                PulsePower::Heavy,
-                PulseReach::Long,
-                PulseMagazine::Expanded,
-            )),
-        },
-    );
-    harness.step_until(|harness| {
-        harness
-            .server
-            .world()
-            .get::<ServerSession>(harness.server_links[0])
-            .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| outcome.request_id == 3)
-    });
-    let outcome = harness
-        .server
-        .world()
-        .get::<ServerSession>(harness.server_links[0])
-        .unwrap()
-        .last_selection_response
-        .unwrap();
-    assert_eq!(outcome.decision, BuildSelectionDecision::OverBudget);
-    assert_eq!(
-        build_runtime_snapshot(harness.server.world(), fighter),
-        accepted_snapshot
-    );
-
-    harness.send_build_selection(
-        0,
-        BuildSelectionRequest {
-            request_id: 3,
-            match_id,
-            selection: BuildSelection::Custom(custom(
-                PulsePower::Heavy,
-                PulseReach::Long,
-                PulseMagazine::Expanded,
-            )),
-        },
-    );
-    harness.step_until(|harness| {
-        harness
-            .server
-            .world()
-            .get::<ServerSession>(harness.server_links[0])
-            .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| {
-                outcome.request_id == 3 && outcome.decision == BuildSelectionDecision::OverBudget
-            })
-    });
-    assert_eq!(
-        build_runtime_snapshot(harness.server.world(), fighter),
-        accepted_snapshot
-    );
-
-    for (request_id, request_match, decision) in [
-        (2, match_id, BuildSelectionDecision::Stale),
-        (
-            4,
-            brawler::matchplay::MatchId(match_id.0 + 1),
-            BuildSelectionDecision::WrongMatch,
-        ),
-    ] {
-        harness.send_build_selection(
-            0,
-            BuildSelectionRequest {
-                request_id,
-                match_id: request_match,
-                selection: BuildSelection::Preset(BuildPresetId(1)),
-            },
-        );
-        harness.step_until(|harness| {
-            harness
-                .server
-                .world()
-                .get::<ServerSession>(harness.server_links[0])
-                .and_then(|session| session.last_selection_response)
-                .is_some_and(|outcome| outcome.request_id == request_id)
-        });
-        assert_eq!(
-            harness
-                .server
-                .world()
-                .get::<ServerSession>(harness.server_links[0])
-                .unwrap()
-                .last_selection_response
-                .unwrap()
-                .decision,
-            decision
-        );
-        assert_eq!(
-            build_runtime_snapshot(harness.server.world(), fighter),
-            accepted_snapshot
-        );
-    }
-
-    harness
-        .server
-        .world_mut()
-        .get_mut::<MatchParticipant>(fighter)
-        .unwrap()
-        .ready = true;
-    harness.send_build_selection(
-        0,
-        BuildSelectionRequest {
-            request_id: 5,
-            match_id,
-            selection: BuildSelection::Preset(BuildPresetId(1)),
-        },
-    );
-    harness.step_until(|harness| {
-        harness
-            .server
-            .world()
-            .get::<ServerSession>(harness.server_links[0])
-            .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| outcome.request_id == 5)
-    });
-    assert_eq!(
-        harness
-            .server
-            .world()
-            .get::<ServerSession>(harness.server_links[0])
-            .unwrap()
-            .last_selection_response
-            .unwrap()
-            .decision,
-        BuildSelectionDecision::ReadyLocked
-    );
-    assert_eq!(
-        build_runtime_snapshot(harness.server.world(), fighter),
-        accepted_snapshot
-    );
-
-    harness
-        .server
-        .world_mut()
-        .get_mut::<MatchParticipant>(fighter)
-        .unwrap()
-        .ready = false;
-    {
-        let world = harness.server.world_mut();
-        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRootMarker>>();
-        roots.single_mut(world).unwrap().phase = MatchPhase::Completed {
-            completed_at_tick: 0,
-            restart_unlocked_at_tick: u64::MAX,
-            result: brawler::matchplay::MatchResult::Draw,
-        };
-    }
-    harness.send_build_selection(
-        0,
-        BuildSelectionRequest {
-            request_id: 6,
-            match_id,
-            selection: BuildSelection::Preset(BuildPresetId(1)),
-        },
-    );
-    harness.step_until(|harness| {
-        harness
-            .server
-            .world()
-            .get::<ServerSession>(harness.server_links[0])
-            .and_then(|session| session.last_selection_response)
-            .is_some_and(|outcome| outcome.request_id == 6)
-    });
-    assert_eq!(
-        harness
-            .server
-            .world()
-            .get::<ServerSession>(harness.server_links[0])
-            .unwrap()
-            .last_selection_response
-            .unwrap()
-            .decision,
-        BuildSelectionDecision::WrongPhase
-    );
-    assert_eq!(
-        build_runtime_snapshot(harness.server.world(), fighter),
-        accepted_snapshot
-    );
-}
-
 #[test]
 fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
     let mut harness = Harness::new_match(2);
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(1);
+        .weapon_preset = Some(1);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientNetworkConfig>()
-        .build_preset = Some(3);
+        .weapon_preset = Some(3);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
+    harness.install_saved_brawler_loadout(1, 3, 2, [5, 6]);
     let match_id = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
@@ -1106,10 +770,10 @@ fn dash_shape_cast_truncates_before_map_collision_and_blocks_primary_fire() {
         client
             .world_mut()
             .resource_mut::<ClientNetworkConfig>()
-            .build_preset = Some(1);
+            .weapon_preset = Some(1);
     }
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let match_id = {
         let world = harness.server.world_mut();

@@ -33,7 +33,6 @@ pub(crate) fn activate_concealment_field(
             Option<&mut super::self_cloak::UltimateGeneration>,
             Has<crate::combat::Defeated>,
             Has<crate::matchplay::ActiveCombatant>,
-            Has<crate::combat::AwaitingPostSelectionInput>,
         ),
         With<crate::protocol::Fighter>,
     >,
@@ -55,7 +54,6 @@ pub(crate) fn activate_concealment_field(
         generation,
         defeated,
         active,
-        barrier,
     ) in &mut casters
     {
         if loadout.ultimate.kind != crate::builds::UltimateKind::ConcealmentField {
@@ -81,8 +79,7 @@ pub(crate) fn activate_concealment_field(
             owner_network_id: *network_id,
             kind: crate::abilities::AbilityTelemetryKind::ActivationAttempt,
         });
-        let held = !barrier
-            && !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
+        let held = !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
         let rejection = if !held {
             Some(crate::abilities::AbilityRejectionReason::StaleInput)
         } else if defeated {

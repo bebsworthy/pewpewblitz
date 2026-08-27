@@ -32,7 +32,7 @@ fn server_player_position(harness: &mut Harness, player_id: PlayerId) -> Vec2 {
 #[test]
 fn ready_commands_are_link_scoped_idempotent_and_match_scoped() {
     let mut harness = Harness::new_match(1);
-    harness.step_until(|harness| harness.client_is_active(0) && harness.selection_is_complete(0));
+    harness.step_until(|harness| harness.client_is_active(0) && harness.loadout_is_ready(0));
     let state = server_match(&mut harness);
     let ready = MatchCommandRequest {
         request_id: 9,
@@ -89,7 +89,7 @@ fn ready_commands_are_link_scoped_idempotent_and_match_scoped() {
 fn countdown_cancellation_returns_to_waiting_and_clears_ready_quorum() {
     let mut harness = Harness::new_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
     for index in 0..2 {
@@ -130,7 +130,7 @@ fn countdown_cancellation_returns_to_waiting_and_clears_ready_quorum() {
         MatchPhase::Waiting
     ));
     harness.add_client(3);
-    harness.step_until(|harness| harness.client_is_active(2) && harness.selection_is_complete(2));
+    harness.step_until(|harness| harness.client_is_active(2) && harness.loadout_is_ready(2));
     for (index, request_id) in [(1, 3), (2, 1)] {
         harness.send_match_command(
             index,
@@ -163,7 +163,7 @@ fn countdown_cancellation_returns_to_waiting_and_clears_ready_quorum() {
 fn countdown_departure_cancels_a_still_valid_two_versus_two_roster() {
     let mut harness = Harness::new_match(4);
     harness.step_until(|harness| {
-        (0..4).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..4).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
     for index in 0..4 {
@@ -284,34 +284,12 @@ fn initial_admission_uses_the_shared_spawn_selector() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() {
+fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_matches() {
     let mut harness = Harness::new_match(4);
     harness.step_until(|harness| {
-        (0..4).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..4).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
-    for index in 0..4 {
-        harness.send_build_selection(
-            index,
-            BuildSelectionRequest {
-                request_id: 10,
-                match_id: waiting.match_id,
-                selection: BuildSelection::Preset(BuildPresetId(u16::try_from(index + 1).unwrap())),
-            },
-        );
-    }
-    harness.step_until(|harness| {
-        harness.server_links.iter().all(|link| {
-            harness
-                .server
-                .world()
-                .get::<ServerSession>(*link)
-                .and_then(|session| session.last_selection_response)
-                .is_some_and(|outcome| {
-                    outcome.request_id == 10 && outcome.decision == BuildSelectionDecision::Accepted
-                })
-        })
-    });
     for index in 0..4 {
         let player = harness.controlled_player_id(index);
         let world = harness.server.world_mut();
@@ -321,9 +299,9 @@ fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() 
             query
                 .iter(world)
                 .find(|(candidate, _)| **candidate == player)
-                .map(|(_, loadout)| loadout.identity.source_build_preset_id)
+                .map(|(_, loadout)| loadout.primary_weapon.source_preset_id)
                 .unwrap(),
-            Some(BuildPresetId(u16::try_from(index + 1).unwrap()))
+            Some(WeaponPresetId(u16::try_from(index + 1).unwrap()))
         );
     }
     harness.step_until(|harness| {
@@ -333,8 +311,8 @@ fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() 
                 .world()
                 .get::<brawler::builds::ResolvedMatchLoadout>(entity)
                 .is_some_and(|loadout| {
-                    loadout.identity.source_build_preset_id
-                        == Some(BuildPresetId(u16::try_from(index + 1).unwrap()))
+                    loadout.primary_weapon.source_preset_id
+                        == Some(WeaponPresetId(u16::try_from(index + 1).unwrap()))
                 })
         })
     });
@@ -515,34 +493,8 @@ fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() 
 
     let _ = world;
     for index in 0..4 {
-        harness.send_build_selection(
-            index,
-            BuildSelectionRequest {
-                request_id: 20,
-                match_id: restarted.match_id,
-                selection: BuildSelection::Preset(BuildPresetId(
-                    u16::try_from((index + 1) % 4 + 1).unwrap(),
-                )),
-            },
-        );
-    }
-    harness.step_until(|harness| {
-        (0..4).all(|index| {
-            let player = harness.controlled_player_id(index);
-            let expected = BuildPresetId(u16::try_from((index + 1) % 4 + 1).unwrap());
-            let world = harness.server.world_mut();
-            let mut query = world.query_filtered::<
-                (&PlayerId, &brawler::builds::ResolvedMatchLoadout),
-                With<Fighter>,
-            >();
-            query.iter(world).any(|(candidate, loadout)| {
-                *candidate == player && loadout.identity.source_build_preset_id == Some(expected)
-            })
-        })
-    });
-    for index in 0..4 {
         let player = harness.controlled_player_id(index);
-        let expected = BuildPresetId(u16::try_from((index + 1) % 4 + 1).unwrap());
+        let expected = WeaponPresetId(u16::try_from(index + 1).unwrap());
         let world = harness.server.world_mut();
         let mut query = world
             .query_filtered::<(&PlayerId, &brawler::builds::ResolvedMatchLoadout), With<Fighter>>();
@@ -550,7 +502,7 @@ fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() 
             query
                 .iter(world)
                 .find(|(candidate, _)| **candidate == player)
-                .map(|(_, loadout)| loadout.identity.source_build_preset_id)
+                .map(|(_, loadout)| loadout.primary_weapon.source_preset_id)
                 .unwrap(),
             Some(expected)
         );
@@ -558,11 +510,11 @@ fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() 
     harness.step_until(|harness| {
         (0..4).all(|index| {
             let entity = harness.controlled_entity(index);
-            let expected = BuildPresetId(u16::try_from((index + 1) % 4 + 1).unwrap());
+            let expected = WeaponPresetId(u16::try_from(index + 1).unwrap());
             harness.clients[index]
                 .world()
                 .get::<brawler::builds::ResolvedMatchLoadout>(entity)
-                .is_some_and(|loadout| loadout.identity.source_build_preset_id == Some(expected))
+                .is_some_and(|loadout| loadout.primary_weapon.source_preset_id == Some(expected))
         })
     });
 
@@ -626,27 +578,17 @@ fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() 
     let twice_restarted = server_match(&mut harness);
     assert!(twice_restarted.match_id.0 > restarted.match_id.0);
     assert!(matches!(twice_restarted.phase, MatchPhase::Waiting));
-    for index in 0..4 {
-        harness.send_build_selection(
-            index,
-            BuildSelectionRequest {
-                request_id: 30,
-                match_id: twice_restarted.match_id,
-                selection: BuildSelection::Preset(BuildPresetId(u16::try_from(index + 1).unwrap())),
-            },
-        );
-    }
     harness.step_until(|harness| {
         (0..4).all(|index| {
             let player = harness.controlled_player_id(index);
-            let expected = BuildPresetId(u16::try_from(index + 1).unwrap());
+            let expected = WeaponPresetId(u16::try_from(index + 1).unwrap());
             let world = harness.server.world_mut();
             let mut query = world.query_filtered::<
                 (&PlayerId, &brawler::builds::ResolvedMatchLoadout),
                 With<Fighter>,
             >();
             query.iter(world).any(|(candidate, loadout)| {
-                *candidate == player && loadout.identity.source_build_preset_id == Some(expected)
+                *candidate == player && loadout.primary_weapon.source_preset_id == Some(expected)
             })
         })
     });
@@ -744,7 +686,7 @@ fn four_clients_converge_named_builds_and_restart_three_authoritative_matches() 
 fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
     let mut harness = Harness::new_match(4);
     harness.step_until(|harness| {
-        (0..4).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..4).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
     for index in 0..4 {
@@ -874,7 +816,7 @@ fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
     ));
 
     harness.add_client(6);
-    harness.step_until(|harness| harness.client_is_active(5) && harness.selection_is_complete(5));
+    harness.step_until(|harness| harness.client_is_active(5) && harness.loadout_is_ready(5));
     let admitted = harness.controlled_player_id(5);
     let world = harness.server.world_mut();
     let mut fighters = world.query_filtered::<(&PlayerId, &TeamId), With<Fighter>>();
@@ -892,7 +834,7 @@ fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
 fn simultaneous_last_team_disconnect_draws_and_empty_roster_restarts() {
     let mut harness = Harness::new_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
     for index in 0..2 {
@@ -933,7 +875,7 @@ fn simultaneous_last_team_disconnect_draws_and_empty_roster_restarts() {
 fn fighter_intent_is_gated_in_waiting_countdown_and_completed() {
     let mut harness = Harness::new_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
     let controlled = harness.controlled_player_id(0);
@@ -1065,7 +1007,7 @@ fn fighter_intent_is_gated_in_waiting_countdown_and_completed() {
 fn spawn_protection_blocks_hostile_payload_allows_movement_breaks_and_expires() {
     let mut harness = Harness::new_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
     for index in 0..2 {
@@ -1177,7 +1119,7 @@ fn spawn_protection_blocks_hostile_payload_allows_movement_breaks_and_expires() 
 fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
     let mut harness = Harness::new_match(2);
     harness.step_until(|harness| {
-        (0..2).all(|index| harness.client_is_active(index) && harness.selection_is_complete(index))
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
     let waiting = server_match(&mut harness);
     for index in 0..2 {

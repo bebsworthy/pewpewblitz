@@ -436,7 +436,6 @@ pub fn authenticated_netcode_id(remote_id: &RemoteId) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builds::BuildPresetId;
     use brawler_routing::{
         AllocationId, Generation, LobbySessionId, LogicalServerId, ManifestCommon, MatchId,
         MatchManifestBot, PeerId, ProcessId, RouteId, WorkerId, WorkerRole,
@@ -450,14 +449,13 @@ mod tests {
         let fighter = fighter_definitions
             .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
             .unwrap();
-        let preset = builds.preset(BuildPresetId(1)).unwrap();
         let brawler = crate::profiles::SavedBrawler {
             id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
             creation_ordinal: 1,
             name: "Player One".into(),
             fighter_profile_id: crate::profiles::FighterProfileId(1),
             weapon_base_id: crate::profiles::WeaponBaseId(1),
-            ultimate_id: preset.recipe.ultimate,
+            ultimate_id: crate::builds::UltimateDefinitionId(1),
             passive_ids: [
                 crate::builds::PassiveDefinitionId(3),
                 crate::builds::PassiveDefinitionId(4),
@@ -656,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_admission_preserves_stable_team_and_build_selection() {
+    fn manifest_admission_preserves_stable_team_and_saved_brawler_loadout() {
         let value = manifest();
         let participant = admit_manifest_client(
             &value,
@@ -694,6 +692,7 @@ mod tests {
         value.countdown_ticks = 60;
         value.respawn_ticks = 120;
         let mut worker = build_match_worker_app(config, value.clone()).unwrap();
+        crate::test_app::finalize(&mut worker);
         assert_eq!(
             worker.world().resource::<ServerRoleResource>().manifest(),
             Some(&value)
@@ -766,7 +765,9 @@ mod tests {
             .collect();
         value.common.protocol_registry_fingerprint = protocol;
         value.common.content_fingerprint = content.0;
-        build_match_worker_app(config, value).unwrap()
+        let mut worker = build_match_worker_app(config, value).unwrap();
+        crate::test_app::finalize(&mut worker);
+        worker
     }
 
     fn activate_bot_worker(worker: &mut App) {

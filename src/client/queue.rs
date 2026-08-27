@@ -571,11 +571,7 @@ fn outcome_matches_pending(
                     == command.game_type_configuration_revision
                 && membership.brawler_id == command.brawler_id
                 && membership.brawler_revision == command.brawler_revision
-                && membership
-                    .accepted_build
-                    .identity
-                    .source_build_preset_id
-                    .is_none()
+                && membership.accepted_build.identity.recipe_fingerprint.0 != 0
         }
         (
             crate::lobby::QueueCommand::Cancel(command),
@@ -1288,9 +1284,17 @@ mod tests {
                 brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
                 brawler_revision: crate::profiles::ProfileRevision::INITIAL,
                 accepted_build: crate::builds::AcceptedBuildSummary {
-                    canonical_recipe: super::super::build_editor::default_custom_recipe(),
+                    canonical_recipe: crate::builds::BrawlerBuildRecipe {
+                        weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(
+                            1,
+                        )),
+                        ultimate: crate::builds::UltimateDefinitionId(1),
+                        passives: [
+                            crate::builds::PassiveDefinitionId(3),
+                            crate::builds::PassiveDefinitionId(4),
+                        ],
+                    },
                     identity: crate::builds::SelectedBuild {
-                        source_build_preset_id: None,
                         recipe_fingerprint: crate::builds::BuildRecipeFingerprint(1),
                         revision: crate::builds::BuildRevision(1),
                     },

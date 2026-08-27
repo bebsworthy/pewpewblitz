@@ -280,7 +280,7 @@ pub struct ClientNetworkConfig {
     pub headless_fire: bool,
     pub headless_ultimate: bool,
     pub headless_simulation_ticks: Option<u32>,
-    pub build_preset: Option<u16>,
+    pub weapon_preset: Option<u16>,
     pub windowed_combat_demo: Option<WindowedCombatDemo>,
     pub windowed_controller_demo: Option<WindowedControllerDemo>,
     pub render_profile: RenderProfile,
@@ -350,7 +350,7 @@ impl ClientNetworkConfig {
             headless_fire: false,
             headless_ultimate: false,
             headless_simulation_ticks: None,
-            build_preset: None,
+            weapon_preset: None,
             windowed_combat_demo: None,
             windowed_controller_demo: None,
             render_profile: RenderProfile::from_env(),
@@ -412,10 +412,10 @@ impl ClientNetworkConfig {
             return Err("--simulation-ticks must be greater than zero".to_string());
         }
         if self
-            .build_preset
-            .is_some_and(|preset| !(1..=7).contains(&preset))
+            .weapon_preset
+            .is_some_and(|preset| !(1..=4).contains(&preset))
         {
-            return Err("--build-preset must be between 1 and 7 (7 selects custom)".to_string());
+            return Err("--weapon-preset must be between 1 and 4".to_string());
         }
         if self.window_size.is_some_and(|(width, height)| {
             !(640..=3_840).contains(&width) || !(360..=2_160).contains(&height)

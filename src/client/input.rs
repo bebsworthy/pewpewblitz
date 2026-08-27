@@ -329,7 +329,6 @@ pub(super) fn resolve_targeted_ultimate_input(
             &crate::builds::ResolvedMatchLoadout,
             &crate::builds::AbilityState,
             Has<crate::combat::Defeated>,
-            Has<SelectingBuild>,
         ),
         (With<Fighter>, With<Controlled>),
     >,
@@ -350,7 +349,7 @@ pub(super) fn resolve_targeted_ultimate_input(
         return;
     }
 
-    let Ok((loadout, ability, defeated, selecting)) = controlled.single() else {
+    let Ok((loadout, ability, defeated)) = controlled.single() else {
         pending.targeted_ultimate.armed_for = None;
         pending.latched_buttons &= !FighterInput::ULTIMATE;
         return;
@@ -367,7 +366,6 @@ pub(super) fn resolve_targeted_ultimate_input(
     let eligible = playable.0
         && matches!(*context, ClientInputContext::Gameplay)
         && !defeated
-        && !selecting
         && matches!(ability.phase, crate::builds::AbilityPhase::Ready);
     if !eligible {
         pending.targeted_ultimate.armed_for = None;
@@ -662,7 +660,6 @@ pub(super) fn write_client_input(
     trace: Option<ResMut<LiveInputTrace>>,
     context: Res<ClientInputContext>,
     playable: Res<ClientPlayableGate>,
-    selecting: Query<(), (With<Fighter>, With<Controlled>, With<SelectingBuild>)>,
     mut query: Query<&mut ActionState<FighterInput>, With<InputMarker<FighterInput>>>,
 ) {
     let mut trace = trace.filter(|trace| trace.enabled);
@@ -679,10 +676,7 @@ pub(super) fn write_client_input(
         }
         return;
     };
-    let input = if !playable.0
-        || !matches!(*context, ClientInputContext::Gameplay)
-        || selecting.iter().next().is_some()
-    {
+    let input = if !playable.0 || !matches!(*context, ClientInputContext::Gameplay) {
         pending.latched_buttons = 0;
         FighterInput::default()
     } else {

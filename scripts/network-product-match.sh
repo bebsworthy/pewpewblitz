@@ -133,7 +133,7 @@ while [ "$index" -le "$client_count" ]; do
                 --headless \
                 --product-practice-smoke \
                 --product-game-type "$game_type" \
-                --build-preset 1 &
+                --weapon-preset 1 &
         elif [ "$requeue_smoke" = 1 ]; then
             if [ "$index" -eq 1 ]; then aim_axis=1,0; else aim_axis=-1,0; fi
             target/debug/brawler-client \
@@ -146,7 +146,7 @@ while [ "$index" -le "$client_count" ]; do
                 --aim-axis "$aim_axis" \
                 --fire \
                 --simulation-ticks 4000 \
-                --build-preset 1 &
+                --weapon-preset 1 &
         else
             if [ -n "$game_type" ]; then
                 target/debug/brawler-client \
@@ -157,7 +157,7 @@ while [ "$index" -le "$client_count" ]; do
                     --headless \
                     "$match_flag" \
                     --product-game-type "$game_type" \
-                    --build-preset "$preset" &
+                    --weapon-preset "$preset" &
             else
                 target/debug/brawler-client \
                     --client-id $((5000 + index)) \
@@ -166,7 +166,7 @@ while [ "$index" -le "$client_count" ]; do
                     --auto-connect \
                     --headless \
                     "$match_flag" \
-                    --build-preset "$preset" &
+                    --weapon-preset "$preset" &
             fi
         fi
     else

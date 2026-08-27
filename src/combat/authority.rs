@@ -69,17 +69,19 @@ pub(super) fn spawn_test_dummy(
         default_fighter_runtime(NEUTRAL_TEAM, &fighters, &weapons);
     let build_catalog =
         crate::builds::BuildCatalog::embedded().expect("embedded build catalog is valid");
-    let build_preset = build_catalog
-        .preset(crate::builds::BuildPresetId(1))
-        .expect("build preset 1 exists");
-    let loadout = crate::builds::resolve_build_recipe(
+    let loadout = crate::builds::resolve_saved_brawler_recipe(
         &build_catalog,
         &catalog.0,
         fighter,
-        build_preset.recipe,
-        Some(build_preset.id),
+        crate::profiles::FighterProfileId(1),
+        crate::profiles::WeaponBaseId(1),
+        crate::builds::UltimateDefinitionId(1),
+        [
+            crate::builds::PassiveDefinitionId(3),
+            crate::builds::PassiveDefinitionId(4),
+        ],
     )
-    .expect("dummy build-preset loadout resolves");
+    .expect("dummy saved-brawler loadout resolves");
     let dummy = commands
         .spawn((
             Fighter,

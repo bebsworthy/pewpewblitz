@@ -574,7 +574,6 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         ClientOverlay::Credits => ShellLayer::Credits,
         ClientOverlay::Error(_) => ShellLayer::Error,
         ClientOverlay::None
-        | ClientOverlay::BuildEditor
         | ClientOverlay::DashboardMenu
         | ClientOverlay::BrawlerList
         | ClientOverlay::BrawlerDetails(_)
@@ -940,8 +939,7 @@ fn handle_shell_actions(
                 let focus = match client_overlay.as_ref() {
                     ClientOverlay::Credits => ShellControlId::Credits,
                     ClientOverlay::Settings | ClientOverlay::Error(_) => ShellControlId::Settings,
-                    ClientOverlay::BuildEditor
-                    | ClientOverlay::DashboardMenu
+                    ClientOverlay::DashboardMenu
                     | ClientOverlay::BrawlerList
                     | ClientOverlay::BrawlerDetails(_)
                     | ClientOverlay::BrawlerCreation

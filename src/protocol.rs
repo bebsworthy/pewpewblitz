@@ -35,8 +35,7 @@ use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
     CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback,
     LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline, ProjectileSource,
-    ReplicatedAttackSource, SelectingBuild, StraightFlight, TeamId, WeaponDefinitionId,
-    WeaponState,
+    ReplicatedAttackSource, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -53,7 +52,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 30;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 31;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -472,41 +471,6 @@ impl<'de> Deserialize<'de> for MatchRouteGrant {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BuildSelectionRequest {
-    pub request_id: u64,
-    pub match_id: crate::matchplay::MatchId,
-    pub selection: BuildSelection,
-}
-
-pub use crate::builds::BuildSelection;
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BuildSelectionDecision {
-    Accepted,
-    Stale,
-    WrongMatch,
-    WrongPhase,
-    ReadyLocked,
-    UnknownId,
-    /// Reserved for forward-compatible variable-length recipes; M08's `[PassiveDefinitionId; 2]`
-    /// wire type makes this decision unreachable for current clients.
-    InvalidSlots,
-    InvalidCombination,
-    OverBudget,
-    ResolutionFailed,
-    CandidateTooLarge,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BuildSelectionOutcome {
-    pub request_id: u64,
-    pub match_id: crate::matchplay::MatchId,
-    pub decision: BuildSelectionDecision,
-    pub accepted_identity: Option<crate::builds::SelectedBuild>,
-    pub accepted_total_points: Option<u8>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MatchCommand {
     SetReady(bool),
     ReadyForRestart,
@@ -725,7 +689,6 @@ fn register_replicated_components(app: &mut App) {
         .replicate_once();
     app.component::<crate::abilities::SentryDeadline>()
         .replicate_once();
-    app.component::<SelectingBuild>().replicate();
     app.component::<ActiveEffects>().replicate();
     app.component::<KnockbackFeedback>().replicate();
     app.component::<AttackDelivery>().replicate_once();
@@ -777,10 +740,6 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         register_queue_protocol(app);
         app.register_message::<MatchRouteGrant>()
-            .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<BuildSelectionRequest>()
-            .add_direction(NetworkDirection::ClientToServer);
-        app.register_message::<BuildSelectionOutcome>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<MatchCommandRequest>()
             .add_direction(NetworkDirection::ClientToServer);

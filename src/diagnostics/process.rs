@@ -341,7 +341,7 @@ pub(super) fn observe_manifest_participants(
 /// Consolidate the bounded gameplay telemetry summaries into the terminal observation
 /// state, so the consolidated report ties the run to its build, ability, match/mode, and
 /// map observations instead of process/network measurements alone. The authoritative
-/// match, build, and ability telemetry resources exist only in the server process; both
+/// match and ability telemetry resources exist only in the server process; both
 /// roles observe the same canonical map state. Reading aggregates here — while the process still
 /// owns the resources — keeps report finalization free of gameplay-query parameters.
 #[allow(
@@ -351,23 +351,9 @@ pub(super) fn observe_manifest_participants(
 pub(super) fn observe_gameplay_aggregates(
     mut state: ResMut<ProcessDiagnosticsState>,
     match_telemetry: Option<Res<crate::matchplay::MatchTelemetry>>,
-    #[cfg(feature = "server")] build_telemetry: Option<Res<crate::builds::BuildTelemetry>>,
     #[cfg(feature = "server")] map_telemetry: Option<Res<crate::map::MapDynamicTelemetry>>,
 ) {
     let mut gameplay = GameplayAggregatesV1::default();
-    #[cfg(feature = "server")]
-    if let Some(builds) = build_telemetry.as_deref() {
-        // Process-lifetime totals count evicted records too: once a bounded queue starts
-        // dropping, retained length alone would freeze the reported total while its
-        // dropped counter keeps climbing.
-        gameplay.build_selections = u32::try_from(
-            u64::try_from(builds.selections.len())
-                .unwrap_or(u64::MAX)
-                .saturating_add(builds.dropped_records),
-        )
-        .unwrap_or(u32::MAX);
-        gameplay.build_dropped_records = builds.dropped_records;
-    }
     #[cfg(feature = "server")]
     if let Some(map) = map_telemetry.as_deref() {
         gameplay.map_destruction_requested = map.destruction_requests;
@@ -963,12 +949,10 @@ fn assemble_closeout_report(
 }
 
 /// Bounded, separator-free identity for one manifest participant row. `:` separates the
-/// fields because the manifest validator rejects `=` and newlines inside identity values;
-/// the worst case (`u64` fingerprint, `u16` ids) stays far under the identity bound.
+/// fields because the manifest validator rejects `=` and newlines inside identity values.
 pub(super) fn participant_build_identity(build: &crate::builds::SelectedBuild) -> String {
     format!(
-        "preset:{} fingerprint:{} revision:{}",
-        build.source_build_preset_id.map_or(0, |id| u64::from(id.0)),
+        "fingerprint:{} revision:{}",
         build.recipe_fingerprint.0,
         u64::from(build.revision.0)
     )

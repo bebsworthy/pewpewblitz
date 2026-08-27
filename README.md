@@ -222,7 +222,7 @@ contract. Important ownership rules are:
 - `--auto-connect`, headless clients, and demo automation require an explicit `--client-id`;
 - `--server` prefills the interactive connection target and selects the automation endpoint;
 - `--window-size WIDTHxHEIGHT` reproduces supported visual-check layouts;
-- `--build-preset 1..7` (six presets plus custom), movement/aim/fire flags, demos, screenshots, and render reports are
+- `--weapon-preset 1..4`, movement/aim/fire flags, demos, screenshots, and render reports are
   development or automation inputs rather than alternate product flows;
 - `BRAWLER_FORCE_PRIMITIVE_WORLD=1` verifies deterministic meshes inside the sole 3D renderer; it is
   not a renderer or content-mode selector;

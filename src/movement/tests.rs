@@ -230,7 +230,7 @@ fn absent_end_state_cannot_refresh_input_validation() {
 
 #[cfg(feature = "server")]
 #[test]
-fn movement_decision_combines_freshness_staleness_and_activation_barrier() {
+fn movement_decision_combines_freshness_and_staleness() {
     let tuning = InputTuning::default();
     let input = FighterInput::from_axes(Vec2::new(0.6, 0.0), Some(Vec2::X), 0);
     let mut buffer = NativeBuffer::<FighterInput>::default();
@@ -243,12 +243,10 @@ fn movement_decision_combines_freshness_staleness_and_activation_barrier() {
         &InputFreshness::default(),
         Some(&ActionState(input)),
         Some(&buffer),
-        None,
         &tuning,
         12,
     );
     assert!(!decision.stale);
-    assert!(decision.activation_ready);
     assert_eq!(decision.freshness.last_fresh_tick, Some(10));
     assert!((decision.movement.x - 0.5).abs() < 1e-5);
     assert!(decision.aim.is_some());
@@ -261,46 +259,17 @@ fn movement_decision_combines_freshness_staleness_and_activation_barrier() {
         },
         None,
         None,
-        None,
         &tuning,
         12,
     );
     assert!(decision.stale);
     assert_eq!(decision.movement, Vec2::ZERO);
-
-    // The post-selection barrier holds movement until a later fresh tick arrives.
-    let barrier = crate::combat::AwaitingPostSelectionInput {
-        accepted_at_tick: 30,
-    };
-    let decision = movement_decision(
-        31,
-        &InputFreshness {
-            last_fresh_tick: Some(10),
-        },
-        Some(&ActionState(input)),
-        None,
-        Some(&barrier),
-        &tuning,
-        12,
-    );
-    assert!(!decision.activation_ready);
 }
 
 #[cfg(feature = "server")]
 #[test]
-fn resolved_velocity_applies_modifiers_and_external_motion_only_when_active() {
-    let held = MovementDecision {
-        activation_ready: false,
-        movement: Vec2::X,
-        ..MovementDecision::default()
-    };
-    assert_eq!(
-        resolved_movement_velocity(0, &held, None, 300.0, None, None, None),
-        Vec2::ZERO
-    );
-
+fn resolved_velocity_applies_modifiers_and_external_motion() {
     let decision = MovementDecision {
-        activation_ready: true,
         movement: Vec2::X,
         ..MovementDecision::default()
     };

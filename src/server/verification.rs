@@ -35,7 +35,6 @@ pub(super) fn verify_process_match(
     mut classification: ResMut<crate::diagnostics::ProcessExitClassification>,
     roots: Query<&MatchState, With<MatchRoot>>,
     telemetry: Res<crate::matchplay::MatchTelemetry>,
-    build_telemetry: Res<crate::builds::BuildTelemetry>,
     maps: Query<
         (
             &crate::map::ResolvedMapSnapshot,
@@ -131,20 +130,6 @@ pub(super) fn verify_process_match(
     let preset_deaths = format_preset_counts(&summary.suffered_deaths_by_preset);
     let preset_death_rates =
         format_preset_rates(&summary.suffered_deaths_per_participant_minute_by_preset);
-    let build_preset_ids = summary
-        .participants
-        .iter()
-        .map(|participant| participant.selected_build)
-        .filter_map(|build| build.source_build_preset_id)
-        .map(|id| id.0.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let custom_builds = summary
-        .participants
-        .iter()
-        .map(|participant| participant.selected_build)
-        .filter(|build| build.source_build_preset_id.is_none())
-        .count();
     let build_fingerprints = summary
         .participants
         .iter()
@@ -255,7 +240,7 @@ pub(super) fn verify_process_match(
         )
     });
     let report = format!(
-        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nmode_definition_id={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_preset_ids={}\ncustom_builds={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nbuild_selections={}\nbuild_dropped_records={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nself_cloak_uses={}\nself_cloak_active_ticks={}\nself_cloak_end_reasons={:?}\nreveal_scan_uses={}\nreveal_scan_targets={}\nconcealment_field_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_map_collision_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\nmap_catalog_schema_version={}\nmap_dynamic_fingerprint={}\nmap_placement_count={}\nmap_terminal_state_count={}\nmap_dynamic_revision={}\nmap_dynamic_digest={}\nmap_destruction_revision={}\nmap_placements_changed={}\nmap_collider_updates={}\nmap_recovery_requests={}\nmap_recovery_responses={}\nmap_recovery_rejections={}\nmap_recovery_snapshot_bytes={}\nmap_event_min_bytes={:?}\nmap_event_max_bytes={:?}\nmap_defensive_repairs={}\nmap_dropped_records={}\n",
+        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nmode_definition_id={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nself_cloak_uses={}\nself_cloak_active_ticks={}\nself_cloak_end_reasons={:?}\nreveal_scan_uses={}\nreveal_scan_targets={}\nconcealment_field_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_map_collision_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\nmap_catalog_schema_version={}\nmap_dynamic_fingerprint={}\nmap_placement_count={}\nmap_terminal_state_count={}\nmap_dynamic_revision={}\nmap_dynamic_digest={}\nmap_destruction_revision={}\nmap_placements_changed={}\nmap_collider_updates={}\nmap_recovery_requests={}\nmap_recovery_responses={}\nmap_recovery_rejections={}\nmap_recovery_snapshot_bytes={}\nmap_event_min_bytes={:?}\nmap_event_max_bytes={:?}\nmap_defensive_repairs={}\nmap_dropped_records={}\n",
         initial.0,
         state.match_id.0,
         participant_count,
@@ -278,8 +263,6 @@ pub(super) fn verify_process_match(
         telemetry.summaries.len(),
         summary.weapon_aggregates.len(),
         weapon_preset_ids,
-        build_preset_ids,
-        custom_builds,
         build_fingerprints,
         build_total_points,
         ultimate_ids,
@@ -295,8 +278,6 @@ pub(super) fn verify_process_match(
         preset_death_rates,
         accepted_attacks,
         attacks_with_hostile_contact,
-        build_telemetry.selections.len(),
-        build_telemetry.dropped_records,
         ability_telemetry.attempts,
         ability_telemetry.accepts,
         ability_telemetry.dash_uses,
@@ -552,9 +533,8 @@ pub(super) fn verify_process_combat(
         );
         return;
     };
-    let tested_fighter = selected_fighters.iter().any(|(build, loadout)| {
-        build.source_build_preset_id.is_some()
-            && loadout.primary_weapon.source_preset_id == Some(expected_preset_id)
+    let tested_fighter = selected_fighters.iter().any(|(_, loadout)| {
+        loadout.primary_weapon.source_preset_id == Some(expected_preset_id)
             && loadout.primary_weapon.recipe_fingerprint == expected_resolved.recipe_fingerprint
     });
     let expected_attacks = weapon_telemetry

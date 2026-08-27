@@ -51,16 +51,13 @@ use evidence::{capture_server_combat_checkpoints, send_combat_evidence_checkpoin
 #[cfg(feature = "server")]
 use recovery::restore_attack_idle_health;
 
-pub use crate::builds::SelectingBuild;
 pub use crate::content::GameplayContentFingerprint;
 #[cfg(feature = "client")]
 pub use client::ClientCombatEvidenceStatus;
 #[cfg(feature = "client")]
 pub(crate) use client::DeduplicatedCombatCue;
 #[cfg(feature = "client")]
-pub use client::{
-    BuildSelectionText, CaptureCombatCues, ClientCombatPlugin, CombatAbilityHudText, CombatHudText,
-};
+pub use client::{CaptureCombatCues, ClientCombatPlugin, CombatAbilityHudText, CombatHudText};
 pub use cues::*;
 pub use definitions::{
     DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,

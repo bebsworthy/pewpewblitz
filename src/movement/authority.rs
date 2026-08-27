@@ -33,7 +33,6 @@ use super::{
 pub(crate) struct MovementDecision {
     pub freshness: InputFreshness,
     pub stale: bool,
-    pub activation_ready: bool,
     pub movement: Vec2,
     pub aim: Option<Vec2>,
     /// Raw dequantized move axis and button mask, kept for the input-change trace only.
@@ -50,7 +49,6 @@ pub(crate) fn movement_decision(
     freshness: &InputFreshness,
     action: Option<&ActionState<FighterInput>>,
     buffer: Option<&NativeBuffer<FighterInput>>,
-    activation_barrier: Option<&crate::combat::AwaitingPostSelectionInput>,
     tuning: &InputTuning,
     stale_input_ticks: u64,
 ) -> MovementDecision {
@@ -69,15 +67,9 @@ pub(crate) fn movement_decision(
     } else {
         FighterInput::default()
     };
-    let activation_ready = activation_barrier.is_none_or(|barrier| {
-        freshness
-            .last_fresh_tick
-            .is_some_and(|fresh_tick| fresh_tick > barrier.accepted_at_tick)
-    });
     MovementDecision {
         freshness,
         stale,
-        activation_ready,
         movement: decoded_move(input.move_axis, *tuning),
         aim: input
             .aim_update
@@ -87,7 +79,7 @@ pub(crate) fn movement_decision(
 }
 
 /// Resolve the per-tick desired velocity from loadout, effects, adrenaline, and external
-/// motion. Returns zero while the post-selection activation barrier is held.
+/// motion.
 #[must_use]
 pub(crate) fn resolved_movement_velocity(
     tick: u64,
@@ -98,9 +90,6 @@ pub(crate) fn resolved_movement_velocity(
     passive_state: Option<&crate::builds::PassiveRuntimeState>,
     external_motion: Option<&crate::combat::ExternalMotion>,
 ) -> Vec2 {
-    if !decision.activation_ready {
-        return Vec2::ZERO;
-    }
     let movement_multiplier = active_effects
         .and_then(|effects| effects.slow)
         .filter(|slow| tick < slow.expires_at_tick)
@@ -306,8 +295,6 @@ pub(super) fn authoritative_movement(
             Option<&ActionState<FighterInput>>,
             Option<&NativeBuffer<FighterInput>>,
             Option<&crate::combat::Defeated>,
-            Option<&crate::combat::SelectingBuild>,
-            Option<&crate::combat::AwaitingPostSelectionInput>,
             Option<&crate::combat::ActiveEffects>,
             Option<&crate::combat::ExternalMotion>,
             Option<&crate::matchplay::MatchParticipant>,
@@ -335,8 +322,6 @@ pub(super) fn authoritative_movement(
         action,
         buffer,
         defeated,
-        selecting,
-        activation_barrier,
         active_effects,
         external_motion,
         participant,
@@ -347,7 +332,6 @@ pub(super) fn authoritative_movement(
             .get(entity)
             .is_ok_and(|state| matches!(state.phase, crate::builds::AbilityPhase::Dashing { .. }))
             || defeated.is_some()
-            || selecting.is_some()
             || (participant.is_some() && active_combatant.is_none())
         {
             continue;
@@ -361,14 +345,11 @@ pub(super) fn authoritative_movement(
             freshness,
             action,
             buffer,
-            activation_barrier,
             &input_tuning,
             tuning.stale_input_ticks,
         );
         let freshness = decision.freshness;
-        if decision.activation_ready
-            && let Some(aim) = decision.aim
-        {
+        if let Some(aim) = decision.aim {
             rotation = Rotation::radians(aim.y.atan2(aim.x));
         }
         let desired_velocity = resolved_movement_velocity(
@@ -449,14 +430,5 @@ pub(super) fn authoritative_movement(
                 tick: tick.0,
             },
         ));
-        if activation_barrier.is_some_and(|barrier| {
-            freshness
-                .last_fresh_tick
-                .is_some_and(|fresh_tick| fresh_tick > barrier.accepted_at_tick)
-        }) {
-            commands
-                .entity(entity)
-                .remove::<crate::combat::AwaitingPostSelectionInput>();
-        }
     }
 }

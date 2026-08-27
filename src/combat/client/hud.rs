@@ -11,10 +11,6 @@ pub struct CombatHudText;
 pub struct CombatAbilityHudText;
 
 #[cfg(feature = "client")]
-#[derive(Component)]
-pub struct BuildSelectionText;
-
-#[cfg(feature = "client")]
 #[allow(clippy::too_many_lines)]
 #[allow(
     clippy::needless_pass_by_value,

@@ -19,6 +19,9 @@ pub mod protocol;
 pub mod timing;
 pub mod weapon_parts;
 
+#[cfg(test)]
+pub(crate) mod test_app;
+
 #[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "server")]
