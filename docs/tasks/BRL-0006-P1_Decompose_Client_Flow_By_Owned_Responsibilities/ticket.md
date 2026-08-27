@@ -1,14 +1,14 @@
 ---
 id: BRL-0006
 title: 'P1: Decompose client flow by owned responsibilities'
-status: doing
+status: done
 theme: quality
 release:
 priority: none
 created: 2026-08-27T18:15:28Z
-modified: 2026-08-27T20:49:16Z
-closed:
-revision: b6b95faf855c1a58
+modified: 2026-08-27T21:25:06Z
+closed: 2026-08-27T21:24:32Z
+revision: 848ef6367f5ff54d
 blocks: []
 related: [BRL-0002]
 ---

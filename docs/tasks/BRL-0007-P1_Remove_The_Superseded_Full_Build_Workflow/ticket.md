@@ -1,14 +1,14 @@
 ---
 id: BRL-0007
 title: 'P1: Remove the superseded full-build workflow'
-status: doing
+status: done
 theme: quality
 release:
 priority: none
 created: 2026-08-27T18:15:28Z
-modified: 2026-08-27T21:13:47Z
-closed:
-revision: 22df58e3dcf4a18f
+modified: 2026-08-27T21:25:06Z
+closed: 2026-08-27T21:24:32Z
+revision: 54ebc4509f1d3862
 blocks: [BRL-0003]
 related: [BRL-0002]
 ---

@@ -49,3 +49,10 @@ Full routed/recovery/native product evidence remains before closeout.
 - Canonical routing, client, server, and Balance Lab suites passed (83+4+5+5+3 routing tests, 416 client tests, 332 server tests, 349 Balance Lab tests).
 - All 12 performance gates passed.
 - Bounded native two-client gameplay render rerun passed. The saved-brawler/dashboard product UI still needs its explicit native smoke before this ticket closes.
+
+## Native product-flow closeout (2026-08-27)
+
+- The fresh-profile screenshot `target/brl-dashboard-native-clean/brawler-000540.png` verifies that first-run loadout creation now enters the saved-brawler workflow directly.
+- The seeded-profile screenshot `target/brl-dashboard-seeded-screens/brawler-000540.png` verifies that Automation Brawler is surfaced as the dashboard selection and that no superseded Build Editor entry point remains.
+- The native connection smoke exposed a duplicate deferred despawn during rejected/disconnected link cleanup. The server now inserts `Disconnected` and leaves teardown to Lightyear's lifecycle observer, eliminating the competing despawn command; the focused server lifecycle tests, server Clippy, and a repeated native connection smoke pass without the warning.
+- All acceptance evidence is complete: canonical role suites, 88 network scenarios, routed product and Practice E2E, 12 performance gates, native two-client rendering, and native saved-brawler/dashboard UI.

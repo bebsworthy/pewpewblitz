@@ -1353,13 +1353,11 @@ fn disconnect_rejected_sessions(
             continue;
         }
         if matches!(session.phase, ServerSessionPhase::Rejected) {
-            // Server-side `Disconnect` is a client/host trigger in Lightyear 0.29. A
-            // rejected link has no authoritative entity to preserve, so mark the lifecycle
-            // outcome and remove the link after its prior-frame rejection has flushed.
-            commands
-                .entity(entity)
-                .insert(Disconnected::default())
-                .despawn();
+            // Server-side `Disconnect` is a client/host trigger in Lightyear 0.29. Marking
+            // the link disconnected lets Lightyear's lifecycle observer own its teardown;
+            // queueing our own despawn here races that observer and produces a harmless but
+            // noisy duplicate-despawn warning.
+            commands.entity(entity).try_insert(Disconnected::default());
         }
     }
 }

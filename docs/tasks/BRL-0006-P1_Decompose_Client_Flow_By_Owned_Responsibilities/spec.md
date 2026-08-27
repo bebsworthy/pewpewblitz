@@ -78,3 +78,10 @@ Verification after the complete moves:
 - `cargo test --locked --no-default-features --features client --lib` — 416 passed
 
 Remaining closeout evidence: relevant native dashboard, game-select, and saved-brawler UI smoke verification.
+
+## Native UI closeout (2026-08-27)
+
+- A fresh isolated 1280x720 client profile rendered the Create Brawler flow at `target/brl-dashboard-native-clean/brawler-000540.png`; visual inspection confirmed the three-column fighter, weapon, and ultimate selection layout, responsive bounds, focus treatment, and Create Brawler action.
+- A seeded isolated profile rendered the connected dashboard at `target/brl-dashboard-seeded-screens/brawler-000540.png`; visual inspection confirmed server status, 3D fighter preview, saved-brawler card, mode card, Practice/Play controls, and settings/menu presentation without the removed Build Editor.
+- The existing bounded native two-client gameplay render gate also passes on rerun (p95 17.003 ms and 17.008 ms; zero frames above 25 ms).
+- Client Clippy, all 416 client library tests, the full routed/network matrix, and the native UI smoke pass. Acceptance is complete.
