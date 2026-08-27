@@ -20,7 +20,10 @@ pub use cues::ClientCombatObservation;
 pub(crate) use cues::RecentCombatEvents;
 pub use hud::{BuildSelectionText, CombatAbilityHudText, CombatHudText};
 pub use preview::MAX_PREVIEW_SEGMENTS;
-pub(crate) use preview::preview_segments;
+pub(crate) use preview::{
+    AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, PreviewGeometry,
+    PreviewPrimitive, preview_primitives,
+};
 
 pub struct ClientCombatPlugin;
 

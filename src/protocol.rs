@@ -34,8 +34,9 @@ use crate::builds::{AbilityState, PassiveRuntimeState, ResolvedMatchLoadout};
 use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
     CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback,
-    LobbedFlight, Projectile, ProjectileDeadline, ProjectileSource, ReplicatedAttackSource,
-    SelectingBuild, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
+    LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline, ProjectileSource,
+    ReplicatedAttackSource, SelectingBuild, StraightFlight, TeamId, WeaponDefinitionId,
+    WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -731,6 +732,7 @@ fn register_replicated_components(app: &mut App) {
     app.component::<LobbedFlight>().replicate_once();
     app.component::<ProjectileDeadline>().replicate_once();
     app.component::<StraightFlight>().replicate_once();
+    app.component::<ProjectileBody>().replicate_once();
     app.component::<TeamId>().replicate();
     app.component::<CurrentHealth>().replicate();
     app.component::<WeaponState>().replicate();

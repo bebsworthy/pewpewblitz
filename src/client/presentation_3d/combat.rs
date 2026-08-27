@@ -1,7 +1,10 @@
 //! Complete 3D combat presentation over independent, client-only visual roots.
 
 use super::*;
-use crate::combat::client::{DeduplicatedCombatCue, MAX_PREVIEW_SEGMENTS, preview_segments};
+use crate::combat::client::{
+    AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, DeduplicatedCombatCue,
+    MAX_PREVIEW_SEGMENTS, PreviewGeometry, PreviewPrimitive, preview_primitives,
+};
 use std::collections::{HashMap, HashSet};
 
 const PREVIEW_HEIGHT: f32 = 2.5;
@@ -15,6 +18,7 @@ const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const MAX_EFFECTS: usize = 96;
 const CONCEALED_FIGHTER_ALPHA: f32 = 0.52;
+const STRAIGHT_PROJECTILE_VISUAL_THICKNESS: f32 = 6.0;
 
 #[derive(Component)]
 pub(super) struct SentryVisual3d;
@@ -118,6 +122,42 @@ pub(super) struct WeaponPreviewVisual3d {
     slot: u8,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct AimPreviewInputs<'w, 's> {
+    maps: Query<
+        'w,
+        's,
+        (
+            &'static crate::map::ResolvedMapSnapshot,
+            &'static crate::map::MapDynamicState,
+        ),
+        With<crate::map::MapRoot>,
+    >,
+    catalog: Res<'w, crate::map::MapCatalogResource>,
+    pending: Res<'w, PendingLocalActions>,
+    index: ResMut<'w, AimTraceBlockerIndex>,
+    sentries: Query<
+        'w,
+        's,
+        (
+            &'static Position,
+            &'static crate::abilities::SentryIdentity,
+            &'static crate::combat::CurrentHealth,
+        ),
+        With<crate::abilities::Sentry>,
+    >,
+    safes: Query<
+        'w,
+        's,
+        (
+            &'static Position,
+            &'static Rotation,
+            &'static crate::matchplay::HeistSafe,
+            &'static crate::combat::CurrentHealth,
+        ),
+    >,
+}
+
 #[derive(Component)]
 pub(super) struct CombatEffect3d {
     timer: Timer,
@@ -147,6 +187,7 @@ pub(super) fn reconcile_combat_visuals(
             &Position,
             &crate::combat::ProjectileSource,
             Option<&crate::combat::StraightFlight>,
+            Option<&crate::combat::ProjectileBody>,
             Option<&crate::combat::LobbedFlight>,
         ),
         With<crate::combat::Projectile>,
@@ -195,7 +236,10 @@ pub(super) fn reconcile_combat_visuals(
             spawn_fighter_overhead(&mut commands, owner);
         }
     }
-    for (owner, position, source, straight, lobbed) in &projectiles {
+    for (owner, position, source, straight, body, lobbed) in &projectiles {
+        if straight.is_some() && body.is_none() {
+            continue;
+        }
         if !projectile_roots.contains_key(&owner) {
             spawn_projectile(
                 &mut commands,
@@ -205,6 +249,7 @@ pub(super) fn reconcile_combat_visuals(
                 position.0,
                 source.team_id,
                 straight,
+                body,
                 lobbed.is_some(),
             );
         }
@@ -597,6 +642,7 @@ fn spawn_projectile(
     position: Vec2,
     team: crate::combat::TeamId,
     straight: Option<&crate::combat::StraightFlight>,
+    body: Option<&crate::combat::ProjectileBody>,
     lobbed: bool,
 ) {
     let root = commands
@@ -611,6 +657,13 @@ fn spawn_projectile(
         ))
         .id();
     commands.entity(root).with_children(|parent| {
+        let transform = if lobbed {
+            Transform::default()
+        } else {
+            Transform::from_scale(straight_projectile_visual_scale(
+                *body.expect("straight projectile visual requires replicated body"),
+            ))
+        };
         parent.spawn((
             Mesh3d(if lobbed {
                 primitives.lobbed_projectile.clone()
@@ -619,14 +672,18 @@ fn spawn_projectile(
             }),
             MeshMaterial3d(team_material(team, materials)),
             NotShadowCaster,
-            Transform::from_rotation(if lobbed {
-                Quat::IDENTITY
-            } else {
-                Quat::from_rotation_z(core::f32::consts::FRAC_PI_2)
-            }),
+            transform,
             Name::new("V3 projectile geometry"),
         ));
     });
+}
+
+fn straight_projectile_visual_scale(body: crate::combat::ProjectileBody) -> Vec3 {
+    match body.shape {
+        crate::combat::ProjectileShape::Circle { radius } => {
+            Vec3::new(radius, STRAIGHT_PROJECTILE_VISUAL_THICKNESS, radius)
+        }
+    }
 }
 
 fn spawn_sentry(
@@ -971,18 +1028,10 @@ pub(super) fn update_combat_visual_state(
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     definitions: Res<crate::combat::FighterDefinitions>,
-    maps: Query<
-        (
-            &crate::map::ResolvedMapSnapshot,
-            &crate::map::MapDynamicState,
-        ),
-        With<crate::map::MapRoot>,
-    >,
-    map_catalog: Res<crate::map::MapCatalogResource>,
-    pending: Res<PendingLocalActions>,
+    mut aim: AimPreviewInputs,
     fighters: Query<
         (
-            Entity,
+            (Entity, &NetworkEntityId),
             &Position,
             &Rotation,
             &crate::combat::CurrentHealth,
@@ -1032,6 +1081,7 @@ pub(super) fn update_combat_visual_state(
             &WeaponPreviewVisual3d,
             &mut Transform,
             &mut Visibility,
+            &mut Mesh3d,
             &mut MeshMaterial3d<StandardMaterial>,
         ),
         (
@@ -1045,13 +1095,14 @@ pub(super) fn update_combat_visual_state(
     let mut desired_status = HashSet::new();
     let mut fighter_data = HashMap::new();
     let mut controlled = None;
+    let mut dynamic_blockers = Vec::new();
     let controlled_team = fighters.iter().find_map(
         |(_, _, _, _, _, _, _, _, _, _, _, team, _, _, is_controlled)| {
             is_controlled.then_some(*team)
         },
     );
     for (
-        entity,
+        (entity, network_id),
         position,
         rotation,
         health,
@@ -1068,6 +1119,21 @@ pub(super) fn update_combat_visual_state(
         is_controlled,
     ) in &fighters
     {
+        if defeated.is_none()
+            && controlled_team.is_some_and(|controlled_team| {
+                crate::combat::teams_are_hostile(controlled_team, *team)
+            })
+        {
+            dynamic_blockers.push(AimTraceDynamicBlocker {
+                class: AimTraceBlockerClass::Fighter,
+                stable_id: u128::from(network_id.0),
+                position: position.0,
+                rotation: 0.0,
+                shape: crate::map::MapShape::Circle {
+                    radius: crate::movement::STANDARD_FIGHTER_RADIUS,
+                },
+            });
+        }
         let maximum = loadout.map_or_else(
             || {
                 definitions
@@ -1300,16 +1366,55 @@ pub(super) fn update_combat_visual_state(
         ));
     }
 
-    let map = maps
+    for (position, identity, health) in &aim.sentries {
+        if health.0 > 0
+            && controlled_team.is_some_and(|controlled_team| {
+                crate::combat::teams_are_hostile(controlled_team, identity.team_id)
+            })
+        {
+            dynamic_blockers.push(AimTraceDynamicBlocker {
+                class: AimTraceBlockerClass::Sentry,
+                stable_id: u128::from(identity.deployable_id.0),
+                position: position.0,
+                rotation: 0.0,
+                shape: crate::map::MapShape::Circle {
+                    radius: crate::abilities::SENTRY_RADIUS,
+                },
+            });
+        }
+    }
+    for (position, rotation, safe, health) in &aim.safes {
+        if health.0 > 0 {
+            dynamic_blockers.push(AimTraceDynamicBlocker {
+                class: AimTraceBlockerClass::HeistSafe,
+                stable_id: (safe.match_id.0 << 32) | u128::from(safe.anchor_id.0),
+                position: position.0,
+                rotation: rotation.as_radians(),
+                shape: crate::map::MapShape::Rectangle {
+                    half_extents: crate::matchplay::HEIST_SAFE_HALF_EXTENTS,
+                },
+            });
+        }
+    }
+    dynamic_blockers.sort_by_key(|blocker| (blocker.class, blocker.stable_id));
+
+    let map = aim
+        .maps
         .iter()
         .max_by_key(|(snapshot, _)| snapshot.identity.instance_id);
+    if let Some((snapshot, state)) = map {
+        aim.index.refresh(snapshot, state, &aim.catalog.0);
+    }
     let scan_preview = match (map, controlled) {
         (Some((map, _)), Some((origin, facing, loadout, Some(ability))))
             if matches!(
                 loadout.ultimate.kind,
                 crate::builds::UltimateKind::RevealScan
                     | crate::builds::UltimateKind::ConcealmentField
-            ) && pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
+            ) && aim
+                .pending
+                .targeted_ultimate
+                .is_targeting(loadout.ultimate.id)
                 && matches!(ability.phase, crate::builds::AbilityPhase::Ready) =>
         {
             let (
@@ -1332,8 +1437,8 @@ pub(super) fn update_combat_visual_state(
                     crate::abilities::reveal_scan_center(
                         origin,
                         Vec2::from_angle(facing),
-                        pending.aim_axis,
-                        pending.aim_distance,
+                        aim.pending.aim_axis,
+                        aim.pending.aim_distance,
                         maximum_range,
                         map.dimensions.bounds(),
                     )
@@ -1347,27 +1452,32 @@ pub(super) fn update_combat_visual_state(
     };
     let segments = if let Some((origin, center, _)) = scan_preview {
         let delta = center - origin;
-        vec![(
-            origin.midpoint(center),
-            delta.y.atan2(delta.x),
-            Vec2::new(delta.length(), 3.0),
-            Color::srgba(0.3, 0.95, 1.0, 0.45),
-        )]
+        vec![PreviewPrimitive {
+            geometry: PreviewGeometry::Corridor {
+                center: origin.midpoint(center),
+                angle: delta.y.atan2(delta.x),
+                length: delta.length().max(0.001),
+                width: 3.0,
+            },
+            blocked: false,
+        }]
     } else {
         match (map, controlled) {
-            (Some((map, state)), Some((origin, facing, loadout, _))) => preview_segments(
+            (Some((map, state)), Some((origin, facing, loadout, _))) => preview_primitives(
                 origin,
                 facing,
-                pending.aim_distance,
+                aim.pending.aim_distance,
                 &loadout.primary_weapon,
                 map,
                 state,
-                &map_catalog.0,
+                &aim.catalog.0,
+                &aim.index,
+                &dynamic_blockers,
             ),
             _ => Vec::new(),
         }
     };
-    for (slot, mut transform, mut visibility, mut material) in &mut previews {
+    for (slot, mut transform, mut visibility, mut mesh, mut material) in &mut previews {
         if slot.slot == u8::MAX {
             let Some((_, center, radius)) = scan_preview else {
                 *visibility = Visibility::Hidden;
@@ -1380,16 +1490,31 @@ pub(super) fn update_combat_visual_state(
             material.0 = materials.preview.clone();
             continue;
         }
-        let Some((center, angle, size, color)) = segments.get(usize::from(slot.slot)) else {
+        let Some(primitive) = segments.get(usize::from(slot.slot)) else {
             *visibility = Visibility::Hidden;
             continue;
         };
         *visibility = Visibility::Inherited;
-        transform.translation = ground_position(*center) + Vec3::Y * PREVIEW_HEIGHT;
-        transform.rotation = ground_rotation(Rotation::radians(*angle));
-        transform.scale = Vec3::new(size.x, 1.2, size.y.max(2.0));
-        let rgba = color.to_srgba();
-        material.0 = if rgba.red > 0.9 && rgba.green < 0.4 {
+        match primitive.geometry {
+            PreviewGeometry::Corridor {
+                center,
+                angle,
+                length,
+                width,
+            } => {
+                mesh.0 = primitives.unit_cuboid.clone();
+                transform.translation = ground_position(center) + Vec3::Y * PREVIEW_HEIGHT;
+                transform.rotation = ground_rotation(Rotation::radians(angle));
+                transform.scale = Vec3::new(length, 1.2, width.max(0.001));
+            }
+            PreviewGeometry::Disc { center, radius } => {
+                mesh.0 = primitives.area_disc.clone();
+                transform.translation = ground_position(center) + Vec3::Y * PREVIEW_HEIGHT;
+                transform.rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
+                transform.scale = Vec3::splat(radius);
+            }
+        }
+        material.0 = if primitive.blocked {
             materials.preview_blocked.clone()
         } else {
             materials.preview.clone()
@@ -1927,6 +2052,17 @@ pub(super) fn write_combat_visual_poses(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn straight_projectile_visual_footprint_matches_replicated_circle() {
+        let pulse = straight_projectile_visual_scale(crate::combat::ProjectileBody::circle(6.0));
+        let scatter = straight_projectile_visual_scale(crate::combat::ProjectileBody::circle(4.0));
+        assert!((pulse.x - 6.0).abs() < f32::EPSILON);
+        assert!((pulse.z - 6.0).abs() < f32::EPSILON);
+        assert!((scatter.x - 4.0).abs() < f32::EPSILON);
+        assert!((scatter.z - 4.0).abs() < f32::EPSILON);
+        assert!((pulse.y - STRAIGHT_PROJECTILE_VISUAL_THICKNESS).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn reveal_area_lifetime_tracks_authoritative_effect_deadline() {

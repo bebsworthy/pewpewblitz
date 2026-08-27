@@ -739,7 +739,7 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
     assert!(
         fighter_health
             .iter()
-            .any(|(player, health)| *player == player_ids[1] && *health == 65),
+            .any(|(player, health)| *player == player_ids[1] && *health == 965),
         "fighter_health={fighter_health:?}"
     );
     let sentry_owner = sentries

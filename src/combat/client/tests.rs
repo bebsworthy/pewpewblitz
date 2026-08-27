@@ -4,7 +4,10 @@ use crate::combat::client::cues::{
     ClientCombatEvidenceStatus, RecentCombatEvents, remember_combat_event,
 };
 use crate::combat::client::hud::{CombatHudText, update_combat_hud};
-use crate::combat::client::preview::{MAX_PREVIEW_SEGMENTS, preview_segments};
+use crate::combat::client::preview::{
+    AimTraceBlockerIndex, MAX_PREVIEW_SEGMENTS, PreviewGeometry, PreviewPrimitive,
+    preview_primitives,
+};
 use crate::combat::{
     AuthoritativeTick, CombatEventId, CurrentHealth, Defeated, WeaponPhase, WeaponState,
     fighter_color, projectile_color,
@@ -14,7 +17,7 @@ use crate::map::{MapContentCatalog, MapDynamicState, MapInstanceId, MapPresetId 
 use crate::protocol::{Fighter, PlayerId};
 use crate::timing::SimulationTick;
 
-fn preview_for(id: u16) -> Vec<(Vec2, f32, Vec2, Color)> {
+fn preview_for(id: u16) -> Vec<PreviewPrimitive> {
     let catalog = WeaponCatalog::embedded().unwrap();
     let fighter = FighterDefinitions::default().entries[0];
     let resolved = catalog
@@ -30,14 +33,24 @@ fn preview_for(id: u16) -> Vec<(Vec2, f32, Vec2, Color)> {
         revision: 0,
         terminal_states: Vec::new(),
     };
-    preview_segments(
-        Vec2::ZERO,
-        0.0,
+    let spawn = map
+        .spawn_points_by_team
+        .values()
+        .flatten()
+        .next()
+        .expect("resolved preview map spawn");
+    let mut index = AimTraceBlockerIndex::default();
+    index.refresh(&map.snapshot, &state, &map_catalog);
+    preview_primitives(
+        spawn.position,
+        spawn.facing,
         None,
         &resolved,
         &map.snapshot,
         &state,
         &map_catalog,
+        &index,
+        &[],
     )
 }
 
@@ -46,16 +59,9 @@ fn preview_geometry_is_bounded_and_finite_for_all_presets() {
     for id in 1..=4 {
         let segments = preview_for(id);
         assert!(segments.len() <= MAX_PREVIEW_SEGMENTS);
-        assert!(segments.iter().all(|(center, angle, size, _)| {
-            center.is_finite()
-                && angle.is_finite()
-                && size.is_finite()
-                && size.x > 0.0
-                && size.y > 0.0
-        }));
+        assert!(segments.iter().all(|primitive| primitive.is_finite()));
     }
     assert_eq!(preview_for(1).len(), 2);
-    assert_eq!(preview_for(2).len(), 8);
     assert_eq!(preview_for(3).len(), 14);
     assert_eq!(preview_for(4).len(), 10);
 }
@@ -75,7 +81,9 @@ fn launcher_preview_uses_the_requested_focal_distance() {
         revision: 0,
         terminal_states: Vec::new(),
     };
-    let segments = preview_segments(
+    let mut index = AimTraceBlockerIndex::default();
+    index.refresh(&map.snapshot, &state, &map_catalog);
+    let segments = preview_primitives(
         Vec2::ZERO,
         0.0,
         Some(180.0),
@@ -83,9 +91,14 @@ fn launcher_preview_uses_the_requested_focal_distance() {
         &map.snapshot,
         &state,
         &map_catalog,
+        &index,
+        &[],
     );
 
-    assert!((segments[0].2.x - 180.0).abs() < 0.001);
+    let PreviewGeometry::Corridor { length, .. } = segments[0].geometry else {
+        panic!("launcher preview starts with its travel corridor");
+    };
+    assert!((length - 180.0).abs() < 0.001);
 }
 
 /// Resolve a loadout through the real build pipeline, so presentation tests observe the

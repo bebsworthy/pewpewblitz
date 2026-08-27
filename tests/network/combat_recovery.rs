@@ -116,7 +116,7 @@ fn firing_again_does_not_restart_in_progress_ammo_recovery() {
     let player_id = harness.controlled_player_id(0);
     let fire = FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE);
     harness.set_controlled_input(0, fire);
-    harness.step_until(|harness| server_ammo_state(harness, player_id).ammo == 5);
+    harness.step_until(|harness| server_ammo_state(harness, player_id).ammo == 3);
     harness.set_controlled_input(0, FighterInput::default());
     let first_recovery = server_ammo_state(&mut harness, player_id)
         .ammo_recovery
@@ -125,7 +125,7 @@ fn firing_again_does_not_restart_in_progress_ammo_recovery() {
         harness.step();
     }
     harness.set_controlled_input(0, fire);
-    harness.step_until(|harness| server_ammo_state(harness, player_id).ammo == 4);
+    harness.step_until(|harness| server_ammo_state(harness, player_id).ammo == 2);
     harness.set_controlled_input(0, FighterInput::default());
     let after_second_shot = server_ammo_state(&mut harness, player_id);
     assert_eq!(after_second_shot.ammo_recovery, Some(first_recovery));
@@ -156,6 +156,34 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
         .resource_mut::<FighterDefinitions>()
         .entries[0]
         .defeat_reset_delay_ticks = 600;
+    {
+        let world = harness.server.world_mut();
+        let source_position = {
+            let mut source = world.query_filtered::<
+                (&Position, &mut brawler::builds::ResolvedMatchLoadout),
+                (With<Fighter>, Without<TestDummy>),
+            >();
+            let (position, mut loadout) = source.single_mut(world).expect("controlled fighter");
+            let brawler::combat::DeliveryMethod::Straight {
+                speed,
+                lifetime_ticks,
+                ..
+            } = &mut loadout.primary_weapon.recipe.delivery
+            else {
+                panic!("Pulse Sidearm uses straight delivery");
+            };
+            *speed = 1.0;
+            *lifetime_ticks = 600;
+            position.0
+        };
+        let dummy_entity = {
+            let mut dummy = world.query_filtered::<Entity, With<TestDummy>>();
+            dummy.single(world).expect("test dummy entity")
+        };
+        world
+            .entity_mut(dummy_entity)
+            .insert(Position(source_position + Vec2::X * 250.0));
+    }
 
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
@@ -173,6 +201,15 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
             && harness.client_ids(1).len() == 2
             && harness.client_projectile_count(1) > 0
     });
+    {
+        let world = harness.server.world_mut();
+        let mut projectiles =
+            world.query_filtered::<&mut ComposedProjectileRuntime, With<Projectile>>();
+        let mut projectile = projectiles
+            .single_mut(world)
+            .expect("active recovered projectile");
+        projectile.velocity = projectile.velocity.normalize_or_zero() * 500.0;
+    }
     harness.step_until(|harness| {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<Entity, With<TestDummy>>();

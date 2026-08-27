@@ -185,12 +185,13 @@ fn blocked_straight_deliveries(
     else {
         return Vec::new();
     };
+    let body = ProjectileBody::circle(radius);
     delivery_angles(facing, recipe.firing)
         .into_iter()
         .enumerate()
         .filter_map(|(index, angle)| {
             let muzzle = muzzle_position(origin, angle, muzzle_offset);
-            map_muzzle_contact(origin, muzzle, radius, spatial_query).map(
+            map_muzzle_contact(origin, muzzle, body, spatial_query).map(
                 |(entity, point, normal)| BlockedStraightDelivery {
                     delivery_index: u8::try_from(index).unwrap_or(u8::MAX),
                     target: objects
@@ -291,6 +292,8 @@ fn emit_attack_deliveries(
             lifetime_ticks,
             muzzle_offset,
         } => {
+            let body = ProjectileBody::circle(radius);
+            debug_assert!(body.shape.is_valid(), "validated straight projectile body");
             let angles = delivery_angles(facing, recipe.firing);
             for (delivery_index, angle) in angles.into_iter().enumerate() {
                 let delivery_index = u8::try_from(delivery_index).unwrap_or(u8::MAX);
@@ -378,6 +381,7 @@ fn emit_attack_deliveries(
                         maximum_range: range,
                         launched_at_tick: tick,
                     },
+                    body,
                     ComposedProjectileRuntime {
                         owner_entity: entity,
                         source_entity: entity,
@@ -387,13 +391,12 @@ fn emit_attack_deliveries(
                         travelled: 0.0,
                         expires_at_tick: tick.saturating_add(lifetime_ticks),
                         maximum_range: range,
-                        radius,
                         landing: None,
                         recipe: recipe.clone(),
                     },
                     Position::from_xy(muzzle.x, muzzle.y),
                     Rotation::radians(angle),
-                    Collider::circle(radius),
+                    body.collider(),
                     CollisionLayers::new(
                         PROJECTILE_LAYER,
                         FIGHTER_LAYER | STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER,
@@ -445,7 +448,6 @@ fn emit_attack_deliveries(
                     travelled: 0.0,
                     expires_at_tick: tick.saturating_add(flight_ticks),
                     maximum_range: distance,
-                    radius: 0.0,
                     landing: Some(landing),
                     recipe: recipe.clone(),
                 },

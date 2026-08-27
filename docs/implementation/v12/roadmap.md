@@ -36,8 +36,8 @@ presentation and requested the final commit on 2026-08-26, closing M01 and makin
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
-| Current milestone | M03 — combat sustain, ammunition recovery, and instant evidence capture |
+| Status | Complete |
+| Current milestone | None — V12 completed and was accepted on 2026-08-27 |
 | Entry gate | Satisfied: V11 completed and was accepted on 2026-08-26 |
 | Completion gate | Three accepted 3v3 maps, the user-defined M02 balancing workflow, and feedback-driven fighter/weapon tuning pass their owning automated, routed, native, feedback, documentation, and learning gates |
 
@@ -47,7 +47,7 @@ presentation and requested the final commit on 2026-08-26, closing M01 and makin
 |---|---|---|
 | 01 | Complete | One manually authored, grid-readable 3v3 map each for Wipeout, Hot Zone, and Heist, accepted through native playtest, with per-axis framing and a matched one-cell fighter footprint |
 | 02 | Complete | [Correct Balance Lab field contracts, a clearer operator presentation, and authoritative player-loadout context; balancing assistance remains deferred](./milestone-02.md) |
-| 03 | User playtest | [Attack-idle fighter recovery, continuous per-ammunition recovery, and instant paired client screenshot/state evidence](./milestone-03.md) |
+| 03 | Complete | [Attack-idle fighter recovery, continuous per-ammunition recovery, instant paired client screenshot/state evidence, and accepted projectile/readability and balance feedback](./milestone-03.md) |
 
 ## Ordering
 
@@ -67,6 +67,15 @@ navigation, corrected Heist persistence, loadout context, canonical-default diff
 representation-backed fighter limits, canonical verification, and desktop/narrow browser checks
 passed. The user accepted the final comparison workflow and requested commit `3c46d94`.
 
+M03 and V12 completed on 2026-08-27 after server-authoritative attack-idle health recovery,
+continuous per-ammunition recovery, and instant paired screenshot/state evidence capture passed
+their automated, routed, performance, and native feedback gates. The controller-capture overflow
+was corrected without narrowing routed identity, projectile body geometry became the shared source
+for authoritative collision, rendered size, and obstruction-aware aim preview, and the final
+playtest balance pass was recorded in the canonical catalogs. The user accepted the projectile
+readability result and directed version closeout after the final verification, documentation, and
+learning review.
+
 ## Immediate gameplay feedback applied
 
 The user initially queued these values for M03, then explicitly directed that they be applied
@@ -79,6 +88,13 @@ immediately during M02 feedback review:
 These absolute authored values replace `320`/`360`/`288`, preserve the requested
 100%/110%/90% relationship, and advance the build balance revision to `3`. The narrow correction
 does not begin the wider M03 character and weapon rework.
+
+The final M03 playtest balance pass superseded only the Default profile's interim movement value:
+Default is now `70`, while Lightweight remains `110` and Reinforced remains `90` world units per
+second. It also raised Default maximum health and recovery to `1000` and `100` health per second,
+differentiated weapon ammunition recovery, and tuned the Pulse Sidearm and Scatter Cannon delivery
+and damage values. The canonical catalogs and durable gameplay specifications own the complete
+current values; this section preserves the order in which feedback was applied.
 
 ## Version boundaries
 

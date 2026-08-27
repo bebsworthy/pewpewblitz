@@ -501,16 +501,26 @@ fn collect_projectile_snapshots(world: &mut World) -> Vec<Value> {
             Option<&NetworkEntityId>,
             &Position,
             Option<&crate::combat::ProjectileSource>,
+            Option<&crate::combat::ProjectileBody>,
+            Option<&crate::combat::StraightFlight>,
+            Option<&crate::combat::LobbedFlight>,
+            Option<&crate::combat::ProjectileDeadline>,
         ), With<crate::combat::Projectile>>()
         .iter(world)
-        .map(|(entity, network_id, position, source)| {
-            json!({
-                "entity": entity.to_bits(),
-                "network_entity_id": network_id.map(|id| id.0),
-                "position": [position.x, position.y],
-                "source": source,
-            })
-        })
+        .map(
+            |(entity, network_id, position, source, body, straight, lobbed, deadline)| {
+                json!({
+                    "entity": entity.to_bits(),
+                    "network_entity_id": network_id.map(|id| id.0),
+                    "position": [position.x, position.y],
+                    "source": source,
+                    "body": body,
+                    "straight_flight": straight,
+                    "lobbed_flight": lobbed,
+                    "deadline": deadline,
+                })
+            },
+        )
         .collect::<Vec<_>>();
     projectiles
         .sort_by_key(|projectile| projectile["network_entity_id"].as_u64().unwrap_or(u64::MAX));

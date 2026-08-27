@@ -203,14 +203,27 @@ fn projectile_stops_at_thin_cover_before_the_target() {
     });
     {
         let world = harness.server.world_mut();
-        let mut source =
-            world.query_filtered::<(&PlayerId, &mut Position, &mut Rotation), With<Fighter>>();
-        for (player, mut position, mut rotation) in source.iter_mut(world) {
+        let mut source = world.query_filtered::<(
+            &PlayerId,
+            &mut Position,
+            &mut Rotation,
+            Option<&mut brawler::builds::ResolvedMatchLoadout>,
+        ), With<Fighter>>();
+        for (player, mut position, mut rotation, loadout) in source.iter_mut(world) {
             if player.0 == 0 {
                 position.0 = Vec2::new(300.0, -220.0);
             } else {
                 position.0 = Vec2::new(-300.0, -220.0);
                 *rotation = Rotation::IDENTITY;
+                let mut loadout = loadout.expect("controlled fighter loadout");
+                let brawler::combat::DeliveryMethod::Straight { radius, range, .. } =
+                    &mut loadout.primary_weapon.recipe.delivery
+                else {
+                    panic!("Pulse Sidearm uses straight delivery");
+                };
+                // This fixture proves thin-cover sweep ordering rather than canonical balance.
+                *radius = 6.0;
+                *range = 900.0;
             }
         }
     }
@@ -227,6 +240,8 @@ fn projectile_stops_at_thin_cover_before_the_target() {
             .iter()
             .any(|record| matches!(record, CombatLogRecord::Hit { target: None, .. }))
     });
+    harness.set_controlled_input(0, FighterInput::default());
+    harness.step_until(|harness| harness.server_projectile_count() == 0);
     let dummy_health = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();

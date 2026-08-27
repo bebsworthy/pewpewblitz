@@ -15,6 +15,32 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             && harness.selection_is_complete(0)
             && harness.selection_is_complete(1)
     });
+    let player_id = harness.controlled_player_id(0);
+    {
+        let world = harness.server.world_mut();
+        let source_position = {
+            let mut source = world
+                .query_filtered::<(&PlayerId, &Position), (With<Fighter>, Without<TestDummy>)>();
+            source
+                .iter(world)
+                .find(|(candidate, _)| **candidate == player_id)
+                .map(|(_, position)| position.0)
+                .expect("controlled fighter position")
+        };
+        let (dummy_entity, direction) = {
+            let mut dummy = world.query_filtered::<(Entity, &Position), With<TestDummy>>();
+            let (entity, position) = dummy.single(world).expect("test dummy position");
+            (entity, (position.0 - source_position).normalize_or(Vec2::X))
+        };
+        let position = source_position + direction * 250.0;
+        world.entity_mut(dummy_entity).insert((
+            Position(position),
+            SpawnState {
+                position,
+                facing: 0.0,
+            },
+        ));
+    }
     let dummy_aim = harness.aim_at_dummy(0);
     let (dummy_entity, dummy_spawn, dummy_initial_rotation, dummy_initial_layers) = {
         let world = harness.server.world_mut();
@@ -40,6 +66,23 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             .accepted_shots
             >= 1
             && harness.server_projectile_count() > 0
+    });
+    let server_body = {
+        let world = harness.server.world_mut();
+        let mut query =
+            world.query_filtered::<&brawler::combat::ProjectileBody, With<Projectile>>();
+        *query.iter(world).next().expect("server projectile body")
+    };
+    assert_eq!(server_body, brawler::combat::ProjectileBody::circle(2.0));
+    harness.step_until(|harness| {
+        [0, 1].into_iter().all(|client| {
+            let world = harness.clients[client].world_mut();
+            let mut query =
+                world.query_filtered::<&brawler::combat::ProjectileBody, With<Projectile>>();
+            query
+                .iter(world)
+                .any(|body| *body == brawler::combat::ProjectileBody::circle(2.0))
+        })
     });
     let first_tick_projectile_travelled = {
         let world = harness.server.world_mut();
@@ -79,7 +122,7 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             telemetry.defeats,
         )
     };
-    assert!(accepted_shots >= 4);
+    assert!(accepted_shots >= 1);
     assert_eq!(applied_damage, 100);
     assert_eq!(defeats, 1);
 
@@ -174,7 +217,7 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
     );
     assert!((reset_state.1.as_radians() - dummy_initial_rotation.as_radians()).abs() < 0.001);
     assert_eq!(reset_state.2, CurrentHealth(100));
-    assert_eq!(reset_state.3.ammo, 6);
+    assert_eq!(reset_state.3.ammo, 4);
     assert!(matches!(reset_state.3.phase, WeaponPhase::Ready));
     assert_eq!(reset_state.4, dummy_initial_layers);
     assert!(!reset_state.5);
@@ -183,7 +226,7 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             let (health, weapon, defeated) =
                 harness.client_fighter_combat_state(index, DUMMY_NETWORK_ENTITY);
             health.0 == 100
-                && weapon.ammo == 6
+                && weapon.ammo == 4
                 && matches!(weapon.phase, WeaponPhase::Ready)
                 && !defeated
         })
@@ -264,7 +307,7 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
                 let (health, weapon, defeated) =
                     harness.client_fighter_combat_state(index, DUMMY_NETWORK_ENTITY);
                 health.0 == 100
-                    && weapon.ammo == 6
+                    && weapon.ammo == 4
                     && matches!(weapon.phase, WeaponPhase::Ready)
                     && !defeated
             })
@@ -296,14 +339,14 @@ fn newly_spawned_projectile_can_hit_the_target_in_its_first_fixed_tick() {
     };
     {
         let world = harness.server.world_mut();
-        // The muzzle starts at x=-66 and advances 15 units during the fixed sweep. Placing the
-        // target at x=-35 leaves it outside the initial overlap but inside that first sweep.
+        // The muzzle starts at x=-66 and advances 8.33 units during the fixed sweep. Placing the
+        // target at x=-42 leaves it outside the initial overlap but inside that first sweep.
         world
             .entity_mut(source_entity)
             .insert((Position::from_xy(-100.0, -300.0), Rotation::IDENTITY));
         world
             .entity_mut(dummy_entity)
-            .insert(Position::from_xy(-35.0, -300.0));
+            .insert(Position::from_xy(-42.0, -300.0));
     }
     let records_before = harness
         .server
@@ -329,7 +372,7 @@ fn newly_spawned_projectile_can_hit_the_target_in_its_first_fixed_tick() {
                     record,
                     CombatLogRecord::Damage {
                         target: DUMMY_NETWORK_ENTITY,
-                        applied: 25,
+                        applied: 100,
                         ..
                     }
                 )
@@ -384,7 +427,7 @@ fn newly_spawned_projectile_can_hit_the_target_in_its_first_fixed_tick() {
         let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
         query.single(world).expect("dummy health").0
     };
-    assert_eq!(dummy_health, 75);
+    assert_eq!(dummy_health, 0);
 }
 
 #[test]

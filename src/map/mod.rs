@@ -11,6 +11,8 @@ mod runtime;
 #[cfg(feature = "server")]
 mod server;
 
+#[cfg(feature = "client")]
+pub(crate) use catalog::effective_projectile_collider;
 pub use catalog::{
     ASHEN_COURT_ADMISSION_REVISION, ASHEN_COURT_PRESET, ASHEN_PINE_ASSET, ASHEN_ROCK_ASSET,
     ASHEN_WALL_ASSET, BARREL_WOOD_DEBRIS_ASSET, BREAKABLE_BARRIER_ASSET, CACTUS_ASSET,

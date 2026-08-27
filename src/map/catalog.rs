@@ -1626,6 +1626,52 @@ fn effective_blocking_shape(
     placement_collider_shape(snapshot.dimensions, asset, &effective, profile)
 }
 
+/// Current projectile-blocking collider for one authored placement.
+///
+/// This mirrors authoritative dynamic replacement/removal resolution while deliberately using
+/// projectile collision policy rather than fighter collision policy. Client aim tracing consumes
+/// the result as read-only presentation data; authority continues to use installed Avian bodies.
+#[cfg(feature = "client")]
+pub(crate) fn effective_projectile_collider(
+    placement: &MapAssetPlacement,
+    snapshot: &ResolvedMapSnapshot,
+    state: &MapDynamicState,
+    catalog: &MapContentCatalog,
+) -> Option<ResolvedMapCollider> {
+    let asset_id = state
+        .terminal_states
+        .binary_search_by_key(&placement.placement_id, |transition| {
+            transition.placement_id
+        })
+        .ok()
+        .map_or(Some(placement.asset_id), |index| {
+            match state.terminal_states[index].outcome {
+                MapPlacementOutcome::Removed => None,
+                MapPlacementOutcome::ReplacedWith(asset_id) => Some(asset_id),
+            }
+        })?;
+    let asset = catalog.asset(asset_id)?;
+    let profile = catalog.profile(asset.gameplay_profile_id).copied()?;
+    if profile.projectile_collision != ProjectileCollision::BlockAndConsume {
+        return None;
+    }
+    let mut effective = placement.clone();
+    effective.asset_id = asset_id;
+    let shape = placement_collider_shape(snapshot.dimensions, asset, &effective, profile)?;
+    let (position, shape) = match shape {
+        DerivedColliderShape::Rectangle {
+            center,
+            half_extents,
+        } => (center, MapShape::Rectangle { half_extents }),
+        DerivedColliderShape::Circle { center, radius } => (center, MapShape::Circle { radius }),
+    };
+    Some(ResolvedMapCollider {
+        placement_id: placement.placement_id,
+        position,
+        shape,
+    })
+}
+
 fn push_circle_out_of_shape(position: Vec2, radius: f32, shape: DerivedColliderShape) -> Vec2 {
     match shape {
         DerivedColliderShape::Circle {

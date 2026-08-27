@@ -9,8 +9,8 @@ use super::client::ClientCombatObservation;
 use super::*;
 use super::{
     ActiveEffects, AttackDelivery, AttackId, AuthoritativeTick, Defeated, KnockbackFeedback,
-    NetworkEntityId, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon, StraightFlight,
-    WeaponRecipeFingerprint, WeaponState, WorldPoint,
+    NetworkEntityId, ProjectileBody, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon,
+    StraightFlight, WeaponRecipeFingerprint, WeaponState, WorldPoint,
 };
 #[cfg(feature = "server")]
 use bevy::prelude::Resource;
@@ -54,16 +54,22 @@ pub struct CombatProjectileSnapshot {
     pub presentation_profile_id: Option<WeaponPresentationProfileId>,
     pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,
     pub position: WorldPoint,
+    pub body: Option<ProjectileBody>,
     pub lobbed_flight: Option<LobbedFlight>,
     pub deadline: Option<ProjectileDeadline>,
 }
 
 impl CombatProjectileSnapshot {
     #[must_use]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the snapshot constructor consumes the complete bounded projectile component view"
+    )]
     pub fn from_components(
         position: WorldPoint,
         delivery: Option<&AttackDelivery>,
         source: Option<&ReplicatedAttackSource>,
+        body: Option<&ProjectileBody>,
         lobbed_flight: Option<&LobbedFlight>,
         deadline: Option<&ProjectileDeadline>,
         straight_flight: Option<&StraightFlight>,
@@ -102,6 +108,7 @@ impl CombatProjectileSnapshot {
             presentation_profile_id: source.map(|source| source.attack.presentation_profile_id),
             recipe_fingerprint: source.map(|source| source.attack.recipe_fingerprint),
             position,
+            body: body.copied(),
             lobbed_flight: lobbed_flight.copied(),
             deadline: deadline.copied(),
         })
@@ -327,6 +334,7 @@ pub(super) fn capture_server_combat_checkpoints(
             &Position,
             Option<&AttackDelivery>,
             Option<&ReplicatedAttackSource>,
+            Option<&ProjectileBody>,
             Option<&LobbedFlight>,
             Option<&ProjectileDeadline>,
             Option<&StraightFlight>,
@@ -393,11 +401,12 @@ pub(super) fn capture_server_combat_checkpoints(
     let mut projectile_snapshots = projectiles
         .iter()
         .filter_map(
-            |(position, delivery, source, lobbed_flight, deadline, straight_flight)| {
+            |(position, delivery, source, body, lobbed_flight, deadline, straight_flight)| {
                 CombatProjectileSnapshot::from_components(
                     WorldPoint::from(position.0),
                     delivery,
                     source,
+                    body,
                     lobbed_flight,
                     deadline,
                     straight_flight,
@@ -585,6 +594,7 @@ pub fn capture_client_combat_checkpoints(
             &Position,
             Option<&AttackDelivery>,
             Option<&ReplicatedAttackSource>,
+            Option<&ProjectileBody>,
             Option<&LobbedFlight>,
             Option<&ProjectileDeadline>,
             Option<&StraightFlight>,
@@ -637,11 +647,12 @@ pub fn capture_client_combat_checkpoints(
     let mut projectile_snapshots = projectiles
         .iter()
         .filter_map(
-            |(position, delivery, source, lobbed_flight, deadline, straight_flight)| {
+            |(position, delivery, source, body, lobbed_flight, deadline, straight_flight)| {
                 CombatProjectileSnapshot::from_components(
                     WorldPoint::from(position.0),
                     delivery,
                     source,
+                    body,
                     lobbed_flight,
                     deadline,
                     straight_flight,
@@ -695,7 +706,7 @@ pub fn capture_client_combat_checkpoints(
         }
         let mut checkpoint_projectiles = projectiles
             .iter()
-            .filter(|(_, _, _, lobbed, deadline, straight)| {
+            .filter(|(_, _, _, _, lobbed, deadline, straight)| {
                 let launched_at_tick = straight
                     .map(|flight| flight.launched_at_tick)
                     .or_else(|| lobbed.map(|flight| flight.launched_at_tick))
@@ -708,11 +719,12 @@ pub fn capture_client_combat_checkpoints(
                     && expected.snapshot.authoritative_tick <= expires_at_tick
             })
             .filter_map(
-                |(position, delivery, source, lobbed_flight, deadline, straight_flight)| {
+                |(position, delivery, source, body, lobbed_flight, deadline, straight_flight)| {
                     CombatProjectileSnapshot::from_components(
                         WorldPoint::from(position.0),
                         delivery,
                         source,
+                        body,
                         lobbed_flight,
                         deadline,
                         straight_flight,
@@ -981,6 +993,7 @@ mod tests {
             presentation_profile_id: Some(WeaponPresentationProfileId(3)),
             recipe_fingerprint: Some(WeaponRecipeFingerprint(77)),
             position: WorldPoint { x: 12.0, y: 13.0 },
+            body: Some(ProjectileBody::circle(6.0)),
             lobbed_flight: None,
             deadline: Some(ProjectileDeadline {
                 expires_at_tick: 101,

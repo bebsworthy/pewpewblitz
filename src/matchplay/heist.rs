@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub const HEIST_RULES_REVISION: u16 = 1;
 pub const HEIST_SAFE_COUNT: usize = 2;
+pub const HEIST_SAFE_HALF_EXTENTS: Vec2 = Vec2::new(48.0, 32.0);
 pub const MAX_HEIST_OBJECTIVE_CUES: usize = 256;
 pub const HEIST_CRITICAL_HEALTH_PERCENT: u8 = 25;
 

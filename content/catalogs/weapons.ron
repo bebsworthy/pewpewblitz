@@ -32,12 +32,12 @@
             configuration: (
                 presentation_profile_id: WeaponPresentationProfileId(1),
                 recipe: (
-                    economy: Magazine(capacity: 6, refill_ticks: 78),
+                    economy: Magazine(capacity: 4, refill_ticks: 60),
                     fire_cooldown_ticks: 12,
                     firing: Single,
-                    delivery: Straight(speed: 900.0, radius: 6.0, range: 900.0, lifetime_ticks: 60, muzzle_offset: 34.0),
+                    delivery: Straight(speed: 500.0, radius: 2.0, range: 320.0, lifetime_ticks: 60, muzzle_offset: 34.0),
                     payload_bundles: [
-                        (target: Direct, effects: [Damage(amount: 25, falloff: None, recipients: Hostiles)]),
+                        (target: Direct, effects: [Damage(amount: 200, falloff: None, recipients: Hostiles)]),
                     ],
                     world_effects: [],
                 ),
@@ -50,12 +50,12 @@
             configuration: (
                 presentation_profile_id: WeaponPresentationProfileId(2),
                 recipe: (
-                    economy: Magazine(capacity: 4, refill_ticks: 78),
+                    economy: Magazine(capacity: 3, refill_ticks: 72),
                     fire_cooldown_ticks: 36,
-                    firing: Spread(delivery_count: 7, total_angle_degrees: 30.0),
-                    delivery: Straight(speed: 850.0, radius: 4.0, range: 720.0, lifetime_ticks: 60, muzzle_offset: 32.0),
+                    firing: Spread(delivery_count: 5, total_angle_degrees: 30.0),
+                    delivery: Straight(speed: 600.0, radius: 2.0, range: 320.0, lifetime_ticks: 60, muzzle_offset: 32.0),
                     payload_bundles: [
-                        (target: Direct, effects: [Damage(amount: 12, falloff: Linear(start_distance: 140.0, end_distance: 360.0, minimum_scale: 0.5), recipients: Hostiles)]),
+                        (target: Direct, effects: [Damage(amount: 120, falloff: Linear(start_distance: 140.0, end_distance: 360.0, minimum_scale: 0.5), recipients: Hostiles)]),
                     ],
                     world_effects: [],
                 ),
@@ -68,7 +68,7 @@
             configuration: (
                 presentation_profile_id: WeaponPresentationProfileId(3),
                 recipe: (
-                    economy: Magazine(capacity: 3, refill_ticks: 78),
+                    economy: Magazine(capacity: 3, refill_ticks: 96),
                     fire_cooldown_ticks: 48,
                     firing: Single,
                     delivery: Lobbed(distance: 520.0, max_flight_ticks: 45, visual_arc_height: 140.0, landing_clearance_radius: 10.0, muzzle_offset: 34.0),
@@ -90,7 +90,7 @@
             configuration: (
                 presentation_profile_id: WeaponPresentationProfileId(4),
                 recipe: (
-                    economy: Charges(capacity: 3, recharge_ticks: 78),
+                    economy: Charges(capacity: 3, recharge_ticks: 60),
                     fire_cooldown_ticks: 18,
                     firing: Single,
                     delivery: MeleeArc(reach: 120.0, angle_degrees: 100.0),

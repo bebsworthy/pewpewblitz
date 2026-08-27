@@ -239,6 +239,7 @@ impl Plugin for WorldPresentationPlugin {
         }
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .init_resource::<combat::ConcealedMaterialVariants>()
+            .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .insert_resource(GlobalAmbientLight {
                 color: Color::srgb(0.72, 0.78, 0.9),
                 brightness: 350.0,
@@ -1053,7 +1054,7 @@ fn setup_3d_foundation(
         fighter: meshes.add(Sphere::new(FIGHTER_FALLBACK_RADIUS)),
         sentry_direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
         fighter_facing: meshes.add(fighter_facing_mesh()),
-        projectile: meshes.add(Cylinder::new(4.0, 28.0)),
+        projectile: meshes.add(Cylinder::new(1.0, 1.0)),
         lobbed_projectile: meshes.add(Sphere::new(9.0)),
         unit_cuboid: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
         sentry_base: meshes.add(Cylinder::new(22.0, 8.0)),

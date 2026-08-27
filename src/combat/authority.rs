@@ -334,7 +334,7 @@ pub(super) fn area_line_of_sight_clear_excluding(
 pub(super) fn map_muzzle_contact(
     origin: Vec2,
     muzzle: Vec2,
-    radius: f32,
+    body: ProjectileBody,
     spatial_query: &avian2d::prelude::SpatialQuery,
 ) -> Option<(Entity, Vec2, Vec2)> {
     let delta = muzzle - origin;
@@ -344,7 +344,7 @@ pub(super) fn map_muzzle_contact(
         avian2d::prelude::SpatialQueryFilter::from_mask(STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER);
     spatial_query
         .cast_shape_predicate(
-            &Collider::circle(radius),
+            &body.collider(),
             origin,
             0.0,
             direction,

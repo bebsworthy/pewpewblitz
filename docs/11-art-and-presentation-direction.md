@@ -167,10 +167,14 @@ assignment.
 
 ### Combat and objectives
 
-- straight projectiles use compact travel-aligned geometry;
+- straight projectiles use a compact solid whose X/Z footprint exactly matches the replicated
+  `ProjectileBody`; the current circular body is a low puck rather than an elongated bolt extending
+  beyond its collider;
 - lobbed projectiles may use a presentation-only vertical arc while retaining authoritative ground
   position;
-- previews and telegraphs use shape-exact procedural geometry and distinguish allowed from blocked;
+- straight aim previews sweep the same body shape, show a corridor of its exact width from the
+  muzzle to the first client-observed contact, and distinguish clear from blocked; spread previews
+  show every emitted delivery rather than only outer boundary rays;
 - objective boundaries remain precise and cannot depend on a decorative model or decal;
 - Heist idols show persistent public team/objective health, while neutral barrels and chests show
   compact health only when damaged; the idol, chest, barrel, and restoration pickup remain

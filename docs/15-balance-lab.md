@@ -69,12 +69,21 @@ refill/recharge timing is labeled as recovery for one round or charge. These dur
 positive authoritative tick value but have no invented balance ceiling; the exact numeric input
 remains available beyond the editor's ordinary playtest range.
 
-The canonical starting values shown by the default comparison are `10 health/second`, `3.0 seconds`
-of accepted-attack idle delay, and `1.3 seconds` to recover one round or charge for each current
-weapon base. **Apply & reset match** re-resolves every admitted human and bot, starts a clean match
-epoch, initializes health-recovery inactivity at that epoch, restores starting ammunition, and
-clears old fire/recovery deadlines. Draft edits never mutate the running epoch before that explicit
-apply action.
+For a straight weapon, **Projectile radius** is the radius of its authoritative circular
+`ProjectileBody`, not an explosion radius or decorative effect size. Applying a new value changes
+the server collider and sweep, the visible projectile diameter (`2 × radius`), and the local aim
+corridor width together. Muzzle-offset validation still prevents the configured body from starting
+inside its source fighter. Future non-circular bodies require an explicit shape capability rather
+than overloading this radius field.
+
+The canonical default fighter starts with `1,000` maximum health, `70` world units/second movement,
+`100 health/second` recovery, and `3.0 seconds` of accepted-attack idle delay. The lightweight and
+reinforced profiles remain independently authored rather than inheriting these values. Canonical
+weapon recovery per round or charge is `1.0 seconds` for Pulse Sidearm, `1.2 seconds` for Scatter
+Cannon, `1.6 seconds` for Arc Launcher, and `1.0 seconds` for Impact Blade. **Apply & reset match**
+re-resolves every admitted human and bot, starts a clean match epoch, initializes health-recovery
+inactivity at that epoch, restores starting ammunition, and clears old fire/recovery deadlines.
+Draft edits never mutate the running epoch before that explicit apply action.
 
 ## Validation principle
 

@@ -53,9 +53,9 @@ fn build_selection_resolves_distinct_primary_weapons_and_spawns_spread_deliverie
         selections[1].2.primary_weapon.source_preset_id,
         Some(WeaponPresetId(4))
     );
-    assert_eq!(selections[0].2.primary_weapon.recipe.economy.capacity(), 4);
+    assert_eq!(selections[0].2.primary_weapon.recipe.economy.capacity(), 3);
     assert_eq!(selections[1].2.primary_weapon.recipe.economy.capacity(), 3);
-    assert_eq!(selections[0].3.ammo, 4);
+    assert_eq!(selections[0].3.ammo, 3);
     assert_eq!(selections[1].3.ammo, 3);
 
     for index in 0..2 {
@@ -69,7 +69,7 @@ fn build_selection_resolves_distinct_primary_weapons_and_spawns_spread_deliverie
     }
     let world = harness.server.world_mut();
     let mut deliveries = world.query_filtered::<&AttackDelivery, With<Projectile>>();
-    assert_eq!(deliveries.iter(world).count(), 7);
+    assert_eq!(deliveries.iter(world).count(), 5);
 }
 
 #[test]

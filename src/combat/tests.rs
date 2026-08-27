@@ -63,6 +63,16 @@ fn catalog_validation_rejects_duplicate_and_unsafe_values() {
 }
 
 #[test]
+fn projectile_body_validates_and_preserves_authored_circle_geometry() {
+    let body = ProjectileBody::circle(6.0);
+    assert!(body.shape.is_valid());
+    assert!((body.shape.bounding_radius() - 6.0).abs() < f32::EPSILON);
+    assert!(!ProjectileBody::circle(0.0).shape.is_valid());
+    assert!(!ProjectileBody::circle(-1.0).shape.is_valid());
+    assert!(!ProjectileBody::circle(f32::NAN).shape.is_valid());
+}
+
+#[test]
 fn combat_cue_evidence_encoding_round_trips_full_payload() {
     let cue = CombatCue::Impact {
         event_id: CombatEventId(7),

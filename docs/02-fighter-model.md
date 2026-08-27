@@ -136,19 +136,20 @@ attribute map.
 - ultimate definition and cost;
 - two passive definitions and their resolved grants.
 
-The current canonical fighter-profile movement speeds are expressed in world units per second:
+The current canonical fighter profiles are:
 
-| Profile | Movement speed |
-|---|---:|
-| Default | 100 |
-| Lightweight | 110 |
-| Reinforced | 90 |
+| Profile | Maximum health | Movement speed (world units/s) | Recovery (health/s) |
+|---|---:|---:|---:|
+| Default | 1,000 | 70 | 100 |
+| Lightweight | 85 | 110 | 10 |
+| Reinforced | 120 | 90 | 10 |
 
 ### Health recovery contract
 
-All three canonical profiles initially recover `10` health per second after `3.0` seconds without a
-server-accepted player attack. The rate is authored in health points per second; the delay is
-authored as a positive fixed-tick duration and presented in seconds.
+The Default profile recovers `100` health per second; Lightweight and Reinforced recover `10`.
+Every profile waits `3.0` seconds without a server-accepted player attack. The rate is authored in
+health points per second; the delay is authored as a positive fixed-tick duration and presented in
+seconds.
 
 Recovery is server-owned and follows these rules:
 

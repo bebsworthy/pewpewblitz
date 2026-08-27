@@ -354,6 +354,14 @@ The settings contract includes:
 Reduced Motion or Reduced Effects freezes non-essential procedural Dashboard motion. It does not
 remove factual state, change navigation, or alter gameplay authority.
 
+Straight-weapon aiming must communicate the actual projectile clearance rather than a center-line
+ray. The visible corridor matches the resolved projectile body width, begins at the muzzle after a
+clear launch segment, and ends where that body first reaches projectile-blocking cover, a live
+objective/object, or a currently visible hostile body. Every spread delivery is represented.
+Player-only water and allies do not clip it. Because the guide uses only the client's currently
+observed state, it never reveals concealed/unreplicated opponents and is not a promise about future
+movement or network latency; the server remains the only hit authority.
+
 ## Error and recovery contract
 
 Errors map structured causes to the nearest honest action:

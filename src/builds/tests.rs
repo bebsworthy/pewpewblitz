@@ -16,7 +16,7 @@ fn catalogs() -> (
 #[test]
 fn embedded_catalog_resolves_seven_legal_named_builds_and_new_ultimate_parameters() {
     let (builds, weapons, fighter) = catalogs();
-    assert_eq!(builds.balance_revision, BuildRevision(4));
+    assert_eq!(builds.balance_revision, BuildRevision(5));
     assert_eq!(builds.presets.len(), 7);
     assert_eq!(builds.ultimates.len(), 5);
     for preset in &builds.presets {
@@ -133,8 +133,9 @@ fn candidate_rejects_unknown_ids_and_resolves_exact_budget_and_body_stats() {
     )
     .unwrap();
     assert_eq!(controller.total_points, BUILD_POINT_BUDGET);
-    assert_eq!(controller.fighter_stats.maximum_health, 100);
-    assert!((controller.fighter_stats.movement_speed - 100.0).abs() < f32::EPSILON);
+    assert_eq!(controller.fighter_stats.maximum_health, 1_000);
+    assert!((controller.fighter_stats.movement_speed - 70.0).abs() < f32::EPSILON);
+    assert_eq!(controller.fighter_stats.health_recovery_rate, 100);
 
     let mut unknown = builds.presets[0].recipe;
     unknown.ultimate = UltimateDefinitionId(999);

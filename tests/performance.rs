@@ -467,10 +467,10 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
                 travelled: 0.0,
                 expires_at_tick: u64::MAX,
                 maximum_range: 100_000.0,
-                radius: 6.0,
                 landing: None,
                 recipe: recipe.recipe.clone(),
             },
+            brawler::combat::ProjectileBody::circle(6.0),
             Position::from_xy(position.x, position.y),
             Rotation::IDENTITY,
             Collider::circle(6.0),
@@ -541,7 +541,7 @@ fn m05_scatter_burst_worst_case_stays_within_fixed_tick_budget() {
     );
     assert_eq!(
         telemetry.emitted_deliveries.get(&WeaponPresetId(2)),
-        Some(&224)
+        Some(&160)
     );
     assert_eq!(
         telemetry
@@ -549,10 +549,10 @@ fn m05_scatter_burst_worst_case_stays_within_fixed_tick_budget() {
             .values()
             .find(|aggregate| aggregate.accepted_attacks == 32)
             .map(|aggregate| aggregate.emitted_deliveries),
-        Some(224)
+        Some(160)
     );
     remove_benchmark_actions(&mut app, &owners);
-    fixed_tick_p95(&mut app, "32-scatter-attacks/224-pellets", 60);
+    fixed_tick_p95(&mut app, "32-scatter-attacks/160-pellets", 60);
 }
 
 #[test]

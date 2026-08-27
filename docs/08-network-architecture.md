@@ -266,6 +266,7 @@ The server normally exposes authoritative state through Lightyear-replicated ECS
 Replicated components
   stable player / match / definition identity
   fighter and projectile state, including CurrentHealth and WeaponState
+  immutable ProjectileBody shape plus trajectory-specific flight state
   authoritative tick reference used with fire and ammunition-recovery deadlines
   active effects, damageable-object health/life state, restoration pickups, and objective state
   scores, resolved map snapshot, and map dynamic generation/revision
@@ -278,6 +279,15 @@ Gameplay message, when required
 ```
 
 Do not introduce a custom aggregate `Snapshot` wrapper when Lightyear component replication provides the needed behavior. Register concrete inputs, replicated components, messages, and channels through Bevy plugins, including delivery and ordering semantics. Network data must not expose process-local ECS entity identity unless Lightyear's entity mapping explicitly handles it.
+
+`ProjectileBody` is the one replicated planar geometry fact for projectile collision and
+presentation. It currently carries `ProjectileShape::Circle { radius }` independently from
+`StraightFlight`. The server derives muzzle clearance, installed Avian collider, and fixed-tick
+sweep from that body. Clients may reconstruct a read-only shape sweep over their resolved map and
+currently replicated entities to clip an aim guide, but that index is presentation state: it runs
+no gameplay physics schedule, predicts no hidden target, and cannot accept a hit or mutate a map.
+Adding another shape is an exact current-protocol/content-schema change and updates collision,
+replication, visual footprint, aim trace, and verification as one capability.
 
 ## Dynamic map synchronization
 

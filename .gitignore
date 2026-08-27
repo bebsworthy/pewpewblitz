@@ -9,3 +9,5 @@
 .DS_Store
 __pycache__/
 *.py[cod]
+# Ticket runtime database is local; git-friendly mirrors live in docs/tasks.
+/.ticket/*.db*

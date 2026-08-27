@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | User playtest |
+| Status | Complete |
 | Depends on | Accepted V12 M01 maps and completed M02 Balance Lab correctness/presentation |
 | User direction | Add idle-attack health recovery, continuous per-ammunition recovery, and a one-press keyboard/gamepad screenshot paired with the client-visible engine state |
 | Outcome | Fighters recover health and ammunition through readable server-authoritative timing rules, while a player can preserve a transient visual defect and its matching client observation without opening a menu |
@@ -266,8 +266,8 @@ can recover and then take damage in one tick; defeat evaluates the final ordered
 - [x] Add bounded deterministic client snapshot construction and paired async PNG/JSON saving.
 - [x] Add non-modal success/failure feedback and default/override directory documentation.
 - [x] Run focused, canonical, routed, recovery/late-join, and performance checks.
-- [ ] Complete the native combat/capture playtest.
-- [ ] Record user playtest feedback and complete the learning review.
+- [x] Complete the native combat/capture playtest.
+- [x] Record user playtest feedback and complete the learning review.
 
 ## Verification plan
 
@@ -314,14 +314,25 @@ Automated verification passed on 2026-08-27:
   fighter/projectile capacity cases below the 16.67 ms fixed-tick budget;
 - the Balance Lab web suite passed all 10 tests and its production build.
 
-The native GPU/file-I/O capture check and subjective combat-timing review remain the user playtest
-gate. They are intentionally not claimed by headless automation.
+The final version-closeout rerun included the accumulated projectile-geometry and balance changes:
+
+- the current client, server, and Balance Lab feature suites passed `425`, `331`, and `348` tests
+  respectively, plus the focused routed Balance Lab handoff;
+- all `90` routed network scenarios passed after mechanics-focused fixtures stopped assuming the
+  former fighter health, Pulse damage/range, Scatter capacity, and seven-projectile count; and
+- all `12` performance gates passed, including the current 32-attack Scatter load of `160`
+  projectiles at a `3.064167 ms` p95, below the `16.67 ms` fixed-tick budget.
+
+The native GPU/file-I/O path was exercised through the controller-triggered playtest. That test
+exposed the routed-identity JSON defect below; the corrected capture was accepted through the
+user's subsequent commit request. Subjective projectile readability was separately accepted after
+the rendered body and obstruction-aware aim preview were matched to authoritative geometry.
 
 ## Playtest and exit criteria
 
 - Recovery timing feels legible on all three fighter profiles and never depends on render rate.
 - The user can fire repeatedly while visibly preserving current next-ammo progress, and each round
-  returns independently at the configured 1.3-second default.
+  returns independently at its weapon's configured recovery duration.
 - The filling ammo segment is derived from replicated authoritative start/target ticks, remains
   smooth between updates, never mutates ammo locally, and does not delay fire input while awaiting
   replication after the authoritative target tick.
@@ -336,8 +347,9 @@ gate. They are intentionally not claimed by headless automation.
 
 ## Accepted specification decisions
 
-1. Initial health defaults are `10 health/second` after `3.0 seconds` without an accepted player
-   attack.
+1. The initial implementation used `10 health/second` after `3.0 seconds` without an accepted
+   player attack. Final playtest balancing keeps the `3.0`-second delay and raises the Default
+   profile to `100 health/second`; Lightweight and Reinforced remain at `10 health/second`.
 2. Default capture bindings are `F12` and the north face button. Both remain rebindable.
 
 The ammunition-progress rule is already accepted: firing does not reset an active timer.
@@ -346,7 +358,7 @@ The ammunition-progress rule is already accepted: firing does not reset an activ
 
 ### Controller capture crashed on routed match identity
 
-Status: **implemented; awaiting native retry**.
+Status: **implemented and accepted**.
 
 Pressing the north face button reached the intended capture action, but snapshot construction
 panicked before GPU capture. Routed `MatchId` values occupy the complete `u128` space, while
@@ -359,6 +371,61 @@ Capture now writes every client-visible `MatchId` as a decimal string. This pres
 identity without changing the gameplay/wire representation and avoids precision loss in ordinary
 JSON consumers. Capture wall time is narrowed safely to `u64` milliseconds. A regression test uses
 `u128::MAX`, checks every affected capture projection, and verifies the resulting snapshot can be
-pretty-serialized. The focused regression, complete 416-test client suite, and warning-denied
-client Clippy pass succeeded on 2026-08-27; the native PNG/JSON retry remains part of the open
-playtest gate.
+pretty-serialized. The focused regression, complete client suite, and warning-denied client
+Clippy pass succeeded on 2026-08-27. The user accepted the correction and requested commit
+`d1a7d28` after the controller-triggered native failure was removed.
+
+### Projectile body, rendering, and aim-preview agreement
+
+Status: **implemented and accepted**.
+
+Playtest review found that a fixed four-unit rendered projectile and center-line aim trace could
+disagree with the configured authoritative projectile radius. A shot could therefore appear to
+clear a wall edge while its collision body struck it. Straight projectiles now replicate their
+resolved circular `ProjectileBody` geometry, authoritative sweep/collision consumes the same
+radius, presentation sizes the projectile from it, and aim preview performs a radius-aware sweep
+against blocking map geometry. The user confirmed that the result works. The body component is
+deliberately a typed geometry boundary so later projectile shapes can add explicit variants without
+returning to unrelated collision, presentation, and preview constants.
+
+### Final canonical balance pass
+
+Status: **implemented**.
+
+The final playtest values supersede the milestone's initial defaults where listed:
+
+- Default fighter: `1000` maximum health, `70` world units/second movement, and `100`
+  health/second recovery after the unchanged `3.0`-second attack-idle delay;
+- Pulse Sidearm: four rounds, `1.0` second per round, `500` world units/second projectile speed,
+  `2`-unit projectile radius, `320`-unit range, and `200` damage;
+- Scatter Cannon: three rounds, `1.2` seconds per round, five projectiles, `600` world
+  units/second projectile speed, `2`-unit projectile radius, `320`-unit range, and `120` damage per
+  projectile;
+- Arc Launcher: `1.6` seconds per round; and
+- Impact Blade: `1.0` second per charge.
+
+Lightweight and Reinforced retain their separately authored profiles. The build catalog revision
+advanced with the fighter-default change, and balance-dependent fixtures now distinguish authored
+default assertions from test-local combat setup.
+
+## Closeout and learning review
+
+V12 M03 is complete. Its required sustain, ammunition, capture, Balance Lab maintenance,
+projectile-readability feedback, and final balance changes are integrated without moving gameplay
+authority to the client.
+
+The main mistakes and reusable lessons were:
+
+- Opaque 128-bit gameplay identities cannot be projected as ordinary JSON numbers. Diagnostic
+  formats must serialize them losslessly as strings and test the full representation boundary,
+  including `u128::MAX`.
+- Collision, rendering, and aim preview must consume one projectile-body fact. Independently tuned
+  constants produce frustrating edge disagreement even when each subsystem is internally correct.
+- A projectile body's shape is a gameplay contract, not merely a radius field in a renderer.
+  Future shapes require explicit collision, replication, visualization, and preview support before
+  they become valid authored content.
+- Balance-dependent tests must use current authored defaults only when that is the behavior under
+  test. Timing, range, or late-join fixtures should own explicit local values when they are proving
+  mechanics rather than catalog balance.
+- A fighter-default change must advance the balance revision so persisted selections, resolved
+  snapshots, and operator comparisons cannot silently retain stale meaning.

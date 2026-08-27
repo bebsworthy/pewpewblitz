@@ -127,6 +127,64 @@ pub struct StraightFlight {
     pub launched_at_tick: u64,
 }
 
+/// Authoritative planar collision geometry for a projectile delivery.
+///
+/// Geometry is deliberately independent from trajectory: [`StraightFlight`] describes how the
+/// body moves, while this shape is the single fact used by collision, replication, presentation,
+/// and local aim tracing.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+pub enum ProjectileShape {
+    Circle { radius: f32 },
+}
+
+impl ProjectileShape {
+    #[must_use]
+    pub const fn circle(radius: f32) -> Self {
+        Self::Circle { radius }
+    }
+
+    #[must_use]
+    pub const fn bounding_radius(self) -> f32 {
+        match self {
+            Self::Circle { radius } => radius,
+        }
+    }
+
+    #[must_use]
+    pub fn is_valid(self) -> bool {
+        let radius = self.bounding_radius();
+        radius.is_finite() && radius > 0.0
+    }
+
+    #[must_use]
+    pub fn collider(self) -> avian2d::prelude::Collider {
+        match self {
+            Self::Circle { radius } => avian2d::prelude::Collider::circle(radius),
+        }
+    }
+}
+
+/// Replicated immutable projectile body. Straight deliveries always carry this component;
+/// non-projectile delivery geometry remains owned by its corresponding delivery component.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct ProjectileBody {
+    pub shape: ProjectileShape,
+}
+
+impl ProjectileBody {
+    #[must_use]
+    pub const fn circle(radius: f32) -> Self {
+        Self {
+            shape: ProjectileShape::circle(radius),
+        }
+    }
+
+    #[must_use]
+    pub fn collider(self) -> avian2d::prelude::Collider {
+        self.shape.collider()
+    }
+}
+
 #[cfg(feature = "server")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActiveAttackTracker {
@@ -279,7 +337,6 @@ pub struct ComposedProjectileRuntime {
     pub travelled: f32,
     pub expires_at_tick: u64,
     pub maximum_range: f32,
-    pub radius: f32,
     pub landing: Option<Vec2>,
     pub recipe: WeaponRecipe,
 }

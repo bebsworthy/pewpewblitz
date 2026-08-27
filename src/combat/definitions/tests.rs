@@ -12,6 +12,78 @@ fn embedded_catalog_is_exactly_four_presets() {
         1
     );
 }
+
+#[test]
+fn embedded_weapon_defaults_match_the_accepted_balance_pass() {
+    let catalog = WeaponCatalog::embedded().unwrap();
+    let pulse = &catalog.presets[0].configuration.recipe;
+    assert_eq!(
+        pulse.economy,
+        WeaponEconomy::Magazine {
+            capacity: 4,
+            refill_ticks: 60,
+        }
+    );
+    assert_eq!(
+        pulse.delivery,
+        DeliveryMethod::Straight {
+            speed: 500.0,
+            radius: 2.0,
+            range: 320.0,
+            lifetime_ticks: 60,
+            muzzle_offset: 34.0,
+        }
+    );
+    assert!(matches!(
+        pulse.payload_bundles[0].effects[0],
+        PayloadEffectDefinition::Damage { amount: 200, .. }
+    ));
+
+    let scatter = &catalog.presets[1].configuration.recipe;
+    assert_eq!(
+        scatter.economy,
+        WeaponEconomy::Magazine {
+            capacity: 3,
+            refill_ticks: 72,
+        }
+    );
+    assert_eq!(
+        scatter.firing,
+        FiringPattern::Spread {
+            delivery_count: 5,
+            total_angle_degrees: 30.0,
+        }
+    );
+    assert_eq!(
+        scatter.delivery,
+        DeliveryMethod::Straight {
+            speed: 600.0,
+            radius: 2.0,
+            range: 320.0,
+            lifetime_ticks: 60,
+            muzzle_offset: 32.0,
+        }
+    );
+    assert!(matches!(
+        scatter.payload_bundles[0].effects[0],
+        PayloadEffectDefinition::Damage { amount: 120, .. }
+    ));
+
+    assert_eq!(
+        catalog.presets[2].configuration.recipe.economy,
+        WeaponEconomy::Magazine {
+            capacity: 3,
+            refill_ticks: 96,
+        }
+    );
+    assert_eq!(
+        catalog.presets[3].configuration.recipe.economy,
+        WeaponEconomy::Charges {
+            capacity: 3,
+            recharge_ticks: 60,
+        }
+    );
+}
 #[test]
 fn spread_is_symmetric_and_ordered() {
     let values = spread_angles(0.3, 7, 30.0);

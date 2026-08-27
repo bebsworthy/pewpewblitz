@@ -4,41 +4,49 @@
 
 Brawler is an original, cross-platform top-down arena shooter built around player-authored fighter builds. Combat readability, meaningful build tradeoffs, short matches, reusable content primitives, and server-authoritative networking are the core product constraints.
 
+For current work, start with `ticket list` and `ticket task <ID>`. Ticket descriptions and specs
+own active scope, status, acceptance criteria, and evidence. `docs/tasks/` contains readable Ticket
+mirrors but is never the agent write path.
+
 Start with:
 
 1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v11/roadmap.md`, `milestone-01.md`, and `docs/10-bots.md` for the completed
+2. `docs/implementation/v12/roadmap.md`, `milestone-03.md`, `docs/03-weapons-and-abilities.md`, and
+   `docs/15-balance-lab.md` for the completed 3v3 maps and framing, Balance Lab correction,
+   server-authoritative sustain/ammunition recovery, evidence capture, projectile readability, and
+   feedback-driven balance closeout.
+3. `docs/implementation/v11/roadmap.md`, `milestone-01.md`, and `docs/10-bots.md` for the completed
    playable server-hosted Practice bots, fair delayed perception, bounded navigation, objective
    behavior, feedback corrections, and V11 closeout.
-3. `docs/implementation/v10/roadmap.md`, `milestone-03.md`, and
+4. `docs/implementation/v10/roadmap.md`, `milestone-03.md`, and
    `docs/18-damageable-world-objects-and-heist.md` for the completed oil barrels, mirrored Heist,
    consolidated Feature Yard family, treasure chests, restoration pickups, and V10 closeout.
-4. `docs/implementation/v9/roadmap.md`, `milestone-03.md`, and `docs/17-concealment.md` for the
+5. `docs/implementation/v9/roadmap.md`, `milestone-03.md`, and `docs/17-concealment.md` for the
    completed authoritative terrain, Self Cloak, Concealment Field, reveal-proximity, Reveal Scan,
    server-advertised brawler catalog, and saved-brawler UI closeout.
-5. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
+6. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
    `docs/16-grid-map-asset-system.md` for the completed sparse map-asset system, domain-organized
    content, and legacy-removal evidence.
-6. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
+7. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
    brawlers, weapon bases, and four-slot weapon-part equipment.
-7. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
+8. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
    development-only authoritative Balance Lab and its enduring operator contract.
-8. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
+9. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
    responsive Player Dashboard, connected-loop convergence, recovery/lifecycle hardening, and V5
    closeout evidence.
-9. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
+10. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
    embedded map documents, semantic object placement, two reusable themes, routed admission,
    presentation hardening, and V4 closeout evidence.
-10. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
+11. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
    V3 decisions.
-11. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
+12. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
    provenance, degradation, and future-art contracts.
-12. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-13. `docs/13-player-ux.md` for the canonical player experience and
+13. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
+14. `docs/13-player-ux.md` for the canonical player experience and
    `docs/14-multiplayer-server-architecture.md` for the routed-process decisions it relies on.
-14. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
+15. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
    baseline and closeout evidence.
-15. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
+16. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
    verification evidence, deferred release polish, and the direct-UDP comparison baseline.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
@@ -80,6 +88,17 @@ bots, fair delayed perception and concealment, bounded resumable navigation, Pul
 Wipeout/Hot Zone/Heist objective behavior, full automated/routed/native verification, accepted
 objective-priority and perimeter-recovery feedback corrections, documentation reconciliation, and
 its learning review passed closeout.
+
+V12 completed and was accepted on 2026-08-27 after its three purpose-built 3v3 maps, dynamic
+map/viewport framing, matched one-cell fighter footprint, Balance Lab correctness and presentation,
+server-authoritative health/ammunition recovery, instant paired evidence capture, projectile
+geometry/readability correction, final gameplay balance pass, full verification, documentation
+reconciliation, and learning review passed closeout.
+
+V1–V12 are historical delivery records. Brawler no longer uses large numbered versions or
+milestone roadmaps to plan, sequence, or report current progress. Existing later draft documents
+may provide research or design context, but they do not establish active scope or status. Current
+work is owned and tracked through the Ticket CLI process defined below.
 
 ## Technical stack
 
@@ -238,7 +257,7 @@ primitive override validates 3D degradation and is not a renderer selector.
 - Keep network registrations in `protocol.rs`; keep stable shared protocol/gameplay types in the
   appropriate shared model/cue/definition module. Never expose process-local `Entity` identity on
   the wire. Preserve public module paths and wire contracts during organization-only changes unless
-  the active milestone explicitly approves and tests a protocol change.
+  the active ticket explicitly approves and tests a protocol change.
 - Follow `docs/08-network-architecture.md` for application protocol evolution: use the one global
   compatibility handshake and current schema, and do not introduce per-message versions or
   compatibility decoders without a new validated architecture decision.
@@ -264,7 +283,8 @@ primitive override validates 3D degradation and is not a renderer selector.
 ## Value, maintainability, and no-over-engineering rules
 
 - Deliver a complete player-visible vertical slice before building general infrastructure. A
-  milestone should end with functional value a player can exercise, not only reusable machinery.
+  feature ticket should end with functional value a player can exercise, not only reusable
+  machinery.
 - Build for current demonstrated requirements. Do not model future screens, states, protocol
   variants, settings migrations, widget variants, or extension points before an owned use exists.
 - Start with local, direct code. Extract a helper, module, plugin, crate, or public API only after
@@ -289,8 +309,8 @@ primitive override validates 3D degradation and is not a renderer selector.
   input, resolution, scale, timing sample, and failure into a Cartesian suite without evidence.
 - Reuse production components, canonical commands, and existing harnesses. Do not create a general
   abstraction solely to make one test possible unless production code also benefits from the seam.
-- Record deferred polish and known limitations in the owning milestone or backlog. Do not expand the
-  current slice incidentally to solve future work.
+- Record deferred polish and known limitations in the owning ticket or create a separate backlog
+  ticket. Do not expand the current slice incidentally to solve future work.
 - Prefer the smallest clear implementation that owns today's behavior and is easy to change when a
   new requirement becomes real. Maintainability means clear ownership, limited scope, and safe
   change—not maximum abstraction.
@@ -310,51 +330,71 @@ Treat `references/` as read-only upstream material unless the user explicitly re
 
 When research still requires the internet, prefer current primary documentation and record why the local snapshot was insufficient.
 
-## Versioned implementation docs
+## Ticket-driven work tracking
 
-Implementation work lives under `docs/implementation/<version>/`:
+Ticket is the source of truth for active planning and progress. Do not create a new big numbered
+version, version roadmap, or milestone file to track current work. The completed V1–V12 material
+under `docs/implementation/` remains historical evidence for prior decisions, implementation,
+verification, feedback, and learning. Durable product or technical behavior still belongs in the
+owning main documentation rather than being defined only in a ticket.
 
-```text
-docs/implementation/
-  v1/
-    roadmap.md
-    milestone-01.md
-    milestone-02.md
-    ...
-  v2/
-    roadmap.md
-    milestone-01.md
-    ...
-  v3/
-    roadmap.md
-    milestone-01.md
-```
+This repository's Ticket project code is `BRL`; create and update Brawler work in that project.
+Ticket itself is a new application and may still contain defects or workflow rough edges. When use
+of the CLI reveals a Ticket bug or a concrete way the tool could work better, create a ticket for
+the Ticket application with `ticket task new --project TCK <title>` rather than adding it to the
+`BRL` backlog.
 
-`roadmap.md` defines version scope, ordering, delivery gates, status, and backlog. Each `milestone-NN.md` records the research, user-validated technical specification, implementation checklist, test evidence, playtest handoff, feedback decisions, and closeout learning for one milestone.
+Use the repository's `ticket` CLI and its installed skill for every new task:
 
-Create a milestone file when that milestone becomes next. Do not pre-author distant technical designs that should incorporate earlier evidence.
+- Search or list existing tickets before creating one, and continue the existing ticket when its
+  scope matches rather than creating a duplicate.
+- Give each independently reviewable task one ticket. Its description states the outcome; its spec
+  owns scope, decisions, acceptance criteria, implementation constraints, verification, playtest
+  needs, feedback disposition, and closeout learning.
+- Use the actual Ticket statuses: `idea`, `backlog`, `todo`, `doing`, `done`, and `canceled`. Move a
+  ticket to `doing` when implementation starts and to `done` only when its acceptance criteria and
+  required evidence are satisfied.
+- Record material scope or architecture changes in the ticket spec before implementing them. If a
+  required choice exceeds the user's existing direction, add a Ticket question and wait for its
+  answer; resolve answered questions after incorporating the decision.
+- Create another linked or clearly referenced backlog ticket for deferred work instead of silently
+  expanding the active ticket.
+- Use `ticket task <ID> desc|spec|comment|question|link` commands for mutations. Never edit
+  `.ticket/` or `docs/tasks/` directly. Those files are Ticket-owned state and readable mirrors.
+- Run `ticket sync` before handoff. If it reports a conflict, stop and surface the exact conflict;
+  never choose a side on behalf of the user.
 
-Allowed roadmap statuses are `Not started`, `Researching`, `Specification review`, `Implementing`, `Verifying`, `User playtest`, `Feedback review`, `Complete`, and `Blocked`.
+## Ticket task process
 
-## Milestone process
+For active work:
 
-For the next non-complete milestone:
-
-1. Update the roadmap and milestone status to `Researching`.
-2. Inspect the relevant local Bevy/Lightyear references first, then research current primary sources, alternatives, compatibility, and risks. Record exact local paths and external links in the milestone file.
-3. Write the technical specification, ECS ownership and lifecycle, plugin/schedule composition, network behavior, implementation tasks, test plan, visual checks, and exit criteria.
-4. Set the status to `Specification review` and deliver the specification to the user. Do not begin production implementation until the user validates it.
-5. Set the status to `Implementing` and complete the tracked tasks without silently expanding milestone scope.
-6. Set the status to `Verifying` and run unit tests, integration tests, local network tests, and visual/controller checks required by the specification.
-7. Set the status to `User playtest` and provide a clear build/run path, controls, scenario, known limitations, and requested observations.
-8. Set the status to `Feedback review`. For each feedback item, record whether it is implemented now, deferred to the version backlog, rejected with rationale, or awaiting more evidence.
-9. Re-run affected verification after accepted changes.
-10. Perform a learn-from-errors review. Record mistakes, causes, prevention, and reusable lessons. Create or improve project/Codex skills when the learning is recurring and genuinely reusable.
-11. Mark the milestone `Complete` only after exit criteria, evidence, user feedback triage, and the learning review are complete. Update the roadmap current milestone.
+1. Inspect `ticket list`, `ticket search`, and any referenced ticket. Create a ticket only when no
+   existing ticket owns the request.
+2. Set a concise outcome-oriented description and a concrete spec with acceptance criteria,
+   relevant constraints, and proportional verification. Move it to `doing` when work begins.
+3. Inspect the relevant local source, documentation, and Bevy/Lightyear references before guessing.
+   Add research findings and any consequential decision to the ticket spec.
+4. Implement the ticket without silently broadening its scope. Keep authoritative ownership,
+   execution-role isolation, stable wire identity, persistence, and bounded-state contracts intact.
+5. Run focused and canonical verification proportional to risk. Record commands, results, and any
+   intentionally manual or unavailable evidence in the ticket.
+6. When native or subjective playtesting is required, provide the run path, controls, scenario,
+   known limitations, and requested observations. Keep the ticket in `doing` while required
+   feedback or corrections remain.
+7. Record every feedback item as implemented, deferred to another ticket, rejected with rationale,
+   or awaiting evidence. Re-run affected verification after accepted corrections.
+8. Perform a learn-from-errors review for substantial work. Record mistakes, causes, prevention,
+   and reusable lessons in the ticket; create or improve a skill only when the learning genuinely
+   recurs.
+9. Move the ticket to `done` only when its acceptance criteria, verification, feedback disposition,
+   durable documentation, and required learning are complete. Run `ticket sync` and report the
+   ticket ID in the handoff.
 
 ## Implementation and verification rules
 
-- The current milestone file is the implementation scope contract. Update and revalidate it before materially changing scope or architecture.
+- The active ticket description and spec are the implementation scope contract. Update them through
+  the Ticket CLI and revalidate acceptance criteria before materially changing scope or
+  architecture.
 - Server authority is not optional, including in-process and offline development modes.
 - Clients send intent, not positions, hits, damage, scores, status triggers, or map edits.
 - Separate authored definitions, selected builds, and runtime state.
@@ -362,7 +402,7 @@ For the next non-complete milestone:
 - Use focused pure-function tests where a rule is naturally independent of ECS. Test component, resource, lifecycle, and state behavior with small `App`/`World` schedule tests; add headless integration tests for authority and replication.
 - Advance Bevy fixed time or explicitly run the relevant schedule in time-dependent tests rather than waiting on wall-clock sleeps.
 - Visual verification complements automated tests; it does not replace them.
-- Preserve unrelated user changes and keep deferred work visible in the active version backlog.
+- Preserve unrelated user changes and keep deferred work visible in separate backlog tickets.
 
 Canonical build, test, process, closeout, and playtest commands already live in `justfile` and the
 root `README.md`; use those rather than inventing substitutes. The completed V3 renderer has no 2D

@@ -1,8 +1,8 @@
 (
     schema_version: 6,
-    balance_revision: BuildRevision(4),
+    balance_revision: BuildRevision(5),
     fighter_profiles: (
-        default: (maximum_health: 100, movement_speed: 100.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0),
+        default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0),
         lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0),
         reinforced: (maximum_health: 120, movement_speed: 90.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 128.0),
     ),

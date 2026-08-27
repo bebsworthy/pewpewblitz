@@ -99,7 +99,8 @@ and closeout learning.
 | V9 | Authoritative observer-specific concealment, terrain/proximity proof, cloak/reveal/field ultimates, server-advertised brawler metadata, and the full-screen saved-brawler flow | [V9 roadmap](./implementation/v9/roadmap.md) |
 | V10 | Damageable world objects, oil barrels, mirrored Heist, the consolidated Feature Yard family, treasure chests, restoration pickups, and cross-feature closeout | [V10 roadmap](./implementation/v10/roadmap.md) |
 | V11 | Playable deterministic server-hosted Practice bots with fair perception, map-aware navigation, objective play, Pulse/Dash behavior, and input-only authority | [V11 roadmap](./implementation/v11/roadmap.md) |
-| V12 | In progress: 512×512 structural map capacity, 14-cell camera framing, proper 3v3 maps first, then user-defined balancing-tool improvements and feedback-driven combat tuning | [V12 roadmap](./implementation/v12/roadmap.md) |
+| V12 | Completed 3v3 maps and dynamic framing, Balance Lab correctness/presentation, server-authoritative sustain and ammunition recovery, instant evidence capture, projectile geometry/readability, and feedback-driven balance | [V12 roadmap](./implementation/v12/roadmap.md) |
+| V13 | Specification review: original Blender-authored environment kit and reproducible Bevy-ready asset pipeline | [V13 roadmap](./implementation/v13/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

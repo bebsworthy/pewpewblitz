@@ -77,20 +77,25 @@ fn launcher_explosion_does_not_damage_or_knock_back_its_owner() {
     harness.set_controlled_input(0, FighterInput::default());
     harness.step_until(|harness| harness.server_projectile_count() == 0);
 
-    let (health, has_knockback) = {
+    let (health, maximum_health, has_knockback) = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<(
             &PlayerId,
             &CurrentHealth,
+            &brawler::builds::ResolvedMatchLoadout,
             Option<&brawler::combat::ExternalMotion>,
         ), (With<Fighter>, Without<TestDummy>)>();
-        let (_, health, motion) = query
+        let (_, health, loadout, motion) = query
             .iter(world)
-            .find(|(candidate, _, _)| **candidate == player)
+            .find(|(candidate, _, _, _)| **candidate == player)
             .expect("server-owned launcher fighter");
-        (health.0, motion.is_some())
+        (
+            health.0,
+            loadout.fighter_stats.maximum_health,
+            motion.is_some(),
+        )
     };
-    assert_eq!(health, 100);
+    assert_eq!(health, maximum_health);
     assert!(!has_knockback);
     assert_eq!(
         harness

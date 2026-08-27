@@ -59,6 +59,18 @@ presentation profile keys, and validated base configurations as part of the conn
 brawler catalog. More bases may be added as complete playable recipes without changing the
 part-slot model or adding a client-owned inventory table.
 
+The current canonical base values affected by ordinary play balance are:
+
+| Weapon | Economy | Recovery | Firing | Delivery | Direct damage |
+|---|---|---:|---|---|---:|
+| Pulse Sidearm | 4-shot magazine | 1.0 s/round | Single | 500 speed, 2 radius, 320 range | 200 |
+| Scatter Cannon | 3-shot magazine | 1.2 s/round | 5 over 30° | 600 speed, 2 radius, 320 range | 120/projectile before falloff |
+| Arc Launcher | 3-shot magazine | 1.6 s/round | Single | 520-distance lob | 40 area |
+| Impact Blade | 3 charges | 1.0 s/charge | Single | 120-reach melee arc | 34 |
+
+Durations are displayed in seconds but remain positive 60 Hz fixed-tick values in authoritative
+content. The embedded catalogs, not this summary, are the executable source of truth.
+
 Every weapon has exactly four interchangeable part slots:
 
 ```text
@@ -274,12 +286,26 @@ Delivery
   Lifetime or completion rule
   Payload bundles and world effects
   Stable presentation references or cues
+
+ProjectileBody
+  Shape of the authoritative planar collision footprint
+
+StraightFlight / future trajectory component
+  Motion of that footprint, independently of its shape
 ```
 
 Straight deliveries move through authoritative planar simulation. Lobbed deliveries resolve a
 bounded landing point and flight deadline while clients may present an arc independently. Melee arcs
 are deliveries without projectile entities. The fighter does not own the delivery after creation;
 stable source identity preserves attribution across entity lifecycles.
+
+The current straight body is `ProjectileShape::Circle { radius }`. The server constructs its Avian
+collider and every fixed-tick sweep from that body and replicates it once with the projectile. The
+client uses the same body for the visible solid footprint and local aim corridor. Shape and
+trajectory are separate axes: a later capsule or rectangle does not imply a new movement family,
+and a later curved or homing trajectory does not redefine collision geometry. A new shape is
+complete only when authored validation, authoritative collider/sweep, replication, matching visual,
+and matching aim trace are implemented together.
 
 Eligible V10 world targets reuse these accepted deliveries without becoming fighters. Straight,
 lobbed, and melee contact may apply positive damage to a live barrel or chest; hostile straight,
@@ -322,6 +348,13 @@ The fighter-origin-to-muzzle clearance segment follows the same first-contact co
 projectile sweep. If a live damageable object blocks that segment, the direct payload applies to
 that first object and no projectile is created beyond it. Static cover still blocks the delivery
 without becoming a damage target.
+
+For straight weapons, the local aiming presentation sweeps the resolved `ProjectileBody` from the
+fighter to the muzzle and then through maximum range. Its corridor is one projectile diameter wide,
+starts at the muzzle when clearance succeeds, and terminates at the first client-observed
+projectile blocker. It uses projectile collision policy—player-only water does not clip it—and may
+include currently replicated hostile fighters and sentries. This is readability over observed
+state, not hit authority or latency prediction; only the server sweep decides the result.
 
 ## Effects and status contributions
 

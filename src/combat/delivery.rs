@@ -122,6 +122,7 @@ pub(super) fn sweep_composed_projectiles(
         Entity,
         &Position,
         &mut ComposedProjectileRuntime,
+        Option<&ProjectileBody>,
         Option<&LobbedFlight>,
     )>,
     fighters: Query<
@@ -182,14 +183,14 @@ pub(super) fn sweep_composed_projectiles(
     // carved lanes are the only way through.
     let blocking_geometry: HashSet<Entity> = walls.iter().collect();
     let mut ordered: Vec<_> = projectiles.iter_mut().collect();
-    ordered.sort_by_key(|(_, _, runtime, lob)| {
+    ordered.sort_by_key(|(_, _, runtime, _, lob)| {
         (
             runtime.source.attack_id.0,
             runtime.delivery_index,
             lob.is_some(),
         )
     });
-    for (entity, position, mut runtime, lob) in ordered {
+    for (entity, position, mut runtime, body, lob) in ordered {
         let Some((_, _, _, _, owner_disconnected)) = fighter_lookup
             .values()
             .find(|(_, _, network_id, _, _)| *network_id == runtime.source.owner_network_entity_id)
@@ -275,6 +276,19 @@ pub(super) fn sweep_composed_projectiles(
             finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         }
+        let Some(body) = body.copied().filter(|body| body.shape.is_valid()) else {
+            record_delivery_termination(
+                &mut ids,
+                &mut telemetry,
+                tick.0,
+                &runtime,
+                position.0,
+                WeaponTelemetryOutcome::DeliveryCancelled,
+            );
+            commands.entity(entity).try_despawn();
+            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
+            continue;
+        };
         let step = (runtime.velocity.length() / 60.0)
             .min((runtime.maximum_range - runtime.travelled).max(0.0));
         let Some(direction) = Dir2::new(runtime.velocity.normalize_or_zero()).ok() else {
@@ -298,7 +312,7 @@ pub(super) fn sweep_composed_projectiles(
         )
         .with_excluded_entities([entity, runtime.owner_entity, runtime.source_entity]);
         let hit = spatial_query.cast_shape_predicate(
-            &Collider::circle(runtime.radius),
+            &body.collider(),
             position.0,
             0.0,
             direction,

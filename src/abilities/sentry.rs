@@ -692,7 +692,7 @@ pub(crate) fn tick_sentries(
         With<crate::protocol::Fighter>,
     >,
 ) {
-    use avian2d::prelude::{Collider, CollisionLayers};
+    use avian2d::prelude::CollisionLayers;
     use bevy::math::Dir2;
     use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
     for (entity, position, identity, mut runtime) in &mut sentries {
@@ -990,6 +990,7 @@ pub(crate) fn tick_sentries(
                 maximum_range: SENTRY_ACQUISITION_RANGE,
                 launched_at_tick: tick.0,
             },
+            crate::combat::ProjectileBody::circle(6.0),
             crate::combat::ComposedProjectileRuntime {
                 owner_entity: fighter_owner,
                 source_entity: entity,
@@ -999,13 +1000,12 @@ pub(crate) fn tick_sentries(
                 travelled: 0.0,
                 expires_at_tick: tick.0.saturating_add(32),
                 maximum_range: 480.0,
-                radius: 6.0,
                 landing: None,
                 recipe,
             },
             avian2d::prelude::Position::from_xy(position.x, position.y),
             avian2d::prelude::Rotation::radians(source.facing),
-            Collider::circle(6.0),
+            crate::combat::ProjectileBody::circle(6.0).collider(),
             CollisionLayers::new(
                 crate::movement::PROJECTILE_LAYER,
                 crate::movement::FIGHTER_LAYER
