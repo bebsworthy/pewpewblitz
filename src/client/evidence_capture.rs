@@ -133,7 +133,9 @@ fn request_evidence_capture(world: &mut World, mut sequence: Local<u32>) {
 
     let unix_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis());
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        });
     let suffix = *sequence;
     *sequence = sequence.saturating_add(1);
     let directory = world.resource::<EvidenceCaptureDirectory>().0.clone();
@@ -205,7 +207,7 @@ fn save_capture_pair(
     Ok(())
 }
 
-fn collect_client_snapshot(world: &mut World, unix_millis: u128) -> Value {
+fn collect_client_snapshot(world: &mut World, unix_millis: u64) -> Value {
     let protocol_fingerprint = world
         .get_resource::<ProtocolFingerprint>()
         .map(|fingerprint| fingerprint.0);
@@ -352,13 +354,79 @@ fn collect_match_snapshot(world: &mut World) -> Option<Value> {
         .next()
         .map(|(state, clock, wipeout, hot_zone, heist)| {
             json!({
-                "state": state,
-                "clock": clock,
+                "state": {
+                    "match_id": state.match_id.to_string(),
+                    "mode_definition_id": state.mode_definition_id,
+                    "phase": state.phase,
+                    "rules_revision": state.rules_revision,
+                },
+                "clock": clock.map(|clock| json!({
+                    "match_id": clock.match_id.to_string(),
+                    "completed_tick": clock.completed_tick,
+                })),
                 "wipeout": wipeout,
-                "hot_zone": hot_zone,
-                "heist": heist,
+                "hot_zone": hot_zone.map(|hot_zone| json!({
+                    "match_id": hot_zone.match_id.to_string(),
+                    "zone_anchor_id": hot_zone.zone_anchor_id,
+                    "occupants": hot_zone.occupants,
+                    "status": hot_zone.status,
+                    "progress_ticks": hot_zone.progress_ticks,
+                    "target_progress_ticks": hot_zone.target_progress_ticks,
+                    "next_evaluation_tick": hot_zone.next_evaluation_tick,
+                })),
+                "heist": heist.map(|heist| json!({
+                    "match_id": heist.match_id.to_string(),
+                    "rules_revision": heist.rules_revision,
+                    "generation": heist.generation,
+                    "safes": heist.safes,
+                    "completion": heist.completion,
+                })),
             })
         })
+}
+
+fn collect_match_participant(participant: &MatchParticipant) -> Value {
+    json!({
+        "match_id": participant.match_id.to_string(),
+        "ready": participant.ready,
+        "restart_ready": participant.restart_ready,
+    })
+}
+
+fn collect_sentry_identity(identity: &crate::abilities::SentryIdentity) -> Value {
+    json!({
+        "deployable_id": identity.deployable_id,
+        "owner_player_id": identity.owner_player_id,
+        "owner_network_id": identity.owner_network_id,
+        "team_id": identity.team_id,
+        "ultimate_id": identity.ultimate_id,
+        "match_id": identity.match_id.to_string(),
+    })
+}
+
+fn collect_damageable_target_identity(identity: &crate::map::DamageableTargetIdentity) -> Value {
+    match *identity {
+        crate::map::DamageableTargetIdentity::MapObject {
+            generation,
+            placement_id,
+        } => json!({
+            "MapObject": {
+                "generation": generation,
+                "placement_id": placement_id,
+            },
+        }),
+        crate::map::DamageableTargetIdentity::HeistSafe {
+            match_id,
+            anchor_id,
+            defending_team,
+        } => json!({
+            "HeistSafe": {
+                "match_id": match_id.to_string(),
+                "anchor_id": anchor_id,
+                "defending_team": defending_team,
+            },
+        }),
+    }
 }
 
 fn collect_fighter_snapshots(world: &mut World) -> Vec<Value> {
@@ -414,7 +482,7 @@ fn collect_fighter_snapshots(world: &mut World) -> Vec<Value> {
                     "ability": ability,
                     "effects": effects,
                     "concealment": concealment,
-                    "participant": participant,
+                    "participant": participant.map(collect_match_participant),
                     "spawn_protection": spawn_protection,
                     "controlled": controlled,
                     "defeated": defeated,
@@ -462,7 +530,7 @@ fn collect_sentry_snapshots(world: &mut World) -> Vec<Value> {
         .map(|(network_id, identity, position, health, deadline)| {
             json!({
                 "network_entity_id": network_id.map(|id| id.0),
-                "identity": identity,
+                "identity": collect_sentry_identity(identity),
                 "position": [position.x, position.y],
                 "health": health.map(|health| health.0),
                 "deadline": deadline,
@@ -485,7 +553,7 @@ fn collect_damageable_object_snapshots(world: &mut World) -> Vec<Value> {
         .iter(world)
         .map(|(identity, position, health, maximum, life)| {
             json!({
-                "identity": identity,
+                "identity": collect_damageable_target_identity(identity),
                 "position": [position.x, position.y],
                 "health": health.0,
                 "maximum_health": maximum.0,
@@ -509,7 +577,12 @@ fn collect_objective_snapshots(world: &mut World) -> Vec<Value> {
         .iter(world)
         .map(|(identity, position, health, maximum, life)| {
             json!({
-                "identity": identity,
+                "identity": {
+                    "match_id": identity.match_id.to_string(),
+                    "anchor_id": identity.anchor_id,
+                    "defending_team": identity.defending_team,
+                    "generation": identity.generation,
+                },
                 "position": [position.x, position.y],
                 "health": health.0,
                 "maximum_health": maximum.0,
@@ -605,5 +678,89 @@ fn present_capture_toast(
         for entity in &existing {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wide_match_ids_are_captured_as_json_strings() {
+        let match_id = crate::matchplay::MatchId(u128::MAX);
+        let generation = crate::map::MapDynamicGeneration {
+            map_instance_id: crate::map::MapInstanceId(7),
+            generation: 3,
+        };
+        let safe = crate::matchplay::HeistSafeIdentity {
+            anchor_id: crate::map::ModeAnchorId(11),
+            defending_team: crate::combat::TeamId(0),
+        };
+        let mut world = World::new();
+        world.spawn((
+            MatchRoot,
+            MatchState {
+                match_id,
+                mode_definition_id: crate::map::HEIST_MODE_DEFINITION,
+                phase: crate::matchplay::MatchPhase::Active { ends_at_tick: 900 },
+                rules_revision: 1,
+            },
+            crate::matchplay::MatchClock {
+                match_id,
+                completed_tick: 42,
+            },
+            crate::matchplay::HotZoneState {
+                match_id,
+                zone_anchor_id: crate::map::ModeAnchorId(5),
+                occupants: [1, 0],
+                status: crate::matchplay::HotZoneStatus::Controlled {
+                    team: crate::combat::TeamId(0),
+                },
+                progress_ticks: [12, 0],
+                target_progress_ticks: 1_800,
+                next_evaluation_tick: 43,
+            },
+            crate::matchplay::HeistState {
+                match_id,
+                rules_revision: 1,
+                generation,
+                safes: [safe, safe],
+                completion: None,
+            },
+        ));
+
+        let snapshot = collect_match_snapshot(&mut world).expect("match snapshot");
+        let expected = Value::String(u128::MAX.to_string());
+        assert_eq!(snapshot["state"]["match_id"], expected);
+        assert_eq!(snapshot["clock"]["match_id"], expected);
+        assert_eq!(snapshot["hot_zone"]["match_id"], expected);
+        assert_eq!(snapshot["heist"]["match_id"], expected);
+
+        let participant = collect_match_participant(&MatchParticipant {
+            match_id,
+            ready: true,
+            restart_ready: false,
+        });
+        assert_eq!(participant["match_id"], expected);
+
+        let sentry = collect_sentry_identity(&crate::abilities::SentryIdentity {
+            deployable_id: crate::builds::DeployableId(9),
+            owner_player_id: PlayerId(2),
+            owner_network_id: NetworkEntityId(3),
+            team_id: crate::combat::TeamId(1),
+            ultimate_id: crate::builds::UltimateDefinitionId(4),
+            match_id,
+        });
+        assert_eq!(sentry["match_id"], expected);
+
+        let objective =
+            collect_damageable_target_identity(&crate::map::DamageableTargetIdentity::HeistSafe {
+                match_id,
+                anchor_id: crate::map::ModeAnchorId(6),
+                defending_team: crate::combat::TeamId(1),
+            });
+        assert_eq!(objective["HeistSafe"]["match_id"], expected);
+
+        serde_json::to_vec_pretty(&snapshot).expect("wide-ID snapshot must serialize");
     }
 }

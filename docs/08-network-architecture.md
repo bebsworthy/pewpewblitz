@@ -43,6 +43,8 @@ Client presentation and local feedback
 - interpolate remote fighters;
 - play visual, audio, and camera effects;
 - display HUD and scoreboard;
+- interpolate an ammunition-recovery indicator from replicated server deadlines without granting
+  ammunition or deciding fire readiness;
 - never decide whether a weapon recipe is legal or directly install resolved weapon values;
 - never decide authoritative damage, hits, deaths, status triggers, scores, or map mutations.
 
@@ -55,6 +57,8 @@ Client presentation and local feedback
   server content, and validate profile references against that same catalog;
 - simulate fighter movement and abilities;
 - validate fire commands and cooldowns;
+- own current health, attack-idle health recovery, ammunition stock, and each ammunition-recovery
+  interval;
 - perform projectile, hit, damage, and collision resolution;
 - own status meters and threshold effects;
 - own pickups, objectives, scores, respawns, and victory;
@@ -261,7 +265,8 @@ The server normally exposes authoritative state through Lightyear-replicated ECS
 ```text
 Replicated components
   stable player / match / definition identity
-  fighter and projectile state
+  fighter and projectile state, including CurrentHealth and WeaponState
+  authoritative tick reference used with fire and ammunition-recovery deadlines
   active effects, damageable-object health/life state, restoration pickups, and objective state
   scores, resolved map snapshot, and map dynamic generation/revision
 
@@ -376,6 +381,27 @@ example and the version-pinned
 
 The server owns internal status meters such as `cold`, threshold checks, freeze duration, decay, resistance, and immunity. Clients may receive the meter value for HUD feedback, but cannot apply or trigger the status themselves.
 
+## Combat recovery synchronization
+
+Health recovery is simulation state, not a client timer. The match worker owns the accepted-attack
+idle origin and fractional recovery remainder, mutates integer `CurrentHealth` on fixed ticks, and
+replicates only the resulting public health. Clients do not need the private accumulator to present
+health accurately.
+
+Ammunition recovery needs visible partial progress, so the replicated `WeaponState` contains:
+
+- current authoritative ammunition or charges;
+- fire readiness as `Ready` or a server-authored cooldown target tick; and
+- an optional `AmmoRecovery` interval with authoritative start and target ticks.
+
+The fighter also receives the latest `AuthoritativeTick` observed alongside its replicated state.
+The HUD may interpolate `(tick - started) / (ready - started)` between updates and clamp it to the
+valid interval. That interpolation is presentation only: the client never increments stock, clears
+the interval, shortens a deadline, or treats a visually complete segment as permission to fire.
+Only the server deadline transaction restores one unit, and only replicated stock confirms that
+the unit is usable. This keeps firing authoritative under delay, loss, late join, and reconnect
+while still supplying enough information for a smooth filling bar.
+
 ## Local development modes
 
 Support three development configurations without changing the authoritative gameplay path:
@@ -400,6 +426,9 @@ Networking is validated incrementally rather than treated as one oversized miles
 7. **V9 concealment and reveal:** server-owned terrain/ability sources feed per-client visibility,
    which withholds secret spatial state and recovers current state correctly at reveal, late join,
    and reconnect.
-8. **Future systemic-status milestone:** accumulating meters, threshold triggers, immunity, and duration remain server-owned and recover correctly.
+8. **V12 combat recovery:** health accumulation, ammunition stock, fire cooldown, and per-round
+   recovery deadlines remain server-owned and converge under delayed replication, late join, and
+   reconnect.
+9. **Future systemic-status milestone:** accumulating meters, threshold triggers, immunity, and duration remain server-owned and recover correctly.
 
 Prediction, lag compensation, advanced interpolation tuning, anti-cheat hardening, matchmaking, authentication, session services, and production hosting may be developed after the relevant early gates. The authority boundary, state recovery rules, and explicit connection lifecycle outcomes may not be postponed.

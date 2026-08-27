@@ -341,3 +341,24 @@ gate. They are intentionally not claimed by headless automation.
 2. Default capture bindings are `F12` and the north face button. Both remain rebindable.
 
 The ammunition-progress rule is already accepted: firing does not reset an active timer.
+
+## User playtest feedback
+
+### Controller capture crashed on routed match identity
+
+Status: **implemented; awaiting native retry**.
+
+Pressing the north face button reached the intended capture action, but snapshot construction
+panicked before GPU capture. Routed `MatchId` values occupy the complete `u128` space, while
+`serde_json::json!` internally unwraps an error when a directly serialized integer exceeds JSON's
+supported integer representation. The first failure was the match-state record; the same latent
+failure also existed in match clocks, Hot Zone and Heist state, fighter participation, sentry
+identity, and Heist objective identity.
+
+Capture now writes every client-visible `MatchId` as a decimal string. This preserves the exact
+identity without changing the gameplay/wire representation and avoids precision loss in ordinary
+JSON consumers. Capture wall time is narrowed safely to `u64` milliseconds. A regression test uses
+`u128::MAX`, checks every affected capture projection, and verifies the resulting snapshot can be
+pretty-serialized. The focused regression, complete 416-test client suite, and warning-denied
+client Clippy pass succeeded on 2026-08-27; the native PNG/JSON retry remains part of the open
+playtest gate.

@@ -227,9 +227,31 @@ The four reference presets are:
 | Arc launcher | Lobbed splash projectile | Punishes cover and groups | Slow delivery and recovery |
 | Impact blade | Melee arc | Strong duel pressure and displacement | Must enter danger range |
 
-All four currently recover one spent round or charge every 78 authoritative ticks (1.3 seconds).
-One interval runs whenever ammunition is below capacity. Firing consumes stock but never restarts
-an interval already in progress; fire cooldown and ammunition recovery advance independently.
+### Fire and ammunition-recovery lifecycle
+
+All four currently recover one spent round or charge every `78` authoritative ticks (`1.3`
+seconds). Refill/recharge duration always means the time for one ammunition unit, never a duration
+that restores the whole magazine.
+
+- Spending ammunition starts an interval immediately when none is active and stock is below
+  capacity.
+- Firing again consumes available stock but does not restart, delay, or otherwise change the active
+  interval. A round that was 90% recovered remains 90% recovered and continues toward the same
+  server deadline.
+- At the deadline the server restores exactly one unit. If stock is still below capacity, it starts
+  the next full interval on that same authoritative tick; otherwise recovery becomes inactive.
+- Fire cooldown and ammunition recovery are independent. A fighter may be cooling down while an
+  ammunition interval advances, and a completed interval does not bypass fire cooldown.
+- A passive that changes recovery duration applies when a new interval starts. It does not rewrite
+  an interval already in progress.
+- Spawn, respawn, match restart, and authoritative build replacement restore the resolved starting
+  economy and clear stale deadlines.
+
+`WeaponState` replicates current stock, the fire-cooldown deadline, and an optional
+`AmmoRecovery { started_at_tick, ready_at_tick }`. The client interpolates the filling segment from
+that interval and the latest replicated authoritative tick, but only replicated stock is usable.
+A locally interpolated segment reaching its visual endpoint cannot create ammunition or authorize
+a shot; the next server update confirms the restored unit.
 
 They exercise reusable composition primitives and are not permanent weapon classes. In V7 they
 become the initial permanent weapon-base choices; the named Runner, Bruiser, Controller, and Duelist

@@ -144,9 +144,28 @@ The current canonical fighter-profile movement speeds are expressed in world uni
 | Lightweight | 110 |
 | Reinforced | 90 |
 
-All three canonical profiles initially recover 10 health per second after 3 seconds without a
-server-accepted player attack. Taking damage does not restart that attack-idle delay. Recovery is
-server-owned, fixed-tick accumulated, clamped to maximum health, and reset with fighter lifecycle.
+### Health recovery contract
+
+All three canonical profiles initially recover `10` health per second after `3.0` seconds without a
+server-accepted player attack. The rate is authored in health points per second; the delay is
+authored as a positive fixed-tick duration and presented in seconds.
+
+Recovery is server-owned and follows these rules:
+
+- an accepted primary attack, Dash activation, or Sentry deployment resets the attack-idle origin
+  and discards partial fractional healing progress;
+- aiming, movement, damage received, rejected or dry fire, and automatic shots from a deployed
+  sentry do not reset it;
+- once the delay expires, a fixed-point accumulator applies the authored per-second rate on the
+  60 Hz authoritative schedule without depending on render rate;
+- only whole health points are published, health never exceeds the resolved maximum, and no
+  recovery runs while the fighter is defeated or outside active combat; and
+- spawn, respawn, match restart, build replacement, and disconnect cleanup initialize or clear the
+  runtime accumulator with the rest of fighter state.
+
+The rule is deliberately attack-idle rather than damage-idle. A fighter that has not attacked for
+the configured delay may therefore continue recovering while receiving damage. Adding a separate
+damage-idle delay would be a distinct balance rule, not an implicit client-side exception.
 
 ### Supported runtime state
 

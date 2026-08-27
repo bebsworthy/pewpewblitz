@@ -171,6 +171,13 @@ Evidence captures are saved as matching PNG/JSON pairs under the platform Pictur
 `PewPew Blitz/Captures` (or the application data directory when Pictures is unavailable).
 `BRAWLER_CAPTURE_DIR` overrides that destination for troubleshooting and automation.
 
+Canonical fighters recover `10` health per second after `3.0` seconds without a server-accepted
+player attack. Current weapons recover one round or charge every `1.3` seconds; firing consumes
+stock without resetting an interval already in progress. Both mechanics remain server-authoritative.
+See the [fighter specification](docs/02-fighter-model.md) and
+[weapons and abilities specification](docs/03-weapons-and-abilities.md) for the exact lifecycle and
+replication rules.
+
 ## Server configuration and authored content
 
 Server game types live in [`config/server/game-types.ron`](config/server/game-types.ron). Each stable

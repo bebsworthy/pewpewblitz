@@ -139,9 +139,28 @@ Gameplay HUD elements such as countdown, phase messages, health, ammunition, coo
 state, and roster score are Match sublayers rather than navigation destinations. Developer
 diagnostics and legacy direct-UDP controls are not product screens.
 
-During a windowed session, one rebindable screenshot action immediately captures the rendered
-frame and a matching bounded JSON record of client-visible gameplay state. It opens no menu and
-shows only a short non-modal saved/failure message.
+### Instant evidence capture
+
+During a windowed session, one rebindable action immediately captures the rendered frame and a
+matching bounded JSON record of the gameplay state visible to that client. The defaults are `F12`
+on keyboard and the north face button on gamepad. Capture opens no menu, does not pause simulation,
+does not send gameplay intent, and shows only a short non-modal progress, saved, or failure message.
+
+The request-frame observation is retained while the GPU screenshot and file write finish
+asynchronously. The matching files share one unique stem and are saved under the platform Pictures
+directory at `PewPew Blitz/Captures`; if Pictures is unavailable, the application-local data
+directory is used. `BRAWLER_CAPTURE_DIR` provides an explicit troubleshooting and automation
+override.
+
+The JSON records the build/protocol/content identity, wall-clock capture time, latest observed
+authoritative tick, window and camera, local connection/input context, resolved and presented map,
+match/mode state, and bounded client-visible fighters, projectiles, sentries, world objects,
+objectives, and pickups. It records only state already present in the client world and excludes
+profile credentials, persistence data, hidden server state, and server-only recovery accumulators.
+Opaque 128-bit match identities are written as decimal strings so capture works for the complete
+routed identity space without JSON integer-range failures or downstream precision loss.
+If either member of the pair cannot be saved, the capture is reported as failed rather than
+claiming complete evidence.
 
 Substantial navigation and editing surfaces are screens: they occupy the full viewport, use an
 opaque background, own a clear Back action, and use the available space for hierarchy rather than

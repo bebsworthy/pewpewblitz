@@ -50,9 +50,9 @@ the three permanent fighter profiles, four canonical weapon-base recipes, the bo
 all five supported ultimates, oil-barrel health/explosion tuning, Heist safe health, and treasure-
 chest/restoration-pickup health, restoration, radius, and lifetime. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Persistence envelope 3 is
-migrated by filling canonical chest defaults before validation. Snapshot 8 is migrated inside the
-current envelope by filling the new fighter-recovery fields from canonical content while retaining
-existing tuning. The retired Custom Pulse axes,
+migrated by filling canonical chest defaults before validation. A version-8 snapshot inside the
+current envelope migrates to snapshot 9 by filling the new fighter-recovery fields from canonical
+content while retaining existing tuning. The retired Custom Pulse axes,
 named build presets, point budget, and frame passives are not Balance Lab surfaces. Apply validation
 re-resolves the complete 3×4 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
@@ -68,6 +68,13 @@ Fighter tuning also exposes health recovery per second and the accepted-attack i
 refill/recharge timing is labeled as recovery for one round or charge. These durations require a
 positive authoritative tick value but have no invented balance ceiling; the exact numeric input
 remains available beyond the editor's ordinary playtest range.
+
+The canonical starting values shown by the default comparison are `10 health/second`, `3.0 seconds`
+of accepted-attack idle delay, and `1.3 seconds` to recover one round or charge for each current
+weapon base. **Apply & reset match** re-resolves every admitted human and bot, starts a clean match
+epoch, initializes health-recovery inactivity at that epoch, restores starting ammunition, and
+clears old fire/recovery deadlines. Draft edits never mutate the running epoch before that explicit
+apply action.
 
 ## Validation principle
 
