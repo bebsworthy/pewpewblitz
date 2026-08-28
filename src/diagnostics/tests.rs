@@ -699,16 +699,16 @@ fn checkpoint_digest_requires_identical_names_and_snapshots() {
     left.insert("defeat".to_string(), snapshot(42));
     left.insert("reset".to_string(), snapshot(90));
     let mut right = left.clone();
-    let (left_digest, count) = process::checkpoint_evidence_digest(&left);
+    let (left_digest, count) = process::closeout::checkpoint_evidence_digest(&left);
     assert_eq!(count, 2);
     assert_eq!(
-        process::checkpoint_evidence_digest(&right),
+        process::closeout::checkpoint_evidence_digest(&right),
         (left_digest, 2)
     );
 
     right.insert("active_slow".to_string(), snapshot(7));
     assert_ne!(
-        process::checkpoint_evidence_digest(&right).0,
+        process::closeout::checkpoint_evidence_digest(&right).0,
         left_digest,
         "an extra unmatched checkpoint must change the digest"
     );
@@ -716,13 +716,16 @@ fn checkpoint_digest_requires_identical_names_and_snapshots() {
     right.remove("active_slow");
     right.insert("reset".to_string(), snapshot(91));
     assert_ne!(
-        process::checkpoint_evidence_digest(&right).0,
+        process::closeout::checkpoint_evidence_digest(&right).0,
         left_digest,
         "a divergent snapshot payload must change the digest"
     );
 
     let empty: BTreeMap<String, CombatStateSnapshot> = BTreeMap::new();
-    assert_eq!(process::checkpoint_evidence_digest(&empty), (0, 0));
+    assert_eq!(
+        process::closeout::checkpoint_evidence_digest(&empty),
+        (0, 0)
+    );
 }
 
 #[test]
@@ -1056,12 +1059,12 @@ fn common_window_uses_fixed_authoritative_tick_boundaries() {
         .configure_sets(FixedPostUpdate, crate::matchplay::MatchSet::Outcomes)
         .add_systems(
             FixedPostUpdate,
-            process::observe_common_window_fixed
+            process::common_window::observe_common_window_fixed
                 .after(crate::matchplay::MatchSet::Outcomes)
                 .before(crate::gameplay::advance_simulation_tick),
         )
         .add_systems(FixedPostUpdate, crate::gameplay::advance_simulation_tick)
-        .add_systems(Last, process::finalize_common_window);
+        .add_systems(Last, process::common_window::finalize_common_window);
     let root = app
         .world_mut()
         .spawn((
@@ -1183,7 +1186,7 @@ fn manifest_participants_are_cached_while_fighters_live_and_survive_shutdown() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<ProcessDiagnosticsState>()
-        .add_systems(Update, process::observe_manifest_participants);
+        .add_systems(Update, process::sampling::observe_manifest_participants);
     let fighters: Vec<_> = app
         .world_mut()
         .spawn_batch([
@@ -1262,7 +1265,7 @@ fn gameplay_aggregates_consolidate_hot_zone_terminal_state() {
     app.add_plugins(MinimalPlugins)
         .init_resource::<ProcessDiagnosticsState>()
         .insert_resource(matches)
-        .add_systems(Update, process::observe_gameplay_aggregates);
+        .add_systems(Update, process::sampling::observe_gameplay_aggregates);
     app.update();
     let gameplay = app
         .world()
