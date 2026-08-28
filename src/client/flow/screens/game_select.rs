@@ -1,14 +1,34 @@
 //! Game-type catalog selection, scrolling, and focus visibility.
 
-use super::super::{
-    ClientFlow, FlowButton, FlowNavigation, FlowRoot, FlowUiAction, GAME_TYPE_BACK_INDEX,
-    GAME_TYPE_CONFIRM_INDEX, GamePopulationLabel, GameTypeSelectRoot, GameTypeSelectionDraft,
-    flow_root_node, queue_population, spawn_flow_button, spawn_flow_button_disabled, spawn_heading,
-};
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
-use crate::client::{ClientLobbyMembership, ClientQueueModel};
+use super::{
+    queue::queue_population,
+    shared::{
+        FlowButton, FlowNavigation, FlowRoot, flow_root_node, spawn_flow_button,
+        spawn_flow_button_disabled, spawn_heading,
+    },
+};
+use crate::client::{
+    ClientLobbyMembership, ClientQueueModel,
+    flow::{actions::FlowUiAction, model::ClientFlow},
+};
 use bevy::{input::mouse::MouseWheel, prelude::*, ui::ScrollPosition};
 use lightyear::prelude::client::Client;
+
+pub(in crate::client::flow) const GAME_TYPE_CONFIRM_INDEX: usize = 1_000;
+pub(in crate::client::flow) const GAME_TYPE_BACK_INDEX: usize = 1_001;
+
+#[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct GameTypeSelectionDraft {
+    pub(in crate::client::flow) selected_index: Option<usize>,
+    pub(in crate::client::flow) unavailable_previous: bool,
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct GamePopulationLabel(usize);
+
+#[derive(Component)]
+pub(in crate::client::flow) struct GameTypeSelectRoot;
 
 #[allow(
     clippy::too_many_lines,
@@ -111,7 +131,6 @@ pub(in crate::client::flow) fn spawn_game_type_select(
                         game_type.players_per_team,
                         game_type.players_per_team,
                     ),
-                    None,
                 );
                 root.spawn((
                     GamePopulationLabel(index),
@@ -125,7 +144,6 @@ pub(in crate::client::flow) fn spawn_game_type_select(
                 GAME_TYPE_CONFIRM_INDEX,
                 FlowUiAction::ConfirmGameType,
                 "CONFIRM",
-                None,
                 draft.selected_index.is_none(),
             );
             spawn_flow_button(
@@ -133,9 +151,24 @@ pub(in crate::client::flow) fn spawn_game_type_select(
                 GAME_TYPE_BACK_INDEX,
                 FlowUiAction::CancelGameType,
                 "BACK",
-                None,
             );
         });
+}
+
+#[allow(clippy::needless_pass_by_value)]
+pub(in crate::client::flow) fn update_game_population(
+    memberships: Query<&ClientLobbyMembership, With<Client>>,
+    queue: Res<ClientQueueModel>,
+    mut labels: Query<(&GamePopulationLabel, &mut Text)>,
+) {
+    let Some(membership) = memberships.iter().next() else {
+        return;
+    };
+    for (label, mut text) in &mut labels {
+        if let Some(game) = membership.game_types.get(label.0) {
+            text.0 = queue_population(&queue, game);
+        }
+    }
 }
 
 #[allow(

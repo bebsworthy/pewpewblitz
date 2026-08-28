@@ -1,8 +1,28 @@
 //! Pure focus navigation, overlay filtering, and action-priority policy for flow input.
 
-#![allow(clippy::wildcard_imports)]
-
-use super::*;
+use crate::client::{
+    connection_persistence::{ClientConnectionsPath, save_connections},
+    flow::{
+        actions::{FlowUiAction, PendingFlowActions},
+        model::{ClientFlow, ClientOverlay},
+        persistence::ConnectionPersistence,
+        screens::{
+            brawlers::BrawlerEditDraft,
+            dashboard::{
+                DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_MENU_INDEX,
+                DASHBOARD_PLAY_INDEX, DASHBOARD_PRACTICE_INDEX, DASHBOARD_SETTINGS_INDEX,
+                DashboardLayoutClass, DashboardNavigationDirection, DashboardRoot,
+            },
+            server_select::{EditingField, ServerSelectModel},
+            shared::{FlowButton, FlowNavigation},
+        },
+    },
+};
+use bevy::{
+    input::{ButtonState, keyboard::KeyboardInput},
+    prelude::*,
+    ui::InteractionDisabled,
+};
 use unicode_segmentation::UnicodeSegmentation as _;
 
 pub(super) fn repair_dashboard_focus(current: usize, available: &[usize]) -> usize {

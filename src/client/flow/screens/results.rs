@@ -1,11 +1,17 @@
 //! Match-completion cover and results screen ownership.
 
-use super::super::{
-    ClientFlow, FlowNavigation, FlowRoot, FlowUiAction, RoutedClientLifecycle, RoutedClientSession,
-    SessionPurpose, flow_root_node, spawn_flow_button, spawn_flow_button_disabled, spawn_heading,
-};
 use crate::client::{
-    ClientLobbyMembership, ClientMatchResultState, RoutedClientSessionKind, hud::mode_score_text,
+    ClientLobbyMembership, ClientMatchResultState, RoutedClientLifecycle, RoutedClientSession,
+    RoutedClientSessionKind,
+    flow::{
+        actions::FlowUiAction,
+        model::{ClientFlow, SessionPurpose},
+        screens::shared::{
+            FlowNavigation, FlowRoot, flow_root_node, spawn_flow_button,
+            spawn_flow_button_disabled, spawn_heading,
+        },
+    },
+    hud::mode_score_text,
 };
 use bevy::prelude::*;
 use lightyear::prelude::client::Client;
@@ -157,10 +163,9 @@ pub(in crate::client::flow) fn spawn_results(
                 } else {
                     "PLAY AGAIN"
                 },
-                None,
                 !replay_available,
             );
-            spawn_flow_button(root, 1, FlowUiAction::ReturnToDashboard, "DASHBOARD", None);
+            spawn_flow_button(root, 1, FlowUiAction::ReturnToDashboard, "DASHBOARD");
         });
 }
 

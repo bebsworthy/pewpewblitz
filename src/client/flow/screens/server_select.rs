@@ -1,10 +1,67 @@
 //! Server-selection screen ownership and bounded root replacement.
 
-use super::super::{
-    ClientFlow, ConnectionPersistence, FieldLabel, FlowCommit, FlowNavigation, FlowRoot,
-    FlowUiAction, ServerSelectModel, flow_root_node, spawn_flow_button, spawn_heading,
+use crate::client::flow::{
+    actions::{FlowCommit, FlowUiAction},
+    input::edited_value,
+    model::ClientFlow,
+    persistence::ConnectionPersistence,
+    screens::shared::{
+        FlowButton, FlowNavigation, FlowRoot, flow_root_node, spawn_flow_button, spawn_heading,
+    },
 };
 use bevy::prelude::*;
+
+#[derive(Resource, Clone, Debug)]
+pub(in crate::client::flow) struct ServerSelectModel {
+    pub(in crate::client::flow) address: String,
+    pub(in crate::client::flow) committed_name: String,
+    pub(in crate::client::flow) name: String,
+    pub(in crate::client::flow) editing: Option<EditingField>,
+    pub(in crate::client::flow) caret: usize,
+    pub(in crate::client::flow) inline_error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) enum EditingField {
+    Address,
+    Name,
+}
+
+#[derive(Component, Clone, Copy)]
+pub(in crate::client::flow) enum FieldLabel {
+    Address,
+    Name,
+}
+
+fn spawn_editor_button(
+    parent: &mut ChildSpawnerCommands,
+    index: usize,
+    action: FlowUiAction,
+    field: FieldLabel,
+) {
+    parent
+        .spawn((
+            Button,
+            FlowButton {
+                index,
+                action,
+                error_action: false,
+            },
+            Node {
+                width: percent(88),
+                max_width: px(820),
+                min_height: px(42),
+                padding: UiRect::axes(px(12), px(8)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(px(2)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.09, 0.14, 0.2)),
+            BorderColor::all(Color::NONE),
+        ))
+        .with_child((field, Text::new(""), TextFont::from_font_size(18.0)));
+}
 
 #[allow(
     clippy::needless_pass_by_value,
@@ -37,15 +94,9 @@ pub(in crate::client::flow) fn spawn_server_select_root(
         ))
         .with_children(|root| {
             spawn_heading(root, "SERVER SELECT");
-            spawn_flow_button(
-                root,
-                0,
-                FlowUiAction::EditAddress,
-                "",
-                Some(FieldLabel::Address),
-            );
-            spawn_flow_button(root, 1, FlowUiAction::EditName, "", Some(FieldLabel::Name));
-            spawn_flow_button(root, 2, FlowUiAction::Connect, "CONNECT", None);
+            spawn_editor_button(root, 0, FlowUiAction::EditAddress, FieldLabel::Address);
+            spawn_editor_button(root, 1, FlowUiAction::EditName, FieldLabel::Name);
+            spawn_flow_button(root, 2, FlowUiAction::Connect, "CONNECT");
             let mut index = 3;
             for favorite in &persistence.state.favorites {
                 spawn_flow_button(
@@ -53,7 +104,6 @@ pub(in crate::client::flow) fn spawn_server_select_root(
                     index,
                     FlowUiAction::JoinSaved(favorite.address.clone()),
                     &format!("JOIN {} - {}", favorite.name, favorite.address),
-                    None,
                 );
                 index += 1;
                 spawn_flow_button(
@@ -61,7 +111,6 @@ pub(in crate::client::flow) fn spawn_server_select_root(
                     index,
                     FlowUiAction::RemoveFavorite(favorite.address.clone()),
                     &format!("REMOVE {}", favorite.name),
-                    None,
                 );
                 index += 1;
             }
@@ -71,12 +120,11 @@ pub(in crate::client::flow) fn spawn_server_select_root(
                     index,
                     FlowUiAction::JoinSaved(recent.address.clone()),
                     &format!("RECENT {} - {}", recent.server_name, recent.address),
-                    None,
                 );
                 index += 1;
             }
-            spawn_flow_button(root, index, FlowUiAction::OpenSettings, "SETTINGS", None);
-            spawn_flow_button(root, index + 1, FlowUiAction::Quit, "QUIT", None);
+            spawn_flow_button(root, index, FlowUiAction::OpenSettings, "SETTINGS");
+            spawn_flow_button(root, index + 1, FlowUiAction::Quit, "QUIT");
             if let Some(error) = model.inline_error.as_ref() {
                 root.spawn((
                     Text::new(error.clone()),
@@ -84,6 +132,33 @@ pub(in crate::client::flow) fn spawn_server_select_root(
                 ));
             }
         });
+}
+
+#[allow(clippy::needless_pass_by_value)]
+pub(in crate::client::flow) fn update_server_select_copy(
+    model: Res<ServerSelectModel>,
+    mut fields: Query<(&FieldLabel, &mut Text)>,
+) {
+    for (field, mut text) in &mut fields {
+        text.0 = match field {
+            FieldLabel::Address => format!(
+                "ADDRESS: {}",
+                render_editor_value(&model, EditingField::Address)
+            ),
+            FieldLabel::Name => {
+                format!("NAME: {}", render_editor_value(&model, EditingField::Name))
+            }
+        };
+    }
+}
+
+fn render_editor_value(model: &ServerSelectModel, field: EditingField) -> String {
+    let value = edited_value(model, field);
+    if model.editing != Some(field) {
+        return value.to_string();
+    }
+    let caret = model.caret.min(value.len());
+    format!("{}|{}", &value[..caret], &value[caret..])
 }
 
 #[allow(

@@ -98,6 +98,14 @@ pub(super) enum SessionObservation {
     PracticeRejected(crate::lobby::PracticeStartRejection),
 }
 
+pub(super) fn begin_flow_frame(
+    mut actions: bevy::prelude::ResMut<PendingFlowActions>,
+    mut commit: bevy::prelude::ResMut<FlowCommit>,
+) {
+    *actions = PendingFlowActions::default();
+    *commit = FlowCommit::default();
+}
+
 #[derive(Resource, Default)]
 pub(super) struct PendingFlowActions {
     pub(super) session: Option<SessionObservation>,

@@ -1,9 +1,48 @@
 //! Deferred flow commit and session teardown ownership.
 
-#![allow(clippy::wildcard_imports)]
-
-use super::*;
+use crate::client::{
+    ClientLobbyFailure, ClientLobbyMembership, ClientNetworkConfig, RoutedClientLifecycle,
+    RoutedClientPhase, RoutedClientSession, RuntimeLobbyTarget,
+    connection_persistence::{ClientConnectionsPath, save_connections},
+    flow::{
+        actions::{
+            FlowCommit, FlowUiAction, OverlayCommit, PendingFlowActions, SessionObservation,
+        },
+        connection::{
+            ConnectionGeneration, ConnectionStage, PendingConnection, ResolverState,
+            begin_connection_target, has_next_candidate, spawn_current_candidate, validate_target,
+        },
+        model::{
+            CancelMatchStartConfirmation, ClientFlow, ClientOverlay, FlowError, FlowErrorAction,
+            FlowErrorKind, SelectedGameType, SessionPurpose,
+        },
+        persistence::{ClientLocalLoadFailures, ConnectionPersistence, local_load_error},
+        screens::{
+            brawlers::{BrawlerCreationDraft, BrawlerEditDraft, WeaponEquipmentDraft},
+            dashboard::{
+                DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_PLAY_INDEX, DashboardNotice,
+                DashboardReturnFocus,
+            },
+            game_select::GameTypeSelectionDraft,
+            server_select::{EditingField, ServerSelectModel},
+            shared::FlowNavigation,
+        },
+    },
+};
+use bevy::prelude::*;
+use lightyear::prelude::client::Client;
 use lightyear::prelude::{Unlink, UnlinkReason, client::Disconnect};
+
+#[derive(Resource, Default)]
+pub(in crate::client::flow) struct PendingCreatedBrawler(pub(in crate::client::flow) Option<u64>);
+
+#[derive(Resource, Default)]
+pub(in crate::client::flow) struct PendingEditedBrawler(
+    pub(in crate::client::flow) Option<crate::profiles::SavedBrawlerId>,
+);
+
+#[derive(Resource, Default)]
+pub(in crate::client::flow) struct MatchFailureNotice(pub(in crate::client::flow) bool);
 
 #[allow(
     clippy::too_many_arguments,

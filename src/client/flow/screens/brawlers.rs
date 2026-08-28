@@ -1,8 +1,145 @@
 //! Saved-brawler browsing, creation, editing, equipment, and deletion presentation.
-#![allow(clippy::wildcard_imports)]
+use super::shared::{FlowButton, FlowNavigation, spawn_flow_error_button, spawn_heading};
+use super::{
+    dashboard::{DashboardLayoutClass, dashboard_layout_class},
+    scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
+};
+use crate::client::flow::{
+    actions::FlowUiAction,
+    model::{ClientFlow, ClientOverlay},
+};
+use bevy::{
+    input::mouse::MouseWheel,
+    prelude::*,
+    ui::{InteractionDisabled, ScrollPosition, UiScale},
+    window::PrimaryWindow,
+};
 
-use super::super::*;
-use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct BrawlerCreationDraft {
+    pub(in crate::client::flow) fighter_profile_id: crate::profiles::FighterProfileId,
+    pub(in crate::client::flow) weapon_base_id: crate::profiles::WeaponBaseId,
+    pub(in crate::client::flow) ultimate: crate::builds::UltimateDefinitionId,
+    pub(in crate::client::flow) inline_error: Option<String>,
+}
+
+impl Default for BrawlerCreationDraft {
+    fn default() -> Self {
+        Self {
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            inline_error: None,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct BrawlerEditDraft {
+    pub(in crate::client::flow) brawler_id: Option<crate::profiles::SavedBrawlerId>,
+    pub(in crate::client::flow) name: String,
+    pub(in crate::client::flow) fighter_profile_id: crate::profiles::FighterProfileId,
+    pub(in crate::client::flow) weapon_base_id: crate::profiles::WeaponBaseId,
+    pub(in crate::client::flow) ultimate_id: crate::builds::UltimateDefinitionId,
+    pub(in crate::client::flow) passive_ids: [crate::builds::PassiveDefinitionId; 2],
+    pub(in crate::client::flow) name_caret: usize,
+    pub(in crate::client::flow) editing_name: bool,
+    pub(in crate::client::flow) inline_error: Option<String>,
+}
+
+impl Default for BrawlerEditDraft {
+    fn default() -> Self {
+        Self {
+            brawler_id: None,
+            name: String::new(),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(1),
+            ultimate_id: crate::builds::UltimateDefinitionId(1),
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+            name_caret: 0,
+            editing_name: false,
+            inline_error: None,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct WeaponEquipmentDraft {
+    pub(in crate::client::flow) brawler_id: Option<crate::profiles::SavedBrawlerId>,
+    pub(in crate::client::flow) equipped_part_ids:
+        [Option<crate::weapon_parts::WeaponPartInstanceId>;
+            crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+    pub(in crate::client::flow) selected_slot: usize,
+    pub(in crate::client::flow) inline_error: Option<String>,
+}
+
+impl Default for WeaponEquipmentDraft {
+    fn default() -> Self {
+        Self {
+            brawler_id: None,
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+            selected_slot: 0,
+            inline_error: None,
+        }
+    }
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DeleteBrawlerConfirmationRoot;
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct BrawlerListRoot {
+    profile_revision: crate::profiles::ProfileRevision,
+    pending: bool,
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct BrawlerListScrollArea;
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct BrawlerDetailsRoot {
+    brawler_id: crate::profiles::SavedBrawlerId,
+    profile_revision: crate::profiles::ProfileRevision,
+    pending: bool,
+    pub(in crate::client::flow) contextual_confirmation: bool,
+    layout: BrawlerDetailsLayout,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BrawlerDetailsLayout {
+    Compact,
+    Wide,
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct BrawlerDetailsScrollArea;
+
+#[derive(Component)]
+pub(in crate::client) struct BrawlerDetailsPreviewHost;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct BrawlerCreationRoot {
+    draft: BrawlerCreationDraft,
+    layout: BrawlerDetailsLayout,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct BrawlerEditorRoot {
+    draft: BrawlerEditDraft,
+    layout: BrawlerDetailsLayout,
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct WeaponEquipmentRoot {
+    draft: WeaponEquipmentDraft,
+    layout: BrawlerDetailsLayout,
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct WeaponEquipmentScrollArea;
 
 #[allow(clippy::needless_pass_by_value)]
 pub(in crate::client::flow) fn open_empty_profile_creation(

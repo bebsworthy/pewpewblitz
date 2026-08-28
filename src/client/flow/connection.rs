@@ -1,11 +1,17 @@
 //! Connection-attempt state, deadlines, DNS resolution, and candidate spawning.
 
-use super::{
-    ClientNetworkConfig, LogicalServerAddress, MAX_RESOLVED_CANDIDATES, ProductLobbyAttempt,
-    RoutedClientLifecycle, ServerAddressHost, SessionObservation, spawn_product_lobby_connection,
-};
 use crate::client::server_select::parse_server_address;
-use bevy::prelude::{Commands, Entity, Resource};
+use crate::client::{
+    ClientNetworkConfig, RoutedClientLifecycle,
+    flow::{
+        actions::SessionObservation,
+        model::{ClientFlow, ClientOverlay, FlowError, FlowErrorAction, FlowErrorKind},
+        screens::server_select::ServerSelectModel,
+    },
+    server_select::{LogicalServerAddress, MAX_RESOLVED_CANDIDATES, ServerAddressHost},
+    session::{ProductLobbyAttempt, spawn_product_lobby_connection},
+};
+use bevy::prelude::{Commands, Entity, NextState, Res, ResMut, Resource, Time};
 use bevy::tasks::{IoTaskPool, Task};
 use std::{
     collections::BTreeSet,
@@ -250,5 +256,56 @@ pub(super) fn connection_presentation(pending: &PendingConnection, now: Duration
         ConnectionStage::JoiningLobby => format!(
             "STEP 3 OF 3\nChecking compatibility and game list{dots}\n{address}\nUp to {remaining_seconds}s remaining"
         ),
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    reason = "startup creates the one bounded product connection from runtime-owned resources"
+)]
+pub(super) fn start_initial_connection(
+    mut commands: Commands,
+    time: Res<Time<bevy::prelude::Real>>,
+    config: Res<ClientNetworkConfig>,
+    model: Res<ServerSelectModel>,
+    mut generation: ResMut<ConnectionGeneration>,
+    mut resolver: ResMut<ResolverState>,
+    mut routed: ResMut<RoutedClientLifecycle>,
+    mut next_flow: ResMut<NextState<ClientFlow>>,
+    mut overlay: ResMut<ClientOverlay>,
+) {
+    let target = match validate_target(&model.address, &model.name) {
+        Ok(target) => target,
+        Err(error) => {
+            *overlay = ClientOverlay::Error(FlowError {
+                kind: FlowErrorKind::Connection,
+                message: error,
+                return_flow: ClientFlow::ServerSelect,
+                actions: [Some(FlowErrorAction::Back), None],
+            });
+            next_flow.set(ClientFlow::ServerSelect);
+            return;
+        }
+    };
+    if let Err(error) = begin_connection_target(
+        &mut commands,
+        &config,
+        time.elapsed(),
+        &mut generation,
+        &mut resolver,
+        &mut routed,
+        target,
+    ) {
+        *overlay = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Connection,
+            message: error,
+            return_flow: ClientFlow::ServerSelect,
+            actions: [
+                Some(FlowErrorAction::RetryConnection),
+                Some(FlowErrorAction::Back),
+            ],
+        });
+        next_flow.set(ClientFlow::ServerSelect);
     }
 }

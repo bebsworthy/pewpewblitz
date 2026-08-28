@@ -1,10 +1,14 @@
 //! Local connection-flow persistence ownership.
 
-use super::{
-    ClientFlow, ClientNetworkConfig, FlowError, FlowErrorAction, FlowErrorKind, ServerSelectModel,
-};
 use crate::client::connection_persistence::{
     ClientConnectionsPath, ConnectionsFileV1, load_connections,
+};
+use crate::client::{
+    ClientNetworkConfig,
+    flow::{
+        model::{ClientFlow, FlowError, FlowErrorAction, FlowErrorKind},
+        screens::server_select::ServerSelectModel,
+    },
 };
 use bevy::prelude::{Commands, Res, ResMut, Resource};
 

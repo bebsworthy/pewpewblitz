@@ -1,8 +1,111 @@
 //! Authenticated dashboard snapshot and product-action presentation.
-#![allow(clippy::wildcard_imports)]
-
-use super::super::*;
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
+use super::{
+    brawlers::brawler_loadout_summary,
+    queue::queue_population,
+    shared::{FlowButton, FlowNavigation, FlowRoot, spawn_flow_error_button, spawn_heading},
+};
+use crate::client::{
+    ClientLobbyMembership, RuntimeLobbyTarget,
+    flow::{
+        actions::FlowUiAction,
+        model::{ClientFlow, ClientOverlay, SelectedGameType, SessionPurpose},
+        persistence::ConnectionPersistence,
+    },
+};
+use bevy::{
+    input::mouse::MouseWheel,
+    prelude::*,
+    ui::{InteractionDisabled, ScrollPosition, UiScale},
+    window::PrimaryWindow,
+};
+use lightyear::prelude::client::Client;
+
+pub(in crate::client::flow) const DASHBOARD_PLAY_INDEX: usize = 0;
+pub(in crate::client::flow) const DASHBOARD_PRACTICE_INDEX: usize = 1;
+pub(in crate::client::flow) const DASHBOARD_GAME_INDEX: usize = 2;
+pub(in crate::client::flow) const DASHBOARD_BUILD_INDEX: usize = 3;
+pub(in crate::client::flow) const DASHBOARD_SETTINGS_INDEX: usize = 4;
+pub(in crate::client::flow) const DASHBOARD_MENU_INDEX: usize = 5;
+const DASHBOARD_COMPACT_WIDTH: f32 = 1_000.0;
+const DASHBOARD_COMPACT_HEIGHT: f32 = 640.0;
+
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct DashboardReturnFocus(pub(in crate::client::flow) Option<usize>);
+
+#[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) struct DashboardNotice(pub(in crate::client::flow) Option<String>);
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::client::flow) enum DashboardLayoutClass {
+    #[default]
+    Wide,
+    Compact,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) enum DashboardNavigationDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Component)]
+pub(in crate::client) struct DashboardRoot;
+
+#[derive(Component, Clone, Copy)]
+pub(in crate::client::flow) enum DashboardLayoutRole {
+    Root,
+    Header,
+    Wordmark,
+    Identity,
+    HeaderSpacer,
+    Center,
+    Preview,
+    Build,
+    ActionRow,
+    Mode,
+    UtilityButton { wide_width: f32 },
+    UtilityLabel { has_icon: bool },
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DashboardGameSummaryLabel;
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DashboardPlayLabel;
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DashboardPracticeLabel;
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DashboardBrawlerNameLabel;
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DashboardBrawlerSummaryLabel;
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DashboardMenuRoot;
+
+#[derive(Component)]
+struct DashboardBuildCard;
+
+#[derive(Component)]
+struct DashboardModeCard;
+
+#[derive(Component, Clone, Copy, Debug)]
+pub(in crate::client::flow) enum DashboardButtonStyle {
+    Preview,
+    Header,
+    Build,
+    Mode,
+    Practice,
+    Play,
+}
+
+#[derive(Component)]
+pub(in crate::client) struct DashboardPreviewHost;
 
 #[allow(
     clippy::too_many_arguments,
