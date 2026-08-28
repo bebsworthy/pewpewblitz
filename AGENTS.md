@@ -169,7 +169,8 @@ src/
     catalog.rs             map-asset catalogs, recipes, validation, resolution, and tests
     objects.rs             damageable-target identities, health-state shapes, facts, and cues
     pickups.rs             restoration-pickup authority, collection, expiry, reset, and telemetry
-    runtime.rs             authoritative dynamic state, destruction, object terminals, recovery, and colliders
+    runtime/               server map schedule composition, object authority, installation/colliders,
+                           dynamic destruction/recovery, and focused tests
     server.rs              selected-map startup and exact-generation lifecycle
     client.rs              replicated map convergence, recovery, and presentation readiness
   matchplay/
@@ -198,7 +199,8 @@ src/
     presentation.rs        screen-space HUD and pause-overlay UI
     presentation_3d/       sole gameplay-world renderer: camera, coordinates, GLB/animation,
                            map/combat meshes, projected fighter UI, and render diagnostics
-    session.rs             connection, selection, shutdown, and headless automation lifecycle
+    session/               connection/admission, routed transitions, match commands, automation,
+                           observation, shutdown, and explicit session schedule composition
     settings/              local calibration/rebinding state and pause-overlay UI
     tests.rs               client composition and behavior tests
   diagnostics/
@@ -315,6 +317,26 @@ primitive override validates 3D degradation and is not a renderer selector.
   new requirement becomes real. Maintainability means clear ownership, limited scope, and safe
   change—not maximum abstraction.
 
+## Implementation and verification rules
+
+- The active ticket description and spec are the implementation scope contract. Update them through
+  the Ticket CLI and revalidate acceptance criteria before materially changing scope or
+  architecture.
+- Server authority is not optional, including in-process and offline development modes.
+- Clients send intent, not positions, hits, damage, scores, status triggers, or map edits.
+- Separate authored definitions, selected builds, and runtime state.
+- Keep gameplay events independent from rendering, audio, camera, and HUD presentation.
+- Use focused pure-function tests where a rule is naturally independent of ECS. Test component, resource, lifecycle, and state behavior with small `App`/`World` schedule tests; add headless integration tests for authority and replication.
+- Advance Bevy fixed time or explicitly run the relevant schedule in time-dependent tests rather than waiting on wall-clock sleeps.
+- Visual verification complements automated tests; it does not replace them.
+- Preserve unrelated user changes and keep deferred work visible in separate backlog tickets.
+
+Canonical build, test, process, closeout, and playtest commands already live in `justfile` and the
+root `README.md`; use those rather than inventing substitutes. The completed V3 renderer has no 2D
+gameplay-world fallback or user-facing renderer choice. `BRAWLER_FORCE_PRIMITIVE_WORLD` selects
+deterministic meshes inside the same 3D composition and must not become a permanent content mode.
+
+
 ## Local implementation references
 
 Use the checked-in source and examples before guessing an API or copying an unrelated internet snippet, but verify snapshot versions before transferring exact APIs:
@@ -390,21 +412,19 @@ For active work:
    durable documentation, and required learning are complete. Run `ticket sync` and report the
    ticket ID in the handoff.
 
-## Implementation and verification rules
+## Codebase Intelligence for brawler (Repowise)
 
-- The active ticket description and spec are the implementation scope contract. Update them through
-  the Ticket CLI and revalidate acceptance criteria before materially changing scope or
-  architecture.
-- Server authority is not optional, including in-process and offline development modes.
-- Clients send intent, not positions, hits, damage, scores, status triggers, or map edits.
-- Separate authored definitions, selected builds, and runtime state.
-- Keep gameplay events independent from rendering, audio, camera, and HUD presentation.
-- Use focused pure-function tests where a rule is naturally independent of ECS. Test component, resource, lifecycle, and state behavior with small `App`/`World` schedule tests; add headless integration tests for authority and replication.
-- Advance Bevy fixed time or explicitly run the relevant schedule in time-dependent tests rather than waiting on wall-clock sleeps.
-- Visual verification complements automated tests; it does not replace them.
-- Preserve unrelated user changes and keep deferred work visible in separate backlog tickets.
+### Tools
 
-Canonical build, test, process, closeout, and playtest commands already live in `justfile` and the
-root `README.md`; use those rather than inventing substitutes. The completed V3 renderer has no 2D
-gameplay-world fallback or user-facing renderer choice. `BRAWLER_FORCE_PRIMITIVE_WORLD` selects
-deterministic meshes inside the same 3D composition and must not become a permanent content mode.
+| Tool | When and why |
+|------|--------------|
+| `get_answer(question)` | First call for any how/where/why question. Cite `confidence: "high"` or `grounding: "extracted"` directly; `degraded` means judge by `retrieval_quality`. `symbol_bodies` has live bodies. |
+| `get_context(targets=[...])` | Triage card for files/modules/symbols: docs, signatures, hotspot, fix history. No source bytes — `include=["skeleton"]` for the whole file verified, `["callers"|"decisions"]` for depth. Batch targets. |
+| `get_symbol(id, depth?)` | **Follow-up, not an entry point** — one verified body for an id a prior response named (`path.py::Name`, `path.py:140-180`, `repowise#<hex>`). Never walk a file symbol by symbol; Read it. |
+| `search_codebase(query)` | Hybrid search, auto-routed by query shape; force with `mode=symbol|path|concept|hybrid`. A hit whose `sources` are `[fts]` only has no semantic agreement, so verify it. |
+| `get_why(query, targets?)` | Why the code is shaped this way: decision records, git archaeology, rationale comments. Call before a refactor or a pattern divergence. |
+| `get_risk(targets, changed_files?, include?)` | File history and structural reach. PR mode leads with `directive`; its 0-10 structural heuristic is uncalibrated, not a probability. Read typed test recommendations and coverage state first. |
+| `get_change_risk(revspec?, extensions?, exclude_patterns?)` | Deterministic live-diff review signal for a commit or range. Lead with benchmarked percentile/classification; the 0-10 diff-shape score is supporting, not a probability. `get_risk` scores paths. |
+| `get_health(targets?, include?)` | Defect / maintainability / performance scores and findings. Self-check the files you touched before finishing. |
+| `get_dead_code(tier?, min_confidence?, safe_only?)` | Confidence-tiered unreachable files / unused exports / zombie packages. For cleanup sweeps, not targeted fixes. |
+

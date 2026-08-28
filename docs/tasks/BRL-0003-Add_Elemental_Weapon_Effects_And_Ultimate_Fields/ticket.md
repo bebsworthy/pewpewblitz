@@ -1,14 +1,15 @@
 ---
 id: BRL-0003
 title: Add elemental weapon effects and ultimate fields
-status: backlog
+status: todo
 theme: core
 release:
+priority: none
 created: 2026-08-27T15:57:50Z
-modified: 2026-08-27T18:52:02Z
+modified: 2026-08-28T11:01:11Z
 closed:
-revision: 3c2595e8033e0a87
-blocks: []
+revision: fcc443be064f298a
+blocks: [BRL-0040]
 related: []
 ---
 
