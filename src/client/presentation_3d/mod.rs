@@ -1791,9 +1791,7 @@ fn spawn_map_grass(
             rotation: Quat::from_rotation_y(rotation + f32::from(adjacency) * 0.17),
             scale: Vec3::new(0.72, 0.75, 0.72),
         },
-        Name::new(format!(
-            "non-concealing tall grass adjacency {adjacency:04b}"
-        )),
+        Name::new(format!("tall grass adjacency {adjacency:04b}")),
     ));
 }
 

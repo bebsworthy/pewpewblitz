@@ -37,8 +37,8 @@ gameplay, networking, admission, or match readiness.
   environment assets are optional and resolve through `assets/catalogs/map_asset_visuals.ron`; the
   dedicated server does not load that catalog.
 - Existing generated tall grass is one rotated primitive per cell. It does not provide a useful
-  material family or convincing foliage silhouette, and its presentation name still says
-  "non-concealing" despite the completed concealment gameplay contract.
+  material family or convincing foliage silhouette. BRL-0018 corrected its stale diagnostic name
+  from "non-concealing" to neutral adjacency wording without changing gameplay behavior.
 
 ### KayKit Block Bits reference audit
 

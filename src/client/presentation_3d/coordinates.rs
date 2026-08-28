@@ -9,13 +9,6 @@ pub(crate) fn ground_position(position: Vec2) -> Vec3 {
     Vec3::new(position.x, 0.0, -position.y)
 }
 
-/// Map a simulation direction without introducing render height.
-#[must_use]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn ground_direction(direction: Vec2) -> Vec3 {
-    Vec3::new(direction.x, 0.0, -direction.y)
-}
-
 /// Recover a simulation point while intentionally discarding presentation-only height.
 #[must_use]
 pub(crate) fn ground_point(point: Vec3) -> Vec2 {
@@ -52,12 +45,6 @@ mod tests {
     }
 
     #[test]
-    fn basis_directions_preserve_the_gameplay_plane() {
-        assert_eq!(ground_direction(Vec2::X), Vec3::X);
-        assert_eq!(ground_direction(Vec2::Y), Vec3::NEG_Z);
-    }
-
-    #[test]
     fn yaw_points_positive_x_toward_simulation_facing() {
         for angle in [
             0.0,
@@ -68,7 +55,7 @@ mod tests {
             let rotation = Rotation::radians(angle);
             assert_vec3_close(
                 ground_rotation(rotation) * Vec3::X,
-                ground_direction(Vec2::from_angle(angle)),
+                ground_position(Vec2::from_angle(angle)),
             );
         }
     }
