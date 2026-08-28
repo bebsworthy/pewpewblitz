@@ -10,6 +10,10 @@ fn public_projection_count(app: &mut App) -> usize {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario proves distant hiding, public roster retention, proximity reveal, and rehiding together"
+)]
 fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
     let mut harness = Harness::new_feature_yard(2);
     harness.step_until(|harness| {
@@ -159,6 +163,10 @@ fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario keeps self-cloak, proximity immunity, team scan, and expiry convergence in one security proof"
+)]
 fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
     let mut harness = Harness::new_feature_yard(2);
     harness.clients[0]
@@ -323,6 +331,10 @@ fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario proves field replication, range hiding, and confirmation suppression as one security contract"
+)]
 fn concealment_field_is_public_hides_at_range_and_confirmation_does_not_fire() {
     let mut harness = Harness::new_feature_yard(2);
     harness.clients[1]

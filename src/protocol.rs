@@ -5,18 +5,6 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy::reflect::Reflect;
 use lightyear::input::config::InputConfig;
-#[cfg(feature = "network-test")]
-use lightyear::input::input_buffer::InputBuffer;
-#[cfg(feature = "network-test")]
-use lightyear::input::input_message::{
-    ActionStateSequence, InputMessage, InputTarget, PerTargetData,
-};
-#[cfg(feature = "network-test")]
-use lightyear::prelude::Tick;
-#[cfg(feature = "network-test")]
-use lightyear::prelude::input::InputChannel;
-#[cfg(feature = "network-test")]
-use lightyear::prelude::input::native::{ActionState, NativeStateSequence};
 use lightyear::prelude::{
     AppChannelExt, AppComponentExt, AppInterpolationExt, AppMessageExt, ChannelMode,
     ChannelRegistry, ChannelSettings, ComponentRegistry, InterpolationFns,
@@ -71,37 +59,6 @@ pub struct CombatChannel;
 
 /// Ordered reliable map-mutation and bounded recovery traffic.
 pub struct MapDynamicChannel;
-
-#[cfg(feature = "network-test")]
-pub type TestNativeInputMessage = InputMessage<NativeStateSequence<FighterInput>>;
-
-#[cfg(feature = "network-test")]
-#[must_use]
-pub fn forged_native_input_message_for_test(
-    target: InputTarget,
-    end_tick: u32,
-    input: FighterInput,
-) -> TestNativeInputMessage {
-    let mut buffer = InputBuffer::default();
-    buffer.set(Tick(end_tick), ActionState(input));
-    let states = NativeStateSequence::build_from_input_buffer(&buffer, 1, Tick(end_tick))
-        .expect("forged test input sequence should contain one state");
-    let mut message = InputMessage::new(Tick(end_tick));
-    message.inputs.push(PerTargetData { target, states });
-    message
-}
-
-#[cfg(feature = "network-test")]
-pub fn send_forged_native_input_for_test(
-    sender: &mut lightyear::prelude::MessageSender<TestNativeInputMessage>,
-    target: InputTarget,
-    end_tick: u32,
-    input: FighterInput,
-) {
-    sender.send::<InputChannel>(forged_native_input_message_for_test(
-        target, end_tick, input,
-    ));
-}
 
 /// Hash of the Lightyear message, component, and channel registries for the local app.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]

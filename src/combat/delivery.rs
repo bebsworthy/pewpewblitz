@@ -6,12 +6,14 @@ use super::*;
 use bevy::prelude::Vec2;
 
 #[must_use]
+#[cfg(feature = "client")]
 pub fn lob_height(progress: f32, visual_arc_height: f32) -> f32 {
     let progress = progress.clamp(0.0, 1.0);
     4.0 * visual_arc_height * progress * (1.0 - progress)
 }
 
 #[must_use]
+#[cfg(feature = "server")]
 pub fn sector_contains(
     origin: Vec2,
     facing: f32,
@@ -639,10 +641,12 @@ pub(super) fn resolve_melee_attacks(
 mod tests {
     use super::*;
     #[test]
+    #[cfg(feature = "client")]
     fn arc_height_peaks_at_half_progress() {
         assert!((lob_height(0.5, 140.0) - 140.0).abs() < 0.001);
     }
     #[test]
+    #[cfg(feature = "server")]
     fn sector_includes_tangent_target_radius() {
         assert!(sector_contains(
             Vec2::ZERO,

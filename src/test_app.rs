@@ -3,17 +3,26 @@
 use bevy::{
     app::PluginsState,
     ecs::error::{ErrorHandler, FallbackErrorHandler, panic as panic_on_error},
-    ecs::schedule::{LogLevel, ScheduleBuildSettings},
+    ecs::schedule::{LogLevel, ScheduleBuildSettings, ScheduleLabel},
     prelude::App,
 };
 
-/// Make one focused test app reject ambiguous Brawler-owned system composition while reporting
-/// the owning sets. Call this only on bounded test graphs, not third-party plugin internals.
-pub(crate) fn reject_owned_schedule_ambiguities(app: &mut App) {
-    app.configure_schedules(ScheduleBuildSettings {
-        ambiguity_detection: LogLevel::Error,
-        report_sets: true,
-        ..ScheduleBuildSettings::default()
+/// Reject ambiguities in one reviewed Brawler-owned schedule while reporting the owning sets.
+pub(crate) fn reject_owned_schedule_ambiguities(app: &mut App, schedule_label: impl ScheduleLabel) {
+    configure_owned_schedule_ambiguities(app, schedule_label, LogLevel::Error);
+}
+
+fn configure_owned_schedule_ambiguities(
+    app: &mut App,
+    schedule_label: impl ScheduleLabel,
+    ambiguity_detection: LogLevel,
+) {
+    app.edit_schedule(schedule_label, |schedule| {
+        schedule.set_build_settings(ScheduleBuildSettings {
+            ambiguity_detection,
+            report_sets: true,
+            ..ScheduleBuildSettings::default()
+        });
     });
 }
 
@@ -42,7 +51,7 @@ mod tests {
     use super::*;
     use bevy::{
         ecs::error::{BevyError, ErrorContext},
-        prelude::{Res, Resource, Update},
+        prelude::{Last, Res, Resource, Update},
     };
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},
@@ -87,5 +96,19 @@ mod tests {
             EXPECTED_ERROR_CAPTURED.load(Ordering::SeqCst),
             "the intentional missing-resource failure was not observed"
         );
+    }
+
+    #[test]
+    fn owned_ambiguity_gate_is_error_level_and_schedule_local() {
+        let mut app = App::new();
+        app.add_systems(Update, || {}).add_systems(Last, || {});
+
+        reject_owned_schedule_ambiguities(&mut app, Update);
+
+        let update = app.get_schedule(Update).unwrap().get_build_settings();
+        let last = app.get_schedule(Last).unwrap().get_build_settings();
+        assert!(matches!(update.ambiguity_detection, LogLevel::Error));
+        assert!(update.report_sets);
+        assert!(matches!(last.ambiguity_detection, LogLevel::Ignore));
     }
 }

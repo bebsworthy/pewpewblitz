@@ -10,11 +10,7 @@ use super::{
 };
 use bevy::{
     ecs::schedule::ApplyDeferred,
-    input::{
-        ButtonState,
-        keyboard::KeyboardInput,
-        mouse::{MouseScrollUnit, MouseWheel},
-    },
+    input::{ButtonState, keyboard::KeyboardInput, mouse::MouseWheel},
     prelude::*,
     tasks::{block_on, poll_once},
     ui::{InteractionDisabled, ScrollPosition, UiScale, UiSystems},
@@ -1778,6 +1774,7 @@ fn render_editor_value(model: &ServerSelectModel, field: EditingField) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::input::mouse::MouseScrollUnit;
 
     fn flow_test_app() -> App {
         let mut app = App::new();

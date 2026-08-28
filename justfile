@@ -28,7 +28,7 @@ fmt:
 check: _check-routing _check-client _check-server _check-network _check-balance-lab
 
 # Run formatting, Clippy, and dedicated-server isolation checks.
-lint: _fmt-check _balance-lab-web _clippy-routing _clippy-client _clippy-server _clippy-balance-lab _server-features _v3-world-presentation _map-cleanup
+lint: _fmt-check _balance-lab-web _clippy-routing _clippy-client _clippy-server _clippy-network _clippy-balance-lab _server-features _v3-world-presentation _map-cleanup
 
 # Run all deterministic Rust test suites, including the performance gates.
 test: _test-routing _test-client _test-server _test-balance-lab _test-network _test-performance
@@ -83,6 +83,9 @@ _clippy-client:
 
 _clippy-server:
     cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings
+
+_clippy-network:
+    cargo clippy --locked --no-default-features --features network-test --tests -- -D warnings
 
 _clippy-balance-lab:
     cargo clippy --locked --no-default-features --features balance-lab --all-targets -- -D warnings

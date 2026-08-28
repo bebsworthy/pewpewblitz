@@ -42,11 +42,11 @@ use bevy::{
     app::{ScheduleRunnerPlugin, TerminalCtrlCHandlerPlugin},
     ecs::error::{FallbackErrorHandler, error},
     ecs::system::SystemParam,
-    log::LogPlugin,
     prelude::*,
     state::app::StatesPlugin,
 };
 use core::time::Duration;
+use lightyear::connection::client::Disconnecting;
 use lightyear::prelude::server::{
     NetcodeConfig, NetcodeServer, ServerPlugins, Start, Started, Stop, Stopped,
 };
@@ -1353,11 +1353,10 @@ fn disconnect_rejected_sessions(
             continue;
         }
         if matches!(session.phase, ServerSessionPhase::Rejected) {
-            // Server-side `Disconnect` is a client/host trigger in Lightyear 0.29. Marking
-            // the link disconnected lets Lightyear's lifecycle observer own its teardown;
-            // queueing our own despawn here races that observer and produces a harmless but
-            // noisy duplicate-despawn warning.
-            commands.entity(entity).try_insert(Disconnected::default());
+            // `Disconnecting` is the server-client lifecycle request in Lightyear 0.29.
+            // Its server connection system marks the link disconnected and despawns it on
+            // the next frame, keeping teardown single-owned without a duplicate command.
+            commands.entity(entity).try_insert(Disconnecting);
         }
     }
 }
@@ -1443,22 +1442,22 @@ fn build_authoritative_app(
     if install_terminal_handler {
         app.add_plugins(TerminalCtrlCHandlerPlugin);
     }
-    app.add_plugins(LogPlugin::default())
-        .add_plugins(ServerPlugins {
-            tick_duration: crate::timing::SIMULATION_TICK,
-        })
-        .add_plugins((
-            GameplayPlugin,
-            ProtocolPlugin,
-            AvianNetworkPlugin,
-            AuthoritativeMapPlugin,
-            AuthoritativeMovementPlugin,
-            ServerNetworkPlugin,
-            DedicatedServerPlugin,
-            AuthoritativeMatchPlugin,
-            crate::diagnostics::ProcessDiagnosticsPlugin,
-            practice::PracticeBotPlugin,
-        ));
+    crate::logging::add_log_plugin_once(&mut app);
+    app.add_plugins(ServerPlugins {
+        tick_duration: crate::timing::SIMULATION_TICK,
+    })
+    .add_plugins((
+        GameplayPlugin,
+        ProtocolPlugin,
+        AvianNetworkPlugin,
+        AuthoritativeMapPlugin,
+        AuthoritativeMovementPlugin,
+        ServerNetworkPlugin,
+        DedicatedServerPlugin,
+        AuthoritativeMatchPlugin,
+        crate::diagnostics::ProcessDiagnosticsPlugin,
+        practice::PracticeBotPlugin,
+    ));
     #[cfg(feature = "balance-lab")]
     app.add_plugins(balance_lab::BalanceLabPlugin);
     if let Some(path) =
@@ -1588,12 +1587,13 @@ pub fn build_app() -> App {
 }
 
 /// Request a graceful server stop through Lightyear's lifecycle.
-pub fn request_stop(world: &mut World, server: Entity) {
+#[cfg(feature = "network-test")]
+pub(crate) fn request_stop(world: &mut World, server: Entity) {
     world.trigger(Stop { entity: server });
 }
 
 #[cfg(feature = "network-test")]
-pub fn spawn_crossbeam_server(world: &mut World, config: &ServerNetworkConfig) -> Entity {
+pub(crate) fn spawn_crossbeam_server(world: &mut World, config: &ServerNetworkConfig) -> Entity {
     let timeout_secs = i32::try_from(config.client_timeout.as_secs())
         .expect("test client timeout must fit in Netcode's i32 seconds field");
     let netcode_config = NetcodeConfig::default()
@@ -1617,7 +1617,7 @@ pub fn spawn_crossbeam_server(world: &mut World, config: &ServerNetworkConfig) -
 }
 
 #[cfg(feature = "network-test")]
-pub fn spawn_crossbeam_link(
+pub(crate) fn spawn_crossbeam_link(
     world: &mut World,
     server: Entity,
     io: lightyear::crossbeam::CrossbeamIo,

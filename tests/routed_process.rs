@@ -122,7 +122,7 @@ fn lobby_spec() -> WorkerLaunchSpec {
 fn allocation_request(
     request_id: u64,
     base: u128,
-    build: brawler::server::LobbyBuildIdentity,
+    build: &brawler::server::LobbyBuildIdentity,
 ) -> AllocateRequestBody {
     let lobby_session_id = LobbySessionId::new(base).unwrap();
     let participants = [
@@ -259,7 +259,7 @@ fn real_bevy_workers_isolate_match_crash_and_cleanup_routes_peers() {
         runtime
             .submit_allocation_request(
                 WorkerId::new(LOBBY_WORKER_ID).unwrap(),
-                allocation_request(1, 0x10000, build),
+                allocation_request(1, 0x10000, &build),
             )
             .expect("first production allocation spawns"),
     );
@@ -267,7 +267,7 @@ fn real_bevy_workers_isolate_match_crash_and_cleanup_routes_peers() {
         runtime
             .submit_allocation_request(
                 WorkerId::new(LOBBY_WORKER_ID).unwrap(),
-                allocation_request(2, 0x20000, build),
+                allocation_request(2, 0x20000, &build),
             )
             .expect("second production allocation spawns"),
     );
@@ -434,10 +434,11 @@ fn real_bevy_lobby_restarts_after_crash_and_cleans_exactly() {
                 LifecycleEvent::RestartScheduled { worker_id: id, .. } if *id == worker_id
             );
             if saw_restart {
-                if let LifecycleEvent::Spawned { worker_id: id, pid } = event {
-                    if *id == worker_id && *pid != original_pid {
-                        restarted_pid = Some(*pid);
-                    }
+                if let LifecycleEvent::Spawned { worker_id: id, pid } = event
+                    && *id == worker_id
+                    && *pid != original_pid
+                {
+                    restarted_pid = Some(*pid);
                 }
                 saw_restarted_ready |= matches!(
                     event,

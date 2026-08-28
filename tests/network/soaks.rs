@@ -7,9 +7,9 @@
 
 use super::harness::Harness;
 use bevy::prelude::{With, Without};
-use brawler::combat::TestDummy;
 use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState, WipeoutState};
 use brawler::protocol::{MatchCommand, MatchCommandRequest};
+use brawler::testing::TestDummy;
 
 /// Soak length per mode: the M11 locked budget of 25 completed matches.
 const MATCH_SOAK_ROUNDS: usize = 25;
@@ -205,18 +205,29 @@ fn run_match_soak(harness: &mut Harness, clients: usize, hot_zone: bool) {
 
 #[test]
 fn wipeout_twenty_five_match_restart_soak_retains_bounded_state() {
+    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_match(2);
     run_match_soak(&mut harness, 2, false);
+    assert!(
+        diagnostics.finish() > 0,
+        "wipeout soak did not exercise the expected late-input correction path"
+    );
 }
 
 #[test]
 fn hot_zone_twenty_five_match_restart_soak_retains_bounded_state() {
+    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_hot_zone_match(2);
     run_match_soak(&mut harness, 2, true);
+    assert!(
+        diagnostics.finish() > 0,
+        "hot-zone soak did not exercise the expected late-input correction path"
+    );
 }
 
 #[test]
 fn reconnect_soak_alternates_disconnect_and_clean_new_sessions() {
+    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_match(2);
     let mut sequence = 10_u64;
     step_until_labelled(&mut harness, "initial join", |harness| {
@@ -224,7 +235,7 @@ fn reconnect_soak_alternates_disconnect_and_clean_new_sessions() {
     });
     let static_count = harness.server_static_arena_count();
     // Client worlds accumulate as sessions reconnect; track the two live indices.
-    let mut live = vec![0_usize, 1_usize];
+    let mut live = [0_usize, 1_usize];
 
     for round in 0..RECONNECT_SOAK_ROUNDS {
         // Ready the server-resolved saved-brawler loadouts.
@@ -295,4 +306,8 @@ fn reconnect_soak_alternates_disconnect_and_clean_new_sessions() {
         });
         assert_eq!(harness.server_static_arena_count(), static_count);
     }
+    assert!(
+        diagnostics.finish() > 0,
+        "reconnect soak did not exercise the expected late-input correction path"
+    );
 }

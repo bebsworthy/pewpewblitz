@@ -93,6 +93,8 @@ mod tests {
                     record_finalize_set.in_set(GameplaySet::Finalize),
                 ),
             );
+        crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
+        crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
         app.update();
         // Bevy's real clock records its first instant before producing a delta.
         app.update();

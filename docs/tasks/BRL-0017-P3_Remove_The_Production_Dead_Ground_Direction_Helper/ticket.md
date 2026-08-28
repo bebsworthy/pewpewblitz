@@ -1,13 +1,14 @@
 ---
 id: BRL-0017
 title: 'P3: Remove the production-dead ground_direction helper'
-status: backlog
+status: todo
 theme: quality
 release:
+priority: none
 created: 2026-08-27T18:15:31Z
-modified: 2026-08-27T18:15:33Z
+modified: 2026-08-27T22:50:20Z
 closed:
-revision: ce7cafa74b063631
+revision: 592868ca9403cfe6
 blocks: []
 related: [BRL-0002]
 ---

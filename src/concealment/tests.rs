@@ -135,14 +135,33 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     #[derive(Resource, Default)]
     struct Trace(Vec<&'static str>);
 
-    fn observe(mut trace: ResMut<Trace>) {
-        trace.0.push("outcomes");
+    #[derive(Resource, Default)]
+    struct OutcomesObserved(bool);
+
+    #[derive(Resource, Default)]
+    struct LifecycleApplied(bool);
+
+    fn observe(mut observed: ResMut<OutcomesObserved>) {
+        observed.0 = true;
     }
-    fn resolve(mut trace: ResMut<Trace>) {
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "Bevy systems receive resource parameters by value"
+    )]
+    fn resolve(
+        observed: Res<OutcomesObserved>,
+        lifecycle: Res<LifecycleApplied>,
+        mut trace: ResMut<Trace>,
+    ) {
+        assert!(observed.0, "outcomes must precede source resolution");
+        assert!(
+            lifecycle.0,
+            "combat lifecycle must precede source resolution"
+        );
         trace.0.push("sources");
     }
-    fn lifecycle(mut trace: ResMut<Trace>) {
-        trace.0.push("lifecycle");
+    fn lifecycle(mut applied: ResMut<LifecycleApplied>) {
+        applied.0 = true;
     }
     fn decide(mut trace: ResMut<Trace>) {
         trace.0.push("observers");
@@ -154,7 +173,9 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, crate::gameplay::GameplayPlugin))
         .insert_resource(TimeUpdateStrategy::FixedTimesteps(1))
-        .init_resource::<Trace>();
+        .init_resource::<Trace>()
+        .init_resource::<OutcomesObserved>()
+        .init_resource::<LifecycleApplied>();
     app.configure_sets(
         FixedPostUpdate,
         AbilitySet::ObserveOutcomes.after(CombatSet::Damage),
@@ -170,11 +191,12 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
             cues.in_set(CombatSet::TelemetryAndCues),
         ),
     );
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
 
     app.update();
     app.update();
     assert_eq!(
         app.world().resource::<Trace>().0,
-        vec!["lifecycle", "outcomes", "sources", "observers", "cues"]
+        vec!["sources", "observers", "cues"]
     );
 }

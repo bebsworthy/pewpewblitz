@@ -153,7 +153,7 @@ fn graceful_server_stop_removes_sessions_and_owned_placeholders() {
             && harness.client_is_active(1)
             && harness.server_ids().len() == 2
     });
-    brawler::server::request_stop(harness.server.world_mut(), harness.server_entity);
+    brawler::testing::request_server_stop(harness.server.world_mut(), harness.server_entity);
     for _ in 0..30 {
         harness.step();
     }

@@ -14,6 +14,7 @@ mod preview;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "network-test")]
 pub use cues::CaptureCombatCues;
 pub use cues::ClientCombatEvidenceStatus;
 pub use cues::ClientCombatObservation;

@@ -1738,7 +1738,6 @@ mod connection_start_tests {
     #[test]
     fn client_session_phases_have_one_explicit_lifecycle_order() {
         let mut app = App::new();
-        crate::test_app::reject_owned_schedule_ambiguities(&mut app);
         app.init_resource::<SessionScheduleTrace>();
         configure_client_session_schedule(&mut app);
         app.add_systems(
@@ -1753,6 +1752,7 @@ mod connection_start_tests {
                 session_probe("session-enforcement").in_set(ClientSessionSet::EnforceSession),
             ),
         );
+        crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
 
         app.update();
 

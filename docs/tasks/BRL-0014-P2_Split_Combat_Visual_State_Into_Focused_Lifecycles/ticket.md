@@ -1,14 +1,14 @@
 ---
 id: BRL-0014
 title: 'P2: Split combat visual state into focused lifecycles'
-status: todo
+status: done
 theme: quality
 release:
 priority: none
 created: 2026-08-27T18:15:30Z
-modified: 2026-08-27T20:54:33Z
-closed:
-revision: d9092ea9a954312c
+modified: 2026-08-27T23:07:28Z
+closed: 2026-08-27T23:07:28Z
+revision: 06aead9c2f500b9d
 blocks: []
 related: [BRL-0002]
 ---

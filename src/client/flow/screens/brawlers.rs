@@ -2,6 +2,7 @@
 #![allow(clippy::wildcard_imports)]
 
 use super::super::*;
+use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
 
 #[allow(clippy::needless_pass_by_value)]
 pub(in crate::client::flow) fn open_empty_profile_creation(
@@ -204,23 +205,22 @@ fn spawn_brawler_screen_button(
 pub(in crate::client::flow) fn scroll_brawler_list(
     overlay: Res<ClientOverlay>,
     mut events: MessageReader<MouseWheel>,
-    mut areas: Query<&mut ScrollPosition, With<BrawlerListScrollArea>>,
+    mut areas: Query<(&ComputedNode, &mut ScrollPosition), With<BrawlerListScrollArea>>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::BrawlerList) {
         return;
     }
-    let delta = events
-        .read()
-        .map(|event| match event.unit {
-            MouseScrollUnit::Line => event.y * 36.0,
-            MouseScrollUnit::Pixel => event.y,
-        })
-        .sum::<f32>();
+    let delta = normalized_wheel_delta(events.read(), 36.0);
     if delta.abs() <= f32::EPSILON {
         return;
     }
-    for mut position in &mut areas {
-        position.0.y = (position.0.y - delta).max(0.0);
+    for (node, mut position) in &mut areas {
+        position.0.y = clamp_scroll_offset(
+            position.0.y - delta,
+            node.content_size().y,
+            node.size().y,
+            node.inverse_scale_factor(),
+        );
     }
 }
 
@@ -481,34 +481,40 @@ pub(in crate::client::flow) fn keep_brawler_list_focus_visible(
     let visible_bottom = area_center.y + area_node.size().y * 0.5 - 8.0;
     let button_top = button_center.y - button_node.size().y * 0.5;
     let button_bottom = button_center.y + button_node.size().y * 0.5;
-    if button_top < visible_top {
-        scroll.0.y = (scroll.0.y - (visible_top - button_top)).max(0.0);
-    } else if button_bottom > visible_bottom {
-        scroll.0.y += button_bottom - visible_bottom;
-    }
+    let offset = offset_keeping_interval_visible(
+        scroll.0.y,
+        visible_top..visible_bottom,
+        button_top..button_bottom,
+        area_node.inverse_scale_factor(),
+    );
+    scroll.0.y = clamp_scroll_offset(
+        offset,
+        area_node.content_size().y,
+        area_node.size().y,
+        area_node.inverse_scale_factor(),
+    );
 }
 
 #[allow(clippy::needless_pass_by_value)]
 pub(in crate::client::flow) fn scroll_brawler_details(
     overlay: Res<ClientOverlay>,
     mut events: MessageReader<MouseWheel>,
-    mut areas: Query<&mut ScrollPosition, With<BrawlerDetailsScrollArea>>,
+    mut areas: Query<(&ComputedNode, &mut ScrollPosition), With<BrawlerDetailsScrollArea>>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::BrawlerDetails(_)) {
         return;
     }
-    let delta = events
-        .read()
-        .map(|event| match event.unit {
-            MouseScrollUnit::Line => event.y * 36.0,
-            MouseScrollUnit::Pixel => event.y,
-        })
-        .sum::<f32>();
+    let delta = normalized_wheel_delta(events.read(), 36.0);
     if delta.abs() <= f32::EPSILON {
         return;
     }
-    for mut position in &mut areas {
-        position.0.y = (position.0.y - delta).max(0.0);
+    for (node, mut position) in &mut areas {
+        position.0.y = clamp_scroll_offset(
+            position.0.y - delta,
+            node.content_size().y,
+            node.size().y,
+            node.inverse_scale_factor(),
+        );
     }
 }
 
@@ -561,11 +567,18 @@ pub(in crate::client::flow) fn keep_brawler_details_focus_visible(
     let visible_bottom = area_center.y + area_node.size().y * 0.5 - 8.0;
     let button_top = button_center.y - button_node.size().y * 0.5;
     let button_bottom = button_center.y + button_node.size().y * 0.5;
-    if button_top < visible_top {
-        scroll.0.y = (scroll.0.y - (visible_top - button_top)).max(0.0);
-    } else if button_bottom > visible_bottom {
-        scroll.0.y += button_bottom - visible_bottom;
-    }
+    let offset = offset_keeping_interval_visible(
+        scroll.0.y,
+        visible_top..visible_bottom,
+        button_top..button_bottom,
+        area_node.inverse_scale_factor(),
+    );
+    scroll.0.y = clamp_scroll_offset(
+        offset,
+        area_node.content_size().y,
+        area_node.size().y,
+        area_node.inverse_scale_factor(),
+    );
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -1357,20 +1370,19 @@ pub(in crate::client::flow) fn present_brawler_editor(
 
 pub(in crate::client::flow) fn scroll_weapon_equipment(
     mut wheel: MessageReader<MouseWheel>,
-    mut areas: Query<&mut ScrollPosition, With<WeaponEquipmentScrollArea>>,
+    mut areas: Query<(&ComputedNode, &mut ScrollPosition), With<WeaponEquipmentScrollArea>>,
 ) {
-    let delta = wheel
-        .read()
-        .map(|event| match event.unit {
-            MouseScrollUnit::Line => event.y * 24.0,
-            MouseScrollUnit::Pixel => event.y,
-        })
-        .sum::<f32>();
+    let delta = normalized_wheel_delta(wheel.read(), 24.0);
     if delta.abs() <= f32::EPSILON {
         return;
     }
-    for mut position in &mut areas {
-        position.0.y = (position.0.y - delta).max(0.0);
+    for (node, mut position) in &mut areas {
+        position.0.y = clamp_scroll_offset(
+            position.0.y - delta,
+            node.content_size().y,
+            node.size().y,
+            node.inverse_scale_factor(),
+        );
     }
 }
 
@@ -1735,11 +1747,18 @@ pub(in crate::client::flow) fn keep_weapon_equipment_focus_visible(
     let visible_bottom = area_center.y + area_node.size().y * 0.5 - 8.0;
     let button_top = button_center.y - button_node.size().y * 0.5;
     let button_bottom = button_center.y + button_node.size().y * 0.5;
-    if button_top < visible_top {
-        scroll.0.y = (scroll.0.y - (visible_top - button_top)).max(0.0);
-    } else if button_bottom > visible_bottom {
-        scroll.0.y += button_bottom - visible_bottom;
-    }
+    let offset = offset_keeping_interval_visible(
+        scroll.0.y,
+        visible_top..visible_bottom,
+        button_top..button_bottom,
+        area_node.inverse_scale_factor(),
+    );
+    scroll.0.y = clamp_scroll_offset(
+        offset,
+        area_node.content_size().y,
+        area_node.size().y,
+        area_node.inverse_scale_factor(),
+    );
 }
 
 fn weapon_part_effect_text(effect: crate::weapon_parts::WeaponPartEffect) -> String {

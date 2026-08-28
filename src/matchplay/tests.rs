@@ -669,7 +669,9 @@ mod schedule_trace_tests {
         .add_systems(
             FixedPostUpdate,
             (
-                probe("physics").after(avian2d::prelude::PhysicsSystems::StepSimulation),
+                probe("physics")
+                    .after(avian2d::prelude::PhysicsSystems::StepSimulation)
+                    .before(crate::combat::CombatSet::ProjectileSweep),
                 probe("sweep").in_set(crate::combat::CombatSet::ProjectileSweep),
                 probe("damage").in_set(crate::combat::CombatSet::Damage),
                 probe("observe")
@@ -683,6 +685,8 @@ mod schedule_trace_tests {
                     .before(crate::gameplay::advance_simulation_tick),
             ),
         );
+        crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
+        crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
 
         app.update();
         app.update();

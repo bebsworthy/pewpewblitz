@@ -6,29 +6,30 @@
     reason = "combat math quantizes float weapon/effect values into the bounded u16/u8 wire forms at single, reviewed sites"
 )]
 
-pub mod attack;
+pub(crate) mod attack;
 mod authority;
 #[cfg(feature = "client")]
-pub mod client;
-pub mod cues;
-pub mod definitions;
-pub mod delivery;
-pub mod effects;
-pub mod evidence;
-pub mod model;
-pub mod outcomes;
+pub(crate) mod client;
+pub(crate) mod cues;
+pub(crate) mod definitions;
+pub(crate) mod delivery;
+#[cfg(feature = "server")]
+pub(crate) mod effects;
+pub(crate) mod evidence;
+pub(crate) mod model;
+pub(crate) mod outcomes;
 #[cfg(feature = "server")]
 mod recovery;
 #[cfg(feature = "server")]
-pub mod server;
-pub mod telemetry;
+pub(crate) mod server;
+pub(crate) mod telemetry;
 #[cfg(feature = "server")]
 pub(crate) use telemetry::AbilityWeaponTelemetry;
 
 #[allow(clippy::wildcard_imports)]
 use authority::*;
 #[cfg(feature = "server")]
-pub use authority::{TestDummy, TestDummyFixture, TestDummyResetDeadline};
+pub(crate) use authority::{TestDummy, TestDummyFixture, TestDummyResetDeadline};
 
 #[cfg(all(test, feature = "server"))]
 use attack::advance_composed_weapon_state;
@@ -57,8 +58,11 @@ pub use client::ClientCombatEvidenceStatus;
 #[cfg(feature = "client")]
 pub(crate) use client::DeduplicatedCombatCue;
 #[cfg(feature = "client")]
-pub use client::{CaptureCombatCues, ClientCombatPlugin, CombatAbilityHudText, CombatHudText};
-pub use cues::*;
+pub use client::{ClientCombatPlugin, CombatAbilityHudText, CombatHudText};
+pub use cues::{
+    CombatCue, CombatCueKey, CombatCueKind, CombatEffectCue, DamageSource, SelfCloakEndReason,
+    combat_cue_key, decode_combat_cue, encode_combat_cue,
+};
 pub use definitions::{
     DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,
     PayloadEffectDefinition, RecipientPolicy, ResolvedWeapon, SlowStacking, TargetSelection,
@@ -73,8 +77,21 @@ pub use evidence::{
 };
 #[cfg(feature = "server")]
 pub use evidence::{CombatEvidenceSnapshots, CombatOutbox};
-pub use model::*;
-pub use outcomes::*;
+#[cfg(feature = "server")]
+pub use model::{
+    ActiveAttackTracker, ActiveAttackTrackers, CombatWorldEffectFact, CombatWorldEffectFacts,
+    CompletedAttack, ComposedProjectileRuntime, MeleeAttack, PendingDelivery, PendingDeliveryKind,
+    PendingPayload, SpawnState,
+};
+pub use model::{
+    ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource, AuthoritativePose,
+    AuthoritativeTick, CombatEventId, CombatSourceKind, CurrentHealth, Defeated, DistanceBand,
+    ExternalMotion, HealthRecoveryState, KnockbackFeedback, LobbedFlight, Projectile,
+    ProjectileBody, ProjectileDeadline, ProjectileShape, ProjectileSource, ReplicatedAttackSource,
+    ShotId, SlowEffect, StraightFlight, TeamId, WeaponPhase, WeaponState, WorldPoint,
+    distance_band,
+};
+pub use outcomes::{CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTargetKind};
 #[cfg(feature = "server")]
 pub use server::ServerCombatPlugin;
 use telemetry::MAX_COMBAT_EVIDENCE_EVENTS;
@@ -85,6 +102,12 @@ pub use telemetry::{
     WeaponTelemetryAggregate, WeaponTelemetryKey, WeaponTelemetryOutcome, WeaponTelemetryRecord,
     telemetry_cue_keys,
 };
+
+#[cfg(feature = "network-test")]
+pub(crate) mod testing {
+    pub use super::authority::{TestDummy, TestDummyFixture, TestDummyResetDeadline};
+    pub use super::client::CaptureCombatCues;
+}
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};

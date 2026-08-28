@@ -242,6 +242,7 @@ fn named_client_combat_sets_preserve_the_locked_update_order() {
                 probe("evidence").in_set(CombatClientSet::Evidence),
             ),
         );
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
     app.update();
     let trace = app.world().resource::<SetTrace>().0.clone();
     assert_eq!(

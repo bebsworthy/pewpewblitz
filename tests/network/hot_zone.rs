@@ -272,6 +272,7 @@ fn hot_zone_contested_control_advances_neither_team() {
 
 #[test]
 fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
+    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_hot_zone_match(2);
     select_ready_and_activate(&mut harness, 10);
 
@@ -311,10 +312,15 @@ fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
         phase_result(&server_match(&mut harness)),
         Some(brawler::matchplay::MatchResult::Draw)
     );
+    assert!(
+        diagnostics.finish() > 0,
+        "multi-generation timeout scenario did not exercise expected late-input corrections"
+    );
 }
 
 #[test]
 fn hot_zone_restart_resets_state_in_place_and_converges() {
+    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_hot_zone_match(2);
     select_ready_and_activate(&mut harness, 10);
     let player = stage_outside_zone(&mut harness, 0);
@@ -344,6 +350,10 @@ fn hot_zone_restart_resets_state_in_place_and_converges() {
             client_hot_zone(harness, index).is_some_and(|state| state.progress_ticks == [0, 0])
         })
     });
+    assert!(
+        diagnostics.finish() > 0,
+        "hot-zone restart did not exercise expected late-input corrections"
+    );
 }
 
 #[test]

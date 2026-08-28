@@ -20,19 +20,10 @@ impl bevy::prelude::Plugin for MismatchedProtocolPlugin {
 /// Deterministic receive-delay line for impairment profiles: every inbound packet is
 /// held for `delay` client ticks before delivery, modelling one-way latency without
 /// wall-clock sleeps.
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Default)]
 pub(super) struct ReplicationDelayLine {
     pub(super) delay: usize,
     queue: std::collections::VecDeque<Vec<lightyear::link::RecvPayload>>,
-}
-
-impl Default for ReplicationDelayLine {
-    fn default() -> Self {
-        Self {
-            delay: 0,
-            queue: std::collections::VecDeque::new(),
-        }
-    }
 }
 
 fn delay_packets(
@@ -48,13 +39,12 @@ fn delay_packets(
             delay_line.queue.push_back(inbound);
         }
     }
-    if delay_line.queue.len() > delay_line.delay {
-        if let Some(outbound) = delay_line.queue.pop_front() {
-            if let Some(mut link) = links.iter_mut().next() {
-                for packet in outbound {
-                    link.recv.push_raw(packet);
-                }
-            }
+    if delay_line.queue.len() > delay_line.delay
+        && let Some(outbound) = delay_line.queue.pop_front()
+        && let Some(mut link) = links.iter_mut().next()
+    {
+        for packet in outbound {
+            link.recv.push_raw(packet);
         }
     }
 }
@@ -155,10 +145,8 @@ fn capture_heist_objective_cues(
         With<Client>,
     >,
 ) {
-    for receiver in &mut receivers {
-        if let Some(mut receiver) = receiver {
-            capture.0.extend(receiver.receive());
-        }
+    for mut receiver in (&mut receivers).into_iter().flatten() {
+        capture.0.extend(receiver.receive());
     }
 }
 
@@ -182,6 +170,7 @@ pub(super) struct Harness {
 
 impl Harness {
     pub(super) fn new(client_count: usize) -> Self {
+        brawler::testing::install_network_test_logger();
         let mut harness = Self::new_with_options(client_count, None, false);
         // Generic movement/combat scenarios retain the focused V8 conversion fixture whose
         // authored coordinates they exercise. Product match constructors use Feature Yard.
@@ -254,6 +243,7 @@ impl Harness {
     }
 
     pub(super) fn new_product_lobby(client_count: usize) -> Self {
+        brawler::testing::install_network_test_logger();
         let database_sequence =
             PRODUCT_LOBBY_DATABASE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let server_config = ServerNetworkConfig {
@@ -313,21 +303,22 @@ impl Harness {
             client_heist_cues: Vec::with_capacity(client_count),
             now: Instant::now(),
         };
-        for client_id in 1..=client_count as u64 {
+        for client_index in 0..client_count {
+            let client_id = u64::try_from(client_index + 1).expect("test client count fits u64");
             harness.add_client(client_id);
-            let client_entity = harness.client_entities[client_id as usize - 1];
-            harness.clients[client_id as usize - 1]
+            let client_entity = harness.client_entities[client_index];
+            harness.clients[client_index]
                 .world_mut()
                 .resource_mut::<brawler::client::RoutedClientLifecycle>()
                 .start_lobby();
-            harness.clients[client_id as usize - 1]
+            harness.clients[client_index]
                 .world_mut()
                 .entity_mut(client_entity)
                 .insert(brawler::client::RoutedClientSession {
                     generation: 1,
                     kind: brawler::client::RoutedClientSessionKind::Lobby,
                 });
-            let server_link = harness.server_links[client_id as usize - 1];
+            let server_link = harness.server_links[client_index];
             harness.server.world_mut().entity_mut(server_link).insert(
                 brawler::server::RoutedPeer {
                     worker: server_entity,
@@ -366,6 +357,7 @@ impl Harness {
         extra_protocol: bool,
         mode: HarnessMode,
     ) -> Self {
+        brawler::testing::install_network_test_logger();
         let server_config = ServerNetworkConfig {
             transport: NetworkTransport::Crossbeam,
             handshake_timeout: std::time::Duration::from_millis(250),
@@ -825,7 +817,7 @@ impl Harness {
         let mut sender = world
             .get_mut::<MessageSender<TestNativeInputMessage>>(client_entity)
             .expect("client link should have native input sender");
-        send_forged_native_input_for_test(&mut sender, target, end_tick, input);
+        send_forged_native_input(&mut sender, target, end_tick, input);
     }
 
     pub(super) fn send_match_command(&mut self, index: usize, request: MatchCommandRequest) {

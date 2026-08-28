@@ -278,6 +278,10 @@ fn sentry_projectile_travels_and_damages_a_hostile_fighter() {
     }));
 }
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario proves one dash-and-sentry authority lifecycle across both replicated clients"
+)]
 fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
     let mut harness = Harness::new_match(2);
     harness.clients[0]
@@ -585,6 +589,10 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario compares expiry, destruction, disconnect, and impaired recovery for one sentry lifecycle"
+)]
 fn sentry_expiry_destruction_disconnect_and_impaired_recovery_converge() {
     let (mut expiry, owner, identity) = active_sentry_fixture();
     expiry.step_until(|harness| {
@@ -764,6 +772,10 @@ fn sentry_expiry_destruction_disconnect_and_impaired_recovery_converge() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario keeps dash collision truncation and the coupled primary-fire exclusion in one authority proof"
+)]
 fn dash_shape_cast_truncates_before_map_collision_and_blocks_primary_fire() {
     let mut harness = Harness::new_match(2);
     for client in &mut harness.clients {

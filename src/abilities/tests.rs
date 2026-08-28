@@ -738,6 +738,8 @@ fn production_ability_sets_have_an_explicit_authority_and_outcome_order() {
                 .before(crate::gameplay::advance_simulation_tick),
         ),
     );
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
 
     app.update();
     app.update();

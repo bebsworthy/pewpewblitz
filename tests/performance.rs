@@ -931,9 +931,10 @@ fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
 
     // Controlled zone: two team-1 fighters inside advance exactly one unit per tick.
     for (index, (entity, _)) in owners[0..2].iter().enumerate() {
+        let offset = f32::from(u16::try_from(index).expect("two benchmark owners fit u16"));
         app.world_mut()
             .entity_mut(*entity)
-            .insert(Position::from_xy(0.0, -100.0 - 20.0 * index as f32));
+            .insert(Position::from_xy(0.0, -100.0 - 20.0 * offset));
     }
     app.update();
     let before = hot_zone_progress(&mut app);
@@ -948,9 +949,10 @@ fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
 
     // Contested zone: both teams present, neither advances.
     for (index, (entity, _)) in owners[2..4].iter().enumerate() {
+        let offset = f32::from(u16::try_from(index).expect("two benchmark owners fit u16"));
         app.world_mut()
             .entity_mut(*entity)
-            .insert(Position::from_xy(0.0, 100.0 + 20.0 * index as f32));
+            .insert(Position::from_xy(0.0, 100.0 + 20.0 * offset));
     }
     app.update();
     let before = hot_zone_progress(&mut app);
@@ -1000,6 +1002,10 @@ fn heist_performance_app() -> App {
 /// supplies one more request than the 64-hit transaction limit, proving both bounded rejection
 /// and fixed-tick cost without completing either safe.
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the performance test keeps setup, bounded burst measurement, and telemetry assertions in one scenario"
+)]
 fn v10_m02_heist_objective_burst_stays_within_fixed_tick_budget() {
     let mut app = heist_performance_app();
     let match_id = {

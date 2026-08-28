@@ -11,6 +11,8 @@ pub mod content;
 pub mod diagnostics;
 pub mod gameplay;
 pub mod lobby;
+#[cfg(any(feature = "client", feature = "server"))]
+mod logging;
 pub mod map;
 pub mod matchplay;
 pub mod movement;
@@ -18,6 +20,9 @@ pub mod profiles;
 pub mod protocol;
 pub mod timing;
 pub mod weapon_parts;
+
+#[cfg(feature = "network-test")]
+pub mod testing;
 
 #[cfg(test)]
 pub(crate) mod test_app;

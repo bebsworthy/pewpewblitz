@@ -48,9 +48,35 @@ pub use client::{
     ClientMapPlugin, ClientMapReadiness, ClientWorldObjectReadiness, MapPresentationMember,
     MapPresentationPlugin, MapPresentationSet, PresentedMap, perimeter_visual_shapes,
 };
-pub use model::*;
-pub use objects::*;
-pub use pickups::*;
+pub use model::{
+    AxisAlignedMapRect, MapInstanceId, MapInstanceMember, MapPlacementId, MapPresentationThemeId,
+    MapPresetId, MapRecipeFingerprint, MapRecipeId, MapRoot, MapShape, ModeAnchorId,
+    ModeDefinitionId, NormalizedArea, PlayableBounds, PracticeDummySpawn, ResolvedMapIdentity,
+    SpawnAssignment, SpawnPointCatalog, SpawnPointId, TeamSpawnPoint,
+};
+#[cfg(feature = "client")]
+pub use objects::ReceivedWorldObjectCues;
+pub use objects::{
+    DamageableLifeState, DamageableMaximumHealth, DamageableObjectAsset, DamageableObjectProfile,
+    DamageableTargetClass, DamageableTargetIdentity, DamageableWorldObject,
+    MAX_DAMAGEABLE_MAP_OBJECTS, MAX_SECONDARY_DAMAGE_APPLICATIONS, MAX_TERMINAL_REACTIONS_PER_TICK,
+    MAX_WORLD_OBJECT_CUES, MAX_WORLD_TARGET_FACTS, WorldObjectCue, WorldObjectExplosionFact,
+    WorldObjectExplosionFacts, WorldTargetDamageFact, WorldTargetDamageFacts,
+    WorldTargetTerminalFact, object_is_live,
+};
+#[cfg(feature = "server")]
+pub use objects::{
+    PendingWorldTargetDamage, PendingWorldTargetDamages, WorldObjectOutbox, WorldObjectTelemetry,
+};
+#[cfg(feature = "client")]
+pub use pickups::ReceivedPickupCues;
+pub use pickups::{
+    MAX_LIVE_RESTORATION_PICKUPS, MAX_PICKUP_CUES, MAX_PICKUP_FACTS, PickupAvailableAtTick,
+    PickupCue, PickupExpiresAtTick, PickupLifecycleFact, PickupLifecycleFacts, PickupLifecycleKind,
+    RestorationPickup, RestorationPickupIdentity,
+};
+#[cfg(feature = "server")]
+pub use pickups::{PickupOutbox, PickupTelemetry};
 #[cfg(feature = "server")]
 pub use runtime::{
     DestructibleMapCollider, MapDynamicTelemetry, MapRuntimeSet, install_resolved_map,

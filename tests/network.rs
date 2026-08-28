@@ -10,19 +10,15 @@ use bevy::{
     time::TimeUpdateStrategy,
 };
 use brawler::{
-    client::{
-        ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions,
-        spawn_crossbeam_client,
-    },
+    client::{ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions},
     combat::{
         ActiveAttackTrackers, ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource,
-        CaptureCombatCues, CombatCue, CombatEventId, CombatLogRecord, CombatOutbox,
-        CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind,
-        CombatTelemetry, ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
+        CombatCue, CombatEventId, CombatLogRecord, CombatOutbox, CombatOutcomeFact,
+        CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind, CombatTelemetry,
+        ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
         FighterDefinitions, HealthRecoveryState, MeleeAttack, PendingDelivery, PendingPayload,
-        Projectile, ProjectileDeadline, ReplicatedAttackSource, SpawnState, TeamId, TestDummy,
-        TestDummyFixture, TestDummyResetDeadline, WeaponPhase, WeaponPresetId,
-        WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
+        Projectile, ProjectileDeadline, ReplicatedAttackSource, SpawnState, TeamId, WeaponPhase,
+        WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -45,11 +41,12 @@ use brawler::{
     protocol::{
         Fighter, FighterInput, MatchCommand, MatchCommandDecision, MatchCommandRequest,
         NetworkEntityId, PlaceholderPlayer, PlayerId, ProtocolPlugin, SessionChannel,
-        TestNativeInputMessage, send_forged_native_input_for_test,
     },
-    server::{
-        ServerNetworkPlugin, ServerSession, ServerSessionPhase, spawn_crossbeam_link,
-        spawn_crossbeam_server,
+    server::{ServerNetworkPlugin, ServerSession, ServerSessionPhase},
+    testing::{
+        CaptureCombatCues, TestDummy, TestDummyFixture, TestDummyResetDeadline,
+        TestNativeInputMessage, send_forged_native_input, spawn_crossbeam_client,
+        spawn_crossbeam_link, spawn_crossbeam_server,
     },
     timing::{SIMULATION_TICK, SimulationTick},
 };

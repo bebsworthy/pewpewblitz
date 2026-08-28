@@ -372,6 +372,10 @@ fn hostile_input_and_client_pose_attempts_are_rejected_and_counted() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario mutates every client-owned combat component and verifies one unchanged authoritative snapshot"
+)]
 fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_pose() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| {
@@ -500,6 +504,10 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario keeps wall stopping, tangential sliding, corner contact, and fighter overlap in one collision proof"
+)]
 fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     let mut harness = Harness::new(2);
     harness.step_until(|harness| {
@@ -536,11 +544,10 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         harness.step();
     }
     let wall_pose = harness.server_poses()[0];
-    let expected_positive_x_edge = 896.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
+    let positive_arena_x = 896.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
     let contact_skin_tolerance = 2.5;
     assert!(
-        (expected_positive_x_edge - contact_skin_tolerance..=expected_positive_x_edge)
-            .contains(&wall_pose.1.0.x),
+        (positive_arena_x - contact_skin_tolerance..=positive_arena_x).contains(&wall_pose.1.0.x),
         "wall_pose={wall_pose:?}"
     );
 
@@ -554,8 +561,7 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     }
     let after_slide = harness.server_poses()[0].1.0;
     assert!(
-        (expected_positive_x_edge - contact_skin_tolerance..=expected_positive_x_edge)
-            .contains(&after_slide.x)
+        (positive_arena_x - contact_skin_tolerance..=positive_arena_x).contains(&after_slide.x)
     );
     assert!(after_slide.y > before_slide.y + 40.0);
     for _ in 0..1_000 {
@@ -563,13 +569,11 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     }
     let corner_pose = harness.server_poses()[0].1.0;
     assert!(
-        (expected_positive_x_edge - contact_skin_tolerance..=expected_positive_x_edge)
-            .contains(&corner_pose.x)
+        (positive_arena_x - contact_skin_tolerance..=positive_arena_x).contains(&corner_pose.x)
     );
-    let expected_positive_y_edge = 576.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
+    let positive_arena_y = 576.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
     assert!(
-        (expected_positive_y_edge - contact_skin_tolerance..=expected_positive_y_edge)
-            .contains(&corner_pose.y),
+        (positive_arena_y - contact_skin_tolerance..=positive_arena_y).contains(&corner_pose.y),
         "corner_pose={corner_pose:?}"
     );
 

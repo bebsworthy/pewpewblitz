@@ -285,6 +285,7 @@ fn initial_admission_uses_the_shared_spawn_selector() {
 #[test]
 #[allow(clippy::too_many_lines)]
 fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_matches() {
+    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_match(4);
     harness.step_until(|harness| {
         (0..4).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
@@ -679,11 +680,16 @@ fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_
             .len(),
         3
     );
+    assert!(
+        diagnostics.finish() > 0,
+        "three-match restart scenario did not exercise expected late-input corrections"
+    );
 }
 
 #[test]
 #[allow(clippy::too_many_lines)]
 fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
+    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_match(4);
     harness.step_until(|harness| {
         (0..4).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
@@ -827,6 +833,10 @@ fn active_disconnect_continues_shorthanded_then_forfeits_empty_team() {
             .unwrap()
             .1,
         &TeamId(0)
+    );
+    assert!(
+        diagnostics.finish() > 0,
+        "disconnect and re-admission scenario did not exercise expected late-input corrections"
     );
 }
 

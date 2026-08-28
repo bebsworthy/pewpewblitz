@@ -5,12 +5,9 @@ use super::super::{
     GAME_TYPE_CONFIRM_INDEX, GamePopulationLabel, GameTypeSelectRoot, GameTypeSelectionDraft,
     flow_root_node, queue_population, spawn_flow_button, spawn_flow_button_disabled, spawn_heading,
 };
+use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
 use crate::client::{ClientLobbyMembership, ClientQueueModel};
-use bevy::{
-    input::mouse::{MouseScrollUnit, MouseWheel},
-    prelude::*,
-    ui::ScrollPosition,
-};
+use bevy::{input::mouse::MouseWheel, prelude::*, ui::ScrollPosition};
 use lightyear::prelude::client::Client;
 
 #[allow(
@@ -148,23 +145,22 @@ pub(in crate::client::flow) fn spawn_game_type_select(
 pub(in crate::client::flow) fn scroll_game_type_select(
     flow: Res<State<ClientFlow>>,
     mut wheel: MessageReader<MouseWheel>,
-    mut roots: Query<&mut ScrollPosition, With<GameTypeSelectRoot>>,
+    mut roots: Query<(&ComputedNode, &mut ScrollPosition), With<GameTypeSelectRoot>>,
 ) {
     if *flow.get() != ClientFlow::GameTypeSelect {
         return;
     }
-    let delta = wheel
-        .read()
-        .map(|event| match event.unit {
-            MouseScrollUnit::Line => event.y * 24.0,
-            MouseScrollUnit::Pixel => event.y,
-        })
-        .sum::<f32>();
+    let delta = normalized_wheel_delta(wheel.read(), 24.0);
     if delta.abs() <= f32::EPSILON {
         return;
     }
-    for mut position in &mut roots {
-        position.0.y = (position.0.y - delta).max(0.0);
+    for (node, mut position) in &mut roots {
+        position.0.y = clamp_scroll_offset(
+            position.0.y - delta,
+            node.content_size().y,
+            node.size().y,
+            node.inverse_scale_factor(),
+        );
     }
 }
 
@@ -221,10 +217,17 @@ pub(in crate::client::flow) fn keep_game_type_focus_visible(
         let visible_bottom = root_center.y + root_half_height - 8.0;
         let focused_top = focused_center.y - focused_half_height;
         let focused_bottom = focused_center.y + focused_half_height;
-        if focused_bottom > visible_bottom {
-            scroll.0.y += focused_bottom - visible_bottom;
-        } else if focused_top < visible_top {
-            scroll.0.y = (scroll.0.y - (visible_top - focused_top)).max(0.0);
-        }
+        let offset = offset_keeping_interval_visible(
+            scroll.0.y,
+            visible_top..visible_bottom,
+            focused_top..focused_bottom,
+            root_node.inverse_scale_factor(),
+        );
+        scroll.0.y = clamp_scroll_offset(
+            offset,
+            root_node.content_size().y,
+            root_node.size().y,
+            root_node.inverse_scale_factor(),
+        );
     }
 }

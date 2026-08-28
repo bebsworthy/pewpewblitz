@@ -2,6 +2,7 @@
 #![allow(clippy::wildcard_imports)]
 
 use super::super::*;
+use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
 
 #[allow(
     clippy::too_many_arguments,
@@ -815,21 +816,23 @@ fn apply_dashboard_layout_node(
 
 pub(in crate::client::flow) fn scroll_dashboard(
     mut wheel: MessageReader<MouseWheel>,
-    mut roots: Query<(&DashboardLayoutClass, &mut ScrollPosition), With<DashboardRoot>>,
+    mut roots: Query<
+        (&DashboardLayoutClass, &ComputedNode, &mut ScrollPosition),
+        With<DashboardRoot>,
+    >,
 ) {
-    let delta = wheel
-        .read()
-        .map(|event| match event.unit {
-            MouseScrollUnit::Line => event.y * 24.0,
-            MouseScrollUnit::Pixel => event.y,
-        })
-        .sum::<f32>();
+    let delta = normalized_wheel_delta(wheel.read(), 24.0);
     if delta.abs() <= f32::EPSILON {
         return;
     }
-    for (class, mut position) in &mut roots {
+    for (class, node, mut position) in &mut roots {
         if *class == DashboardLayoutClass::Compact {
-            position.0.y = (position.0.y - delta).max(0.0);
+            position.0.y = clamp_scroll_offset(
+                position.0.y - delta,
+                node.content_size().y,
+                node.size().y,
+                node.inverse_scale_factor(),
+            );
         }
     }
 }
@@ -885,11 +888,18 @@ pub(in crate::client::flow) fn keep_dashboard_focus_visible(
         let half_height = root_node.size().y * 0.5;
         let visible_top = center.y - half_height + 8.0;
         let visible_bottom = center.y + half_height - 8.0;
-        if focused_top < visible_top {
-            scroll.0.y = (scroll.0.y - (visible_top - focused_top)).max(0.0);
-        } else if focused_bottom > visible_bottom {
-            scroll.0.y += focused_bottom - visible_bottom;
-        }
+        let offset = offset_keeping_interval_visible(
+            scroll.0.y,
+            visible_top..visible_bottom,
+            focused_top..focused_bottom,
+            root_node.inverse_scale_factor(),
+        );
+        scroll.0.y = clamp_scroll_offset(
+            offset,
+            root_node.content_size().y,
+            root_node.size().y,
+            root_node.inverse_scale_factor(),
+        );
     }
 }
 

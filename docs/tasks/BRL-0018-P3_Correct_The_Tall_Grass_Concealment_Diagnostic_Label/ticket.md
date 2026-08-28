@@ -1,13 +1,14 @@
 ---
 id: BRL-0018
 title: 'P3: Correct the tall-grass concealment diagnostic label'
-status: backlog
+status: todo
 theme: quality
 release:
+priority: none
 created: 2026-08-27T18:15:32Z
-modified: 2026-08-27T18:15:34Z
+modified: 2026-08-27T22:50:22Z
 closed:
-revision: 9563c3ea3d890bcc
+revision: 45217834e00c4573
 blocks: []
 related: [BRL-0002]
 ---

@@ -11,9 +11,9 @@ use bevy::prelude::{With, Without};
 use brawler::client::prediction::{
     OwnerPredictedPose, OwnerPredictionSettings, OwnerPredictionStats,
 };
-use brawler::combat::{AuthoritativePose, TestDummy};
 use brawler::map::{MapRoot, ResolvedMapSnapshot};
 use brawler::protocol::{Fighter, FighterInput};
+use brawler::{combat::AuthoritativePose, testing::TestDummy};
 use lightyear::prelude::Controlled;
 
 /// Receive-delay ticks per profile: 0 (local), 1 (~33 ms RTT), 3 (~100 ms RTT at 60 Hz).

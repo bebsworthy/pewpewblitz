@@ -1,9 +1,19 @@
 //! Server-owned concealment composition and observer-specific replication relevance.
 
-mod model;
-pub use model::*;
 mod field;
-pub use field::*;
+mod model;
+pub use field::{
+    AlliedConcealmentMemberships, ConcealmentFieldId, ConcealmentFieldState,
+    MAX_ACTIVE_CONCEALMENT_FIELDS, ObjectiveCarrier, field_contains,
+};
+#[cfg(feature = "server")]
+pub(crate) use field::{ConcealmentFieldOwner, NextConcealmentFieldId};
+pub use model::{
+    ATTACK_REVEAL_TICKS, ConcealmentPresentationState, ConcealmentRevealDeadlines,
+    ConcealmentSources, DAMAGE_REVEAL_TICKS, ForcedRevealSource, ForcedRevealSources,
+    MAX_FORCED_REVEAL_SOURCES, ObserverRelation, ObserverVisibilityInput, TeamRevealDeadline,
+    TerrainConcealmentMembership, observer_can_see, reveal_lock_active,
+};
 
 #[cfg(feature = "server")]
 mod network;

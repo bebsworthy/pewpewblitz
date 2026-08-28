@@ -5,7 +5,7 @@ use crate::combat::client::{
     AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, DeduplicatedCombatCue,
     MAX_PREVIEW_SEGMENTS, PreviewGeometry, PreviewPrimitive, preview_primitives,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const PREVIEW_HEIGHT: f32 = 2.5;
 const FIGHTER_BODY_WORLD_HEIGHT: f32 = KENNEY_CHARACTER_WORLD_HEIGHT;
@@ -117,9 +117,155 @@ pub(super) struct DashTrailVisual3d {
     last_position: Vec2,
 }
 
+#[derive(Component, Clone, Copy)]
+pub(super) struct DashTrailLink(Entity);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DashTrailAction {
+    Spawn,
+    Update(Entity),
+    Remove(Entity),
+    ClearStaleLink,
+    None,
+}
+
 #[derive(Component)]
 pub(super) struct WeaponPreviewVisual3d {
     slot: u8,
+}
+
+type OverheadFighterQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static crate::combat::CurrentHealth,
+        &'static crate::combat::FighterDefinitionId,
+        Option<&'static crate::combat::Defeated>,
+        Option<&'static AuthoritativeTick>,
+        Option<&'static crate::builds::ResolvedMatchLoadout>,
+        &'static crate::combat::TeamId,
+        Option<&'static crate::matchplay::FighterDisplayName>,
+        Option<&'static crate::combat::WeaponState>,
+        Has<Controlled>,
+    ),
+    With<Fighter>,
+>;
+
+type AmmoFillQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Node,
+    Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentFillUi>)>,
+>;
+
+type StatusFighterQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Position,
+        Option<&'static crate::combat::Defeated>,
+        Option<&'static AuthoritativeTick>,
+        Option<&'static crate::combat::ActiveEffects>,
+        Option<&'static crate::combat::KnockbackFeedback>,
+        Option<&'static crate::concealment::ConcealmentPresentationState>,
+    ),
+    With<Fighter>,
+>;
+
+type DashFighterQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Position,
+        Option<&'static crate::builds::AbilityState>,
+        Option<&'static DashTrailLink>,
+    ),
+    (
+        With<Fighter>,
+        Or<(
+            Changed<Position>,
+            Changed<crate::builds::AbilityState>,
+            Added<DashTrailLink>,
+        )>,
+    ),
+>;
+
+type AimFighterQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static NetworkEntityId,
+        &'static Position,
+        &'static Rotation,
+        Option<&'static crate::combat::Defeated>,
+        Option<&'static crate::builds::AbilityState>,
+        Option<&'static crate::builds::ResolvedMatchLoadout>,
+        &'static crate::combat::TeamId,
+        Has<Controlled>,
+    ),
+    With<Fighter>,
+>;
+
+type PreviewVisualQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static WeaponPreviewVisual3d,
+        &'static mut Transform,
+        &'static mut Visibility,
+        &'static mut Mesh3d,
+        &'static mut MeshMaterial3d<StandardMaterial>,
+    ),
+    (
+        Without<FighterHealthFillUi>,
+        Without<DashTrailVisual3d>,
+        Without<FighterOverheadUi>,
+        Without<FighterAmmoRowUi>,
+    ),
+>;
+
+type ControlledAim<'a> = (
+    Vec2,
+    f32,
+    &'a crate::builds::ResolvedMatchLoadout,
+    Option<&'a crate::builds::AbilityState>,
+);
+type ActivePreviewMap<'a> = (
+    &'a crate::map::ResolvedMapSnapshot,
+    &'a crate::map::MapDynamicState,
+);
+
+type SentryAimQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Position,
+        &'static crate::abilities::SentryIdentity,
+        &'static crate::combat::CurrentHealth,
+    ),
+    With<crate::abilities::Sentry>,
+>;
+
+type SafeAimQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Position,
+        &'static Rotation,
+        &'static crate::matchplay::HeistSafe,
+        &'static crate::combat::CurrentHealth,
+    ),
+>;
+
+#[derive(Clone, Copy)]
+struct AmmoPresentation {
+    visible: bool,
+    capacity: u8,
+    available: u8,
+    recovery_progress: f32,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -136,26 +282,8 @@ pub(super) struct AimPreviewInputs<'w, 's> {
     catalog: Res<'w, crate::map::MapCatalogResource>,
     pending: Res<'w, PendingLocalActions>,
     index: ResMut<'w, AimTraceBlockerIndex>,
-    sentries: Query<
-        'w,
-        's,
-        (
-            &'static Position,
-            &'static crate::abilities::SentryIdentity,
-            &'static crate::combat::CurrentHealth,
-        ),
-        With<crate::abilities::Sentry>,
-    >,
-    safes: Query<
-        'w,
-        's,
-        (
-            &'static Position,
-            &'static Rotation,
-            &'static crate::matchplay::HeistSafe,
-            &'static crate::combat::CurrentHealth,
-        ),
-    >,
+    sentries: SentryAimQuery<'w, 's>,
+    safes: SafeAimQuery<'w, 's>,
 }
 
 #[derive(Component)]
@@ -165,8 +293,38 @@ pub(super) struct CombatEffect3d {
     order: u64,
 }
 
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub(super) struct CombatEffectSequence(u64);
+
+#[derive(Message)]
+pub(super) struct PendingCombatEffect {
+    lifetime: Duration,
+    expires_at_tick: Option<u64>,
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+    transform: Transform,
+    label: &'static str,
+}
+
+impl PendingCombatEffect {
+    fn spawn(&self, commands: &mut Commands, order: u64) -> Entity {
+        commands
+            .spawn((
+                CombatEffect3d {
+                    timer: Timer::new(self.lifetime, TimerMode::Once),
+                    expires_at_tick: self.expires_at_tick,
+                    order,
+                },
+                Mesh3d(self.mesh.clone()),
+                MeshMaterial3d(self.material.clone()),
+                NotShadowCaster,
+                NotShadowReceiver,
+                self.transform,
+                Name::new(self.label),
+            ))
+            .id()
+    }
+}
 
 #[allow(
     clippy::cast_possible_truncation,
@@ -1019,121 +1177,42 @@ pub(super) fn project_fighter_overhead_ui(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
-    clippy::too_many_lines,
     clippy::type_complexity,
-    reason = "this state phase coordinates health, status, trail, and preview visual owners"
+    reason = "the overhead lifecycle reads the complete replicated fighter label, health, and ammunition state"
 )]
-pub(super) fn update_combat_visual_state(
+pub(super) fn update_fighter_overhead_state(
     mut commands: Commands,
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
     definitions: Res<crate::combat::FighterDefinitions>,
-    mut aim: AimPreviewInputs,
-    fighters: Query<
-        (
-            (Entity, &NetworkEntityId),
-            &Position,
-            &Rotation,
-            &crate::combat::CurrentHealth,
-            &crate::combat::FighterDefinitionId,
-            Option<&crate::combat::Defeated>,
-            Option<&AuthoritativeTick>,
-            Option<&crate::combat::ActiveEffects>,
-            Option<&crate::combat::KnockbackFeedback>,
-            Option<&crate::builds::AbilityState>,
-            (
-                Option<&crate::builds::ResolvedMatchLoadout>,
-                Option<&crate::concealment::ConcealmentPresentationState>,
-            ),
-            &crate::combat::TeamId,
-            Option<&crate::matchplay::FighterDisplayName>,
-            Option<&crate::combat::WeaponState>,
-            Has<Controlled>,
-        ),
-        With<Fighter>,
-    >,
+    fighters: OverheadFighterQuery,
     mut overhead_roots: Query<
         (&CombatVisualOwner, &mut FighterOverheadUi, &mut Visibility),
         Without<WeaponPreviewVisual3d>,
     >,
-    mut fill_nodes: Query<
-        &mut Node,
-        Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentFillUi>)>,
-    >,
+    mut fill_nodes: AmmoFillQuery,
     mut overhead_texts: Query<(&mut Text, &mut TextColor), With<FighterOverheadTextUi>>,
     mut overhead_colors: Query<
         &mut BackgroundColor,
         Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentUi>)>,
     >,
     mut ammo_rows: Query<&mut Visibility, (With<FighterAmmoRowUi>, Without<FighterOverheadUi>)>,
-    mut statuses: Query<(Entity, &CombatVisualOwner, &StatusVisual3d)>,
-    mut trails: Query<
-        (
-            Entity,
-            &CombatVisualOwner,
-            &mut DashTrailVisual3d,
-            &mut Transform,
-        ),
-        (Without<FighterHealthFillUi>, Without<WeaponPreviewVisual3d>),
-    >,
-    mut previews: Query<
-        (
-            &WeaponPreviewVisual3d,
-            &mut Transform,
-            &mut Visibility,
-            &mut Mesh3d,
-            &mut MeshMaterial3d<StandardMaterial>,
-        ),
-        (
-            Without<FighterHealthFillUi>,
-            Without<DashTrailVisual3d>,
-            Without<FighterOverheadUi>,
-            Without<FighterAmmoRowUi>,
-        ),
-    >,
 ) {
-    let mut desired_status = HashSet::new();
     let mut fighter_data = HashMap::new();
-    let mut controlled = None;
-    let mut dynamic_blockers = Vec::new();
-    let controlled_team = fighters.iter().find_map(
-        |(_, _, _, _, _, _, _, _, _, _, _, team, _, _, is_controlled)| {
-            is_controlled.then_some(*team)
-        },
-    );
+    let controlled_team = fighters
+        .iter()
+        .find_map(|(_, _, _, _, _, _, team, _, _, is_controlled)| is_controlled.then_some(*team));
     for (
-        (entity, network_id),
-        position,
-        rotation,
+        entity,
         health,
         definition,
         defeated,
         authoritative_tick,
-        effects,
-        knockback,
-        ability,
-        (loadout, concealment),
+        loadout,
         team,
         display_name,
         weapon,
         is_controlled,
     ) in &fighters
     {
-        if defeated.is_none()
-            && controlled_team.is_some_and(|controlled_team| {
-                crate::combat::teams_are_hostile(controlled_team, *team)
-            })
-        {
-            dynamic_blockers.push(AimTraceDynamicBlocker {
-                class: AimTraceBlockerClass::Fighter,
-                stable_id: u128::from(network_id.0),
-                position: position.0,
-                rotation: 0.0,
-                shape: crate::map::MapShape::Circle {
-                    radius: crate::movement::STANDARD_FIGHTER_RADIUS,
-                },
-            });
-        }
         let maximum = loadout.map_or_else(
             || {
                 definitions
@@ -1143,20 +1222,9 @@ pub(super) fn update_combat_visual_state(
             |value| value.fighter_stats.maximum_health,
         );
         let observed_tick = authoritative_tick.map(|tick| tick.0);
-        // Forced reveal is a public status wherever the subject is otherwise legally present.
-        // Observer-specific entity visibility still prevents this marker leaking a hidden target.
-        let revealed = concealment
-            .zip(authoritative_tick)
-            .is_some_and(|(state, now)| {
-                state
-                    .forced_reveals
-                    .iter()
-                    .any(|reveal| now.0 < reveal.expires_at_tick)
-            });
         fighter_data.insert(
             entity,
             (
-                position.0,
                 health.0,
                 maximum,
                 defeated.is_some(),
@@ -1165,74 +1233,13 @@ pub(super) fn update_combat_visual_state(
                 weapon.map_or(0, |state| state.ammo),
                 loadout.map_or(0, |value| value.primary_weapon.recipe.economy.capacity()),
                 ammo_recovery_progress(weapon, observed_tick),
-                revealed,
             ),
         );
-        if defeated.is_none() {
-            if effects.is_some_and(|value| {
-                value.slow.is_some_and(|slow| {
-                    authoritative_tick.is_none_or(|now| now.0 < slow.expires_at_tick)
-                })
-            }) {
-                desired_status.insert((entity, StatusKind::Slow));
-            }
-            if knockback.is_some() {
-                desired_status.insert((entity, StatusKind::Knockback));
-            }
-            if revealed {
-                desired_status.insert((entity, StatusKind::Reveal));
-            }
-        }
-        let dashing = ability.is_some_and(|value| {
-            matches!(value.phase, crate::builds::AbilityPhase::Dashing { .. })
-        });
-        let trail = trails.iter_mut().find(|(_, owner, _, _)| owner.0 == entity);
-        match (dashing, trail) {
-            (true, None) => {
-                commands.spawn((
-                    CombatVisualOwner(entity),
-                    DashTrailVisual3d {
-                        last_position: position.0,
-                    },
-                    Mesh3d(primitives.unit_cuboid.clone()),
-                    MeshMaterial3d(materials.dash.clone()),
-                    NotShadowCaster,
-                    Transform::from_translation(ground_position(position.0) + Vec3::Y * 3.0),
-                    Name::new("V3 dash trail"),
-                ));
-            }
-            (true, Some((_, _, mut trail, mut transform))) => {
-                let delta = position.0 - trail.last_position;
-                if delta.length_squared() > f32::EPSILON {
-                    transform.translation =
-                        ground_position(trail.last_position.midpoint(position.0)) + Vec3::Y * 3.0;
-                    transform.rotation = ground_rotation(Rotation::radians(delta.y.atan2(delta.x)));
-                    transform.scale = Vec3::new(delta.length().max(2.0), 3.0, 12.0);
-                    trail.last_position = position.0;
-                }
-            }
-            (false, Some((trail_entity, _, _, _))) => commands.entity(trail_entity).despawn(),
-            (false, None) => {}
-        }
-        if is_controlled {
-            controlled =
-                loadout.map(|loadout| (position.0, rotation.as_radians(), loadout, ability));
-        }
     }
 
     for (owner, mut overhead, mut visibility) in &mut overhead_roots {
-        let Some((
-            _,
-            current,
-            maximum,
-            defeated,
-            relation,
-            name,
-            ammo,
-            capacity,
-            ammo_progress,
-            _revealed,
-        )) = fighter_data.get(&owner.0)
+        let Some((current, maximum, defeated, relation, name, ammo, capacity, ammo_progress)) =
+            fighter_data.get(&owner.0)
         else {
             *visibility = Visibility::Hidden;
             continue;
@@ -1262,69 +1269,138 @@ pub(super) fn update_combat_visual_state(
             }
         }
 
-        let show_ammo = *relation == GroundMarkerRelation::Local && *capacity > 0;
-        if let Ok(mut ammo_visibility) = ammo_rows.get_mut(overhead.ammo_row) {
-            *ammo_visibility = if show_ammo {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
+        reconcile_overhead_ammunition(
+            &mut commands,
+            &mut overhead,
+            &mut ammo_rows,
+            &mut fill_nodes,
+            AmmoPresentation {
+                visible: *relation == GroundMarkerRelation::Local && *capacity > 0,
+                capacity: *capacity,
+                available: *ammo,
+                recovery_progress: *ammo_progress,
+            },
+        );
+    }
+}
+
+fn reconcile_overhead_ammunition(
+    commands: &mut Commands,
+    overhead: &mut FighterOverheadUi,
+    ammo_rows: &mut Query<&mut Visibility, (With<FighterAmmoRowUi>, Without<FighterOverheadUi>)>,
+    fill_nodes: &mut AmmoFillQuery,
+    presentation: AmmoPresentation,
+) {
+    if let Ok(mut visibility) = ammo_rows.get_mut(overhead.ammo_row) {
+        *visibility = if presentation.visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+    let desired_segments = if presentation.visible {
+        usize::from(presentation.capacity)
+    } else {
+        0
+    };
+    if overhead.ammo_segments.len() != desired_segments {
+        for segment in overhead.ammo_segments.drain(..) {
+            commands.entity(segment).despawn();
+        }
+        overhead.ammo_fills.clear();
+        commands.entity(overhead.ammo_row).with_children(|parent| {
+            for _ in 0..desired_segments {
+                let mut fill = None;
+                let segment = parent
+                    .spawn((
+                        FighterAmmoSegmentUi,
+                        Node {
+                            flex_grow: 1.0,
+                            height: percent(100.0),
+                            overflow: Overflow::clip(),
+                            border_radius: BorderRadius::all(px(2.5)),
+                            ..default()
+                        },
+                        BackgroundColor(ammo_segment_color(false)),
+                        Name::new("V3 fighter ammunition segment"),
+                    ))
+                    .with_children(|segment| {
+                        fill = Some(
+                            segment
+                                .spawn((
+                                    FighterAmmoSegmentFillUi,
+                                    Node {
+                                        width: percent(0.0),
+                                        height: percent(100.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(ammo_segment_color(true)),
+                                    Name::new("V3 fighter ammunition segment fill"),
+                                ))
+                                .id(),
+                        );
+                    })
+                    .id();
+                overhead.ammo_segments.push(segment);
+                overhead
+                    .ammo_fills
+                    .push(fill.expect("ammunition segment creates one fill"));
+            }
+        });
+    }
+    for (index, fill) in overhead.ammo_fills.iter().enumerate() {
+        if let Ok(mut node) = fill_nodes.get_mut(*fill) {
+            let ratio = match index.cmp(&usize::from(presentation.available)) {
+                std::cmp::Ordering::Less => 1.0,
+                std::cmp::Ordering::Equal => presentation.recovery_progress,
+                std::cmp::Ordering::Greater => 0.0,
             };
+            node.width = percent(ratio.clamp(0.0, 1.0) * 100.0);
         }
-        let desired_segments = if show_ammo { usize::from(*capacity) } else { 0 };
-        if overhead.ammo_segments.len() != desired_segments {
-            for segment in overhead.ammo_segments.drain(..) {
-                commands.entity(segment).despawn();
-            }
-            overhead.ammo_fills.clear();
-            commands.entity(overhead.ammo_row).with_children(|parent| {
-                for _ in 0..desired_segments {
-                    let mut fill = None;
-                    let segment = parent
-                        .spawn((
-                            FighterAmmoSegmentUi,
-                            Node {
-                                flex_grow: 1.0,
-                                height: percent(100.0),
-                                overflow: Overflow::clip(),
-                                border_radius: BorderRadius::all(px(2.5)),
-                                ..default()
-                            },
-                            BackgroundColor(ammo_segment_color(false)),
-                            Name::new("V3 fighter ammunition segment"),
-                        ))
-                        .with_children(|segment| {
-                            fill = Some(
-                                segment
-                                    .spawn((
-                                        FighterAmmoSegmentFillUi,
-                                        Node {
-                                            width: percent(0.0),
-                                            height: percent(100.0),
-                                            ..default()
-                                        },
-                                        BackgroundColor(ammo_segment_color(true)),
-                                        Name::new("V3 fighter ammunition segment fill"),
-                                    ))
-                                    .id(),
-                            );
-                        })
-                        .id();
-                    overhead.ammo_segments.push(segment);
-                    overhead
-                        .ammo_fills
-                        .push(fill.expect("ammunition segment creates one fill"));
-                }
-            });
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    reason = "durable status reconciliation reads the authoritative status sources and owns only status visuals"
+)]
+pub(super) fn reconcile_status_visuals(
+    mut commands: Commands,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    fighters: StatusFighterQuery,
+    mut statuses: Query<(Entity, &CombatVisualOwner, &StatusVisual3d)>,
+) {
+    let mut desired_status = HashMap::new();
+    for (entity, position, defeated, authoritative_tick, effects, knockback, concealment) in
+        &fighters
+    {
+        if defeated.is_some() {
+            continue;
         }
-        for (index, fill) in overhead.ammo_fills.iter().enumerate() {
-            if let Ok(mut node) = fill_nodes.get_mut(*fill) {
-                let ratio = match index.cmp(&usize::from(*ammo)) {
-                    std::cmp::Ordering::Less => 1.0,
-                    std::cmp::Ordering::Equal => *ammo_progress,
-                    std::cmp::Ordering::Greater => 0.0,
-                };
-                node.width = percent(ratio.clamp(0.0, 1.0) * 100.0);
-            }
+        if effects.is_some_and(|value| {
+            value.slow.is_some_and(|slow| {
+                authoritative_tick.is_none_or(|now| now.0 < slow.expires_at_tick)
+            })
+        }) {
+            desired_status.insert((entity, StatusKind::Slow), position.0);
+        }
+        if knockback.is_some() {
+            desired_status.insert((entity, StatusKind::Knockback), position.0);
+        }
+        // Forced reveal is a public status wherever the subject is otherwise legally present.
+        // Observer-specific entity visibility still prevents this marker leaking a hidden target.
+        if concealment
+            .zip(authoritative_tick)
+            .is_some_and(|(state, now)| {
+                state
+                    .forced_reveals
+                    .iter()
+                    .any(|reveal| now.0 < reveal.expires_at_tick)
+            })
+        {
+            desired_status.insert((entity, StatusKind::Reveal), position.0);
         }
     }
 
@@ -1333,14 +1409,14 @@ pub(super) fn update_combat_visual_state(
         .map(|(_, owner, kind)| (owner.0, kind.0))
         .collect();
     for (entity, owner, kind) in &mut statuses {
-        if !desired_status.contains(&(owner.0, kind.0)) {
+        if !desired_status.contains_key(&(owner.0, kind.0)) {
             commands.entity(entity).despawn();
         }
     }
-    for (owner, kind) in desired_status.difference(&existing_status).copied() {
-        let Some((position, ..)) = fighter_data.get(&owner) else {
+    for (&(owner, kind), &position) in &desired_status {
+        if existing_status.contains(&(owner, kind)) {
             continue;
-        };
+        }
         commands.spawn((
             CombatVisualOwner(owner),
             StatusVisual3d(kind),
@@ -1353,7 +1429,7 @@ pub(super) fn update_combat_visual_state(
             NotShadowCaster,
             NotShadowReceiver,
             Transform {
-                translation: ground_position(*position)
+                translation: ground_position(position)
                     + Vec3::Y * if kind == StatusKind::Slow { 2.0 } else { 3.0 },
                 rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
                 scale: Vec3::splat(match kind {
@@ -1365,37 +1441,143 @@ pub(super) fn update_combat_visual_state(
             Name::new("V3 durable combat status"),
         ));
     }
+}
 
-    for (position, identity, health) in &aim.sentries {
-        if health.0 > 0
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "dash presentation owns the direct fighter-to-trail lifecycle"
+)]
+pub(super) fn reconcile_dash_trails(
+    mut commands: Commands,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    fighters: DashFighterQuery,
+    mut trails: Query<(&mut DashTrailVisual3d, &mut Transform)>,
+) {
+    for (fighter, position, ability, link) in &fighters {
+        let dashing = ability.is_some_and(|value| {
+            matches!(value.phase, crate::builds::AbilityPhase::Dashing { .. })
+        });
+        let linked_trail = link.map(|link| link.0);
+        match dash_trail_action(
+            dashing,
+            linked_trail,
+            linked_trail.is_some_and(|trail| trails.contains(trail)),
+        ) {
+            DashTrailAction::Update(trail_entity) => {
+                let Ok((mut trail, mut transform)) = trails.get_mut(trail_entity) else {
+                    continue;
+                };
+                let delta = position.0 - trail.last_position;
+                if delta.length_squared() > f32::EPSILON {
+                    transform.translation =
+                        ground_position(trail.last_position.midpoint(position.0)) + Vec3::Y * 3.0;
+                    transform.rotation = ground_rotation(Rotation::radians(delta.y.atan2(delta.x)));
+                    transform.scale = Vec3::new(delta.length().max(2.0), 3.0, 12.0);
+                    trail.last_position = position.0;
+                }
+            }
+            DashTrailAction::Spawn => {
+                let trail =
+                    spawn_dash_trail(&mut commands, &primitives, &materials, fighter, position.0);
+                commands.entity(fighter).insert(DashTrailLink(trail));
+            }
+            DashTrailAction::Remove(trail) => {
+                commands.entity(trail).despawn();
+                commands.entity(fighter).remove::<DashTrailLink>();
+            }
+            DashTrailAction::ClearStaleLink => {
+                commands.entity(fighter).remove::<DashTrailLink>();
+            }
+            DashTrailAction::None => {}
+        }
+    }
+}
+
+fn dash_trail_action(
+    dashing: bool,
+    linked_trail: Option<Entity>,
+    linked_trail_exists: bool,
+) -> DashTrailAction {
+    match (dashing, linked_trail, linked_trail_exists) {
+        (true, Some(trail), true) => DashTrailAction::Update(trail),
+        (true, _, _) => DashTrailAction::Spawn,
+        (false, Some(trail), true) => DashTrailAction::Remove(trail),
+        (false, Some(_), false) => DashTrailAction::ClearStaleLink,
+        (false, None, _) => DashTrailAction::None,
+    }
+}
+
+fn spawn_dash_trail(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    fighter: Entity,
+    position: Vec2,
+) -> Entity {
+    commands
+        .spawn((
+            CombatVisualOwner(fighter),
+            DashTrailVisual3d {
+                last_position: position,
+            },
+            Mesh3d(primitives.unit_cuboid.clone()),
+            MeshMaterial3d(materials.dash.clone()),
+            NotShadowCaster,
+            Transform::from_translation(ground_position(position) + Vec3::Y * 3.0),
+            Name::new("V3 dash trail"),
+        ))
+        .id()
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    reason = "aim preview owns controlled-loadout geometry and the complete bounded blocker set"
+)]
+pub(super) fn update_aim_preview(
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    mut aim: AimPreviewInputs,
+    fighters: AimFighterQuery,
+    mut previews: PreviewVisualQuery,
+) {
+    let mut controlled = None;
+    let mut dynamic_blockers = Vec::new();
+    let controlled_team = fighters
+        .iter()
+        .find_map(|(_, _, _, _, _, _, team, is_controlled)| is_controlled.then_some(*team));
+    for (network_id, position, rotation, defeated, ability, loadout, team, is_controlled) in
+        &fighters
+    {
+        if defeated.is_none()
             && controlled_team.is_some_and(|controlled_team| {
-                crate::combat::teams_are_hostile(controlled_team, identity.team_id)
+                crate::combat::teams_are_hostile(controlled_team, *team)
             })
         {
             dynamic_blockers.push(AimTraceDynamicBlocker {
-                class: AimTraceBlockerClass::Sentry,
-                stable_id: u128::from(identity.deployable_id.0),
+                class: AimTraceBlockerClass::Fighter,
+                stable_id: u128::from(network_id.0),
                 position: position.0,
                 rotation: 0.0,
                 shape: crate::map::MapShape::Circle {
-                    radius: crate::abilities::SENTRY_RADIUS,
+                    radius: crate::movement::STANDARD_FIGHTER_RADIUS,
                 },
             });
         }
-    }
-    for (position, rotation, safe, health) in &aim.safes {
-        if health.0 > 0 {
-            dynamic_blockers.push(AimTraceDynamicBlocker {
-                class: AimTraceBlockerClass::HeistSafe,
-                stable_id: (safe.match_id.0 << 32) | u128::from(safe.anchor_id.0),
-                position: position.0,
-                rotation: rotation.as_radians(),
-                shape: crate::map::MapShape::Rectangle {
-                    half_extents: crate::matchplay::HEIST_SAFE_HALF_EXTENTS,
-                },
-            });
+        if is_controlled {
+            controlled =
+                loadout.map(|loadout| (position.0, rotation.as_radians(), loadout, ability));
         }
     }
+
+    append_nonfighter_aim_blockers(
+        &aim.sentries,
+        &aim.safes,
+        controlled_team,
+        &mut dynamic_blockers,
+    );
     dynamic_blockers.sort_by_key(|blocker| (blocker.class, blocker.stable_id));
 
     let map = aim
@@ -1405,51 +1587,7 @@ pub(super) fn update_combat_visual_state(
     if let Some((snapshot, state)) = map {
         aim.index.refresh(snapshot, state, &aim.catalog.0);
     }
-    let scan_preview = match (map, controlled) {
-        (Some((map, _)), Some((origin, facing, loadout, Some(ability))))
-            if matches!(
-                loadout.ultimate.kind,
-                crate::builds::UltimateKind::RevealScan
-                    | crate::builds::UltimateKind::ConcealmentField
-            ) && aim
-                .pending
-                .targeted_ultimate
-                .is_targeting(loadout.ultimate.id)
-                && matches!(ability.phase, crate::builds::AbilityPhase::Ready) =>
-        {
-            let (
-                crate::builds::UltimateParameters::RevealScan {
-                    maximum_range_milliunits,
-                    radius_milliunits,
-                    ..
-                }
-                | crate::builds::UltimateParameters::ConcealmentField {
-                    maximum_range_milliunits,
-                    radius_milliunits,
-                    ..
-                },
-            ) = (loadout.ultimate.parameters,)
-            else {
-                unreachable!()
-            };
-            crate::builds::world_units_from_milliunits(maximum_range_milliunits)
-                .and_then(|maximum_range| {
-                    crate::abilities::reveal_scan_center(
-                        origin,
-                        Vec2::from_angle(facing),
-                        aim.pending.aim_axis,
-                        aim.pending.aim_distance,
-                        maximum_range,
-                        map.dimensions.bounds(),
-                    )
-                })
-                .zip(crate::builds::world_units_from_milliunits(
-                    radius_milliunits,
-                ))
-                .map(|(center, radius)| (origin, center, radius))
-        }
-        _ => None,
-    };
+    let scan_preview = targeted_ultimate_preview(map, controlled, &aim.pending);
     let segments = if let Some((origin, center, _)) = scan_preview {
         let delta = center - origin;
         vec![PreviewPrimitive {
@@ -1477,7 +1615,110 @@ pub(super) fn update_combat_visual_state(
             _ => Vec::new(),
         }
     };
-    for (slot, mut transform, mut visibility, mut mesh, mut material) in &mut previews {
+    apply_aim_preview_visuals(
+        &mut previews,
+        &primitives,
+        &materials,
+        scan_preview,
+        &segments,
+    );
+}
+
+fn append_nonfighter_aim_blockers(
+    sentries: &SentryAimQuery,
+    safes: &SafeAimQuery,
+    controlled_team: Option<crate::combat::TeamId>,
+    blockers: &mut Vec<AimTraceDynamicBlocker>,
+) {
+    for (position, identity, health) in sentries.iter() {
+        if health.0 > 0
+            && controlled_team.is_some_and(|controlled_team| {
+                crate::combat::teams_are_hostile(controlled_team, identity.team_id)
+            })
+        {
+            blockers.push(AimTraceDynamicBlocker {
+                class: AimTraceBlockerClass::Sentry,
+                stable_id: u128::from(identity.deployable_id.0),
+                position: position.0,
+                rotation: 0.0,
+                shape: crate::map::MapShape::Circle {
+                    radius: crate::abilities::SENTRY_RADIUS,
+                },
+            });
+        }
+    }
+    for (position, rotation, safe, health) in safes.iter() {
+        if health.0 > 0 {
+            blockers.push(AimTraceDynamicBlocker {
+                class: AimTraceBlockerClass::HeistSafe,
+                stable_id: (safe.match_id.0 << 32) | u128::from(safe.anchor_id.0),
+                position: position.0,
+                rotation: rotation.as_radians(),
+                shape: crate::map::MapShape::Rectangle {
+                    half_extents: crate::matchplay::HEIST_SAFE_HALF_EXTENTS,
+                },
+            });
+        }
+    }
+}
+
+fn targeted_ultimate_preview(
+    map: Option<ActivePreviewMap<'_>>,
+    controlled: Option<ControlledAim<'_>>,
+    pending: &PendingLocalActions,
+) -> Option<(Vec2, Vec2, f32)> {
+    match (map, controlled) {
+        (Some((map, _)), Some((origin, facing, loadout, Some(ability))))
+            if matches!(
+                loadout.ultimate.kind,
+                crate::builds::UltimateKind::RevealScan
+                    | crate::builds::UltimateKind::ConcealmentField
+            ) && pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
+                && matches!(ability.phase, crate::builds::AbilityPhase::Ready) =>
+        {
+            let (
+                crate::builds::UltimateParameters::RevealScan {
+                    maximum_range_milliunits,
+                    radius_milliunits,
+                    ..
+                }
+                | crate::builds::UltimateParameters::ConcealmentField {
+                    maximum_range_milliunits,
+                    radius_milliunits,
+                    ..
+                },
+            ) = (loadout.ultimate.parameters,)
+            else {
+                unreachable!()
+            };
+            crate::builds::world_units_from_milliunits(maximum_range_milliunits)
+                .and_then(|maximum_range| {
+                    crate::abilities::reveal_scan_center(
+                        origin,
+                        Vec2::from_angle(facing),
+                        pending.aim_axis,
+                        pending.aim_distance,
+                        maximum_range,
+                        map.dimensions.bounds(),
+                    )
+                })
+                .zip(crate::builds::world_units_from_milliunits(
+                    radius_milliunits,
+                ))
+                .map(|(center, radius)| (origin, center, radius))
+        }
+        _ => None,
+    }
+}
+
+fn apply_aim_preview_visuals(
+    previews: &mut PreviewVisualQuery,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    scan_preview: Option<(Vec2, Vec2, f32)>,
+    segments: &[PreviewPrimitive],
+) {
+    for (slot, mut transform, mut visibility, mut mesh, mut material) in previews.iter_mut() {
         if slot.slot == u8::MAX {
             let Some((_, center, radius)) = scan_preview else {
                 *visibility = Visibility::Hidden;
@@ -1528,16 +1769,14 @@ pub(super) fn update_combat_visual_state(
     reason = "cue consumption resolves actor intents and one bounded effect transaction"
 )]
 pub(super) fn consume_combat_cues(
-    mut commands: Commands,
     mut cues: MessageReader<DeduplicatedCombatCue>,
+    mut pending_effects: MessageWriter<PendingCombatEffect>,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     settings: Option<Res<ClientShellSettings>>,
     owners: Query<(Entity, &NetworkEntityId), With<Fighter>>,
     mut visuals: Query<(&CombatVisualOwner, &mut V3FighterVisual)>,
-    effects: Query<(Entity, &CombatEffect3d)>,
     authoritative_ticks: Query<&AuthoritativeTick>,
-    mut sequence: Local<CombatEffectSequence>,
 ) {
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
     let current_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
@@ -1554,12 +1793,6 @@ pub(super) fn consume_combat_cues(
         let Some((position, material, scale)) = cue_effect(cue, &materials) else {
             continue;
         };
-        if effects.iter().count() >= MAX_EFFECTS
-            && let Some((oldest, _)) = effects.iter().min_by_key(|(_, effect)| effect.order)
-        {
-            commands.entity(oldest).despawn();
-        }
-        sequence.0 = sequence.0.saturating_add(1);
         let scan_pulse = matches!(cue, crate::combat::CombatCue::RevealScanActivated { .. });
         let (lifetime, expires_at_tick) = combat_effect_lifetime(cue, current_tick, reduced);
         let transform = if scan_pulse {
@@ -1572,27 +1805,22 @@ pub(super) fn consume_combat_cues(
             Transform::from_translation(ground_position(position) + Vec3::Y * (scale * 0.45))
                 .with_scale(Vec3::splat(scale * if reduced { 0.65 } else { 1.0 }))
         };
-        commands.spawn((
-            CombatEffect3d {
-                timer: Timer::new(lifetime, TimerMode::Once),
-                expires_at_tick,
-                order: sequence.0,
-            },
-            Mesh3d(if scan_pulse {
+        pending_effects.write(PendingCombatEffect {
+            lifetime,
+            expires_at_tick,
+            mesh: if scan_pulse {
                 primitives.area_ring.clone()
             } else {
                 primitives.effect_sphere.clone()
-            }),
-            MeshMaterial3d(material),
-            NotShadowCaster,
-            NotShadowReceiver,
+            },
+            material,
             transform,
-            Name::new(if scan_pulse {
+            label: if scan_pulse {
                 "V9 active Reveal Scan area"
             } else {
                 "V3 bounded combat cue effect"
-            }),
-        ));
+            },
+        });
     }
 }
 
@@ -1602,14 +1830,12 @@ pub(super) fn consume_combat_cues(
     reason = "the focused Bevy presentation system reads bounded cue, map, palette, settings, and effect state"
 )]
 pub(super) fn consume_world_object_cues(
-    mut commands: Commands,
     received: Option<ResMut<crate::map::ReceivedWorldObjectCues>>,
+    mut pending_effects: MessageWriter<PendingCombatEffect>,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     settings: Option<Res<ClientShellSettings>>,
-    effects: Query<(Entity, &CombatEffect3d)>,
     map_states: Query<&crate::map::MapDynamicState, With<crate::map::MapRoot>>,
-    mut sequence: Local<CombatEffectSequence>,
 ) {
     let Some(mut received) = received else {
         return;
@@ -1623,12 +1849,6 @@ pub(super) fn consume_world_object_cues(
         if cue.target().generation() != map_state.generation_id() {
             continue;
         }
-        if effects.iter().count() >= MAX_EFFECTS
-            && let Some((oldest, _)) = effects.iter().min_by_key(|(_, effect)| effect.order)
-        {
-            commands.entity(oldest).despawn();
-        }
-        sequence.0 = sequence.0.saturating_add(1);
         let (position, radius, exploded) = match cue {
             crate::map::WorldObjectCue::Damaged { position, .. } => {
                 (position.as_vec2(), 11.0, false)
@@ -1639,24 +1859,16 @@ pub(super) fn consume_world_object_cues(
                 ..
             } => (position.as_vec2(), f32::from(radius_world_units), true),
         };
-        commands.spawn((
-            CombatEffect3d {
-                timer: Timer::new(
-                    Duration::from_secs_f32(if reduced { 0.12 } else { 0.28 }),
-                    TimerMode::Once,
-                ),
-                expires_at_tick: None,
-                order: sequence.0,
-            },
-            Mesh3d(if exploded {
+        pending_effects.write(PendingCombatEffect {
+            lifetime: Duration::from_secs_f32(if reduced { 0.12 } else { 0.28 }),
+            expires_at_tick: None,
+            mesh: if exploded {
                 primitives.area_ring.clone()
             } else {
                 primitives.effect_sphere.clone()
-            }),
-            MeshMaterial3d(materials.effect_damage.clone()),
-            NotShadowCaster,
-            NotShadowReceiver,
-            if exploded {
+            },
+            material: materials.effect_damage.clone(),
+            transform: if exploded {
                 Transform {
                     translation: ground_position(position) + Vec3::Y * PREVIEW_HEIGHT,
                     rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
@@ -1666,12 +1878,12 @@ pub(super) fn consume_world_object_cues(
                 Transform::from_translation(ground_position(position) + Vec3::Y * 8.0)
                     .with_scale(Vec3::splat(if reduced { 7.0 } else { radius }))
             },
-            Name::new(if exploded {
+            label: if exploded {
                 "V10 authoritative oil-barrel blast"
             } else {
                 "V10 oil-barrel damage response"
-            }),
-        ));
+            },
+        });
     }
 }
 
@@ -1681,14 +1893,12 @@ pub(super) fn consume_world_object_cues(
     reason = "the pickup cue presenter owns bounded green open, heal, and expiry feedback"
 )]
 pub(super) fn consume_pickup_cues(
-    mut commands: Commands,
     received: Option<ResMut<crate::map::ReceivedPickupCues>>,
+    mut pending_effects: MessageWriter<PendingCombatEffect>,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     settings: Option<Res<ClientShellSettings>>,
-    effects: Query<(Entity, &CombatEffect3d)>,
     map_states: Query<&crate::map::MapDynamicState, With<crate::map::MapRoot>>,
-    mut sequence: Local<CombatEffectSequence>,
 ) {
     let Some(mut received) = received else { return };
     let Ok(map_state) = map_states.single() else {
@@ -1729,30 +1939,16 @@ pub(super) fn consume_pickup_cues(
         if identity.generation != map_state.generation_id() {
             continue;
         }
-        if effects.iter().count() >= MAX_EFFECTS
-            && let Some((oldest, _)) = effects.iter().min_by_key(|(_, effect)| effect.order)
-        {
-            commands.entity(oldest).despawn();
-        }
-        sequence.0 = sequence.0.saturating_add(1);
-        commands.spawn((
-            CombatEffect3d {
-                timer: Timer::new(
-                    Duration::from_secs_f32(if reduced { 0.12 } else { 0.3 }),
-                    TimerMode::Once,
-                ),
-                expires_at_tick: None,
-                order: sequence.0,
-            },
-            Mesh3d(if ring {
+        pending_effects.write(PendingCombatEffect {
+            lifetime: Duration::from_secs_f32(if reduced { 0.12 } else { 0.3 }),
+            expires_at_tick: None,
+            mesh: if ring {
                 primitives.area_ring.clone()
             } else {
                 primitives.effect_sphere.clone()
-            }),
-            MeshMaterial3d(materials.pickup_glow.clone()),
-            NotShadowCaster,
-            NotShadowReceiver,
-            if ring {
+            },
+            material: materials.pickup_glow.clone(),
+            transform: if ring {
                 Transform {
                     translation: ground_position(position) + Vec3::Y * PREVIEW_HEIGHT,
                     rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
@@ -1762,8 +1958,8 @@ pub(super) fn consume_pickup_cues(
                 Transform::from_translation(ground_position(position) + Vec3::Y * 15.0)
                     .with_scale(Vec3::splat(if reduced { radius * 0.6 } else { radius }))
             },
-            Name::new(label),
-        ));
+            label,
+        });
     }
 }
 
@@ -1773,16 +1969,14 @@ pub(super) fn consume_pickup_cues(
     reason = "the focused presentation system validates and materializes bounded objective cues"
 )]
 pub(super) fn consume_heist_objective_cues(
-    mut commands: Commands,
     mut received: MessageReader<crate::matchplay::ReceivedHeistObjectiveCue>,
+    mut pending_effects: MessageWriter<PendingCombatEffect>,
     readiness: Res<hud::ClientHeistReadiness>,
     matches: Query<&MatchState, With<MatchRoot>>,
     safes: Query<&crate::map::DamageableTargetIdentity, With<crate::matchplay::HeistSafe>>,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     settings: Option<Res<ClientShellSettings>>,
-    effects: Query<(Entity, &CombatEffect3d)>,
-    mut sequence: Local<CombatEffectSequence>,
 ) {
     let ready = matches!(*readiness, hud::ClientHeistReadiness::Ready);
     let match_id = matches.single().ok().map(|state| state.match_id);
@@ -1800,35 +1994,21 @@ pub(super) fn consume_heist_objective_cues(
         {
             continue;
         }
-        if effects.iter().count() >= MAX_EFFECTS
-            && let Some((oldest, _)) = effects.iter().min_by_key(|(_, effect)| effect.order)
-        {
-            commands.entity(oldest).despawn();
-        }
-        sequence.0 = sequence.0.saturating_add(1);
         let (radius, duration, ring) = match cue.kind {
             crate::matchplay::HeistObjectiveCueKind::Damaged => (12.0, 0.24, false),
             crate::matchplay::HeistObjectiveCueKind::Critical => (30.0, 0.50, true),
             crate::matchplay::HeistObjectiveCueKind::Destroyed => (72.0, 0.85, true),
         };
-        commands.spawn((
-            CombatEffect3d {
-                timer: Timer::new(
-                    Duration::from_secs_f32(if reduced { duration * 0.5 } else { duration }),
-                    TimerMode::Once,
-                ),
-                expires_at_tick: None,
-                order: sequence.0,
-            },
-            Mesh3d(if ring {
+        pending_effects.write(PendingCombatEffect {
+            lifetime: Duration::from_secs_f32(if reduced { duration * 0.5 } else { duration }),
+            expires_at_tick: None,
+            mesh: if ring {
                 primitives.area_ring.clone()
             } else {
                 primitives.effect_sphere.clone()
-            }),
-            MeshMaterial3d(materials.effect_damage.clone()),
-            NotShadowCaster,
-            NotShadowReceiver,
-            Transform {
+            },
+            material: materials.effect_damage.clone(),
+            transform: Transform {
                 translation: ground_position(cue.position.as_vec2()) + Vec3::Y * PREVIEW_HEIGHT,
                 scale: if ring {
                     Vec3::new(radius, 1.0, radius)
@@ -1837,12 +2017,46 @@ pub(super) fn consume_heist_objective_cues(
                 },
                 ..default()
             },
-            Name::new(match cue.kind {
+            label: match cue.kind {
                 crate::matchplay::HeistObjectiveCueKind::Damaged => "Heist safe hit cue",
                 crate::matchplay::HeistObjectiveCueKind::Critical => "Heist safe critical cue",
                 crate::matchplay::HeistObjectiveCueKind::Destroyed => "Heist safe destroyed cue",
-            }),
-        ));
+            },
+        });
+    }
+}
+
+pub(super) fn materialize_combat_effects(
+    mut commands: Commands,
+    mut pending_effects: MessageReader<PendingCombatEffect>,
+    effects: Query<(Entity, &CombatEffect3d)>,
+    mut sequence: Local<CombatEffectSequence>,
+) {
+    let mut active = effects
+        .iter()
+        .map(|(entity, effect)| (effect.order, entity))
+        .collect::<VecDeque<_>>();
+    active
+        .make_contiguous()
+        .sort_unstable_by_key(|(order, entity)| (*order, entity.to_bits()));
+    if let Some((maximum_order, _)) = active.back() {
+        sequence.0 = sequence.0.max(*maximum_order);
+    }
+    while active.len() > MAX_EFFECTS {
+        if let Some((_, oldest)) = active.pop_front() {
+            commands.entity(oldest).try_despawn();
+        }
+    }
+
+    for descriptor in pending_effects.read() {
+        while active.len() >= MAX_EFFECTS {
+            if let Some((_, oldest)) = active.pop_front() {
+                commands.entity(oldest).try_despawn();
+            }
+        }
+        sequence.0 = sequence.0.saturating_add(1);
+        let entity = descriptor.spawn(&mut commands, sequence.0);
+        active.push_back((sequence.0, entity));
     }
 }
 
@@ -1946,7 +2160,7 @@ pub(super) fn cleanup_combat_effects(
             .zip(current_tick)
             .is_some_and(|(expires_at_tick, now)| now >= expires_at_tick);
         if authoritative_expiry || effect.timer.is_finished() {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -2052,6 +2266,128 @@ pub(super) fn write_combat_visual_poses(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pending_effect(label: &'static str, lifetime: Duration) -> PendingCombatEffect {
+        PendingCombatEffect {
+            lifetime,
+            expires_at_tick: None,
+            mesh: Handle::default(),
+            material: Handle::default(),
+            transform: Transform::default(),
+            label,
+        }
+    }
+
+    fn effect_allocation_app() -> App {
+        let mut app = App::new();
+        app.add_message::<PendingCombatEffect>()
+            .add_systems(Update, materialize_combat_effects);
+        app
+    }
+
+    #[test]
+    fn effect_allocation_evicts_oldest_and_settles_at_capacity() {
+        let mut app = effect_allocation_app();
+        let existing = (0..MAX_EFFECTS + 2)
+            .map(|order| {
+                app.world_mut()
+                    .spawn(CombatEffect3d {
+                        timer: Timer::new(Duration::from_mins(1), TimerMode::Once),
+                        expires_at_tick: None,
+                        order: u64::try_from(order).expect("bounded effect order fits u64"),
+                    })
+                    .id()
+            })
+            .collect::<Vec<_>>();
+        app.world_mut()
+            .write_message(pending_effect("combat family", Duration::from_millis(180)));
+        app.world_mut().write_message(pending_effect(
+            "world-object family",
+            Duration::from_millis(280),
+        ));
+
+        app.update();
+
+        for evicted in &existing[..4] {
+            assert!(app.world().get_entity(*evicted).is_err());
+        }
+        let world = app.world_mut();
+        let mut effects = world.query::<&CombatEffect3d>();
+        let orders = effects
+            .iter(world)
+            .map(|effect| effect.order)
+            .collect::<Vec<_>>();
+        assert_eq!(orders.len(), MAX_EFFECTS);
+        assert_eq!(orders.iter().copied().min(), Some(4));
+        assert_eq!(orders.iter().copied().max(), Some(99));
+    }
+
+    #[test]
+    fn effect_allocation_preserves_cross_family_message_order() {
+        let mut app = effect_allocation_app();
+        for label in ["combat", "world-object", "pickup", "heist"] {
+            app.world_mut()
+                .write_message(pending_effect(label, Duration::from_millis(100)));
+        }
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut effects = world.query::<(&CombatEffect3d, &Name)>();
+        let mut ordered = effects
+            .iter(world)
+            .map(|(effect, name)| (effect.order, name.as_str()))
+            .collect::<Vec<_>>();
+        ordered.sort_unstable_by_key(|(order, _)| *order);
+        assert_eq!(
+            ordered
+                .into_iter()
+                .map(|(_, name)| name)
+                .collect::<Vec<_>>(),
+            ["combat", "world-object", "pickup", "heist"]
+        );
+    }
+
+    #[test]
+    fn reduced_effect_duration_survives_central_allocation() {
+        let cue = crate::combat::CombatCue::Reset {
+            event_id: crate::combat::CombatEventId(1),
+            tick: 1,
+            target: NetworkEntityId(1),
+            position: Vec2::ZERO.into(),
+        };
+        let normal = combat_effect_lifetime(&cue, None, false).0;
+        let reduced = combat_effect_lifetime(&cue, None, true).0;
+        assert!(reduced < normal);
+
+        let mut app = effect_allocation_app();
+        app.world_mut()
+            .write_message(pending_effect("reduced", reduced));
+        app.update();
+        let world = app.world_mut();
+        let mut effects = world.query::<&CombatEffect3d>();
+        assert_eq!(effects.single(world).unwrap().timer.duration(), reduced);
+    }
+
+    #[test]
+    fn authoritative_effect_expiry_cleans_up_materialized_effect() {
+        let mut app = App::new();
+        app.add_message::<PendingCombatEffect>()
+            .insert_resource(Time::<Real>::default())
+            .add_systems(
+                Update,
+                (materialize_combat_effects, cleanup_combat_effects).chain(),
+            );
+        app.world_mut().spawn(AuthoritativeTick(40));
+        let mut descriptor = pending_effect("authoritative", Duration::from_mins(1));
+        descriptor.expires_at_tick = Some(40);
+        app.world_mut().write_message(descriptor);
+
+        app.update();
+        let world = app.world_mut();
+        let mut effects = world.query_filtered::<Entity, With<CombatEffect3d>>();
+        assert_eq!(effects.iter(world).count(), 0);
+    }
 
     #[test]
     fn straight_projectile_visual_footprint_matches_replicated_circle() {
@@ -2243,10 +2579,37 @@ mod tests {
     }
 
     #[test]
-    fn combat_visual_state_queries_are_runtime_disjoint() {
+    fn focused_combat_visual_state_queries_are_runtime_disjoint() {
         let mut schedule = Schedule::default();
-        schedule.add_systems(update_combat_visual_state);
+        schedule.add_systems((
+            update_fighter_overhead_state,
+            reconcile_status_visuals,
+            reconcile_dash_trails,
+            update_aim_preview,
+        ));
         schedule.initialize(&mut World::new()).unwrap();
+    }
+
+    #[test]
+    fn dash_trail_lifecycle_uses_the_direct_link_and_repairs_stale_links() {
+        let trail = Entity::from_raw_u32(7).expect("valid trail entity");
+        assert_eq!(
+            dash_trail_action(true, Some(trail), true),
+            DashTrailAction::Update(trail)
+        );
+        assert_eq!(
+            dash_trail_action(false, Some(trail), true),
+            DashTrailAction::Remove(trail)
+        );
+        assert_eq!(
+            dash_trail_action(true, Some(trail), false),
+            DashTrailAction::Spawn
+        );
+        assert_eq!(
+            dash_trail_action(false, Some(trail), false),
+            DashTrailAction::ClearStaleLink
+        );
+        assert_eq!(dash_trail_action(false, None, false), DashTrailAction::None);
     }
 
     #[test]

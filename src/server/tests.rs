@@ -12,7 +12,6 @@ fn session_probe(label: &'static str) -> impl FnMut(ResMut<SessionScheduleTrace>
 #[test]
 fn server_session_phases_have_one_explicit_authority_order() {
     let mut app = App::new();
-    crate::test_app::reject_owned_schedule_ambiguities(&mut app);
     app.init_resource::<SessionScheduleTrace>();
     configure_server_session_schedule(&mut app);
     app.add_systems(
@@ -25,6 +24,7 @@ fn server_session_phases_have_one_explicit_authority_order() {
             session_probe("terminal").in_set(ServerSessionSet::Terminal),
         ),
     );
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
 
     app.update();
 

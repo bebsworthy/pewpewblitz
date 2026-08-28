@@ -34,8 +34,6 @@ pub(crate) use planning::{
 };
 #[cfg(feature = "server")]
 pub(crate) use runtime::requested_damage;
-pub use runtime::{combine_knockback, refresh_strongest_slow};
-
 /// The bounded authoritative transaction outputs produced by payload resolution, grouped
 /// to keep the scheduling system within the engine's system-parameter budget.
 #[cfg(feature = "server")]

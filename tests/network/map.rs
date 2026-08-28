@@ -267,6 +267,10 @@ fn client_local_snapshot_edit_has_no_authoritative_map_path() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario proves partial barrel health and terminal removal convergence across both clients"
+)]
 fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
     let mut harness = Harness::new_feature_yard_match(2);
     harness.step_until(|harness| {
@@ -381,6 +385,10 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario keeps chest destruction, pickup replication, collection, and cleanup in one lifecycle proof"
+)]
 fn chest_drop_and_collection_converge_for_two_clients() {
     let mut harness = Harness::new_feature_yard_match(2);
     harness.step_until(|harness| {
@@ -512,6 +520,10 @@ fn chest_drop_and_collection_converge_for_two_clients() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario compares point-blank obstruction for both supported damageable object families"
+)]
 fn point_blank_shots_damage_the_first_chest_or_barrel_without_passing_through() {
     let mut harness = Harness::new_feature_yard_match(2);
     harness.step_until(|harness| {

@@ -37,8 +37,7 @@ fn select_ready_and_activate_with_loadouts(
     loadouts: [(u16, u16, [u16; 2]); 2],
 ) {
     harness.step_until(|harness| (0..2).all(|index| harness.client_is_active(index)));
-    for index in 0..2 {
-        let (weapon, ultimate, passives) = loadouts[index];
+    for (index, (weapon, ultimate, passives)) in loadouts.into_iter().enumerate() {
         harness.install_saved_brawler_loadout(index, weapon, ultimate, passives);
     }
     harness.step_until(|harness| (0..2).all(|index| harness.loadout_is_ready(index)));
@@ -175,6 +174,10 @@ fn restart_after_completion(harness: &mut Harness, request_base: u64) {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario keeps threshold cues, invalid damage, completion, and restart convergence in one authority proof"
+)]
 fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
     let mut harness = Harness::new_heist_match(2);
     select_ready_and_activate(&mut harness, 10);

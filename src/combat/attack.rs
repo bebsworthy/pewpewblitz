@@ -1,32 +1,8 @@
-//! Shared attack economy and deterministic delivery identity helpers.
+//! Authoritative attack economy and delivery orchestration.
 
 #[allow(clippy::wildcard_imports)]
 #[cfg(feature = "server")]
 use super::*;
-use super::{AttackId, FiringPattern, WeaponEconomy};
-
-#[must_use]
-pub fn delivery_count(firing: FiringPattern) -> u8 {
-    match firing {
-        FiringPattern::Single => 1,
-        FiringPattern::Spread { delivery_count, .. } => delivery_count,
-    }
-}
-
-#[must_use]
-pub fn economy_ready(resource: u8, phase_ready: bool) -> bool {
-    phase_ready && resource > 0
-}
-
-#[must_use]
-pub fn refill_deadline(current_tick: u64, economy: WeaponEconomy) -> u64 {
-    current_tick.saturating_add(economy.refill_ticks())
-}
-
-#[must_use]
-pub fn delivery_key(attack_id: AttackId, delivery_index: u8) -> (u64, u8) {
-    (attack_id.0, delivery_index)
-}
 
 #[cfg(feature = "server")]
 pub(super) fn advance_composed_weapon_state(
@@ -903,16 +879,9 @@ fn consume_quick_cycle_state(
     crate::abilities::apply_quick_cycle_ticks(base_ticks)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
-    #[test]
-    fn delivery_indices_are_stable_within_one_attack() {
-        assert_eq!(delivery_key(AttackId(7), 3), (7, 3));
-        assert_eq!(delivery_count(FiringPattern::Single), 1);
-    }
-
-    #[cfg(feature = "server")]
     #[test]
     fn quick_cycle_is_consumed_once_for_magazine_and_charge_refills() {
         for economy in [
@@ -941,7 +910,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "server")]
     #[test]
     fn lob_focal_distance_is_bounded_by_the_authored_maximum() {
         use crate::protocol::QuantizedAimDistance;
@@ -957,7 +925,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "server")]
     #[test]
     fn lob_flight_time_scales_with_landing_distance_and_keeps_a_short_floor() {
         assert_eq!(resolved_lob_flight_ticks(520.0, 520.0, 45), 45);

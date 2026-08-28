@@ -24,7 +24,6 @@ use bevy::{
     ecs::error::{FallbackErrorHandler, error},
     input::keyboard::Key,
     input::mouse::AccumulatedMouseMotion,
-    log::LogPlugin,
     prelude::*,
     state::app::StatesPlugin,
     window::{PresentMode, PrimaryWindow, WindowCloseRequested, WindowResolution},
@@ -538,8 +537,8 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
             crate::timing::SIMULATION_TICK,
         )))
-        .add_plugins(StatesPlugin)
-        .add_plugins(LogPlugin::default());
+        .add_plugins(StatesPlugin);
+        crate::logging::add_log_plugin_once(&mut app);
     } else {
         let (present_mode, winit_settings) = render_profile_settings(render_profile);
         app.add_plugins(
@@ -692,7 +691,7 @@ pub fn build_app() -> App {
     clippy::needless_pass_by_value,
     reason = "network-test callers pass an owned configuration alongside the owned Crossbeam IO"
 )]
-pub fn spawn_crossbeam_client(
+pub(crate) fn spawn_crossbeam_client(
     world: &mut World,
     config: ClientNetworkConfig,
     io: lightyear::crossbeam::CrossbeamIo,

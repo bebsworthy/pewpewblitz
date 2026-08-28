@@ -13,3 +13,10 @@ Resolve strict Clippy findings for the network-test test/performance configurati
 # Constraints
 
 Do not mechanically refactor scenario tests solely to silence line-count lints.
+
+## Verification (2026-08-27)
+
+- `cargo clippy --locked --no-default-features --features network-test --tests -- -D warnings` passed.
+- `cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1` passed: 88/88.
+- `cargo test --locked --no-default-features --features network-test --test performance -- --nocapture` passed: 12/12.
+- Rejected-session teardown now uses Lightyear server-side `Disconnecting`, restoring the handshake-timeout lifecycle test without duplicate despawn ownership.

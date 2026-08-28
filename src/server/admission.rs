@@ -19,7 +19,7 @@ use crate::{
 };
 #[cfg(test)]
 use bevy::app::TerminalCtrlCHandlerPlugin;
-use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, state::app::StatesPlugin};
+use bevy::{app::ScheduleRunnerPlugin, prelude::*, state::app::StatesPlugin};
 use brawler_routing::{LobbyManifest, MatchManifestParticipant, MatchManifestV1};
 use lightyear::prelude::server::ServerPlugins;
 use lightyear::prelude::{PeerId, RemoteId};
@@ -403,16 +403,16 @@ pub fn build_lobby_worker_app(
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
             crate::timing::SIMULATION_TICK,
         )))
-        .add_plugins(StatesPlugin)
-        .add_plugins(LogPlugin::default())
-        .add_plugins(ServerPlugins {
-            tick_duration: crate::timing::SIMULATION_TICK,
-        })
-        .add_plugins((
-            crate::protocol::ProtocolPlugin,
-            super::lobby::LobbyPlugin,
-            super::routed_worker::RoutedWorkerPlugin,
-        ));
+        .add_plugins(StatesPlugin);
+    crate::logging::add_log_plugin_once(&mut app);
+    app.add_plugins(ServerPlugins {
+        tick_duration: crate::timing::SIMULATION_TICK,
+    })
+    .add_plugins((
+        crate::protocol::ProtocolPlugin,
+        super::lobby::LobbyPlugin,
+        super::routed_worker::RoutedWorkerPlugin,
+    ));
     validate_runtime_identity(
         &mut app,
         manifest.common.protocol_registry_fingerprint,

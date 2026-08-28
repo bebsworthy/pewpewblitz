@@ -272,6 +272,7 @@ impl Plugin for WorldPresentationPlugin {
         }
         configure_world_presentation_schedule(app);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
+            .add_message::<combat::PendingCombatEffect>()
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .init_resource::<DamageableObjectHealthUiIndex>()
@@ -318,7 +319,9 @@ impl Plugin for WorldPresentationPlugin {
                     combat::consume_world_object_cues,
                     combat::consume_pickup_cues,
                     combat::consume_heist_objective_cues,
+                    combat::materialize_combat_effects,
                 )
+                    .chain()
                     .in_set(WorldPresentationSet::ConsumeCues),
             )
             .add_systems(
@@ -326,12 +329,12 @@ impl Plugin for WorldPresentationPlugin {
                 (
                     update_heist_safe_status_visuals,
                     update_damageable_map_visuals,
-                    (
-                        combat::update_fighter_concealment_visuals,
-                        combat::update_combat_visual_state,
-                        update_character_animation,
-                    )
-                        .chain(),
+                    combat::update_fighter_concealment_visuals,
+                    combat::update_fighter_overhead_state,
+                    combat::reconcile_status_visuals,
+                    combat::reconcile_dash_trails,
+                    combat::update_aim_preview,
+                    update_character_animation,
                     tint_3d_zone,
                 )
                     .in_set(WorldPresentationSet::Animate),
@@ -2179,7 +2182,6 @@ mod tests {
     #[test]
     fn presentation_phases_preserve_sync_and_semantic_order() {
         let mut app = App::new();
-        crate::test_app::reject_owned_schedule_ambiguities(&mut app);
         app.init_resource::<PresentationScheduleTrace>();
         configure_world_presentation_schedule(&mut app);
         app.add_systems(
@@ -2194,6 +2196,7 @@ mod tests {
                 presentation_probe("cleanup").in_set(WorldPresentationSet::Cleanup),
             ),
         );
+        crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
 
         app.update();
 
