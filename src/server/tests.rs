@@ -232,3 +232,134 @@ fn checkpoint_reports_fail_closed_on_missing_or_altered_state() {
         &snapshot,
     ));
 }
+
+#[test]
+fn combat_prerequisites_require_every_authoritative_and_client_signal() {
+    let mut telemetry = CombatTelemetry {
+        applied_damage: 10,
+        defeats: 1,
+        ..default()
+    };
+    assert!(combat_prerequisites_met(2, 4, &telemetry, true, true, true));
+
+    telemetry.defeats = 0;
+    assert!(!combat_prerequisites_met(
+        2, 4, &telemetry, true, true, true
+    ));
+    telemetry.defeats = 1;
+    assert!(!combat_prerequisites_met(
+        2, 4, &telemetry, true, true, false
+    ));
+}
+
+#[test]
+fn cue_comparison_stops_at_the_first_reset() {
+    let defeat = CombatCue::Defeat {
+        event_id: crate::combat::CombatEventId(1),
+        tick: 10,
+        source: None,
+        target: NetworkEntityId(2),
+    };
+    let reset = CombatCue::Reset {
+        event_id: crate::combat::CombatEventId(2),
+        tick: 11,
+        target: NetworkEntityId(2),
+        position: crate::combat::WorldPoint::from(Vec2::ZERO),
+    };
+    let after_reset = CombatCue::Defeat {
+        event_id: crate::combat::CombatEventId(3),
+        tick: 12,
+        source: None,
+        target: NetworkEntityId(3),
+    };
+
+    assert_eq!(
+        cues_through_first_reset(&[defeat.clone(), reset.clone(), after_reset]),
+        vec![defeat, reset]
+    );
+}
+
+#[test]
+fn cue_comparison_keeps_expected_cues_and_ignores_other_authoritative_events() {
+    let expected_defeat = CombatCue::Defeat {
+        event_id: crate::combat::CombatEventId(1),
+        tick: 10,
+        source: None,
+        target: NetworkEntityId(2),
+    };
+    let additional_environment_cue = CombatCue::Defeat {
+        event_id: crate::combat::CombatEventId(99),
+        tick: 10,
+        source: Some(crate::combat::DamageSource::Environment {
+            map_instance_id: 1,
+            generation: 1,
+            placement_id: 4,
+            initiating_player: None,
+            initiating_fighter: None,
+        }),
+        target: NetworkEntityId(7),
+    };
+    let expected_reset = CombatCue::Reset {
+        event_id: crate::combat::CombatEventId(2),
+        tick: 11,
+        target: NetworkEntityId(2),
+        position: crate::combat::WorldPoint::from(Vec2::ZERO),
+    };
+    let expected = vec![expected_defeat.clone(), expected_reset.clone()];
+    let observed = vec![expected_defeat, additional_environment_cue, expected_reset];
+
+    assert_eq!(cues_matching_expected(&expected, &observed), expected);
+}
+
+#[test]
+fn checkpoint_convergence_requires_the_same_server_candidate_on_both_clients() {
+    let snapshot = CombatStateSnapshot {
+        authoritative_tick: 7,
+        fighters: Vec::new(),
+        projectiles: Vec::new(),
+    };
+    let encoded = encode_state_snapshot(&snapshot).expect("snapshot encoding");
+    let matching_report = format!("checkpoint_reset={encoded}\n");
+    let mut evidence = CombatEvidenceSnapshots::default();
+    evidence
+        .checkpoints
+        .insert("reset".to_string(), snapshot.clone());
+    evidence
+        .checkpoint_candidates
+        .insert("reset".to_string(), vec![(snapshot, 100)]);
+
+    assert!(checkpoint_reports_converge(
+        &evidence,
+        &["reset"],
+        &matching_report,
+        &matching_report,
+    ));
+    assert!(!checkpoint_reports_converge(
+        &evidence,
+        &["reset"],
+        &matching_report,
+        "checkpoint_reset=00\n",
+    ));
+    assert!(!checkpoint_reports_converge(
+        &evidence,
+        &["defeat", "reset"],
+        &matching_report,
+        &matching_report,
+    ));
+}
+
+#[test]
+fn fire_to_cue_latency_uses_only_nonnegative_matching_samples() {
+    let evidence = fire_to_cue_latency_evidence(
+        &[
+            (crate::combat::ShotId(7), 100),
+            (crate::combat::ShotId(8), 200),
+        ],
+        "cue_shot_id=7_epoch_us=150\ncue_shot_id=8_epoch_us=190\n",
+        "cue_shot_id=7_epoch_us=175\n",
+    );
+
+    assert!(evidence.contains("fire_to_cue_client_one_us=50\n"));
+    assert!(evidence.contains("fire_to_cue_client_two_us=75\n"));
+    assert!(!evidence.contains("shot_id=8"));
+}

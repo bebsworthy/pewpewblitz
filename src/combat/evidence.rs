@@ -12,6 +12,8 @@ use super::{
     NetworkEntityId, ProjectileBody, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon,
     StraightFlight, WeaponRecipeFingerprint, WeaponState, WorldPoint,
 };
+#[cfg(feature = "client")]
+use atomic_write_file::AtomicWriteFile;
 #[cfg(feature = "server")]
 use bevy::prelude::Resource;
 use bevy::prelude::{Message, Vec2};
@@ -19,6 +21,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+#[cfg(feature = "client")]
+use std::io::Write as _;
 
 pub const MAX_STATE_SNAPSHOT_BYTES: usize = 32 * 1024;
 #[cfg(feature = "client")]
@@ -917,7 +921,7 @@ pub fn record_headless_combat_observation(
     for cue in &observation.cue_stream {
         let _ = writeln!(report, "cue_stream={}", encode_combat_cue(cue));
     }
-    match fs::write(&path, report) {
+    match write_client_combat_evidence(&path, &report) {
         Ok(()) => {
             observation.wrote_ready = true;
             status.ready = true;
@@ -929,6 +933,16 @@ pub fn record_headless_combat_observation(
             "headless combat observation write failed"
         ),
     }
+}
+
+#[cfg(feature = "client")]
+fn write_client_combat_evidence(path: &std::path::Path, report: &str) -> Result<(), String> {
+    let mut file = AtomicWriteFile::open(path)
+        .map_err(|error| format!("could not open atomic combat evidence file: {error}"))?;
+    file.write_all(report.as_bytes())
+        .map_err(|error| format!("could not write combat evidence: {error}"))?;
+    file.commit()
+        .map_err(|error| format!("could not publish combat evidence: {error}"))
 }
 
 #[cfg(feature = "client")]
@@ -951,6 +965,8 @@ fn required_client_checkpoints(preset_id: u16) -> &'static [&'static str] {
 #[cfg(all(test, any(feature = "server", feature = "client")))]
 mod tests {
     use super::*;
+    #[cfg(feature = "client")]
+    use std::env;
 
     fn fighter(network_entity_id: NetworkEntityId) -> CombatFighterSnapshot {
         CombatFighterSnapshot {
@@ -1064,6 +1080,30 @@ mod tests {
         assert!(reset.fighters[0].weapon_state.is_some());
         assert_eq!(reset.fighters[1].health, None);
         assert_eq!(reset.fighters[1].weapon_state, None);
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn client_combat_evidence_is_atomically_published() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let directory = env::temp_dir().join(format!(
+            "brawler-combat-evidence-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create evidence test directory");
+        let path = directory.join("client-1.ready");
+
+        write_client_combat_evidence(&path, "complete-evidence\n")
+            .expect("publish combat evidence");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read published combat evidence"),
+            "complete-evidence\n"
+        );
+        std::fs::remove_dir_all(directory).expect("remove evidence test directory");
     }
 
     #[cfg(feature = "client")]

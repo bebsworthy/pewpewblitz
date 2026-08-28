@@ -23,6 +23,156 @@ fn fail_verification(
     );
 }
 
+pub(super) fn combat_prerequisites_met(
+    active_sessions: usize,
+    accepted_attacks: u64,
+    telemetry: &CombatTelemetry,
+    tested_fighter: bool,
+    expected_family_exercised: bool,
+    clients_observed: bool,
+) -> bool {
+    active_sessions >= 2
+        && accepted_attacks >= 4
+        && telemetry.applied_damage > 0
+        && telemetry.defeats > 0
+        && tested_fighter
+        && expected_family_exercised
+        && clients_observed
+}
+
+pub(super) fn cues_through_first_reset(cues: &[CombatCue]) -> Vec<CombatCue> {
+    cues.iter()
+        .take_while(|cue| {
+            !matches!(
+                cue,
+                CombatCue::Reset { .. } | CombatCue::FighterReset { .. }
+            )
+        })
+        .chain(
+            cues.iter()
+                .skip_while(|cue| {
+                    !matches!(
+                        cue,
+                        CombatCue::Reset { .. } | CombatCue::FighterReset { .. }
+                    )
+                })
+                .take(1),
+        )
+        .cloned()
+        .collect()
+}
+
+/// Client wire streams can contain authoritative map/object cues that are emitted through the
+/// shared outbox but are not retained by the legacy combat telemetry stream. Compare every
+/// telemetry-owned cue exactly and in order without treating those additional authoritative cues
+/// as divergence.
+pub(super) fn cues_matching_expected(
+    expected: &[CombatCue],
+    observed: &[CombatCue],
+) -> Vec<CombatCue> {
+    observed
+        .iter()
+        .filter(|observed_cue| {
+            let observed_key = crate::combat::combat_cue_key(observed_cue);
+            expected
+                .iter()
+                .any(|expected_cue| crate::combat::combat_cue_key(expected_cue) == observed_key)
+        })
+        .cloned()
+        .collect()
+}
+
+pub(super) fn checkpoint_reports_converge(
+    evidence: &CombatEvidenceSnapshots,
+    required_checkpoints: &[&str],
+    client_one: &str,
+    client_two: &str,
+) -> bool {
+    required_checkpoints
+        .iter()
+        .all(|required| evidence.checkpoints.contains_key(*required))
+        && evidence.checkpoints.keys().all(|checkpoint| {
+            let report_key = format!("checkpoint_{checkpoint}");
+            let clients_reported_checkpoint = parse_report_value(client_one, &report_key).is_some()
+                && parse_report_value(client_two, &report_key).is_some();
+            let clients_share_server_candidate =
+                clients_share_checkpoint_candidate(evidence, checkpoint, client_one, client_two);
+            clients_reported_checkpoint && clients_share_server_candidate
+        })
+}
+
+fn clients_share_checkpoint_candidate(
+    evidence: &CombatEvidenceSnapshots,
+    checkpoint: &str,
+    client_one: &str,
+    client_two: &str,
+) -> bool {
+    let report_key = format!("checkpoint_{checkpoint}");
+    evidence
+        .checkpoint_candidates
+        .get(checkpoint)
+        .is_some_and(|candidates| {
+            candidates.iter().any(|(snapshot, _)| {
+                report_matches_snapshot(client_one, &report_key, snapshot)
+                    && report_matches_snapshot(client_two, &report_key, snapshot)
+            })
+        })
+}
+
+fn log_checkpoint_diagnostics(
+    evidence: &CombatEvidenceSnapshots,
+    client_one: &str,
+    client_two: &str,
+) {
+    for checkpoint in evidence.checkpoints.keys() {
+        let report_key = format!("checkpoint_{checkpoint}");
+        let client_one_value = parse_report_value(client_one, &report_key);
+        let client_two_value = parse_report_value(client_two, &report_key);
+        let matches_both =
+            clients_share_checkpoint_candidate(evidence, checkpoint, client_one, client_two);
+        error!(
+            checkpoint,
+            server_candidates = evidence
+                .checkpoint_candidates
+                .get(checkpoint)
+                .map_or(0, Vec::len),
+            client_one_present = client_one_value.is_some(),
+            client_two_present = client_two_value.is_some(),
+            matches_both,
+            "combat checkpoint diagnostic"
+        );
+    }
+}
+
+pub(super) fn fire_to_cue_latency_evidence(
+    accepted_shots: &[(crate::combat::ShotId, u128)],
+    client_one: &str,
+    client_two: &str,
+) -> String {
+    let client_one_cues = parse_client_cue_timestamps(client_one);
+    let client_two_cues = parse_client_cue_timestamps(client_two);
+    let mut latency_evidence = String::new();
+    for (shot_id, fired_at) in accepted_shots {
+        for (client_name, cues) in [
+            ("client_one", &client_one_cues),
+            ("client_two", &client_two_cues),
+        ] {
+            let Some((_, cue_at)) = cues.iter().find(|(candidate, _)| candidate == &shot_id.0)
+            else {
+                continue;
+            };
+            if *cue_at >= *fired_at {
+                let _ = writeln!(
+                    latency_evidence,
+                    "fire_to_cue_{client_name}_us={}",
+                    cue_at.saturating_sub(*fired_at)
+                );
+            }
+        }
+    }
+    latency_evidence
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
@@ -564,14 +714,14 @@ pub(super) fn verify_process_combat(
                 .is_file()
         })
     });
-    if active_sessions < 2
-        || accepted_attacks < 4
-        || telemetry.applied_damage == 0
-        || telemetry.defeats == 0
-        || !tested_fighter
-        || !expected_family_exercised
-        || !clients_observed
-    {
+    if !combat_prerequisites_met(
+        active_sessions,
+        accepted_attacks,
+        &telemetry,
+        tested_fighter,
+        expected_family_exercised,
+        clients_observed,
+    ) {
         return;
     }
     let Some(path) = check.ready_file.clone() else {
@@ -655,30 +805,13 @@ pub(super) fn verify_process_combat(
         );
         return;
     }
-    let through_reset = |cues: &[CombatCue]| {
-        cues.iter()
-            .take_while(|cue| {
-                !matches!(
-                    cue,
-                    CombatCue::Reset { .. } | CombatCue::FighterReset { .. }
-                )
-            })
-            .chain(
-                cues.iter()
-                    .skip_while(|cue| {
-                        !matches!(
-                            cue,
-                            CombatCue::Reset { .. } | CombatCue::FighterReset { .. }
-                        )
-                    })
-                    .take(1),
-            )
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-    let expected_cue_stream = through_reset(&telemetry.cues);
-    let client_one_cue_stream = through_reset(&parse_client_cue_stream(&client_one));
-    let client_two_cue_stream = through_reset(&parse_client_cue_stream(&client_two));
+    let expected_cue_stream = cues_through_first_reset(&telemetry.cues);
+    let client_one_wire_stream = cues_through_first_reset(&parse_client_cue_stream(&client_one));
+    let client_two_wire_stream = cues_through_first_reset(&parse_client_cue_stream(&client_two));
+    let client_one_cue_stream =
+        cues_matching_expected(&expected_cue_stream, &client_one_wire_stream);
+    let client_two_cue_stream =
+        cues_matching_expected(&expected_cue_stream, &client_two_wire_stream);
     let cue_converged = !expected_cue_stream.is_empty()
         && client_one_cue_stream.as_slice() == expected_cue_stream.as_slice()
         && client_two_cue_stream.as_slice() == expected_cue_stream.as_slice();
@@ -696,6 +829,8 @@ pub(super) fn verify_process_combat(
             expected_cue_count = expected_cue_stream.len(),
             client_one_cue_count = client_one_cue_stream.len(),
             client_two_cue_count = client_two_cue_stream.len(),
+            client_one_wire_cue_count = client_one_wire_stream.len(),
+            client_two_wire_cue_count = client_two_wire_stream.len(),
             first_client_one_mismatch = ?first_client_one_mismatch,
             first_client_two_mismatch = ?first_client_two_mismatch,
             expected_cue_stream = ?expected_cue_stream,
@@ -713,67 +848,10 @@ pub(super) fn verify_process_combat(
         return;
     }
     let required_checkpoints = required_process_checkpoints(expected_preset_id);
-    let checkpoint_converged = required_checkpoints
-        .iter()
-        .all(|required| evidence.checkpoints.contains_key(*required))
-        && evidence.checkpoints.keys().all(|checkpoint| {
-            let client_one_snapshot =
-                parse_report_value(&client_one, &format!("checkpoint_{checkpoint}"));
-            let client_two_snapshot =
-                parse_report_value(&client_two, &format!("checkpoint_{checkpoint}"));
-            evidence
-                .checkpoint_candidates
-                .get(checkpoint)
-                .is_some_and(|candidates| {
-                    candidates.iter().any(|(snapshot, _)| {
-                        report_matches_snapshot(
-                            &client_one,
-                            &format!("checkpoint_{checkpoint}"),
-                            snapshot,
-                        ) && report_matches_snapshot(
-                            &client_two,
-                            &format!("checkpoint_{checkpoint}"),
-                            snapshot,
-                        )
-                    }) && client_one_snapshot.is_some()
-                        && client_two_snapshot.is_some()
-                })
-        });
+    let checkpoint_converged =
+        checkpoint_reports_converge(&evidence, required_checkpoints, &client_one, &client_two);
     if !checkpoint_converged {
-        for checkpoint in evidence.checkpoints.keys() {
-            let client_one_value =
-                parse_report_value(&client_one, &format!("checkpoint_{checkpoint}"));
-            let client_two_value =
-                parse_report_value(&client_two, &format!("checkpoint_{checkpoint}"));
-            let matches_both =
-                evidence
-                    .checkpoint_candidates
-                    .get(checkpoint)
-                    .is_some_and(|candidates| {
-                        candidates.iter().any(|(snapshot, _)| {
-                            report_matches_snapshot(
-                                &client_one,
-                                &format!("checkpoint_{checkpoint}"),
-                                snapshot,
-                            ) && report_matches_snapshot(
-                                &client_two,
-                                &format!("checkpoint_{checkpoint}"),
-                                snapshot,
-                            )
-                        })
-                    });
-            error!(
-                checkpoint,
-                server_candidates = evidence
-                    .checkpoint_candidates
-                    .get(checkpoint)
-                    .map_or(0, Vec::len),
-                client_one_present = client_one_value.is_some(),
-                client_two_present = client_two_value.is_some(),
-                matches_both,
-                "combat checkpoint diagnostic"
-            );
-        }
+        log_checkpoint_diagnostics(&evidence, &client_one, &client_two);
         error!(
             server_checkpoints = ?evidence.checkpoints.keys().collect::<Vec<_>>(),
             "authoritative combat state snapshots did not converge on both clients"
@@ -818,27 +896,11 @@ pub(super) fn verify_process_combat(
         return;
     };
     if let Some(report_path) = check.report_file.clone() {
-        let client_one_cues = parse_client_cue_timestamps(&client_one);
-        let client_two_cues = parse_client_cue_timestamps(&client_two);
-        let mut latency_evidence = String::new();
-        for (shot_id, fired_at) in &telemetry.accepted_shot_timestamps {
-            for (client_name, cues) in [
-                ("client_one", &client_one_cues),
-                ("client_two", &client_two_cues),
-            ] {
-                let Some((_, cue_at)) = cues.iter().find(|(candidate, _)| candidate == &shot_id.0)
-                else {
-                    continue;
-                };
-                if *cue_at >= *fired_at {
-                    let _ = writeln!(
-                        latency_evidence,
-                        "fire_to_cue_{client_name}_us={}",
-                        cue_at.saturating_sub(*fired_at)
-                    );
-                }
-            }
-        }
+        let latency_evidence = fire_to_cue_latency_evidence(
+            &telemetry.accepted_shot_timestamps,
+            &client_one,
+            &client_two,
+        );
         if latency_evidence.is_empty() {
             error!("combat fire-to-cue latency evidence is incomplete");
             check.completed = true;

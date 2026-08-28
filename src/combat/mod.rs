@@ -116,8 +116,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 #[cfg(feature = "server")]
 use std::env;
-#[cfg(feature = "client")]
-use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use avian2d::prelude::Position;
