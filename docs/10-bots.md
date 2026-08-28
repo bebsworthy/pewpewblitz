@@ -313,6 +313,9 @@ It has no Bevy ECS dependency and requires no AI framework.
   It derives range, projectile speed, reload, charge, and activation facts from the resolved saved-
   brawler snapshot. Predictive aim uses permitted delayed target velocity/positions, retains bounded
   error, and checks line of fire. Dash has explicit engage, escape, and traversal safety rules.
+  Demolition Strike adds one focused executor branch: when charged, a bot may aim it at an observed
+  public target within the resolved maximum range and emits the same ordinary targeted-ultimate
+  input as a player. It receives no terrain mutation shortcut or hidden map knowledge.
 - **Mode goals are focused adapters.** Wipeout, Hot Zone, and Heist produce bounded goal candidates
   for the common planner rather than scattering mode branches through navigation and combat. An
   objective role retains its zone/safe anchor while opportunistically aiming at visible enemies;

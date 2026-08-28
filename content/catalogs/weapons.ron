@@ -1,5 +1,5 @@
 (
-    schema_version: 4,
+    schema_version: 5,
     recipe_policy: (
         max_deliveries_per_attack: 16,
         max_payload_bundles: 4,
@@ -79,7 +79,7 @@
                             Slow(movement_multiplier: 0.70, duration_ticks: 45, stacking: StrongestRefreshes, recipients: Hostiles),
                         ]),
                     ],
-                    world_effects: [DestroyMap(radius: 48.0)],
+                    world_effects: [],
                 ),
             ),
         ),

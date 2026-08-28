@@ -361,9 +361,11 @@ pub(super) fn resolve_pending_deliveries(
             };
             world_effect_facts.0.push(CombatWorldEffectFact {
                 tick: delivery.tick,
-                source: delivery.source,
-                delivery_index: delivery.delivery_index,
-                effect_index,
+                source: CombatWorldEffectSource::Weapon {
+                    attack: delivery.source,
+                    delivery_index: delivery.delivery_index,
+                    effect_index,
+                },
                 position,
                 effect: *effect,
             });

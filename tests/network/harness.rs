@@ -970,21 +970,23 @@ pub(super) fn map_destruction_fact(
 ) -> brawler::combat::CombatWorldEffectFact {
     brawler::combat::CombatWorldEffectFact {
         tick: 0,
-        source: AttackSource {
-            kind: CombatSourceKind::PrimaryWeapon,
-            attack_id: AttackId(attack),
-            player_id: PlayerId(1),
-            owner_network_entity_id: NetworkEntityId(1),
-            team_id: TeamId(0),
-            recipe_fingerprint: WeaponRecipeFingerprint::default(),
-            presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
-            legacy_compatibility: false,
-            source_preset_id: None,
-            origin: WorldPoint { x: 0.0, y: 0.0 },
-            facing: 0.0,
+        source: brawler::combat::CombatWorldEffectSource::Weapon {
+            attack: AttackSource {
+                kind: CombatSourceKind::PrimaryWeapon,
+                attack_id: AttackId(attack),
+                player_id: PlayerId(1),
+                owner_network_entity_id: NetworkEntityId(1),
+                team_id: TeamId(0),
+                recipe_fingerprint: WeaponRecipeFingerprint::default(),
+                presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
+                legacy_compatibility: false,
+                source_preset_id: None,
+                origin: WorldPoint { x: 0.0, y: 0.0 },
+                facing: 0.0,
+            },
+            delivery_index: 0,
+            effect_index: 0,
         },
-        delivery_index: 0,
-        effect_index: 0,
         position: WorldPoint {
             x: position.0,
             y: position.1,

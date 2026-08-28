@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 7;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 7;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 8;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 8;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -121,9 +121,9 @@ impl BuildCatalog {
             return Err("unsupported build catalog schema/revision".into());
         }
         self.validate_tuning()?;
-        if self.weapon_costs.len() != 4 || self.ultimates.len() != 5 || self.passives.len() != 6 {
+        if self.weapon_costs.len() != 4 || self.ultimates.len() != 6 || self.passives.len() != 6 {
             return Err(
-                "the build catalog requires four weapon costs, five ultimates, and six passives"
+                "the build catalog requires four weapon costs, six ultimates, and six passives"
                     .into(),
             );
         }
@@ -267,6 +267,7 @@ fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(),
         (UltimateDefinitionId(3), UltimateKind::SelfCloak, 4),
         (UltimateDefinitionId(4), UltimateKind::RevealScan, 4),
         (UltimateDefinitionId(5), UltimateKind::ConcealmentField, 4),
+        (UltimateDefinitionId(6), UltimateKind::DemolitionStrike, 4),
     ];
     if !definitions
         .iter()
@@ -304,6 +305,19 @@ fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(),
                         duration_ticks: 1..=3_600,
                     }
                 )
+                | (
+                    UltimateKind::DemolitionStrike,
+                    UltimateParameters::DemolitionStrike {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        radius_milliunits: 8_000..=64_000,
+                    }
+                )
+        ) || matches!(
+            definition.parameters,
+            UltimateParameters::DemolitionStrike {
+                radius_milliunits,
+                ..
+            } if !radius_milliunits.is_multiple_of(4_000)
         )
     }) {
         return Err("ultimate kind and parameters do not match engine bounds".into());

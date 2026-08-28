@@ -89,6 +89,25 @@ fn concealment_field_is_valid_for_saved_brawler_creation_and_editing() {
 }
 
 #[test]
+fn demolition_strike_is_valid_for_saved_brawler_creation_and_editing() {
+    let draft = BrawlerDraft {
+        name: "Demolitionist".into(),
+        fighter_profile_id: FighterProfileId(1),
+        weapon_base_id: WeaponBaseId(3),
+        ultimate_id: UltimateDefinitionId(6),
+        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
+    };
+    assert_eq!(draft.clone().normalized().unwrap(), draft);
+
+    let edit = BrawlerEdit {
+        name: "Demolitionist Edited".into(),
+        ultimate_id: UltimateDefinitionId(6),
+        passive_ids: [PassiveDefinitionId(4), PassiveDefinitionId(5)],
+    };
+    assert_eq!(edit.clone().normalized().unwrap(), edit);
+}
+
+#[test]
 fn v3_part_snapshot_stays_inside_the_routing_bound() {
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();

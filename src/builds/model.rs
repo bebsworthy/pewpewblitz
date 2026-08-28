@@ -100,6 +100,7 @@ pub enum UltimateKind {
     SelfCloak,
     RevealScan,
     ConcealmentField,
+    DemolitionStrike,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,7 +114,9 @@ impl UltimateKind {
     pub const fn activation_style(self) -> UltimateActivationStyle {
         match self {
             Self::Dash | Self::Sentry | Self::SelfCloak => UltimateActivationStyle::Immediate,
-            Self::RevealScan | Self::ConcealmentField => UltimateActivationStyle::Targeted,
+            Self::RevealScan | Self::ConcealmentField | Self::DemolitionStrike => {
+                UltimateActivationStyle::Targeted
+            }
         }
     }
 }
@@ -134,6 +137,10 @@ pub enum UltimateParameters {
         maximum_range_milliunits: u32,
         radius_milliunits: u32,
         duration_ticks: u64,
+    },
+    DemolitionStrike {
+        maximum_range_milliunits: u32,
+        radius_milliunits: u32,
     },
 }
 

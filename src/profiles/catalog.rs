@@ -24,7 +24,7 @@ pub const MAX_ADVERTISED_ULTIMATES: usize = 32;
 pub const MAX_ADVERTISED_PASSIVES: usize = 32;
 pub const MAX_ADVERTISED_BRAWLER_CATALOG_BYTES: usize = 16 * 1024;
 
-const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 1;
+const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 2;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BrawlerCatalogRevision(pub u64);
@@ -391,6 +391,19 @@ fn validate_ultimate_parameters(definitions: &[AdvertisedUltimate]) -> Result<()
                         duration_ticks: 1..=3_600,
                     }
                 )
+                | (
+                    UltimateKind::DemolitionStrike,
+                    UltimateParameters::DemolitionStrike {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        radius_milliunits: 8_000..=64_000,
+                    }
+                )
+        ) || matches!(
+            definition.parameters,
+            UltimateParameters::DemolitionStrike {
+                radius_milliunits,
+                ..
+            } if !radius_milliunits.is_multiple_of(4_000)
         )
     }) {
         return Err("invalid advertised ultimate parameters".into());
@@ -539,13 +552,19 @@ mod tests {
     }
 
     #[test]
-    fn embedded_catalog_is_bounded_and_includes_concealment_field() {
+    fn embedded_catalog_is_bounded_and_includes_current_targeted_ultimates() {
         let catalog = embedded();
         assert_eq!(
             catalog
                 .ultimate(UltimateDefinitionId(5))
                 .map(|definition| definition.display_name.as_str()),
             Some("Concealment Field")
+        );
+        assert_eq!(
+            catalog
+                .ultimate(UltimateDefinitionId(6))
+                .map(|definition| definition.display_name.as_str()),
+            Some("Demolition Strike")
         );
         assert!(
             postcard::to_allocvec(&catalog).unwrap().len() <= MAX_ADVERTISED_BRAWLER_CATALOG_BYTES

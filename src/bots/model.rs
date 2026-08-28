@@ -74,6 +74,8 @@ pub(super) struct BotObservation {
     pub weapon_phase: WeaponPhase,
     pub weapon_ammo: u8,
     pub ability_ready: bool,
+    pub ultimate_kind: crate::builds::UltimateKind,
+    pub ultimate_range: f32,
     pub weapon_range: f32,
     pub projectile_speed: f32,
 }
@@ -122,7 +124,7 @@ pub(super) struct BotState {
     pub perimeter_recovery: bool,
     pub stuck_escape_until_tick: u64,
     pub stuck_escape_axis: Vec2,
-    pub last_dash_tick: Option<u64>,
+    pub last_ultimate_tick: Option<u64>,
 }
 
 impl Default for BotState {
@@ -143,7 +145,7 @@ impl Default for BotState {
             perimeter_recovery: false,
             stuck_escape_until_tick: 0,
             stuck_escape_axis: Vec2::ZERO,
-            last_dash_tick: None,
+            last_ultimate_tick: None,
         }
     }
 }

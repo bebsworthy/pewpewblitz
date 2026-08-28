@@ -99,14 +99,23 @@ pub(super) fn decide(
     {
         buttons |= FighterInput::PRIMARY_FIRE;
     }
-    if intent.dash
+    let use_ultimate = if observation.ultimate_kind == crate::builds::UltimateKind::DemolitionStrike
+    {
+        observation.ability_ready
+            && intent.aim_target.is_some_and(|(position, _)| {
+                position.distance(observation.self_view.position) <= observation.ultimate_range
+            })
+    } else {
+        intent.dash && observation.ability_ready
+    };
+    if use_ultimate
         && observation.ability_ready
         && state
-            .last_dash_tick
+            .last_ultimate_tick
             .is_none_or(|last| observation.tick.saturating_sub(last) > 12)
     {
         buttons |= FighterInput::ULTIMATE;
-        state.last_dash_tick = Some(observation.tick);
+        state.last_ultimate_tick = Some(observation.tick);
     }
     BotDecision {
         input: FighterInput::from_axes_with_aim_distance(

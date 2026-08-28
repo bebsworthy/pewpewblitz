@@ -85,6 +85,11 @@ re-resolves every admitted human and bot, starts a clean match epoch, initialize
 inactivity at that epoch, restores starting ammunition, and clears old fire/recovery deadlines.
 Draft edits never mutate the running epoch before that explicit apply action.
 
+Ultimate tuning includes Demolition Strike maximum range and destruction radius. Its radius remains
+quantized to whole-cell-safe 4-world-unit steps and capped at 64 world units. Weapon world-effect
+fields remain available for generic recipe validation, while the built-in Arc Launcher exposes no
+terrain-destruction effect.
+
 ## Validation principle
 
 The operator is allowed to change balance rules. Balance Lab must not reject a value merely because

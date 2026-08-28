@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::Serialize;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 2;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -755,6 +755,40 @@ fn add_ultimate_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &Balan
                     NumberSpec::ticks(1, 3_600),
                 );
             }
+            UltimateParameters::DemolitionStrike { .. } => {
+                add_field(
+                    fields,
+                    path![
+                        "ultimates",
+                        index,
+                        "parameters",
+                        "DemolitionStrike",
+                        "maximum_range_milliunits"
+                    ],
+                    EditorSection::Ultimates,
+                    &ultimate.key,
+                    &ultimate.display_name,
+                    "Targeting",
+                    "Maximum range",
+                    NumberSpec::milliunits(1, 4_096_000),
+                );
+                add_field(
+                    fields,
+                    path![
+                        "ultimates",
+                        index,
+                        "parameters",
+                        "DemolitionStrike",
+                        "radius_milliunits"
+                    ],
+                    EditorSection::Ultimates,
+                    &ultimate.key,
+                    &ultimate.display_name,
+                    "Area",
+                    "Destruction radius",
+                    NumberSpec::milliunits(8_000, 64_000),
+                );
+            }
             UltimateParameters::Dash | UltimateParameters::Sentry => {}
         }
     }
@@ -881,11 +915,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_exposes_only_the_seventy_nine_supported_numeric_leaves() {
+    fn manifest_exposes_only_the_eighty_supported_numeric_leaves() {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 79);
+        assert_eq!(manifest.fields.len(), 80);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()

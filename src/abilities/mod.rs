@@ -3,6 +3,8 @@
 mod charge;
 mod concealment_field;
 mod dash;
+#[cfg(feature = "server")]
+mod demolition;
 mod passives;
 mod reveal_scan;
 mod self_cloak;
@@ -24,7 +26,7 @@ pub use passives::{
     ADRENAL_DURATION_TICKS, ADRENAL_REARM_TICKS, apply_close_quarters_damage,
     apply_quick_cycle_ticks, apply_tenacity_ticks,
 };
-pub use reveal_scan::reveal_scan_center;
+pub use reveal_scan::targeted_ultimate_center;
 #[cfg(feature = "server")]
 pub(crate) use self_cloak::UltimateGeneration;
 pub use sentry::{
@@ -76,6 +78,7 @@ impl Plugin for ServerAbilityPlugin {
                     self_cloak::activate_self_cloak,
                     reveal_scan::activate_reveal_scan,
                     concealment_field::activate_concealment_field,
+                    demolition::activate_demolition_strike,
                     ApplyDeferred,
                 )
                     .chain()

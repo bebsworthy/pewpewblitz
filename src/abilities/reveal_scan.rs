@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 #[must_use]
-pub fn reveal_scan_center(
+pub fn targeted_ultimate_center(
     origin: Vec2,
     facing: Vec2,
     aim_update: Option<Vec2>,
@@ -171,7 +171,7 @@ pub(crate) fn activate_reveal_scan(
         else {
             continue;
         };
-        let Some(center) = reveal_scan_center(
+        let Some(center) = targeted_ultimate_center(
             position.0,
             Vec2::from_angle(rotation.as_radians()),
             aim,

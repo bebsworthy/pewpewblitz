@@ -538,6 +538,9 @@ fn combat_sound(cue: &CombatCue) -> Option<(SoundKind, u64)> {
         CombatCue::SelfCloakActivated { event_id, .. }
         | CombatCue::RevealScanActivated { event_id, .. }
         | CombatCue::ForcedRevealApplied { event_id, .. } => Some((SoundKind::Ready, event_id.0)),
+        CombatCue::DemolitionStrikeActivated { event_id, .. } => {
+            Some((SoundKind::Impact, event_id.0))
+        }
         CombatCue::SelfCloakEnded { event_id, .. } => Some((SoundKind::Impact, event_id.0)),
     }
 }

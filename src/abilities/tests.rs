@@ -85,14 +85,189 @@ fn reveal_scan_targeting_uses_current_aim_distance_and_clamps_center() {
         max: Vec2::new(100.0, 80.0),
     };
     assert_eq!(
-        reveal_scan_center(Vec2::ZERO, Vec2::X, Some(Vec2::Y), Some(40.0), 64.0, bounds),
+        targeted_ultimate_center(Vec2::ZERO, Vec2::X, Some(Vec2::Y), Some(40.0), 64.0, bounds),
         Some(Vec2::new(0.0, 40.0))
     );
     assert_eq!(
-        reveal_scan_center(Vec2::new(90.0, 0.0), Vec2::X, None, None, 64.0, bounds),
+        targeted_ultimate_center(Vec2::new(90.0, 0.0), Vec2::X, None, None, 64.0, bounds),
         Some(Vec2::new(100.0, 0.0))
     );
-    assert!(reveal_scan_center(Vec2::NAN, Vec2::X, None, None, 64.0, bounds).is_none());
+    assert!(targeted_ultimate_center(Vec2::NAN, Vec2::X, None, None, 64.0, bounds).is_none());
+}
+
+#[cfg(feature = "server")]
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the focused ECS test verifies acceptance, held input, and stale rejection together"
+)]
+fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
+    use avian2d::prelude::{Position, Rotation};
+    use bevy::prelude::*;
+    use lightyear::prelude::input::native::ActionState;
+
+    let builds = crate::builds::BuildCatalog::embedded().unwrap();
+    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    let loadout = crate::builds::resolve_build_recipe(
+        &builds,
+        &weapons,
+        &fighter,
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(6),
+            passives: [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(3),
+            ],
+        },
+    )
+    .unwrap();
+    let mut app = App::new();
+    app.insert_resource(crate::timing::SimulationTick(7))
+        .insert_resource(crate::map::PlayableBounds(crate::map::AxisAlignedMapRect {
+            min: Vec2::splat(-1_000.0),
+            max: Vec2::splat(1_000.0),
+        }))
+        .insert_resource(crate::movement::InputTuning::default())
+        .init_resource::<crate::combat::NextCombatIds>()
+        .init_resource::<crate::combat::CombatOutbox>()
+        .init_resource::<crate::combat::CombatWorldEffectFacts>()
+        .init_resource::<AbilityTelemetry>()
+        .add_systems(Update, demolition::activate_demolition_strike);
+    let fighter_entity = app
+        .world_mut()
+        .spawn((
+            crate::protocol::Fighter,
+            Position(Vec2::new(10.0, 20.0)),
+            Rotation::IDENTITY,
+            loadout,
+            NetworkEntityId(9),
+            crate::movement::InputFreshness {
+                last_fresh_tick: Some(7),
+            },
+            AbilityState {
+                charge: ULTIMATE_CHARGE_MAX,
+                phase: AbilityPhase::Ready,
+            },
+            ActionState(crate::protocol::FighterInput::from_axes_with_aim_distance(
+                Vec2::ZERO,
+                Some(Vec2::X),
+                Some(100.0),
+                crate::protocol::FighterInput::ULTIMATE,
+            )),
+            crate::matchplay::ActiveCombatant,
+            crate::matchplay::SpawnProtection {
+                expires_at_tick: 99,
+            },
+        ))
+        .id();
+
+    app.update();
+
+    assert_eq!(
+        app.world().get::<AbilityState>(fighter_entity),
+        Some(&AbilityState {
+            charge: 0,
+            phase: AbilityPhase::Charging,
+        })
+    );
+    assert!(
+        app.world()
+            .get::<crate::matchplay::SpawnProtection>(fighter_entity)
+            .is_none()
+    );
+    let facts = &app
+        .world()
+        .resource::<crate::combat::CombatWorldEffectFacts>()
+        .0;
+    assert_eq!(facts.len(), 1);
+    assert!(matches!(
+        facts[0].source,
+        crate::combat::CombatWorldEffectSource::Ultimate {
+            owner_network_entity_id: NetworkEntityId(9),
+            ultimate_id: crate::builds::UltimateDefinitionId(6),
+            ..
+        }
+    ));
+    assert_eq!(
+        facts[0].position,
+        crate::combat::WorldPoint { x: 110.0, y: 20.0 }
+    );
+    assert_eq!(
+        facts[0].effect,
+        crate::combat::WorldEffectDefinition::DestroyMap { radius: 64.0 }
+    );
+    assert!(matches!(
+        app.world()
+            .resource::<crate::combat::CombatOutbox>()
+            .0
+            .as_slice(),
+        [crate::combat::CombatCue::DemolitionStrikeActivated {
+            source: NetworkEntityId(9),
+            radius_milliunits: 64_000,
+            ..
+        }]
+    ));
+
+    // Holding the button cannot duplicate an accepted activation.
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .len(),
+        1
+    );
+    assert_eq!(
+        app.world()
+            .resource::<crate::combat::CombatOutbox>()
+            .0
+            .len(),
+        1
+    );
+
+    // A stale activation request is rejected before charge or world state changes.
+    let demolition_loadout = app
+        .world()
+        .get::<crate::builds::ResolvedMatchLoadout>(fighter_entity)
+        .unwrap()
+        .clone();
+    let stale = app
+        .world_mut()
+        .spawn((
+            crate::protocol::Fighter,
+            Position(Vec2::ZERO),
+            Rotation::IDENTITY,
+            demolition_loadout,
+            NetworkEntityId(10),
+            crate::movement::InputFreshness {
+                last_fresh_tick: None,
+            },
+            AbilityState {
+                charge: ULTIMATE_CHARGE_MAX,
+                phase: AbilityPhase::Ready,
+            },
+            ActionState(crate::protocol::FighterInput::from_axes(
+                Vec2::ZERO,
+                Some(Vec2::X),
+                crate::protocol::FighterInput::ULTIMATE,
+            )),
+            crate::matchplay::ActiveCombatant,
+        ))
+        .id();
+    app.update();
+    assert_eq!(
+        app.world().get::<AbilityState>(stale).unwrap().charge,
+        ULTIMATE_CHARGE_MAX
+    );
+    assert_eq!(
+        app.world()
+            .resource::<crate::combat::CombatWorldEffectFacts>()
+            .0
+            .len(),
+        1
+    );
 }
 
 #[test]

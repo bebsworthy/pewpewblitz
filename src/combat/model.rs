@@ -385,11 +385,25 @@ pub struct PendingDelivery {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CombatWorldEffectFact {
     pub tick: u64,
-    pub source: AttackSource,
-    pub delivery_index: u8,
-    pub effect_index: u8,
+    pub source: CombatWorldEffectSource,
     pub position: WorldPoint,
     pub effect: WorldEffectDefinition,
+}
+
+/// Stable provenance for a committed world effect without fabricating a weapon attack.
+#[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CombatWorldEffectSource {
+    Weapon {
+        attack: AttackSource,
+        delivery_index: u8,
+        effect_index: u8,
+    },
+    Ultimate {
+        event_id: CombatEventId,
+        owner_network_entity_id: NetworkEntityId,
+        ultimate_id: crate::builds::UltimateDefinitionId,
+    },
 }
 
 /// Bounded ordered world-effect facts for one fixed post-update tick.

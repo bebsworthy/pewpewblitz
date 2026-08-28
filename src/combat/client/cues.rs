@@ -151,6 +151,7 @@ pub(crate) fn receive_combat_cues(
                 | CombatCue::SelfCloakActivated { event_id, .. }
                 | CombatCue::SelfCloakEnded { event_id, .. }
                 | CombatCue::RevealScanActivated { event_id, .. }
+                | CombatCue::DemolitionStrikeActivated { event_id, .. }
                 | CombatCue::ForcedRevealApplied { event_id, .. } => *event_id,
             };
             if !remember_combat_event(&mut recent, event_id) {

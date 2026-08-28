@@ -293,6 +293,15 @@ fn capture_observations(
             }
         }
         let (weapon_range, projectile_speed) = weapon_capabilities(&observer.loadout);
+        let ultimate_range = match observer.loadout.ultimate.parameters {
+            crate::builds::UltimateParameters::DemolitionStrike {
+                maximum_range_milliunits,
+                ..
+            } => {
+                crate::builds::world_units_from_milliunits(maximum_range_milliunits).unwrap_or(0.0)
+            }
+            _ => 0.0,
+        };
         controller.push_observation(BotObservation {
             tick: tick.0,
             match_id: match_state.match_id,
@@ -309,6 +318,8 @@ fn capture_observations(
             weapon_phase: observer.weapon.phase,
             weapon_ammo: observer.weapon.ammo,
             ability_ready: matches!(observer.ability.phase, AbilityPhase::Ready),
+            ultimate_kind: observer.loadout.ultimate.kind,
+            ultimate_range,
             weapon_range,
             projectile_speed,
         });

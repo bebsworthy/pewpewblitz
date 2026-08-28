@@ -80,8 +80,8 @@ pub use evidence::{CombatEvidenceSnapshots, CombatOutbox};
 #[cfg(feature = "server")]
 pub use model::{
     ActiveAttackTracker, ActiveAttackTrackers, CombatWorldEffectFact, CombatWorldEffectFacts,
-    CompletedAttack, ComposedProjectileRuntime, MeleeAttack, PendingDelivery, PendingDeliveryKind,
-    PendingPayload, SpawnState,
+    CombatWorldEffectSource, CompletedAttack, ComposedProjectileRuntime, MeleeAttack,
+    PendingDelivery, PendingDeliveryKind, PendingPayload, SpawnState,
 };
 pub use model::{
     ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource, AuthoritativePose,

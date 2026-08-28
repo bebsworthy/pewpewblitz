@@ -36,7 +36,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 9;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 10;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -140,6 +140,7 @@ impl BalanceLabSnapshotV3 {
                         UltimateKind::SelfCloak
                             | UltimateKind::RevealScan
                             | UltimateKind::ConcealmentField
+                            | UltimateKind::DemolitionStrike
                     )
                 })
                 .map(|ultimate| UltimateTuning {
@@ -879,6 +880,9 @@ fn same_ultimate_parameter_shape(
         ) | (
             UltimateParameters::ConcealmentField { .. },
             UltimateParameters::ConcealmentField { .. }
+        ) | (
+            UltimateParameters::DemolitionStrike { .. },
+            UltimateParameters::DemolitionStrike { .. }
         )
     )
 }
@@ -1208,17 +1212,6 @@ mod tests {
         let mut expanded_brush = baseline.clone();
         expanded_brush.weapons[2].recipe.world_effects =
             vec![WorldEffectDefinition::DestroyMap { radius: 128.0 }];
-        validate_snapshot(
-            &expanded_brush,
-            &baseline,
-            &builds,
-            &weapons,
-            &maps,
-            &fighter,
-        )
-        .unwrap();
-        expanded_brush.weapons[2].recipe.world_effects =
-            vec![WorldEffectDefinition::DestroyMap { radius: 132.0 }];
         assert!(
             validate_snapshot(
                 &expanded_brush,

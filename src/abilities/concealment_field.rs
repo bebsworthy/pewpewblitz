@@ -123,7 +123,7 @@ pub(crate) fn activate_concealment_field(
         else {
             continue;
         };
-        let Some(center) = crate::abilities::reveal_scan_center(
+        let Some(center) = crate::abilities::targeted_ultimate_center(
             position.0,
             Vec2::from_angle(rotation.as_radians()),
             aim,

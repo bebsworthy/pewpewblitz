@@ -59,6 +59,7 @@ pub enum CombatCueKind {
     SelfCloakActivated,
     SelfCloakEnded,
     RevealScanActivated,
+    DemolitionStrikeActivated,
     ForcedRevealApplied,
 }
 
@@ -84,6 +85,7 @@ impl CombatCueKind {
             Self::SelfCloakActivated => "self_cloak_activated",
             Self::SelfCloakEnded => "self_cloak_ended",
             Self::RevealScanActivated => "reveal_scan_activated",
+            Self::DemolitionStrikeActivated => "demolition_strike_activated",
             Self::ForcedRevealApplied => "forced_reveal_applied",
         }
     }
@@ -109,6 +111,7 @@ impl CombatCueKind {
             "self_cloak_activated" => Some(Self::SelfCloakActivated),
             "self_cloak_ended" => Some(Self::SelfCloakEnded),
             "reveal_scan_activated" => Some(Self::RevealScanActivated),
+            "demolition_strike_activated" => Some(Self::DemolitionStrikeActivated),
             "forced_reveal_applied" => Some(Self::ForcedRevealApplied),
             _ => None,
         }
@@ -304,6 +307,13 @@ pub enum CombatCue {
         radius_milliunits: u32,
         expires_at_tick: u64,
     },
+    DemolitionStrikeActivated {
+        event_id: CombatEventId,
+        tick: u64,
+        source: NetworkEntityId,
+        center: WorldPoint,
+        radius_milliunits: u32,
+    },
     ForcedRevealApplied {
         event_id: CombatEventId,
         tick: u64,
@@ -340,6 +350,9 @@ pub fn combat_cue_key(cue: &CombatCue) -> CombatCueKey {
         CombatCue::SelfCloakEnded { event_id, .. } => (CombatCueKind::SelfCloakEnded, *event_id),
         CombatCue::RevealScanActivated { event_id, .. } => {
             (CombatCueKind::RevealScanActivated, *event_id)
+        }
+        CombatCue::DemolitionStrikeActivated { event_id, .. } => {
+            (CombatCueKind::DemolitionStrikeActivated, *event_id)
         }
         CombatCue::ForcedRevealApplied { event_id, .. } => {
             (CombatCueKind::ForcedRevealApplied, *event_id)

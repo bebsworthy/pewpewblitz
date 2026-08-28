@@ -134,25 +134,40 @@ fn barrel_health(app: &mut App, placement_id: u32) -> Option<u16> {
 fn destruction_fact(position: Vec2, radius: f32) -> CombatWorldEffectFact {
     CombatWorldEffectFact {
         tick: 1,
-        source: AttackSource {
-            kind: CombatSourceKind::PrimaryWeapon,
-            attack_id: AttackId(1),
-            player_id: crate::protocol::PlayerId(1),
-            owner_network_entity_id: crate::protocol::NetworkEntityId(1),
-            team_id: crate::combat::TeamId(0),
-            recipe_fingerprint: crate::combat::WeaponRecipeFingerprint::default(),
-            presentation_profile_id: crate::combat::WeaponPresentationProfileId(3),
-            legacy_compatibility: false,
-            source_preset_id: None,
-            origin: WorldPoint { x: 0.0, y: 0.0 },
-            facing: 0.0,
+        source: crate::combat::CombatWorldEffectSource::Weapon {
+            attack: AttackSource {
+                kind: CombatSourceKind::PrimaryWeapon,
+                attack_id: AttackId(1),
+                player_id: crate::protocol::PlayerId(1),
+                owner_network_entity_id: crate::protocol::NetworkEntityId(1),
+                team_id: crate::combat::TeamId(0),
+                recipe_fingerprint: crate::combat::WeaponRecipeFingerprint::default(),
+                presentation_profile_id: crate::combat::WeaponPresentationProfileId(3),
+                legacy_compatibility: false,
+                source_preset_id: None,
+                origin: WorldPoint { x: 0.0, y: 0.0 },
+                facing: 0.0,
+            },
+            delivery_index: 0,
+            effect_index: 0,
         },
-        delivery_index: 0,
-        effect_index: 0,
         position: WorldPoint {
             x: position.x,
             y: position.y,
         },
+        effect: WorldEffectDefinition::DestroyMap { radius },
+    }
+}
+
+fn demolition_fact(position: Vec2, radius: f32, event_id: u64) -> CombatWorldEffectFact {
+    CombatWorldEffectFact {
+        tick: 2,
+        source: crate::combat::CombatWorldEffectSource::Ultimate {
+            event_id: crate::combat::CombatEventId(event_id),
+            owner_network_entity_id: crate::protocol::NetworkEntityId(1),
+            ultimate_id: crate::builds::UltimateDefinitionId(6),
+        },
+        position: position.into(),
         effect: WorldEffectDefinition::DestroyMap { radius },
     }
 }
@@ -263,6 +278,27 @@ fn radius_brush_removes_whole_grid_cells_and_restart_restores_them() {
     assert_eq!(telemetry.destruction_requests, 1);
     assert_eq!(telemetry.destruction_applied, 1);
     assert_eq!(telemetry.placements_changed, removed_count as u64);
+    assert_eq!(telemetry.demolition_requests, 0);
+
+    app.world_mut()
+        .resource_mut::<CombatWorldEffectFacts>()
+        .0
+        .push(demolition_fact(target_center, 1.0, 2));
+    apply_map_destruction(app.world_mut());
+    let revision_after_demolition = app.world().get::<MapDynamicState>(root).unwrap().revision;
+    assert_eq!(revision_after_demolition, 1);
+    app.world_mut()
+        .resource_mut::<CombatWorldEffectFacts>()
+        .0
+        .push(demolition_fact(target_center, 1.0, 3));
+    apply_map_destruction(app.world_mut());
+    let state = app.world().get::<MapDynamicState>(root).unwrap();
+    assert_eq!(state.revision, revision_after_demolition);
+    let telemetry = app.world().resource::<MapDynamicTelemetry>();
+    assert_eq!(telemetry.demolition_requests, 2);
+    assert_eq!(telemetry.demolition_applied, 1);
+    assert_eq!(telemetry.demolition_no_ops, 1);
+    assert_eq!(telemetry.demolition_placements_changed, 1);
 }
 
 #[test]

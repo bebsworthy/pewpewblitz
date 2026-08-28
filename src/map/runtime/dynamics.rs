@@ -4,7 +4,10 @@ use bevy::prelude::*;
 use lightyear::prelude::{Disconnected, LinkOf, MessageReceiver, MessageSender};
 
 use crate::{
-    combat::{CombatWorldEffectFact, CombatWorldEffectFacts, WorldEffectDefinition},
+    combat::{
+        CombatWorldEffectFact, CombatWorldEffectFacts, CombatWorldEffectSource,
+        WorldEffectDefinition,
+    },
     protocol::MapDynamicChannel,
     server::{ServerSession, ServerSessionPhase},
 };
@@ -20,13 +23,21 @@ use crate::map::{
     MapPlacementOutcome, MapPlacementTransition, ResolvedMapSnapshot, placement_cells,
 };
 
-fn fact_key(fact: &CombatWorldEffectFact) -> (u64, u64, u8, u8) {
-    (
-        fact.tick,
-        fact.source.attack_id.0,
-        fact.delivery_index,
-        fact.effect_index,
-    )
+fn fact_key(fact: &CombatWorldEffectFact) -> (u64, u8, u64, u8, u8) {
+    match fact.source {
+        CombatWorldEffectSource::Weapon {
+            attack,
+            delivery_index,
+            effect_index,
+        } => (
+            fact.tick,
+            0,
+            attack.attack_id.0,
+            delivery_index,
+            effect_index,
+        ),
+        CombatWorldEffectSource::Ultimate { event_id, .. } => (fact.tick, 1, event_id.0, 0, 0),
+    }
 }
 
 fn circle_overlaps_cell(center: Vec2, radius: f32, min: Vec2) -> bool {
@@ -65,6 +76,7 @@ fn record_destruction_telemetry(
     requests: u64,
     applied: u64,
     placements_changed: u64,
+    demolition: (u64, u64, u64),
 ) {
     let mut telemetry = world.resource_mut::<MapDynamicTelemetry>();
     telemetry.destruction_applied = telemetry.destruction_applied.saturating_add(applied);
@@ -74,8 +86,20 @@ fn record_destruction_telemetry(
     telemetry.placements_changed = telemetry
         .placements_changed
         .saturating_add(placements_changed);
+    telemetry.demolition_requests = telemetry.demolition_requests.saturating_add(demolition.0);
+    telemetry.demolition_applied = telemetry.demolition_applied.saturating_add(demolition.1);
+    telemetry.demolition_no_ops = telemetry
+        .demolition_no_ops
+        .saturating_add(demolition.0.saturating_sub(demolition.1));
+    telemetry.demolition_placements_changed = telemetry
+        .demolition_placements_changed
+        .saturating_add(demolition.2);
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the atomic map transaction keeps ordering, revision, collider, outbox, and source telemetry together"
+)]
 pub(super) fn apply_map_destruction(world: &mut World) {
     let Some((root_entity, snapshot, mut state)) = world
         .query_filtered::<(Entity, &ResolvedMapSnapshot, &MapDynamicState), With<crate::map::MapRoot>>()
@@ -110,7 +134,12 @@ pub(super) fn apply_map_destruction(world: &mut World) {
         .collect();
     let mut newly_terminal = std::collections::BTreeSet::new();
     let mut events = Vec::new();
+    let mut demolition_requests = 0_u64;
+    let mut demolition_applied = 0_u64;
+    let mut demolition_changed = 0_u64;
     for fact in facts {
+        let demolition = matches!(fact.source, CombatWorldEffectSource::Ultimate { .. });
+        demolition_requests = demolition_requests.saturating_add(u64::from(demolition));
         let WorldEffectDefinition::DestroyMap { radius } = fact.effect;
         let mut transitions = Vec::new();
         for placement in &snapshot.placements {
@@ -134,6 +163,11 @@ pub(super) fn apply_map_destruction(world: &mut World) {
         }
         transitions.sort_by_key(|transition| transition.placement_id);
         if !transitions.is_empty() {
+            if demolition {
+                demolition_applied = demolition_applied.saturating_add(1);
+                demolition_changed = demolition_changed
+                    .saturating_add(u64::try_from(transitions.len()).unwrap_or(u64::MAX));
+            }
             state.revision = state
                 .revision
                 .checked_add(1)
@@ -147,7 +181,13 @@ pub(super) fn apply_map_destruction(world: &mut World) {
     }
     let applied = u64::try_from(events.len()).unwrap_or(u64::MAX);
     let changed = u64::try_from(newly_terminal.len()).unwrap_or(u64::MAX);
-    record_destruction_telemetry(world, requests, applied, changed);
+    record_destruction_telemetry(
+        world,
+        requests,
+        applied,
+        changed,
+        (demolition_requests, demolition_applied, demolition_changed),
+    );
     if newly_terminal.is_empty() {
         return;
     }

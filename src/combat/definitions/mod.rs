@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 4;
-pub const FINGERPRINT_FORMAT_VERSION: u16 = 2;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 5;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 3;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]

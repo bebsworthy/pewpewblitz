@@ -70,6 +70,9 @@ The current canonical base values affected by ordinary play balance are:
 
 Durations are displayed in seconds but remain positive 60 Hz fixed-tick values in authoritative
 content. The embedded catalogs, not this summary, are the executable source of truth.
+Arc Launcher damage no longer destroys terrain. Generic delivery-level `DestroyMap` remains a
+validated weapon capability for future authored recipes, but no built-in weapon currently grants
+it.
 
 Every weapon has exactly four interchangeable part slots:
 
@@ -438,7 +441,13 @@ The supported ultimate set contains:
 - **Dash:** authoritative directed movement with collision, interruption, contact attribution, and
   cleanup;
 - **Sentry:** bounded placement, one owned deployable, autonomous targeting and fire, health,
-  lifetime, destruction, and lifecycle cleanup.
+  lifetime, destruction, and lifecycle cleanup;
+- **Self Cloak, Reveal Scan, and Concealment Field:** the concealment/reveal families described
+  below;
+- **Demolition Strike:** an instant server-authoritative targeted terrain brush with 520 world-unit
+  maximum range and a 64 world-unit destruction radius. It spends full ultimate charge on any
+  accepted activation, including a valid area where no destructible placement changes. It does not
+  damage fighters or world objects.
 
 The supported passive set contains:
 

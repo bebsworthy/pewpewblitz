@@ -100,6 +100,7 @@ pub(crate) struct Material3dAssets {
     pub(crate) status_knockback: Handle<StandardMaterial>,
     pub(crate) status_reveal: Handle<StandardMaterial>,
     pub(crate) scan_area: Handle<StandardMaterial>,
+    pub(crate) demolition_area: Handle<StandardMaterial>,
     pub(crate) concealment_field_blue_fill: Handle<StandardMaterial>,
     pub(crate) concealment_field_blue_boundary: Handle<StandardMaterial>,
     pub(crate) concealment_field_red_fill: Handle<StandardMaterial>,
@@ -1267,6 +1268,13 @@ fn setup_3d_foundation(
         scan_area: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.12, 0.72),
             emissive: LinearRgba::new(1.8, 0.04, 0.7, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        demolition_area: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.28, 0.04, 0.72),
+            emissive: LinearRgba::new(2.4, 0.18, 0.02, 1.0),
+            alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),

@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 4;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 5;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -53,18 +53,18 @@ pub(super) fn load(
         .and_then(serde_json::Value::as_u64)
         == Some(3)
     {
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(4);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(8);
         value["snapshot"]["chest"] = serde_json::to_value(validator.baseline.chest)
             .map_err(|error| format!("canonical chest migration failed: {error}"))?;
     }
     if value
         .get("schemaVersion")
         .and_then(serde_json::Value::as_u64)
-        == Some(u64::from(PERSISTENCE_SCHEMA_VERSION))
+        == Some(4)
         && value["snapshot"]["schemaVersion"].as_u64() == Some(8)
     {
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(9);
         let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
             .map_err(|error| format!("canonical fighter recovery migration failed: {error}"))?;
         for profile in ["default", "lightweight", "reinforced"] {
@@ -73,6 +73,42 @@ pub(super) fn load(
                     canonical_profiles[profile][field].clone();
             }
         }
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(4)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(9)
+    {
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        let demolition = validator
+            .baseline
+            .ultimates
+            .iter()
+            .find(|ultimate| ultimate.kind == crate::builds::UltimateKind::DemolitionStrike)
+            .ok_or_else(|| "canonical demolition tuning is missing".to_string())?;
+        let ultimates = value["snapshot"]["ultimates"]
+            .as_array_mut()
+            .ok_or_else(|| "persisted ultimate tuning is not an array".to_string())?;
+        if !ultimates
+            .iter()
+            .any(|ultimate| ultimate["id"].as_u64() == Some(6))
+        {
+            ultimates.push(
+                serde_json::to_value(demolition)
+                    .map_err(|error| format!("canonical demolition migration failed: {error}"))?,
+            );
+        }
+        let arc = value["snapshot"]["weapons"]
+            .as_array_mut()
+            .and_then(|weapons| {
+                weapons
+                    .iter_mut()
+                    .find(|weapon| weapon["id"].as_u64() == Some(3))
+            })
+            .ok_or_else(|| "persisted Arc Launcher tuning is missing".to_string())?;
+        arc["recipe"]["worldEffects"] = serde_json::json!([]);
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -240,7 +276,14 @@ mod tests {
 
         let mut value: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(4);
         value["snapshot"]["schemaVersion"] = serde_json::json!(8);
+        value["snapshot"]["ultimates"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|ultimate| ultimate["id"].as_u64() != Some(6));
+        value["snapshot"]["weapons"][2]["recipe"]["worldEffects"] =
+            serde_json::json!([{ "DestroyMap": { "radius": 48.0 } }]);
         for profile in ["default", "lightweight", "reinforced"] {
             value["snapshot"]["fighterProfiles"][profile]
                 .as_object_mut()

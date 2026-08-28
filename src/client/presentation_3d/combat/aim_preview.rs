@@ -196,7 +196,7 @@ pub(in super::super) fn update_aim_preview(
         aim.index.refresh(snapshot, state, &aim.catalog.0);
     }
     let scan_preview = targeted_ultimate_preview(map, controlled, &aim.pending);
-    let segments = if let Some((origin, center, _)) = scan_preview {
+    let segments = if let Some((origin, center, _, _)) = scan_preview {
         let delta = center - origin;
         vec![PreviewPrimitive {
             geometry: PreviewGeometry::Corridor {
@@ -274,13 +274,14 @@ fn targeted_ultimate_preview(
     map: Option<ActivePreviewMap<'_>>,
     controlled: Option<ControlledAim<'_>>,
     pending: &PendingLocalActions,
-) -> Option<(Vec2, Vec2, f32)> {
+) -> Option<(Vec2, Vec2, f32, bool)> {
     match (map, controlled) {
         (Some((map, _)), Some((origin, facing, loadout, Some(ability))))
             if matches!(
                 loadout.ultimate.kind,
                 crate::builds::UltimateKind::RevealScan
                     | crate::builds::UltimateKind::ConcealmentField
+                    | crate::builds::UltimateKind::DemolitionStrike
             ) && pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
                 && matches!(ability.phase, crate::builds::AbilityPhase::Ready) =>
         {
@@ -294,6 +295,10 @@ fn targeted_ultimate_preview(
                     maximum_range_milliunits,
                     radius_milliunits,
                     ..
+                }
+                | crate::builds::UltimateParameters::DemolitionStrike {
+                    maximum_range_milliunits,
+                    radius_milliunits,
                 },
             ) = (loadout.ultimate.parameters,)
             else {
@@ -301,7 +306,7 @@ fn targeted_ultimate_preview(
             };
             crate::builds::world_units_from_milliunits(maximum_range_milliunits)
                 .and_then(|maximum_range| {
-                    crate::abilities::reveal_scan_center(
+                    crate::abilities::targeted_ultimate_center(
                         origin,
                         Vec2::from_angle(facing),
                         pending.aim_axis,
@@ -313,7 +318,14 @@ fn targeted_ultimate_preview(
                 .zip(crate::builds::world_units_from_milliunits(
                     radius_milliunits,
                 ))
-                .map(|(center, radius)| (origin, center, radius))
+                .map(|(center, radius)| {
+                    (
+                        origin,
+                        center,
+                        radius,
+                        loadout.ultimate.kind == crate::builds::UltimateKind::DemolitionStrike,
+                    )
+                })
         }
         _ => None,
     }
@@ -323,12 +335,12 @@ fn apply_aim_preview_visuals(
     previews: &mut PreviewVisualQuery,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
-    scan_preview: Option<(Vec2, Vec2, f32)>,
+    scan_preview: Option<(Vec2, Vec2, f32, bool)>,
     segments: &[PreviewPrimitive],
 ) {
     for (slot, mut transform, mut visibility, mut mesh, mut material) in previews.iter_mut() {
         if slot.slot == u8::MAX {
-            let Some((_, center, radius)) = scan_preview else {
+            let Some((_, center, radius, demolition)) = scan_preview else {
                 *visibility = Visibility::Hidden;
                 continue;
             };
@@ -336,7 +348,11 @@ fn apply_aim_preview_visuals(
             transform.translation = ground_position(center) + Vec3::Y * GROUND_EFFECT_HEIGHT;
             transform.rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
             transform.scale = Vec3::splat(radius);
-            material.0 = materials.preview.clone();
+            material.0 = if demolition {
+                materials.demolition_area.clone()
+            } else {
+                materials.preview.clone()
+            };
             continue;
         }
         let Some(primitive) = segments.get(usize::from(slot.slot)) else {

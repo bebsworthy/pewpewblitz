@@ -283,6 +283,12 @@ must not create a feature where one already exists. A cleared bush commonly uses
 exposes the existing surface; a broken obstacle may use `Replace` with a nonblocking destroyed
 feature. The replacement asset owns presentation after replacement commits.
 
+`DestroyMap` facts carry typed provenance. Weapon deliveries identify their committed attack,
+delivery, and authored effect; Demolition Strike identifies its ultimate event, owner, and stable
+ultimate definition. Both enter this same deterministic transaction, publication, restart, and
+recovery path. The ultimate does not introduce a second brush runtime or change which placements
+are eligible.
+
 V8 retains bounded area-destruction delivery by lowering accepted attacks into deterministic cell
 candidate sets. It does not retain a second public 8-unit map-authoring grid. If sub-cell collision
 work remains useful internally during migration, it is an implementation detail and cannot appear

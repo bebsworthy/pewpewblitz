@@ -422,6 +422,15 @@ fn cue_effect(
             materials.scan_area.clone(),
             crate::builds::world_units_from_milliunits(*radius_milliunits).unwrap_or(0.0),
         )),
+        C::DemolitionStrikeActivated {
+            center,
+            radius_milliunits,
+            ..
+        } => Some((
+            center.as_vec2(),
+            materials.demolition_area.clone(),
+            crate::builds::world_units_from_milliunits(*radius_milliunits).unwrap_or(0.0),
+        )),
         C::Muzzle { .. }
         | C::Impact { .. }
         | C::Damage { .. }

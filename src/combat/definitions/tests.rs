@@ -218,23 +218,14 @@ fn policy_change_changes_content_fingerprint() {
 // --- Delivery-level world effects (Milestone 10) ---
 
 #[test]
-fn only_the_arc_launcher_carries_a_map_destruction_world_effect() {
+fn built_in_weapons_do_not_carry_map_destruction_world_effects() {
     let catalog = WeaponCatalog::embedded().unwrap();
     for preset in &catalog.presets {
-        match preset.id.0 {
-            3 => {
-                assert_eq!(
-                    preset.configuration.recipe.world_effects,
-                    vec![WorldEffectDefinition::DestroyMap { radius: 48.0 }],
-                    "Arc Launcher carries exactly one radius-48 map destruction effect"
-                );
-            }
-            _ => assert!(
-                preset.configuration.recipe.world_effects.is_empty(),
-                "preset {} must be explicit about having no world effects",
-                preset.id.0
-            ),
-        }
+        assert!(
+            preset.configuration.recipe.world_effects.is_empty(),
+            "preset {} must be explicit about having no world effects",
+            preset.id.0
+        );
     }
 }
 
@@ -253,8 +244,9 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
     let policy = WeaponRecipePolicy::default();
     let limits = EngineWeaponLimits::default();
 
-    // More than one world effect per delivery.
+    // Generic authored weapon destruction remains supported even though no built-in uses it.
     let mut two = arc_configuration();
+    two.recipe.world_effects = vec![WorldEffectDefinition::DestroyMap { radius: 48.0 }];
     two.recipe
         .world_effects
         .push(WorldEffectDefinition::DestroyMap { radius: 16.0 });
@@ -277,6 +269,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
 
     // Destruction on straight (non-lobbed) delivery.
     let mut straight = arc_configuration();
+    straight.recipe.world_effects = vec![WorldEffectDefinition::DestroyMap { radius: 48.0 }];
     straight.recipe.delivery = DeliveryMethod::Straight {
         speed: 900.0,
         radius: 6.0,
@@ -317,7 +310,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
             .contains("policy exceeds engine limits")
     );
 
-    // The untouched Arc configuration still resolves with its terrain effect.
+    // The untouched Arc configuration resolves without a terrain effect.
     assert!(
         arc_configuration()
             .validate(&policy, limits, Some(fighter.body_radius))

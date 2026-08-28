@@ -119,6 +119,45 @@ fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
 }
 
 #[test]
+fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
+    let dimensions = MapDimensions {
+        width: 32,
+        height: 24,
+    };
+    let navigation = BotNavigationSnapshot {
+        dimensions,
+        blocked: BTreeSet::new(),
+    };
+    let mut observed = observation(20);
+    observed.ability_ready = true;
+    observed.ultimate_kind = crate::builds::UltimateKind::DemolitionStrike;
+    observed.ultimate_range = 520.0;
+    observed.visible_enemies.push(super::model::BotFighterView {
+        network_id: crate::protocol::NetworkEntityId(2),
+        team: crate::combat::TeamId(1),
+        position: Vec2::new(160.0, 0.0),
+        velocity: Vec2::ZERO,
+        current_health: 100,
+        maximum_health: 100,
+        active: true,
+    });
+    let decision = policy::decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        BotProfile::default(),
+        &navigation,
+        7,
+        BotRole::Pressure,
+        512,
+    );
+    assert_ne!(
+        decision.input.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE,
+        0
+    );
+    assert!(decision.input.aim_distance.is_some());
+}
+
+#[test]
 fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
     use crate::{
         combat::TeamId,
@@ -533,6 +572,8 @@ fn observation(tick: u64) -> BotObservation {
         weapon_phase: WeaponPhase::Ready,
         weapon_ammo: 1,
         ability_ready: false,
+        ultimate_kind: crate::builds::UltimateKind::Dash,
+        ultimate_range: 0.0,
         weapon_range: 100.0,
         projectile_speed: 100.0,
     }

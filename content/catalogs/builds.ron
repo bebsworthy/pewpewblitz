@@ -1,6 +1,6 @@
 (
-    schema_version: 7,
-    balance_revision: BuildRevision(5),
+    schema_version: 8,
+    balance_revision: BuildRevision(6),
     fighter_profiles: (
         default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0),
         lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0),
@@ -29,6 +29,7 @@
         (id: UltimateDefinitionId(3), key: "self-cloak", display_name: "Self Cloak", kind: SelfCloak, point_cost: 4, parameters: SelfCloak(duration_ticks: 360)),
         (id: UltimateDefinitionId(4), key: "reveal-scan", display_name: "Reveal Scan", kind: RevealScan, point_cost: 4, parameters: RevealScan(maximum_range_milliunits: 640000, radius_milliunits: 192000, reveal_ticks: 300)),
         (id: UltimateDefinitionId(5), key: "concealment-field", display_name: "Concealment Field", kind: ConcealmentField, point_cost: 4, parameters: ConcealmentField(maximum_range_milliunits: 480000, radius_milliunits: 192000, duration_ticks: 360)),
+        (id: UltimateDefinitionId(6), key: "demolition-strike", display_name: "Demolition Strike", kind: DemolitionStrike, point_cost: 4, parameters: DemolitionStrike(maximum_range_milliunits: 520000, radius_milliunits: 64000)),
     ],
     passives: [
         (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2),
