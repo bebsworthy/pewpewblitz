@@ -304,9 +304,14 @@ impl Plugin for WorldPresentationPlugin {
                     reconcile_dynamic_map_visuals,
                     reconcile_restoration_pickup_visuals,
                     reconcile_heist_safe_visuals,
+                    combat::reconcile_projectile_visuals,
+                    combat::reconcile_sentry_visuals,
+                    combat::reconcile_concealment_field_visuals,
+                    combat::reconcile_aim_preview_visuals,
                     (
-                        combat::reconcile_combat_visuals,
+                        combat::reconcile_fighter_visuals,
                         upgrade_fighters_to_imported_models,
+                        combat::reconcile_fighter_overheads,
                     )
                         .chain(),
                 )
@@ -345,8 +350,12 @@ impl Plugin for WorldPresentationPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (combat::write_combat_visual_poses, follow_3d_camera)
-                    .chain()
+                (
+                    (combat::write_fighter_visual_poses, follow_3d_camera).chain(),
+                    combat::write_projectile_visual_poses,
+                    combat::write_sentry_visual_poses,
+                    combat::write_status_visual_poses,
+                )
                     .after(InterpolationSystems::Interpolate)
                     .after(PhysicsSystems::Writeback)
                     .before(TransformSystems::Propagate),
