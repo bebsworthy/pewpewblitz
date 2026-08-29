@@ -270,6 +270,85 @@ impl NextDeployableId {
 }
 
 #[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug)]
+struct SentryOwnerLifecycleView {
+    network_id: NetworkEntityId,
+    defeated: bool,
+    active: bool,
+    controller_disconnected: bool,
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::type_complexity)]
+fn index_sentry_owner_lifecycle(
+    owners: &Query<(
+        &NetworkEntityId,
+        Option<&crate::combat::Defeated>,
+        Option<&crate::matchplay::ActiveCombatant>,
+        Option<&lightyear::prelude::ControlledBy>,
+    )>,
+    disconnected: &Query<
+        Entity,
+        (
+            With<lightyear::prelude::LinkOf>,
+            With<lightyear::prelude::Disconnected>,
+        ),
+    >,
+) -> Vec<SentryOwnerLifecycleView> {
+    owners
+        .iter()
+        .map(
+            |(network_id, defeated, active, controlled)| SentryOwnerLifecycleView {
+                network_id: *network_id,
+                defeated: defeated.is_some(),
+                active: active.is_some(),
+                controller_disconnected: controlled
+                    .is_some_and(|controlled| disconnected.contains(controlled.owner)),
+            },
+        )
+        .collect()
+}
+
+#[cfg(feature = "server")]
+fn sentry_cleanup_reason(
+    tick: u64,
+    root: Option<&crate::matchplay::MatchState>,
+    identity: SentryIdentity,
+    deadline: SentryDeadline,
+    destroyed: bool,
+    owners: &[SentryOwnerLifecycleView],
+) -> Option<crate::abilities::SentryCleanupReason> {
+    if destroyed {
+        return Some(crate::abilities::SentryCleanupReason::Destroyed);
+    }
+    if tick >= deadline.expires_at_tick {
+        return Some(crate::abilities::SentryCleanupReason::Expired);
+    }
+    if root.is_some_and(|root| root.match_id != identity.match_id) {
+        return Some(crate::abilities::SentryCleanupReason::MatchRestarted);
+    }
+    if root.is_some_and(|root| matches!(root.phase, crate::matchplay::MatchPhase::Completed { .. }))
+    {
+        return Some(crate::abilities::SentryCleanupReason::MatchCompleted);
+    }
+    let Some(owner) = owners
+        .iter()
+        .find(|owner| owner.network_id == identity.owner_network_id)
+    else {
+        return Some(crate::abilities::SentryCleanupReason::OwnerDisconnected);
+    };
+    if owner.controller_disconnected {
+        Some(crate::abilities::SentryCleanupReason::OwnerDisconnected)
+    } else if owner.defeated {
+        Some(crate::abilities::SentryCleanupReason::OwnerDefeated)
+    } else if !owner.active {
+        Some(crate::abilities::SentryCleanupReason::OwnerDisconnected)
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "server")]
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -539,37 +618,16 @@ pub(crate) fn request_sentry_lifecycle_cleanup(
     mut requests: MessageWriter<SentryCleanupRequest>,
 ) {
     let root = roots.single().ok();
+    let owners = index_sentry_owner_lifecycle(&owners, &disconnected);
     for (identity, deadline, destroyed) in &sentries {
-        let reason = if destroyed.is_some() {
-            Some(crate::abilities::SentryCleanupReason::Destroyed)
-        } else if tick.0 >= deadline.expires_at_tick {
-            Some(crate::abilities::SentryCleanupReason::Expired)
-        } else if root.is_some_and(|root| root.match_id != identity.match_id) {
-            Some(crate::abilities::SentryCleanupReason::MatchRestarted)
-        } else if root.is_some_and(|root| {
-            matches!(root.phase, crate::matchplay::MatchPhase::Completed { .. })
-        }) {
-            Some(crate::abilities::SentryCleanupReason::MatchCompleted)
-        } else {
-            match owners
-                .iter()
-                .find(|(owner, ..)| **owner == identity.owner_network_id)
-            {
-                Some((_, defeated, active, controlled)) => {
-                    if controlled.is_some_and(|controlled| disconnected.contains(controlled.owner))
-                    {
-                        Some(crate::abilities::SentryCleanupReason::OwnerDisconnected)
-                    } else if defeated.is_some() {
-                        Some(crate::abilities::SentryCleanupReason::OwnerDefeated)
-                    } else if active.is_none() {
-                        Some(crate::abilities::SentryCleanupReason::OwnerDisconnected)
-                    } else {
-                        None
-                    }
-                }
-                None => Some(crate::abilities::SentryCleanupReason::OwnerDisconnected),
-            }
-        };
+        let reason = sentry_cleanup_reason(
+            tick.0,
+            root,
+            *identity,
+            *deadline,
+            destroyed.is_some(),
+            &owners,
+        );
         if let Some(reason) = reason {
             requests.write(SentryCleanupRequest {
                 deployable_id: identity.deployable_id,
@@ -578,6 +636,150 @@ pub(crate) fn request_sentry_lifecycle_cleanup(
             });
         }
     }
+}
+
+#[cfg(feature = "server")]
+fn coalesce_sentry_cleanup_requests(
+    requests: impl IntoIterator<Item = SentryCleanupRequest>,
+) -> std::collections::BTreeMap<crate::builds::DeployableId, SentryCleanupRequest> {
+    let mut selected = std::collections::BTreeMap::new();
+    for request in requests {
+        selected
+            .entry(request.deployable_id)
+            .and_modify(|current: &mut SentryCleanupRequest| {
+                if cleanup_reason_priority(request.reason) < cleanup_reason_priority(current.reason)
+                {
+                    *current = request;
+                }
+            })
+            .or_insert(request);
+    }
+    selected
+}
+
+#[cfg(feature = "server")]
+fn sentry_cleanup_lifetime(
+    request: SentryCleanupRequest,
+    deadline: Option<&SentryDeadline>,
+    tuning: &ResolvedSentryTuning,
+) -> u64 {
+    deadline.map_or(0, |deadline| {
+        let activated_at_tick = deadline
+            .expires_at_tick
+            .saturating_sub(tuning.lifetime_ticks);
+        request
+            .requested_at_tick
+            .saturating_sub(activated_at_tick)
+            .min(tuning.lifetime_ticks)
+    })
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+fn purge_sentry_owned_work(
+    commands: &mut Commands,
+    sentry_entity: Entity,
+    identity: SentryIdentity,
+    deliveries: &Query<(Entity, &crate::combat::ReplicatedAttackSource)>,
+    pending_payloads: &mut Messages<crate::combat::PendingPayload>,
+    pending_deliveries: &mut Messages<crate::combat::PendingDelivery>,
+    melee_attacks: &mut Messages<crate::combat::MeleeAttack>,
+) {
+    // Match teardown may queue the same removal earlier in the schedule. Cleanup remains the
+    // single ability transaction, but tolerates that external ownership teardown race.
+    commands.entity(sentry_entity).try_despawn();
+    despawn_sentry_deliveries(
+        commands,
+        identity.owner_network_id,
+        identity.deployable_id,
+        deliveries,
+    );
+    retain_non_sentry_messages(
+        pending_payloads,
+        identity.owner_network_id,
+        identity.deployable_id,
+        |message| message.source,
+    );
+    retain_non_sentry_messages(
+        pending_deliveries,
+        identity.owner_network_id,
+        identity.deployable_id,
+        |message| message.source,
+    );
+    retain_non_sentry_messages(
+        melee_attacks,
+        identity.owner_network_id,
+        identity.deployable_id,
+        |message| message.source,
+    );
+}
+
+#[cfg(feature = "server")]
+fn settle_sentry_owner(
+    identity: SentryIdentity,
+    tuning: &ResolvedSentryTuning,
+    mut cleanup_position: Option<Vec2>,
+    owners: &mut Query<(
+        &NetworkEntityId,
+        &avian2d::prelude::Position,
+        &mut crate::builds::AbilityState,
+    )>,
+) -> Option<Vec2> {
+    for (owner, owner_position, mut ability) in owners {
+        if *owner == identity.owner_network_id
+            && matches!(
+                ability.phase,
+                crate::builds::AbilityPhase::Deployed { deployable_id, .. }
+                    if deployable_id == identity.deployable_id
+            )
+        {
+            ability.phase =
+                crate::abilities::settled_ability_phase(ability.charge, tuning.charge_maximum);
+        }
+        if *owner == identity.owner_network_id && cleanup_position.is_none() {
+            cleanup_position = Some(owner_position.0);
+        }
+    }
+    cleanup_position
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+fn publish_sentry_cleanup(
+    request: SentryCleanupRequest,
+    identity: SentryIdentity,
+    lifetime_ticks: u64,
+    cleanup_position: Option<Vec2>,
+    ids: &mut crate::combat::NextCombatIds,
+    telemetry: &mut crate::abilities::AbilityTelemetry,
+    combat_telemetry: &mut crate::combat::CombatTelemetry,
+    outbox: &mut crate::combat::CombatOutbox,
+) {
+    telemetry.record(crate::abilities::AbilityTelemetryRecord {
+        tick: request.requested_at_tick,
+        owner_network_id: identity.owner_network_id,
+        kind: crate::abilities::AbilityTelemetryKind::SentryCleanup {
+            deployable_id: identity.deployable_id,
+            reason: request.reason,
+            lifetime_ticks,
+        },
+    });
+    let Some(cleanup_position) = cleanup_position else {
+        return;
+    };
+    let Some(event_id) = ids.allocate_event() else {
+        return;
+    };
+    let cleanup_cue = crate::combat::CombatCue::DeployableRemoved {
+        event_id,
+        tick: request.requested_at_tick,
+        owner: identity.owner_network_id,
+        deployable_id: identity.deployable_id,
+        position: crate::combat::WorldPoint::from(cleanup_position),
+        reason: request.reason,
+    };
+    combat_telemetry.record_cue(cleanup_cue.clone());
+    outbox.0.push(cleanup_cue);
 }
 
 #[cfg(feature = "server")]
@@ -609,18 +811,7 @@ pub(crate) fn cleanup_requested_sentries(
         &mut crate::builds::AbilityState,
     )>,
 ) {
-    let mut selected = std::collections::BTreeMap::new();
-    for request in requests.read().copied() {
-        selected
-            .entry(request.deployable_id)
-            .and_modify(|current: &mut SentryCleanupRequest| {
-                if cleanup_reason_priority(request.reason) < cleanup_reason_priority(current.reason)
-                {
-                    *current = request;
-                }
-            })
-            .or_insert(request);
-    }
+    let selected = coalesce_sentry_cleanup_requests(requests.read().copied());
     for request in selected.into_values() {
         let Some((entity, identity, deadline, position, tuning)) = sentries
             .iter()
@@ -629,84 +820,34 @@ pub(crate) fn cleanup_requested_sentries(
             continue;
         };
         let identity = *identity;
-        let mut cleanup_position = position.map(|position| position.0);
-        let lifetime_ticks = deadline.map_or(0, |deadline| {
-            let activated_at_tick = deadline
-                .expires_at_tick
-                .saturating_sub(tuning.lifetime_ticks);
-            request
-                .requested_at_tick
-                .saturating_sub(activated_at_tick)
-                .min(tuning.lifetime_ticks)
-        });
-        // Match teardown may queue the same removal earlier in the schedule. Cleanup remains the
-        // single ability transaction, but tolerates that external ownership teardown race.
-        commands.entity(entity).try_despawn();
-        despawn_sentry_deliveries(
+        let lifetime_ticks = sentry_cleanup_lifetime(request, deadline, tuning);
+        purge_sentry_owned_work(
             &mut commands,
-            identity.owner_network_id,
-            identity.deployable_id,
+            entity,
+            identity,
             &deliveries,
-        );
-        retain_non_sentry_messages(
             &mut pending_payloads,
-            identity.owner_network_id,
-            identity.deployable_id,
-            |message| message.source,
-        );
-        retain_non_sentry_messages(
             &mut pending_deliveries,
-            identity.owner_network_id,
-            identity.deployable_id,
-            |message| message.source,
-        );
-        retain_non_sentry_messages(
             &mut melee_attacks,
-            identity.owner_network_id,
-            identity.deployable_id,
-            |message| message.source,
         );
-        for (owner, owner_position, mut ability) in &mut owners {
-            if *owner == identity.owner_network_id
-                && matches!(
-                    ability.phase,
-                    crate::builds::AbilityPhase::Deployed { deployable_id, .. }
-                        if deployable_id == identity.deployable_id
-                )
-            {
-                ability.phase =
-                    crate::abilities::settled_ability_phase(ability.charge, tuning.charge_maximum);
-            }
-            if *owner == identity.owner_network_id && cleanup_position.is_none() {
-                cleanup_position = Some(owner_position.0);
-            }
-        }
-        telemetry.record(crate::abilities::AbilityTelemetryRecord {
-            tick: request.requested_at_tick,
-            owner_network_id: identity.owner_network_id,
-            kind: crate::abilities::AbilityTelemetryKind::SentryCleanup {
-                deployable_id: identity.deployable_id,
-                reason: request.reason,
-                lifetime_ticks,
-            },
-        });
-        if let Some(cleanup_position) = cleanup_position
-            && let Some(event_id) = ids.allocate_event()
-        {
-            let cleanup_cue = crate::combat::CombatCue::DeployableRemoved {
-                event_id,
-                tick: request.requested_at_tick,
-                owner: identity.owner_network_id,
-                deployable_id: identity.deployable_id,
-                position: crate::combat::WorldPoint::from(cleanup_position),
-                reason: request.reason,
-            };
-            combat_telemetry.record_cue(cleanup_cue.clone());
-            outbox.0.push(cleanup_cue);
-        }
+        let cleanup_position = settle_sentry_owner(
+            identity,
+            tuning,
+            position.map(|position| position.0),
+            &mut owners,
+        );
+        publish_sentry_cleanup(
+            request,
+            identity,
+            lifetime_ticks,
+            cleanup_position,
+            &mut ids,
+            &mut telemetry,
+            &mut combat_telemetry,
+            &mut outbox,
+        );
     }
 }
-
 #[cfg(feature = "server")]
 fn retain_non_sentry_messages<M: Message>(
     messages: &mut Messages<M>,
@@ -742,6 +883,456 @@ const fn cleanup_reason_priority(reason: crate::abilities::SentryCleanupReason) 
         crate::abilities::SentryCleanupReason::MatchCompleted => 5,
         crate::abilities::SentryCleanupReason::MatchRestarted => 6,
     }
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug)]
+struct SentryOwnerView {
+    visibility_position: Vec2,
+    reveal_radius: f32,
+    projectile_owner: Entity,
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Debug)]
+struct SentryFighterTargetView {
+    position: Vec2,
+    network_id: NetworkEntityId,
+    team_id: crate::combat::TeamId,
+    targetable: bool,
+    base_concealment: crate::concealment::ConcealmentSources,
+    reveal_deadlines: Option<crate::concealment::ConcealmentRevealDeadlines>,
+    ability: crate::builds::AbilityState,
+    forced_reveals: Option<crate::concealment::ForcedRevealSources>,
+    objective_carrier: bool,
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug)]
+struct SentryObjectiveTargetView {
+    entity: Entity,
+    position: Vec2,
+    identity: crate::map::DamageableTargetIdentity,
+    safe: crate::matchplay::HeistSafe,
+    health: u16,
+    life: crate::map::DamageableLifeState,
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug)]
+struct SentryFireTarget {
+    position: Vec2,
+    cue_target: Option<NetworkEntityId>,
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Debug)]
+struct SentryFirePlan {
+    owner_entity: Entity,
+    direction: Vec2,
+    cue: crate::combat::CombatCue,
+    source: crate::combat::AttackSource,
+    recipe: crate::combat::WeaponRecipe,
+}
+
+#[cfg(feature = "server")]
+fn index_sentry_owners(
+    owners: &Query<
+        (
+            Entity,
+            &NetworkEntityId,
+            &avian2d::prelude::Position,
+            &crate::builds::ResolvedMatchLoadout,
+        ),
+        With<crate::protocol::Fighter>,
+    >,
+) -> std::collections::BTreeMap<NetworkEntityId, SentryOwnerView> {
+    let mut indexed = std::collections::BTreeMap::new();
+    for (entity, network_id, position, loadout) in owners {
+        indexed
+            .entry(*network_id)
+            .and_modify(|view: &mut SentryOwnerView| view.projectile_owner = entity)
+            .or_insert(SentryOwnerView {
+                visibility_position: position.0,
+                reveal_radius: loadout.fighter_stats.reveal_proximity_radius,
+                projectile_owner: entity,
+            });
+    }
+    indexed
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::type_complexity)]
+fn index_sentry_fighter_targets(
+    fighters: &Query<
+        (
+            &avian2d::prelude::Position,
+            &NetworkEntityId,
+            &crate::combat::TeamId,
+            Option<&crate::combat::Defeated>,
+            Option<&crate::matchplay::ActiveCombatant>,
+            Option<&crate::concealment::TerrainConcealmentMembership>,
+            Option<&crate::concealment::AlliedConcealmentMemberships>,
+            Option<&crate::concealment::ConcealmentRevealDeadlines>,
+            &crate::builds::AbilityState,
+            Option<&crate::concealment::ForcedRevealSources>,
+            Has<crate::concealment::ObjectiveCarrier>,
+        ),
+        With<crate::protocol::Fighter>,
+    >,
+) -> Vec<SentryFighterTargetView> {
+    fighters
+        .iter()
+        .map(
+            |(
+                position,
+                network_id,
+                team_id,
+                defeated,
+                active,
+                terrain,
+                field,
+                reveal_deadlines,
+                ability,
+                forced_reveals,
+                objective_carrier,
+            )| SentryFighterTargetView {
+                position: position.0,
+                network_id: *network_id,
+                team_id: *team_id,
+                targetable: defeated.is_none() && active.is_some(),
+                base_concealment: crate::concealment::ConcealmentSources {
+                    terrain: terrain.is_some(),
+                    self_cloak: false,
+                    allied_field: field.is_some_and(|value| !value.0.is_empty()),
+                },
+                reveal_deadlines: reveal_deadlines.copied(),
+                ability: *ability,
+                forced_reveals: forced_reveals.cloned(),
+                objective_carrier,
+            },
+        )
+        .collect()
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::type_complexity)]
+fn index_sentry_objective_targets(
+    objectives: &Query<
+        (
+            Entity,
+            &avian2d::prelude::Position,
+            &crate::map::DamageableTargetIdentity,
+            &crate::matchplay::HeistSafe,
+            &crate::combat::CurrentHealth,
+            &crate::map::DamageableLifeState,
+        ),
+        With<crate::matchplay::HeistSafe>,
+    >,
+) -> Vec<SentryObjectiveTargetView> {
+    objectives
+        .iter()
+        .map(
+            |(entity, position, identity, safe, health, life)| SentryObjectiveTargetView {
+                entity,
+                position: position.0,
+                identity: *identity,
+                safe: *safe,
+                health: health.0,
+                life: *life,
+            },
+        )
+        .collect()
+}
+
+#[cfg(feature = "server")]
+fn sentry_observer_can_see(
+    tick: u64,
+    observer_team: crate::combat::TeamId,
+    owner: SentryOwnerView,
+    target: &SentryFighterTargetView,
+) -> bool {
+    crate::concealment::observer_can_see(crate::concealment::ObserverVisibilityInput {
+        relation: crate::concealment::ObserverRelation::Enemy,
+        observer_alive: true,
+        concealment: if target.objective_carrier {
+            crate::concealment::ConcealmentSources::NONE
+        } else {
+            crate::concealment::ConcealmentSources {
+                terrain: target.base_concealment.terrain,
+                self_cloak: matches!(target.ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if tick < expires_at_tick),
+                allied_field: target.base_concealment.allied_field,
+            }
+        },
+        forced_revealed: target
+            .forced_reveals
+            .as_ref()
+            .is_some_and(|sources| sources.active_for_team(observer_team, tick)),
+        subject_reveal_locked: target
+            .reveal_deadlines
+            .is_some_and(|deadlines| crate::concealment::reveal_lock_active(tick, deadlines)),
+        distance_squared: owner.visibility_position.distance_squared(target.position),
+        reveal_radius: owner.reveal_radius,
+    })
+}
+
+#[cfg(feature = "server")]
+fn sentry_has_clear_line_of_sight(
+    spatial_query: &avian2d::prelude::SpatialQuery,
+    origin: Vec2,
+    target: Vec2,
+    excluded_entity: Option<Entity>,
+) -> bool {
+    use bevy::math::Dir2;
+
+    let delta = target - origin;
+    let Some(direction) = Dir2::new(delta.normalize_or_zero()).ok() else {
+        return false;
+    };
+    let mut filter = avian2d::prelude::SpatialQueryFilter::from_mask(
+        crate::movement::STATIC_MAP_LAYER | crate::movement::DESTRUCTIBLE_MAP_LAYER,
+    );
+    if let Some(entity) = excluded_entity {
+        filter = filter.with_excluded_entities([entity]);
+    }
+    spatial_query
+        .cast_ray(origin, direction, delta.length(), true, &filter)
+        .is_none()
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+fn select_sentry_target(
+    tick: u64,
+    sentry_position: Vec2,
+    identity: SentryIdentity,
+    acquisition_range: f32,
+    owner: Option<SentryOwnerView>,
+    fighters: &[SentryFighterTargetView],
+    objectives: &[SentryObjectiveTargetView],
+    spatial_query: &avian2d::prelude::SpatialQuery,
+) -> Option<SentryTarget> {
+    let fighter = stable_sentry_target(
+        fighters.iter().filter_map(|target| {
+            if target.team_id == identity.team_id || !target.targetable {
+                return None;
+            }
+            let visible_to_owner = owner.is_some_and(|owner| {
+                sentry_observer_can_see(tick, identity.team_id, owner, target)
+            });
+            if !visible_to_owner {
+                return None;
+            }
+            let distance_squared = sentry_position.distance_squared(target.position);
+            let clear_line_of_sight = sentry_has_clear_line_of_sight(
+                spatial_query,
+                sentry_position,
+                target.position,
+                None,
+            );
+            Some((target.network_id, distance_squared, clear_line_of_sight))
+        }),
+        acquisition_range,
+    );
+    if let Some(fighter) = fighter {
+        return Some(SentryTarget::Fighter(fighter));
+    }
+    stable_sentry_objective_target(
+        objectives.iter().filter_map(|target| {
+            if target.safe.match_id != identity.match_id
+                || target.safe.defending_team == identity.team_id
+                || target.health == 0
+                || !matches!(target.life, crate::map::DamageableLifeState::Live)
+            {
+                return None;
+            }
+            Some((
+                target.identity,
+                sentry_position.distance_squared(target.position),
+                sentry_has_clear_line_of_sight(
+                    spatial_query,
+                    sentry_position,
+                    target.position,
+                    Some(target.entity),
+                ),
+            ))
+        }),
+        acquisition_range,
+    )
+    .map(SentryTarget::ModeObjective)
+}
+
+#[cfg(feature = "server")]
+fn revalidate_sentry_target(
+    tick: u64,
+    identity: SentryIdentity,
+    target: SentryTarget,
+    owner: Option<SentryOwnerView>,
+    fighters: &[SentryFighterTargetView],
+    objectives: &[SentryObjectiveTargetView],
+) -> Option<SentryFireTarget> {
+    match target {
+        SentryTarget::Fighter(network_id) => {
+            let target = fighters
+                .iter()
+                .find(|target| target.network_id == network_id && target.targetable)?;
+            owner
+                .is_some_and(|owner| sentry_observer_can_see(tick, identity.team_id, owner, target))
+                .then_some(SentryFireTarget {
+                    position: target.position,
+                    cue_target: Some(network_id),
+                })
+        }
+        SentryTarget::ModeObjective(target_identity) => objectives
+            .iter()
+            .find(|target| {
+                target.identity == target_identity
+                    && target.safe.match_id == identity.match_id
+                    && target.safe.defending_team != identity.team_id
+                    && target.health > 0
+                    && matches!(target.life, crate::map::DamageableLifeState::Live)
+            })
+            .map(|target| SentryFireTarget {
+                position: target.position,
+                cue_target: None,
+            }),
+    }
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+fn plan_sentry_fire(
+    tick: u64,
+    sentry_position: Vec2,
+    identity: SentryIdentity,
+    target: SentryFireTarget,
+    direction: Vec2,
+    tuning: &ResolvedSentryTuning,
+    owner: SentryOwnerView,
+    attack_id: crate::combat::AttackId,
+    fire_event_id: crate::combat::CombatEventId,
+) -> SentryFirePlan {
+    let source = crate::combat::AttackSource {
+        kind: crate::combat::CombatSourceKind::Deployable {
+            ultimate_id: identity.ultimate_id,
+            deployable_id: identity.deployable_id,
+        },
+        attack_id,
+        player_id: identity.owner_player_id,
+        owner_network_entity_id: identity.owner_network_id,
+        team_id: identity.team_id,
+        recipe_fingerprint: tuning.recipe_fingerprint,
+        presentation_profile_id: tuning.presentation_profile_id,
+        legacy_compatibility: false,
+        source_preset_id: None,
+        origin: crate::combat::WorldPoint::from(sentry_position),
+        facing: direction.y.atan2(direction.x),
+    };
+    SentryFirePlan {
+        owner_entity: owner.projectile_owner,
+        direction,
+        cue: crate::combat::CombatCue::SentryFired {
+            event_id: fire_event_id,
+            tick,
+            owner: identity.owner_network_id,
+            deployable_id: identity.deployable_id,
+            target: target.cue_target,
+            position: crate::combat::WorldPoint::from(sentry_position),
+            presentation_profile_id: tuning.presentation_profile_id,
+        },
+        source,
+        recipe: tuning.recipe.clone(),
+    }
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+fn commit_sentry_fire(
+    commands: &mut Commands,
+    tick: u64,
+    sentry_entity: Entity,
+    identity: SentryIdentity,
+    runtime: &mut SentryRuntime,
+    tuning: &ResolvedSentryTuning,
+    plan: SentryFirePlan,
+    telemetry: &mut crate::abilities::AbilityTelemetry,
+    combat_telemetry: &mut crate::combat::CombatTelemetry,
+    outbox: &mut crate::combat::CombatOutbox,
+) {
+    use avian2d::prelude::CollisionLayers;
+    use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
+
+    let crate::combat::DeliveryMethod::Straight {
+        speed,
+        radius,
+        range,
+        lifetime_ticks,
+        ..
+    } = plan.recipe.delivery
+    else {
+        return;
+    };
+    runtime.record_fire(tick, tuning.fire_interval_ticks);
+    telemetry.record(crate::abilities::AbilityTelemetryRecord {
+        tick,
+        owner_network_id: identity.owner_network_id,
+        kind: crate::abilities::AbilityTelemetryKind::SentryShot(identity.deployable_id),
+    });
+    combat_telemetry.record_cue(plan.cue.clone());
+    outbox.0.push(plan.cue);
+    commands.spawn((
+        crate::combat::Projectile,
+        crate::combat::ProjectileSource {
+            shot_id: crate::combat::ShotId(plan.source.attack_id.0),
+            player_id: identity.owner_player_id,
+            owner_network_entity_id: identity.owner_network_id,
+            team_id: identity.team_id,
+            weapon_definition_id: crate::combat::WeaponDefinitionId(1),
+        },
+        crate::combat::ReplicatedAttackSource {
+            attack: plan.source,
+        },
+        crate::combat::AttackDelivery {
+            attack_id: plan.source.attack_id,
+            delivery_index: 0,
+        },
+        crate::combat::ProjectileDeadline {
+            expires_at_tick: tick.saturating_add(lifetime_ticks),
+        },
+        crate::combat::StraightFlight {
+            origin: crate::combat::WorldPoint::from(plan.source.origin.as_vec2()),
+            facing: plan.source.facing,
+            speed,
+            maximum_range: range,
+            launched_at_tick: tick,
+        },
+        crate::combat::ProjectileBody::circle(radius),
+        crate::combat::ComposedProjectileRuntime {
+            owner_entity: plan.owner_entity,
+            source_entity: sentry_entity,
+            source: plan.source,
+            delivery_index: 0,
+            velocity: plan.direction * speed,
+            travelled: 0.0,
+            expires_at_tick: tick.saturating_add(lifetime_ticks),
+            maximum_range: range,
+            landing: None,
+            recipe: plan.recipe,
+        },
+        avian2d::prelude::Position(plan.source.origin.as_vec2()),
+        avian2d::prelude::Rotation::radians(plan.source.facing),
+        crate::combat::ProjectileBody::circle(radius).collider(),
+        CollisionLayers::new(
+            crate::movement::PROJECTILE_LAYER,
+            crate::movement::FIGHTER_LAYER
+                | crate::movement::DEPLOYABLE_LAYER
+                | crate::movement::STATIC_MAP_LAYER
+                | crate::movement::DESTRUCTIBLE_MAP_LAYER,
+        ),
+        crate::matchplay::MatchMember(identity.match_id),
+        Replicate::to_clients(NetworkTarget::All),
+        InterpolationTarget::to_clients(NetworkTarget::All),
+    ));
 }
 
 #[cfg(feature = "server")]
@@ -796,7 +1387,7 @@ pub(crate) fn tick_sentries(
         ),
         With<crate::matchplay::HeistSafe>,
     >,
-    mut owners: Query<
+    owners: Query<
         (
             Entity,
             &NetworkEntityId,
@@ -806,122 +1397,27 @@ pub(crate) fn tick_sentries(
         With<crate::protocol::Fighter>,
     >,
 ) {
-    use avian2d::prelude::CollisionLayers;
-    use bevy::math::Dir2;
-    use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
+    let owner_index = index_sentry_owners(&owners);
+    let fighter_targets = index_sentry_fighter_targets(&fighters);
+    let objective_targets = index_sentry_objective_targets(&objectives);
     for (entity, position, identity, mut runtime, sentry_tuning) in &mut sentries {
-        let owner_view = owners
-            .iter()
-            .find(|(_, id, _, _)| **id == identity.owner_network_id)
-            .map(|(_, _, position, loadout)| {
-                (position.0, loadout.fighter_stats.reveal_proximity_radius)
-            });
+        let owner = owner_index.get(&identity.owner_network_id).copied();
         if runtime.begin_acquisition_if_due(tick.0, sentry_tuning.acquisition_interval_ticks) {
-            let fighter_target = stable_sentry_target(fighters.iter().filter_map(
-                |(
-                    target_position,
-                    target_id,
-                    team,
-                    defeated,
-                    active,
-                    terrain,
-                    field,
-                    deadlines,
-                    ability,
-                    forced,
-                    objective_carrier,
-                )| {
-                    if *team == identity.team_id || defeated.is_some() || active.is_none() {
-                        return None;
-                    }
-                    let permitted = owner_view.is_some_and(|(owner_position, reveal_radius)| {
-                        crate::concealment::observer_can_see(
-                            crate::concealment::ObserverVisibilityInput {
-                                relation: crate::concealment::ObserverRelation::Enemy,
-                                observer_alive: true,
-                                concealment: if objective_carrier {
-                                    crate::concealment::ConcealmentSources::NONE
-                                } else {
-                                    crate::concealment::ConcealmentSources {
-                                        terrain: terrain.is_some(),
-                                        self_cloak: matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if tick.0 < expires_at_tick),
-                                        allied_field: field
-                                            .is_some_and(|value| !value.0.is_empty()),
-                                    }
-                                },
-                                forced_revealed: forced.is_some_and(|sources| {
-                                    sources.active_for_team(identity.team_id, tick.0)
-                                }),
-                                subject_reveal_locked: deadlines.is_some_and(|value| {
-                                    crate::concealment::reveal_lock_active(tick.0, *value)
-                                }),
-                                distance_squared: owner_position
-                                    .distance_squared(target_position.0),
-                                reveal_radius,
-                            },
-                        )
-                    });
-                    if !permitted {
-                        return None;
-                    }
-                    let delta = target_position.0 - position.0;
-                    let distance_squared = delta.length_squared();
-                    let visible =
-                        Dir2::new(delta.normalize_or_zero())
-                            .ok()
-                            .is_some_and(|direction| {
-                                spatial_query
-                                    .cast_ray(
-                                        position.0,
-                                        direction,
-                                        delta.length(),
-                                        true,
-                                        &avian2d::prelude::SpatialQueryFilter::from_mask(
-                                            crate::movement::STATIC_MAP_LAYER
-                                                | crate::movement::DESTRUCTIBLE_MAP_LAYER,
-                                        ),
-                                    )
-                                    .is_none()
-                            });
-                    Some((*target_id, distance_squared, visible))
-                },
-            ), sentry_tuning.acquisition_range);
-            if fighter_target.is_some() {
-                runtime.set_fighter_target(fighter_target);
-            } else {
-                runtime.set_objective_target(stable_sentry_objective_target(
-                    objectives.iter().filter_map(
-                        |(target_entity, target_position, target, safe, health, life)| {
-                            if safe.match_id != identity.match_id
-                                || safe.defending_team == identity.team_id
-                                || health.0 == 0
-                                || !matches!(life, crate::map::DamageableLifeState::Live)
-                            {
-                                return None;
-                            }
-                            let delta = target_position.0 - position.0;
-                            let visible = Dir2::new(delta.normalize_or_zero()).ok().is_some_and(
-                                |direction| {
-                                    spatial_query
-                                        .cast_ray(
-                                            position.0,
-                                            direction,
-                                            delta.length(),
-                                            true,
-                                            &avian2d::prelude::SpatialQueryFilter::from_mask(
-                                                crate::movement::STATIC_MAP_LAYER
-                                                    | crate::movement::DESTRUCTIBLE_MAP_LAYER,
-                                            )
-                                            .with_excluded_entities([target_entity]),
-                                        )
-                                        .is_none()
-                                },
-                            );
-                            Some((*target, delta.length_squared(), visible))
-                        },
-                    ),
-                    sentry_tuning.acquisition_range,
-                ));
+            match select_sentry_target(
+                tick.0,
+                position.0,
+                *identity,
+                sentry_tuning.acquisition_range,
+                owner,
+                &fighter_targets,
+                &objective_targets,
+                &spatial_query,
+            ) {
+                Some(SentryTarget::Fighter(target)) => runtime.set_fighter_target(Some(target)),
+                Some(SentryTarget::ModeObjective(target)) => {
+                    runtime.set_objective_target(Some(target));
+                }
+                None => runtime.clear_target(),
             }
         }
         if !runtime.fire_is_due(tick.0) {
@@ -930,198 +1426,61 @@ pub(crate) fn tick_sentries(
         let Some(target) = runtime.target() else {
             continue;
         };
-        let (target_position, cue_target) = match target {
-            SentryTarget::Fighter(target_id) => {
-                let Some((
-                    target_position,
-                    _,
-                    _,
-                    _,
-                    _,
-                    terrain,
-                    field,
-                    deadlines,
-                    ability,
-                    forced,
-                    objective_carrier,
-                )) = fighters.iter().find(|(_, id, _, defeated, active, ..)| {
-                    **id == target_id && defeated.is_none() && active.is_some()
-                })
-                else {
-                    runtime.clear_target();
-                    continue;
-                };
-                let permitted = owner_view.is_some_and(|(owner_position, reveal_radius)| {
-                    crate::concealment::observer_can_see(
-                        crate::concealment::ObserverVisibilityInput {
-                            relation: crate::concealment::ObserverRelation::Enemy,
-                            observer_alive: true,
-                            concealment: if objective_carrier {
-                                crate::concealment::ConcealmentSources::NONE
-                            } else {
-                                crate::concealment::ConcealmentSources {
-                                    terrain: terrain.is_some(),
-                                    self_cloak: matches!(ability.phase, crate::builds::AbilityPhase::Cloaked { expires_at_tick, .. } if tick.0 < expires_at_tick),
-                                    allied_field: field
-                                        .is_some_and(|value| !value.0.is_empty()),
-                                }
-                            },
-                            forced_revealed: forced.is_some_and(|sources| {
-                                sources.active_for_team(identity.team_id, tick.0)
-                            }),
-                            subject_reveal_locked: deadlines.is_some_and(|value| {
-                                crate::concealment::reveal_lock_active(tick.0, *value)
-                            }),
-                            distance_squared: owner_position
-                                .distance_squared(target_position.0),
-                            reveal_radius,
-                        },
-                    )
-                });
-                if !permitted {
-                    runtime.clear_target();
-                    continue;
-                }
-                (target_position.0, Some(target_id))
-            }
-            SentryTarget::ModeObjective(target_identity) => {
-                let Some((_, target_position, _, _, _, _)) =
-                    objectives
-                        .iter()
-                        .find(|(_, _, candidate, safe, health, life)| {
-                            **candidate == target_identity
-                                && safe.match_id == identity.match_id
-                                && safe.defending_team != identity.team_id
-                                && health.0 > 0
-                                && matches!(life, crate::map::DamageableLifeState::Live)
-                        })
-                else {
-                    runtime.clear_target();
-                    continue;
-                };
-                (target_position.0, None)
-            }
+        let Some(fire_target) = revalidate_sentry_target(
+            tick.0,
+            *identity,
+            target,
+            owner,
+            &fighter_targets,
+            &objective_targets,
+        ) else {
+            runtime.clear_target();
+            continue;
         };
-        let delta = target_position - position.0;
-        let Some(direction) = delta.try_normalize() else {
+        let Some(direction) = (fire_target.position - position.0).try_normalize() else {
             continue;
         };
         let Some(attack_id) = ids.allocate_attack() else {
             continue;
         };
-        let mut fighter_owner = None;
-        for (owner_entity, owner_id, _, _) in &mut owners {
+        for (owner_entity, owner_id, _, _) in &owners {
             if *owner_id == identity.owner_network_id {
-                fighter_owner = Some(owner_entity);
                 commands
                     .entity(owner_entity)
                     .remove::<crate::matchplay::SpawnProtection>();
             }
         }
-        let Some(fighter_owner) = fighter_owner else {
+        let Some(owner) = owner else {
             continue;
         };
         let Some(fire_event_id) = ids.allocate_event() else {
             continue;
         };
-        runtime.record_fire(tick.0, sentry_tuning.fire_interval_ticks);
-        telemetry.record(crate::abilities::AbilityTelemetryRecord {
-            tick: tick.0,
-            owner_network_id: identity.owner_network_id,
-            kind: crate::abilities::AbilityTelemetryKind::SentryShot(identity.deployable_id),
-        });
-        let fire_cue = crate::combat::CombatCue::SentryFired {
-            event_id: fire_event_id,
-            tick: tick.0,
-            owner: identity.owner_network_id,
-            deployable_id: identity.deployable_id,
-            target: cue_target,
-            position: crate::combat::WorldPoint::from(position.0),
-            presentation_profile_id: sentry_tuning.presentation_profile_id,
-        };
-        combat_telemetry.record_cue(fire_cue.clone());
-        outbox.0.push(fire_cue);
-        let source = crate::combat::AttackSource {
-            kind: crate::combat::CombatSourceKind::Deployable {
-                ultimate_id: identity.ultimate_id,
-                deployable_id: identity.deployable_id,
-            },
+        let plan = plan_sentry_fire(
+            tick.0,
+            position.0,
+            *identity,
+            fire_target,
+            direction,
+            sentry_tuning,
+            owner,
             attack_id,
-            player_id: identity.owner_player_id,
-            owner_network_entity_id: identity.owner_network_id,
-            team_id: identity.team_id,
-            recipe_fingerprint: sentry_tuning.recipe_fingerprint,
-            presentation_profile_id: sentry_tuning.presentation_profile_id,
-            legacy_compatibility: false,
-            source_preset_id: None,
-            origin: crate::combat::WorldPoint::from(position.0),
-            facing: direction.y.atan2(direction.x),
-        };
-        let recipe = sentry_tuning.recipe.clone();
-        let crate::combat::DeliveryMethod::Straight {
-            speed,
-            radius,
-            range,
-            lifetime_ticks,
-            ..
-        } = recipe.delivery
-        else {
-            continue;
-        };
-        commands.spawn((
-            crate::combat::Projectile,
-            crate::combat::ProjectileSource {
-                shot_id: crate::combat::ShotId(attack_id.0),
-                player_id: identity.owner_player_id,
-                owner_network_entity_id: identity.owner_network_id,
-                team_id: identity.team_id,
-                weapon_definition_id: crate::combat::WeaponDefinitionId(1),
-            },
-            crate::combat::ReplicatedAttackSource { attack: source },
-            crate::combat::AttackDelivery {
-                attack_id,
-                delivery_index: 0,
-            },
-            crate::combat::ProjectileDeadline {
-                expires_at_tick: tick.0.saturating_add(lifetime_ticks),
-            },
-            crate::combat::StraightFlight {
-                origin: crate::combat::WorldPoint::from(position.0),
-                facing: source.facing,
-                speed,
-                maximum_range: range,
-                launched_at_tick: tick.0,
-            },
-            crate::combat::ProjectileBody::circle(radius),
-            crate::combat::ComposedProjectileRuntime {
-                owner_entity: fighter_owner,
-                source_entity: entity,
-                source,
-                delivery_index: 0,
-                velocity: direction * speed,
-                travelled: 0.0,
-                expires_at_tick: tick.0.saturating_add(lifetime_ticks),
-                maximum_range: range,
-                landing: None,
-                recipe,
-            },
-            avian2d::prelude::Position::from_xy(position.x, position.y),
-            avian2d::prelude::Rotation::radians(source.facing),
-            crate::combat::ProjectileBody::circle(radius).collider(),
-            CollisionLayers::new(
-                crate::movement::PROJECTILE_LAYER,
-                crate::movement::FIGHTER_LAYER
-                    | crate::movement::DEPLOYABLE_LAYER
-                    | crate::movement::STATIC_MAP_LAYER
-                    | crate::movement::DESTRUCTIBLE_MAP_LAYER,
-            ),
-            crate::matchplay::MatchMember(identity.match_id),
-            Replicate::to_clients(NetworkTarget::All),
-            InterpolationTarget::to_clients(NetworkTarget::All),
-        ));
+            fire_event_id,
+        );
+        commit_sentry_fire(
+            &mut commands,
+            tick.0,
+            entity,
+            *identity,
+            &mut runtime,
+            sentry_tuning,
+            plan,
+            &mut telemetry,
+            &mut combat_telemetry,
+            &mut outbox,
+        );
     }
 }
-
 #[cfg(feature = "server")]
 pub(crate) fn despawn_sentry_deliveries(
     commands: &mut Commands,

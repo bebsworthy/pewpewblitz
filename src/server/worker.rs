@@ -17,7 +17,7 @@ use crate::{
 use bevy::{app::AppExit, prelude::*};
 use brawler_routing::{
     ActivationBody, AllocateRequestBody, CONTROL_VERSION_CURRENT, CodecError, ControlBody,
-    ControlFrame, ControlSequenceTracker, FramedReader, IpcChannel, IpcIoError,
+    ControlFrame, ControlSequenceTracker, FramedReader, IpcChannel, IpcIoError, IpcReadProgress,
     LobbyAuthenticatedBody, LobbyManifest, LobbyNetcodeAuthenticatedBody, MatchManifestV1,
     PACKET_VERSION_V1, PeerCloseBody, ProcessId, ROUTE_VERSION_V1, ReadyBody, SequenceDisposition,
     StopBody, UnixWorkerChannels, WorkerId, WorkerRole,
@@ -648,52 +648,49 @@ fn worker_control_emit_result(
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-fn worker_control_receive(
-    mut commands: Commands,
-    mut app_exit: MessageWriter<AppExit>,
-    mut state: ResMut<WorkerControlState>,
-    mut lobby_inbox: Option<ResMut<LobbyControlInbox>>,
-    mut lobby_outbox: Option<ResMut<LobbyControlOutbox>>,
-    mut match_outbox: Option<ResMut<MatchControlOutbox>>,
-    mut workers: Query<(Entity, &mut RoutedWorker), With<Linked>>,
-) {
-    let Ok((worker_entity, mut worker)) = workers.single_mut() else {
-        return;
-    };
-    let progress = match worker.channels_mut().control_read_ready(CONTROL_BURST) {
-        Ok(progress) => progress,
-        Err(_error) => {
-            error!(worker = ?state.worker_id, "brawler routed worker control read failed");
-            worker_control_failure(
-                &mut worker,
-                &mut state,
-                &mut app_exit,
-                &mut commands,
-                worker_entity,
-                FAILURE_DETAIL_MALFORMED,
-            );
-            return;
-        }
-    };
+fn enqueue_control_body(
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+    body: ControlBody,
+) -> Result<(), IpcIoError> {
+    let bytes = ControlFrame::from_raw_sequence(
+        state.next_sequence,
+        state.process_id,
+        state.worker_id,
+        body,
+    )
+    .and_then(|frame| frame.encode())
+    .map_err(IpcIoError::Malformed)?;
+    worker.channels_mut().enqueue_control(&bytes)?;
+    state.next_sequence = state.next_sequence.saturating_add(1);
+    Ok(())
+}
+
+fn receive_control_records(worker: &mut RoutedWorker) -> Result<IpcReadProgress, IpcIoError> {
+    worker.channels_mut().control_read_ready(CONTROL_BURST)
+}
+
+fn validate_and_dispatch_control_records(
+    records: Vec<Vec<u8>>,
+    worker_entity: Entity,
+    state: &mut WorkerControlState,
+    lobby_inbox: &mut Option<ResMut<LobbyControlInbox>>,
+    commands: &mut Commands,
+) -> Result<Option<StopBody>, u32> {
     let mut stop = None;
-    let mut failure = None;
-    for record in progress.records {
-        let frame = match ControlFrame::decode_for(&record, state.process_id, state.worker_id) {
-            Ok(frame) => frame,
-            Err(_error) => {
+    for record in records {
+        let frame = ControlFrame::decode_for(&record, state.process_id, state.worker_id).map_err(
+            |_error| {
                 error!(worker = ?state.worker_id, "brawler routed worker rejected malformed control frame");
-                failure = Some(FAILURE_DETAIL_MALFORMED);
-                break;
-            }
-        };
+                FAILURE_DETAIL_MALFORMED
+            },
+        )?;
         match state.sequences.observe(frame.clone()) {
             Ok(SequenceDisposition::Duplicate) => continue,
             Ok(SequenceDisposition::Accepted) => {}
             Err(_error) => {
                 error!(worker = ?state.worker_id, "brawler routed worker rejected control sequence");
-                failure = Some(FAILURE_DETAIL_MALFORMED);
-                break;
+                return Err(FAILURE_DETAIL_MALFORMED);
             }
         }
         match &frame.body {
@@ -717,32 +714,29 @@ fn worker_control_receive(
                     && !inbox.push(frame.clone())
                 {
                     error!(worker = ?state.worker_id, "brawler routed worker lobby control inbox overflow");
-                    failure = Some(FAILURE_DETAIL_MALFORMED);
-                    break;
+                    return Err(FAILURE_DETAIL_MALFORMED);
                 }
             }
             ControlBody::ActivationDissolved(_) | ControlBody::Activated(_) => {
                 if let Some(inbox) = lobby_inbox.as_mut()
                     && !inbox.push(frame.clone())
                 {
-                    failure = Some(FAILURE_DETAIL_MALFORMED);
-                    break;
+                    return Err(FAILURE_DETAIL_MALFORMED);
                 }
             }
             _ => {}
         }
     }
-    if let Some(detail_code) = failure {
-        worker_control_failure(
-            &mut worker,
-            &mut state,
-            &mut app_exit,
-            &mut commands,
-            worker_entity,
-            detail_code,
-        );
-        return;
-    }
+    Ok(stop)
+}
+
+fn admit_control_stop(
+    stop: Option<StopBody>,
+    worker_entity: Entity,
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+    commands: &mut Commands,
+) {
     if let Some(stop_body) = stop
         && !state.shutdown_requested
     {
@@ -754,6 +748,186 @@ fn worker_control_receive(
             reason: lightyear::prelude::UnlinkReason::UserRequested(None),
         });
     }
+}
+
+#[derive(Default)]
+struct OutboxDrain {
+    blocked: bool,
+    failed: bool,
+}
+
+fn drain_match_control_outbox(
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+    outbox: &mut MatchControlOutbox,
+    drain: &mut OutboxDrain,
+) {
+    let candidates = [
+        outbox.start_failed.map(ControlBody::StartFailed),
+        outbox.cancel.map(ControlBody::CancelActivation),
+        outbox.activated.map(ControlBody::Activated),
+    ];
+    for (index, body) in candidates.into_iter().enumerate() {
+        let Some(body) = body else { continue };
+        if drain.blocked {
+            break;
+        }
+        match enqueue_control_body(worker, state, body) {
+            Ok(()) => match index {
+                0 => outbox.start_failed = None,
+                1 => outbox.cancel = None,
+                _ => outbox.activated = None,
+            },
+            Err(IpcIoError::WouldBlock) => drain.blocked = true,
+            Err(_) => drain.failed = true,
+        }
+    }
+}
+
+fn lobby_backpressure(error: &IpcIoError) -> bool {
+    matches!(
+        error,
+        IpcIoError::WouldBlock | IpcIoError::Malformed(CodecError::Oversize)
+    )
+}
+
+fn drain_lobby_control_outbox(
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+    outbox: &mut LobbyControlOutbox,
+    drain: &mut OutboxDrain,
+) {
+    while !drain.blocked {
+        let Some(body) = outbox.activation_cancels.front().copied() else {
+            break;
+        };
+        match enqueue_control_body(worker, state, ControlBody::CancelActivation(body)) {
+            Ok(()) => {
+                outbox.activation_cancels.pop_front();
+            }
+            Err(IpcIoError::WouldBlock) => drain.blocked = true,
+            Err(_) => drain.failed = true,
+        }
+    }
+    while let Some(fact) = outbox.netcode_authenticated_front().copied() {
+        match enqueue_control_body(worker, state, ControlBody::LobbyNetcodeAuthenticated(fact)) {
+            Ok(()) => outbox.pop_netcode_authenticated(),
+            Err(error) if lobby_backpressure(&error) => {
+                drain.blocked = true;
+                break;
+            }
+            Err(_) => {
+                drain.failed = true;
+                break;
+            }
+        }
+    }
+    while !drain.blocked {
+        let Some(fact) = outbox.authenticated_front().copied() else {
+            break;
+        };
+        match enqueue_control_body(worker, state, ControlBody::LobbyAuthenticated(fact)) {
+            Ok(()) => outbox.pop_authenticated(),
+            Err(error) if lobby_backpressure(&error) => {
+                drain.blocked = true;
+                break;
+            }
+            Err(_) => {
+                drain.failed = true;
+                break;
+            }
+        }
+    }
+    if !drain.blocked {
+        while let Some(body) = outbox.front().cloned() {
+            match enqueue_control_body(worker, state, ControlBody::AllocateRequest(body)) {
+                Ok(()) => outbox.pop_front(),
+                Err(error) if lobby_backpressure(&error) => break,
+                Err(_) => {
+                    drain.failed = true;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn emit_control_heartbeat(
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+) -> Result<(), IpcIoError> {
+    let now = Instant::now();
+    if now < state.next_heartbeat || state.shutdown_requested {
+        return Ok(());
+    }
+    enqueue_control_body(
+        worker,
+        state,
+        ControlBody::Heartbeat(brawler_routing::HeartbeatBody {
+            generation: state.generation,
+            uptime_ms: 0,
+            active_peers: u16::try_from(worker.peer_count()).unwrap_or(u16::MAX),
+            packet_frames: 0,
+            packet_bytes: 0,
+            control_frames: 0,
+            control_bytes: 0,
+            fixed_tick_lag_us: 0,
+            health_flags: 0,
+        }),
+    )?;
+    state.next_heartbeat = now + state.heartbeat_interval;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn worker_control_receive(
+    mut commands: Commands,
+    mut app_exit: MessageWriter<AppExit>,
+    mut state: ResMut<WorkerControlState>,
+    mut lobby_inbox: Option<ResMut<LobbyControlInbox>>,
+    mut lobby_outbox: Option<ResMut<LobbyControlOutbox>>,
+    mut match_outbox: Option<ResMut<MatchControlOutbox>>,
+    mut workers: Query<(Entity, &mut RoutedWorker), With<Linked>>,
+) {
+    let Ok((worker_entity, mut worker)) = workers.single_mut() else {
+        return;
+    };
+    let progress = match receive_control_records(&mut worker) {
+        Ok(progress) => progress,
+        Err(_error) => {
+            error!(worker = ?state.worker_id, "brawler routed worker control read failed");
+            worker_control_failure(
+                &mut worker,
+                &mut state,
+                &mut app_exit,
+                &mut commands,
+                worker_entity,
+                FAILURE_DETAIL_MALFORMED,
+            );
+            return;
+        }
+    };
+    let stop = match validate_and_dispatch_control_records(
+        progress.records,
+        worker_entity,
+        &mut state,
+        &mut lobby_inbox,
+        &mut commands,
+    ) {
+        Ok(stop) => stop,
+        Err(detail_code) => {
+            worker_control_failure(
+                &mut worker,
+                &mut state,
+                &mut app_exit,
+                &mut commands,
+                worker_entity,
+                detail_code,
+            );
+            return;
+        }
+    };
+    admit_control_stop(stop, worker_entity, &mut worker, &mut state, &mut commands);
     // Evaluate EOF only after the current batch has been decoded and Stop has been admitted. A
     // same-read Stop+EOF is therefore equivalent to a Stop followed by a later EOF: the
     // supervisor has closed its write half, while the worker still owns the response direction.
@@ -764,209 +938,25 @@ fn worker_control_receive(
             stop_seen = stop.is_some(),
             "brawler routed worker received unsolicited control EOF"
         );
-        failure = Some(FAILURE_DETAIL_EOF);
-    }
-    if let Some(detail_code) = failure {
         worker_control_failure(
             &mut worker,
             &mut state,
             &mut app_exit,
             &mut commands,
             worker_entity,
-            detail_code,
+            FAILURE_DETAIL_EOF,
         );
         return;
     }
     if !state.shutdown_requested {
-        let mut outbox_failed = false;
-        let mut outbox_blocked = false;
-        if let Some(outbox) = match_outbox.as_mut()
-            && let Some(body) = outbox.start_failed
-        {
-            let encoded = ControlFrame::from_raw_sequence(
-                state.next_sequence,
-                state.process_id,
-                state.worker_id,
-                ControlBody::StartFailed(body),
-            )
-            .and_then(|frame| frame.encode());
-            match encoded {
-                Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
-                    Ok(()) => {
-                        outbox.start_failed = None;
-                        state.next_sequence = state.next_sequence.saturating_add(1);
-                    }
-                    Err(IpcIoError::WouldBlock) => outbox_blocked = true,
-                    Err(_) => outbox_failed = true,
-                },
-                Err(_) => outbox_failed = true,
-            }
-        }
-        if let Some(outbox) = match_outbox.as_mut()
-            && !outbox_blocked
-            && let Some(body) = outbox.cancel
-        {
-            let encoded = ControlFrame::from_raw_sequence(
-                state.next_sequence,
-                state.process_id,
-                state.worker_id,
-                ControlBody::CancelActivation(body),
-            )
-            .and_then(|frame| frame.encode());
-            match encoded {
-                Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
-                    Ok(()) => {
-                        outbox.cancel = None;
-                        state.next_sequence = state.next_sequence.saturating_add(1);
-                    }
-                    Err(IpcIoError::WouldBlock) => outbox_blocked = true,
-                    Err(_) => outbox_failed = true,
-                },
-                Err(_) => outbox_failed = true,
-            }
-        }
-        if let Some(outbox) = match_outbox.as_mut()
-            && !outbox_blocked
-            && let Some(body) = outbox.activated
-        {
-            let encoded = ControlFrame::from_raw_sequence(
-                state.next_sequence,
-                state.process_id,
-                state.worker_id,
-                ControlBody::Activated(body),
-            )
-            .and_then(|frame| frame.encode());
-            match encoded {
-                Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
-                    Ok(()) => {
-                        outbox.activated = None;
-                        state.next_sequence = state.next_sequence.saturating_add(1);
-                    }
-                    Err(IpcIoError::WouldBlock) => outbox_blocked = true,
-                    Err(_) => outbox_failed = true,
-                },
-                Err(_) => outbox_failed = true,
-            }
+        let mut drain = OutboxDrain::default();
+        if let Some(outbox) = match_outbox.as_mut() {
+            drain_match_control_outbox(&mut worker, &mut state, outbox, &mut drain);
         }
         if let Some(outbox) = lobby_outbox.as_mut() {
-            while !outbox_blocked {
-                let Some(body) = outbox.activation_cancels.front().copied() else {
-                    break;
-                };
-                let encoded = ControlFrame::from_raw_sequence(
-                    state.next_sequence,
-                    state.process_id,
-                    state.worker_id,
-                    ControlBody::CancelActivation(body),
-                )
-                .and_then(|frame| frame.encode());
-                match encoded {
-                    Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
-                        Ok(()) => {
-                            outbox.activation_cancels.pop_front();
-                            state.next_sequence = state.next_sequence.saturating_add(1);
-                        }
-                        Err(IpcIoError::WouldBlock) => outbox_blocked = true,
-                        Err(_) => outbox_failed = true,
-                    },
-                    Err(_) => outbox_failed = true,
-                }
-            }
-            while let Some(fact) = outbox.netcode_authenticated_front().copied() {
-                let Ok(frame) = ControlFrame::from_raw_sequence(
-                    state.next_sequence,
-                    state.process_id,
-                    state.worker_id,
-                    ControlBody::LobbyNetcodeAuthenticated(fact),
-                ) else {
-                    outbox_failed = true;
-                    break;
-                };
-                let Ok(bytes) = frame.encode() else {
-                    outbox_failed = true;
-                    break;
-                };
-                match worker.channels_mut().enqueue_control(&bytes) {
-                    Ok(()) => {
-                        outbox.pop_netcode_authenticated();
-                        state.next_sequence = state.next_sequence.saturating_add(1);
-                    }
-                    Err(IpcIoError::WouldBlock | IpcIoError::Malformed(CodecError::Oversize)) => {
-                        outbox_blocked = true;
-                        break;
-                    }
-                    Err(_) => {
-                        outbox_failed = true;
-                        break;
-                    }
-                }
-            }
-            while !outbox_blocked {
-                let Some(fact) = outbox.authenticated_front().copied() else {
-                    break;
-                };
-                let Ok(frame) = ControlFrame::from_raw_sequence(
-                    state.next_sequence,
-                    state.process_id,
-                    state.worker_id,
-                    ControlBody::LobbyAuthenticated(fact),
-                ) else {
-                    outbox_failed = true;
-                    break;
-                };
-                let Ok(bytes) = frame.encode() else {
-                    outbox_failed = true;
-                    break;
-                };
-                match worker.channels_mut().enqueue_control(&bytes) {
-                    Ok(()) => {
-                        outbox.pop_authenticated();
-                        state.next_sequence = state.next_sequence.saturating_add(1);
-                    }
-                    Err(IpcIoError::WouldBlock | IpcIoError::Malformed(CodecError::Oversize)) => {
-                        outbox_blocked = true;
-                        break;
-                    }
-                    Err(_) => {
-                        outbox_failed = true;
-                        break;
-                    }
-                }
-            }
-            if !outbox_blocked {
-                while let Some(body) = outbox.front().cloned() {
-                    let Ok(frame) = ControlFrame::from_raw_sequence(
-                        state.next_sequence,
-                        state.process_id,
-                        state.worker_id,
-                        ControlBody::AllocateRequest(body),
-                    ) else {
-                        outbox_failed = true;
-                        break;
-                    };
-                    let Ok(bytes) = frame.encode() else {
-                        outbox_failed = true;
-                        break;
-                    };
-                    match worker.channels_mut().enqueue_control(&bytes) {
-                        Ok(()) => {
-                            outbox.pop_front();
-                            state.next_sequence = state.next_sequence.saturating_add(1);
-                        }
-                        Err(
-                            IpcIoError::WouldBlock | IpcIoError::Malformed(CodecError::Oversize),
-                        ) => {
-                            break;
-                        }
-                        Err(_) => {
-                            outbox_failed = true;
-                            break;
-                        }
-                    }
-                }
-            }
+            drain_lobby_control_outbox(&mut worker, &mut state, outbox, &mut drain);
         }
-        if outbox_failed {
+        if drain.failed {
             error!(worker = ?state.worker_id, "brawler routed worker lobby control outbox failed");
             worker_control_failure(
                 &mut worker,
@@ -979,58 +969,16 @@ fn worker_control_receive(
             return;
         }
     }
-    let now = Instant::now();
-    if now >= state.next_heartbeat && !state.shutdown_requested {
-        let heartbeat = ControlFrame::from_raw_sequence(
-            state.next_sequence,
-            state.process_id,
-            state.worker_id,
-            ControlBody::Heartbeat(brawler_routing::HeartbeatBody {
-                generation: state.generation,
-                uptime_ms: 0,
-                active_peers: u16::try_from(worker.peer_count()).unwrap_or(u16::MAX),
-                packet_frames: 0,
-                packet_bytes: 0,
-                control_frames: 0,
-                control_bytes: 0,
-                fixed_tick_lag_us: 0,
-                health_flags: 0,
-            }),
+    if emit_control_heartbeat(&mut worker, &mut state).is_err() {
+        error!(worker = ?state.worker_id, "brawler routed worker heartbeat enqueue failed");
+        worker_control_failure(
+            &mut worker,
+            &mut state,
+            &mut app_exit,
+            &mut commands,
+            worker_entity,
+            FAILURE_DETAIL_MALFORMED,
         );
-        let heartbeat = match heartbeat {
-            Ok(frame) => frame.encode().map_err(WorkerBootstrapError::from),
-            Err(error) => Err(WorkerBootstrapError::from(error)),
-        };
-        match heartbeat {
-            Ok(bytes) => match worker.channels_mut().enqueue_control(&bytes) {
-                Ok(()) => {
-                    state.next_sequence = state.next_sequence.saturating_add(1);
-                    state.next_heartbeat = now + state.heartbeat_interval;
-                }
-                Err(_error) => {
-                    error!(worker = ?state.worker_id, "brawler routed worker heartbeat enqueue failed");
-                    worker_control_failure(
-                        &mut worker,
-                        &mut state,
-                        &mut app_exit,
-                        &mut commands,
-                        worker_entity,
-                        FAILURE_DETAIL_MALFORMED,
-                    );
-                }
-            },
-            Err(_error) => {
-                error!(worker = ?state.worker_id, "brawler routed worker heartbeat encode failed");
-                worker_control_failure(
-                    &mut worker,
-                    &mut state,
-                    &mut app_exit,
-                    &mut commands,
-                    worker_entity,
-                    FAILURE_DETAIL_MALFORMED,
-                );
-            }
-        }
     }
 }
 

@@ -111,6 +111,244 @@ pub(super) struct ProjectileEnvironmentState<'w, 's> {
 }
 
 #[cfg(feature = "server")]
+type FighterSweepSnapshot = (Vec2, TeamId, NetworkEntityId, bool, bool);
+
+#[cfg(feature = "server")]
+type ObjectSweepSnapshot = (
+    Vec2,
+    crate::map::DamageableTargetIdentity,
+    CurrentHealth,
+    crate::map::DamageableLifeState,
+);
+
+#[cfg(feature = "server")]
+struct ProjectileSweepIndex {
+    fighters: HashMap<Entity, FighterSweepSnapshot>,
+    objects: HashMap<Entity, ObjectSweepSnapshot>,
+    blocking_geometry: HashSet<Entity>,
+}
+
+#[cfg(feature = "server")]
+impl ProjectileSweepIndex {
+    fn owner_is_connected(&self, owner: NetworkEntityId) -> bool {
+        self.fighters
+            .values()
+            .any(|(_, _, network_id, _, disconnected)| *network_id == owner && !disconnected)
+    }
+
+    fn accepts_candidate(&self, candidate: Entity, runtime: &ComposedProjectileRuntime) -> bool {
+        self.fighters.get(&candidate).map_or_else(
+            || {
+                self.objects.get(&candidate).map_or_else(
+                    || self.blocking_geometry.contains(&candidate),
+                    |(_, _, health, life)| crate::map::object_is_live(*health, *life),
+                )
+            },
+            |(_, team, network_id, defeated, disconnected)| {
+                let has_contact_delivery = runtime.recipe.payload_bundles.iter().any(|bundle| {
+                    matches!(bundle.target, TargetSelection::Direct)
+                        || (matches!(
+                            runtime.recipe.delivery,
+                            DeliveryMethod::StickyStraight { .. }
+                        ) && matches!(bundle.target, TargetSelection::Area { .. }))
+                });
+                let has_affecting_payload = runtime.recipe.payload_bundles.iter().any(|bundle| {
+                    (matches!(bundle.target, TargetSelection::Direct)
+                        || matches!(bundle.target, TargetSelection::Area { .. }))
+                        && payload_can_affect_target(bundle, runtime.source, *team, *network_id)
+                });
+                has_contact_delivery && has_affecting_payload && !defeated && !disconnected
+            },
+        )
+    }
+}
+
+#[cfg(feature = "server")]
+enum LobTrajectoryPlan {
+    InFlight(Vec2),
+    Landed(Vec2),
+}
+
+#[cfg(feature = "server")]
+fn plan_lob_trajectory(tick: u64, lob: &LobbedFlight) -> LobTrajectoryPlan {
+    let launch = lob.launch.as_vec2();
+    let landing = lob.landing.as_vec2();
+    if tick >= lob.lands_at_tick {
+        return LobTrajectoryPlan::Landed(landing);
+    }
+    let progress = (tick.saturating_sub(lob.launched_at_tick) as f32)
+        / (lob
+            .lands_at_tick
+            .saturating_sub(lob.launched_at_tick)
+            .max(1) as f32);
+    LobTrajectoryPlan::InFlight(launch.lerp(landing, progress.clamp(0.0, 1.0)))
+}
+
+#[cfg(feature = "server")]
+struct StraightTrajectoryPlan {
+    body: ProjectileBody,
+    step: f32,
+    direction: Dir2,
+}
+
+#[cfg(feature = "server")]
+fn plan_straight_trajectory(
+    runtime: &ComposedProjectileRuntime,
+    body: Option<&ProjectileBody>,
+) -> Option<StraightTrajectoryPlan> {
+    let body = body.copied().filter(|body| body.shape.is_valid())?;
+    let step = (runtime.velocity.length() / 60.0)
+        .min((runtime.maximum_range - runtime.travelled).max(0.0));
+    let direction = Dir2::new(runtime.velocity.normalize_or_zero()).ok()?;
+    Some(StraightTrajectoryPlan {
+        body,
+        step,
+        direction,
+    })
+}
+
+#[cfg(feature = "server")]
+struct ProjectileTerminationContext<'a, 'w, 's> {
+    commands: &'a mut Commands<'w, 's>,
+    ids: &'a mut NextCombatIds,
+    trackers: &'a mut ActiveAttackTrackers,
+    telemetry: &'a mut WeaponTelemetry,
+}
+
+#[cfg(feature = "server")]
+impl ProjectileTerminationContext<'_, '_, '_> {
+    fn commit(
+        &mut self,
+        tick: u64,
+        entity: Entity,
+        position: Vec2,
+        runtime: &ComposedProjectileRuntime,
+        outcome: WeaponTelemetryOutcome,
+    ) {
+        record_delivery_termination(self.ids, self.telemetry, tick, runtime, position, outcome);
+        self.commands.entity(entity).try_despawn();
+        finish_attack_delivery(self.trackers, runtime.source.attack_id);
+    }
+}
+
+#[cfg(feature = "server")]
+fn direct_world_damage_requests(
+    runtime: &ComposedProjectileRuntime,
+    target: crate::map::DamageableTargetIdentity,
+    hit_point: Vec2,
+) -> Vec<crate::map::PendingWorldTargetDamage> {
+    let mut requests = Vec::new();
+    for (bundle_index, bundle) in runtime
+        .recipe
+        .payload_bundles
+        .iter()
+        .enumerate()
+        .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Direct))
+    {
+        for (effect_index, effect) in bundle.effects.iter().enumerate() {
+            let PayloadEffectDefinition::Damage {
+                amount, falloff, ..
+            } = *effect
+            else {
+                continue;
+            };
+            requests.push(crate::map::PendingWorldTargetDamage {
+                target,
+                source: runtime.source,
+                attack_id: runtime.source.attack_id,
+                requested_damage: effects::requested_damage(
+                    amount,
+                    falloff,
+                    runtime.travelled,
+                    1.0,
+                    None,
+                    runtime.source.origin.as_vec2().distance(hit_point),
+                ),
+                delivery_index: runtime.delivery_index,
+                bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+                effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
+            });
+        }
+    }
+    requests
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::too_many_arguments)]
+fn queue_direct_fighter_payloads(
+    pending: &mut MessageWriter<PendingPayload>,
+    runtime: &ComposedProjectileRuntime,
+    target_entity: Entity,
+    target: FighterSweepSnapshot,
+    hit_point: Vec2,
+    hit_distance: f32,
+    step: f32,
+) {
+    let (target_position, target_team, target_network_id, defeated, _) = target;
+    if defeated {
+        return;
+    }
+    for (bundle_index, bundle) in
+        runtime
+            .recipe
+            .payload_bundles
+            .iter()
+            .enumerate()
+            .filter(|(_, bundle)| {
+                matches!(bundle.target, TargetSelection::Direct)
+                    && payload_can_affect_target(
+                        bundle,
+                        runtime.source,
+                        target_team,
+                        target_network_id,
+                    )
+            })
+    {
+        pending.write(PendingPayload {
+            source: runtime.source,
+            delivery_index: runtime.delivery_index,
+            bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
+            target: target_entity,
+            target_network_id,
+            position: hit_point,
+            engagement_distance: runtime.source.origin.as_vec2().distance(target_position),
+            delivery_travel: runtime.travelled,
+            contact_fraction: (hit_distance / step.max(f32::EPSILON)).clamp(0.0, 1.0),
+            bundle: bundle.clone(),
+        });
+    }
+}
+
+#[cfg(feature = "server")]
+fn write_straight_impact(
+    deliveries: &mut MessageWriter<PendingDelivery>,
+    runtime: &ComposedProjectileRuntime,
+    entity: Entity,
+    target: Option<FighterSweepSnapshot>,
+    tick: u64,
+    point: Vec2,
+    normal: Vec2,
+) {
+    deliveries.write(PendingDelivery {
+        entity: Some(entity),
+        source: runtime.source,
+        delivery_index: runtime.delivery_index,
+        tick,
+        engagement_distance: target.map_or(0.0, |(position, ..)| {
+            runtime.source.origin.as_vec2().distance(position)
+        }),
+        delivery_travel: runtime.travelled,
+        kind: PendingDeliveryKind::StraightImpact {
+            target: target.map(|(_, _, network_id, _, _)| network_id),
+            position: WorldPoint::from(point),
+            normal: WorldPoint::from(normal),
+            distance_band: distance_band(runtime.travelled),
+        },
+        world_effects: runtime.recipe.world_effects.clone(),
+    });
+}
+
+#[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 #[allow(
@@ -165,7 +403,7 @@ pub(super) fn sweep_composed_projectiles(
     spatial_query: avian2d::prelude::SpatialQuery,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
-    let fighter_lookup: HashMap<_, _> = fighters
+    let fighter_lookup = fighters
         .iter()
         .map(
             |(entity, position, team, network_id, defeated, controlled)| {
@@ -183,7 +421,7 @@ pub(super) fn sweep_composed_projectiles(
             },
         )
         .collect();
-    let object_lookup: HashMap<_, _> = objects
+    let object_lookup = objects
         .iter()
         .map(|(entity, position, identity, health, life)| {
             (entity, (position.0, *identity, *health, *life))
@@ -192,7 +430,11 @@ pub(super) fn sweep_composed_projectiles(
     // Static authoritative geometry stops projectiles: permanent map colliders (the
     // ArenaWall entities) and destructible chunk colliders alike, so cover works and
     // carved lanes are the only way through.
-    let blocking_geometry: HashSet<Entity> = environment.walls.iter().collect();
+    let index = ProjectileSweepIndex {
+        fighters: fighter_lookup,
+        objects: object_lookup,
+        blocking_geometry: environment.walls.iter().collect(),
+    };
     let mut active_sticky_by_owner: HashMap<u64, usize> = HashMap::new();
     let mut active_sticky_total = 0_usize;
     let mut newly_attached_primaries: HashMap<u64, Entity> = HashMap::new();
@@ -211,50 +453,30 @@ pub(super) fn sweep_composed_projectiles(
         )
     });
     for (entity, position, mut runtime, body, lob) in ordered {
-        let Some((_, _, _, _, owner_disconnected)) = fighter_lookup
-            .values()
-            .find(|(_, _, network_id, _, _)| *network_id == runtime.source.owner_network_entity_id)
-        else {
-            record_delivery_termination(
-                &mut ids,
-                &mut telemetry,
+        if !index.owner_is_connected(runtime.source.owner_network_entity_id) {
+            ProjectileTerminationContext {
+                commands: &mut commands,
+                ids: &mut ids,
+                trackers: &mut trackers,
+                telemetry: &mut telemetry,
+            }
+            .commit(
                 tick.0,
-                &runtime,
+                entity,
                 position.0,
+                &runtime,
                 WeaponTelemetryOutcome::DeliveryCancelled,
             );
-            commands.entity(entity).try_despawn();
-            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
-            continue;
-        };
-        if *owner_disconnected {
-            record_delivery_termination(
-                &mut ids,
-                &mut telemetry,
-                tick.0,
-                &runtime,
-                position.0,
-                WeaponTelemetryOutcome::DeliveryCancelled,
-            );
-            commands.entity(entity).try_despawn();
-            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         }
         if let Some(lob) = lob {
-            if tick.0 < lob.lands_at_tick {
-                let progress = (tick.0.saturating_sub(lob.launched_at_tick) as f32)
-                    / (lob
-                        .lands_at_tick
-                        .saturating_sub(lob.launched_at_tick)
-                        .max(1) as f32);
-                let launch = lob.launch.as_vec2();
-                let landing = lob.landing.as_vec2();
-                commands
-                    .entity(entity)
-                    .insert(Position(launch.lerp(landing, progress.clamp(0.0, 1.0))));
-                continue;
-            }
-            let landing = lob.landing.as_vec2();
+            let landing = match plan_lob_trajectory(tick.0, lob) {
+                LobTrajectoryPlan::InFlight(position) => {
+                    commands.entity(entity).insert(Position(position));
+                    continue;
+                }
+                LobTrajectoryPlan::Landed(landing) => landing,
+            };
             if let DeliveryMethod::Splash {
                 shape,
                 duration_ticks,
@@ -392,44 +614,35 @@ pub(super) fn sweep_composed_projectiles(
                     continue;
                 }
             }
-            record_delivery_termination(
-                &mut ids,
-                &mut telemetry,
+            ProjectileTerminationContext {
+                commands: &mut commands,
+                ids: &mut ids,
+                trackers: &mut trackers,
+                telemetry: &mut telemetry,
+            }
+            .commit(
                 tick.0,
-                &runtime,
+                entity,
                 position.0,
+                &runtime,
                 WeaponTelemetryOutcome::DeliveryExpired,
             );
-            commands.entity(entity).try_despawn();
-            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         }
-        let Some(body) = body.copied().filter(|body| body.shape.is_valid()) else {
-            record_delivery_termination(
-                &mut ids,
-                &mut telemetry,
+        let Some(trajectory) = plan_straight_trajectory(&runtime, body) else {
+            ProjectileTerminationContext {
+                commands: &mut commands,
+                ids: &mut ids,
+                trackers: &mut trackers,
+                telemetry: &mut telemetry,
+            }
+            .commit(
                 tick.0,
-                &runtime,
+                entity,
                 position.0,
+                &runtime,
                 WeaponTelemetryOutcome::DeliveryCancelled,
             );
-            commands.entity(entity).try_despawn();
-            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
-            continue;
-        };
-        let step = (runtime.velocity.length() / 60.0)
-            .min((runtime.maximum_range - runtime.travelled).max(0.0));
-        let Some(direction) = Dir2::new(runtime.velocity.normalize_or_zero()).ok() else {
-            record_delivery_termination(
-                &mut ids,
-                &mut telemetry,
-                tick.0,
-                &runtime,
-                position.0,
-                WeaponTelemetryOutcome::DeliveryCancelled,
-            );
-            commands.entity(entity).try_despawn();
-            finish_attack_delivery(&mut trackers, runtime.source.attack_id);
             continue;
         };
         let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
@@ -440,55 +653,23 @@ pub(super) fn sweep_composed_projectiles(
         )
         .with_excluded_entities([entity, runtime.owner_entity, runtime.source_entity]);
         let hit = spatial_query.cast_shape_predicate(
-            &body.collider(),
+            &trajectory.body.collider(),
             position.0,
             0.0,
-            direction,
-            &avian2d::prelude::ShapeCastConfig::from_max_distance(step),
+            trajectory.direction,
+            &avian2d::prelude::ShapeCastConfig::from_max_distance(trajectory.step),
             &filter,
-            &|candidate| {
-                fighter_lookup.get(&candidate).map_or_else(
-                    || {
-                        object_lookup.get(&candidate).map_or_else(
-                            || blocking_geometry.contains(&candidate),
-                            |(_, _, health, life)| crate::map::object_is_live(*health, *life),
-                        )
-                    },
-                    |(_, team, _, defeated, owner_disconnected)| {
-                        runtime.recipe.payload_bundles.iter().any(|bundle| {
-                            matches!(bundle.target, TargetSelection::Direct)
-                                || (matches!(
-                                    runtime.recipe.delivery,
-                                    DeliveryMethod::StickyStraight { .. }
-                                ) && matches!(bundle.target, TargetSelection::Area { .. }))
-                        }) && runtime.recipe.payload_bundles.iter().any(|bundle| {
-                            (matches!(bundle.target, TargetSelection::Direct)
-                                || matches!(bundle.target, TargetSelection::Area { .. }))
-                                && fighter_lookup.get(&candidate).is_some_and(
-                                    |(_, _, network_id, _, _)| {
-                                        payload_can_affect_target(
-                                            bundle,
-                                            runtime.source,
-                                            *team,
-                                            *network_id,
-                                        )
-                                    },
-                                )
-                        }) && !defeated
-                            && !owner_disconnected
-                    },
-                )
-            },
+            &|candidate| index.accepts_candidate(candidate, &runtime),
         );
         let Some(hit) = hit else {
-            runtime.travelled += step;
-            commands
-                .entity(entity)
-                .insert(Position(position.0 + direction.as_vec2() * step));
+            runtime.travelled += trajectory.step;
+            commands.entity(entity).insert(Position(
+                position.0 + trajectory.direction.as_vec2() * trajectory.step,
+            ));
             continue;
         };
-        runtime.travelled += hit.distance.clamp(0.0, step);
-        let target = fighter_lookup.get(&hit.entity).copied();
+        runtime.travelled += hit.distance.clamp(0.0, trajectory.step);
+        let target = index.fighters.get(&hit.entity).copied();
         if let Some((_, max_active, explosion_radius)) =
             sticky::sticky_delivery_parameters(&runtime.recipe)
         {
@@ -553,96 +734,33 @@ pub(super) fn sweep_composed_projectiles(
                 }
             }
         }
-        if let Some((target_position, target_team, target_network_id, defeated, _)) = target
-            && !defeated
-        {
-            for (bundle_index, bundle) in
-                runtime
-                    .recipe
-                    .payload_bundles
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, bundle)| {
-                        matches!(bundle.target, TargetSelection::Direct)
-                            && payload_can_affect_target(
-                                bundle,
-                                runtime.source,
-                                target_team,
-                                target_network_id,
-                            )
-                    })
-            {
-                pending.write(PendingPayload {
-                    source: runtime.source,
-                    delivery_index: runtime.delivery_index,
-                    bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
-                    target: hit.entity,
-                    target_network_id,
-                    position: hit.point2,
-                    engagement_distance: runtime.source.origin.as_vec2().distance(target_position),
-                    delivery_travel: runtime.travelled,
-                    contact_fraction: (hit.distance / step.max(f32::EPSILON)).clamp(0.0, 1.0),
-                    bundle: bundle.clone(),
-                });
-            }
+        if let Some(target) = target {
+            queue_direct_fighter_payloads(
+                &mut pending,
+                &runtime,
+                hit.entity,
+                target,
+                hit.point2,
+                hit.distance,
+                trajectory.step,
+            );
         }
-        if let Some((_, identity, health, life)) = object_lookup.get(&hit.entity).copied()
+        if let Some((_, identity, health, life)) = index.objects.get(&hit.entity).copied()
             && crate::map::object_is_live(health, life)
         {
-            for (bundle_index, bundle) in runtime
-                .recipe
-                .payload_bundles
-                .iter()
-                .enumerate()
-                .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Direct))
-            {
-                for (effect_index, effect) in bundle.effects.iter().enumerate() {
-                    let PayloadEffectDefinition::Damage {
-                        amount, falloff, ..
-                    } = *effect
-                    else {
-                        continue;
-                    };
-                    queue_damageable_target(
-                        &mut world_pending,
-                        &mut objective_pending,
-                        crate::map::PendingWorldTargetDamage {
-                            target: identity,
-                            source: runtime.source,
-                            attack_id: runtime.source.attack_id,
-                            requested_damage: effects::requested_damage(
-                                amount,
-                                falloff,
-                                runtime.travelled,
-                                1.0,
-                                None,
-                                runtime.source.origin.as_vec2().distance(hit.point2),
-                            ),
-                            delivery_index: runtime.delivery_index,
-                            bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
-                            effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
-                        },
-                    );
-                }
+            for request in direct_world_damage_requests(&runtime, identity, hit.point2) {
+                queue_damageable_target(&mut world_pending, &mut objective_pending, request);
             }
         }
-        deliveries.write(PendingDelivery {
-            entity: Some(entity),
-            source: runtime.source,
-            delivery_index: runtime.delivery_index,
-            tick: tick.0,
-            engagement_distance: target.map_or(0.0, |(position, ..)| {
-                runtime.source.origin.as_vec2().distance(position)
-            }),
-            delivery_travel: runtime.travelled,
-            kind: PendingDeliveryKind::StraightImpact {
-                target: target.map(|(_, _, network_id, _, _)| network_id),
-                position: WorldPoint::from(hit.point2),
-                normal: WorldPoint::from(hit.normal1),
-                distance_band: distance_band(runtime.travelled),
-            },
-            world_effects: runtime.recipe.world_effects.clone(),
-        });
+        write_straight_impact(
+            &mut deliveries,
+            &runtime,
+            entity,
+            target,
+            tick.0,
+            hit.point2,
+            hit.normal1,
+        );
     }
 }
 
@@ -915,6 +1033,27 @@ mod tests {
         assert_eq!(objectives.0[0].delivery_index, 2);
         assert_eq!(objectives.0[0].bundle_index, 3);
         assert_eq!(objectives.0[0].effect_index, 4);
+    }
+
+    #[test]
+    #[cfg(feature = "server")]
+    fn lob_trajectory_plan_interpolates_then_lands_at_the_exact_tick() {
+        let flight = LobbedFlight {
+            launch: WorldPoint::from(Vec2::ZERO),
+            landing: WorldPoint::from(Vec2::new(120.0, 60.0)),
+            launched_at_tick: 10,
+            lands_at_tick: 16,
+            visual_arc_height: 40.0,
+        };
+
+        assert!(matches!(
+            plan_lob_trajectory(13, &flight),
+            LobTrajectoryPlan::InFlight(position) if position == Vec2::new(60.0, 30.0)
+        ));
+        assert!(matches!(
+            plan_lob_trajectory(16, &flight),
+            LobTrajectoryPlan::Landed(position) if position == Vec2::new(120.0, 60.0)
+        ));
     }
 
     #[test]

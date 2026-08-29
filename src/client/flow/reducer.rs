@@ -44,6 +44,646 @@ pub(in crate::client::flow) struct PendingEditedBrawler(
 #[derive(Resource, Default)]
 pub(in crate::client::flow) struct MatchFailureNotice(pub(in crate::client::flow) bool);
 
+type LobbyMembershipQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static ClientLobbyMembership,
+        Option<&'static RuntimeLobbyTarget>,
+        &'static RoutedClientSession,
+    ),
+    With<Client>,
+>;
+
+fn resolve_profile_decision(
+    profile: &mut crate::client::ClientProfileModel,
+    dashboard_notice: &mut DashboardNotice,
+    pending_created_brawler: &mut PendingCreatedBrawler,
+    pending_edited_brawler: &mut PendingEditedBrawler,
+    creation_draft: &mut BrawlerCreationDraft,
+    brawler_edit: &mut BrawlerEditDraft,
+    commit: &mut FlowCommit,
+) {
+    let Some(decision) = profile.take_decision() else {
+        return;
+    };
+    let accepted = matches!(decision, crate::profiles::ProfileDecision::Accepted);
+    dashboard_notice.0 = Some(match decision {
+        crate::profiles::ProfileDecision::Accepted => "Profile saved.".to_string(),
+        crate::profiles::ProfileDecision::InvalidRequest => {
+            "That brawler change is not valid.".to_string()
+        }
+        crate::profiles::ProfileDecision::StaleRevision => {
+            "The profile changed; review it and try again.".to_string()
+        }
+        crate::profiles::ProfileDecision::MissingBrawler => {
+            "That brawler no longer exists.".to_string()
+        }
+        crate::profiles::ProfileDecision::CapacityReached => {
+            "Brawler limit reached (16).".to_string()
+        }
+        crate::profiles::ProfileDecision::QueueLocked => {
+            "Leave the queue before changing a brawler.".to_string()
+        }
+        crate::profiles::ProfileDecision::TemporarilyUnavailable => {
+            "Profile storage is temporarily unavailable; try again.".to_string()
+        }
+        crate::profiles::ProfileDecision::StorageFault => {
+            "The profile could not be saved safely; owned data was preserved.".to_string()
+        }
+        crate::profiles::ProfileDecision::MissingPart => {
+            "That weapon part is no longer in this inventory.".to_string()
+        }
+        crate::profiles::ProfileDecision::PartAlreadyEquipped => {
+            "That physical part is already equipped on a brawler.".to_string()
+        }
+        crate::profiles::ProfileDecision::IncompatibleWeapon => {
+            "Those parts do not form a valid weapon configuration.".to_string()
+        }
+        crate::profiles::ProfileDecision::IncompatibleBuild => {
+            "Choose only one elemental resistance passive for this brawler.".to_string()
+        }
+    });
+    if accepted
+        && let Some(ordinal) = pending_created_brawler.0.take()
+        && let Some(created) = profile.snapshot().and_then(|snapshot| {
+            snapshot
+                .brawlers
+                .iter()
+                .find(|brawler| brawler.creation_ordinal == ordinal)
+        })
+    {
+        dashboard_notice.0 = Some(format!("Created {}.", created.name));
+        commit.overlay = Some(OverlayCommit::BrawlerDetails(created.id));
+        commit.focus_index = Some(0);
+    } else if accepted && let Some(brawler_id) = pending_edited_brawler.0.take() {
+        commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
+        commit.focus_index = Some(1);
+    } else if !accepted {
+        if pending_created_brawler.0.take().is_some() {
+            creation_draft.inline_error.clone_from(&dashboard_notice.0);
+            commit.overlay = Some(OverlayCommit::BrawlerCreation);
+        }
+        if pending_edited_brawler.0.take().is_some() {
+            brawler_edit.inline_error.clone_from(&dashboard_notice.0);
+            commit.overlay = Some(OverlayCommit::BrawlerEditor);
+        }
+    }
+}
+
+fn resolve_explicit_action(
+    action: &FlowUiAction,
+    commit: &mut FlowCommit,
+    purpose: &mut SessionPurpose,
+    selection: &mut SelectedGameType,
+    game_draft: &mut GameTypeSelectionDraft,
+    dashboard_notice: &mut DashboardNotice,
+    result_state: &mut crate::client::ClientMatchResultState,
+) {
+    if matches!(
+        action,
+        FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer
+    ) {
+        commit.teardown = true;
+        commit.overlay = Some(OverlayCommit::Clear);
+        commit.next_flow = Some(ClientFlow::ServerSelect);
+        if *purpose == SessionPurpose::Practice {
+            *purpose = SessionPurpose::Multiplayer;
+        }
+        *selection = SelectedGameType::default();
+        *game_draft = GameTypeSelectionDraft::default();
+        dashboard_notice.0 = None;
+        result_state.context = None;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_session_observation(
+    observation: SessionObservation,
+    flow: ClientFlow,
+    membership: &LobbyMembershipQuery,
+    pending: &mut Option<ResMut<PendingConnection>>,
+    path: &ClientConnectionsPath,
+    model: &mut ServerSelectModel,
+    persistence: &mut ConnectionPersistence,
+    selection: &mut SelectedGameType,
+    game_draft: &mut GameTypeSelectionDraft,
+    dashboard_focus: &mut DashboardReturnFocus,
+    dashboard_notice: &mut DashboardNotice,
+    queue: &mut crate::client::ClientQueueModel,
+    result_state: &mut crate::client::ClientMatchResultState,
+    routed: &mut RoutedClientLifecycle,
+    match_failure: &mut MatchFailureNotice,
+    purpose: &mut SessionPurpose,
+    local_failures: ClientLocalLoadFailures,
+    commit: &mut FlowCommit,
+) {
+    match observation {
+        observation @ (SessionObservation::Accepted
+        | SessionObservation::ResolverCompleted { .. }
+        | SessionObservation::CandidateFailed
+        | SessionObservation::CandidateTimedOut
+        | SessionObservation::DnsTimedOut
+        | SessionObservation::UnexpectedLoss
+        | SessionObservation::TimedOut
+        | SessionObservation::Rejected(_)) => resolve_connection_observation(
+            observation,
+            membership,
+            pending,
+            path,
+            model,
+            persistence,
+            selection,
+            game_draft,
+            dashboard_focus,
+            dashboard_notice,
+            result_state,
+            local_failures,
+            commit,
+        ),
+        observation => resolve_matchmaking_observation(
+            observation,
+            flow,
+            membership,
+            selection,
+            dashboard_focus,
+            queue,
+            result_state,
+            routed,
+            match_failure,
+            purpose,
+            commit,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_connection_observation(
+    observation: SessionObservation,
+    membership: &LobbyMembershipQuery,
+    pending: &mut Option<ResMut<PendingConnection>>,
+    path: &ClientConnectionsPath,
+    model: &ServerSelectModel,
+    persistence: &mut ConnectionPersistence,
+    selection: &mut SelectedGameType,
+    game_draft: &mut GameTypeSelectionDraft,
+    dashboard_focus: &mut DashboardReturnFocus,
+    dashboard_notice: &mut DashboardNotice,
+    result_state: &mut crate::client::ClientMatchResultState,
+    local_failures: ClientLocalLoadFailures,
+    commit: &mut FlowCommit,
+) {
+    match observation {
+        SessionObservation::Accepted => {
+            if let Some((membership, target, _)) = membership.iter().next() {
+                persistence.state.preferred_display_name = Some(model.committed_name.clone());
+                if let Some(target) = target {
+                    let _ = persistence
+                        .state
+                        .record_recent(&membership.server_name, &target.logical_address);
+                }
+                if let Err(error) = save_connections(&path.0, &persistence.state) {
+                    persistence.dirty_error = Some(error.clone());
+                    commit.error = Some(FlowError {
+                        kind: FlowErrorKind::Persistence,
+                        message: format!("Could not save connection data: {error}"),
+                        return_flow: ClientFlow::Dashboard,
+                        actions: [
+                            Some(FlowErrorAction::RetrySave),
+                            Some(FlowErrorAction::ContinueWithoutSaving),
+                        ],
+                    });
+                }
+                if commit.error.is_none()
+                    && let Some(mut error) = local_load_error(local_failures)
+                {
+                    error.return_flow = ClientFlow::Dashboard;
+                    commit.error = Some(error);
+                }
+                *selection = SelectedGameType::default();
+                dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
+                commit.next_flow = Some(ClientFlow::Dashboard);
+            }
+        }
+        SessionObservation::ResolverCompleted { generation, result } => {
+            if let Some(pending) = pending.as_deref_mut()
+                && pending.generation == generation
+            {
+                match result {
+                    Ok(candidates) if !candidates.is_empty() => {
+                        pending.candidates = candidates;
+                        pending.dns_deadline = None;
+                        pending.current_candidate = 0;
+                        pending.stage = ConnectionStage::ContactingServer {
+                            current: 1,
+                            total: pending.candidates.len(),
+                        };
+                        commit.advance_candidate = true;
+                    }
+                    Ok(_) => fail_to_server_select(
+                        commit,
+                        "Address resolution returned no usable addresses".to_string(),
+                        true,
+                    ),
+                    Err(error) => fail_to_server_select(commit, error, true),
+                }
+            }
+        }
+        SessionObservation::CandidateFailed | SessionObservation::CandidateTimedOut => {
+            commit.teardown = true;
+            if pending
+                .as_ref()
+                .is_some_and(|pending| has_next_candidate(pending))
+            {
+                commit.advance_candidate = true;
+            } else {
+                let message = if matches!(observation, SessionObservation::CandidateFailed) {
+                    "Could not contact the server"
+                } else {
+                    "The lobby handshake timed out"
+                };
+                fail_to_server_select(commit, message.to_string(), true);
+            }
+        }
+        SessionObservation::DnsTimedOut => {
+            commit.teardown = true;
+            fail_to_server_select(commit, "Address resolution timed out".to_string(), true);
+        }
+        SessionObservation::UnexpectedLoss => {
+            commit.teardown = true;
+            *selection = SelectedGameType::default();
+            *game_draft = GameTypeSelectionDraft::default();
+            dashboard_notice.0 = None;
+            result_state.context = None;
+            fail_to_server_select(
+                commit,
+                "The lobby connection was lost unexpectedly".to_string(),
+                true,
+            );
+        }
+        SessionObservation::TimedOut => {
+            commit.teardown = true;
+            fail_to_server_select(commit, "The connection attempt timed out".to_string(), true);
+        }
+        SessionObservation::Rejected(reason) => {
+            commit.teardown = true;
+            commit.next_flow = Some(ClientFlow::ServerSelect);
+            commit.error = Some(rejection_flow_error(reason));
+        }
+        _ => unreachable!("session observation was routed to the wrong reducer"),
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn resolve_matchmaking_observation(
+    observation: SessionObservation,
+    flow: ClientFlow,
+    membership: &LobbyMembershipQuery,
+    selection: &mut SelectedGameType,
+    dashboard_focus: &mut DashboardReturnFocus,
+    queue: &crate::client::ClientQueueModel,
+    result_state: &mut crate::client::ClientMatchResultState,
+    routed: &mut RoutedClientLifecycle,
+    match_failure: &mut MatchFailureNotice,
+    purpose: &mut SessionPurpose,
+    commit: &mut FlowCommit,
+) {
+    match observation {
+        SessionObservation::QueueProtocolFailure => {
+            commit.teardown = true;
+            *selection = SelectedGameType::default();
+            fail_to_server_select_with_kind(
+                commit,
+                FlowErrorKind::Content,
+                "The lobby queue state was incompatible with this client".to_string(),
+                true,
+            );
+        }
+        SessionObservation::QueueTimedOut => {
+            let label = queue
+                .pending()
+                .map_or("queue command", |pending| match pending.command {
+                    crate::lobby::QueueCommand::Join(_) => "queue admission",
+                    crate::lobby::QueueCommand::Cancel(_) => "queue cancellation",
+                });
+            commit.error = Some(FlowError {
+                kind: FlowErrorKind::Queue,
+                message: format!("The {label} acknowledgement is taking longer than expected"),
+                return_flow: flow,
+                actions: [
+                    Some(FlowErrorAction::RetryQueue),
+                    Some(FlowErrorAction::Disconnect),
+                ],
+            });
+        }
+        SessionObservation::ReservationStarted => {
+            commit.next_flow = Some(ClientFlow::MatchLoading);
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        SessionObservation::MatchStartReturned | SessionObservation::FreshLobbyReturn => {
+            if let Some(context) = result_state.context.as_mut()
+                && let Some(game_type_id) = context.game_type_id.as_ref()
+                && let Some((membership, _, _)) = membership.iter().next()
+                && let Some(game) = membership
+                    .game_types
+                    .iter()
+                    .find(|game| &game.id == game_type_id)
+            {
+                context.game_name = Some(game.display_name.clone());
+                selection.catalog_revision = Some(membership.catalog_revision);
+                selection.game_type_id = Some(game.id.clone());
+                selection.configuration_revision = Some(game.configuration_revision);
+            }
+            let destination = if result_state.context.is_some() {
+                ClientFlow::Results
+            } else {
+                *purpose = SessionPurpose::Multiplayer;
+                dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
+                ClientFlow::Dashboard
+            };
+            commit.next_flow = Some(destination);
+            if core::mem::take(&mut match_failure.0) {
+                commit.error = Some(FlowError {
+                    kind: FlowErrorKind::Connection,
+                    message: "The match server stopped unexpectedly".to_string(),
+                    return_flow: ClientFlow::Dashboard,
+                    actions: [Some(FlowErrorAction::Back), None],
+                });
+            }
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        SessionObservation::MatchFailed => {
+            result_state.context = None;
+            match_failure.0 = true;
+            let _ = routed.request_return_to_lobby();
+        }
+        SessionObservation::PracticeRejected(reason) => {
+            if matches!(
+                reason,
+                crate::lobby::PracticeStartRejection::StaleCatalog
+                    | crate::lobby::PracticeStartRejection::StaleGameConfiguration
+                    | crate::lobby::PracticeStartRejection::UnknownGameType
+            ) {
+                commit.teardown = true;
+                fail_to_server_select_with_kind(
+                    commit,
+                    FlowErrorKind::Content,
+                    "The lobby content changed incompatibly; reconnect to obtain a fresh game list"
+                        .to_string(),
+                    true,
+                );
+            } else {
+                commit.error = Some(FlowError {
+                    kind: FlowErrorKind::Practice,
+                    message: practice_rejection_copy(reason).to_string(),
+                    return_flow: flow,
+                    actions: [Some(FlowErrorAction::Back), None],
+                });
+            }
+        }
+        SessionObservation::CountdownObserved => {
+            commit.next_flow = Some(ClientFlow::Match);
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        SessionObservation::QueueOutcome(outcome) => {
+            resolve_queue_outcome(
+                outcome,
+                flow,
+                selection,
+                dashboard_focus,
+                result_state,
+                purpose,
+                commit,
+            );
+        }
+        _ => unreachable!("session observation was routed to the wrong reducer"),
+    }
+}
+
+fn resolve_queue_outcome(
+    outcome: crate::lobby::QueueCommandOutcome,
+    flow: ClientFlow,
+    selection: &mut SelectedGameType,
+    dashboard_focus: &mut DashboardReturnFocus,
+    result_state: &mut crate::client::ClientMatchResultState,
+    purpose: &mut SessionPurpose,
+    commit: &mut FlowCommit,
+) {
+    match outcome.decision {
+        crate::lobby::QueueDecision::Joined(membership) => {
+            result_state.context = None;
+            result_state.last_accepted_game_type_id = Some(membership.game_type_id.clone());
+            selection.catalog_revision = Some(membership.catalog_revision);
+            selection.game_type_id = Some(membership.game_type_id.clone());
+            selection.configuration_revision = Some(membership.game_type_configuration_revision);
+            commit.next_flow = Some(ClientFlow::Queue);
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        crate::lobby::QueueDecision::Cancelled { .. } => {
+            *purpose = SessionPurpose::Multiplayer;
+            dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
+            commit.next_flow = Some(ClientFlow::Dashboard);
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        crate::lobby::QueueDecision::Rejected(reason) => {
+            resolve_queue_rejection(&reason, flow, commit);
+        }
+    }
+}
+
+fn resolve_queue_rejection(
+    reason: &crate::lobby::QueueRejection,
+    flow: ClientFlow,
+    commit: &mut FlowCommit,
+) {
+    match reason {
+        crate::lobby::QueueRejection::IncompatiblePassives => {
+            commit.error = Some(FlowError {
+                kind: FlowErrorKind::Queue,
+                message: "The selected passives are incompatible".to_string(),
+                return_flow: flow,
+                actions: [Some(FlowErrorAction::Back), None],
+            });
+        }
+        crate::lobby::QueueRejection::OverBudget { used, budget } => {
+            commit.error = Some(FlowError {
+                kind: FlowErrorKind::Queue,
+                message: format!("The selected build uses {used} of {budget} points"),
+                return_flow: flow,
+                actions: [Some(FlowErrorAction::Back), None],
+            });
+        }
+        crate::lobby::QueueRejection::StaleCatalog
+        | crate::lobby::QueueRejection::StaleGameConfiguration
+        | crate::lobby::QueueRejection::UnknownGameType
+        | crate::lobby::QueueRejection::ProtocolFailure => {
+            commit.teardown = true;
+            fail_to_server_select_with_kind(
+                commit,
+                FlowErrorKind::Content,
+                "The lobby content changed incompatibly; reconnect to obtain a fresh game list"
+                    .to_string(),
+                true,
+            );
+        }
+        crate::lobby::QueueRejection::RateLimited { retry_after_millis } => {
+            commit.error = Some(FlowError {
+                kind: FlowErrorKind::Queue,
+                message: format!(
+                    "Queue commands are temporarily limited; try again in {retry_after_millis} ms",
+                ),
+                return_flow: flow,
+                actions: [
+                    Some(FlowErrorAction::TryAgainQueue),
+                    Some(FlowErrorAction::Disconnect),
+                ],
+            });
+        }
+        crate::lobby::QueueRejection::MustCancelFirst => {
+            commit.error = Some(FlowError {
+                kind: FlowErrorKind::Queue,
+                message: "Cancel the current queue ticket before changing game or build"
+                    .to_string(),
+                return_flow: flow,
+                actions: [Some(FlowErrorAction::Back), None],
+            });
+        }
+        crate::lobby::QueueRejection::TicketMismatch
+        | crate::lobby::QueueRejection::StaleRequest
+        | crate::lobby::QueueRejection::TemporarilyUnavailable
+        | crate::lobby::QueueRejection::InternalBuildResolution
+        | crate::lobby::QueueRejection::ServerMatchCapacityOccupied => {
+            commit.error = Some(FlowError {
+                kind: FlowErrorKind::Queue,
+                message: "The queue request could not be completed".to_string(),
+                return_flow: flow,
+                actions: [Some(FlowErrorAction::Disconnect), None],
+            });
+        }
+    }
+}
+
+fn remove_favorite(
+    address: &str,
+    path: &ClientConnectionsPath,
+    persistence: &mut ConnectionPersistence,
+    commit: &mut FlowCommit,
+) {
+    let removed_index = persistence
+        .state
+        .favorites
+        .iter()
+        .position(|favorite| favorite.address == address);
+    if persistence.state.remove_favorite(address) {
+        if let Err(error) = save_connections(&path.0, &persistence.state) {
+            persistence.dirty_error = Some(error);
+        }
+        commit.refresh_server_select = Some(favorite_focus_after_removal(
+            removed_index,
+            persistence.state.favorites.len(),
+        ));
+    }
+}
+
+fn retry_connection_persistence(
+    path: &ClientConnectionsPath,
+    persistence: &mut ConnectionPersistence,
+    commit: &mut FlowCommit,
+) {
+    match save_connections(&path.0, &persistence.state) {
+        Ok(()) => {
+            persistence.dirty_error = None;
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        Err(error) => persistence.dirty_error = Some(error),
+    }
+}
+
+fn toggle_favorite_server(
+    membership: &LobbyMembershipQuery,
+    path: &ClientConnectionsPath,
+    persistence: &mut ConnectionPersistence,
+    commit: &mut FlowCommit,
+) {
+    let Some((membership, Some(target), _)) = membership.iter().next() else {
+        return;
+    };
+    let removed = persistence
+        .state
+        .favorites
+        .iter()
+        .any(|favorite| favorite.address == target.logical_address)
+        && persistence.state.remove_favorite(&target.logical_address);
+    if !removed
+        && let Err(error) = persistence
+            .state
+            .add_favorite(&membership.server_name, &target.logical_address)
+    {
+        persistence.dirty_error = Some(error);
+        return;
+    }
+    if let Err(error) = save_connections(&path.0, &persistence.state) {
+        persistence.dirty_error = Some(error);
+        return;
+    }
+    commit.overlay = Some(OverlayCommit::Clear);
+}
+
+fn begin_server_field_edit(
+    model: &mut ServerSelectModel,
+    field: EditingField,
+    overlay: &ClientOverlay,
+    commit: &mut FlowCommit,
+) {
+    model.editing = Some(field);
+    model.caret = match field {
+        EditingField::Address => model.address.len(),
+        EditingField::Name => model.name.len(),
+    };
+    if field == EditingField::Name && matches!(overlay, ClientOverlay::Error(_)) {
+        commit.overlay = Some(OverlayCommit::Clear);
+        commit.refresh_server_select = Some(1);
+    }
+}
+
+fn start_entered_connection(model: &mut ServerSelectModel, commit: &mut FlowCommit) {
+    match validate_target(&model.address, &model.name) {
+        Ok(target) => {
+            model.address = target.logical_address.canonical().to_string();
+            model.name.clone_from(&target.proposed_display_name);
+            model
+                .committed_name
+                .clone_from(&target.proposed_display_name);
+            model.inline_error = None;
+            commit.start_target = Some(target);
+            commit.next_flow = Some(ClientFlow::Connecting);
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        Err(error) => model.inline_error = Some(error),
+    }
+}
+
+fn start_saved_connection(address: &str, model: &mut ServerSelectModel, commit: &mut FlowCommit) {
+    match validate_target(address, &model.name) {
+        Ok(target) => {
+            model.address = target.logical_address.canonical().to_string();
+            commit.start_target = Some(target);
+            commit.next_flow = Some(ClientFlow::Connecting);
+        }
+        Err(error) => model.inline_error = Some(error),
+    }
+}
+
+fn retry_connection(model: &mut ServerSelectModel, commit: &mut FlowCommit) {
+    match validate_target(&model.address, &model.name) {
+        Ok(target) => {
+            commit.start_target = Some(target);
+            commit.next_flow = Some(ClientFlow::Connecting);
+        }
+        Err(error) => model.inline_error = Some(error),
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
@@ -59,14 +699,7 @@ pub(super) fn resolve_flow_action(
     mut model: ResMut<ServerSelectModel>,
     mut persistence: ResMut<ConnectionPersistence>,
     mut pending: Option<ResMut<PendingConnection>>,
-    membership: Query<
-        (
-            &ClientLobbyMembership,
-            Option<&RuntimeLobbyTarget>,
-            &RoutedClientSession,
-        ),
-        With<Client>,
-    >,
+    membership: LobbyMembershipQuery,
     path: Res<ClientConnectionsPath>,
     overlay: Res<ClientOverlay>,
     dashboard: (
@@ -116,392 +749,48 @@ pub(super) fn resolve_flow_action(
         mut exit,
         local_failures,
     ) = models;
-    if let Some(decision) = profile.take_decision() {
-        let accepted = matches!(decision, crate::profiles::ProfileDecision::Accepted);
-        dashboard_notice.0 = Some(match decision {
-            crate::profiles::ProfileDecision::Accepted => "Profile saved.".to_string(),
-            crate::profiles::ProfileDecision::InvalidRequest => {
-                "That brawler change is not valid.".to_string()
-            }
-            crate::profiles::ProfileDecision::StaleRevision => {
-                "The profile changed; review it and try again.".to_string()
-            }
-            crate::profiles::ProfileDecision::MissingBrawler => {
-                "That brawler no longer exists.".to_string()
-            }
-            crate::profiles::ProfileDecision::CapacityReached => {
-                "Brawler limit reached (16).".to_string()
-            }
-            crate::profiles::ProfileDecision::QueueLocked => {
-                "Leave the queue before changing a brawler.".to_string()
-            }
-            crate::profiles::ProfileDecision::TemporarilyUnavailable => {
-                "Profile storage is temporarily unavailable; try again.".to_string()
-            }
-            crate::profiles::ProfileDecision::StorageFault => {
-                "The profile could not be saved safely; owned data was preserved.".to_string()
-            }
-            crate::profiles::ProfileDecision::MissingPart => {
-                "That weapon part is no longer in this inventory.".to_string()
-            }
-            crate::profiles::ProfileDecision::PartAlreadyEquipped => {
-                "That physical part is already equipped on a brawler.".to_string()
-            }
-            crate::profiles::ProfileDecision::IncompatibleWeapon => {
-                "Those parts do not form a valid weapon configuration.".to_string()
-            }
-            crate::profiles::ProfileDecision::IncompatibleBuild => {
-                "Choose only one elemental resistance passive for this brawler.".to_string()
-            }
-        });
-        if accepted
-            && let Some(ordinal) = pending_created_brawler.0.take()
-            && let Some(created) = profile.snapshot().and_then(|snapshot| {
-                snapshot
-                    .brawlers
-                    .iter()
-                    .find(|brawler| brawler.creation_ordinal == ordinal)
-            })
-        {
-            dashboard_notice.0 = Some(format!("Created {}.", created.name));
-            commit.overlay = Some(OverlayCommit::BrawlerDetails(created.id));
-            commit.focus_index = Some(0);
-        } else if accepted && let Some(brawler_id) = pending_edited_brawler.0.take() {
-            commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
-            commit.focus_index = Some(1);
-        } else if !accepted {
-            if pending_created_brawler.0.take().is_some() {
-                creation_draft.inline_error = dashboard_notice.0.clone();
-                commit.overlay = Some(OverlayCommit::BrawlerCreation);
-            }
-            if pending_edited_brawler.0.take().is_some() {
-                brawler_edit.inline_error = dashboard_notice.0.clone();
-                commit.overlay = Some(OverlayCommit::BrawlerEditor);
-            }
-        }
-    }
+    resolve_profile_decision(
+        &mut profile,
+        &mut dashboard_notice,
+        &mut pending_created_brawler,
+        &mut pending_edited_brawler,
+        &mut creation_draft,
+        &mut brawler_edit,
+        &mut commit,
+    );
     if let Some(explicit) = actions.explicit.take() {
-        match explicit {
-            FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer => {
-                commit.teardown = true;
-                commit.overlay = Some(OverlayCommit::Clear);
-                commit.next_flow = Some(if *purpose == SessionPurpose::Practice {
-                    *purpose = SessionPurpose::Multiplayer;
-                    ClientFlow::ServerSelect
-                } else {
-                    ClientFlow::ServerSelect
-                });
-                *selection = SelectedGameType::default();
-                *game_draft = GameTypeSelectionDraft::default();
-                dashboard_notice.0 = None;
-                result_state.context = None;
-            }
-            _ => {}
-        }
+        resolve_explicit_action(
+            &explicit,
+            &mut commit,
+            &mut purpose,
+            &mut selection,
+            &mut game_draft,
+            &mut dashboard_notice,
+            &mut result_state,
+        );
         return;
     }
     if let Some(observation) = actions.session.take() {
-        match observation {
-            SessionObservation::Accepted => {
-                if let Some((membership, target, _)) = membership.iter().next() {
-                    persistence.state.preferred_display_name = Some(model.committed_name.clone());
-                    if let Some(target) = target {
-                        let _ = persistence
-                            .state
-                            .record_recent(&membership.server_name, &target.logical_address);
-                    }
-                    if let Err(error) = save_connections(&path.0, &persistence.state) {
-                        persistence.dirty_error = Some(error.clone());
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Persistence,
-                            message: format!("Could not save connection data: {error}"),
-                            return_flow: ClientFlow::Dashboard,
-                            actions: [
-                                Some(FlowErrorAction::RetrySave),
-                                Some(FlowErrorAction::ContinueWithoutSaving),
-                            ],
-                        });
-                    }
-                    if commit.error.is_none()
-                        && let Some(mut error) = local_load_error(*local_failures)
-                    {
-                        error.return_flow = ClientFlow::Dashboard;
-                        commit.error = Some(error);
-                    }
-                    *selection = SelectedGameType::default();
-                    dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
-                    commit.next_flow = Some(ClientFlow::Dashboard);
-                }
-            }
-            SessionObservation::ResolverCompleted { generation, result } => {
-                if let Some(pending) = pending.as_deref_mut()
-                    && pending.generation == generation
-                {
-                    match result {
-                        Ok(candidates) if !candidates.is_empty() => {
-                            pending.candidates = candidates;
-                            pending.dns_deadline = None;
-                            pending.current_candidate = 0;
-                            pending.stage = ConnectionStage::ContactingServer {
-                                current: 1,
-                                total: pending.candidates.len(),
-                            };
-                            commit.advance_candidate = true;
-                        }
-                        Ok(_) => fail_to_server_select(
-                            &mut commit,
-                            "Address resolution returned no usable addresses".to_string(),
-                            true,
-                        ),
-                        Err(error) => fail_to_server_select(&mut commit, error, true),
-                    }
-                }
-            }
-            SessionObservation::CandidateFailed => {
-                commit.teardown = true;
-                if pending
-                    .as_ref()
-                    .is_some_and(|pending| has_next_candidate(pending))
-                {
-                    commit.advance_candidate = true;
-                } else {
-                    fail_to_server_select(
-                        &mut commit,
-                        "Could not contact the server".to_string(),
-                        true,
-                    );
-                }
-            }
-            SessionObservation::CandidateTimedOut => {
-                commit.teardown = true;
-                if pending
-                    .as_ref()
-                    .is_some_and(|pending| has_next_candidate(pending))
-                {
-                    commit.advance_candidate = true;
-                } else {
-                    fail_to_server_select(
-                        &mut commit,
-                        "The lobby handshake timed out".to_string(),
-                        true,
-                    );
-                }
-            }
-            SessionObservation::DnsTimedOut => {
-                commit.teardown = true;
-                fail_to_server_select(
-                    &mut commit,
-                    "Address resolution timed out".to_string(),
-                    true,
-                );
-            }
-            SessionObservation::UnexpectedLoss => {
-                commit.teardown = true;
-                *selection = SelectedGameType::default();
-                *game_draft = GameTypeSelectionDraft::default();
-                dashboard_notice.0 = None;
-                result_state.context = None;
-                fail_to_server_select(
-                    &mut commit,
-                    "The lobby connection was lost unexpectedly".to_string(),
-                    true,
-                );
-            }
-            SessionObservation::TimedOut => {
-                commit.teardown = true;
-                fail_to_server_select(
-                    &mut commit,
-                    "The connection attempt timed out".to_string(),
-                    true,
-                );
-            }
-            SessionObservation::Rejected(reason) => {
-                commit.teardown = true;
-                commit.next_flow = Some(ClientFlow::ServerSelect);
-                commit.error = Some(rejection_flow_error(reason));
-            }
-            SessionObservation::QueueProtocolFailure => {
-                commit.teardown = true;
-                *selection = SelectedGameType::default();
-                fail_to_server_select_with_kind(
-                    &mut commit,
-                    FlowErrorKind::Content,
-                    "The lobby queue state was incompatible with this client".to_string(),
-                    true,
-                );
-            }
-            SessionObservation::QueueTimedOut => {
-                let label =
-                    queue
-                        .pending()
-                        .map_or("queue command", |pending| match pending.command {
-                            crate::lobby::QueueCommand::Join(_) => "queue admission",
-                            crate::lobby::QueueCommand::Cancel(_) => "queue cancellation",
-                        });
-                commit.error = Some(FlowError {
-                    kind: FlowErrorKind::Queue,
-                    message: format!("The {label} acknowledgement is taking longer than expected"),
-                    return_flow: *flow.get(),
-                    actions: [
-                        Some(FlowErrorAction::RetryQueue),
-                        Some(FlowErrorAction::Disconnect),
-                    ],
-                });
-            }
-            SessionObservation::ReservationStarted => {
-                commit.next_flow = Some(ClientFlow::MatchLoading);
-                commit.overlay = Some(OverlayCommit::Clear);
-            }
-            SessionObservation::MatchStartReturned | SessionObservation::FreshLobbyReturn => {
-                if let Some(context) = result_state.context.as_mut()
-                    && let Some(game_type_id) = context.game_type_id.as_ref()
-                    && let Some((membership, _, _)) = membership.iter().next()
-                    && let Some(game) = membership
-                        .game_types
-                        .iter()
-                        .find(|game| &game.id == game_type_id)
-                {
-                    context.game_name = Some(game.display_name.clone());
-                    selection.catalog_revision = Some(membership.catalog_revision);
-                    selection.game_type_id = Some(game.id.clone());
-                    selection.configuration_revision = Some(game.configuration_revision);
-                }
-                let destination = if result_state.context.is_some() {
-                    ClientFlow::Results
-                } else {
-                    *purpose = SessionPurpose::Multiplayer;
-                    dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
-                    ClientFlow::Dashboard
-                };
-                commit.next_flow = Some(destination);
-                if core::mem::take(&mut match_failure.0) {
-                    commit.error = Some(FlowError {
-                        kind: FlowErrorKind::Connection,
-                        message: "The match server stopped unexpectedly".to_string(),
-                        return_flow: ClientFlow::Dashboard,
-                        actions: [Some(FlowErrorAction::Back), None],
-                    });
-                }
-                commit.overlay = Some(OverlayCommit::Clear);
-            }
-            SessionObservation::MatchFailed => {
-                result_state.context = None;
-                match_failure.0 = true;
-                let _ = routed.request_return_to_lobby();
-            }
-            SessionObservation::PracticeRejected(reason) => {
-                if matches!(
-                    reason,
-                    crate::lobby::PracticeStartRejection::StaleCatalog
-                        | crate::lobby::PracticeStartRejection::StaleGameConfiguration
-                        | crate::lobby::PracticeStartRejection::UnknownGameType
-                ) {
-                    commit.teardown = true;
-                    fail_to_server_select_with_kind(
-                        &mut commit,
-                        FlowErrorKind::Content,
-                        "The lobby content changed incompatibly; reconnect to obtain a fresh game list"
-                            .to_string(),
-                        true,
-                    );
-                } else {
-                    commit.error = Some(FlowError {
-                        kind: FlowErrorKind::Practice,
-                        message: practice_rejection_copy(reason).to_string(),
-                        return_flow: *flow.get(),
-                        actions: [Some(FlowErrorAction::Back), None],
-                    });
-                }
-            }
-            SessionObservation::CountdownObserved => {
-                commit.next_flow = Some(ClientFlow::Match);
-                commit.overlay = Some(OverlayCommit::Clear);
-            }
-            SessionObservation::QueueOutcome(outcome) => match outcome.decision {
-                crate::lobby::QueueDecision::Joined(membership) => {
-                    result_state.context = None;
-                    result_state.last_accepted_game_type_id = Some(membership.game_type_id.clone());
-                    selection.catalog_revision = Some(membership.catalog_revision);
-                    selection.game_type_id = Some(membership.game_type_id.clone());
-                    selection.configuration_revision =
-                        Some(membership.game_type_configuration_revision);
-                    commit.next_flow = Some(ClientFlow::Queue);
-                    commit.overlay = Some(OverlayCommit::Clear);
-                }
-                crate::lobby::QueueDecision::Cancelled { .. } => {
-                    *purpose = SessionPurpose::Multiplayer;
-                    dashboard_focus.0 = Some(DASHBOARD_PLAY_INDEX);
-                    commit.next_flow = Some(ClientFlow::Dashboard);
-                    commit.overlay = Some(OverlayCommit::Clear);
-                }
-                crate::lobby::QueueDecision::Rejected(reason) => match reason {
-                    crate::lobby::QueueRejection::IncompatiblePassives => {
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Queue,
-                            message: "The selected passives are incompatible".to_string(),
-                            return_flow: *flow.get(),
-                            actions: [Some(FlowErrorAction::Back), None],
-                        });
-                    }
-                    crate::lobby::QueueRejection::OverBudget { used, budget } => {
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Queue,
-                            message: format!("The selected build uses {used} of {budget} points"),
-                            return_flow: *flow.get(),
-                            actions: [Some(FlowErrorAction::Back), None],
-                        });
-                    }
-                    crate::lobby::QueueRejection::StaleCatalog
-                    | crate::lobby::QueueRejection::StaleGameConfiguration
-                    | crate::lobby::QueueRejection::UnknownGameType
-                    | crate::lobby::QueueRejection::ProtocolFailure => {
-                        commit.teardown = true;
-                        fail_to_server_select_with_kind(
-                            &mut commit,
-                            FlowErrorKind::Content,
-                            "The lobby content changed incompatibly; reconnect to obtain a fresh game list"
-                                .to_string(),
-                            true,
-                        );
-                    }
-                    crate::lobby::QueueRejection::RateLimited { retry_after_millis } => {
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Queue,
-                            message: format!(
-                                "Queue commands are temporarily limited; try again in {retry_after_millis} ms",
-                            ),
-                            return_flow: *flow.get(),
-                            actions: [
-                                Some(FlowErrorAction::TryAgainQueue),
-                                Some(FlowErrorAction::Disconnect),
-                            ],
-                        });
-                    }
-                    crate::lobby::QueueRejection::MustCancelFirst => {
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Queue,
-                            message:
-                                "Cancel the current queue ticket before changing game or build"
-                                    .to_string(),
-                            return_flow: *flow.get(),
-                            actions: [Some(FlowErrorAction::Back), None],
-                        });
-                    }
-                    crate::lobby::QueueRejection::TicketMismatch
-                    | crate::lobby::QueueRejection::StaleRequest
-                    | crate::lobby::QueueRejection::TemporarilyUnavailable
-                    | crate::lobby::QueueRejection::InternalBuildResolution
-                    | crate::lobby::QueueRejection::ServerMatchCapacityOccupied => {
-                        commit.error = Some(FlowError {
-                            kind: FlowErrorKind::Queue,
-                            message: "The queue request could not be completed".to_string(),
-                            return_flow: *flow.get(),
-                            actions: [Some(FlowErrorAction::Disconnect), None],
-                        });
-                    }
-                },
-            },
-        }
+        resolve_session_observation(
+            observation,
+            *flow.get(),
+            &membership,
+            &mut pending,
+            &path,
+            &mut model,
+            &mut persistence,
+            &mut selection,
+            &mut game_draft,
+            &mut dashboard_focus,
+            &mut dashboard_notice,
+            &mut queue,
+            &mut result_state,
+            &mut routed,
+            &mut match_failure,
+            &mut purpose,
+            *local_failures,
+            &mut commit,
+        );
         return;
     }
     let Some(action) = actions.ordinary.take() else {
@@ -509,54 +798,27 @@ pub(super) fn resolve_flow_action(
     };
     match action {
         FlowUiAction::EditAddress => {
-            model.editing = Some(EditingField::Address);
-            model.caret = model.address.len();
+            begin_server_field_edit(
+                &mut model,
+                EditingField::Address,
+                overlay.as_ref(),
+                &mut commit,
+            );
         }
         FlowUiAction::EditName => {
-            model.editing = Some(EditingField::Name);
-            model.caret = model.name.len();
-            if matches!(overlay.as_ref(), ClientOverlay::Error(_)) {
-                commit.overlay = Some(OverlayCommit::Clear);
-                commit.refresh_server_select = Some(1);
-            }
+            begin_server_field_edit(
+                &mut model,
+                EditingField::Name,
+                overlay.as_ref(),
+                &mut commit,
+            );
         }
-        FlowUiAction::Connect => match validate_target(&model.address, &model.name) {
-            Ok(target) => {
-                model.address = target.logical_address.canonical().to_string();
-                model.name.clone_from(&target.proposed_display_name);
-                model
-                    .committed_name
-                    .clone_from(&target.proposed_display_name);
-                model.inline_error = None;
-                commit.start_target = Some(target);
-                commit.next_flow = Some(ClientFlow::Connecting);
-                commit.overlay = Some(OverlayCommit::Clear);
-            }
-            Err(error) => model.inline_error = Some(error),
-        },
-        FlowUiAction::JoinSaved(address) => match validate_target(&address, &model.name) {
-            Ok(target) => {
-                model.address = target.logical_address.canonical().to_string();
-                commit.start_target = Some(target);
-                commit.next_flow = Some(ClientFlow::Connecting);
-            }
-            Err(error) => model.inline_error = Some(error),
-        },
+        FlowUiAction::Connect => start_entered_connection(&mut model, &mut commit),
+        FlowUiAction::JoinSaved(address) => {
+            start_saved_connection(&address, &mut model, &mut commit);
+        }
         FlowUiAction::RemoveFavorite(address) => {
-            let removed_index = persistence
-                .state
-                .favorites
-                .iter()
-                .position(|favorite| favorite.address == address);
-            if persistence.state.remove_favorite(&address) {
-                if let Err(error) = save_connections(&path.0, &persistence.state) {
-                    persistence.dirty_error = Some(error);
-                }
-                commit.refresh_server_select = Some(favorite_focus_after_removal(
-                    removed_index,
-                    persistence.state.favorites.len(),
-                ));
-            }
+            remove_favorite(&address, &path, &mut persistence, &mut commit);
         }
         FlowUiAction::Back => commit.overlay = Some(OverlayCommit::Clear),
         FlowUiAction::Quit => {
@@ -588,22 +850,9 @@ pub(super) fn resolve_flow_action(
             commit.overlay = Some(OverlayCommit::ChangeServerConfirmation);
             commit.focus_index = Some(0);
         }
-        FlowUiAction::Retry => match validate_target(&model.address, &model.name) {
-            Ok(target) => {
-                commit.start_target = Some(target);
-                commit.next_flow = Some(ClientFlow::Connecting);
-            }
-            Err(error) => model.inline_error = Some(error),
-        },
+        FlowUiAction::Retry => retry_connection(&mut model, &mut commit),
         FlowUiAction::RetrySave => {
-            let result = save_connections(&path.0, &persistence.state);
-            match result {
-                Ok(()) => {
-                    persistence.dirty_error = None;
-                    commit.overlay = Some(OverlayCommit::Clear);
-                }
-                Err(error) => persistence.dirty_error = Some(error),
-            }
+            retry_connection_persistence(&path, &mut persistence, &mut commit);
         }
         FlowUiAction::ContinueWithoutSaving => {
             persistence.dirty_error = None;
@@ -638,106 +887,24 @@ pub(super) fn resolve_flow_action(
             commit.next_flow = Some(ClientFlow::Dashboard);
         }
         FlowUiAction::ToggleFavoriteServer => {
-            if let Some((membership, Some(target), _)) = membership.iter().next() {
-                let removed = persistence
-                    .state
-                    .favorites
-                    .iter()
-                    .any(|favorite| favorite.address == target.logical_address)
-                    && persistence.state.remove_favorite(&target.logical_address);
-                if !removed
-                    && let Err(error) = persistence
-                        .state
-                        .add_favorite(&membership.server_name, &target.logical_address)
-                {
-                    persistence.dirty_error = Some(error);
-                    return;
-                }
-                if let Err(error) = save_connections(&path.0, &persistence.state) {
-                    persistence.dirty_error = Some(error);
-                    return;
-                }
-                commit.overlay = Some(OverlayCommit::Clear);
-            }
+            toggle_favorite_server(&membership, &path, &mut persistence, &mut commit);
         }
-        FlowUiAction::CreateBrawler => {
-            if queue.membership().is_some()
-                || queue.pending().is_some()
-                || practice.pending()
-                || profile.pending()
-            {
-                return;
-            }
-            let Some(snapshot) = profile.snapshot() else {
-                return;
-            };
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            if snapshot.brawlers.len() >= usize::from(catalog.limits.maximum_saved_brawlers) {
-                dashboard_notice.0 = Some(format!(
-                    "Brawler limit reached ({}).",
-                    catalog.limits.maximum_saved_brawlers
-                ));
-                commit.overlay = Some(OverlayCommit::Clear);
-                return;
-            }
-            let (Some(fighter), Some(weapon), Some(ultimate)) = (
-                catalog.fighter_profiles.first(),
-                catalog.weapon_bases.first(),
-                catalog.ultimates.first(),
-            ) else {
-                return;
-            };
-            *creation_draft = BrawlerCreationDraft {
-                fighter_profile_id: fighter.id,
-                weapon_base_id: weapon.id,
-                ultimate: ultimate.id,
-                inline_error: None,
-            };
-            commit.overlay = Some(OverlayCommit::BrawlerCreation);
-        }
-        FlowUiAction::CycleCreationProfile => {
-            creation_draft.inline_error = None;
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let index = catalog
-                .fighter_profiles
-                .iter()
-                .position(|entry| entry.id == creation_draft.fighter_profile_id)
-                .unwrap_or(0);
-            creation_draft.fighter_profile_id =
-                catalog.fighter_profiles[(index + 1) % catalog.fighter_profiles.len()].id;
-        }
-        FlowUiAction::CycleCreationWeapon => {
-            creation_draft.inline_error = None;
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let index = catalog
-                .weapon_bases
-                .iter()
-                .position(|entry| entry.id == creation_draft.weapon_base_id)
-                .unwrap_or(0);
-            creation_draft.weapon_base_id =
-                catalog.weapon_bases[(index + 1) % catalog.weapon_bases.len()].id;
-        }
-        FlowUiAction::CycleCreationUltimate => {
-            creation_draft.inline_error = None;
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let current = catalog
-                .ultimates
-                .iter()
-                .position(|definition| definition.id == creation_draft.ultimate)
-                .unwrap_or(0);
-            creation_draft.ultimate = catalog.ultimates[(current + 1) % catalog.ultimates.len()].id;
-        }
-        FlowUiAction::CancelCreateBrawler => {
-            commit.overlay = Some(OverlayCommit::BrawlerList);
-        }
+        action @ (FlowUiAction::CreateBrawler
+        | FlowUiAction::CycleCreationProfile
+        | FlowUiAction::CycleCreationWeapon
+        | FlowUiAction::CycleCreationUltimate
+        | FlowUiAction::CancelCreateBrawler
+        | FlowUiAction::ConfirmCreateBrawler) => resolve_brawler_creation_action(
+            &action,
+            overlay.as_ref(),
+            &queue,
+            &practice,
+            &mut profile,
+            &mut creation_draft,
+            &mut pending_created_brawler,
+            &mut dashboard_notice,
+            &mut commit,
+        ),
         FlowUiAction::CancelBrawlerEdit => {
             commit.overlay = brawler_edit
                 .brawler_id
@@ -752,107 +919,28 @@ pub(super) fn resolve_flow_action(
             };
             commit.overlay = Some(details);
         }
-        FlowUiAction::ConfirmCreateBrawler => {
-            if !matches!(overlay.as_ref(), ClientOverlay::BrawlerCreation)
-                || queue.membership().is_some()
-                || queue.pending().is_some()
-                || practice.pending()
-                || profile.pending()
-            {
-                return;
-            }
-            let Some(snapshot) = profile.snapshot() else {
-                return;
-            };
-            let ordinal = snapshot.next_brawler_ordinal;
-            creation_draft.inline_error = None;
-            let Some((passive_one, passive_two)) = profile.catalog().and_then(|catalog| {
-                let mut passives = catalog.selectable_passives().map(|entry| entry.id);
-                Some((passives.next()?, passives.next()?))
-            }) else {
-                return;
-            };
-            if profile.create(crate::profiles::BrawlerDraft {
-                name: format!("Brawler {ordinal}"),
-                fighter_profile_id: creation_draft.fighter_profile_id,
-                weapon_base_id: creation_draft.weapon_base_id,
-                ultimate_id: creation_draft.ultimate,
-                passive_ids: [passive_one, passive_two],
-            }) {
-                pending_created_brawler.0 = Some(ordinal);
-            }
-        }
         FlowUiAction::SelectBrawler(brawler_id) => {
-            if queue.membership().is_some()
-                || queue.pending().is_some()
-                || practice.pending()
-                || profile.pending()
-            {
-                return;
-            }
-            let already_selected = profile
-                .snapshot()
-                .is_some_and(|snapshot| snapshot.selected_brawler_id == Some(brawler_id));
-            if already_selected || profile.select(brawler_id) {
-                commit.overlay = Some(OverlayCommit::Clear);
-                commit.focus_index = Some(DASHBOARD_BUILD_INDEX);
-            }
+            select_brawler(brawler_id, &queue, &practice, &mut profile, &mut commit);
         }
         FlowUiAction::OpenBrawlerEditor(brawler_id) => {
-            if queue.membership().is_some()
-                || queue.pending().is_some()
-                || practice.pending()
-                || profile.pending()
-            {
-                return;
-            }
-            let selected = profile
-                .snapshot()
-                .and_then(|snapshot| {
-                    snapshot
-                        .brawlers
-                        .iter()
-                        .find(|brawler| brawler.id == brawler_id)
-                })
-                .cloned();
-            if let Some(brawler) = selected {
-                *brawler_edit = BrawlerEditDraft {
-                    brawler_id: Some(brawler.id),
-                    name_caret: brawler.name.len(),
-                    name: brawler.name,
-                    fighter_profile_id: brawler.fighter_profile_id,
-                    weapon_base_id: brawler.weapon_base_id,
-                    ultimate_id: brawler.ultimate_id,
-                    passive_ids: brawler.passive_ids,
-                    editing_name: false,
-                    inline_error: None,
-                };
-                commit.overlay = Some(OverlayCommit::BrawlerEditor);
-            }
+            open_brawler_editor(
+                brawler_id,
+                &queue,
+                &practice,
+                &profile,
+                &mut brawler_edit,
+                &mut commit,
+            );
         }
         FlowUiAction::OpenWeaponEquipment(brawler_id) => {
-            if queue.membership().is_some()
-                || queue.pending().is_some()
-                || practice.pending()
-                || profile.pending()
-            {
-                return;
-            }
-            let selected = profile.snapshot().and_then(|snapshot| {
-                snapshot
-                    .brawlers
-                    .iter()
-                    .find(|brawler| brawler.id == brawler_id)
-            });
-            if let Some(brawler) = selected {
-                *equipment_draft = WeaponEquipmentDraft {
-                    brawler_id: Some(brawler.id),
-                    equipped_part_ids: brawler.equipped_part_ids,
-                    selected_slot: 0,
-                    inline_error: None,
-                };
-                commit.overlay = Some(OverlayCommit::WeaponEquipment);
-            }
+            open_weapon_equipment(
+                brawler_id,
+                &queue,
+                &practice,
+                &profile,
+                &mut equipment_draft,
+                &mut commit,
+            );
         }
         FlowUiAction::BeginBrawlerNameEdit => {
             brawler_edit.editing_name = true;
@@ -860,125 +948,31 @@ pub(super) fn resolve_flow_action(
             brawler_edit.inline_error = None;
         }
         FlowUiAction::CycleBrawlerUltimate => {
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let index = catalog
-                .ultimates
-                .iter()
-                .position(|definition| definition.id == brawler_edit.ultimate_id)
-                .unwrap_or(0);
-            brawler_edit.ultimate_id = catalog.ultimates[(index + 1) % catalog.ultimates.len()].id;
+            cycle_brawler_ultimate(&profile, &mut brawler_edit);
         }
         FlowUiAction::CycleBrawlerPassiveOne => {
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let options: Vec<_> = catalog
-                .selectable_passives()
-                .map(|entry| entry.id)
-                .collect();
-            let index = options
-                .iter()
-                .position(|id| *id == brawler_edit.passive_ids[0])
-                .unwrap_or(0);
-            brawler_edit.passive_ids[0] = options[(index + 1) % options.len()];
-            if brawler_edit.passive_ids[0] == brawler_edit.passive_ids[1] {
-                brawler_edit.passive_ids[1] = options[(index + 2) % options.len()];
-            }
+            cycle_brawler_passive(&profile, &mut brawler_edit, 0);
         }
         FlowUiAction::CycleBrawlerPassiveTwo => {
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let options: Vec<_> = catalog
-                .selectable_passives()
-                .map(|entry| entry.id)
-                .collect();
-            let index = options
-                .iter()
-                .position(|id| *id == brawler_edit.passive_ids[1])
-                .unwrap_or(0);
-            brawler_edit.passive_ids[1] = options[(index + 1) % options.len()];
-            if brawler_edit.passive_ids[0] == brawler_edit.passive_ids[1] {
-                brawler_edit.passive_ids[0] = options[(index + 2) % options.len()];
-            }
+            cycle_brawler_passive(&profile, &mut brawler_edit, 1);
         }
         FlowUiAction::ConfirmBrawlerEdit => {
-            let Ok(name) = crate::lobby::normalize_proposed_display_name(&brawler_edit.name) else {
-                brawler_edit.inline_error = Some("Enter a valid brawler name.".to_string());
-                return;
-            };
-            let Some(brawler_id) = brawler_edit.brawler_id else {
-                return;
-            };
-            if profile.edit(
-                brawler_id,
-                crate::profiles::BrawlerEdit {
-                    name,
-                    ultimate_id: brawler_edit.ultimate_id,
-                    passive_ids: brawler_edit.passive_ids,
-                },
-            ) {
-                pending_edited_brawler.0 = Some(brawler_id);
-                brawler_edit.inline_error = None;
-            }
+            confirm_brawler_edit(&mut profile, &mut brawler_edit, &mut pending_edited_brawler);
         }
-        FlowUiAction::SelectEquipmentSlot(slot) => {
-            if slot < crate::weapon_parts::WEAPON_PART_SLOT_COUNT {
-                equipment_draft.selected_slot = slot;
-                equipment_draft.inline_error = None;
-            }
-        }
-        FlowUiAction::EquipWeaponPart(part_id) => {
-            let Some(snapshot) = profile.snapshot() else {
-                return;
-            };
-            let Some(brawler_id) = equipment_draft.brawler_id else {
-                return;
-            };
-            if snapshot.brawlers.iter().any(|brawler| {
-                brawler.id != brawler_id && brawler.equipped_part_ids.contains(&Some(part_id))
-            }) {
-                equipment_draft.inline_error =
-                    Some("That physical part is equipped on another brawler.".into());
-                return;
-            }
-            for slot in &mut equipment_draft.equipped_part_ids {
-                if *slot == Some(part_id) {
-                    *slot = None;
-                }
-            }
-            let selected_slot = equipment_draft.selected_slot;
-            equipment_draft.equipped_part_ids[selected_slot] = Some(part_id);
-            equipment_draft.inline_error = None;
-        }
-        FlowUiAction::UnequipWeaponPart => {
-            let selected_slot = equipment_draft.selected_slot;
-            equipment_draft.equipped_part_ids[selected_slot] = None;
-            equipment_draft.inline_error = None;
-        }
-        FlowUiAction::ConfirmWeaponEquipment => {
-            let Some(brawler_id) = equipment_draft.brawler_id else {
-                return;
-            };
-            if profile.equip_weapon_parts(brawler_id, equipment_draft.equipped_part_ids) {
-                commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
-            }
-        }
-        FlowUiAction::CancelWeaponEquipment => {
-            commit.overlay = equipment_draft
-                .brawler_id
-                .map_or(Some(OverlayCommit::BrawlerList), |id| {
-                    Some(OverlayCommit::BrawlerDetails(id))
-                });
+        action @ (FlowUiAction::SelectEquipmentSlot(_)
+        | FlowUiAction::EquipWeaponPart(_)
+        | FlowUiAction::UnequipWeaponPart
+        | FlowUiAction::ConfirmWeaponEquipment
+        | FlowUiAction::CancelWeaponEquipment) => {
+            resolve_weapon_equipment_action(
+                &action,
+                &mut profile,
+                &mut equipment_draft,
+                &mut commit,
+            );
         }
         FlowUiAction::DeleteBrawler(brawler_id) => {
-            if queue.membership().is_some()
-                || queue.pending().is_some()
-                || practice.pending()
-                || profile.pending()
-            {
+            if profile_changes_blocked(&queue, &practice, &profile) {
                 return;
             }
             commit.overlay = Some(OverlayCommit::DeleteBrawlerConfirmation(brawler_id));
@@ -990,40 +984,75 @@ pub(super) fn resolve_flow_action(
             let _ = profile.delete(*brawler_id);
             commit.overlay = Some(OverlayCommit::BrawlerList);
         }
+        action @ (FlowUiAction::JoinQueue
+        | FlowUiAction::StartPractice
+        | FlowUiAction::QueueAgain
+        | FlowUiAction::OpenGameTypeSelect
+        | FlowUiAction::ReturnToDashboard
+        | FlowUiAction::KeepPlaying
+        | FlowUiAction::KeepLoading
+        | FlowUiAction::ConfirmLeaveMatch
+        | FlowUiAction::CancelQueue
+        | FlowUiAction::RetryQueue
+        | FlowUiAction::TryAgainQueue
+        | FlowUiAction::RequestCancelMatchStart
+        | FlowUiAction::ConfirmCancelMatchStart) => resolve_match_navigation_action(
+            &action,
+            time.elapsed(),
+            *flow.get(),
+            &membership,
+            &mut selection,
+            &mut game_draft,
+            &mut dashboard_focus,
+            &mut queue,
+            &mut practice,
+            &mut loading,
+            &mut result_state,
+            &mut routed,
+            &mut purpose,
+            &mut commit,
+        ),
+        FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer => {}
+    }
+    let _ = flow;
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn resolve_match_navigation_action(
+    action: &FlowUiAction,
+    now: std::time::Duration,
+    flow: ClientFlow,
+    membership: &LobbyMembershipQuery,
+    selection: &mut SelectedGameType,
+    game_draft: &mut GameTypeSelectionDraft,
+    dashboard_focus: &mut DashboardReturnFocus,
+    queue: &mut crate::client::ClientQueueModel,
+    practice: &mut crate::client::ClientPracticeModel,
+    loading: &mut crate::client::ClientMatchLoadingModel,
+    result_state: &mut crate::client::ClientMatchResultState,
+    routed: &mut RoutedClientLifecycle,
+    purpose: &mut SessionPurpose,
+    commit: &mut FlowCommit,
+) {
+    match action {
         FlowUiAction::JoinQueue => {
-            if *flow.get() != ClientFlow::Dashboard || practice.pending() {
+            if flow != ClientFlow::Dashboard || practice.pending() {
                 return;
             }
             *purpose = SessionPurpose::Multiplayer;
-            let selected = membership.iter().next().and_then(|(membership, _, _)| {
-                membership.profile.selected_brawler_id.and_then(|id| {
-                    membership
-                        .profile
-                        .brawlers
-                        .iter()
-                        .find(|brawler| brawler.id == id)
-                })
-            });
-            if let Some(brawler) = selected {
-                let _ = queue.start_join(&selection, brawler.id, brawler.revision, time.elapsed());
+            let selected = selected_brawler_identity(membership);
+            if let Some((brawler_id, brawler_revision)) = selected {
+                let _ = queue.start_join(selection, brawler_id, brawler_revision, now);
             }
         }
         FlowUiAction::StartPractice => {
-            if *flow.get() != ClientFlow::Dashboard || queue.pending().is_some() {
+            if flow != ClientFlow::Dashboard || queue.pending().is_some() {
                 return;
             }
             *purpose = SessionPurpose::Practice;
-            let selected = membership.iter().next().and_then(|(membership, _, _)| {
-                membership.profile.selected_brawler_id.and_then(|id| {
-                    membership
-                        .profile
-                        .brawlers
-                        .iter()
-                        .find(|brawler| brawler.id == id)
-                })
-            });
-            if let Some(brawler) = selected {
-                let _ = practice.start(&selection, brawler.id, brawler.revision);
+            let selected = selected_brawler_identity(membership);
+            if let Some((brawler_id, brawler_revision)) = selected {
+                let _ = practice.start(selection, brawler_id, brawler_revision);
             }
         }
         FlowUiAction::QueueAgain => {
@@ -1059,7 +1088,7 @@ pub(super) fn resolve_flow_action(
                         .find(|brawler| brawler.id == id)
                 });
                 if selected_brawler
-                    .is_none_or(|brawler| !practice.start(&selection, brawler.id, brawler.revision))
+                    .is_none_or(|brawler| !practice.start(selection, brawler.id, brawler.revision))
                 {
                     commit.error = Some(FlowError {
                         kind: FlowErrorKind::Practice,
@@ -1083,7 +1112,7 @@ pub(super) fn resolve_flow_action(
                         session.generation,
                         membership,
                         &game_type_id,
-                        time.elapsed(),
+                        now,
                     );
                     if started {
                         selection.catalog_revision = Some(membership.catalog_revision);
@@ -1140,15 +1169,15 @@ pub(super) fn resolve_flow_action(
             commit.overlay = Some(OverlayCommit::Clear);
         }
         FlowUiAction::CancelQueue => {
-            let _ = queue.start_cancel(time.elapsed());
+            let _ = queue.start_cancel(now);
         }
         FlowUiAction::RetryQueue => {
-            if queue.retry_pending(time.elapsed()) {
+            if queue.retry_pending(now) {
                 commit.overlay = Some(OverlayCommit::Clear);
             }
         }
         FlowUiAction::TryAgainQueue => {
-            if queue.try_again_after_rate_limit(time.elapsed()) {
+            if queue.try_again_after_rate_limit(now) {
                 commit.overlay = Some(OverlayCommit::Clear);
             }
         }
@@ -1166,9 +1195,395 @@ pub(super) fn resolve_flow_action(
                 commit.overlay = Some(OverlayCommit::Clear);
             }
         }
-        FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer => {}
+        _ => unreachable!("flow action was routed to the wrong reducer"),
     }
-    let _ = flow;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_brawler_creation_action(
+    action: &FlowUiAction,
+    overlay: &ClientOverlay,
+    queue: &crate::client::ClientQueueModel,
+    practice: &crate::client::ClientPracticeModel,
+    profile: &mut crate::client::ClientProfileModel,
+    creation_draft: &mut BrawlerCreationDraft,
+    pending_created_brawler: &mut PendingCreatedBrawler,
+    dashboard_notice: &mut DashboardNotice,
+    commit: &mut FlowCommit,
+) {
+    match action {
+        FlowUiAction::CreateBrawler => {
+            open_brawler_creation(
+                queue,
+                practice,
+                profile,
+                creation_draft,
+                dashboard_notice,
+                commit,
+            );
+        }
+        FlowUiAction::CycleCreationProfile => {
+            creation_draft.inline_error = None;
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            let index = catalog
+                .fighter_profiles
+                .iter()
+                .position(|entry| entry.id == creation_draft.fighter_profile_id)
+                .unwrap_or(0);
+            creation_draft.fighter_profile_id =
+                catalog.fighter_profiles[(index + 1) % catalog.fighter_profiles.len()].id;
+        }
+        FlowUiAction::CycleCreationWeapon => {
+            creation_draft.inline_error = None;
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            let index = catalog
+                .weapon_bases
+                .iter()
+                .position(|entry| entry.id == creation_draft.weapon_base_id)
+                .unwrap_or(0);
+            creation_draft.weapon_base_id =
+                catalog.weapon_bases[(index + 1) % catalog.weapon_bases.len()].id;
+        }
+        FlowUiAction::CycleCreationUltimate => {
+            creation_draft.inline_error = None;
+            let Some(catalog) = profile.catalog() else {
+                return;
+            };
+            let current = catalog
+                .ultimates
+                .iter()
+                .position(|definition| definition.id == creation_draft.ultimate)
+                .unwrap_or(0);
+            creation_draft.ultimate = catalog.ultimates[(current + 1) % catalog.ultimates.len()].id;
+        }
+        FlowUiAction::CancelCreateBrawler => {
+            commit.overlay = Some(OverlayCommit::BrawlerList);
+        }
+        FlowUiAction::ConfirmCreateBrawler => {
+            confirm_brawler_creation(
+                overlay,
+                queue,
+                practice,
+                profile,
+                creation_draft,
+                pending_created_brawler,
+            );
+        }
+        _ => unreachable!("flow action was routed to the wrong reducer"),
+    }
+}
+
+fn open_brawler_creation(
+    queue: &crate::client::ClientQueueModel,
+    practice: &crate::client::ClientPracticeModel,
+    profile: &crate::client::ClientProfileModel,
+    draft: &mut BrawlerCreationDraft,
+    dashboard_notice: &mut DashboardNotice,
+    commit: &mut FlowCommit,
+) {
+    if profile_changes_blocked(queue, practice, profile) {
+        return;
+    }
+    let Some(snapshot) = profile.snapshot() else {
+        return;
+    };
+    let Some(catalog) = profile.catalog() else {
+        return;
+    };
+    if snapshot.brawlers.len() >= usize::from(catalog.limits.maximum_saved_brawlers) {
+        dashboard_notice.0 = Some(format!(
+            "Brawler limit reached ({}).",
+            catalog.limits.maximum_saved_brawlers
+        ));
+        commit.overlay = Some(OverlayCommit::Clear);
+        return;
+    }
+    let (Some(fighter), Some(weapon), Some(ultimate)) = (
+        catalog.fighter_profiles.first(),
+        catalog.weapon_bases.first(),
+        catalog.ultimates.first(),
+    ) else {
+        return;
+    };
+    *draft = BrawlerCreationDraft {
+        fighter_profile_id: fighter.id,
+        weapon_base_id: weapon.id,
+        ultimate: ultimate.id,
+        inline_error: None,
+    };
+    commit.overlay = Some(OverlayCommit::BrawlerCreation);
+}
+
+fn confirm_brawler_creation(
+    overlay: &ClientOverlay,
+    queue: &crate::client::ClientQueueModel,
+    practice: &crate::client::ClientPracticeModel,
+    profile: &mut crate::client::ClientProfileModel,
+    draft: &mut BrawlerCreationDraft,
+    pending: &mut PendingCreatedBrawler,
+) {
+    if !matches!(overlay, ClientOverlay::BrawlerCreation)
+        || profile_changes_blocked(queue, practice, profile)
+    {
+        return;
+    }
+    let Some(snapshot) = profile.snapshot() else {
+        return;
+    };
+    let ordinal = snapshot.next_brawler_ordinal;
+    draft.inline_error = None;
+    let Some((passive_one, passive_two)) = profile.catalog().and_then(|catalog| {
+        let mut passives = catalog.selectable_passives().map(|entry| entry.id);
+        Some((passives.next()?, passives.next()?))
+    }) else {
+        return;
+    };
+    if profile.create(crate::profiles::BrawlerDraft {
+        name: format!("Brawler {ordinal}"),
+        fighter_profile_id: draft.fighter_profile_id,
+        weapon_base_id: draft.weapon_base_id,
+        ultimate_id: draft.ultimate,
+        passive_ids: [passive_one, passive_two],
+    }) {
+        pending.0 = Some(ordinal);
+    }
+}
+
+fn profile_changes_blocked(
+    queue: &crate::client::ClientQueueModel,
+    practice: &crate::client::ClientPracticeModel,
+    profile: &crate::client::ClientProfileModel,
+) -> bool {
+    queue.membership().is_some()
+        || queue.pending().is_some()
+        || practice.pending()
+        || profile.pending()
+}
+
+fn select_brawler(
+    brawler_id: crate::profiles::SavedBrawlerId,
+    queue: &crate::client::ClientQueueModel,
+    practice: &crate::client::ClientPracticeModel,
+    profile: &mut crate::client::ClientProfileModel,
+    commit: &mut FlowCommit,
+) {
+    if profile_changes_blocked(queue, practice, profile) {
+        return;
+    }
+    let already_selected = profile
+        .snapshot()
+        .is_some_and(|snapshot| snapshot.selected_brawler_id == Some(brawler_id));
+    if already_selected || profile.select(brawler_id) {
+        commit.overlay = Some(OverlayCommit::Clear);
+        commit.focus_index = Some(DASHBOARD_BUILD_INDEX);
+    }
+}
+
+fn open_brawler_editor(
+    brawler_id: crate::profiles::SavedBrawlerId,
+    queue: &crate::client::ClientQueueModel,
+    practice: &crate::client::ClientPracticeModel,
+    profile: &crate::client::ClientProfileModel,
+    draft: &mut BrawlerEditDraft,
+    commit: &mut FlowCommit,
+) {
+    if profile_changes_blocked(queue, practice, profile) {
+        return;
+    }
+    let selected = profile
+        .snapshot()
+        .and_then(|snapshot| {
+            snapshot
+                .brawlers
+                .iter()
+                .find(|brawler| brawler.id == brawler_id)
+        })
+        .cloned();
+    if let Some(brawler) = selected {
+        *draft = BrawlerEditDraft {
+            brawler_id: Some(brawler.id),
+            name_caret: brawler.name.len(),
+            name: brawler.name,
+            fighter_profile_id: brawler.fighter_profile_id,
+            weapon_base_id: brawler.weapon_base_id,
+            ultimate_id: brawler.ultimate_id,
+            passive_ids: brawler.passive_ids,
+            editing_name: false,
+            inline_error: None,
+        };
+        commit.overlay = Some(OverlayCommit::BrawlerEditor);
+    }
+}
+
+fn open_weapon_equipment(
+    brawler_id: crate::profiles::SavedBrawlerId,
+    queue: &crate::client::ClientQueueModel,
+    practice: &crate::client::ClientPracticeModel,
+    profile: &crate::client::ClientProfileModel,
+    draft: &mut WeaponEquipmentDraft,
+    commit: &mut FlowCommit,
+) {
+    if profile_changes_blocked(queue, practice, profile) {
+        return;
+    }
+    let selected = profile.snapshot().and_then(|snapshot| {
+        snapshot
+            .brawlers
+            .iter()
+            .find(|brawler| brawler.id == brawler_id)
+    });
+    if let Some(brawler) = selected {
+        *draft = WeaponEquipmentDraft {
+            brawler_id: Some(brawler.id),
+            equipped_part_ids: brawler.equipped_part_ids,
+            selected_slot: 0,
+            inline_error: None,
+        };
+        commit.overlay = Some(OverlayCommit::WeaponEquipment);
+    }
+}
+
+fn cycle_brawler_ultimate(
+    profile: &crate::client::ClientProfileModel,
+    draft: &mut BrawlerEditDraft,
+) {
+    let Some(catalog) = profile.catalog() else {
+        return;
+    };
+    let index = catalog
+        .ultimates
+        .iter()
+        .position(|definition| definition.id == draft.ultimate_id)
+        .unwrap_or(0);
+    draft.ultimate_id = catalog.ultimates[(index + 1) % catalog.ultimates.len()].id;
+}
+
+fn cycle_brawler_passive(
+    profile: &crate::client::ClientProfileModel,
+    draft: &mut BrawlerEditDraft,
+    slot: usize,
+) {
+    let Some(catalog) = profile.catalog() else {
+        return;
+    };
+    let options: Vec<_> = catalog
+        .selectable_passives()
+        .map(|entry| entry.id)
+        .collect();
+    let other_slot = 1 - slot;
+    let index = options
+        .iter()
+        .position(|id| *id == draft.passive_ids[slot])
+        .unwrap_or(0);
+    draft.passive_ids[slot] = options[(index + 1) % options.len()];
+    if draft.passive_ids[slot] == draft.passive_ids[other_slot] {
+        draft.passive_ids[other_slot] = options[(index + 2) % options.len()];
+    }
+}
+
+fn confirm_brawler_edit(
+    profile: &mut crate::client::ClientProfileModel,
+    draft: &mut BrawlerEditDraft,
+    pending: &mut PendingEditedBrawler,
+) {
+    let Ok(name) = crate::lobby::normalize_proposed_display_name(&draft.name) else {
+        draft.inline_error = Some("Enter a valid brawler name.".to_string());
+        return;
+    };
+    let Some(brawler_id) = draft.brawler_id else {
+        return;
+    };
+    if profile.edit(
+        brawler_id,
+        crate::profiles::BrawlerEdit {
+            name,
+            ultimate_id: draft.ultimate_id,
+            passive_ids: draft.passive_ids,
+        },
+    ) {
+        pending.0 = Some(brawler_id);
+        draft.inline_error = None;
+    }
+}
+
+fn resolve_weapon_equipment_action(
+    action: &FlowUiAction,
+    profile: &mut crate::client::ClientProfileModel,
+    draft: &mut WeaponEquipmentDraft,
+    commit: &mut FlowCommit,
+) {
+    match action {
+        FlowUiAction::SelectEquipmentSlot(slot) => {
+            if *slot < crate::weapon_parts::WEAPON_PART_SLOT_COUNT {
+                draft.selected_slot = *slot;
+                draft.inline_error = None;
+            }
+        }
+        FlowUiAction::EquipWeaponPart(part_id) => {
+            let Some(snapshot) = profile.snapshot() else {
+                return;
+            };
+            let Some(brawler_id) = draft.brawler_id else {
+                return;
+            };
+            if snapshot.brawlers.iter().any(|brawler| {
+                brawler.id != brawler_id && brawler.equipped_part_ids.contains(&Some(*part_id))
+            }) {
+                draft.inline_error =
+                    Some("That physical part is equipped on another brawler.".into());
+                return;
+            }
+            for slot in &mut draft.equipped_part_ids {
+                if *slot == Some(*part_id) {
+                    *slot = None;
+                }
+            }
+            draft.equipped_part_ids[draft.selected_slot] = Some(*part_id);
+            draft.inline_error = None;
+        }
+        FlowUiAction::UnequipWeaponPart => {
+            draft.equipped_part_ids[draft.selected_slot] = None;
+            draft.inline_error = None;
+        }
+        FlowUiAction::ConfirmWeaponEquipment => {
+            let Some(brawler_id) = draft.brawler_id else {
+                return;
+            };
+            if profile.equip_weapon_parts(brawler_id, draft.equipped_part_ids) {
+                commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
+            }
+        }
+        FlowUiAction::CancelWeaponEquipment => {
+            commit.overlay = draft
+                .brawler_id
+                .map_or(Some(OverlayCommit::BrawlerList), |id| {
+                    Some(OverlayCommit::BrawlerDetails(id))
+                });
+        }
+        _ => unreachable!("flow action was routed to the wrong reducer"),
+    }
+}
+
+fn selected_brawler_identity(
+    membership: &LobbyMembershipQuery,
+) -> Option<(
+    crate::profiles::SavedBrawlerId,
+    crate::profiles::ProfileRevision,
+)> {
+    membership.iter().next().and_then(|(membership, _, _)| {
+        membership.profile.selected_brawler_id.and_then(|id| {
+            membership
+                .profile
+                .brawlers
+                .iter()
+                .find(|brawler| brawler.id == id)
+                .map(|brawler| (brawler.id, brawler.revision))
+        })
+    })
 }
 
 pub(super) fn accept_game_type_draft(
