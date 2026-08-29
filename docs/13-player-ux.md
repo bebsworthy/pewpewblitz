@@ -354,6 +354,35 @@ The settings contract includes:
 Reduced Motion or Reduced Effects freezes non-essential procedural Dashboard motion. It does not
 remove factual state, change navigation, or alter gameplay authority.
 
+Gameplay targeting uses one latched local input mode. Actual mouse motion, mouse-button press
+edges, and keyboard gameplay-key press edges select keyboard/mouse; meaningful changed gamepad
+axes, gamepad-button press edges, and the primary-trigger press edge select that gamepad. Resting
+devices and unchanged held inputs do not reclaim the mode, there is no timeout, and simultaneous
+non-action activity retains the current mode. When only one device supplies Fire or Confirm in a
+frame, that action source wins before the client derives aim for the action.
+
+Mouse targeting continues to use the cursor ground point. Gamepad placement targeting treats a
+neutral post-handler right stick as no target: it retains no previous point and displays no
+reticle, landing marker, or radius preview. Every nonzero magnitude after optional local calibration
+maps continuously across the complete legal range, while direction follows the normalized stick.
+The separate facing commit threshold does not compress placement distance. Returning the stick to
+neutral clears placement immediately.
+
+Primary Fire and targeted-ultimate confirmation from a neutral gamepad may derive ordinary aim
+intent from the client's currently presented viewport. Assistance first selects the nearest live,
+effect-eligible hostile fighter; only when no such fighter is visible may it select the nearest
+live non-fighter the action can affect, such as an eligible sentry, objective, chest, or barrel. It
+does not range-filter, test line of sight, lead motion, or inspect off-screen entities. With no
+candidate, straight and melee actions retain current facing and placement actions retain their
+ordinary untargeted fallback. Selection uses current presented position and sends only the same aim
+direction, distance, and action bits as manual input; it never sends a target identity or decides a
+hit.
+
+Controller backends normally filter and renormalize hardware deadzones, so Brawler's default
+additional aim deadzone remains zero to preserve short-range precision. Residual device-specific
+neutral drift can still leave a cosmetic placement reticle a few pixels from the fighter; BRL-0050
+owns guided neutral calibration and live preview rather than restoring a large universal default.
+
 Straight-weapon aiming must communicate the actual projectile clearance rather than a center-line
 ray. The visible corridor matches the resolved projectile body width, begins at the muzzle after a
 clear launch segment, and ends where that body first reaches projectile-blocking cover, a live

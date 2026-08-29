@@ -33,6 +33,8 @@ Client presentation and local feedback
 ### Client responsibilities
 
 - read controller or keyboard/mouse input;
+- derive manual or viewport-bounded assisted aim from currently presented client state and encode
+  both through the same ordinary input intent, without sending a selected target identity;
 - present a caller-supplied development account ID at lobby admission and request profile mutations
   or selected-brawler admission using stable identity/revision data;
 - validate and install the accepted connection-scoped profile, game-type catalog, and advertised
@@ -148,6 +150,12 @@ InputFrame
   ultimate
   interact
 ```
+
+Physical-device selection, gamepad neutral calibration, reticle visibility, and viewport-bounded
+neutral-fire assistance are client-local. Assistance may choose direction and requested distance
+from currently presented entities, but it cannot reveal off-screen or unreplicated state and does
+not create a distinct protocol action. The server receives the ordinary aim vector/distance and
+continues to own action acceptance, range and bounds repair, collision, recipients, and effects.
 
 Saved-brawler and weapon-equipment edits are not per-tick combat input. They use ordered,
 idempotent profile requests tied to the receiving authenticated lobby connection. A request never

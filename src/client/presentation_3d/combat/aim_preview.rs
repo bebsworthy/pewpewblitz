@@ -195,8 +195,13 @@ pub(in super::super) fn update_aim_preview(
     if let Some((snapshot, state)) = map {
         aim.index.refresh(snapshot, state, &aim.catalog.0);
     }
-    let scan_preview = targeted_ultimate_preview(map, controlled, &aim.pending);
-    let segments = if let Some((origin, center, _, _)) = scan_preview {
+    let has_target = aim.pending.aim_axis.is_some();
+    let scan_preview = has_target
+        .then(|| targeted_ultimate_preview(map, controlled, &aim.pending))
+        .flatten();
+    let segments = if !has_target {
+        Vec::new()
+    } else if let Some((origin, center, _, _)) = scan_preview {
         let delta = center - origin;
         vec![PreviewPrimitive {
             geometry: PreviewGeometry::Corridor {

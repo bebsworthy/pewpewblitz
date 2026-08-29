@@ -3,9 +3,8 @@
 //! The server validates ownership, tick windows, history, rate, bit masks, and normalized
 //! magnitude of the quantized `FighterInput`; it never sees physical devices. These settings
 //! shape device input *before* quantization, so the default calibration is the identity for
-//! movement (the server remains the sole default move-shaping authority) and mirrors the
-//! authoritative aim thresholds so default facing behavior is unchanged. The pause-overlay
-//! presentation of these settings lives in the `ui` submodule.
+//! movement and post-handler aim. The pause-overlay presentation of these settings lives in the
+//! `ui` submodule.
 
 pub mod persistence;
 pub mod ui;
@@ -323,7 +322,7 @@ impl Default for ClientInputSettings {
             gamepad: GamepadBindings::default(),
             mouse_primary: MouseButton::Left,
             move_deadzone: 0.0,
-            aim_deadzone: 0.25,
+            aim_deadzone: 0.0,
             aim_commit_threshold: 0.35,
             trigger_press: 0.55,
             trigger_release: 0.45,
@@ -533,25 +532,34 @@ impl ClientInputSettings {
 
     /// Shape an aim axis and decide whether it commits a facing update.
     ///
-    /// The defaults mirror the authoritative aim shaping so default facing behavior is
-    /// unchanged; deviations are the user's local calibration choice.
+    /// Facing retains its independent commit threshold after optional player calibration;
+    /// placement distance uses [`Self::shape_targeting_axis`] directly.
     #[must_use]
     pub fn shape_aim(&self, axis: Vec2) -> Option<Vec2> {
+        let remapped = self.shape_targeting_axis(axis)?;
+        (remapped.length() >= self.aim_commit_threshold).then(|| remapped.normalize_or_zero())
+    }
+
+    /// Post-handler targeting vector after optional player calibration.
+    ///
+    /// Placement targeting deliberately does not apply the separate facing commit threshold:
+    /// every nonzero post-deadzone magnitude owns a point in the complete authored range.
+    #[must_use]
+    pub fn shape_targeting_axis(&self, axis: Vec2) -> Option<Vec2> {
         let axis = if self.invert_aim_y {
             Vec2::new(axis.x, -axis.y)
         } else {
             axis
         };
         let remapped = crate::movement::radial_deadzone(axis, self.aim_deadzone);
-        (remapped.length() >= self.aim_commit_threshold).then(|| remapped.normalize_or_zero())
+        (remapped.length_squared() > f32::EPSILON).then_some(remapped)
     }
 
-    /// Post-calibration aim magnitude mapped onto the controlled lob range.
+    /// Post-calibration targeting magnitude mapped onto the controlled placement range.
     #[must_use]
     pub fn shape_aim_distance(&self, axis: Vec2, range: f32) -> Option<f32> {
-        self.shape_aim(axis)
-            .is_some()
-            .then(|| crate::movement::radial_deadzone(axis, self.aim_deadzone).length() * range)
+        self.shape_targeting_axis(axis)
+            .map(|target| target.length() * range)
     }
 
     /// Analog trigger hysteresis for the held primary-fire button.
@@ -592,34 +600,25 @@ mod tests {
     }
 
     #[test]
-    fn default_aim_shaping_matches_authoritative_commit_decisions() {
+    fn default_targeting_uses_every_nonzero_post_handler_magnitude() {
         let settings = ClientInputSettings::default();
-        let tuning = crate::movement::InputTuning::default();
-        for axis in [
-            Vec2::ZERO,
-            Vec2::new(0.1, 0.0),
-            Vec2::new(0.3, 0.0),
-            Vec2::new(0.34, 0.0),
-            Vec2::new(0.36, 0.0),
-            Vec2::new(-0.8, 0.2),
-            Vec2::splat(core::f32::consts::FRAC_1_SQRT_2),
-        ] {
-            let client_commits = settings.shape_aim(axis);
-            let server_commits = crate::movement::committed_aim(axis, tuning);
-            // The commit decision must agree exactly; committed directions agree within
-            // float noise because both paths normalize a positive scalar multiple.
-            assert_eq!(
-                client_commits.is_some(),
-                server_commits.is_some(),
-                "axis {axis:?}"
+        assert_eq!(settings.shape_targeting_axis(Vec2::ZERO), None);
+        for magnitude in [0.01_f32, 0.1, 0.35, 0.7, 1.0] {
+            let target = settings
+                .shape_targeting_axis(Vec2::X * magnitude)
+                .expect("nonzero handler output targets");
+            assert!((target.length() - magnitude).abs() < 1e-6);
+            assert!(
+                (settings
+                    .shape_aim_distance(Vec2::X * magnitude, 200.0)
+                    .unwrap()
+                    - magnitude * 200.0)
+                    .abs()
+                    < 1e-4
             );
-            if let (Some(client), Some(server)) = (client_commits, server_commits) {
-                assert!(
-                    (client - server).length() < 1e-5,
-                    "axis {axis:?} diverged: {client:?} vs {server:?}"
-                );
-            }
         }
+        assert_eq!(settings.shape_aim(Vec2::X * 0.1), None);
+        assert_eq!(settings.shape_aim(Vec2::X * 0.35), Some(Vec2::X));
     }
 
     #[test]
@@ -700,6 +699,7 @@ mod tests {
         assert!(settings.validate().is_err());
 
         settings.move_deadzone = 0.2;
+        settings.aim_deadzone = 0.2;
         settings.aim_commit_threshold = 0.1;
         assert!(settings.validate().is_err());
     }
@@ -789,8 +789,8 @@ mod tests {
     fn raising_the_aim_deadzone_keeps_the_commit_threshold_valid() {
         let mut settings = ClientInputSettings::default();
         settings.adjust_calibration(CalibrationField::AimDeadzone, 0.2);
-        assert!((settings.aim_deadzone - 0.45).abs() < 1e-6);
-        assert!((settings.aim_commit_threshold - 0.45).abs() < 1e-6);
+        assert!((settings.aim_deadzone - 0.2).abs() < 1e-6);
+        assert!((settings.aim_commit_threshold - 0.35).abs() < 1e-6);
         assert!(settings.validate().is_ok());
     }
 

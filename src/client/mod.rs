@@ -70,6 +70,7 @@ mod server_select;
 mod session;
 mod settings;
 mod shell;
+mod targeting;
 pub(crate) use assets::ClientAssetHandles;
 pub use flow::{
     CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,
@@ -477,9 +478,28 @@ fn select_active_gamepad(
 fn select_active_input_device(
     current: ActiveInputDevice,
     keyboard_mouse_active: bool,
+    keyboard_mouse_action: bool,
     selected_gamepad: Option<Entity>,
     meaningful_gamepad: Option<Entity>,
+    gamepad_action: Option<Entity>,
 ) -> ActiveInputDevice {
+    if keyboard_mouse_action != gamepad_action.is_some() {
+        return if keyboard_mouse_action {
+            ActiveInputDevice::KeyboardMouse
+        } else {
+            ActiveInputDevice::Gamepad(gamepad_action.expect("checked gamepad action"))
+        };
+    }
+    if keyboard_mouse_active && meaningful_gamepad.is_some() {
+        return match current {
+            ActiveInputDevice::KeyboardMouse => ActiveInputDevice::KeyboardMouse,
+            ActiveInputDevice::Gamepad(current) if selected_gamepad == Some(current) => {
+                ActiveInputDevice::Gamepad(current)
+            }
+            ActiveInputDevice::Gamepad(_) => selected_gamepad
+                .map_or(ActiveInputDevice::KeyboardMouse, ActiveInputDevice::Gamepad),
+        };
+    }
     match current {
         ActiveInputDevice::KeyboardMouse => {
             meaningful_gamepad.map_or(ActiveInputDevice::KeyboardMouse, ActiveInputDevice::Gamepad)

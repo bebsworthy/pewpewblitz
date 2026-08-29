@@ -523,6 +523,68 @@ fn idle_gamepad_does_not_become_the_active_input_device() {
     );
 }
 
+#[test]
+fn gamepad_neutral_has_no_target_and_small_lob_input_uses_inner_range() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .init_resource::<PendingLocalActions>()
+        .insert_resource(ClientPlayableGate(true))
+        .init_resource::<ClientInputContext>()
+        .init_resource::<InputDeviceActivity>()
+        .init_resource::<ClientInputSettings>()
+        .add_systems(Update, sample_local_input);
+    let gamepad_entity = app.world_mut().spawn(Gamepad::default()).id();
+    app.world_mut().spawn((
+        Fighter,
+        Controlled,
+        Position::default(),
+        resolved_arc_launcher_loadout(),
+    ));
+
+    {
+        let mut gamepad = app.world_mut().get_mut::<Gamepad>(gamepad_entity).unwrap();
+        gamepad.analog_mut().set(GamepadButton::RightTrigger2, 1.0);
+    }
+    app.update();
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert_eq!(
+        pending.active_device,
+        ActiveInputDevice::Gamepad(gamepad_entity)
+    );
+    assert_eq!(pending.aim_axis, None);
+    assert_eq!(pending.aim_distance, None);
+    assert_ne!(pending.held_buttons & FighterInput::PRIMARY_FIRE, 0);
+
+    {
+        let mut gamepad = app.world_mut().get_mut::<Gamepad>(gamepad_entity).unwrap();
+        gamepad.analog_mut().set(GamepadButton::RightTrigger2, 0.0);
+        gamepad.analog_mut().set(GamepadAxis::RightStickX, 0.02);
+    }
+    app.update();
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert_eq!(pending.aim_axis, Some(Vec2::X));
+    assert!(
+        pending
+            .aim_distance
+            .is_some_and(|distance| (distance - 10.4).abs() < 0.001)
+    );
+
+    app.world_mut()
+        .get_mut::<Gamepad>(gamepad_entity)
+        .unwrap()
+        .analog_mut()
+        .set(GamepadAxis::RightStickX, 0.0);
+    app.update();
+    let pending = app.world().resource::<PendingLocalActions>();
+    assert_eq!(
+        pending.active_device,
+        ActiveInputDevice::Gamepad(gamepad_entity)
+    );
+    assert_eq!(pending.aim_axis, None);
+    assert_eq!(pending.aim_distance, None);
+}
+
 /// Resolve the Arc Launcher loadout through the real build pipeline, so input shaping
 /// tests observe the same `ResolvedMatchLoadout` a joined client receives by replication.
 fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
@@ -757,7 +819,7 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
     assert!(
         pending
             .aim_distance
-            .is_some_and(|distance| (distance - 381.333_34).abs() < 0.001)
+            .is_some_and(|distance| (distance - 416.0).abs() < 0.001)
     );
     assert_ne!(pending.held_buttons & FighterInput::PRIMARY_FIRE, 0);
     assert_eq!(
@@ -828,8 +890,8 @@ fn gamepad_stick_magnitude_controls_fire_field_placement_distance() {
         .expect("armed Fire Field keeps gamepad placement distance");
 
     assert!(near_distance < far_distance);
-    assert!((far_distance - 381.333_34).abs() < 0.001);
-    assert!((near_distance - 242.666_67).abs() < 0.001);
+    assert!((far_distance - 416.0).abs() < 0.001);
+    assert!((near_distance - 312.0).abs() < 0.001);
 }
 
 #[test]
@@ -912,13 +974,76 @@ fn disconnected_gamepad_falls_back_to_most_recent_connected_device() {
 fn keyboard_mouse_selection_persists_until_gamepad_activity() {
     let gamepad = Entity::from_raw_u32(3).expect("valid test entity index");
     assert_eq!(
-        select_active_input_device(ActiveInputDevice::KeyboardMouse, false, Some(gamepad), None,),
+        select_active_input_device(
+            ActiveInputDevice::KeyboardMouse,
+            false,
+            false,
+            Some(gamepad),
+            None,
+            None,
+        ),
         ActiveInputDevice::KeyboardMouse
     );
     assert_eq!(
         select_active_input_device(
             ActiveInputDevice::KeyboardMouse,
             false,
+            false,
+            Some(gamepad),
+            Some(gamepad),
+            None,
+        ),
+        ActiveInputDevice::Gamepad(gamepad)
+    );
+    assert_eq!(
+        select_active_input_device(
+            ActiveInputDevice::Gamepad(gamepad),
+            true,
+            false,
+            Some(gamepad),
+            None,
+            None,
+        ),
+        ActiveInputDevice::KeyboardMouse
+    );
+}
+
+#[test]
+fn simultaneous_non_action_activity_retains_the_current_device() {
+    let gamepad = Entity::from_raw_u32(3).expect("valid test entity index");
+    assert_eq!(
+        select_active_input_device(
+            ActiveInputDevice::KeyboardMouse,
+            true,
+            false,
+            Some(gamepad),
+            Some(gamepad),
+            None,
+        ),
+        ActiveInputDevice::KeyboardMouse
+    );
+    assert_eq!(
+        select_active_input_device(
+            ActiveInputDevice::Gamepad(gamepad),
+            true,
+            false,
+            Some(gamepad),
+            Some(gamepad),
+            None,
+        ),
+        ActiveInputDevice::Gamepad(gamepad)
+    );
+}
+
+#[test]
+fn fire_source_wins_same_frame_device_arbitration() {
+    let gamepad = Entity::from_raw_u32(3).expect("valid test entity index");
+    assert_eq!(
+        select_active_input_device(
+            ActiveInputDevice::KeyboardMouse,
+            true,
+            false,
+            Some(gamepad),
             Some(gamepad),
             Some(gamepad),
         ),
@@ -928,6 +1053,8 @@ fn keyboard_mouse_selection_persists_until_gamepad_activity() {
         select_active_input_device(
             ActiveInputDevice::Gamepad(gamepad),
             true,
+            true,
+            Some(gamepad),
             Some(gamepad),
             None,
         ),
@@ -1082,7 +1209,7 @@ fn settings_keys_adjust_calibration_only_while_shell_owns_input() {
     keyboard.press(KeyCode::BracketRight);
     app.update();
     let settings = *app.world().resource::<ClientInputSettings>();
-    assert!((settings.aim_deadzone - 0.30).abs() < 1e-6);
+    assert!((settings.aim_deadzone - 0.05).abs() < 1e-6);
     assert_eq!(
         app.world().resource::<InputSettingsSelection>().field,
         InputSettingsField::Calibration(CalibrationField::AimDeadzone)
@@ -1324,7 +1451,7 @@ fn settings_overlay_reports_calibration_bindings_and_conflicts() {
     let lines = compose_input_settings_lines(&settings, selection);
     assert!(lines.len() <= 8);
     assert!(
-        lines[0].replace("move=[0.00]", "").contains("aim=0.25")
+        lines[0].replace("move=[0.00]", "").contains("aim=0.00")
             && lines[0].contains("trigger=0.55/0.45")
     );
     assert!(lines.iter().any(|line| line.contains("Bindings OK")));

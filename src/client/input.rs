@@ -14,6 +14,19 @@ pub(super) fn logical_key_pressed(keyboard: Option<&ButtonInput<Key>>, expected:
     })
 }
 
+pub(super) fn logical_key_just_pressed(
+    keyboard: Option<&ButtonInput<Key>>,
+    expected: &str,
+) -> bool {
+    keyboard.is_some_and(|keyboard| {
+        keyboard.get_just_pressed().any(|key| {
+            matches!(key, Key::Character(character) if character
+                .as_str()
+                .eq_ignore_ascii_case(expected))
+        })
+    })
+}
+
 /// A device value counts as activity only when it strictly exceeds its threshold. A zero
 /// threshold still requires a nonzero sample, so a connected-but-resting stick or trigger
 /// cannot claim the active input device (the default move deadzone is 0.0).
@@ -51,6 +64,7 @@ pub(super) fn sample_local_input(
     gamepads: Query<(Entity, &Gamepad)>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
+    auto_aim: targeting::ViewportAutoAim,
     // The replicated loadout is the wire shape; a standalone `ResolvedWeapon` never
     // arrives in network play, so controller lob ranging must read the loadout's weapon.
     fighters: Query<
@@ -94,21 +108,46 @@ pub(super) fn sample_local_input(
     if binding_pressed(bindings.move_up) {
         keyboard_move.y += 1.0;
     }
-    let action_keys = [
+    let gameplay_keys = [
+        bindings.move_left,
+        bindings.move_right,
+        bindings.move_down,
+        bindings.move_up,
         bindings.active_item,
         bindings.ultimate,
         bindings.interact,
         bindings.pause,
+        bindings.scoreboard,
     ];
-    let keyboard_active = keyboard_move != Vec2::ZERO || keyboard.any_just_pressed(action_keys);
-    let keyboard_scoreboard = binding_pressed(bindings.scoreboard);
+    let keyboard_active = keyboard.any_just_pressed(gameplay_keys)
+        || gameplay_keys.iter().any(|key| {
+            key_code_letter(*key).is_some_and(|letter| {
+                logical_key_just_pressed(logical_keyboard, &letter.to_string())
+            })
+        });
     let mouse_active = mouse_motion.is_some_and(|motion| motion.delta.length_squared() > 0.0);
+    let mouse_primary_pressed =
+        mouse_buttons.is_some_and(|buttons| buttons.just_pressed(settings.mouse_primary));
 
     let mut meaningful_gamepads = Vec::new();
+    let mut action_gamepads = Vec::new();
     for (entity, gamepad) in &gamepads {
         let left = gamepad.left_stick();
         let right = gamepad.right_stick();
         let trigger = gamepad.get(settings.gamepad.primary).unwrap_or(0.0);
+        let previous = activity
+            .last_samples
+            .iter()
+            .find(|(id, _, _, _)| *id == entity);
+        let trigger_pressed = trigger >= settings.trigger_press
+            && previous.is_none_or(|(_, _, _, previous_trigger)| {
+                *previous_trigger < settings.trigger_press
+            });
+        let button_pressed = settings
+            .gamepad
+            .rows()
+            .iter()
+            .any(|(_, button)| gamepad.just_pressed(*button));
         let meaningful = exceeds_activity_threshold(left.length(), settings.move_deadzone)
             || exceeds_activity_threshold(right.length(), settings.aim_deadzone)
             || exceeds_activity_threshold(trigger, settings.trigger_release)
@@ -117,27 +156,17 @@ pub(super) fn sample_local_input(
                 .rows()
                 .iter()
                 .any(|(_, button)| gamepad.pressed(*button));
-        let changed = activity
-            .last_samples
-            .iter()
-            .find(|(id, _, _, _)| *id == entity)
-            .is_none_or(|(_, previous_left, previous_right, previous_trigger)| {
-                previous_left.distance_squared(left) > 0.0001
-                    || previous_right.distance_squared(right) > 0.0001
-                    || (trigger >= settings.trigger_release
-                        && *previous_trigger < settings.trigger_release)
-            });
-        if meaningful
-            && (changed
-                || settings
-                    .gamepad
-                    .rows()
-                    .iter()
-                    .any(|(_, button)| gamepad.just_pressed(*button)))
-        {
+        let changed = previous.is_none_or(|(_, previous_left, previous_right, _)| {
+            previous_left.distance_squared(left) > 0.0001
+                || previous_right.distance_squared(right) > 0.0001
+        });
+        if meaningful && (changed || trigger_pressed || button_pressed) {
             activity.recent_gamepads.retain(|id| *id != entity);
             activity.recent_gamepads.push(entity);
             meaningful_gamepads.push(entity);
+        }
+        if trigger_pressed {
+            action_gamepads.push(entity);
         }
         activity.last_samples.retain(|(id, _, _, _)| *id != entity);
         activity.last_samples.push((entity, left, right, trigger));
@@ -164,9 +193,8 @@ pub(super) fn sample_local_input(
 
     let keyboard_mouse_active = keyboard_active
         || mouse_active
-        || keyboard_scoreboard
         || mouse_buttons.is_some_and(|buttons| {
-            buttons.any_pressed([settings.mouse_primary, MouseButton::Right])
+            buttons.any_just_pressed([settings.mouse_primary, MouseButton::Right])
         });
     let meaningful_gamepad = if meaningful_gamepads.is_empty() {
         None
@@ -176,8 +204,10 @@ pub(super) fn sample_local_input(
     pending.active_device = select_active_input_device(
         pending.active_device,
         keyboard_mouse_active,
+        mouse_primary_pressed,
         active_gamepad,
         meaningful_gamepad,
+        action_gamepads.last().copied(),
     );
 
     let (move_axis, aim_axis, aim_distance, gamepad_buttons, gamepad_pause, gamepad_interact) =
@@ -199,21 +229,37 @@ pub(super) fn sample_local_input(
                 if gamepad.pressed(settings.gamepad.ultimate) {
                     buttons |= FighterInput::ULTIMATE;
                 }
-                let shaped_aim = right.is_finite().then(|| settings.shape_aim(right));
                 let aim_range = controlled_gamepad_aim_range(
                     &fighters,
                     pending.targeted_ultimate,
                     buttons & FighterInput::ULTIMATE != 0,
                 );
+                let manual_target = right.is_finite().then(|| {
+                    if let Some(range) = aim_range {
+                        settings
+                            .shape_targeting_axis(right)
+                            .map(|target| (target.normalize(), Some(target.length() * range)))
+                    } else {
+                        settings.shape_aim(right).map(|direction| (direction, None))
+                    }
+                });
+                let (aim_axis, aim_distance) = manual_target.flatten().map_or_else(
+                    || {
+                        if buttons & FighterInput::PRIMARY_FIRE == 0 {
+                            return (None, None);
+                        }
+                        auto_aim
+                            .resolve(&cameras, pending.targeted_ultimate)
+                            .map_or((None, None), |assisted| {
+                                (Some(assisted.direction), Some(assisted.distance))
+                            })
+                    },
+                    |(direction, distance)| (Some(direction), distance),
+                );
                 (
                     settings.shape_move(left),
-                    shaped_aim.flatten(),
-                    shaped_aim
-                        .is_some()
-                        .then(|| {
-                            aim_range.and_then(|range| settings.shape_aim_distance(right, range))
-                        })
-                        .flatten(),
+                    aim_axis,
+                    aim_distance,
                     buttons,
                     gamepad.just_pressed(settings.gamepad.pause),
                     gamepad.just_pressed(settings.gamepad.interact),
