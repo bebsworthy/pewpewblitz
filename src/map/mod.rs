@@ -3,17 +3,22 @@
 mod catalog;
 #[cfg(feature = "client")]
 mod client;
+#[cfg(test)]
+mod compatibility_tests;
 mod effect_tiles;
+mod geometry;
 mod model;
 mod objects;
 mod pickups;
+mod resolution;
 #[cfg(feature = "server")]
 mod runtime;
 #[cfg(feature = "server")]
 mod server;
+mod state;
+#[cfg(test)]
+mod tests;
 
-#[cfg(feature = "client")]
-pub(crate) use catalog::effective_projectile_collider;
 pub use catalog::{
     ASHEN_COURT_ADMISSION_REVISION, ASHEN_COURT_PRESET, ASHEN_PINE_ASSET, ASHEN_ROCK_ASSET,
     ASHEN_WALL_ASSET, BARREL_WOOD_DEBRIS_ASSET, BREAKABLE_BARRIER_ASSET, CACTUS_ASSET,
@@ -29,21 +34,17 @@ pub use catalog::{
     MapAssetSlot, MapCatalogResource, MapCell, MapColliderShape, MapConcealmentBehavior,
     MapContentCatalog, MapContentPlugin, MapDamageProfile, MapDamageProfileId,
     MapDestructionBehavior, MapDimensionLimits, MapDimensions, MapDurabilityBehavior,
-    MapDynamicGeneration, MapDynamicRecoveryRequest, MapDynamicRecoverySnapshot,
-    MapDynamicResetEvent, MapDynamicState, MapFilledRect, MapFootprint, MapGameplayProfile,
-    MapGameplayProfileId, MapHalfCellPoint, MapInteractionBehavior, MapModeAnchorKind,
-    MapModeAnchorPlacement, MapMutationEvent, MapObjectTerminalBehavior, MapPlacementOutcome,
-    MapPlacementParameterKind, MapPlacementParameters, MapPlacementTransition, MapPreset,
-    MapRecipe, MapSurfaceTagId, MapVisualProfileId, OIL_BARREL_ASSET, PLAYER_SPAWN_ASSET,
-    POWDERLINE_VAULT_ADMISSION_REVISION, POWDERLINE_VAULT_PRESET, PlayerCollision,
-    ProjectileCollision, RED_BRICK_WALL_ASSET, RUBBLE_ASSET, ResolvedHeistSafeAnchor, ResolvedMap,
-    ResolvedMapSnapshot, RestorationPickupDefinition, RestorationPickupDefinitionId,
-    SAND_FLOOR_ASSET, SLOW_TILE_ASSET, SPEED_TILE_ASSET, SWITCHBACK_BASIN_ADMISSION_REVISION,
+    MapFilledRect, MapFootprint, MapGameplayProfile, MapGameplayProfileId, MapHalfCellPoint,
+    MapInteractionBehavior, MapModeAnchorKind, MapModeAnchorPlacement, MapObjectTerminalBehavior,
+    MapPlacementParameterKind, MapPlacementParameters, MapPreset, MapRecipe, MapSurfaceTagId,
+    MapVisualProfileId, OIL_BARREL_ASSET, PLAYER_SPAWN_ASSET, POWDERLINE_VAULT_ADMISSION_REVISION,
+    POWDERLINE_VAULT_PRESET, PlayerCollision, ProjectileCollision, RED_BRICK_WALL_ASSET,
+    RUBBLE_ASSET, RestorationPickupDefinition, RestorationPickupDefinitionId, SAND_FLOOR_ASSET,
+    SLOW_TILE_ASSET, SPEED_TILE_ASSET, SWITCHBACK_BASIN_ADMISSION_REVISION,
     SWITCHBACK_BASIN_PRESET, TALL_GRASS_ASSET, TREASURE_CHEST_ASSET,
     VERDANT_CROSSFIRE_ADMISSION_REVISION, VERDANT_CROSSFIRE_PRESET, WALL_ARENA_ASSET,
     WALL_DUNGEON_ASSET, WATER_ASSET, WIPEOUT_MODE_DEFINITION, WOOD_WALL_ASSET,
-    YELLOW_STRIPED_COVER_ASSET, cardinal_adjacency_mask, circle_overlaps_blocking_map,
-    placement_cells, placement_world_center, resolve_circle_against_blocking_map,
+    YELLOW_STRIPED_COVER_ASSET,
 };
 #[cfg(feature = "client")]
 pub use client::{
@@ -54,6 +55,12 @@ pub use effect_tiles::{
     DAMAGE_TILE_DAMAGE, DAMAGE_TILE_INTERVAL_TICKS, EffectTileKind, EffectTileOccupancy,
     MAX_EFFECT_TILE_PLACEMENTS, MapEffectTileBehavior, ResolvedEffectTile,
     SLOW_TILE_MULTIPLIER_MILLI, SPEED_TILE_MULTIPLIER_MILLI,
+};
+#[cfg(feature = "client")]
+pub(crate) use geometry::effective_projectile_collider;
+pub use geometry::{
+    cardinal_adjacency_mask, circle_overlaps_blocking_map, placement_cells, placement_world_center,
+    resolve_circle_against_blocking_map,
 };
 pub use model::{
     AxisAlignedMapRect, MapInstanceId, MapInstanceMember, MapPlacementId, MapPresentationThemeId,
@@ -84,10 +91,16 @@ pub use pickups::{
 };
 #[cfg(feature = "server")]
 pub use pickups::{PickupOutbox, PickupTelemetry};
+pub use resolution::{ResolvedHeistSafeAnchor, ResolvedMap};
 #[cfg(feature = "server")]
 pub use runtime::{
     DestructibleMapCollider, MapDynamicTelemetry, MapRuntimeSet, install_resolved_map,
     register_map_runtime,
+};
+pub use state::{
+    MapDynamicGeneration, MapDynamicRecoveryRequest, MapDynamicRecoverySnapshot,
+    MapDynamicResetEvent, MapDynamicState, MapMutationEvent, MapPlacementOutcome,
+    MapPlacementTransition, ResolvedMapSnapshot,
 };
 
 #[cfg(feature = "server")]

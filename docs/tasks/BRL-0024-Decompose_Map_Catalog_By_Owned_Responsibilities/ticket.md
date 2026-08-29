@@ -1,14 +1,14 @@
 ---
 id: BRL-0024
 title: Decompose map catalog by owned responsibilities
-status: todo
+status: done
 theme: quality
 release:
 priority: none
 created: 2026-08-28T07:20:42Z
-modified: 2026-08-29T17:12:28Z
-closed:
-revision: 834144607ed5fca1
+modified: 2026-08-29T18:19:50Z
+closed: 2026-08-29T18:19:50Z
+revision: 2ff4417397f41a70
 blocks: []
 related: [BRL-0027]
 ---

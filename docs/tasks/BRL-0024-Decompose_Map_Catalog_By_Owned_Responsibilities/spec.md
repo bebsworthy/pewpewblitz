@@ -127,3 +127,36 @@ A native playtest is not required for a behavior-preserving organization-only ch
 - [ ] Durable documentation is updated only if the refactor reveals or changes an enduring ownership contract; otherwise the ticket records that no documentation change was necessary.
 - [ ] A proportional learn-from-errors review records mistakes, causes, prevention, and reusable lessons, or explicitly records that no material errors occurred.
 - [ ] `ticket sync` completes without conflicts before closeout.
+
+# Closeout evidence
+
+## Implementation
+
+- Baseline revision: `535d3ec`, including accepted BRL-0036 work; unrelated pre-existing edits in `.repowise-workspace.yaml`, `AGENTS.md`, and `data/server/profiles.sqlite3` were preserved.
+- `catalog.rs` now owns authored definitions, loading, catalog validation, and fingerprints; `state.rs` owns shared serialized dynamic/snapshot state; `resolution.rs` owns canonical resolution and resolved facts; `geometry.rs` owns pure spatial/topology rules; focused behavior and exact compatibility tests live outside production modules.
+- `resolve_grid_recipe` is a phase coordinator without a `too_many_lines` allowance. Runtime facts use a named result and separate collider/spawn derivation with an origin lookup rather than repeated placement scans.
+- `src/map/mod.rs` preserves the existing public surface. The external compile characterization passes under both client and server feature graphs.
+- No durable product or architecture documentation changed: this is an internal ownership refactor and the enduring authority/protocol behavior is unchanged. Module documentation now states the new local ownership.
+- No native playtest was required because the exact compatibility, role, network, and performance gates found no behavioral or presentation uncertainty.
+
+## Verification
+
+- Pre-extraction and post-extraction exact compatibility characterization: 2/2 passed for catalog material, all built-in recipe/snapshot/runtime-fact digests, and representative dynamic messages.
+- Focused map behavior suite: 28/28 passed.
+- Public API characterization: passed with `--features server` and `--features client`.
+- `just fmt`: passed.
+- `just check`: passed all client, headless server, routing, network-test, Balance Lab, and web lanes.
+- `just lint`: passed all formatting, Clippy `-D warnings`, feature-graph, and cleanup lanes.
+- `just test`: passed, including 449 client tests, 376 server tests, 90 network scenarios, and 12 performance gates.
+- `git diff --check`: passed.
+
+## Repowise disposition
+
+Repowise was rerun for `catalog.rs`, `state.rs`, `resolution.rs`, `geometry.rs`, `tests.rs`, `compatibility_tests.rs`, and `tests/map_public_api.rs`. The oversized mixed-responsibility catalog and giant resolution coordinator were resolved. Residual findings are intentionally retained: localized authored-rule matrices in `catalog.rs`, Heist/reachability and geometric algorithms in their new owners, data-heavy exact characterization/tests, and historical churn/co-change/duplication signals. Further behavioral simplification or test deduplication is outside this organization-only ticket and would add compatibility risk without a demonstrated ownership benefit.
+
+## Learn from errors
+
+- The first mechanical extraction placed module-boundary text incorrectly and attached a derive to the wrong item. Formatting/compilation immediately exposed it. Prevention: split only at verified syntactic boundaries and compile after each ownership cut.
+- One manually transcribed preset digest was wrong. Running the exact characterization before production moves exposed it. Prevention: capture and verify baseline digests once before extraction and never update them to accommodate refactor output.
+- The first public-API characterization omitted feature-gated exports. Auditing every `pub use` branch and compiling both role graphs corrected it. Prevention: derive API characterizations from all conditional re-export branches, not only the default build.
+- These were ticket-specific execution mistakes, not a recurring workflow gap requiring a new skill.
