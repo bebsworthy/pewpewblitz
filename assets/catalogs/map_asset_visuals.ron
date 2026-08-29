@@ -35,5 +35,8 @@
         (id: MapVisualProfileId(47), kind: Imported(path: "brawler/models/kaykit/block-bits/wood.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Wall, adjacency_group: Wall),
         (id: MapVisualProfileId(48), kind: Imported(path: "brawler/models/kaykit/block-bits/striped-block-yellow.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Cover),
         (id: MapVisualProfileId(49), kind: Imported(path: "brawler/models/kaykit/block-bits/striped-block-green.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 1.0, 1.0), fallback: Cover),
+        (id: MapVisualProfileId(50), kind: GeneratedDecoration, scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (0.16, 0.88, 1.0), fallback: Decoration),
+        (id: MapVisualProfileId(51), kind: GeneratedDecoration, scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (0.56, 0.30, 1.0), fallback: Decoration),
+        (id: MapVisualProfileId(52), kind: GeneratedDecoration, scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 0.12, 0.08), fallback: Decoration),
     ],
 )

@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 11;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 12;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -252,8 +252,8 @@ pub(super) fn load(
         == Some(10)
         && value["snapshot"]["schemaVersion"].as_u64() == Some(15)
     {
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(11);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(16);
         let canonical = serde_json::to_value(&validator.baseline)
             .map_err(|error| format!("canonical Splash migration failed: {error}"))?;
         let weapons = value["snapshot"]["weapons"]
@@ -275,6 +275,17 @@ pub(super) fn load(
             weapons.push(splash);
         }
         weapons.sort_by_key(|weapon| weapon["id"].as_u64().unwrap_or(u64::MAX));
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(11)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(16)
+    {
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["snapshot"]["effectTiles"] = serde_json::to_value(validator.baseline.effect_tiles)
+            .map_err(|error| format!("canonical effect-tile migration failed: {error}"))?;
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -390,6 +401,7 @@ mod tests {
         let (validator, mut snapshot) = fixture();
         snapshot.fighter_profiles.default.maximum_health += 7;
         snapshot.heist.safe_maximum_health = 2_750;
+        snapshot.effect_tiles.damage_per_pulse = 17;
 
         save(&path, &snapshot, BalanceLabRevision(9)).unwrap();
         let loaded = load(&path, &validator).unwrap().unwrap();
@@ -398,6 +410,11 @@ mod tests {
         assert_eq!(
             loaded.builds.fighter_profiles.default.maximum_health,
             snapshot.fighter_profiles.default.maximum_health
+        );
+        assert_eq!(loaded.snapshot.effect_tiles.damage_per_pulse, 17);
+        assert_eq!(
+            super::super::EffectTileTuning::from_catalog(&loaded.maps).unwrap(),
+            snapshot.effect_tiles
         );
 
         clear(&path).unwrap();
@@ -473,6 +490,10 @@ mod tests {
         let loaded = load(&path, &validator).unwrap().unwrap();
         assert_eq!(loaded.revision, BalanceLabRevision(5));
         assert_eq!(loaded.snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(
+            loaded.snapshot.effect_tiles,
+            validator.baseline.effect_tiles
+        );
         assert_eq!(loaded.snapshot.weapons.len(), 7);
         assert!(loaded.snapshot.weapons.iter().any(|weapon| weapon.id == 6));
         assert!(loaded.snapshot.weapons.iter().any(|weapon| weapon.id == 7));

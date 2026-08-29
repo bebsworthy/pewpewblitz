@@ -21,7 +21,7 @@ const sectionHelp: Record<EditorSection, string> = {
   fighters: "Creation profiles shared by saved brawlers.",
   weapons: "Authoritative weapon economy, delivery, payload, and world effects.",
   ultimates: "Concealment and reveal timing, targeting, and area rules.",
-  "world-objects": "Durability, explosions, and restoration pickups.",
+  "world-objects": "Map-owned effect tiles, durability, explosions, and restoration pickups.",
   modes: "Mode-owned objective rules.",
 };
 

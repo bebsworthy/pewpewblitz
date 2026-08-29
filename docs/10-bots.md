@@ -269,6 +269,12 @@ The first planner uses deterministic bounded resumable routing:
   barrel does not become traversable knowledge before its delayed observation, while an unexpected
   authoritative collision may trigger ordinary stuck recovery.
 
+Resolved authored effect tiles add deterministic per-cell traversal costs to this same graph.
+Speed tiles are preferred when the route benefit justifies them, Slow tiles are discouraged, and
+Damage tiles carry the strongest penalty; they are never treated as hard blockers. The weighted
+search retains stable tie-breaking and bounded expansion, and direct-path bypass is disabled when
+the map contains weighted cells so bots cannot silently ignore authored gameplay terrain.
+
 The standard fighter radius is 14 world units. Practice navigation adds one unit of conservative
 safety, so its effective 15-unit clearance still traverses a 32-unit one-cell passage with one
 unit remaining on each side. The allowance must not independently grow until it rejects geometry

@@ -4,7 +4,7 @@ use crate::map::{
 use bevy::prelude::*;
 use std::{
     cmp::{Ordering, Reverse},
-    collections::{BTreeSet, BinaryHeap},
+    collections::{BTreeMap, BTreeSet, BinaryHeap},
 };
 
 const MAX_NAVIGATION_NODES: usize =
@@ -14,6 +14,7 @@ const MAX_NAVIGATION_NODES: usize =
 pub(super) struct BotNavigationSnapshot {
     pub dimensions: MapDimensions,
     pub(super) blocked: BTreeSet<u32>,
+    pub(super) terrain_cost_milli: BTreeMap<u32, u16>,
 }
 
 #[derive(Clone, Debug)]
@@ -68,9 +69,24 @@ impl BotNavigationSnapshot {
                 }
             }
         }
+        let terrain_cost_milli = map
+            .effect_tiles
+            .iter()
+            .map(|tile| {
+                let cost = match tile.behavior {
+                    crate::map::MapEffectTileBehavior::Speed { .. } => 800,
+                    crate::map::MapEffectTileBehavior::Slow { .. } => 1_429,
+                    crate::map::MapEffectTileBehavior::Damage { .. } => 2_000,
+                    crate::map::MapEffectTileBehavior::None => 1_000,
+                };
+                (index(dimensions, tile.cell.x, tile.cell.y), cost)
+            })
+            .filter(|(_, cost)| *cost != 1_000)
+            .collect();
         Some(Self {
             dimensions,
             blocked,
+            terrain_cost_milli,
         })
     }
 
@@ -110,7 +126,7 @@ impl BotNavigationSnapshot {
             return None;
         }
         let goal = self.clamp_goal(goal);
-        if self.line_clear(start, goal, dynamic_blockers) {
+        if self.terrain_cost_milli.is_empty() && self.line_clear(start, goal, dynamic_blockers) {
             return Some(BotRouteStart::Complete(vec![goal]));
         }
         let start_cell = self.world_to_cell(start)?;
@@ -322,14 +338,30 @@ impl BotRouteSearch {
                 {
                     continue;
                 }
-                let next_cost = current.cost.saturating_add(step_cost);
+                let terrain_cost = u32::from(
+                    navigation
+                        .terrain_cost_milli
+                        .get(&next)
+                        .copied()
+                        .unwrap_or(1_000),
+                );
+                let next_cost = current
+                    .cost
+                    .saturating_add(step_cost.saturating_mul(terrain_cost) / 1_000);
                 if next_cost >= self.costs[next as usize] {
                     continue;
                 }
                 self.costs[next as usize] = next_cost;
                 self.parents[next as usize] = current.index;
+                let heuristic_scale = if navigation.terrain_cost_milli.is_empty() {
+                    1_000
+                } else {
+                    800
+                };
                 self.open.push(Reverse(OpenNode {
-                    estimate: next_cost.saturating_add(heuristic((nx, ny), self.goal_cell)),
+                    estimate: next_cost.saturating_add(
+                        heuristic((nx, ny), self.goal_cell).saturating_mul(heuristic_scale) / 1_000,
+                    ),
                     cost: next_cost,
                     index: next,
                 }));

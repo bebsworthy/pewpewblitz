@@ -1,5 +1,5 @@
 (
-    schema_version: 6,
+    schema_version: 7,
     assets: [
         (
             id: MapAssetId(1), key: "ground", display_name: "Ground", slot: Surface,
@@ -221,6 +221,27 @@
         (
             id: MapAssetId(34), key: "striped-cover-green", display_name: "Green Striped Cover", slot: Feature,
             gameplay_profile_id: MapGameplayProfileId(3), visual_profile_id: MapVisualProfileId(49),
+            footprint_cells: (width: 1, height: 1),
+            allowed_quarter_turns: 15, surface_tag: None,
+            allowed_surface_tags: [MapSurfaceTagId(1), MapSurfaceTagId(2)], parameter_kind: None,
+        ),
+        (
+            id: MapAssetId(35), key: "effect-tile-speed", display_name: "Speed Tile", slot: Feature,
+            gameplay_profile_id: MapGameplayProfileId(11), visual_profile_id: MapVisualProfileId(50),
+            footprint_cells: (width: 1, height: 1),
+            allowed_quarter_turns: 15, surface_tag: None,
+            allowed_surface_tags: [MapSurfaceTagId(1), MapSurfaceTagId(2)], parameter_kind: None,
+        ),
+        (
+            id: MapAssetId(36), key: "effect-tile-slow", display_name: "Slow Tile", slot: Feature,
+            gameplay_profile_id: MapGameplayProfileId(12), visual_profile_id: MapVisualProfileId(51),
+            footprint_cells: (width: 1, height: 1),
+            allowed_quarter_turns: 15, surface_tag: None,
+            allowed_surface_tags: [MapSurfaceTagId(1), MapSurfaceTagId(2)], parameter_kind: None,
+        ),
+        (
+            id: MapAssetId(37), key: "effect-tile-damage", display_name: "Damage Tile", slot: Feature,
+            gameplay_profile_id: MapGameplayProfileId(13), visual_profile_id: MapVisualProfileId(52),
             footprint_cells: (width: 1, height: 1),
             allowed_quarter_turns: 15, surface_tag: None,
             allowed_surface_tags: [MapSurfaceTagId(1), MapSurfaceTagId(2)], parameter_kind: None,

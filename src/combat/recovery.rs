@@ -42,11 +42,14 @@ pub(super) fn restore_attack_idle_health(
             &mut HealthRecoveryState,
             &ActiveEffects,
             Option<&MatchParticipant>,
+            Option<&crate::map::EffectTileOccupancy>,
         ),
         (With<Fighter>, Without<Defeated>),
     >,
 ) {
-    for (entity, loadout, mut health, mut recovery, effects, participant) in &mut fighters {
+    for (entity, loadout, mut health, mut recovery, effects, participant, effect_tile) in
+        &mut fighters
+    {
         if participant.is_some() && !active.contains(entity) {
             recovery.recovery_remainder = 0;
             continue;
@@ -61,6 +64,10 @@ pub(super) fn restore_attack_idle_health(
             continue;
         }
         if effects.is_poisoned(tick.0) {
+            recovery.recovery_remainder = 0;
+            continue;
+        }
+        if effect_tile.is_some_and(crate::map::EffectTileOccupancy::blocks_healing) {
             recovery.recovery_remainder = 0;
             continue;
         }

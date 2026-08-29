@@ -73,6 +73,11 @@ pub fn register_map_runtime(app: &mut App) {
         )
         .add_systems(
             FixedPostUpdate,
+            effect_tiles::apply_damage_tile_pulses
+                .in_set(crate::combat::CombatDamageSet::EnvironmentReactions),
+        )
+        .add_systems(
+            FixedPostUpdate,
             publish_map_dynamic_traffic.in_set(MapRuntimeSet::Publish),
         )
         .add_systems(
@@ -89,10 +94,12 @@ pub fn register_map_runtime(app: &mut App) {
         )
         .add_systems(Update, receive_map_recovery_requests);
     super::pickups::register_pickup_runtime(app);
+    effect_tiles::register(app);
     crate::matchplay::register_environment_reset_system(app, reset_map_on_match_restart);
 }
 
 mod dynamics;
+pub(super) mod effect_tiles;
 mod installation;
 mod object_authority;
 #[cfg(test)]

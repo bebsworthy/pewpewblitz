@@ -324,6 +324,63 @@ None
 PlayerSpawn
 ```
 
+### Authored effect tiles
+
+An effect tile is a one-cell, non-colliding `Feature` asset. Its shared gameplay profile—not the
+recipe or client visual—selects exactly one supported behavior:
+
+```text
+Speed:  movement multiplier 1250 milli
+Slow:   movement multiplier 700 milli
+Damage: 10 neutral damage every 30 simulation ticks after a full first interval
+```
+
+There is no `Heal` effect-tile behavior or Heal Tile asset. Restoration Field and restoration
+pickups are separate combat/map systems. A future healing tile requires its own authored behavior,
+authority rule, validation, replication evidence, and presentation rather than reusing one of the
+three current identities by convention.
+
+The resolver derives a bounded `ResolvedEffectTile` index from ordinary placements. Each entry
+retains the stable placement ID, grid cell, and complete authored behavior. During an active match,
+the server converts each living active fighter's center position to one half-open grid cell after
+input processing and before simulation. It inserts or removes one replicated
+`EffectTileOccupancy` carrying the current map generation, placement, kind, entry tick, and optional
+damage-pulse deadline. Consequently, crossing a tile boundary becomes authoritative on the next
+fixed-tick occupancy pass; presentation never decides whether a fighter is inside.
+
+Speed and Slow multiply only ordinary player-driven movement. The composition is:
+
+```text
+ordinary velocity = input direction
+                  × resolved fighter speed
+                  × active combat-Slow multiplier
+                  × effect-tile multiplier
+                  × Adrenaline multiplier
+
+final velocity = ordinary velocity + unmodified ExternalMotion
+```
+
+Dash, knockback, and other external motion therefore remain unaffected. There is currently no
+implemented combined-multiplier clamp. The production movement path presently reads the canonical
+`1.250` Speed and `0.700` Slow constants from the effect-tile module rather than reading the
+authored values retained by `ResolvedEffectTile`. Balance Lab can validate and persist different
+Speed/Slow values, but those edits do not yet alter authoritative movement. This is an open
+BRL-0036 wiring gap, not an intended operator contract.
+
+Damage occupancy schedules its first pulse one complete authored interval after entry. Due pulses
+run in the combat environment-reaction phase, read damage and interval from the resolved authored
+behavior, respect spawn protection, and emit ordinary neutral-environment damage/defeat facts,
+cues, attribution, and telemetry. Each pulse reschedules from the current tick, so a delayed worker
+cannot produce catch-up bursts. While Damage occupancy is present, it also suppresses every
+server-owned positive-health gameplay path: idle recovery, healing payloads, Restoration Field,
+and restoration-pickup collection. A blocked pickup remains available unless its ordinary expiry
+is due, and no successful healing/collection fact or cue is emitted. Speed and Slow occupancy do
+not suppress healing.
+
+`EffectTileOccupancy` is replicated from server to clients. Clients use its kind to display the
+matching affected-fighter ground ring; placed tiles use their asset visual profiles. Both are
+presentation only and cannot apply movement, damage, or healing rules.
+
 Only behavior completed by an accepted milestone may be present in the production catalog. Spawn placement
 parameters contain team slot, stable spawn ordinal, and facing quarter-turn. Teleporter placement
 parameters remain a candidate rather than a current enum value. A teleporter behavior is not

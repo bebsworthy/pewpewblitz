@@ -154,7 +154,7 @@ pub(super) fn required_payload_event_count(
         {
             continue;
         }
-        let Some((target_network_id, target_team, health, defeated, target_kind)) =
+        let Some((target_network_id, target_team, health, defeated, target_kind, healing_blocked)) =
             planned_targets.get_mut(&record.target)
         else {
             continue;
@@ -210,7 +210,10 @@ pub(super) fn required_payload_event_count(
                 | PayloadEffectDefinition::Heal { .. }
                     if !*defeated =>
                 {
-                    1
+                    usize::from(
+                        !matches!(effect, PayloadEffectDefinition::Heal { .. })
+                            || !*healing_blocked,
+                    )
                 }
                 PayloadEffectDefinition::Knockback { .. }
                 | PayloadEffectDefinition::Slow { .. }

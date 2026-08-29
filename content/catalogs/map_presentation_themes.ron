@@ -1,5 +1,5 @@
 (
-    schema_version: 6,
+    schema_version: 7,
     themes: [
         (id: MapPresentationThemeId(1), key: "crossroads-facility"),
         (id: MapPresentationThemeId(2), key: "tidal-garden"),

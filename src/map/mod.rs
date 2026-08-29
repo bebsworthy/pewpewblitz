@@ -3,6 +3,7 @@
 mod catalog;
 #[cfg(feature = "client")]
 mod client;
+mod effect_tiles;
 mod model;
 mod objects;
 mod pickups;
@@ -16,27 +17,28 @@ pub(crate) use catalog::effective_projectile_collider;
 pub use catalog::{
     ASHEN_COURT_ADMISSION_REVISION, ASHEN_COURT_PRESET, ASHEN_PINE_ASSET, ASHEN_ROCK_ASSET,
     ASHEN_WALL_ASSET, BARREL_WOOD_DEBRIS_ASSET, BREAKABLE_BARRIER_ASSET, CACTUS_ASSET,
-    COFFIN_DECORATION_ASSET, DESTRUCTIBLE_COVER_ASSET, EnvironmentExplosionProfile,
-    EnvironmentExplosionProfileId, FEATURE_YARD_HEIST_ADMISSION_REVISION,
-    FEATURE_YARD_HEIST_PRESET, FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION,
-    FEATURE_YARD_HOT_ZONE_PRESET, FEATURE_YARD_WIPEOUT_ADMISSION_REVISION,
-    FEATURE_YARD_WIPEOUT_PRESET, GARDEN_WALL_ASSET, GRAVESTONE_DECORATION_ASSET,
-    GREEN_STRIPED_COVER_ASSET, GREEN_SYMBOL_WALL_ASSET, GROUND_ASSET, HEIST_MODE_DEFINITION,
-    HEIST_SAFE_VISUAL_PROFILE, HOT_ZONE_MODE_DEFINITION, LANTERN_DECORATION_ASSET,
-    MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MAX_MAP_DIMENSION_CELLS, METAL_WALL_ASSET,
-    MapAssetDefinition, MapAssetId, MapAssetPlacement, MapAssetSlot, MapCatalogResource, MapCell,
-    MapColliderShape, MapConcealmentBehavior, MapContentCatalog, MapContentPlugin,
-    MapDamageProfile, MapDamageProfileId, MapDestructionBehavior, MapDimensionLimits,
-    MapDimensions, MapDurabilityBehavior, MapDynamicGeneration, MapDynamicRecoveryRequest,
-    MapDynamicRecoverySnapshot, MapDynamicResetEvent, MapDynamicState, MapFilledRect, MapFootprint,
-    MapGameplayProfile, MapGameplayProfileId, MapHalfCellPoint, MapInteractionBehavior,
-    MapModeAnchorKind, MapModeAnchorPlacement, MapMutationEvent, MapObjectTerminalBehavior,
-    MapPlacementOutcome, MapPlacementParameterKind, MapPlacementParameters, MapPlacementTransition,
-    MapPreset, MapRecipe, MapSurfaceTagId, MapVisualProfileId, OIL_BARREL_ASSET,
-    PLAYER_SPAWN_ASSET, POWDERLINE_VAULT_ADMISSION_REVISION, POWDERLINE_VAULT_PRESET,
-    PlayerCollision, ProjectileCollision, RED_BRICK_WALL_ASSET, RUBBLE_ASSET,
-    ResolvedHeistSafeAnchor, ResolvedMap, ResolvedMapSnapshot, RestorationPickupDefinition,
-    RestorationPickupDefinitionId, SAND_FLOOR_ASSET, SWITCHBACK_BASIN_ADMISSION_REVISION,
+    COFFIN_DECORATION_ASSET, DAMAGE_TILE_ASSET, DESTRUCTIBLE_COVER_ASSET,
+    EnvironmentExplosionProfile, EnvironmentExplosionProfileId,
+    FEATURE_YARD_HEIST_ADMISSION_REVISION, FEATURE_YARD_HEIST_PRESET,
+    FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION, FEATURE_YARD_HOT_ZONE_PRESET,
+    FEATURE_YARD_WIPEOUT_ADMISSION_REVISION, FEATURE_YARD_WIPEOUT_PRESET, GARDEN_WALL_ASSET,
+    GRAVESTONE_DECORATION_ASSET, GREEN_STRIPED_COVER_ASSET, GREEN_SYMBOL_WALL_ASSET, GROUND_ASSET,
+    HEIST_MODE_DEFINITION, HEIST_SAFE_VISUAL_PROFILE, HOT_ZONE_MODE_DEFINITION,
+    LANTERN_DECORATION_ASSET, MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION,
+    MAX_MAP_DIMENSION_CELLS, METAL_WALL_ASSET, MapAssetDefinition, MapAssetId, MapAssetPlacement,
+    MapAssetSlot, MapCatalogResource, MapCell, MapColliderShape, MapConcealmentBehavior,
+    MapContentCatalog, MapContentPlugin, MapDamageProfile, MapDamageProfileId,
+    MapDestructionBehavior, MapDimensionLimits, MapDimensions, MapDurabilityBehavior,
+    MapDynamicGeneration, MapDynamicRecoveryRequest, MapDynamicRecoverySnapshot,
+    MapDynamicResetEvent, MapDynamicState, MapFilledRect, MapFootprint, MapGameplayProfile,
+    MapGameplayProfileId, MapHalfCellPoint, MapInteractionBehavior, MapModeAnchorKind,
+    MapModeAnchorPlacement, MapMutationEvent, MapObjectTerminalBehavior, MapPlacementOutcome,
+    MapPlacementParameterKind, MapPlacementParameters, MapPlacementTransition, MapPreset,
+    MapRecipe, MapSurfaceTagId, MapVisualProfileId, OIL_BARREL_ASSET, PLAYER_SPAWN_ASSET,
+    POWDERLINE_VAULT_ADMISSION_REVISION, POWDERLINE_VAULT_PRESET, PlayerCollision,
+    ProjectileCollision, RED_BRICK_WALL_ASSET, RUBBLE_ASSET, ResolvedHeistSafeAnchor, ResolvedMap,
+    ResolvedMapSnapshot, RestorationPickupDefinition, RestorationPickupDefinitionId,
+    SAND_FLOOR_ASSET, SLOW_TILE_ASSET, SPEED_TILE_ASSET, SWITCHBACK_BASIN_ADMISSION_REVISION,
     SWITCHBACK_BASIN_PRESET, TALL_GRASS_ASSET, TREASURE_CHEST_ASSET,
     VERDANT_CROSSFIRE_ADMISSION_REVISION, VERDANT_CROSSFIRE_PRESET, WALL_ARENA_ASSET,
     WALL_DUNGEON_ASSET, WATER_ASSET, WIPEOUT_MODE_DEFINITION, WOOD_WALL_ASSET,
@@ -47,6 +49,11 @@ pub use catalog::{
 pub use client::{
     ClientMapPlugin, ClientMapReadiness, ClientWorldObjectReadiness, MapPresentationMember,
     MapPresentationPlugin, MapPresentationSet, PresentedMap, perimeter_visual_shapes,
+};
+pub use effect_tiles::{
+    DAMAGE_TILE_DAMAGE, DAMAGE_TILE_INTERVAL_TICKS, EffectTileKind, EffectTileOccupancy,
+    MAX_EFFECT_TILE_PLACEMENTS, MapEffectTileBehavior, ResolvedEffectTile,
+    SLOW_TILE_MULTIPLIER_MILLI, SPEED_TILE_MULTIPLIER_MILLI,
 };
 pub use model::{
     AxisAlignedMapRect, MapInstanceId, MapInstanceMember, MapPlacementId, MapPresentationThemeId,

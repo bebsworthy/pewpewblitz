@@ -62,7 +62,7 @@ impl AllocationPolicy {
     #[must_use]
     pub const fn brawler_m01_with_rules_profile(rules_profile: u8) -> Self {
         Self::new(
-            ModeAllocationPolicy::new(7, 2, rules_profile),
+            ModeAllocationPolicy::new(7, 5, rules_profile),
             ModeAllocationPolicy::new(8, 2, rules_profile),
             ModeAllocationPolicy::new(9, 2, rules_profile),
             1_000,

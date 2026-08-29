@@ -1659,6 +1659,10 @@ fn materialize_map_static_visuals(
             spawn_map_grass(
                 commands, primitives, materials, marker, center, rotation, adjacency,
             );
+        } else if let Some(material) =
+            effect_tile_material(placement.asset_id, presentation_materials)
+        {
+            spawn_effect_tile(commands, primitives, marker, center, material);
         } else if asset.slot == crate::map::MapAssetSlot::Feature {
             commands.spawn((
                 marker,
@@ -1697,6 +1701,39 @@ fn materialize_map_static_visuals(
         snapshot.dimensions.bounds(),
     );
     materialize_hot_zone_objective(commands, meshes, presentation_materials, marker, snapshot);
+}
+
+fn effect_tile_material(
+    asset_id: crate::map::MapAssetId,
+    materials: &Material3dAssets,
+) -> Option<Handle<StandardMaterial>> {
+    match asset_id {
+        crate::map::SPEED_TILE_ASSET => Some(materials.dash.clone()),
+        crate::map::SLOW_TILE_ASSET => Some(materials.status_slow.clone()),
+        crate::map::DAMAGE_TILE_ASSET => Some(materials.effect_damage.clone()),
+        _ => None,
+    }
+}
+
+fn spawn_effect_tile(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    marker: crate::map::MapPresentationMember,
+    center: Vec2,
+    material: Handle<StandardMaterial>,
+) {
+    commands.spawn((
+        marker,
+        Mesh3d(primitives.unit_cuboid.clone()),
+        MeshMaterial3d(material),
+        NotShadowCaster,
+        Transform {
+            translation: ground_position(center) + Vec3::Y * 1.0,
+            rotation: Quat::IDENTITY,
+            scale: Vec3::new(28.0, 1.0, 28.0),
+        },
+        Name::new("authored gameplay effect tile"),
+    ));
 }
 
 fn spawn_imported_map_asset(

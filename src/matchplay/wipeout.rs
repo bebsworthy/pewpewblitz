@@ -73,13 +73,23 @@ mod rules {
         protocol::{Fighter, NetworkEntityId},
         timing::SimulationTick,
     };
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const RECENT_HOSTILE_DAMAGE_CREDIT_TICKS: u64 = 300;
+
+    #[derive(Clone, Copy, Debug)]
+    struct RecentHostileDamageCredit {
+        source_network_id: NetworkEntityId,
+        source_team: TeamId,
+        expires_at_tick: u64,
+    }
 
     /// Bounded per-match scored-event identity set so duplicate combat facts cannot score twice.
     #[derive(Resource, Default, Debug)]
     pub(crate) struct ScoredCombatEvents {
         pub(crate) match_id: Option<crate::matchplay::MatchId>,
         pub(crate) ids: BTreeSet<u64>,
+        recent_hostile_damage: BTreeMap<NetworkEntityId, RecentHostileDamageCredit>,
     }
 
     pub struct WipeoutModePlugin;
@@ -182,6 +192,7 @@ mod rules {
         };
         wipeout.team_scores = [0, 0];
         scored_events.ids.clear();
+        scored_events.recent_hostile_damage.clear();
         scored_events.match_id = None;
     }
 
@@ -210,10 +221,23 @@ mod rules {
         if scored_events.match_id != Some(state.match_id) {
             scored_events.match_id = Some(state.match_id);
             scored_events.ids.clear();
+            scored_events.recent_hostile_damage.clear();
         }
+        scored_events
+            .recent_hostile_damage
+            .retain(|_, credit| tick.0 <= credit.expires_at_tick);
         for fact in &facts.0 {
             if fact.tick != tick.0 {
                 diagnostics.stale_tick = diagnostics.stale_tick.saturating_add(1);
+                continue;
+            }
+            if matches!(fact.kind, CombatOutcomeKind::Damage { amount } if amount > 0) {
+                remember_recent_hostile_damage(
+                    fact,
+                    state.match_id,
+                    &participants,
+                    &mut scored_events.recent_hostile_damage,
+                );
                 continue;
             }
             if !matches!(fact.kind, CombatOutcomeKind::Defeat) {
@@ -237,7 +261,27 @@ mod rules {
                     diagnostics.unknown_or_wrong_match_target.saturating_add(1);
                 continue;
             }
-            if let Some(source_team) = credited_defeat_team(fact, *target_team) {
+            let recent_credit = scored_events
+                .recent_hostile_damage
+                .remove(&fact.target_network_id)
+                .filter(|credit| tick.0 <= credit.expires_at_tick);
+            let credited_team = credited_defeat_team_with_recent(
+                fact,
+                *target_team,
+                recent_credit.map(|credit| (credit.source_team, credit.expires_at_tick)),
+                tick.0,
+            );
+            if fact.source_team.is_none()
+                && let Some(credit) =
+                    recent_credit.filter(|credit| tick.0 <= credit.expires_at_tick)
+            {
+                debug!(
+                    target = fact.target_network_id.0,
+                    source = credit.source_network_id.0,
+                    "credited neutral environment defeat to recent hostile damager"
+                );
+            }
+            if let Some(source_team) = credited_team {
                 let index = usize::from(source_team.0);
                 wipeout.team_scores[index] = wipeout.team_scores[index].saturating_add(1);
             } else if fact
@@ -269,6 +313,42 @@ mod rules {
         }
     }
 
+    fn remember_recent_hostile_damage(
+        fact: &crate::combat::CombatOutcomeFact,
+        match_id: crate::matchplay::MatchId,
+        participants: &Query<(&NetworkEntityId, &TeamId, &MatchParticipantView), With<Fighter>>,
+        credits: &mut BTreeMap<NetworkEntityId, RecentHostileDamageCredit>,
+    ) {
+        let (Some(source_network_id), Some(source_team)) =
+            (fact.source_network_id, fact.source_team)
+        else {
+            return;
+        };
+        if source_network_id == fact.target_network_id || source_team == fact.target_team {
+            return;
+        }
+        let source_is_current = participants.iter().any(|(network_id, team, participant)| {
+            *network_id == source_network_id
+                && *team == source_team
+                && participant.match_id == match_id
+        });
+        let target_is_current = participants.iter().any(|(network_id, team, participant)| {
+            *network_id == fact.target_network_id
+                && *team == fact.target_team
+                && participant.match_id == match_id
+        });
+        if source_is_current && target_is_current {
+            credits.insert(
+                fact.target_network_id,
+                RecentHostileDamageCredit {
+                    source_network_id,
+                    source_team,
+                    expires_at_tick: fact.tick.saturating_add(RECENT_HOSTILE_DAMAGE_CREDIT_TICKS),
+                },
+            );
+        }
+    }
+
     pub(crate) fn credited_defeat_team(
         fact: &crate::combat::CombatOutcomeFact,
         target_team: TeamId,
@@ -280,6 +360,22 @@ mod rules {
         .then_some(source_team)
     }
 
+    pub(crate) fn credited_defeat_team_with_recent(
+        fact: &crate::combat::CombatOutcomeFact,
+        target_team: TeamId,
+        recent: Option<(TeamId, u64)>,
+        tick: u64,
+    ) -> Option<TeamId> {
+        credited_defeat_team(fact, target_team).or_else(|| {
+            let (team, expires_at_tick) = recent?;
+            (fact.source_team.is_none()
+                && team.0 <= 1
+                && team != target_team
+                && tick <= expires_at_tick)
+                .then_some(team)
+        })
+    }
+
     /// View alias avoiding a second import of the shared participant component.
     type MatchParticipantView = crate::matchplay::MatchParticipant;
 }
@@ -287,7 +383,7 @@ mod rules {
 #[cfg(feature = "server")]
 pub use rules::WipeoutModePlugin;
 #[cfg(all(feature = "server", test))]
-pub(crate) use rules::credited_defeat_team;
+pub(crate) use rules::{credited_defeat_team, credited_defeat_team_with_recent};
 
 #[cfg(test)]
 mod tests {

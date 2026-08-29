@@ -17,6 +17,8 @@ pub(crate) mod definitions;
 pub(crate) mod delivery;
 #[cfg(feature = "server")]
 pub(crate) mod effects;
+#[cfg(feature = "server")]
+pub(crate) mod environment;
 pub(crate) mod evidence;
 #[cfg(feature = "server")]
 pub(crate) mod fields;

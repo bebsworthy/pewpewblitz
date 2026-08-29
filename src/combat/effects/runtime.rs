@@ -100,7 +100,7 @@ pub(crate) fn requested_damage(
 }
 
 #[cfg(feature = "server")]
-pub(super) type PlannedTarget = (NetworkEntityId, TeamId, u16, bool, CombatTargetKind);
+pub(super) type PlannedTarget = (NetworkEntityId, TeamId, u16, bool, CombatTargetKind, bool);
 
 #[cfg(feature = "server")]
 pub(super) const fn combat_source_allows_target(

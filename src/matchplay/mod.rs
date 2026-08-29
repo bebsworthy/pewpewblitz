@@ -70,11 +70,11 @@ pub use telemetry::{
 };
 #[cfg(feature = "server")]
 pub use wipeout::WipeoutModePlugin;
-#[cfg(all(feature = "server", test))]
-pub(crate) use wipeout::credited_defeat_team;
 pub use wipeout::{
     WIPEOUT_RULES_REVISION, WipeoutRules, WipeoutState, score_result, timeout_result,
 };
+#[cfg(all(feature = "server", test))]
+pub(crate) use wipeout::{credited_defeat_team, credited_defeat_team_with_recent};
 
 #[cfg(feature = "server")]
 #[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

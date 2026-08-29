@@ -55,6 +55,8 @@ The supported recipe model expresses:
 - profile-derived player/projectile collision, including footprint rectangles and bounded circles;
 - explicit whole-cell destructible placements and optional replacement assets;
 - parameterized player-spawn marker assets and team slots;
+- one-cell non-colliding effect-tile features whose approved profiles supply Speed, Slow, or
+  periodic neutral Damage behavior;
 - the compatible mode definition;
 - typed mode-required anchors, currently the half-cell-precision Hot Zone circle and two
   cell-aligned team-owned Heist objective anchors.
@@ -99,6 +101,21 @@ slot may occupy a cell, so a maximum-size map admits up to 1,048,576 total place
 concealing feature may occupy each of its 262,144 cells. The resolved snapshot ceiling is 32 MiB.
 Damageable objects and other mutable families keep smaller independent bounds, and admission at
 the structural maximum is not a performance claim for the current per-placement renderer.
+Effect-tile placements have their own 4,096-placement ceiling. They may not overlap a spawn, and a
+Damage tile may not occupy a cell adjacent to one. Occupancy uses the fighter center and half-open
+cell bounds so one fighter resolves to at most one tile. The supported authored identities are
+Speed, Slow, and Damage; there is no Heal tile. The server derives occupancy before fixed-tick
+simulation and replicates that fact for presentation. Speed and Slow multiply ordinary
+player-driven movement without modifying Dash, knockback, or other external motion. Damage begins
+pulsing only after a complete first interval and blocks passive recovery, healing payloads,
+Restoration Field, and restoration-pickup collection until the fighter exits; blocked pickups are
+not consumed unless their ordinary expiry is due. Speed and Slow occupancy do not block healing.
+
+The resolved map retains each tile's complete authored behavior. Damage amount and interval are
+read from that resolved behavior at runtime. The current Speed/Slow movement path instead reads the
+canonical `1.250`/`0.700` constants; although Balance Lab validates and persists alternative
+multipliers, they are not yet consumed by authoritative movement. BRL-0036 remains open for that
+wiring correction.
 
 Resolution produces an immutable `ResolvedMap` and contributes to a
 `ResolvedMatchComposition`. Mutable runtime state never flows back into the authored recipe. A map
@@ -139,6 +156,8 @@ The authoritative map runtime owns:
 - terminal destruction/replacement outcomes, colliders, revisions, and rebuild work;
 - live damageable environment-object identity, partial health, exact-once barrel/chest terminal
   behavior, and restoration-pickup lifecycle;
+- current effect-tile occupancy, full-interval periodic damage deadlines, and neutral environment
+  damage transactions through the ordinary combat outcome path;
 - installation, reset, recovery, and teardown of those map-owned facts.
 
 The authoritative mode runtime owns:
@@ -246,6 +265,11 @@ exactly two teams or use one advertised topology as an engine-wide ceiling.
 Wipeout is a team elimination-score mode. An enemy defeat grants a point; the first team to the
 target wins, or the leading team wins when time expires. Fighters normally re-enter after a
 server-owned respawn delay.
+
+A neutral environment defeat, including a Damage tile pulse, credits the most recent qualifying
+hostile fighter that damaged the target within 300 simulation ticks. This bounded memory is owned
+by the active Wipeout match; direct hostile attribution takes precedence, and self, allied, stale,
+wrong-match, or absent sources never earn credit.
 
 Its map schema requires compatible team spawns and safe re-entry space but no objective geometry.
 Its runtime owns scores, timeout resolution, respawn policy, victory, and the match summary.

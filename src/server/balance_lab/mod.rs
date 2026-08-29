@@ -37,7 +37,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 16;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 17;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -101,6 +101,147 @@ struct ChestTuning {
     pickup_definition: crate::map::RestorationPickupDefinition,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct EffectTileTuning {
+    speed_multiplier_milli: u16,
+    slow_multiplier_milli: u16,
+    damage_per_pulse: u16,
+    interval_ticks: u16,
+}
+
+impl EffectTileTuning {
+    const MIN_SPEED_MULTIPLIER_MILLI: u16 = 1_001;
+    const MAX_SPEED_MULTIPLIER_MILLI: u16 = 2_000;
+    const MIN_SLOW_MULTIPLIER_MILLI: u16 = 100;
+    const MAX_SLOW_MULTIPLIER_MILLI: u16 = 999;
+    const MIN_DAMAGE_PER_PULSE: u16 = 1;
+    const MAX_DAMAGE_PER_PULSE: u16 = 100;
+    const MIN_INTERVAL_TICKS: u16 = 6;
+    const MAX_INTERVAL_TICKS: u16 = 600;
+
+    fn from_catalog(maps: &crate::map::MapContentCatalog) -> Result<Self, String> {
+        let speed = unique_effect_tile_behavior(maps, crate::map::EffectTileKind::Speed)?;
+        let slow = unique_effect_tile_behavior(maps, crate::map::EffectTileKind::Slow)?;
+        let damage = unique_effect_tile_behavior(maps, crate::map::EffectTileKind::Damage)?;
+        let crate::map::MapEffectTileBehavior::Speed {
+            movement_multiplier_milli: speed_multiplier_milli,
+        } = speed
+        else {
+            return Err("Speed effect-tile profile changed behavior variant".into());
+        };
+        let crate::map::MapEffectTileBehavior::Slow {
+            movement_multiplier_milli: slow_multiplier_milli,
+        } = slow
+        else {
+            return Err("Slow effect-tile profile changed behavior variant".into());
+        };
+        let crate::map::MapEffectTileBehavior::Damage {
+            damage: damage_per_pulse,
+            interval_ticks,
+        } = damage
+        else {
+            return Err("Damage effect-tile profile changed behavior variant".into());
+        };
+        Ok(Self {
+            speed_multiplier_milli,
+            slow_multiplier_milli,
+            damage_per_pulse,
+            interval_ticks,
+        })
+    }
+
+    fn validate(self) -> Result<(), String> {
+        if !(Self::MIN_SPEED_MULTIPLIER_MILLI..=Self::MAX_SPEED_MULTIPLIER_MILLI)
+            .contains(&self.speed_multiplier_milli)
+        {
+            return Err(
+                "field /effectTiles/speedMultiplierMilli: must be within 1.001..=2.000".into(),
+            );
+        }
+        if !(Self::MIN_SLOW_MULTIPLIER_MILLI..=Self::MAX_SLOW_MULTIPLIER_MILLI)
+            .contains(&self.slow_multiplier_milli)
+        {
+            return Err(
+                "field /effectTiles/slowMultiplierMilli: must be within 0.100..=0.999".into(),
+            );
+        }
+        if !(Self::MIN_DAMAGE_PER_PULSE..=Self::MAX_DAMAGE_PER_PULSE)
+            .contains(&self.damage_per_pulse)
+        {
+            return Err("field /effectTiles/damagePerPulse: must be within 1..=100 health".into());
+        }
+        if !(Self::MIN_INTERVAL_TICKS..=Self::MAX_INTERVAL_TICKS).contains(&self.interval_ticks) {
+            return Err(
+                "field /effectTiles/intervalTicks: must be within 0.1..=10.0 seconds".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn install(self, maps: &mut crate::map::MapContentCatalog) -> Result<(), String> {
+        replace_effect_tile_behavior(
+            maps,
+            crate::map::EffectTileKind::Speed,
+            crate::map::MapEffectTileBehavior::Speed {
+                movement_multiplier_milli: self.speed_multiplier_milli,
+            },
+        )?;
+        replace_effect_tile_behavior(
+            maps,
+            crate::map::EffectTileKind::Slow,
+            crate::map::MapEffectTileBehavior::Slow {
+                movement_multiplier_milli: self.slow_multiplier_milli,
+            },
+        )?;
+        replace_effect_tile_behavior(
+            maps,
+            crate::map::EffectTileKind::Damage,
+            crate::map::MapEffectTileBehavior::Damage {
+                damage: self.damage_per_pulse,
+                interval_ticks: self.interval_ticks,
+            },
+        )
+    }
+}
+
+fn unique_effect_tile_behavior(
+    maps: &crate::map::MapContentCatalog,
+    kind: crate::map::EffectTileKind,
+) -> Result<crate::map::MapEffectTileBehavior, String> {
+    let mut matching = maps
+        .gameplay_profiles
+        .iter()
+        .filter(|profile| profile.effect_tile.kind() == Some(kind));
+    let behavior = matching
+        .next()
+        .map(|profile| profile.effect_tile)
+        .ok_or_else(|| format!("{kind:?} effect-tile profile is missing"))?;
+    if matching.next().is_some() {
+        return Err(format!("{kind:?} effect-tile profile is not unique"));
+    }
+    Ok(behavior)
+}
+
+fn replace_effect_tile_behavior(
+    maps: &mut crate::map::MapContentCatalog,
+    kind: crate::map::EffectTileKind,
+    behavior: crate::map::MapEffectTileBehavior,
+) -> Result<(), String> {
+    let mut matching = maps
+        .gameplay_profiles
+        .iter_mut()
+        .filter(|profile| profile.effect_tile.kind() == Some(kind));
+    let profile = matching
+        .next()
+        .ok_or_else(|| format!("{kind:?} effect-tile profile is missing"))?;
+    profile.effect_tile = behavior;
+    if matching.next().is_some() {
+        return Err(format!("{kind:?} effect-tile profile is not unique"));
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct BalanceLabSnapshotV3 {
@@ -111,6 +252,7 @@ struct BalanceLabSnapshotV3 {
     ultimates: Vec<UltimateTuning>,
     barrel: BarrelTuning,
     chest: ChestTuning,
+    effect_tiles: EffectTileTuning,
     heist: HeistTuning,
 }
 
@@ -176,6 +318,8 @@ impl BalanceLabSnapshotV3 {
                     .restoration_pickup(crate::map::RestorationPickupDefinitionId(1))
                     .expect("embedded restoration pickup definition exists"),
             },
+            effect_tiles: EffectTileTuning::from_catalog(maps)
+                .expect("embedded effect-tile profiles are complete and unique"),
             heist: HeistTuning {
                 safe_maximum_health: crate::matchplay::HeistRules::default().safe_maximum_health,
             },
@@ -759,6 +903,7 @@ fn validate_snapshot(
         return Err("unsupported snapshot shape".into());
     }
     candidate.condition_rules.validate()?;
+    candidate.effect_tiles.validate()?;
     if !(100..=20_000).contains(&candidate.heist.safe_maximum_health) {
         return Err("Heist safe maximum health must be within 100..=20000".into());
     }
@@ -829,7 +974,12 @@ fn validate_snapshot(
         .find(|definition| definition.id == candidate.chest.pickup_definition.id)
         .ok_or_else(|| "restoration pickup definition disappeared".to_string())? =
         candidate.chest.pickup_definition;
+    // A follow-up edit may start from an already tuned development catalog. Restore the canonical
+    // effect values while validating every ordinary map/catalog contract, then install the bounded
+    // Balance Lab values after that production validation succeeds.
+    baseline.effect_tiles.install(&mut next_maps)?;
     next_maps.validate()?;
+    candidate.effect_tiles.install(&mut next_maps)?;
     Ok((next_builds, next_weapons, next_maps))
 }
 
@@ -1431,7 +1581,87 @@ mod tests {
         assert!(json.contains("\"reveal_proximity_radius\""));
         assert!(json.contains("\"displayName\""));
         assert!(json.contains("\"heist\""));
+        assert!(json.contains("\"effectTiles\""));
+        assert!(json.contains("\"speedMultiplierMilli\":1250"));
         assert!(json.contains("\"safeMaximumHealth\":2000"));
+    }
+
+    #[test]
+    fn effect_tile_tuning_is_bounded_and_installed_without_weakening_canonical_validation() {
+        let builds = BuildCatalog::embedded().unwrap();
+        let weapons = WeaponCatalog::embedded().unwrap();
+        let maps = crate::map::MapContentCatalog::embedded().unwrap();
+        let fighter = FighterDefinitions::default().entries[0];
+        let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
+        let mut candidate = baseline.clone();
+        candidate.effect_tiles = EffectTileTuning {
+            speed_multiplier_milli: 1_800,
+            slow_multiplier_milli: 400,
+            damage_per_pulse: 25,
+            interval_ticks: 90,
+        };
+        let (_, _, revised_maps) =
+            validate_snapshot(&candidate, &baseline, &builds, &weapons, &maps, &fighter).unwrap();
+        assert_eq!(
+            EffectTileTuning::from_catalog(&revised_maps).unwrap(),
+            candidate.effect_tiles
+        );
+        let resolved = revised_maps
+            .resolve_preset(
+                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::MapInstanceId(1),
+            )
+            .unwrap();
+        for tile in resolved.effect_tiles {
+            match tile.behavior {
+                crate::map::MapEffectTileBehavior::Speed {
+                    movement_multiplier_milli,
+                } => assert_eq!(movement_multiplier_milli, 1_800),
+                crate::map::MapEffectTileBehavior::Slow {
+                    movement_multiplier_milli,
+                } => assert_eq!(movement_multiplier_milli, 400),
+                crate::map::MapEffectTileBehavior::Damage {
+                    damage,
+                    interval_ticks,
+                } => {
+                    assert_eq!(damage, 25);
+                    assert_eq!(interval_ticks, 90);
+                }
+                crate::map::MapEffectTileBehavior::None => {
+                    panic!("resolved effect tile cannot be inert")
+                }
+            }
+        }
+        assert_eq!(
+            EffectTileTuning::from_catalog(&maps).unwrap(),
+            baseline.effect_tiles
+        );
+
+        for invalid in [
+            EffectTileTuning {
+                speed_multiplier_milli: 1_000,
+                ..baseline.effect_tiles
+            },
+            EffectTileTuning {
+                slow_multiplier_milli: 1_000,
+                ..baseline.effect_tiles
+            },
+            EffectTileTuning {
+                damage_per_pulse: 101,
+                ..baseline.effect_tiles
+            },
+            EffectTileTuning {
+                interval_ticks: 5,
+                ..baseline.effect_tiles
+            },
+        ] {
+            let mut rejected = baseline.clone();
+            rejected.effect_tiles = invalid;
+            assert!(
+                validate_snapshot(&rejected, &baseline, &builds, &weapons, &maps, &fighter)
+                    .is_err()
+            );
+        }
     }
 
     #[test]
@@ -1573,6 +1803,11 @@ mod tests {
         candidate.fighter_profiles.reinforced.cold_capacity = 1_250;
         candidate.condition_rules.freeze_duration_ticks = 45;
         candidate.condition_rules.cold_decay_per_tick = 12;
+        candidate.effect_tiles.speed_multiplier_milli = 1_600;
+        candidate.effect_tiles.slow_multiplier_milli = 450;
+        candidate.effect_tiles.damage_per_pulse = 22;
+        candidate.effect_tiles.interval_ticks = 75;
+        let expected_effect_tiles = candidate.effect_tiles;
         let expected_condition_rules = candidate.condition_rules;
         candidate.weapons[0].recipe.fire_cooldown_ticks += 1;
         candidate.weapons[1].recipe.fire_cooldown_ticks += 1;
@@ -1721,6 +1956,13 @@ mod tests {
         assert_eq!(
             *app.world().resource::<RestartBuildPolicy>(),
             RestartBuildPolicy::Retain
+        );
+        assert_eq!(
+            EffectTileTuning::from_catalog(
+                &app.world().resource::<crate::map::MapCatalogResource>().0
+            )
+            .unwrap(),
+            expected_effect_tiles
         );
         assert!(
             app.world()

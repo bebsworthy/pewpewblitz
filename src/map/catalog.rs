@@ -5,9 +5,9 @@
 //! match systems; it never converts a grid placement into an authored V4 recipe or region.
 
 use super::{
-    AxisAlignedMapRect, MapInstanceId, MapPlacementId, MapPresentationThemeId, MapPresetId,
-    MapRecipeFingerprint, MapRecipeId, MapShape, ModeAnchorId, ModeDefinitionId,
-    ResolvedMapIdentity, SpawnPointId, TeamSpawnPoint,
+    AxisAlignedMapRect, MapEffectTileBehavior, MapInstanceId, MapPlacementId,
+    MapPresentationThemeId, MapPresetId, MapRecipeFingerprint, MapRecipeId, MapShape, ModeAnchorId,
+    ModeDefinitionId, ResolvedEffectTile, ResolvedMapIdentity, SpawnPointId, TeamSpawnPoint,
 };
 use bevy::prelude::{App, Component, Plugin, Resource, Vec2};
 use serde::{Deserialize, Serialize};
@@ -16,9 +16,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
 pub const MAX_MAP_OBJECT_HEALTH: u16 = 1_000;
 pub const MAX_RESOLVED_MAP_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 6;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 7;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 5;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 8;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 9;
 #[cfg(test)]
 const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const ASHEN_COURT_PRESET: MapPresetId = MapPresetId(3);
@@ -28,7 +28,7 @@ const TIDAL_GARDEN_PRESET: MapPresetId = MapPresetId(4);
 #[cfg(test)]
 const BARREL_YARD_PRESET: MapPresetId = MapPresetId(5);
 pub const FEATURE_YARD_WIPEOUT_PRESET: MapPresetId = MapPresetId(7);
-pub const FEATURE_YARD_WIPEOUT_ADMISSION_REVISION: u16 = 2;
+pub const FEATURE_YARD_WIPEOUT_ADMISSION_REVISION: u16 = 5;
 pub const FEATURE_YARD_HOT_ZONE_PRESET: MapPresetId = MapPresetId(8);
 pub const FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION: u16 = 2;
 pub const FEATURE_YARD_HEIST_PRESET: MapPresetId = MapPresetId(9);
@@ -71,6 +71,9 @@ pub const METAL_WALL_ASSET: MapAssetId = MapAssetId(31);
 pub const WOOD_WALL_ASSET: MapAssetId = MapAssetId(32);
 pub const YELLOW_STRIPED_COVER_ASSET: MapAssetId = MapAssetId(33);
 pub const GREEN_STRIPED_COVER_ASSET: MapAssetId = MapAssetId(34);
+pub const SPEED_TILE_ASSET: MapAssetId = MapAssetId(35);
+pub const SLOW_TILE_ASSET: MapAssetId = MapAssetId(36);
+pub const DAMAGE_TILE_ASSET: MapAssetId = MapAssetId(37);
 
 macro_rules! grid_id {
     ($name:ident) => {
@@ -365,6 +368,7 @@ pub struct MapGameplayProfile {
     pub durability: MapDurabilityBehavior,
     pub interaction: MapInteractionBehavior,
     pub concealment: MapConcealmentBehavior,
+    pub effect_tile: MapEffectTileBehavior,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1079,6 +1083,7 @@ pub struct ResolvedMap {
     pub player_only_surface_rects: Vec<MapCellRect>,
     pub objective_zone: Option<ResolvedMapObjective>,
     pub heist_safes: Vec<ResolvedHeistSafeAnchor>,
+    pub effect_tiles: Vec<ResolvedEffectTile>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1173,6 +1178,18 @@ fn resolve_grid_recipe(
                 .is_some_and(|profile| profile.concealment == MapConcealmentBehavior::HideOccupants)
         })
         .count();
+    let effect_tile_placement_count = placements
+        .iter()
+        .filter(|placement| {
+            catalog
+                .asset(placement.asset_id)
+                .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
+                .is_some_and(|profile| profile.effect_tile != MapEffectTileBehavior::None)
+        })
+        .count();
+    if effect_tile_placement_count > super::MAX_EFFECT_TILE_PLACEMENTS {
+        return Err("map recipe exceeds the effect-tile ceiling".to_string());
+    }
     validate_placement_capacity(
         recipe.dimensions,
         placements.len(),
@@ -1286,6 +1303,7 @@ fn resolve_grid_recipe(
         }
     }
     validate_spawn_clearance(&placements, recipe.dimensions, catalog)?;
+    validate_effect_tile_spawn_safety(&placements, catalog)?;
     validate_fighter_navigation(&placements, recipe.dimensions, catalog)?;
     if recipe.mode_definition_id == HEIST_MODE_DEFINITION {
         validate_heist_map_access(&placements, &mode_anchors, recipe.dimensions, catalog)?;
@@ -1373,6 +1391,20 @@ fn resolve_grid_recipe(
         })
         .collect();
     let player_only_surface_rects = merge_cells_to_rectangles(player_only_surface_cells);
+    let effect_tiles = placements
+        .iter()
+        .filter_map(|placement| {
+            let behavior = catalog
+                .asset(placement.asset_id)
+                .and_then(|asset| catalog.profile(asset.gameplay_profile_id))?
+                .effect_tile;
+            behavior.kind().map(|_| ResolvedEffectTile {
+                placement_id: placement.placement_id,
+                cell: placement.cell,
+                behavior,
+            })
+        })
+        .collect();
     Ok(ResolvedMap {
         snapshot,
         spawn_points_by_team,
@@ -1381,6 +1413,7 @@ fn resolve_grid_recipe(
         player_only_surface_rects,
         objective_zone,
         heist_safes,
+        effect_tiles,
     })
 }
 
@@ -1394,6 +1427,41 @@ fn validate_placement_capacity(
     }
     if concealment_placement_count > dimensions.cell_count() {
         return Err("grid map exceeds one concealment feature per cell".to_string());
+    }
+    Ok(())
+}
+
+fn validate_effect_tile_spawn_safety(
+    placements: &[MapAssetPlacement],
+    catalog: &MapContentCatalog,
+) -> Result<(), String> {
+    let spawn_cells: Vec<_> = placements
+        .iter()
+        .filter(|placement| {
+            matches!(
+                placement.parameters,
+                MapPlacementParameters::PlayerSpawn { .. }
+            )
+        })
+        .map(|placement| placement.cell)
+        .collect();
+    for placement in placements {
+        let behavior = catalog
+            .asset(placement.asset_id)
+            .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
+            .map_or(MapEffectTileBehavior::None, |profile| profile.effect_tile);
+        if behavior == MapEffectTileBehavior::None {
+            continue;
+        }
+        for spawn in &spawn_cells {
+            let dx = placement.cell.x.abs_diff(spawn.x);
+            let dy = placement.cell.y.abs_diff(spawn.y);
+            if placement.cell == *spawn
+                || (matches!(behavior, MapEffectTileBehavior::Damage { .. }) && dx <= 1 && dy <= 1)
+            {
+                return Err("effect tile violates spawn safety clearance".to_string());
+            }
+        }
     }
     Ok(())
 }
@@ -2147,6 +2215,7 @@ fn validate_asset_profile(
     asset: &MapAssetDefinition,
     profile: MapGameplayProfile,
 ) -> Result<(), String> {
+    profile.effect_tile.validate()?;
     let inert = profile.player_collision == PlayerCollision::Pass
         && profile.projectile_collision == ProjectileCollision::Pass
         && profile.destruction == MapDestructionBehavior::Indestructible
@@ -2166,6 +2235,7 @@ fn validate_asset_profile(
                 && profile.interaction == MapInteractionBehavior::None
         }
     };
+    let effect_tile_is_consistent = effect_tile_matches_asset(asset, profile, inert);
     let collider_is_consistent = match profile.collider_shape {
         MapColliderShape::None => !blocks,
         MapColliderShape::FootprintRectangle => blocks,
@@ -2232,9 +2302,32 @@ fn validate_asset_profile(
             profile.interaction == MapInteractionBehavior::None && asset.surface_tag.is_none()
         }
     };
-    (valid && collider_is_consistent && concealment_is_consistent && durability_is_consistent)
+    (valid
+        && collider_is_consistent
+        && concealment_is_consistent
+        && effect_tile_is_consistent
+        && durability_is_consistent)
         .then_some(())
         .ok_or_else(|| format!("asset {} contradicts its slot/gameplay profile", asset.key))
+}
+
+fn effect_tile_matches_asset(
+    asset: &MapAssetDefinition,
+    profile: MapGameplayProfile,
+    inert: bool,
+) -> bool {
+    profile.effect_tile == MapEffectTileBehavior::None
+        || (asset.slot == MapAssetSlot::Feature
+            && inert
+            && profile.interaction == MapInteractionBehavior::None
+            && profile.concealment == MapConcealmentBehavior::None
+            && asset.surface_tag.is_none()
+            && asset.parameter_kind == MapPlacementParameterKind::None
+            && asset.footprint_cells
+                == MapFootprint {
+                    width: 1,
+                    height: 1,
+                })
 }
 
 fn validate_damageable_profiles(catalog: &MapContentCatalog) -> Result<(), String> {
@@ -2394,11 +2487,68 @@ mod tests {
                 variant.default_surface_asset_id,
                 wipeout.default_surface_asset_id
             );
-            assert_eq!(variant.placements, wipeout.placements);
+            let wipeout_structural: Vec<_> = wipeout
+                .placements
+                .iter()
+                .filter(|placement| {
+                    catalog
+                        .asset(placement.asset_id)
+                        .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
+                        .is_some_and(|profile| profile.effect_tile == MapEffectTileBehavior::None)
+                })
+                .collect();
+            assert_eq!(
+                variant.placements.iter().collect::<Vec<_>>(),
+                wipeout_structural
+            );
             assert_eq!(variant.filled_rects, wipeout.filled_rects);
         }
         assert_eq!(wipeout.mode_definition_id, WIPEOUT_MODE_DEFINITION);
         assert!(wipeout.mode_anchors.is_empty());
+        let resolved_wipeout = catalog
+            .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+            .unwrap();
+        assert_eq!(resolved_wipeout.effect_tiles.len(), 92);
+        for (kind, expected_count) in [
+            (crate::map::EffectTileKind::Speed, 36),
+            (crate::map::EffectTileKind::Slow, 36),
+            (crate::map::EffectTileKind::Damage, 20),
+        ] {
+            assert_eq!(
+                resolved_wipeout
+                    .effect_tiles
+                    .iter()
+                    .filter(|tile| tile.behavior.kind() == Some(kind))
+                    .count(),
+                expected_count
+            );
+        }
+        for (kind, min_x, min_y) in [
+            (crate::map::EffectTileKind::Speed, 17, 18),
+            (crate::map::EffectTileKind::Speed, 44, 18),
+            (crate::map::EffectTileKind::Slow, 26, 22),
+            (crate::map::EffectTileKind::Slow, 35, 22),
+            (crate::map::EffectTileKind::Speed, 4, 12),
+            (crate::map::EffectTileKind::Speed, 57, 12),
+            (crate::map::EffectTileKind::Slow, 4, 18),
+            (crate::map::EffectTileKind::Slow, 57, 18),
+            (crate::map::EffectTileKind::Damage, 4, 24),
+            (crate::map::EffectTileKind::Damage, 57, 24),
+        ] {
+            for y in min_y..min_y + 3 {
+                for x in min_x..min_x + 3 {
+                    assert!(resolved_wipeout.effect_tiles.iter().any(|tile| {
+                        tile.behavior.kind() == Some(kind) && tile.cell == MapCell::new(x, y)
+                    }));
+                }
+            }
+        }
+        for cell in [MapCell::new(31, 19), MapCell::new(32, 20)] {
+            assert!(resolved_wipeout.effect_tiles.iter().any(|tile| {
+                tile.behavior.kind() == Some(crate::map::EffectTileKind::Damage)
+                    && tile.cell == cell
+            }));
+        }
         assert_eq!(hot_zone.mode_definition_id, HOT_ZONE_MODE_DEFINITION);
         assert_eq!(hot_zone.mode_anchors.len(), 1);
         assert!(matches!(
@@ -3273,6 +3423,7 @@ mod tests {
                 durability: MapDurabilityBehavior::Indestructible,
                 interaction: MapInteractionBehavior::None,
                 concealment: MapConcealmentBehavior::None,
+                effect_tile: MapEffectTileBehavior::None,
             }
         );
 
@@ -3302,6 +3453,34 @@ mod tests {
         concealed.gameplay_profiles[barrel_profile].concealment =
             MapConcealmentBehavior::HideOccupants;
         assert!(concealed.validate().is_err());
+    }
+
+    #[test]
+    fn effect_tiles_reject_noncanonical_values_and_spawn_hazards() {
+        let mut invalid_value = MapContentCatalog::embedded().unwrap();
+        invalid_value.gameplay_profiles[10].effect_tile = MapEffectTileBehavior::Speed {
+            movement_multiplier_milli: 1_249,
+        };
+        assert!(invalid_value.validate().is_err());
+
+        let mut unsafe_spawn = MapContentCatalog::embedded().unwrap();
+        let preset = unsafe_spawn
+            .presets
+            .iter_mut()
+            .find(|preset| preset.id == FEATURE_YARD_WIPEOUT_PRESET)
+            .unwrap();
+        let damage_tile = preset
+            .recipe
+            .placements
+            .iter_mut()
+            .find(|placement| placement.asset_id == DAMAGE_TILE_ASSET)
+            .unwrap();
+        damage_tile.cell = MapCell::new(9, 10);
+        assert!(
+            unsafe_spawn
+                .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+                .is_err_and(|error| error.contains("spawn safety"))
+        );
     }
 
     #[test]

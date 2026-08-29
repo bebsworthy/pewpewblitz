@@ -120,7 +120,9 @@ pub(crate) fn register_pickup_runtime(app: &mut App) {
         .init_resource::<PickupTelemetry>()
         .add_systems(
             FixedPostUpdate,
-            apply_restoration_pickups.in_set(crate::combat::CombatDamageSet::EnvironmentReactions),
+            apply_restoration_pickups
+                .in_set(crate::combat::CombatDamageSet::EnvironmentReactions)
+                .after(super::runtime::effect_tiles::apply_damage_tile_pulses),
         )
         .add_systems(
             FixedPostUpdate,
@@ -231,7 +233,7 @@ fn maximum_health(
     clippy::too_many_lines,
     reason = "one exclusive transaction deterministically orders pickup collection, healing, and expiry"
 )]
-fn apply_restoration_pickups(world: &mut World) {
+pub(super) fn apply_restoration_pickups(world: &mut World) {
     let Some(match_id) = world
         .query::<&crate::matchplay::MatchState>()
         .iter(world)
@@ -308,6 +310,7 @@ fn apply_restoration_pickups(world: &mut World) {
                 Option<&crate::builds::ResolvedMatchLoadout>,
                 &crate::matchplay::MatchMember,
                 &super::SpawnAssignment,
+                Option<&super::EffectTileOccupancy>,
             ), (
                 With<crate::protocol::Fighter>,
                 With<crate::matchplay::ActiveCombatant>,
@@ -325,11 +328,13 @@ fn apply_restoration_pickups(world: &mut World) {
                     loadout,
                     member,
                     spawn,
+                    effect_tile,
                 )| {
                     let maximum = maximum_health(*fighter_id, loadout, &definitions)?;
                     (member.0 == match_id
                         && health.0 > 0
                         && health.0 < maximum
+                        && !effect_tile.is_some_and(super::EffectTileOccupancy::blocks_healing)
                         && spawn.map_instance_id == identity.generation.map_instance_id
                         && position.0.distance_squared(pickup_position)
                             <= f32::from(definition.collection_radius_world_units).powi(2))
@@ -640,5 +645,35 @@ mod tests {
             world.resource::<PickupLifecycleFacts>().0[0].kind,
             PickupLifecycleKind::Collected
         );
+    }
+
+    #[test]
+    fn damage_tile_blocks_collection_without_consuming_the_pickup() {
+        let mut world = fixture(10);
+        let fighter = spawn_fighter(&mut world, 4, 50, Vec2::ZERO);
+        world
+            .entity_mut(fighter)
+            .insert(crate::map::EffectTileOccupancy {
+                generation: MapDynamicGeneration {
+                    map_instance_id: crate::map::MapInstanceId(1),
+                    generation: 1,
+                },
+                placement_id: MapPlacementId(1),
+                kind: crate::map::EffectTileKind::Damage,
+                entered_at_tick: 1,
+                next_pulse_at_tick: Some(30),
+            });
+        let pickup = spawn_pickup_entity(&mut world, 20);
+
+        apply_restoration_pickups(&mut world);
+
+        assert!(world.get_entity(pickup).is_ok());
+        assert_eq!(
+            world.get::<CurrentHealth>(fighter),
+            Some(&CurrentHealth(50))
+        );
+        assert!(world.resource::<PickupLifecycleFacts>().0.is_empty());
+        assert!(world.resource::<PickupOutbox>().0.is_empty());
+        assert_eq!(world.resource::<PickupTelemetry>().collected, 0);
     }
 }

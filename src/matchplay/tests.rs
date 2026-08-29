@@ -337,6 +337,22 @@ fn defeat_credit_rejects_self_allied_environmental_and_invalid_sources() {
     let mut saturated = u16::MAX;
     saturated = saturated.saturating_add(1);
     assert_eq!(saturated, u16::MAX);
+
+    let neutral = CombatOutcomeFact {
+        source_player: None,
+        source_network_id: None,
+        source_team: None,
+        source_kind: crate::combat::CombatSourceKind::Environment,
+        ..hostile
+    };
+    assert_eq!(
+        credited_defeat_team_with_recent(&neutral, TeamId(1), Some((TeamId(0), 301)), 301),
+        Some(TeamId(0))
+    );
+    assert_eq!(
+        credited_defeat_team_with_recent(&neutral, TeamId(1), Some((TeamId(0), 301)), 302),
+        None
+    );
 }
 
 #[test]

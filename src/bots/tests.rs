@@ -9,7 +9,7 @@ use super::{
 };
 use crate::map::MapDimensions;
 use bevy::prelude::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
 fn profile_is_valid_and_entropy_streams_are_repeatable() {
@@ -39,6 +39,7 @@ fn navigation_is_stable_and_does_not_cut_a_blocked_corner() {
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked,
+        terrain_cost_milli: BTreeMap::new(),
     };
     let first = navigation.route(start, goal, &[], 1_000, 64).unwrap();
     let second = navigation.route(start, goal, &[], 1_000, 64).unwrap();
@@ -46,6 +47,32 @@ fn navigation_is_stable_and_does_not_cut_a_blocked_corner() {
     assert_ne!(
         first.first().copied(),
         Some(dimensions.cell_center(crate::map::MapCell::new(2, 2)))
+    );
+}
+
+#[test]
+fn navigation_routes_around_expensive_effect_tiles() {
+    let dimensions = MapDimensions {
+        width: 5,
+        height: 3,
+    };
+    let expensive = BTreeMap::from([
+        (u32::from(dimensions.width) + 1, 2_000),
+        (u32::from(dimensions.width) + 2, 2_000),
+        (u32::from(dimensions.width) + 3, 2_000),
+    ]);
+    let navigation = BotNavigationSnapshot {
+        dimensions,
+        blocked: BTreeSet::new(),
+        terrain_cost_milli: expensive,
+    };
+    let start = dimensions.cell_center(crate::map::MapCell::new(0, 1));
+    let goal = dimensions.cell_center(crate::map::MapCell::new(4, 1));
+    let route = navigation.route(start, goal, &[], 128, 32).unwrap();
+    assert!(
+        route
+            .iter()
+            .any(|point| (point.y - start.y).abs() > f32::EPSILON)
     );
 }
 
@@ -131,6 +158,7 @@ fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked: BTreeSet::new(),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let mut observed = observation(20);
     observed.ability_ready = true;
@@ -173,6 +201,7 @@ fn restoration_bot_targets_an_injured_ally_and_uses_the_field() {
             height: 24,
         },
         blocked: BTreeSet::new(),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let mut observed = observation(20);
     observed.ability_ready = true;
@@ -328,6 +357,7 @@ fn corner_stall_starts_a_bounded_inward_escape() {
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked: BTreeSet::new(),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let profile = BotProfile::default();
     let mut observed = observation(50);
@@ -365,6 +395,7 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked: BTreeSet::new(),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let profile = BotProfile::default();
     let bounds = dimensions.bounds();
@@ -476,6 +507,7 @@ fn large_navigation_is_bounded_and_exhaustion_fails_closed() {
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked: BTreeSet::from([256 * u32::from(dimensions.width) + 256]),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let start = dimensions.cell_center(crate::map::MapCell::new(0, 0));
     let goal = dimensions.cell_center(crate::map::MapCell::new(511, 511));
@@ -495,6 +527,7 @@ fn navigation_search_resumes_deterministically_across_tick_budgets() {
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked: BTreeSet::from([12 * u32::from(dimensions.width) + 16]),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let start = dimensions.cell_center(crate::map::MapCell::new(1, 1));
     let goal = dimensions.cell_center(crate::map::MapCell::new(30, 22));
@@ -523,6 +556,7 @@ fn contact_memory_contains_only_observed_facts_and_expires() {
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked: BTreeSet::new(),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let profile = BotProfile::default();
     let mut state = super::model::BotState::default();
@@ -589,6 +623,7 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
     let navigation = BotNavigationSnapshot {
         dimensions,
         blocked: BTreeSet::from([20 * u32::from(dimensions.width) + 32]),
+        terrain_cost_milli: BTreeMap::new(),
     };
     let profile = BotProfile::default();
     let budget = profile.search_budget_per_bot(5);

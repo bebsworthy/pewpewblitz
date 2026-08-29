@@ -39,6 +39,14 @@ pub(crate) struct MovementDecision {
     pub trace_input: (Vec2, u8),
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct MovementModifiers<'a> {
+    pub active_effects: Option<&'a crate::combat::ActiveEffects>,
+    pub effect_tile: Option<&'a crate::map::EffectTileOccupancy>,
+    pub passive_state: Option<&'a crate::builds::PassiveRuntimeState>,
+    pub external_motion: Option<&'a crate::combat::ExternalMotion>,
+}
+
 /// Pure freshness/eligibility/aim/movement decision shared by the coordinator and tests.
 ///
 /// Returns the updated local freshness copy so the coordinator commits exactly the value
@@ -86,23 +94,39 @@ pub(crate) fn resolved_movement_velocity(
     decision: &MovementDecision,
     loadout_speed: Option<f32>,
     base_speed: f32,
-    active_effects: Option<&crate::combat::ActiveEffects>,
-    passive_state: Option<&crate::builds::PassiveRuntimeState>,
-    external_motion: Option<&crate::combat::ExternalMotion>,
+    modifiers: MovementModifiers<'_>,
 ) -> Vec2 {
-    let movement_multiplier = active_effects
+    let movement_multiplier = modifiers
+        .active_effects
         .and_then(|effects| effects.slow)
         .filter(|slow| tick < slow.expires_at_tick)
         .map_or(1.0, |slow| {
             f32::from(slow.movement_multiplier_milli) / 1000.0
         });
     let resolved_speed = loadout_speed.unwrap_or(base_speed);
-    let adrenaline_multiplier = passive_state
+    let tile_multiplier = modifiers
+        .effect_tile
+        .map_or(1.0, |occupancy| match occupancy.kind {
+            crate::map::EffectTileKind::Speed => {
+                f32::from(crate::map::SPEED_TILE_MULTIPLIER_MILLI) / 1000.0
+            }
+            crate::map::EffectTileKind::Slow => {
+                f32::from(crate::map::SLOW_TILE_MULTIPLIER_MILLI) / 1000.0
+            }
+            crate::map::EffectTileKind::Damage => 1.0,
+        });
+    let adrenaline_multiplier = modifiers
+        .passive_state
         .and_then(|state| state.adrenaline_until_tick)
         .filter(|deadline| tick < *deadline)
         .map_or(1.0, |_| 1.15);
-    decision.movement * resolved_speed * movement_multiplier * adrenaline_multiplier
-        + external_motion
+    decision.movement
+        * resolved_speed
+        * movement_multiplier
+        * tile_multiplier
+        * adrenaline_multiplier
+        + modifiers
+            .external_motion
             .filter(|motion| tick < motion.expires_at_tick)
             .map_or(Vec2::ZERO, |motion| motion.velocity)
 }
@@ -296,6 +320,7 @@ pub(super) fn authoritative_movement(
             Option<&NativeBuffer<FighterInput>>,
             Option<&crate::combat::Defeated>,
             Option<&crate::combat::ActiveEffects>,
+            Option<&crate::map::EffectTileOccupancy>,
             Option<&crate::combat::ExternalMotion>,
             Option<&crate::matchplay::MatchParticipant>,
             Option<&crate::matchplay::ActiveCombatant>,
@@ -323,6 +348,7 @@ pub(super) fn authoritative_movement(
         buffer,
         defeated,
         active_effects,
+        effect_tile,
         external_motion,
         participant,
         active_combatant,
@@ -363,9 +389,12 @@ pub(super) fn authoritative_movement(
                     .ok()
                     .map(|loadout| loadout.fighter_stats.movement_speed),
                 tuning.speed,
-                active_effects,
-                passive_states.get(entity).ok(),
-                external_motion,
+                MovementModifiers {
+                    active_effects,
+                    effect_tile,
+                    passive_state: passive_states.get(entity).ok(),
+                    external_motion,
+                },
             )
         };
         let filter = SpatialQueryFilter::from_mask(

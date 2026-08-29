@@ -2,7 +2,8 @@
 
 #[cfg(feature = "server")]
 use super::authority::{
-    MovementDecision, movement_decision, repaired_pose, resolved_movement_velocity,
+    MovementDecision, MovementModifiers, movement_decision, repaired_pose,
+    resolved_movement_velocity,
 };
 #[cfg(feature = "server")]
 use super::input::{
@@ -273,7 +274,13 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
         movement: Vec2::X,
         ..MovementDecision::default()
     };
-    let velocity = resolved_movement_velocity(0, &decision, Some(320.0), 300.0, None, None, None);
+    let velocity = resolved_movement_velocity(
+        0,
+        &decision,
+        Some(320.0),
+        300.0,
+        MovementModifiers::default(),
+    );
     assert!((velocity.x - 320.0).abs() < 1e-5);
 
     let slow = crate::combat::ActiveEffects {
@@ -285,20 +292,74 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
         }),
         ..default()
     };
-    let velocity = resolved_movement_velocity(5, &decision, None, 300.0, Some(&slow), None, None);
+    let velocity = resolved_movement_velocity(
+        5,
+        &decision,
+        None,
+        300.0,
+        MovementModifiers {
+            active_effects: Some(&slow),
+            ..default()
+        },
+    );
     assert!((velocity.x - 150.0).abs() < 1e-5);
 
     // An expired slow no longer applies.
-    let velocity = resolved_movement_velocity(20, &decision, None, 300.0, Some(&slow), None, None);
+    let velocity = resolved_movement_velocity(
+        20,
+        &decision,
+        None,
+        300.0,
+        MovementModifiers {
+            active_effects: Some(&slow),
+            ..default()
+        },
+    );
     assert!((velocity.x - 300.0).abs() < 1e-5);
 
     let external = crate::combat::ExternalMotion {
         velocity: Vec2::new(0.0, 40.0),
         expires_at_tick: 30,
     };
-    let velocity =
-        resolved_movement_velocity(5, &decision, None, 300.0, None, None, Some(&external));
+    let velocity = resolved_movement_velocity(
+        5,
+        &decision,
+        None,
+        300.0,
+        MovementModifiers {
+            external_motion: Some(&external),
+            ..default()
+        },
+    );
     assert!((velocity.y - 40.0).abs() < 1e-5 && (velocity.x - 300.0).abs() < 1e-5);
+
+    let speed_tile = crate::map::EffectTileOccupancy {
+        generation: crate::map::MapDynamicGeneration {
+            map_instance_id: crate::map::MapInstanceId(1),
+            generation: 1,
+        },
+        placement_id: crate::map::MapPlacementId(1),
+        kind: crate::map::EffectTileKind::Speed,
+        entered_at_tick: 1,
+        next_pulse_at_tick: None,
+    };
+    let velocity = resolved_movement_velocity(
+        5,
+        &decision,
+        None,
+        300.0,
+        MovementModifiers {
+            active_effects: Some(&slow),
+            effect_tile: Some(&speed_tile),
+            external_motion: Some(&external),
+            ..default()
+        },
+    );
+    assert!((velocity.x - 187.5).abs() < 1e-5);
+    assert!(
+        (velocity.y - 40.0).abs() < 1e-5,
+        "tile speed must not scale external motion"
+    );
 }
 
 #[cfg(feature = "server")]

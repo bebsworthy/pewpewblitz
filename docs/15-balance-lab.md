@@ -3,10 +3,10 @@
 ## Purpose
 
 Balance Lab is a development-only, server-authoritative tuning console for local Practice matches.
-It edits a complete global-rule, fighter-profile, weapon-base, and supported-ultimate tuning snapshot, validates
-it against concrete engine and wire safety invariants, persists accepted tuning locally, and
-applies it by starting a clean authoritative match epoch. It does not modify canonical authored
-content.
+It edits a complete global-rule, fighter-profile, weapon-base, supported-ultimate, map-effect, and
+world-object tuning snapshot, validates it against concrete engine and wire safety invariants,
+persists accepted tuning locally, and applies it by starting a clean authoritative match epoch. It
+does not modify canonical authored content.
 
 Use [Weapons and abilities](./03-weapons-and-abilities.md) and
 [Fighter and build specification](./02-fighter-model.md) for the gameplay property model. The
@@ -25,8 +25,9 @@ restoration-pickup evolution.
 3. Review **Players & loadouts** for the authoritative human and bot roster admitted to this
    Practice worker. Each card identifies the team, fighter profile, weapon base, ultimate, two
    passives, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
-4. Choose a gameplay section and one global rule family, fighter, weapon, ultimate, world object,
-   or mode. Edit the focused draft using the displayed gameplay units and authoritative bounds.
+4. Choose a gameplay section and one global rule family, fighter, weapon, ultimate, map effect,
+   world object, or mode. Edit the focused draft using the displayed gameplay units and
+   authoritative bounds.
 5. Review the changed marker plus applied/default comparison. Values that differ from the
    canonical server defaults are highlighted in red independently of whether they are newly edited
    or already applied. Use **Copy differences** to copy a readable list of every current draft value
@@ -46,21 +47,29 @@ recomputes runtime recipe identities for equipped weapon modifiers whose base re
 persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
 worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 16, the persistence envelope is version 11, and the
-non-persisted editor-manifest schema is version 7. The server manifest explicitly identifies every
+The current snapshot schema is version 17, the persistence envelope is version 12, and the
+non-persisted editor-manifest schema is version 8. The server manifest explicitly identifies every
 editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
 control. The browser does not infer editability or limits from serialized field names. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
 duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, seven
 canonical weapon-base recipes, and the bounded parameters of all nine tunable ultimates,
 including every Sticky Blomb delivery/fuse value, every Splash numeric delivery value, and every
-Big Blob parent/secondary value. Oil-barrel health/explosion tuning, Heist safe health, and
+Big Blob parent/secondary value. The **World objects** tab exposes an **Effect tiles** subject with
+Speed and Slow multipliers, Damage per pulse, and pulse interval. These controls tune the three
+supported authored identities; there is no Heal tile control or runtime tile behavior. Damage
+amount and interval are consumed from the rebuilt map catalog by authoritative damage pulses.
+Speed/Slow edits currently validate, persist, appear in canonical differences, and enter the
+development map catalog, but authoritative movement still uses the canonical `1.250` and `0.700`
+constants. Until BRL-0036 closes that wiring gap, those two controls must not be presented as
+effective gameplay tuning. Oil-barrel health/explosion tuning, Heist safe health, and
 treasure-chest/restoration-pickup health,
 restoration, radius, and lifetime are also editable. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Older supported envelopes
 migrate sequentially by filling canonical chest, fighter-recovery, demolition,
-elemental-resistance, elemental-field, Cold-capacity, and global condition-rule defaults before validation while retaining existing
-tuning. The removed full-build workflow is not a Balance Lab surface. Apply validation
+elemental-resistance, elemental-field, Cold-capacity, global condition-rule, and effect-tile
+defaults before validation while retaining existing tuning. The removed full-build workflow is not
+a Balance Lab surface. Apply validation
 re-resolves the complete 3×7 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
 
@@ -78,6 +87,14 @@ remains available beyond the editor's ordinary playtest range. Type timing value
 decimal seconds. Balance Lab saves the nearest 1/60-second server tick and displays tick-backed
 seconds to two decimal places: `0.17 s`, for example, resolves to 10 ticks. Operators do not need to
 calculate or enter an exact six-decimal tick multiple.
+
+Effect-tile movement is displayed as an ordinary multiplier: Speed accepts `1.001×` through
+`2.000×`, and Slow accepts `0.100×` through `0.999×`. Damage accepts `1` through `100` health per
+pulse, while its interval accepts `0.10` through `10.00` seconds and is stored at 60 Hz. Applying
+these values replaces only the three development-worker gameplay-profile behaviors after the
+otherwise canonical map catalog passes validation. The clean restart then resolves the selected map
+from that revised catalog; placement, asset identity, visuals, and production catalog defaults do
+not change.
 
 Each fighter profile also exposes its own Cold capacity and Cold, Poison, and Fire resistance
 baseline. Resistance is displayed as a percentage while stored in basis points. The roster always
@@ -193,7 +210,7 @@ Review this checklist:
 Primary implementation ownership currently lives in `src/server/balance_lab/`, with authored global
 condition tuning in `content/catalogs/combat_conditions.ron`, authored build
 tuning in `src/builds/definitions.rs`, weapon definitions and map-destruction bounds in
-`src/combat/definitions/`, object/chest definitions in `src/map/catalog.rs`, Heist safe rules in
+`src/combat/definitions/`, effect-tile and object/chest definitions in `src/map/`, Heist safe rules in
 `src/matchplay/heist.rs`, and the operator application in `tools/balance-lab-web/`.
 
 Elemental field timing, range, radius, and effect strength are part of the editable ultimate

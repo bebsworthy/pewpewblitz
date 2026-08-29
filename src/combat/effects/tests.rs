@@ -183,3 +183,65 @@ fn dual_splash_payload_routes_damage_to_enemies_and_healing_to_allies() {
         Some(1.0)
     );
 }
+
+#[cfg(feature = "server")]
+#[test]
+fn damage_tile_suppresses_composed_heal_event_reservation() {
+    use crate::combat::effects::planning::required_payload_event_count;
+    use std::collections::{HashMap, HashSet};
+
+    let target = Entity::from_raw_u32(1).expect("valid target entity");
+    let source = AttackSource {
+        kind: CombatSourceKind::PrimaryWeapon,
+        attack_id: AttackId(1),
+        player_id: PlayerId(1),
+        owner_network_entity_id: NetworkEntityId(1),
+        team_id: TeamId(1),
+        recipe_fingerprint: WeaponRecipeFingerprint(1),
+        presentation_profile_id: WeaponPresentationProfileId(7),
+        legacy_compatibility: false,
+        source_preset_id: Some(WeaponPresetId(7)),
+        origin: WorldPoint::from(Vec2::ZERO),
+        facing: 0.0,
+    };
+    let records = [PendingPayload {
+        source,
+        delivery_index: 0,
+        bundle_index: 0,
+        target,
+        target_network_id: NetworkEntityId(2),
+        position: Vec2::ZERO,
+        engagement_distance: 0.0,
+        delivery_travel: 0.0,
+        contact_fraction: 0.0,
+        bundle: PayloadBundleDefinition {
+            target: TargetSelection::Direct,
+            effects: vec![PayloadEffectDefinition::Heal {
+                amount: 24,
+                recipients: RecipientPolicy::AlliesAndOwner,
+            }],
+        },
+    }];
+    let connected = HashSet::from([source.owner_network_entity_id.0]);
+    let mut blocked = HashMap::from([(
+        target,
+        (
+            NetworkEntityId(2),
+            TeamId(1),
+            50,
+            false,
+            CombatTargetKind::Fighter,
+            true,
+        ),
+    )]);
+    assert_eq!(
+        required_payload_event_count(&[], &records, &connected, &HashSet::new(), &mut blocked),
+        Some(0),
+    );
+
+    blocked.get_mut(&target).expect("target exists").5 = false;
+    assert_eq!(
+        required_payload_event_count(&[], &records, &connected, &HashSet::new(), &mut blocked),
+        Some(1),
+    );
+}

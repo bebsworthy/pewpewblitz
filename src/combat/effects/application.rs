@@ -124,25 +124,28 @@ pub(super) fn plan_composed_events(
         .targets
         .p1()
         .iter()
-        .filter(|(_, _, _, _, _, controlled)| {
+        .filter(|(_, _, _, _, _, controlled, _)| {
             controlled.is_none_or(|controlled| !batch.disconnected.contains(&controlled.owner))
         })
-        .map(|(entity, network_id, team, health, defeated, _)| {
-            (
-                entity,
+        .map(
+            |(entity, network_id, team, health, defeated, _, effect_tile)| {
                 (
-                    *network_id,
-                    *team,
-                    health.0,
-                    defeated.is_some(),
-                    if combat.sentry_targets.contains(entity) {
-                        CombatTargetKind::Deployable
-                    } else {
-                        CombatTargetKind::Fighter
-                    },
-                ),
-            )
-        })
+                    entity,
+                    (
+                        *network_id,
+                        *team,
+                        health.0,
+                        defeated.is_some(),
+                        if combat.sentry_targets.contains(entity) {
+                            CombatTargetKind::Deployable
+                        } else {
+                            CombatTargetKind::Fighter
+                        },
+                        effect_tile.is_some_and(crate::map::EffectTileOccupancy::blocks_healing),
+                    ),
+                )
+            },
+        )
         .collect();
     let Some(required_event_count) = required_payload_event_count(
         &batch.deliveries,
@@ -241,6 +244,7 @@ pub(super) fn apply_composed_records(
             defeated,
             controlled_by,
             test_dummy,
+            effect_tile,
         )) = targets.get_mut(record.target)
         else {
             continue;
@@ -466,6 +470,9 @@ pub(super) fn apply_composed_records(
                     target_defeated = true;
                 }
             } else if let PayloadEffectDefinition::Heal { amount, .. } = effect {
+                if effect_tile.is_some_and(crate::map::EffectTileOccupancy::blocks_healing) {
+                    continue;
+                }
                 let requested = (f32::from(amount) * scale)
                     .round()
                     .clamp(1.0, f32::from(u16::MAX)) as u16;

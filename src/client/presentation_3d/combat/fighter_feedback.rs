@@ -27,6 +27,9 @@ enum StatusKind {
     Frozen,
     Poison,
     Fire,
+    TileSpeed,
+    TileSlow,
+    TileDamage,
 }
 
 #[derive(Component)]
@@ -57,6 +60,7 @@ type StatusFighterQuery<'w, 's> = Query<
         Option<&'static crate::combat::ActiveEffects>,
         Option<&'static crate::combat::KnockbackFeedback>,
         Option<&'static crate::concealment::ConcealmentPresentationState>,
+        Option<&'static crate::map::EffectTileOccupancy>,
     ),
     With<Fighter>,
 >;
@@ -206,7 +210,7 @@ pub(in super::super) fn reconcile_status_visuals(
     statuses: Query<(Entity, &CombatVisualOwner, &StatusVisual3d)>,
 ) {
     let mut desired_status = HashMap::new();
-    for (entity, position, defeated, authoritative_tick, effects, knockback, concealment) in
+    for (entity, position, defeated, authoritative_tick, effects, knockback, concealment, tile) in
         &fighters
     {
         if defeated.is_some() {
@@ -255,6 +259,14 @@ pub(in super::super) fn reconcile_status_visuals(
         {
             desired_status.insert((entity, StatusKind::Reveal), position.0);
         }
+        if let Some(tile) = tile {
+            let kind = match tile.kind {
+                crate::map::EffectTileKind::Speed => StatusKind::TileSpeed,
+                crate::map::EffectTileKind::Slow => StatusKind::TileSlow,
+                crate::map::EffectTileKind::Damage => StatusKind::TileDamage,
+            };
+            desired_status.insert((entity, kind), position.0);
+        }
     }
 
     let existing_status: HashSet<_> = statuses
@@ -274,32 +286,43 @@ pub(in super::super) fn reconcile_status_visuals(
             CombatVisualOwner(owner),
             StatusVisual3d(kind),
             Mesh3d(primitives.ground_ring.clone()),
-            MeshMaterial3d(match kind {
-                StatusKind::Slow => materials.status_slow.clone(),
-                StatusKind::Knockback => materials.status_knockback.clone(),
-                StatusKind::Reveal => materials.status_reveal.clone(),
-                StatusKind::Cold | StatusKind::Frozen => materials.elemental_cold.clone(),
-                StatusKind::Poison => materials.status_poison.clone(),
-                StatusKind::Fire => materials.status_fire.clone(),
-            }),
+            MeshMaterial3d(status_material(kind, &materials)),
             NotShadowCaster,
             NotShadowReceiver,
             Transform {
                 translation: ground_position(position)
                     + Vec3::Y * if kind == StatusKind::Slow { 2.0 } else { 3.0 },
                 rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
-                scale: Vec3::splat(match kind {
-                    StatusKind::Slow => 1.15,
-                    StatusKind::Knockback => 0.8,
-                    StatusKind::Reveal => 1.8,
-                    StatusKind::Cold => 1.3,
-                    StatusKind::Frozen => 1.9,
-                    StatusKind::Poison => 1.35,
-                    StatusKind::Fire => 1.55,
-                }),
+                scale: Vec3::splat(status_scale(kind)),
             },
             Name::new("V3 durable combat status"),
         ));
+    }
+}
+
+fn status_material(kind: StatusKind, materials: &Material3dAssets) -> Handle<StandardMaterial> {
+    match kind {
+        StatusKind::Slow | StatusKind::TileSlow => materials.status_slow.clone(),
+        StatusKind::Knockback => materials.status_knockback.clone(),
+        StatusKind::Reveal => materials.status_reveal.clone(),
+        StatusKind::Cold | StatusKind::Frozen => materials.elemental_cold.clone(),
+        StatusKind::Poison => materials.status_poison.clone(),
+        StatusKind::Fire => materials.status_fire.clone(),
+        StatusKind::TileSpeed => materials.dash.clone(),
+        StatusKind::TileDamage => materials.effect_damage.clone(),
+    }
+}
+
+const fn status_scale(kind: StatusKind) -> f32 {
+    match kind {
+        StatusKind::Slow => 1.15,
+        StatusKind::Knockback => 0.8,
+        StatusKind::Reveal => 1.8,
+        StatusKind::Cold => 1.3,
+        StatusKind::Frozen => 1.9,
+        StatusKind::Poison => 1.35,
+        StatusKind::Fire => 1.55,
+        StatusKind::TileSpeed | StatusKind::TileSlow | StatusKind::TileDamage => 1.45,
     }
 }
 

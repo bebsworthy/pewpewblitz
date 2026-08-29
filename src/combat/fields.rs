@@ -87,6 +87,7 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
             &mut CurrentHealth,
             &mut ActiveEffects,
             Has<crate::matchplay::SpawnProtection>,
+            Option<&crate::map::EffectTileOccupancy>,
         ),
         (With<Fighter>, Without<Defeated>),
     >,
@@ -142,6 +143,7 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                     mut health,
                     mut effects,
                     protected,
+                    effect_tile,
                 )) = fighters.get_mut(*target_entity)
                 else {
                     continue;
@@ -151,7 +153,11 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                 let eligible = match runtime.effect {
                     PayloadEffectDefinition::Cold { .. }
                     | PayloadEffectDefinition::DamageOverTime { .. } => hostile && !protected,
-                    PayloadEffectDefinition::Heal { .. } => !hostile || owner,
+                    PayloadEffectDefinition::Heal { .. } => {
+                        (!hostile || owner)
+                            && !effect_tile
+                                .is_some_and(crate::map::EffectTileOccupancy::blocks_healing)
+                    }
                     _ => false,
                 };
                 if !eligible {

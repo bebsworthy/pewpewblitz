@@ -88,6 +88,13 @@ export interface ChestTuning extends JsonObject {
   pickupDefinition: JsonObject;
 }
 
+export interface EffectTileTuning extends JsonObject {
+  speedMultiplierMilli: number;
+  slowMultiplierMilli: number;
+  damagePerPulse: number;
+  intervalTicks: number;
+}
+
 export interface BalanceLabSnapshot extends JsonObject {
   schemaVersion: number;
   conditionRules: CombatConditionRules;
@@ -96,6 +103,7 @@ export interface BalanceLabSnapshot extends JsonObject {
   ultimates: UltimateTuning[];
   barrel: BarrelTuning;
   chest: ChestTuning;
+  effectTiles: EffectTileTuning;
   heist: HeistTuning;
 }
 

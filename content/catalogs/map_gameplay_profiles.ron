@@ -1,5 +1,5 @@
 (
-    schema_version: 6,
+    schema_version: 7,
     damage_profiles: [
         (
             id: MapDamageProfileId(1),
@@ -46,6 +46,7 @@
             durability: Indestructible,
             interaction: None,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(2),
@@ -56,6 +57,7 @@
             durability: Indestructible,
             interaction: None,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(3),
@@ -66,6 +68,7 @@
             durability: Indestructible,
             interaction: None,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(4),
@@ -76,6 +79,7 @@
             durability: Indestructible,
             interaction: PlayerSpawn,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(5),
@@ -86,6 +90,7 @@
             durability: Indestructible,
             interaction: None,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(6),
@@ -96,6 +101,7 @@
             durability: Indestructible,
             interaction: None,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(7),
@@ -106,6 +112,7 @@
             durability: Indestructible,
             interaction: None,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(8),
@@ -116,6 +123,7 @@
             durability: Indestructible,
             interaction: None,
             concealment: HideOccupants,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(9),
@@ -126,6 +134,7 @@
             durability: HitPoints(MapDamageProfileId(1)),
             interaction: None,
             concealment: None,
+            effect_tile: None,
         ),
         (
             id: MapGameplayProfileId(10),
@@ -136,6 +145,40 @@
             durability: HitPoints(MapDamageProfileId(2)),
             interaction: None,
             concealment: None,
+            effect_tile: None,
+        ),
+        (
+            id: MapGameplayProfileId(11),
+            player_collision: Pass,
+            projectile_collision: Pass,
+            collider_shape: None,
+            destruction: Indestructible,
+            durability: Indestructible,
+            interaction: None,
+            concealment: None,
+            effect_tile: Speed(movement_multiplier_milli: 1250),
+        ),
+        (
+            id: MapGameplayProfileId(12),
+            player_collision: Pass,
+            projectile_collision: Pass,
+            collider_shape: None,
+            destruction: Indestructible,
+            durability: Indestructible,
+            interaction: None,
+            concealment: None,
+            effect_tile: Slow(movement_multiplier_milli: 700),
+        ),
+        (
+            id: MapGameplayProfileId(13),
+            player_collision: Pass,
+            projectile_collision: Pass,
+            collider_shape: None,
+            destruction: Indestructible,
+            durability: Indestructible,
+            interaction: None,
+            concealment: None,
+            effect_tile: Damage(damage: 10, interval_ticks: 30),
         ),
     ],
 )
