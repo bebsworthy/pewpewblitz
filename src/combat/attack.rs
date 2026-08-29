@@ -180,6 +180,13 @@ pub(super) struct MuzzleContactState<'w, 's> {
 }
 
 #[cfg(feature = "server")]
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct AttackCommitBuffers<'w> {
+    accepted_attacks: ResMut<'w, AcceptedAttackFacts>,
+    outbox: ResMut<'w, CombatOutbox>,
+}
+
+#[cfg(feature = "server")]
 fn blocked_straight_deliveries(
     origin: Vec2,
     facing: f32,
@@ -677,6 +684,7 @@ fn record_accepted_attack(
     trackers: &mut ActiveAttackTrackers,
     telemetry: &mut WeaponTelemetry,
     legacy_telemetry: &mut CombatTelemetry,
+    accepted_attacks: &mut AcceptedAttackFacts,
     outbox: &mut CombatOutbox,
 ) {
     let AcceptedAttackRecord {
@@ -717,6 +725,13 @@ fn record_accepted_attack(
     }
     telemetry.record_accepted_attack(preset_id, source.recipe_fingerprint);
     legacy_telemetry.accepted_shots = legacy_telemetry.accepted_shots.saturating_add(1);
+    let recorded = accepted_attacks.record(AcceptedAttackFact {
+        event_id,
+        tick,
+        attack_id,
+        source_network_id: source.owner_network_entity_id,
+    });
+    debug_assert!(recorded, "attack fact capacity was checked before commit");
     let accepted_cue = CombatCue::AttackAccepted {
         event_id,
         tick,
@@ -816,7 +831,7 @@ pub(super) fn authoritative_composed_fire(
     mut legacy_telemetry: ResMut<CombatTelemetry>,
     evidence: Res<CombatEvidenceMode>,
     mut trackers: ResMut<ActiveAttackTrackers>,
-    mut outbox: ResMut<CombatOutbox>,
+    mut commit_buffers: AttackCommitBuffers,
     mut melee: MessageWriter<MeleeAttack>,
     active_combatants: Query<(), With<crate::matchplay::ActiveCombatant>>,
     dashing: Query<(), With<crate::abilities::DashRuntime>>,
@@ -889,6 +904,9 @@ pub(super) fn authoritative_composed_fire(
             continue;
         }
         if state.ammo == 0 {
+            continue;
+        }
+        if !commit_buffers.accepted_attacks.has_capacity() {
             continue;
         }
         let origin = position.0;
@@ -1050,7 +1068,7 @@ pub(super) fn authoritative_composed_fire(
             &reserved_events,
             &mut blocked_event_cursor,
             &mut legacy_telemetry,
-            &mut outbox,
+            &mut commit_buffers.outbox,
             &mut melee,
             &mut muzzle_contacts.world_pending,
             &mut muzzle_contacts.objective_pending,
@@ -1080,7 +1098,8 @@ pub(super) fn authoritative_composed_fire(
             &mut trackers,
             &mut gameplay_telemetry.weapon,
             &mut legacy_telemetry,
-            &mut outbox,
+            &mut commit_buffers.accepted_attacks,
+            &mut commit_buffers.outbox,
         );
     }
 }

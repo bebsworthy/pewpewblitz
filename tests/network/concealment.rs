@@ -97,20 +97,27 @@ fn distant_grass_occupant_is_absent_but_public_roster_and_reveals_converge() {
         .entity_mut(observer)
         .insert(Position::from_xy(grass_center.x, grass_center.y + 320.0));
     harness.step_until(|harness| harness.client_ids(0).len() == 1);
-    harness
-        .server
-        .world_mut()
-        .resource_mut::<CombatOutbox>()
-        .0
-        .push(CombatCue::AttackAccepted {
-            event_id: CombatEventId(90_001),
-            tick: attack_tick,
-            attack_id: AttackId(90_001),
-            source: subject_id,
-            position: WorldPoint::from(grass_center),
-            weapon_definition_id: brawler::combat::WeaponDefinitionId(1),
-            presentation_profile_id: brawler::combat::WeaponPresentationProfileId(1),
-        });
+    assert!(
+        harness
+            .server
+            .world_mut()
+            .resource_mut::<AcceptedAttackFacts>()
+            .record(AcceptedAttackFact {
+                event_id: CombatEventId(90_001),
+                tick: attack_tick,
+                attack_id: AttackId(90_001),
+                source_network_id: subject_id,
+            })
+    );
+    assert!(
+        !harness
+            .server
+            .world()
+            .resource::<CombatOutbox>()
+            .0
+            .iter()
+            .any(|cue| matches!(cue, CombatCue::AttackAccepted { .. }))
+    );
     harness.step_until(|harness| harness.client_ids(0).len() == 2);
     assert_eq!(public_projection_count(&mut harness.clients[0]), 2);
 

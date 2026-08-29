@@ -110,7 +110,10 @@ pub use model::{
     ShotId, SlowEffect, StickyBlobKind, StickyBlobState, StraightFlight, TeamId, WeaponPhase,
     WeaponState, WorldPoint, distance_band,
 };
-pub use outcomes::{CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTargetKind};
+pub use outcomes::{
+    AcceptedAttackFact, AcceptedAttackFacts, CombatOutcomeFact, CombatOutcomeFacts,
+    CombatOutcomeKind, CombatTargetKind, MAX_ACCEPTED_ATTACK_FACTS_PER_TICK,
+};
 pub use rules::{
     COMBAT_CONDITION_RULES_SCHEMA_VERSION, CombatConditionRules, CombatConditionRulesResource,
     MAX_COLD_DECAY_PER_TICK, MAX_COLD_RULE_TICKS,

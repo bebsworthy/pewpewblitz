@@ -2,10 +2,28 @@
 
 use super::*;
 
+#[derive(Resource, Default)]
+struct CapturedAcceptedAttacks(Vec<AcceptedAttackFact>);
+
+#[allow(clippy::needless_pass_by_value)]
+fn capture_accepted_attacks(
+    facts: Res<AcceptedAttackFacts>,
+    mut captured: ResMut<CapturedAcceptedAttacks>,
+) {
+    captured.0.extend(facts.0.iter().copied());
+}
+
 #[test]
 #[allow(clippy::too_many_lines)]
 fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
     let mut harness = Harness::new(2);
+    harness
+        .server
+        .init_resource::<CapturedAcceptedAttacks>()
+        .add_systems(
+            bevy::prelude::FixedPostUpdate,
+            capture_accepted_attacks.in_set(brawler::combat::CombatSet::Lifecycle),
+        );
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
@@ -16,6 +34,15 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             && harness.loadout_is_ready(1)
     });
     let player_id = harness.controlled_player_id(0);
+    let source_network_id = {
+        let world = harness.server.world_mut();
+        let mut sources = world.query::<(&PlayerId, &NetworkEntityId)>();
+        sources
+            .iter(world)
+            .find(|(candidate, _)| **candidate == player_id)
+            .map(|(_, network_id)| *network_id)
+            .expect("controlled fighter network identity")
+    };
     {
         let world = harness.server.world_mut();
         let source_position = {
@@ -67,6 +94,15 @@ fn authoritative_pulse_hits_dummy_and_sandbox_reset_restores_durable_state() {
             >= 1
             && harness.server_projectile_count() > 0
     });
+    let accepted = &harness
+        .server
+        .world()
+        .resource::<CapturedAcceptedAttacks>()
+        .0;
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].source_network_id, source_network_id);
+    assert_ne!(accepted[0].event_id.0, 0);
+    assert_ne!(accepted[0].attack_id.0, 0);
     let server_body = {
         let world = harness.server.world_mut();
         let mut query =

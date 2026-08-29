@@ -16,9 +16,9 @@ use super::{
 };
 use crate::{
     combat::{
-        ActiveAttackTrackers, CombatOutbox, CombatOutcomeFacts, Defeated, FighterDefinitions,
-        MeleeAttack, PendingDelivery, PendingPayload, SpawnState, TeamId, WeaponDefinitions,
-        WeaponTelemetry,
+        AcceptedAttackFacts, ActiveAttackTrackers, CombatOutbox, CombatOutcomeFacts, Defeated,
+        FighterDefinitions, MeleeAttack, PendingDelivery, PendingPayload, SpawnState, TeamId,
+        WeaponDefinitions, WeaponTelemetry,
     },
     map::{MapStartupSet, ResolvedMap, SpawnPointCatalog, WIPEOUT_MODE_DEFINITION},
     protocol::{Fighter, FighterInput, NetworkEntityId, PlayerId},
@@ -937,6 +937,7 @@ fn cleanup_restarted_match(
     mut ordinals: ResMut<RespawnOrdinals>,
     mut prior_positions: ResMut<PriorMatchPositions>,
     mut facts: ResMut<CombatOutcomeFacts>,
+    mut accepted_attacks: ResMut<AcceptedAttackFacts>,
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut outbox: ResMut<CombatOutbox>,
     mut pending_payloads: ResMut<Messages<PendingPayload>>,
@@ -962,6 +963,7 @@ fn cleanup_restarted_match(
     ordinals.0.clear();
     prior_positions.0.clear();
     facts.0.clear();
+    accepted_attacks.0.clear();
     trackers.active.clear();
     trackers.completed.clear();
     outbox.0.clear();

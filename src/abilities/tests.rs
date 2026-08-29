@@ -30,6 +30,80 @@ fn damage_fact(
     }
 }
 
+#[cfg(feature = "server")]
+#[test]
+fn self_cloak_ends_from_attack_fact_without_an_attack_cue_and_preserves_precedence() {
+    use crate::combat::{
+        AcceptedAttackFact, AcceptedAttackFacts, AttackId, CombatCue, CombatEventId, CombatOutbox,
+        CombatOutcomeFacts, NextCombatIds, SelfCloakEndReason,
+    };
+    use crate::protocol::Fighter;
+    use crate::timing::SimulationTick;
+    use bevy::prelude::*;
+
+    let mut app = App::new();
+    app.insert_resource(SimulationTick(10))
+        .init_resource::<AcceptedAttackFacts>()
+        .init_resource::<CombatOutcomeFacts>()
+        .init_resource::<NextCombatIds>()
+        .init_resource::<CombatOutbox>()
+        .init_resource::<AbilityTelemetry>()
+        .add_systems(Update, self_cloak::resolve_self_cloak_lifecycle);
+    let fighter = app
+        .world_mut()
+        .spawn((
+            Fighter,
+            NetworkEntityId(2),
+            AbilityState {
+                charge: 0,
+                phase: AbilityPhase::Cloaked {
+                    generation: 3,
+                    activated_at_tick: 4,
+                    expires_at_tick: 10,
+                },
+            },
+        ))
+        .id();
+    assert!(
+        app.world_mut()
+            .resource_mut::<AcceptedAttackFacts>()
+            .record(AcceptedAttackFact {
+                event_id: CombatEventId(8),
+                tick: 10,
+                attack_id: AttackId(8),
+                source_network_id: NetworkEntityId(2),
+            })
+    );
+    app.world_mut().resource_mut::<CombatOutcomeFacts>().0 = vec![damage_fact(
+        9,
+        crate::combat::CombatSourceKind::PrimaryWeapon,
+        crate::combat::CombatTargetKind::Fighter,
+        crate::combat::TeamId(0),
+        crate::combat::TeamId(1),
+    )];
+
+    app.update();
+
+    assert_eq!(
+        app.world().get::<AbilityState>(fighter).unwrap().phase,
+        AbilityPhase::Charging
+    );
+    let outbox = &app.world().resource::<CombatOutbox>().0;
+    assert!(
+        !outbox
+            .iter()
+            .any(|cue| matches!(cue, CombatCue::AttackAccepted { .. }))
+    );
+    assert!(outbox.iter().any(|cue| matches!(
+        cue,
+        CombatCue::SelfCloakEnded {
+            source: NetworkEntityId(2),
+            reason: SelfCloakEndReason::Attack,
+            ..
+        }
+    )));
+}
+
 #[test]
 fn charge_uses_exact_damage_multipliers_caps_and_becomes_ready() {
     assert_eq!(

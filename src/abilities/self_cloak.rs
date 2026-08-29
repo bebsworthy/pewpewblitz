@@ -166,6 +166,7 @@ pub(crate) fn activate_self_cloak(
 )]
 pub(crate) fn resolve_self_cloak_lifecycle(
     tick: Res<crate::timing::SimulationTick>,
+    accepted_attacks: Res<crate::combat::AcceptedAttackFacts>,
     outcomes: Res<crate::combat::CombatOutcomeFacts>,
     mut ids: ResMut<crate::combat::NextCombatIds>,
     mut outbox: ResMut<crate::combat::CombatOutbox>,
@@ -188,7 +189,10 @@ pub(crate) fn resolve_self_cloak_lifecycle(
         else {
             continue;
         };
-        let attacked = outbox.0.iter().any(|cue| matches!(cue, crate::combat::CombatCue::AttackAccepted { source, .. } if source == network_id));
+        let attacked = accepted_attacks
+            .0
+            .iter()
+            .any(|fact| fact.source_network_id == *network_id);
         let damaged = outcomes.0.iter().any(|fact| fact.target_network_id == *network_id && matches!(fact.kind, crate::combat::CombatOutcomeKind::Damage { amount } if amount > 0));
         let reason = if attacked {
             Some(crate::combat::SelfCloakEndReason::Attack)

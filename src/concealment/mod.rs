@@ -37,9 +37,7 @@ mod server {
         *,
     };
     use crate::{
-        combat::{
-            CombatCue, CombatOutbox, CombatOutcomeFacts, CombatOutcomeKind, Defeated, TeamId,
-        },
+        combat::{AcceptedAttackFacts, CombatOutcomeFacts, CombatOutcomeKind, Defeated, TeamId},
         map::{MapCatalogResource, MapConcealmentBehavior, ResolvedMap, placement_cells},
         matchplay::ActiveCombatant,
         protocol::{Fighter, NetworkEntityId},
@@ -96,7 +94,7 @@ mod server {
     fn observe_attack_and_damage_reveal_locks(
         mut commands: Commands,
         tick: Res<SimulationTick>,
-        outbox: Res<CombatOutbox>,
+        accepted_attacks: Res<AcceptedAttackFacts>,
         outcomes: Res<CombatOutcomeFacts>,
         fighters: Query<
             (
@@ -107,13 +105,10 @@ mod server {
             With<Fighter>,
         >,
     ) {
-        let attack_reveals: HashSet<_> = outbox
+        let attack_reveals: HashSet<_> = accepted_attacks
             .0
             .iter()
-            .filter_map(|cue| match cue {
-                CombatCue::AttackAccepted { source, .. } => Some(source.0),
-                _ => None,
-            })
+            .map(|fact| fact.source_network_id.0)
             .collect();
         let damage_reveals: HashSet<_> = outcomes
             .0

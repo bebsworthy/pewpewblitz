@@ -43,6 +43,7 @@ impl Plugin for ServerCombatPlugin {
         reason = "combat plugin composition keeps fixed-tick ordering and deferred boundaries visible in one place"
     )]
     fn build(&self, app: &mut App) {
+        outcomes::register_accepted_attack_fact_lifecycle(app);
         if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
             app.insert_resource(TestDummyFixture {
                 position: Vec2::new(0.0, -320.0),
