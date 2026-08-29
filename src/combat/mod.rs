@@ -76,6 +76,7 @@ pub use cues::{
     CombatCue, CombatCueKey, CombatCueKind, CombatEffectCue, DamageSource, SelfCloakEndReason,
     combat_cue_key, decode_combat_cue, encode_combat_cue,
 };
+pub(crate) use definitions::MAX_WEAPON_PRESETS;
 pub use definitions::{
     DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,
     PayloadEffectDefinition, PersistentAreaShape, RecipientPolicy, ResolvedWeapon, SlowStacking,

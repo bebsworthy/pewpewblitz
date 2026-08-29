@@ -17,6 +17,8 @@ pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 13;
 pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 13;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
+pub(crate) const MAX_ULTIMATE_DEFINITIONS: usize = 32;
+pub(crate) const MAX_PASSIVE_DEFINITIONS: usize = 32;
 pub const BUILD_POINT_BUDGET: u8 = 12;
 pub const MAX_FIGHTER_MOVEMENT_SPEED: f32 = 1_200.0;
 pub const MAX_COLD_CAPACITY: u16 = 10_000;
@@ -122,53 +124,29 @@ impl BuildCatalog {
             return Err("unsupported build catalog schema/revision".into());
         }
         self.validate_tuning()?;
-        if self.weapon_costs.len() != 7 || self.ultimates.len() != 11 || self.passives.len() != 9 {
-            return Err(
-                "the build catalog requires seven weapon costs, eleven ultimates, and nine passives"
-                    .into(),
-            );
+        if self.weapon_costs.is_empty()
+            || self.weapon_costs.len() > crate::combat::MAX_WEAPON_PRESETS
+            || self.ultimates.is_empty()
+            || self.ultimates.len() > MAX_ULTIMATE_DEFINITIONS
+            || self.passives.len() < 2
+            || self.passives.len() > MAX_PASSIVE_DEFINITIONS
+        {
+            return Err("the build catalog requires non-empty definition inventories".into());
         }
         validate_metadata(&self.ultimates, |d| d.id.0, |d| &d.key, |d| &d.display_name)?;
         validate_metadata(&self.passives, |d| d.id.0, |d| &d.key, |d| &d.display_name)?;
-        let expected_weapon_costs = [
-            (WeaponPresetId(1), 4),
-            (WeaponPresetId(2), 5),
-            (WeaponPresetId(3), 5),
-            (WeaponPresetId(4), 4),
-            (WeaponPresetId(5), 4),
-            (WeaponPresetId(6), 4),
-            (WeaponPresetId(7), 4),
-        ];
-        if !self
+        if self
             .weapon_costs
-            .iter()
-            .zip(expected_weapon_costs)
-            .all(|(definition, expected)| (definition.weapon_id, definition.point_cost) == expected)
+            .windows(2)
+            .any(|pair| pair[0].weapon_id >= pair[1].weapon_id)
+            || self
+                .weapon_costs
+                .iter()
+                .any(|definition| definition.weapon_id.0 == 0)
         {
-            return Err("weapon point costs do not match the M08 content contract".into());
+            return Err("weapon point costs must have unique ascending non-zero IDs".into());
         }
-        validate_ultimate_inventory(&self.ultimates)?;
-        let expected_passives = [
-            (PassiveDefinitionId(1), PassiveKind::LightweightFrame, 2),
-            (PassiveDefinitionId(2), PassiveKind::ReinforcedFrame, 2),
-            (PassiveDefinitionId(3), PassiveKind::AdrenalResponse, 2),
-            (PassiveDefinitionId(4), PassiveKind::CloseQuarters, 2),
-            (PassiveDefinitionId(5), PassiveKind::QuickCycle, 2),
-            (PassiveDefinitionId(6), PassiveKind::Tenacity, 1),
-            (PassiveDefinitionId(7), PassiveKind::CryogenicInsulation, 1),
-            (PassiveDefinitionId(8), PassiveKind::FilteredCirculation, 1),
-            (PassiveDefinitionId(9), PassiveKind::HeatShielding, 1),
-        ];
-        if !self
-            .passives
-            .iter()
-            .zip(expected_passives)
-            .all(|(definition, expected)| {
-                (definition.id, definition.kind, definition.point_cost) == expected
-            })
-        {
-            return Err("passive inventory does not match the engine contract".into());
-        }
+        validate_ultimate_definitions(&self.ultimates)?;
         if self
             .ultimates
             .iter()
@@ -186,6 +164,22 @@ impl BuildCatalog {
         }
         if postcard::to_allocvec(self).map_or(true, |bytes| bytes.len() > 16 * 1024) {
             return Err("build catalog exceeds engine size ceiling".into());
+        }
+        Ok(())
+    }
+
+    /// Validate references that cross the build and weapon catalog boundary.
+    pub(crate) fn validate_weapon_references(&self, weapons: &WeaponCatalog) -> Result<(), String> {
+        self.validate()?;
+        weapons.validate()?;
+        let cost_ids: HashSet<_> = self
+            .weapon_costs
+            .iter()
+            .map(|definition| definition.weapon_id)
+            .collect();
+        let preset_ids: HashSet<_> = weapons.presets.iter().map(|preset| preset.id).collect();
+        if cost_ids != preset_ids {
+            return Err("weapon point costs must exactly cover the weapon catalog".into());
         }
         Ok(())
     }
@@ -272,29 +266,7 @@ impl BuildCatalog {
     }
 }
 
-fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(), String> {
-    let expected = [
-        (UltimateDefinitionId(1), UltimateKind::Dash, 3),
-        (UltimateDefinitionId(2), UltimateKind::Sentry, 4),
-        (UltimateDefinitionId(3), UltimateKind::SelfCloak, 4),
-        (UltimateDefinitionId(4), UltimateKind::RevealScan, 4),
-        (UltimateDefinitionId(5), UltimateKind::ConcealmentField, 4),
-        (UltimateDefinitionId(6), UltimateKind::DemolitionStrike, 4),
-        (UltimateDefinitionId(7), UltimateKind::CryogenicField, 4),
-        (UltimateDefinitionId(8), UltimateKind::FireField, 4),
-        (UltimateDefinitionId(9), UltimateKind::PoisonField, 4),
-        (UltimateDefinitionId(10), UltimateKind::RestorationField, 4),
-        (UltimateDefinitionId(11), UltimateKind::BigBlob, 4),
-    ];
-    if !definitions
-        .iter()
-        .zip(expected)
-        .all(|(definition, expected)| {
-            (definition.id, definition.kind, definition.point_cost) == expected
-        })
-    {
-        return Err("ultimate inventory does not match the V9 M03 engine contract".into());
-    }
+fn validate_ultimate_definitions(definitions: &[UltimateDefinition]) -> Result<(), String> {
     if definitions.iter().any(|definition| {
         !matches!(
             (definition.kind, definition.parameters),

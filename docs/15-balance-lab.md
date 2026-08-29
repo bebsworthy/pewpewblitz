@@ -59,10 +59,9 @@ Big Blob parent/secondary value. The **World objects** tab exposes an **Effect t
 Speed and Slow multipliers, Damage per pulse, and pulse interval. These controls tune the three
 supported authored identities; there is no Heal tile control or runtime tile behavior. Damage
 amount and interval are consumed from the rebuilt map catalog by authoritative damage pulses.
-Speed/Slow edits currently validate, persist, appear in canonical differences, and enter the
-development map catalog, but authoritative movement still uses the canonical `1.250` and `0.700`
-constants. Until BRL-0036 closes that wiring gap, those two controls must not be presented as
-effective gameplay tuning. Oil-barrel health/explosion tuning, Heist safe health, and
+Speed/Slow edits validate, persist, appear in canonical differences, enter the development map
+catalog, and drive authoritative movement through the resolved effect-tile occupancy. Oil-barrel
+health/explosion tuning, Heist safe health, and
 treasure-chest/restoration-pickup health,
 restoration, radius, and lifetime are also editable. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Older supported envelopes

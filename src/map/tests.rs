@@ -1018,10 +1018,16 @@ fn damageable_profiles_reject_invalid_bounds_references_and_incompatible_behavio
 }
 
 #[test]
-fn effect_tiles_reject_noncanonical_values_and_spawn_hazards() {
-    let mut invalid_value = MapContentCatalog::embedded().unwrap();
-    invalid_value.gameplay_profiles[10].effect_tile = MapEffectTileBehavior::Speed {
+fn effect_tiles_accept_bounded_authored_values_and_reject_unsafe_values_and_spawns() {
+    let mut tuned = MapContentCatalog::embedded().unwrap();
+    tuned.gameplay_profiles[10].effect_tile = MapEffectTileBehavior::Speed {
         movement_multiplier_milli: 1_249,
+    };
+    assert!(tuned.validate().is_ok());
+
+    let mut invalid_value = tuned.clone();
+    invalid_value.gameplay_profiles[10].effect_tile = MapEffectTileBehavior::Speed {
+        movement_multiplier_milli: effect_tiles::MAX_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI + 1,
     };
     assert!(invalid_value.validate().is_err());
 

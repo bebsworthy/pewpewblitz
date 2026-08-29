@@ -974,12 +974,8 @@ fn validate_snapshot(
         .find(|definition| definition.id == candidate.chest.pickup_definition.id)
         .ok_or_else(|| "restoration pickup definition disappeared".to_string())? =
         candidate.chest.pickup_definition;
-    // A follow-up edit may start from an already tuned development catalog. Restore the canonical
-    // effect values while validating every ordinary map/catalog contract, then install the bounded
-    // Balance Lab values after that production validation succeeds.
-    baseline.effect_tiles.install(&mut next_maps)?;
-    next_maps.validate()?;
     candidate.effect_tiles.install(&mut next_maps)?;
+    next_maps.validate()?;
     Ok((next_builds, next_weapons, next_maps))
 }
 

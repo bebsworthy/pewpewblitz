@@ -10,6 +10,8 @@ use super::FighterDefinition;
 pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 9;
 pub const FINGERPRINT_FORMAT_VERSION: u16 = 7;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
+pub(crate) const MAX_WEAPON_PRESETS: usize = 16;
+const MAX_WEAPON_CATALOG_BYTES: usize = 64 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WeaponPresetId(pub u16);
@@ -233,8 +235,8 @@ impl WeaponCatalog {
         if self.schema_version != WEAPON_CATALOG_SCHEMA_VERSION {
             return Err("unsupported weapon catalog schema".to_string());
         }
-        if self.presets.len() != 7 {
-            return Err("the weapon catalog requires exactly seven weapon presets".to_string());
+        if self.presets.is_empty() || self.presets.len() > MAX_WEAPON_PRESETS {
+            return Err("the weapon catalog preset inventory exceeds engine bounds".to_string());
         }
         validate_policy(&self.recipe_policy, limits)?;
         if self
@@ -247,12 +249,12 @@ impl WeaponCatalog {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         for preset in &self.presets {
-            if !matches!(preset.id.0, 1..=7)
+            if preset.id.0 == 0
                 || !ids.insert(preset.id)
                 || !keys.insert(preset.key.clone())
                 || !valid_key(&preset.key)
                 || !valid_display_name(&preset.display_name)
-                || !matches!(preset.configuration.presentation_profile_id.0, 1..=7)
+                || preset.configuration.presentation_profile_id.0 == 0
             {
                 return Err(format!("invalid preset metadata for {}", preset.key));
             }
@@ -260,8 +262,9 @@ impl WeaponCatalog {
                 .configuration
                 .validate(&self.recipe_policy, limits, None)?;
         }
-        if ids.len() != 7 || !(1..=7).all(|id| ids.contains(&WeaponPresetId(id))) {
-            return Err("weapon preset IDs must be exactly 1 through 7".to_string());
+        if postcard::to_allocvec(self).map_or(true, |bytes| bytes.len() > MAX_WEAPON_CATALOG_BYTES)
+        {
+            return Err("weapon catalog exceeds engine size ceiling".to_string());
         }
         Ok(())
     }
@@ -563,7 +566,7 @@ impl WeaponConfiguration {
         fighter_radius: Option<f32>,
     ) -> Result<(), String> {
         let recipe = &self.recipe;
-        if !matches!(self.presentation_profile_id.0, 1..=7) {
+        if self.presentation_profile_id.0 == 0 {
             return Err("unknown weapon presentation profile".to_string());
         }
         let economy_family = match recipe.economy {

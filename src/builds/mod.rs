@@ -3,6 +3,8 @@
 mod definitions;
 mod model;
 
+pub(crate) use definitions::{MAX_PASSIVE_DEFINITIONS, MAX_ULTIMATE_DEFINITIONS};
+
 pub use definitions::resolve_reveal_proximity_radius;
 pub use definitions::{
     BUILD_CATALOG_SCHEMA_VERSION, BUILD_FINGERPRINT_FORMAT_VERSION, BUILD_POINT_BUDGET,

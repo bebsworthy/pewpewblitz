@@ -14,6 +14,50 @@ fn embedded_catalog_is_exactly_seven_presets() {
 }
 
 #[test]
+fn catalog_accepts_an_additive_preset_using_existing_primitives() {
+    let mut catalog = WeaponCatalog::embedded().unwrap();
+    let mut eighth = catalog.presets.last().unwrap().clone();
+    eighth.id = WeaponPresetId(8);
+    eighth.key = "eighth-preset".into();
+    eighth.display_name = "Eighth Preset".into();
+    catalog.presets.push(eighth);
+
+    assert!(catalog.validate().is_ok());
+    assert!(catalog.fingerprint().is_ok());
+}
+
+#[test]
+fn additive_catalog_still_rejects_invalid_metadata_and_inventory_overrun() {
+    let embedded = WeaponCatalog::embedded().unwrap();
+    let mut duplicate = embedded.clone();
+    duplicate.presets[1].key = duplicate.presets[0].key.clone();
+    assert!(duplicate.validate().is_err());
+
+    let mut zero = embedded.clone();
+    zero.presets[0].id = WeaponPresetId(0);
+    assert!(zero.validate().is_err());
+
+    let mut bounded = embedded;
+    let template = bounded.presets.last().unwrap().clone();
+    for id in 8..=u16::try_from(MAX_WEAPON_PRESETS).unwrap() {
+        let mut preset = template.clone();
+        preset.id = WeaponPresetId(id);
+        preset.key = format!("preset-{id}");
+        preset.display_name = format!("Preset {id}");
+        bounded.presets.push(preset);
+    }
+    assert!(bounded.validate().is_ok());
+
+    let id = u16::try_from(MAX_WEAPON_PRESETS + 1).unwrap();
+    let mut preset = template;
+    preset.id = WeaponPresetId(id);
+    preset.key = format!("preset-{id}");
+    preset.display_name = format!("Preset {id}");
+    bounded.presets.push(preset);
+    assert!(bounded.validate().is_err());
+}
+
+#[test]
 fn embedded_weapon_defaults_match_the_accepted_balance_pass() {
     let catalog = WeaponCatalog::embedded().unwrap();
     let pulse = &catalog.presets[0].configuration.recipe;

@@ -83,14 +83,10 @@ fn resolve_effect_tile_occupancy(
             }
             continue;
         };
-        let kind = tile
-            .behavior
-            .kind()
-            .expect("resolved effect tile has a kind");
         if current.is_some_and(|occupancy| {
             occupancy.generation == generation
                 && occupancy.placement_id == tile.placement_id
-                && occupancy.kind == kind
+                && occupancy.behavior == tile.behavior
         }) {
             continue;
         }
@@ -103,7 +99,7 @@ fn resolve_effect_tile_occupancy(
         commands.entity(entity).insert(EffectTileOccupancy {
             generation,
             placement_id: tile.placement_id,
-            kind,
+            behavior: tile.behavior,
             entered_at_tick: tick.0,
             next_pulse_at_tick,
         });
@@ -118,15 +114,22 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
     if !active {
         return;
     }
-    let tick = world.resource::<crate::timing::SimulationTick>().0;
-    let Some(map) = world.get_resource::<ResolvedMap>().cloned() else {
+    if world.get_resource::<ResolvedMap>().is_none() {
         return;
+    }
+    let active_generation = {
+        let mut roots = world.query_filtered::<&MapDynamicState, With<MapRoot>>();
+        let mut roots = roots.iter(world);
+        let Some(state) = roots.next() else {
+            return;
+        };
+        let generation = state.generation_id();
+        if roots.next().is_some() {
+            return;
+        }
+        generation
     };
-    let behaviors: BTreeMap<_, _> = map
-        .effect_tiles
-        .iter()
-        .map(|tile| (tile.placement_id, tile.behavior))
-        .collect();
+    let tick = world.resource::<crate::timing::SimulationTick>().0;
     let mut due: Vec<_> = world
         .query_filtered::<(Entity, &EffectTileOccupancy), (
             With<crate::protocol::Fighter>,
@@ -135,17 +138,19 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
         )>()
         .iter(world)
         .filter_map(|(entity, occupancy)| {
+            if occupancy.generation != active_generation {
+                return None;
+            }
             let deadline = occupancy.next_pulse_at_tick?;
-            let behavior = *behaviors.get(&occupancy.placement_id)?;
-            (tick >= deadline).then_some((entity, *occupancy, behavior))
+            (tick >= deadline).then_some((entity, *occupancy))
         })
         .collect();
-    due.sort_by_key(|(_, occupancy, _)| occupancy.placement_id);
-    for (entity, occupancy, behavior) in due {
+    due.sort_by_key(|(_, occupancy)| occupancy.placement_id);
+    for (entity, occupancy) in due {
         let super::super::MapEffectTileBehavior::Damage {
             damage,
             interval_ticks,
-        } = behavior
+        } = occupancy.behavior
         else {
             continue;
         };
@@ -168,6 +173,59 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn occupancy_retains_tuned_behavior_and_schedules_its_full_first_interval() {
+        let mut app = App::new();
+        app.insert_resource(crate::timing::SimulationTick(30));
+        let mut map = crate::map::MapCatalogResource::from_world(app.world_mut())
+            .0
+            .resolve_preset(
+                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::MapInstanceId(3),
+            )
+            .unwrap();
+        let behavior = crate::map::MapEffectTileBehavior::Damage {
+            damage: 7,
+            interval_ticks: 45,
+        };
+        let tile = map
+            .effect_tiles
+            .iter_mut()
+            .find(|tile| tile.behavior.kind() == Some(crate::map::EffectTileKind::Damage))
+            .unwrap();
+        tile.behavior = behavior;
+        let position = map.snapshot.dimensions.cell_center(tile.cell);
+        app.insert_resource(map);
+        app.world_mut().spawn((
+            MapRoot,
+            MapDynamicState {
+                map_instance_id: crate::map::MapInstanceId(3),
+                generation: 1,
+                revision: 0,
+                terminal_states: Vec::new(),
+            },
+        ));
+        let fighter = app
+            .world_mut()
+            .spawn((
+                crate::protocol::Fighter,
+                crate::matchplay::ActiveCombatant,
+                Position(position),
+            ))
+            .id();
+        app.add_systems(
+            Update,
+            (resolve_effect_tile_occupancy, ApplyDeferred).chain(),
+        );
+
+        app.update();
+
+        let occupancy = app.world().get::<EffectTileOccupancy>(fighter).unwrap();
+        assert_eq!(occupancy.behavior, behavior);
+        assert_eq!(occupancy.entered_at_tick, 30);
+        assert_eq!(occupancy.next_pulse_at_tick, Some(75));
+    }
 
     #[test]
     fn cell_lookup_uses_half_open_bounds() {
@@ -208,16 +266,15 @@ mod tests {
         assert_eq!(map_cell_at(&map, dimensions.bounds().max), None);
     }
 
-    #[test]
-    fn damage_pulses_wait_reschedule_from_now_and_never_catch_up() {
+    fn damage_pulse_fixture() -> (App, Entity, Entity) {
         let mut app = App::new();
         app.init_resource::<crate::map::MapCatalogResource>()
             .init_resource::<crate::combat::NextCombatIds>()
             .init_resource::<crate::combat::CombatOutcomeFacts>()
             .init_resource::<crate::combat::CombatOutbox>()
             .init_resource::<crate::combat::CombatTelemetry>()
-            .insert_resource(crate::timing::SimulationTick(60));
-        let map = app
+            .insert_resource(crate::timing::SimulationTick(75));
+        let mut map = app
             .world()
             .resource::<crate::map::MapCatalogResource>()
             .0
@@ -226,13 +283,31 @@ mod tests {
                 crate::map::MapInstanceId(3),
             )
             .unwrap();
-        let tile = *map
+        let tuned_behavior = crate::map::MapEffectTileBehavior::Damage {
+            damage: 7,
+            interval_ticks: 45,
+        };
+        let tile = map
             .effect_tiles
-            .iter()
+            .iter_mut()
             .find(|tile| tile.behavior.kind() == Some(crate::map::EffectTileKind::Damage))
             .unwrap();
+        tile.behavior = tuned_behavior;
+        let tile = *tile;
         let position = map.snapshot.dimensions.cell_center(tile.cell);
         app.insert_resource(map);
+        let map_root = app
+            .world_mut()
+            .spawn((
+                MapRoot,
+                MapDynamicState {
+                    map_instance_id: crate::map::MapInstanceId(3),
+                    generation: 1,
+                    revision: 0,
+                    terminal_states: Vec::new(),
+                },
+            ))
+            .id();
         app.world_mut().spawn(crate::matchplay::MatchState {
             match_id: crate::matchplay::MatchId(1),
             mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
@@ -254,23 +329,29 @@ mod tests {
                         generation: 1,
                     },
                     placement_id: tile.placement_id,
-                    kind: crate::map::EffectTileKind::Damage,
+                    behavior: tile.behavior,
                     entered_at_tick: 30,
-                    next_pulse_at_tick: Some(60),
+                    next_pulse_at_tick: Some(75),
                 },
             ))
             .id();
+        (app, map_root, fighter)
+    }
+
+    #[test]
+    fn damage_pulses_wait_reschedule_from_now_and_never_catch_up() {
+        let (mut app, map_root, fighter) = damage_pulse_fixture();
 
         apply_damage_tile_pulses(app.world_mut());
         assert_eq!(
             app.world().get::<crate::combat::CurrentHealth>(fighter),
-            Some(&crate::combat::CurrentHealth(40))
+            Some(&crate::combat::CurrentHealth(43))
         );
         assert_eq!(
             app.world()
                 .get::<EffectTileOccupancy>(fighter)
                 .and_then(|occupancy| occupancy.next_pulse_at_tick),
-            Some(90)
+            Some(120)
         );
 
         app.world_mut()
@@ -279,14 +360,33 @@ mod tests {
         apply_damage_tile_pulses(app.world_mut());
         assert_eq!(
             app.world().get::<crate::combat::CurrentHealth>(fighter),
-            Some(&crate::combat::CurrentHealth(30)),
+            Some(&crate::combat::CurrentHealth(36)),
             "a delayed tick applies one pulse, not a catch-up burst"
         );
         assert_eq!(
             app.world()
                 .get::<EffectTileOccupancy>(fighter)
                 .and_then(|occupancy| occupancy.next_pulse_at_tick),
-            Some(230)
+            Some(245)
+        );
+
+        app.world_mut()
+            .get_mut::<MapDynamicState>(map_root)
+            .unwrap()
+            .generation = 2;
+        apply_damage_tile_pulses(app.world_mut());
+        assert_eq!(
+            app.world().get::<crate::combat::CurrentHealth>(fighter),
+            Some(&crate::combat::CurrentHealth(36)),
+            "stale-generation occupancy cannot apply damage"
+        );
+
+        app.world_mut().despawn(map_root);
+        apply_damage_tile_pulses(app.world_mut());
+        assert_eq!(
+            app.world().get::<crate::combat::CurrentHealth>(fighter),
+            Some(&crate::combat::CurrentHealth(36)),
+            "occupancy cannot apply damage without a live map root"
         );
     }
 }

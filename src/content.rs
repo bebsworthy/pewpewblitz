@@ -13,6 +13,7 @@ pub fn gameplay_content_fingerprint(
     maps: &crate::map::MapContentCatalog,
     builds: &crate::builds::BuildCatalog,
 ) -> Result<GameplayContentFingerprint, String> {
+    builds.validate_weapon_references(weapons)?;
     let weapon_material = weapons.canonical_fingerprint_material()?;
     let map_material = maps.canonical_fingerprint_material()?;
     let build_material = builds.canonical_fingerprint_material()?;

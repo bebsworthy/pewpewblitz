@@ -339,7 +339,9 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
             generation: 1,
         },
         placement_id: crate::map::MapPlacementId(1),
-        kind: crate::map::EffectTileKind::Speed,
+        behavior: crate::map::MapEffectTileBehavior::Speed {
+            movement_multiplier_milli: 1_500,
+        },
         entered_at_tick: 1,
         next_pulse_at_tick: None,
     };
@@ -355,7 +357,7 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
             ..default()
         },
     );
-    assert!((velocity.x - 187.5).abs() < 1e-5);
+    assert!((velocity.x - 225.0).abs() < 1e-5);
     assert!(
         (velocity.y - 40.0).abs() < 1e-5,
         "tile speed must not scale external motion"

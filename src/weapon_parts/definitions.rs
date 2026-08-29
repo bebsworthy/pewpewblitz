@@ -1,6 +1,6 @@
 use super::model::{
-    MAX_PART_TYPE_BYTES, WeaponPartDefinitionId, WeaponPartEffect, WeaponPartInstance,
-    WeaponPartInstanceId, WeaponPartModelError, valid_text,
+    MAX_PART_TYPE_BYTES, MAX_WEAPON_PARTS_PER_PROFILE, WeaponPartDefinitionId, WeaponPartEffect,
+    WeaponPartInstance, WeaponPartInstanceId, WeaponPartModelError, valid_text,
 };
 use crate::content::{GameplayContentFingerprint, fnv1a64};
 use bevy::prelude::{FromWorld, Plugin, Resource};
@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 pub const WEAPON_PART_CATALOG_SCHEMA_VERSION: u16 = 2;
 const WEAPON_PART_FINGERPRINT_VERSION: u16 = 2;
+const MAX_WEAPON_PART_CATALOG_BYTES: usize = 16 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct WeaponPartDefinition {
@@ -36,8 +37,9 @@ impl WeaponPartCatalog {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != WEAPON_PART_CATALOG_SCHEMA_VERSION
-            || self.starter_set_revision != 2
-            || self.definitions.len() != 12
+            || self.starter_set_revision < 2
+            || self.definitions.is_empty()
+            || self.definitions.len() > MAX_WEAPON_PARTS_PER_PROFILE
             || self
                 .definitions
                 .windows(2)
@@ -67,6 +69,11 @@ impl WeaponPartCatalog {
                 effects: definition.effects.clone(),
             };
             instance.validate().map_err(|error| error.to_string())?;
+        }
+        if postcard::to_allocvec(self)
+            .map_or(true, |bytes| bytes.len() > MAX_WEAPON_PART_CATALOG_BYTES)
+        {
+            return Err("weapon-part catalog exceeds engine size ceiling".into());
         }
         Ok(())
     }

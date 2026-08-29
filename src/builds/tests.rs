@@ -254,13 +254,22 @@ fn passive_slot_order_does_not_change_canonical_fingerprint() {
 }
 
 #[test]
-fn catalog_rejects_count_identity_and_cost_mutations() {
+fn catalog_accepts_additive_inventory_and_rejects_identity_and_cost_mutations() {
     let (builds, _, _) = catalogs();
+    let mut additive = builds.clone();
+    let mut ultimate = additive.ultimates.last().unwrap().clone();
+    ultimate.id = UltimateDefinitionId(12);
+    ultimate.key = "alternate-big-blob".into();
+    ultimate.display_name = "Alternate Big Blob".into();
+    additive.ultimates.push(ultimate);
+    let mut passive = additive.passives.last().unwrap().clone();
+    passive.id = PassiveDefinitionId(10);
+    passive.key = "alternate-heat-shielding".into();
+    passive.display_name = "Alternate Heat Shielding".into();
+    additive.passives.push(passive);
+    assert!(additive.validate().is_ok());
     let mut invalid = builds.clone();
-    invalid.passives.pop();
-    assert!(invalid.validate().is_err());
-    let mut invalid = builds.clone();
-    invalid.ultimates[0].point_cost = 12;
+    invalid.ultimates[0].point_cost = BUILD_POINT_BUDGET + 1;
     assert!(invalid.validate().is_err());
     let mut invalid = builds.clone();
     invalid.schema_version = 0;
@@ -286,6 +295,48 @@ fn catalog_rejects_count_identity_and_cost_mutations() {
     let mut invalid = builds;
     invalid.passives[0].key = "Upper_Case".into();
     assert!(invalid.validate().is_err());
+}
+
+#[test]
+fn weapon_costs_must_exactly_cover_an_additive_weapon_catalog() {
+    let (mut builds, mut weapons, _) = catalogs();
+    let mut eighth = weapons.presets.last().unwrap().clone();
+    eighth.id = crate::combat::WeaponPresetId(8);
+    eighth.key = "eighth-preset".into();
+    eighth.display_name = "Eighth Preset".into();
+    weapons.presets.push(eighth);
+    builds.weapon_costs.push(WeaponPointCost {
+        weapon_id: crate::combat::WeaponPresetId(8),
+        point_cost: 4,
+    });
+
+    assert!(weapons.validate().is_ok());
+    assert!(builds.validate_weapon_references(&weapons).is_ok());
+
+    builds.weapon_costs.pop();
+    assert!(builds.validate_weapon_references(&weapons).is_err());
+}
+
+#[test]
+fn additive_build_catalog_still_enforces_inventory_ceiling() {
+    let (mut builds, _, _) = catalogs();
+    let template = builds.ultimates.last().unwrap().clone();
+    for id in 12..=u16::try_from(MAX_ULTIMATE_DEFINITIONS).unwrap() {
+        let mut definition = template.clone();
+        definition.id = UltimateDefinitionId(id);
+        definition.key = format!("ultimate-{id}");
+        definition.display_name = format!("Ultimate {id}");
+        builds.ultimates.push(definition);
+    }
+    assert!(builds.validate().is_ok());
+
+    let id = u16::try_from(MAX_ULTIMATE_DEFINITIONS + 1).unwrap();
+    let mut definition = template;
+    definition.id = UltimateDefinitionId(id);
+    definition.key = format!("ultimate-{id}");
+    definition.display_name = format!("Ultimate {id}");
+    builds.ultimates.push(definition);
+    assert!(builds.validate().is_err());
 }
 
 #[test]

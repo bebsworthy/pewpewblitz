@@ -260,7 +260,11 @@ pub(in super::super) fn reconcile_status_visuals(
             desired_status.insert((entity, StatusKind::Reveal), position.0);
         }
         if let Some(tile) = tile {
-            let kind = match tile.kind {
+            let kind = match tile
+                .behavior
+                .kind()
+                .expect("occupied effect tiles always have a behavior kind")
+            {
                 crate::map::EffectTileKind::Speed => StatusKind::TileSpeed,
                 crate::map::EffectTileKind::Slow => StatusKind::TileSlow,
                 crate::map::EffectTileKind::Damage => StatusKind::TileDamage,

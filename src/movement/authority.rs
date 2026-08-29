@@ -104,17 +104,9 @@ pub(crate) fn resolved_movement_velocity(
             f32::from(slow.movement_multiplier_milli) / 1000.0
         });
     let resolved_speed = loadout_speed.unwrap_or(base_speed);
-    let tile_multiplier = modifiers
-        .effect_tile
-        .map_or(1.0, |occupancy| match occupancy.kind {
-            crate::map::EffectTileKind::Speed => {
-                f32::from(crate::map::SPEED_TILE_MULTIPLIER_MILLI) / 1000.0
-            }
-            crate::map::EffectTileKind::Slow => {
-                f32::from(crate::map::SLOW_TILE_MULTIPLIER_MILLI) / 1000.0
-            }
-            crate::map::EffectTileKind::Damage => 1.0,
-        });
+    let tile_multiplier = modifiers.effect_tile.map_or(1.0, |occupancy| {
+        f32::from(occupancy.behavior.movement_multiplier_milli()) / 1000.0
+    });
     let adrenaline_multiplier = modifiers
         .passive_state
         .and_then(|state| state.adrenaline_until_tick)

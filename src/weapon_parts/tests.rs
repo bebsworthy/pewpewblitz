@@ -9,6 +9,51 @@ fn embedded_catalog_is_valid_and_has_twelve_sidegrades() {
 }
 
 #[test]
+fn catalog_accepts_an_additive_part_definition() {
+    let mut catalog = WeaponPartCatalog::embedded().unwrap();
+    let mut thirteenth = catalog.definitions.last().unwrap().clone();
+    thirteenth.id = WeaponPartDefinitionId(13);
+    thirteenth.key = "thirteenth-part".into();
+    thirteenth.display_name = "Thirteenth Part".into();
+    catalog.starter_set_revision += 1;
+    catalog.definitions.push(thirteenth);
+
+    assert!(catalog.validate().is_ok());
+    assert!(catalog.fingerprint().is_ok());
+}
+
+#[test]
+fn additive_part_catalog_rejects_duplicate_keys_and_inventory_overrun() {
+    let embedded = WeaponPartCatalog::embedded().unwrap();
+    let mut duplicate = embedded.clone();
+    duplicate.definitions[1].key = duplicate.definitions[0].key.clone();
+    assert!(duplicate.validate().is_err());
+
+    let mut regressed_revision = embedded.clone();
+    regressed_revision.starter_set_revision = 1;
+    assert!(regressed_revision.validate().is_err());
+
+    let mut oversized = embedded;
+    let template = oversized.definitions.last().unwrap().clone();
+    for id in 13..=u16::try_from(MAX_WEAPON_PARTS_PER_PROFILE).unwrap() {
+        let mut definition = template.clone();
+        definition.id = WeaponPartDefinitionId(id);
+        definition.key = format!("part-{id}");
+        definition.display_name = format!("Part {id}");
+        oversized.definitions.push(definition);
+    }
+    assert!(oversized.validate().is_ok());
+
+    let id = u16::try_from(MAX_WEAPON_PARTS_PER_PROFILE + 1).unwrap();
+    let mut definition = template;
+    definition.id = WeaponPartDefinitionId(id);
+    definition.key = format!("part-{id}");
+    definition.display_name = format!("Part {id}");
+    oversized.definitions.push(definition);
+    assert!(oversized.validate().is_err());
+}
+
+#[test]
 fn slot_permutation_has_the_same_modifiers_and_weapon_fingerprint() {
     let parts = WeaponPartCatalog::embedded().unwrap();
     let first: Vec<_> = parts

@@ -9,6 +9,11 @@ pub const SPEED_TILE_MULTIPLIER_MILLI: u16 = 1_250;
 pub const SLOW_TILE_MULTIPLIER_MILLI: u16 = 700;
 pub const DAMAGE_TILE_DAMAGE: u16 = 10;
 pub const DAMAGE_TILE_INTERVAL_TICKS: u16 = 30;
+pub(crate) const MAX_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI: u16 = 2_000;
+pub(crate) const MIN_SLOW_TILE_MOVEMENT_MULTIPLIER_MILLI: u16 = 100;
+pub(crate) const MAX_EFFECT_TILE_DAMAGE: u16 = 100;
+pub(crate) const MIN_EFFECT_TILE_INTERVAL_TICKS: u16 = 6;
+pub(crate) const MAX_EFFECT_TILE_INTERVAL_TICKS: u16 = 600;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MapEffectTileBehavior {
@@ -54,16 +59,16 @@ impl MapEffectTileBehavior {
         match self {
             Self::None
             | Self::Speed {
-                movement_multiplier_milli: SPEED_TILE_MULTIPLIER_MILLI,
+                movement_multiplier_milli: 1_001..=MAX_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI,
             }
             | Self::Slow {
-                movement_multiplier_milli: SLOW_TILE_MULTIPLIER_MILLI,
+                movement_multiplier_milli: MIN_SLOW_TILE_MOVEMENT_MULTIPLIER_MILLI..=999,
             }
             | Self::Damage {
-                damage: DAMAGE_TILE_DAMAGE,
-                interval_ticks: DAMAGE_TILE_INTERVAL_TICKS,
+                damage: 1..=MAX_EFFECT_TILE_DAMAGE,
+                interval_ticks: MIN_EFFECT_TILE_INTERVAL_TICKS..=MAX_EFFECT_TILE_INTERVAL_TICKS,
             } => Ok(()),
-            _ => Err("effect tile behavior does not match the supported authored contract".into()),
+            _ => Err("effect tile behavior exceeds engine bounds".into()),
         }
     }
 }
@@ -86,7 +91,7 @@ pub struct ResolvedEffectTile {
 pub struct EffectTileOccupancy {
     pub generation: MapDynamicGeneration,
     pub placement_id: MapPlacementId,
-    pub kind: EffectTileKind,
+    pub behavior: MapEffectTileBehavior,
     pub entered_at_tick: u64,
     pub next_pulse_at_tick: Option<u64>,
 }
@@ -95,7 +100,7 @@ impl EffectTileOccupancy {
     /// Whether this authoritative occupancy suppresses positive-health gameplay effects.
     #[must_use]
     pub const fn blocks_healing(&self) -> bool {
-        matches!(self.kind, EffectTileKind::Damage)
+        matches!(self.behavior, MapEffectTileBehavior::Damage { .. })
     }
 }
 
@@ -103,14 +108,14 @@ impl EffectTileOccupancy {
 mod tests {
     use super::*;
 
-    fn occupancy(kind: EffectTileKind) -> EffectTileOccupancy {
+    fn occupancy(behavior: MapEffectTileBehavior) -> EffectTileOccupancy {
         EffectTileOccupancy {
             generation: MapDynamicGeneration {
                 map_instance_id: crate::map::MapInstanceId(1),
                 generation: 1,
             },
             placement_id: MapPlacementId(1),
-            kind,
+            behavior,
             entered_at_tick: 0,
             next_pulse_at_tick: None,
         }
@@ -118,8 +123,24 @@ mod tests {
 
     #[test]
     fn only_damage_occupancy_blocks_healing() {
-        assert!(occupancy(EffectTileKind::Damage).blocks_healing());
-        assert!(!occupancy(EffectTileKind::Speed).blocks_healing());
-        assert!(!occupancy(EffectTileKind::Slow).blocks_healing());
+        assert!(
+            occupancy(MapEffectTileBehavior::Damage {
+                damage: 10,
+                interval_ticks: 30,
+            })
+            .blocks_healing()
+        );
+        assert!(
+            !occupancy(MapEffectTileBehavior::Speed {
+                movement_multiplier_milli: 1_250,
+            })
+            .blocks_healing()
+        );
+        assert!(
+            !occupancy(MapEffectTileBehavior::Slow {
+                movement_multiplier_milli: 700,
+            })
+            .blocks_healing()
+        );
     }
 }

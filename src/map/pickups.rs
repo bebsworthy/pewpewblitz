@@ -659,7 +659,10 @@ mod tests {
                     generation: 1,
                 },
                 placement_id: MapPlacementId(1),
-                kind: crate::map::EffectTileKind::Damage,
+                behavior: crate::map::MapEffectTileBehavior::Damage {
+                    damage: 10,
+                    interval_ticks: 30,
+                },
                 entered_at_tick: 1,
                 next_pulse_at_tick: Some(30),
             });

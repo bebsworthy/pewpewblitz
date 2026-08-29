@@ -19,9 +19,9 @@ use serde::{
 use std::collections::HashSet;
 
 pub const MAX_ADVERTISED_FIGHTER_PROFILES: usize = 16;
-pub const MAX_ADVERTISED_WEAPON_BASES: usize = 16;
-pub const MAX_ADVERTISED_ULTIMATES: usize = 32;
-pub const MAX_ADVERTISED_PASSIVES: usize = 32;
+pub const MAX_ADVERTISED_WEAPON_BASES: usize = crate::combat::MAX_WEAPON_PRESETS;
+pub const MAX_ADVERTISED_ULTIMATES: usize = crate::builds::MAX_ULTIMATE_DEFINITIONS;
+pub const MAX_ADVERTISED_PASSIVES: usize = crate::builds::MAX_PASSIVE_DEFINITIONS;
 pub const MAX_ADVERTISED_BRAWLER_CATALOG_BYTES: usize = 16 * 1024;
 
 const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 3;
@@ -94,6 +94,7 @@ pub struct AdvertisedBrawlerCatalog {
 
 impl AdvertisedBrawlerCatalog {
     pub fn from_content(builds: &BuildCatalog, weapons: &WeaponCatalog) -> Result<Self, String> {
+        builds.validate_weapon_references(weapons)?;
         let mut catalog = Self {
             revision: BrawlerCatalogRevision(0),
             limits: AdvertisedBrawlerLimits {
