@@ -76,6 +76,7 @@ export function validateDisplayNumber(display: number, field: EditorFieldDescrip
   const stored = display * field.storageScale;
   if (
     field.storageKind === "integer" &&
+    field.storageScale === 1 &&
     Math.abs(stored - Math.round(stored)) > 0.0001
   ) {
     return `Must align to increments of ${formatNumber(field.step)} ${field.unit}.`;
@@ -93,4 +94,11 @@ export function changedFields(
 
 export function formatNumber(value: number) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
+}
+
+export function formatFieldNumber(value: number, field: EditorFieldDescriptor) {
+  if (field.storageKind === "integer" && field.storageScale === 60 && field.unit === "s") {
+    return String(Number(value.toFixed(2)));
+  }
+  return formatNumber(value);
 }

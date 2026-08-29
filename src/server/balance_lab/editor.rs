@@ -146,7 +146,7 @@ impl NumberSpec {
             minimum_exclusive: false,
             step: 1.0 / 60.0,
             control: EditorControl::Number,
-            help: Some("Stored at the authoritative 60 Hz fixed-tick rate."),
+            help: Some("Enter seconds; saved to the nearest 1/60-second server tick."),
         }
     }
 

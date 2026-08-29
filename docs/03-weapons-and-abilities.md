@@ -71,7 +71,9 @@ The current canonical base values affected by ordinary play balance are:
 | Spray | 3-shot magazine | 1.5 s/round | Single spritz | 480-speed, 240-reach, 70° cone | 40/pulse before falloff |
 
 Durations are displayed in seconds but remain positive 60 Hz fixed-tick values in authoritative
-content. The embedded catalogs, not this summary, are the executable source of truth.
+content. Editors accept ordinary decimal seconds and save the nearest fixed tick; for example,
+`0.17 s` becomes 10 ticks. The embedded catalogs, not this summary, are the executable source of
+truth.
 Arc Launcher damage no longer destroys terrain. Generic delivery-level `DestroyMap` remains a
 validated weapon capability for future authored recipes, but no built-in weapon currently grants
 it.
@@ -313,6 +315,12 @@ Static and live blocking geometry clip only the angular rays they obstruct; othe
 continue to propagate. Occlusion is recomputed for every pulse, so destroying or removing a blocker
 opens that angular portion up to the spray's current global reach without restarting propagation.
 The client reconstructs the same clipped cone for presentation and evidence but never owns hits.
+
+Spray damage can fall off with distance from its captured source. **Falloff start** is the distance
+through which each pulse retains full damage. Between **Falloff start** and **Falloff end**, damage
+decreases linearly. At and beyond **Falloff end**, **Minimum damage scale** is applied; a scale of
+`0.5`, for example, means half damage. This changes pulse strength only—it does not change how far
+the gas travels, which targets overlap the cone, or how geometry clips it.
 
 The current straight body is `ProjectileShape::Circle { radius }`. The server constructs its Avian
 collider and every fixed-tick sweep from that body and replicates it once with the projectile. The

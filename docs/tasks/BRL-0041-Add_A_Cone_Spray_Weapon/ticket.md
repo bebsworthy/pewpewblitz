@@ -1,14 +1,14 @@
 ---
 id: BRL-0041
 title: Add a cone spray weapon
-status: doing
+status: done
 theme: core
 release:
 priority: medium
 created: 2026-08-28T09:40:59Z
-modified: 2026-08-29T10:48:46Z
-closed:
-revision: f60b849c134f6f60
+modified: 2026-08-29T14:35:12Z
+closed: 2026-08-29T14:35:12Z
+revision: d586e905ff064e18
 blocks: []
 related: []
 ---

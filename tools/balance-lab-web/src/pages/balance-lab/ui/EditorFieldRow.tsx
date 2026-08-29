@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   displayNumber,
-  formatNumber,
+  formatFieldNumber,
   pathKey,
   storedNumber,
 } from "../lib/editorFields";
@@ -36,9 +36,12 @@ export function EditorFieldRow({
   const baselineDisplay = displayNumber(baseline, field);
   const changed = storedNumber(draft, field) !== storedNumber(applied, field);
   const differsFromDefault = storedNumber(draft, field) !== storedNumber(baseline, field);
-  const [text, setText] = useState(formatNumber(display));
+  const [text, setText] = useState(formatFieldNumber(display, field));
 
-  useEffect(() => setText(formatNumber(display)), [display]);
+  useEffect(
+    () => setText(formatFieldNumber(display, field)),
+    [display, field.storageKind, field.storageScale, field.unit],
+  );
 
   const update = (next: string) => {
     setText(next);
@@ -54,7 +57,7 @@ export function EditorFieldRow({
           {differsFromDefault && <span className="default-difference-badge">Non-default</span>}
         </div>
         <p>
-          Applied {formatNumber(appliedDisplay)} · Default {formatNumber(baselineDisplay)} {field.unit}
+          Applied {formatFieldNumber(appliedDisplay, field)} · Default {formatFieldNumber(baselineDisplay, field)} {field.unit}
         </p>
         {field.help && <small>{field.help}</small>}
       </div>

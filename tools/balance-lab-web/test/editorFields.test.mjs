@@ -4,6 +4,7 @@ import {
   changedFields,
   displayNumber,
   fieldFromServerError,
+  formatFieldNumber,
   pathKey,
   readAtPath,
   replaceAtPath,
@@ -54,7 +55,7 @@ test("editor scales authoritative milliunits for display and storage", () => {
   assert.equal(toStoredNumber(384.125, range), 384_125);
 });
 
-test("rounded seconds still resolve to an integral authoritative tick", () => {
+test("ordinary decimal seconds snap to an authoritative tick", () => {
   const ticks = {
     ...health,
     storageScale: 60,
@@ -64,7 +65,9 @@ test("rounded seconds still resolve to an integral authoritative tick", () => {
   };
   assert.equal(validateDisplayNumber(0.333333, ticks), null);
   assert.equal(toStoredNumber(0.333333, ticks), 20);
-  assert.match(validateDisplayNumber(0.34, ticks), /increments of/);
+  assert.equal(validateDisplayNumber(0.17, ticks), null);
+  assert.equal(toStoredNumber(0.17, ticks), 10);
+  assert.equal(formatFieldNumber(10 / 60, ticks), "0.17");
 });
 
 test("authoritative bounds drive inline validation", () => {

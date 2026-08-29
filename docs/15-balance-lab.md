@@ -73,7 +73,10 @@ inventing part names.
 Fighter tuning also exposes health recovery per second and the accepted-attack idle delay. Weapon
 refill/recharge timing is labeled as recovery for one round or charge. These durations require a
 positive authoritative tick value but have no invented balance ceiling; the exact numeric input
-remains available beyond the editor's ordinary playtest range.
+remains available beyond the editor's ordinary playtest range. Type timing values as ordinary
+decimal seconds. Balance Lab saves the nearest 1/60-second server tick and displays tick-backed
+seconds to two decimal places: `0.17 s`, for example, resolves to 10 ticks. Operators do not need to
+calculate or enter an exact six-decimal tick multiple.
 
 Each fighter profile also exposes its own Cold capacity and Cold, Poison, and Fire resistance
 baseline. Resistance is displayed as a percentage while stored in basis points. The roster always
@@ -101,6 +104,15 @@ The Spray base exposes propagation speed, reach, cone angle, linger duration, pu
 maximum targets as bounded numeric fields. Its geometry-occlusion switch remains structural rather
 than an ordinary balance control. Applying any Spray edit starts a clean Practice epoch so no live
 spray mixes old and new timing or geometry.
+
+The Spray damage payload also exposes three distance-falloff controls:
+
+- **Falloff start:** distance from the fixed spray source at which damage begins decreasing; pulses
+  deal full damage before this point.
+- **Falloff end:** distance at which the decrease reaches its minimum; damage decreases linearly
+  between the start and end.
+- **Minimum damage scale:** damage multiplier used at and beyond the falloff end. `0.5` means 50%
+  damage. It affects damage only, not propagation reach or cone occupancy.
 
 The canonical default fighter starts with `1,000` maximum health, `70` world units/second movement,
 `100 health/second` recovery, and `3.0 seconds` of accepted-attack idle delay. The lightweight and

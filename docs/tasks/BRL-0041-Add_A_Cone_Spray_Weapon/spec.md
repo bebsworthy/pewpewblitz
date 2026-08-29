@@ -61,3 +61,23 @@ Players can equip a Spray weapon whose accepted primary attack instantly emits o
 - Adding a sixth weapon exposed several exact-count and sparse-ID fixtures plus an old Balance Lab migration fixture that still modeled a five-weapon catalog. The first complete test run found these assumptions; the fixtures now explicitly model all six bases and the sequential migration removes both post-schema additions before replaying migrations.
 - The initial rumble system assumed the gamepad message resource existed in minimal network-test apps. It now treats that presentation resource as optional, preserving headless composition.
 - Spray timing validation originally derived pulse counts before rejecting a zero interval. Validation now rejects primitive invalid values before performing division, and a regression test covers zero cadence.
+
+## Balance Lab decimal-entry correction — 2026-08-29
+
+- Tick-backed duration fields now accept ordinary decimal seconds and round to the nearest authoritative tick instead of requiring the typed decimal to already equal an exact 1/60-second multiple.
+- `0.17` seconds therefore resolves to 10 ticks; unscaled integer fields such as health continue to reject fractional values.
+- Tick durations display to two decimal places and explain that values are saved to the nearest server tick.
+- Balance Lab web tests/build, the focused editor manifest test, and Balance Lab Clippy pass after the correction.
+
+
+## Native playtest acceptance — 2026-08-29
+
+- The user confirmed the stationary perfume-like spray behavior works for them after reviewing the distance falloff controls and exercising the Balance Lab decimal-entry correction.
+- Native playtest evidence is accepted; no remaining BRL-0041 feedback or closeout gate remains.
+
+
+## Documentation clarification — 2026-08-29
+
+- Updated the durable weapons specification to define Spray falloff start, falloff end, and minimum damage scale, including what falloff does not affect.
+- Updated the Balance Lab operator guide to explain ordinary decimal-second entry, nearest-60-Hz-tick storage, two-decimal display, and the three Spray falloff controls.
+- `git diff --check -- docs/03-weapons-and-abilities.md docs/15-balance-lab.md` passed. Concurrent Splash documentation changes in the weapons guide were preserved unchanged.
