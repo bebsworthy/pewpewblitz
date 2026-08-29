@@ -14,3 +14,5 @@ __pycache__/
 .repowise
 .codex
 data/
+.claude
+.vscode
