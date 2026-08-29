@@ -11,3 +11,6 @@ __pycache__/
 *.py[cod]
 # Ticket runtime database is local; git-friendly mirrors live in docs/tasks.
 /.ticket/*.db*
+.repowise
+.codex
+data/
