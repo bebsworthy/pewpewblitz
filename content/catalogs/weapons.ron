@@ -1,12 +1,12 @@
 (
-    schema_version: 7,
+    schema_version: 8,
     recipe_policy: (
         max_deliveries_per_attack: 16,
         max_payload_bundles: 4,
         max_effects_per_bundle: 4,
         permitted_economy_families: [Magazine, Charges],
         permitted_firing_patterns: [Single, Spread],
-        permitted_delivery_methods: [Straight, StickyStraight, Lobbed, MeleeArc],
+        permitted_delivery_methods: [Straight, StickyStraight, Lobbed, MeleeArc, ConeSpray],
         permitted_target_selections: [Direct, Area],
         permitted_payload_effects: [Damage, Knockback, Slow, Cold, DamageOverTime, Heal],
         permitted_recipient_policies: [Hostiles, HostilesAndOwner, Allies, AlliesAndOwner],
@@ -118,6 +118,26 @@
                     payload_bundles: [
                         (target: Area(radius: 85.44, map_occlusion: false, max_targets: 16), effects: [
                             Damage(amount: 200, falloff: None, recipients: Hostiles),
+                        ]),
+                    ],
+                    world_effects: [],
+                ),
+            ),
+        ),
+        (
+            id: WeaponPresetId(6),
+            key: "spray",
+            display_name: "Spray",
+            configuration: (
+                presentation_profile_id: WeaponPresentationProfileId(6),
+                recipe: (
+                    economy: Magazine(capacity: 3, refill_ticks: 90),
+                    fire_cooldown_ticks: 24,
+                    firing: Single,
+                    delivery: ConeSpray(propagation_speed: 480.0, reach: 240.0, angle_degrees: 70.0, linger_ticks: 30, pulse_interval_ticks: 10, map_occlusion: true, max_targets: 6),
+                    payload_bundles: [
+                        (target: Direct, effects: [
+                            Damage(amount: 40, falloff: Linear(start_distance: 120.0, end_distance: 240.0, minimum_scale: 0.5), recipients: Hostiles),
                         ]),
                     ],
                     world_effects: [],

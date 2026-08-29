@@ -1,18 +1,18 @@
 ---
 id: BRL-0041
 title: Add a cone spray weapon
-status: backlog
+status: doing
 theme: core
 release:
 priority: medium
 created: 2026-08-28T09:40:59Z
-modified: 2026-08-28T09:41:01Z
+modified: 2026-08-29T10:48:46Z
 closed:
-revision: d0c0cfe20fbea971
+revision: f60b849c134f6f60
 blocks: []
 related: []
 ---
 
 # Description
 
-Add a weapon base whose accepted primary attacks apply authoritative damage in a bounded cone instead of spawning a projectile, with matching aim preview, cover policy, feedback, and counterplay.
+Add a weapon base whose accepted primary instantly emits one stationary gas spray that propagates through a short cone, is clipped locally by blocking geometry, lingers, and applies server-authoritative damage over time without spawning a projectile.

@@ -53,7 +53,7 @@ it must not select a separate combat implementation.
 The intended long-lived brawler model fixes one fighter profile and one weapon base when the player
 creates that brawler. The fighter-profile identity and persistence lifecycle belong to
 [Fighter and build specification](./02-fighter-model.md); this document owns how the fixed weapon
-base and its equipped parts resolve into an operational weapon. The current four reference weapon
+base and its equipped parts resolve into an operational weapon. The current six reference weapon
 presets are the initial weapon bases. Lobby authority advertises their stable IDs, display names,
 presentation profile keys, and validated base configurations as part of the connection-scoped
 brawler catalog. More bases may be added as complete playable recipes without changing the
@@ -67,6 +67,8 @@ The current canonical base values affected by ordinary play balance are:
 | Scatter Cannon | 3-shot magazine | 1.2 s/round | 5 over 30° | 600 speed, 2 radius, 320 range | 120/projectile before falloff |
 | Arc Launcher | 3-shot magazine | 1.6 s/round | Single | 520-distance lob | 40 area |
 | Impact Blade | 3 charges | 1.0 s/charge | Single | 120-reach melee arc | 34 |
+| Sticky Blomb | 3-shot magazine | 1.5 s/round | Single | 320-range sticky projectile | 36 impact plus persistent pulses |
+| Spray | 3-shot magazine | 1.5 s/round | Single spritz | 480-speed, 240-reach, 70° cone | 40/pulse before falloff |
 
 Durations are displayed in seconds but remain positive 60 Hz fixed-tick values in authoritative
 content. The embedded catalogs, not this summary, are the executable source of truth.
@@ -223,7 +225,7 @@ The established weapon foundation supports:
 
 - magazine and charge economies;
 - single and spread firing patterns;
-- straight projectile, lobbed projectile, and melee-arc delivery;
+- straight projectile, lobbed projectile, melee-arc, sticky-area, and propagating cone-spray delivery;
 - direct and bounded area target selection;
 - damage, knockback, and strongest-refreshes slow effects;
 - no falloff and linear damage falloff;
@@ -233,7 +235,7 @@ The established weapon foundation supports:
 - authoritative fire cooldown, one-at-a-time ammunition recovery, lifetime, collision, and outcome attribution;
 - stable presentation cues resolved independently by the client.
 
-The four reference presets are:
+The six reference presets are:
 
 | Weapon | Pattern | Strength | Cost or weakness |
 |---|---|---|---|
@@ -241,11 +243,12 @@ The four reference presets are:
 | Scatter cannon | Short spread of pellets | Excellent close-range burst | Poor range and falloff |
 | Arc launcher | Lobbed splash projectile | Punishes cover and groups | Slow delivery and recovery |
 | Impact blade | Melee arc | Strong duel pressure and displacement | Must enter danger range |
+| Sticky Blomb | Sticky projectile and persistent area | Denies a bounded position | Delayed repeated value |
+| Spray | Instant stationary cone spritz | Sustained close-range area pressure | Must commit aim and origin at firing time |
 
 ### Fire and ammunition-recovery lifecycle
 
-All four currently recover one spent round or charge every `78` authoritative ticks (`1.3`
-seconds). Refill/recharge duration always means the time for one ammunition unit, never a duration
+Refill/recharge duration always means the time for one ammunition unit, never a duration
 that restores the whole magazine.
 
 - Spending ammunition starts an interval immediately when none is active and stock is below
@@ -301,6 +304,15 @@ Straight deliveries move through authoritative planar simulation. Lobbed deliver
 bounded landing point and flight deadline while clients may present an arc independently. Melee arcs
 are deliveries without projectile entities. The fighter does not own the delivery after creation;
 stable source identity preserves attribution across entity lifecycles.
+
+A cone spray is also a delivery without projectile entities. Attack acceptance immediately fixes
+an immutable world-space origin and facing, then a replicated gas volume grows from that point at
+the authored propagation speed, remains through its bounded linger interval, and applies payloads
+on authoritative pulse ticks. Moving or turning the fighter after firing never moves the spray.
+Static and live blocking geometry clip only the angular rays they obstruct; other parts of the cone
+continue to propagate. Occlusion is recomputed for every pulse, so destroying or removing a blocker
+opens that angular portion up to the spray's current global reach without restarting propagation.
+The client reconstructs the same clipped cone for presentation and evidence but never owns hits.
 
 The current straight body is `ProjectileShape::Circle { radius }`. The server constructs its Avian
 collider and every fixed-tick sweep from that body and replicates it once with the projectile. The

@@ -1971,7 +1971,8 @@ fn weapon_preview_text(weapon: &crate::combat::ResolvedWeapon) -> String {
         crate::combat::DeliveryMethod::Straight { range, .. }
         | crate::combat::DeliveryMethod::StickyStraight { range, .. } => range,
         crate::combat::DeliveryMethod::Lobbed { distance, .. } => distance,
-        crate::combat::DeliveryMethod::MeleeArc { reach, .. } => reach,
+        crate::combat::DeliveryMethod::MeleeArc { reach, .. }
+        | crate::combat::DeliveryMethod::ConeSpray { reach, .. } => reach,
     };
     format!(
         "Capacity {} · Damage {} · Fire {}t · Refill {}t · Reach {:.0}{}",

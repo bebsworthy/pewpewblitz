@@ -694,6 +694,7 @@ fn checkpoint_digest_requires_identical_names_and_snapshots() {
         authoritative_tick: tick,
         fighters: Vec::new(),
         projectiles: Vec::new(),
+        cone_sprays: Vec::new(),
     };
     let mut left: BTreeMap<String, CombatStateSnapshot> = BTreeMap::new();
     left.insert("defeat".to_string(), snapshot(42));

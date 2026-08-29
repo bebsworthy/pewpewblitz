@@ -44,7 +44,7 @@ fn every_legacy_part_resolves_on_every_weapon_base() {
     let fighter = &fighters.entries[0];
     for definition in parts.definitions.iter().take(8) {
         let modifiers = aggregate_weapon_part_effects(definition.effects.iter().copied()).unwrap();
-        for base in 1..=5 {
+        for base in 1..=6 {
             resolve_weapon_parts(&weapons, fighter, WeaponPresetId(base), modifiers).unwrap();
         }
     }
@@ -69,7 +69,7 @@ fn every_legal_zero_to_four_part_combination_resolves_on_its_compatible_bases() 
         let Ok(modifiers) = aggregate_weapon_part_effects(effects) else {
             continue;
         };
-        for base in 1..=5 {
+        for base in 1..=6 {
             let _ = resolve_weapon_parts(&weapons, fighter, WeaponPresetId(base), modifiers);
         }
     }

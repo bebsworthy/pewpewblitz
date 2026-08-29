@@ -56,7 +56,7 @@ fn preview_for(id: u16) -> Vec<PreviewPrimitive> {
 
 #[test]
 fn preview_geometry_is_bounded_and_finite_for_all_presets() {
-    for id in 1..=5 {
+    for id in 1..=6 {
         let segments = preview_for(id);
         assert!(segments.len() <= MAX_PREVIEW_SEGMENTS);
         assert!(segments.iter().all(|primitive| primitive.is_finite()));

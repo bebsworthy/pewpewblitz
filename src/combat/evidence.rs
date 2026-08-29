@@ -34,6 +34,8 @@ pub struct CombatStateSnapshot {
     pub authoritative_tick: u64,
     pub fighters: Vec<CombatFighterSnapshot>,
     pub projectiles: Vec<CombatProjectileSnapshot>,
+    #[serde(default)]
+    pub cone_sprays: Vec<CombatConeSpraySnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,6 +63,31 @@ pub struct CombatProjectileSnapshot {
     pub body: Option<ProjectileBody>,
     pub lobbed_flight: Option<LobbedFlight>,
     pub deadline: Option<ProjectileDeadline>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CombatConeSpraySnapshot {
+    pub attack_id: AttackId,
+    pub presentation_profile_id: Option<WeaponPresentationProfileId>,
+    pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,
+    pub state: ConeSprayState,
+}
+
+impl CombatConeSpraySnapshot {
+    #[must_use]
+    pub fn from_components(
+        delivery: Option<&AttackDelivery>,
+        source: Option<&ReplicatedAttackSource>,
+        state: &ConeSprayState,
+    ) -> Option<Self> {
+        let delivery = delivery?;
+        Some(Self {
+            attack_id: delivery.attack_id,
+            presentation_profile_id: source.map(|source| source.attack.presentation_profile_id),
+            recipe_fingerprint: source.map(|source| source.attack.recipe_fingerprint),
+            state: *state,
+        })
+    }
 }
 
 impl CombatProjectileSnapshot {
@@ -156,6 +183,7 @@ pub struct CombatEvidenceSnapshots {
 pub enum CombatCheckpoint {
     ActiveScatterFlight,
     ActiveLobFlight,
+    ActiveConeSpray,
     ActiveSlow,
     ActiveKnockback,
     Defeat,
@@ -169,6 +197,7 @@ impl CombatCheckpoint {
         match self {
             Self::ActiveScatterFlight => "active_scatter_flight",
             Self::ActiveLobFlight => "active_lob_flight",
+            Self::ActiveConeSpray => "active_cone_spray",
             Self::ActiveSlow => "active_slow",
             Self::ActiveKnockback => "active_knockback",
             Self::Defeat => "defeat",
@@ -202,7 +231,9 @@ fn normalize_checkpoint_snapshot(
         // same gameplay state. Latency is measured separately from the equality payload.
         fighter.authoritative_tick = AuthoritativeTick::default();
         match checkpoint {
-            CombatCheckpoint::ActiveScatterFlight | CombatCheckpoint::ActiveLobFlight => {
+            CombatCheckpoint::ActiveScatterFlight
+            | CombatCheckpoint::ActiveLobFlight
+            | CombatCheckpoint::ActiveConeSpray => {
                 // Transient delivery checkpoints prove stable fighter build/configuration and
                 // full projectile identity, reconstructed position, flight data, and deadline.
                 fighter.weapon_state = None;
@@ -257,6 +288,9 @@ fn normalize_checkpoint_snapshot(
                 fighter.facing = 0.0;
             }
         }
+    }
+    if checkpoint != CombatCheckpoint::ActiveConeSpray {
+        snapshot.cone_sprays.clear();
     }
     snapshot
 }
@@ -345,6 +379,14 @@ pub(super) fn capture_server_combat_checkpoints(
         ),
         With<Projectile>,
     >,
+    cone_sprays: Query<
+        (
+            Option<&AttackDelivery>,
+            Option<&ReplicatedAttackSource>,
+            &ConeSprayState,
+        ),
+        With<ConeSpray>,
+    >,
 ) {
     if !env::var("BRAWLER_NETWORK_ASSERT_COMBAT").is_ok_and(|value| value == "1") {
         return;
@@ -421,10 +463,18 @@ pub(super) fn capture_server_combat_checkpoints(
         .collect::<Vec<_>>();
     projectile_snapshots
         .sort_by_key(|projectile| (projectile.attack_id.0, projectile.delivery_index));
+    let mut cone_spray_snapshots = cone_sprays
+        .iter()
+        .filter_map(|(delivery, source, state)| {
+            CombatConeSpraySnapshot::from_components(delivery, source, state)
+        })
+        .collect::<Vec<_>>();
+    cone_spray_snapshots.sort_by_key(|spray| spray.attack_id.0);
     let snapshot = CombatStateSnapshot {
         authoritative_tick: tick.0,
         fighters: fighter_snapshots,
         projectiles: projectile_snapshots,
+        cone_sprays: cone_spray_snapshots,
     };
     let Some(encoded) = encode_state_snapshot(&snapshot) else {
         return;
@@ -445,6 +495,7 @@ pub(super) fn capture_server_combat_checkpoints(
         .projectiles
         .iter()
         .any(|projectile| projectile.lobbed_flight.is_some());
+    let has_cone_spray = !snapshot.cone_sprays.is_empty();
     let has_slow = snapshot.fighters.iter().any(|fighter| {
         fighter
             .active_effects
@@ -465,6 +516,7 @@ pub(super) fn capture_server_combat_checkpoints(
     for (checkpoint, active) in [
         ("active_scatter_flight", has_scatter_flight),
         ("active_lob_flight", has_lob_flight),
+        ("active_cone_spray", has_cone_spray),
         ("active_slow", has_slow),
         ("active_knockback", has_knockback),
         ("defeat", has_defeat),
@@ -481,6 +533,7 @@ pub(super) fn capture_server_combat_checkpoints(
             let checkpoint_kind = match checkpoint {
                 "active_scatter_flight" => CombatCheckpoint::ActiveScatterFlight,
                 "active_lob_flight" => CombatCheckpoint::ActiveLobFlight,
+                "active_cone_spray" => CombatCheckpoint::ActiveConeSpray,
                 "active_slow" => CombatCheckpoint::ActiveSlow,
                 "active_knockback" => CombatCheckpoint::ActiveKnockback,
                 "defeat" => CombatCheckpoint::Defeat,
@@ -605,6 +658,14 @@ pub fn capture_client_combat_checkpoints(
         ),
         With<Projectile>,
     >,
+    cone_sprays: Query<
+        (
+            Option<&AttackDelivery>,
+            Option<&ReplicatedAttackSource>,
+            &ConeSprayState,
+        ),
+        With<ConeSpray>,
+    >,
 ) {
     if observation.ready_file.is_none() {
         return;
@@ -667,10 +728,18 @@ pub fn capture_client_combat_checkpoints(
         .collect::<Vec<_>>();
     projectile_snapshots
         .sort_by_key(|projectile| (projectile.attack_id.0, projectile.delivery_index));
+    let mut cone_spray_snapshots = cone_sprays
+        .iter()
+        .filter_map(|(delivery, source, state)| {
+            CombatConeSpraySnapshot::from_components(delivery, source, state)
+        })
+        .collect::<Vec<_>>();
+    cone_spray_snapshots.sort_by_key(|spray| spray.attack_id.0);
     let snapshot = CombatStateSnapshot {
         authoritative_tick,
         fighters: fighter_snapshots,
         projectiles: projectile_snapshots,
+        cone_sprays: cone_spray_snapshots,
     };
     observation
         .snapshot_history
@@ -745,6 +814,13 @@ pub fn capture_client_combat_checkpoints(
                 authoritative_tick: expected.snapshot.authoritative_tick,
                 fighters: checkpoint_fighters,
                 projectiles: checkpoint_projectiles,
+                cone_sprays: cone_sprays
+                    .iter()
+                    .filter(|(_, _, state)| state.active_at(expected.snapshot.authoritative_tick))
+                    .filter_map(|(delivery, source, state)| {
+                        CombatConeSpraySnapshot::from_components(delivery, source, state)
+                    })
+                    .collect(),
             },
         );
         let Some(snapshot) = observation
@@ -958,6 +1034,7 @@ fn required_client_checkpoints(preset_id: u16) -> &'static [&'static str] {
             "reset",
         ],
         4 => &["active_knockback", "defeat", "reset"],
+        6 => &["active_cone_spray", "defeat", "reset"],
         _ => &[],
     }
 }
@@ -1022,6 +1099,7 @@ mod tests {
             authoritative_tick: 55,
             fighters: vec![fighter(DUMMY_NETWORK_ENTITY), fighter(NetworkEntityId(1))],
             projectiles: vec![projectile()],
+            cone_sprays: Vec::new(),
         }
     }
 

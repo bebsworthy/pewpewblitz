@@ -685,6 +685,7 @@ fn combat_cue_subjects(cue: &CombatCue) -> Vec<NetworkEntityId> {
         CombatCue::AttackAccepted { source, .. }
         | CombatCue::DeliveryImpact { source, .. }
         | CombatCue::LobLanded { source, .. }
+        | CombatCue::ConeSprayPulse { source, .. }
         | CombatCue::Muzzle { source, .. }
         | CombatCue::Impact { source, .. }
         | CombatCue::DemolitionStrikeActivated { source, .. }

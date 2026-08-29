@@ -22,8 +22,8 @@ pub(crate) use cues::RecentCombatEvents;
 pub use hud::{CombatAbilityHudText, CombatHudText};
 pub use preview::MAX_PREVIEW_SEGMENTS;
 pub(crate) use preview::{
-    AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, PreviewGeometry,
-    PreviewPrimitive, preview_primitives,
+    AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, MAX_CONE_SPRAY_SEGMENTS,
+    PreviewGeometry, PreviewPrimitive, cone_spray_primitives, preview_primitives,
 };
 
 pub struct ClientCombatPlugin;
@@ -81,6 +81,7 @@ impl Plugin for ClientCombatPlugin {
                     cues::receive_combat_cues.in_set(CombatClientSet::Ingest),
                     receive_combat_evidence_checkpoints.in_set(CombatClientSet::Ingest),
                     hud::update_combat_hud.in_set(CombatClientSet::HudAndStatus),
+                    cues::rumble_spray_feedback.in_set(CombatClientSet::Effects),
                     capture_client_combat_checkpoints.in_set(CombatClientSet::Evidence),
                     record_headless_combat_observation.in_set(CombatClientSet::Evidence),
                 )

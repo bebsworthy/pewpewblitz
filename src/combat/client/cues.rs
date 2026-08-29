@@ -2,6 +2,8 @@
 
 #![allow(clippy::wildcard_imports)]
 use super::*;
+use bevy::input::gamepad::{Gamepad, GamepadRumbleIntensity, GamepadRumbleRequest};
+use std::time::Duration;
 #[derive(Resource, Debug)]
 pub struct ClientCombatEvidenceStatus {
     pub(crate) required: bool,
@@ -137,6 +139,7 @@ pub(crate) fn receive_combat_cues(
                 | CombatCue::DeliveryImpact { event_id, .. }
                 | CombatCue::LobLanded { event_id, .. }
                 | CombatCue::MeleeContact { event_id, .. }
+                | CombatCue::ConeSprayPulse { event_id, .. }
                 | CombatCue::DamageApplied { event_id, .. }
                 | CombatCue::EffectApplied { event_id, .. }
                 | CombatCue::FighterDefeated { event_id, .. }
@@ -199,6 +202,47 @@ pub(crate) fn receive_combat_cues(
                 continue;
             }
             presented_cues.write(DeduplicatedCombatCue(cue.clone()));
+        }
+    }
+}
+
+#[cfg(feature = "client")]
+pub(crate) fn rumble_spray_feedback(
+    mut cues: MessageReader<DeduplicatedCombatCue>,
+    controlled: Query<&NetworkEntityId, (With<Fighter>, With<lightyear::prelude::Controlled>)>,
+    gamepads: Query<Entity, With<Gamepad>>,
+    mut requests: Option<MessageWriter<GamepadRumbleRequest>>,
+) {
+    let Some(requests) = requests.as_mut() else {
+        return;
+    };
+    let controlled_ids = controlled.iter().copied().collect::<Vec<_>>();
+    for DeduplicatedCombatCue(cue) in cues.read() {
+        let intensity = match cue {
+            CombatCue::AttackAccepted {
+                source,
+                presentation_profile_id: WeaponPresentationProfileId(6),
+                ..
+            } if controlled_ids.contains(source) => Some((0.08, 0.28, 0.08)),
+            CombatCue::DamageApplied {
+                target,
+                presentation_profile_id: WeaponPresentationProfileId(6),
+                ..
+            } if controlled_ids.contains(target) => Some((0.16, 0.34, 0.07)),
+            _ => None,
+        };
+        let Some((strong_motor, weak_motor, seconds)) = intensity else {
+            continue;
+        };
+        for gamepad in &gamepads {
+            requests.write(GamepadRumbleRequest::Add {
+                gamepad,
+                intensity: GamepadRumbleIntensity {
+                    strong_motor,
+                    weak_motor,
+                },
+                duration: Duration::from_secs_f32(seconds),
+            });
         }
     }
 }

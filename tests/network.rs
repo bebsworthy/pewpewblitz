@@ -15,10 +15,11 @@ use brawler::{
         ActiveAttackTrackers, ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource,
         CombatCue, CombatEventId, CombatLogRecord, CombatOutbox, CombatOutcomeFact,
         CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind, CombatTelemetry,
-        ComposedProjectileRuntime, CurrentHealth, DUMMY_NETWORK_ENTITY, Defeated,
-        FighterDefinitions, HealthRecoveryState, MeleeAttack, PendingDelivery, PendingPayload,
-        Projectile, ProjectileDeadline, ReplicatedAttackSource, SpawnState, TeamId, WeaponPhase,
-        WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
+        ComposedProjectileRuntime, ConeSpray, ConeSprayState, CurrentHealth, DUMMY_NETWORK_ENTITY,
+        Defeated, FighterDefinitions, HealthRecoveryState, MeleeAttack, PendingDelivery,
+        PendingPayload, Projectile, ProjectileDeadline, ReplicatedAttackSource, SpawnState, TeamId,
+        WeaponPhase, WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry,
+        WorldPoint,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -79,6 +80,8 @@ mod combat_projectiles;
 mod combat_pulse;
 #[path = "network/combat_recovery.rs"]
 mod combat_recovery;
+#[path = "network/combat_spray.rs"]
+mod combat_spray;
 #[path = "network/concealment.rs"]
 mod concealment;
 #[path = "network/lifecycle.rs"]

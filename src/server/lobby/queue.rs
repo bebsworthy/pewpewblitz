@@ -1158,7 +1158,7 @@ mod tests {
         let admitted = match &command {
             QueueCommand::Join(join) => {
                 let preset = u16::try_from(join.brawler_id.get()).unwrap_or(0);
-                if !(1..=5).contains(&preset) {
+                if !(1..=6).contains(&preset) {
                     return queue.command(
                         &session,
                         QueueRequestId::new(request).unwrap(),

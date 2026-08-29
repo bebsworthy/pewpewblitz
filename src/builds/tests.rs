@@ -24,8 +24,8 @@ fn recipe(weapon: u16, ultimate: u16, passives: [u16; 2]) -> BrawlerBuildRecipe 
 #[test]
 fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters() {
     let (builds, _, _) = catalogs();
-    assert_eq!(builds.balance_revision, BuildRevision(9));
-    assert_eq!(builds.weapon_costs.len(), 5);
+    assert_eq!(builds.balance_revision, BuildRevision(10));
+    assert_eq!(builds.weapon_costs.len(), 6);
     assert_eq!(builds.ultimates.len(), 11);
     assert_eq!(builds.passives.len(), 9);
     assert_eq!(

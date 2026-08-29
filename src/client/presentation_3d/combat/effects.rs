@@ -437,6 +437,7 @@ fn cue_effect(
             crate::builds::world_units_from_milliunits(*radius_milliunits).unwrap_or(0.0),
         )),
         C::Muzzle { .. }
+        | C::ConeSprayPulse { .. }
         | C::Impact { .. }
         | C::Damage { .. }
         | C::Defeat { .. }

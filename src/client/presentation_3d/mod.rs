@@ -96,6 +96,7 @@ pub(crate) struct Material3dAssets {
     pub(crate) zone_boundary: Handle<StandardMaterial>,
     pub(crate) preview: Handle<StandardMaterial>,
     pub(crate) preview_blocked: Handle<StandardMaterial>,
+    pub(crate) spray_gas: Handle<StandardMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
     pub(crate) status_knockback: Handle<StandardMaterial>,
     pub(crate) status_reveal: Handle<StandardMaterial>,
@@ -318,6 +319,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::reconcile_sentry_visuals,
                     combat::reconcile_concealment_field_visuals,
                     combat::reconcile_elemental_field_visuals,
+                    combat::reconcile_cone_spray_visuals,
                     combat::reconcile_sticky_blob_visuals,
                     combat::reconcile_aim_preview_visuals,
                     (
@@ -351,6 +353,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::reconcile_status_visuals,
                     combat::reconcile_dash_trails,
                     combat::update_sticky_blob_fuse_progress,
+                    combat::update_cone_spray_visuals,
                     combat::update_aim_preview,
                     update_character_animation,
                     tint_3d_zone,
@@ -1256,6 +1259,13 @@ fn setup_3d_foundation(
         }),
         preview_blocked: materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.16, 0.16, 0.55),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        spray_gas: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.72, 0.92, 0.82, 0.30),
+            emissive: LinearRgba::new(0.18, 0.42, 0.26, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()

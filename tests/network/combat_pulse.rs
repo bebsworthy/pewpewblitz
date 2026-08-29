@@ -599,7 +599,8 @@ fn reciprocal_lethal_hits_defeat_both_fighters_with_stable_attribution() {
             | CombatCue::RevealScanActivated { event_id, .. }
             | CombatCue::DemolitionStrikeActivated { event_id, .. }
             | CombatCue::ForcedRevealApplied { event_id, .. }
-            | CombatCue::ElementalFieldActivated { event_id, .. } => event_id.0,
+            | CombatCue::ElementalFieldActivated { event_id, .. }
+            | CombatCue::ConeSprayPulse { event_id, .. } => event_id.0,
         })
         .collect();
     assert!(

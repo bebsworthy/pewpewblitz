@@ -8,6 +8,7 @@ use std::collections::HashMap;
 /// Sixteen straight deliveries need one corridor and one terminal disc each. The remaining slots
 /// preserve the existing lobbed/melee previews without allocating presentation entities per frame.
 pub const MAX_PREVIEW_SEGMENTS: usize = 48;
+pub(crate) const MAX_CONE_SPRAY_SEGMENTS: usize = 33;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PreviewGeometry {
@@ -458,6 +459,20 @@ pub(crate) fn preview_primitives(
             reach,
             angle_degrees,
         } => melee_preview_primitives(origin, facing, reach, angle_degrees),
+        DeliveryMethod::ConeSpray {
+            reach,
+            angle_degrees,
+            map_occlusion,
+            ..
+        } => cone_spray_preview_primitives(
+            origin,
+            facing,
+            reach,
+            angle_degrees,
+            map_occlusion,
+            index,
+            dynamic,
+        ),
     };
     primitives.truncate(MAX_PREVIEW_SEGMENTS);
     primitives
@@ -634,6 +649,80 @@ fn melee_preview_primitives(
     primitives
 }
 
+pub(crate) fn cone_spray_primitives(
+    state: ConeSprayState,
+    tick: u64,
+    index: &AimTraceBlockerIndex,
+    dynamic: &[AimTraceDynamicBlocker],
+) -> Vec<PreviewPrimitive> {
+    cone_spray_preview_primitives(
+        state.origin.as_vec2(),
+        state.facing,
+        state.reached_distance(tick),
+        state.angle_degrees,
+        state.map_occlusion,
+        index,
+        dynamic,
+    )
+}
+
+fn cone_spray_preview_primitives(
+    origin: Vec2,
+    facing: f32,
+    reach: f32,
+    angle_degrees: f32,
+    map_occlusion: bool,
+    index: &AimTraceBlockerIndex,
+    dynamic: &[AimTraceDynamicBlocker],
+) -> Vec<PreviewPrimitive> {
+    const RAYS: usize = 17;
+    let half_angle = angle_degrees.to_radians() * 0.5;
+    let geometry_blockers = dynamic
+        .iter()
+        .copied()
+        .filter(|blocker| blocker.class == AimTraceBlockerClass::HeistSafe)
+        .collect::<Vec<_>>();
+    let mut endpoints = Vec::with_capacity(RAYS);
+    let mut primitives = Vec::with_capacity(RAYS * 2 - 1);
+    for ray in 0..RAYS {
+        let progress = ray as f32 / (RAYS - 1) as f32;
+        let angle = facing - half_angle + angle_degrees.to_radians() * progress;
+        let direction = Vec2::from_angle(angle);
+        let trace = if map_occlusion {
+            trace_projectile_body(
+                index,
+                ProjectileBody::circle(0.5),
+                origin,
+                direction,
+                reach,
+                &geometry_blockers,
+            )
+        } else {
+            AimTraceResult {
+                stop_center: origin + direction * reach,
+                distance: reach,
+                blocked: false,
+            }
+        };
+        endpoints.push((trace.stop_center, trace.blocked));
+        primitives.push(PreviewPrimitive::corridor(
+            origin,
+            trace.stop_center,
+            (trace.distance * angle_degrees.to_radians() / (RAYS - 1) as f32).max(4.0),
+            trace.blocked,
+        ));
+    }
+    for pair in endpoints.windows(2) {
+        primitives.push(PreviewPrimitive::corridor(
+            pair[0].0,
+            pair[1].0,
+            3.0,
+            pair[0].1 || pair[1].1,
+        ));
+    }
+    primitives
+}
+
 #[cfg(test)]
 mod geometry_tests {
     use super::*;
@@ -729,6 +818,41 @@ mod geometry_tests {
         );
         assert!(dynamic_hit.blocked);
         assert!((dynamic_hit.distance - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn cone_spray_clips_only_blocked_rays_and_reopens_after_dynamic_removal() {
+        let index = AimTraceBlockerIndex {
+            dimensions: Some(crate::map::MapDimensions {
+                width: 20,
+                height: 20,
+            }),
+            ..Default::default()
+        };
+        let blocker = AimTraceDynamicBlocker {
+            class: AimTraceBlockerClass::HeistSafe,
+            stable_id: 1,
+            position: Vec2::new(45.0, 0.0),
+            rotation: 0.0,
+            shape: crate::map::MapShape::Rectangle {
+                half_extents: Vec2::new(8.0, 10.0),
+            },
+        };
+        let clipped =
+            cone_spray_preview_primitives(Vec2::ZERO, 0.0, 100.0, 70.0, true, &index, &[blocker]);
+        let reopened =
+            cone_spray_preview_primitives(Vec2::ZERO, 0.0, 100.0, 70.0, true, &index, &[]);
+        let corridor_length = |primitive: PreviewPrimitive| match primitive.geometry {
+            PreviewGeometry::Corridor { length, .. } => length,
+            PreviewGeometry::Disc { .. } => panic!("spray rays are corridors"),
+        };
+
+        assert!(clipped[8].blocked, "the center ray crosses the blocker");
+        assert!(corridor_length(clipped[8]) < 40.0);
+        assert!(!clipped[0].blocked, "the neighboring edge ray stays open");
+        assert!((corridor_length(clipped[0]) - 100.0).abs() < 0.01);
+        assert!(!reopened[8].blocked);
+        assert!((corridor_length(reopened[8]) - 100.0).abs() < 0.01);
     }
 
     #[test]

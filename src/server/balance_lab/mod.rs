@@ -37,7 +37,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 14;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 15;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -1022,20 +1022,23 @@ fn same_recipe_shape(expected: &WeaponRecipe, supplied: &WeaponRecipe) -> bool {
         (FiringPattern::Single, FiringPattern::Single)
             | (FiringPattern::Spread { .. }, FiringPattern::Spread { .. })
     );
-    let delivery = matches!(
-        (expected.delivery, supplied.delivery),
+    let delivery = match (expected.delivery, supplied.delivery) {
+        (DeliveryMethod::Straight { .. }, DeliveryMethod::Straight { .. })
+        | (DeliveryMethod::StickyStraight { .. }, DeliveryMethod::StickyStraight { .. })
+        | (DeliveryMethod::Lobbed { .. }, DeliveryMethod::Lobbed { .. })
+        | (DeliveryMethod::MeleeArc { .. }, DeliveryMethod::MeleeArc { .. }) => true,
         (
-            DeliveryMethod::Straight { .. },
-            DeliveryMethod::Straight { .. }
-        ) | (
-            DeliveryMethod::StickyStraight { .. },
-            DeliveryMethod::StickyStraight { .. }
-        ) | (DeliveryMethod::Lobbed { .. }, DeliveryMethod::Lobbed { .. })
-            | (
-                DeliveryMethod::MeleeArc { .. },
-                DeliveryMethod::MeleeArc { .. }
-            )
-    );
+            DeliveryMethod::ConeSpray {
+                map_occlusion: left,
+                ..
+            },
+            DeliveryMethod::ConeSpray {
+                map_occlusion: right,
+                ..
+            },
+        ) => left == right,
+        _ => false,
+    };
     economy
         && firing
         && delivery

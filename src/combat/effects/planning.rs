@@ -19,6 +19,7 @@ pub(super) fn pending_delivery_kind_order(kind: &PendingDeliveryKind) -> u8 {
         PendingDeliveryKind::StickyDetonated { .. } => 1,
         PendingDeliveryKind::LobLanded { .. } => 2,
         PendingDeliveryKind::MeleeContact { .. } => 3,
+        PendingDeliveryKind::ConeSprayPulse { .. } => 4,
     }
 }
 
@@ -395,6 +396,36 @@ pub(super) fn resolve_pending_deliveries(
                     WeaponTelemetryOutcome::MeleeContact,
                 );
             }
+            PendingDeliveryKind::ConeSprayPulse {
+                origin,
+                facing,
+                reached_distance,
+                angle_degrees,
+            } => {
+                let cue = CombatCue::ConeSprayPulse {
+                    event_id,
+                    tick: delivery.tick,
+                    attack_id: delivery.source.attack_id,
+                    delivery_index: delivery.delivery_index,
+                    source: delivery.source.owner_network_entity_id,
+                    weapon_definition_id,
+                    presentation_profile_id: delivery.source.presentation_profile_id,
+                    origin,
+                    facing,
+                    reached_distance,
+                    angle_degrees,
+                };
+                legacy_telemetry.record_cue(cue.clone());
+                outbox.0.push(cue);
+                record_delivery_telemetry(
+                    telemetry,
+                    &delivery,
+                    event_id,
+                    None,
+                    origin,
+                    WeaponTelemetryOutcome::DeliveryImpact,
+                );
+            }
         }
         // World effects are delivery-level facts: exactly one per authored effect for this
         // committed delivery, independent of target count.
@@ -405,6 +436,7 @@ pub(super) fn resolve_pending_deliveries(
                 | PendingDeliveryKind::LobLanded { position }
                 | PendingDeliveryKind::StickyDetonated { position }
                 | PendingDeliveryKind::MeleeContact { position, .. } => *position,
+                PendingDeliveryKind::ConeSprayPulse { origin, .. } => *origin,
             };
             world_effect_facts.0.push(CombatWorldEffectFact {
                 tick: delivery.tick,

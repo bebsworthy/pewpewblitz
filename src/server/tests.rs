@@ -213,6 +213,7 @@ fn checkpoint_reports_fail_closed_on_missing_or_altered_state() {
         authoritative_tick: 7,
         fighters: Vec::new(),
         projectiles: Vec::new(),
+        cone_sprays: Vec::new(),
     };
     let encoded = encode_state_snapshot(&snapshot).expect("snapshot encoding");
     let report = format!("checkpoint_reset={encoded}\n");
@@ -317,6 +318,7 @@ fn checkpoint_convergence_requires_the_same_server_candidate_on_both_clients() {
         authoritative_tick: 7,
         fighters: Vec::new(),
         projectiles: Vec::new(),
+        cone_sprays: Vec::new(),
     };
     let encoded = encode_state_snapshot(&snapshot).expect("snapshot encoding");
     let matching_report = format!("checkpoint_reset={encoded}\n");

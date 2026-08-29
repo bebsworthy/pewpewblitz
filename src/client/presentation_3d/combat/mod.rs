@@ -2,12 +2,14 @@
 
 mod aim_preview;
 mod common;
+mod cone_spray;
 mod effects;
 mod entities;
 mod fighter_feedback;
 mod fighter_ui;
 
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
+pub(super) use cone_spray::{reconcile_cone_spray_visuals, update_cone_spray_visuals};
 pub(super) use effects::{
     CombatEffect3d, PendingCombatEffect, cleanup_combat_effects, consume_combat_cues,
     consume_heist_objective_cues, consume_pickup_cues, consume_world_object_cues,

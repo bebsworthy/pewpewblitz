@@ -43,7 +43,9 @@ pub fn resolve_configuration_with_policy(
             muzzle_offset,
             ..
         } => Some((radius, muzzle_offset)),
-        DeliveryMethod::Lobbed { .. } | DeliveryMethod::MeleeArc { .. } => None,
+        DeliveryMethod::Lobbed { .. }
+        | DeliveryMethod::MeleeArc { .. }
+        | DeliveryMethod::ConeSpray { .. } => None,
     };
     if straight_geometry
         .is_some_and(|(radius, muzzle_offset)| muzzle_offset < fighter.body_radius + radius)
@@ -143,6 +145,16 @@ pub(super) fn normalize_recipe(recipe: &mut WeaponRecipe) {
             reach,
             angle_degrees,
         } => {
+            n(reach);
+            n(angle_degrees);
+        }
+        DeliveryMethod::ConeSpray {
+            propagation_speed,
+            reach,
+            angle_degrees,
+            ..
+        } => {
+            n(propagation_speed);
             n(reach);
             n(angle_degrees);
         }

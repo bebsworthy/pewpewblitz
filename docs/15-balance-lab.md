@@ -46,12 +46,12 @@ recomputes runtime recipe identities for equipped weapon modifiers whose base re
 persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
 worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 14, the persistence envelope is version 9, and the
+The current snapshot schema is version 15, the persistence envelope is version 10, and the
 non-persisted editor-manifest schema is version 6. The server manifest explicitly identifies every
 editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
 control. The browser does not infer editability or limits from serialized field names. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
-duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, five
+duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, six
 canonical weapon-base recipes, and the bounded parameters of all nine tunable ultimates,
 including every Sticky Blomb delivery/fuse value and every Big Blob parent/secondary value. Oil-
 barrel health/explosion tuning, Heist safe health, and treasure-chest/restoration-pickup health,
@@ -60,7 +60,7 @@ topology, replacement assets, and pickup visual identity remain locked. Older su
 migrate sequentially by filling canonical chest, fighter-recovery, demolition,
 elemental-resistance, elemental-field, Cold-capacity, and global condition-rule defaults before validation while retaining existing
 tuning. The removed full-build workflow is not a Balance Lab surface. Apply validation
-re-resolves the complete 3×5 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
+re-resolves the complete 3×6 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
 
 The roster view is also non-persisted and read-only. It is projected from the worker's authoritative
@@ -96,6 +96,11 @@ the server collider and sweep, the visible projectile diameter (`2 × radius`), 
 corridor width together. Muzzle-offset validation still prevents the configured body from starting
 inside its source fighter. Future non-circular bodies require an explicit shape capability rather
 than overloading this radius field.
+
+The Spray base exposes propagation speed, reach, cone angle, linger duration, pulse interval, and
+maximum targets as bounded numeric fields. Its geometry-occlusion switch remains structural rather
+than an ordinary balance control. Applying any Spray edit starts a clean Practice epoch so no live
+spray mixes old and new timing or geometry.
 
 The canonical default fighter starts with `1,000` maximum health, `70` world units/second movement,
 `100 health/second` recovery, and `3.0 seconds` of accepted-attack idle delay. The lightweight and

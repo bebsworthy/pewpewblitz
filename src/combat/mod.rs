@@ -28,6 +28,8 @@ mod rules;
 #[cfg(feature = "server")]
 pub(crate) mod server;
 #[cfg(feature = "server")]
+mod spray;
+#[cfg(feature = "server")]
 pub(crate) mod sticky;
 pub(crate) mod telemetry;
 #[cfg(feature = "server")]
@@ -79,8 +81,8 @@ pub use definitions::{
     linear_falloff, resolve_configuration, spread_angles,
 };
 pub use evidence::{
-    CombatCheckpoint, CombatEvidenceCheckpoint, CombatFighterSnapshot, CombatProjectileSnapshot,
-    CombatStateSnapshot, encode_state_snapshot,
+    CombatCheckpoint, CombatConeSpraySnapshot, CombatEvidenceCheckpoint, CombatFighterSnapshot,
+    CombatProjectileSnapshot, CombatStateSnapshot, encode_state_snapshot,
 };
 #[cfg(feature = "server")]
 pub use evidence::{CombatEvidenceSnapshots, CombatOutbox};
@@ -89,14 +91,15 @@ pub(crate) use model::ElementalFieldRuntime;
 #[cfg(feature = "server")]
 pub use model::{
     ActiveAttackTracker, ActiveAttackTrackers, CombatWorldEffectFact, CombatWorldEffectFacts,
-    CombatWorldEffectSource, CompletedAttack, ComposedProjectileRuntime, MeleeAttack,
-    PendingDelivery, PendingDeliveryKind, PendingPayload, SpawnState, StickyBlobRuntime,
+    CombatWorldEffectSource, CompletedAttack, ComposedProjectileRuntime, ConeSprayRuntime,
+    MeleeAttack, PendingDelivery, PendingDeliveryKind, PendingPayload, SpawnState,
+    StickyBlobRuntime,
 };
 pub use model::{
     ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource, AuthoritativePose,
-    AuthoritativeTick, ColdState, CombatEventId, CombatSourceKind, ConditionSource, CurrentHealth,
-    DamageOverTime, DamageOverTimeKind, Defeated, DistanceBand, ElementalFieldId,
-    ElementalFieldKind, ElementalFieldState, ExternalMotion, HealthRecoveryState,
+    AuthoritativeTick, ColdState, CombatEventId, CombatSourceKind, ConditionSource, ConeSpray,
+    ConeSprayState, CurrentHealth, DamageOverTime, DamageOverTimeKind, Defeated, DistanceBand,
+    ElementalFieldId, ElementalFieldKind, ElementalFieldState, ExternalMotion, HealthRecoveryState,
     KnockbackFeedback, LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline,
     ProjectileShape, ProjectileSource, ReplicatedAttackSource, ShotId, SlowEffect, StickyBlobKind,
     StickyBlobState, StraightFlight, TeamId, WeaponPhase, WeaponState, WorldPoint, distance_band,
@@ -171,6 +174,7 @@ pub const SCATTER_CANNON_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(2);
 pub const ARC_LAUNCHER_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(3);
 pub const IMPACT_BLADE_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(4);
 pub const STICKY_BLOMB_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(5);
+pub const SPRAY_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(6);
 /// Reserved team and entity identity for the neutral practice dummy.
 pub const NEUTRAL_TEAM: TeamId = TeamId(u8::MAX);
 pub const DUMMY_NETWORK_ENTITY: NetworkEntityId = NetworkEntityId(0);

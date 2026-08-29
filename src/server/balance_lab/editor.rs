@@ -603,6 +603,45 @@ fn add_weapon_fields(
                     .ranged(),
             );
         }
+        DeliveryMethod::ConeSpray { .. } => {
+            add(
+                path!["delivery", "ConeSpray", "propagation_speed"],
+                "Spray",
+                "Gas propagation speed",
+                NumberSpec::positive_decimal(f64::from(policy.max_speed), "world units/s"),
+            );
+            add(
+                path!["delivery", "ConeSpray", "reach"],
+                "Spray",
+                "Maximum reach",
+                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
+            );
+            add(
+                path!["delivery", "ConeSpray", "angle_degrees"],
+                "Spray",
+                "Cone angle",
+                NumberSpec::positive_decimal(f64::from(policy.max_angle_degrees), "degrees")
+                    .ranged(),
+            );
+            add(
+                path!["delivery", "ConeSpray", "linger_ticks"],
+                "Spray",
+                "Full-cone linger",
+                NumberSpec::ticks(1, limits.max_deadline_ticks),
+            );
+            add(
+                path!["delivery", "ConeSpray", "pulse_interval_ticks"],
+                "Spray",
+                "Damage pulse interval",
+                NumberSpec::ticks(1, limits.max_deadline_ticks),
+            );
+            add(
+                path!["delivery", "ConeSpray", "max_targets"],
+                "Spray",
+                "Maximum targets per pulse",
+                NumberSpec::integer(1, u32::from(policy.max_targets_per_delivery), "targets"),
+            );
+        }
     }
 
     for (bundle_index, bundle) in weapon.recipe.payload_bundles.iter().enumerate() {
@@ -1287,7 +1326,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 145);
+        assert_eq!(manifest.fields.len(), 158);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()

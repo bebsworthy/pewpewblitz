@@ -204,6 +204,41 @@ pub struct AttackDelivery {
     pub delivery_index: u8,
 }
 
+/// Marker for one replicated, stationary cone spray. It is a timed gameplay volume, not a
+/// projectile: its origin and facing never follow the fighter after attack acceptance.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ConeSpray;
+
+/// Immutable network-visible propagation facts for one accepted perfume-like spritz.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct ConeSprayState {
+    pub origin: WorldPoint,
+    pub facing: f32,
+    pub propagation_speed: f32,
+    pub maximum_reach: f32,
+    pub angle_degrees: f32,
+    pub emitted_at_tick: u64,
+    pub full_at_tick: u64,
+    pub expires_at_tick: u64,
+    pub pulse_interval_ticks: u64,
+    pub map_occlusion: bool,
+    pub max_targets: u8,
+}
+
+impl ConeSprayState {
+    #[must_use]
+    pub fn reached_distance(self, tick: u64) -> f32 {
+        let elapsed = tick.saturating_sub(self.emitted_at_tick) as f32;
+        (elapsed * self.propagation_speed / crate::timing::SIMULATION_TICK_HZ as f32)
+            .clamp(0.0, self.maximum_reach)
+    }
+
+    #[must_use]
+    pub const fn active_at(self, tick: u64) -> bool {
+        tick >= self.emitted_at_tick && tick <= self.expires_at_tick
+    }
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct LobbedFlight {
     pub launch: WorldPoint,
@@ -495,6 +530,17 @@ pub struct MeleeAttack {
 }
 
 #[cfg(feature = "server")]
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ConeSprayRuntime {
+    pub owner_entity: Entity,
+    pub source: AttackSource,
+    pub recipe: WeaponRecipe,
+    pub next_pulse_tick: u64,
+    pub next_delivery_index: u8,
+    pub match_id: Option<crate::matchplay::MatchId>,
+}
+
+#[cfg(feature = "server")]
 #[derive(Message, Clone, Debug, PartialEq)]
 pub struct PendingPayload {
     pub source: AttackSource,
@@ -577,6 +623,12 @@ pub enum PendingDeliveryKind {
     MeleeContact {
         target: NetworkEntityId,
         position: WorldPoint,
+    },
+    ConeSprayPulse {
+        origin: WorldPoint,
+        facing: f32,
+        reached_distance: f32,
+        angle_degrees: f32,
     },
 }
 

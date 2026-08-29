@@ -2,9 +2,9 @@
 
 use super::*;
 #[test]
-fn embedded_catalog_is_exactly_five_presets() {
+fn embedded_catalog_is_exactly_six_presets() {
     let catalog = WeaponCatalog::embedded().unwrap();
-    assert_eq!(catalog.presets.len(), 5);
+    assert_eq!(catalog.presets.len(), 6);
     assert_eq!(
         catalog.presets[1].configuration.recipe.payload_bundles[0]
             .effects
@@ -81,6 +81,20 @@ fn embedded_weapon_defaults_match_the_accepted_balance_pass() {
         WeaponEconomy::Charges {
             capacity: 3,
             recharge_ticks: 60,
+        }
+    );
+
+    let spray = &catalog.presets[5].configuration.recipe;
+    assert_eq!(
+        spray.delivery,
+        DeliveryMethod::ConeSpray {
+            propagation_speed: 480.0,
+            reach: 240.0,
+            angle_degrees: 70.0,
+            linger_ticks: 30,
+            pulse_interval_ticks: 10,
+            map_occlusion: true,
+            max_targets: 6,
         }
     );
 }
@@ -236,6 +250,59 @@ fn arc_configuration() -> WeaponConfiguration {
         .unwrap()
         .configuration
         .clone()
+}
+
+fn spray_configuration() -> WeaponConfiguration {
+    WeaponCatalog::embedded()
+        .unwrap()
+        .preset(WeaponPresetId(6))
+        .unwrap()
+        .configuration
+        .clone()
+}
+
+#[test]
+fn cone_spray_validation_rejects_unbounded_geometry_and_cadence() {
+    let fighter = super::super::FighterDefinitions::default().entries[0];
+    let policy = WeaponRecipePolicy::default();
+    let limits = EngineWeaponLimits::default();
+
+    for delivery in [
+        DeliveryMethod::ConeSpray {
+            propagation_speed: 0.0,
+            reach: 240.0,
+            angle_degrees: 70.0,
+            linger_ticks: 30,
+            pulse_interval_ticks: 10,
+            map_occlusion: true,
+            max_targets: 6,
+        },
+        DeliveryMethod::ConeSpray {
+            propagation_speed: 480.0,
+            reach: 240.0,
+            angle_degrees: 361.0,
+            linger_ticks: 30,
+            pulse_interval_ticks: 10,
+            map_occlusion: true,
+            max_targets: 6,
+        },
+        DeliveryMethod::ConeSpray {
+            propagation_speed: 480.0,
+            reach: 240.0,
+            angle_degrees: 70.0,
+            linger_ticks: 30,
+            pulse_interval_ticks: 0,
+            map_occlusion: true,
+            max_targets: 6,
+        },
+    ] {
+        let mut bad = spray_configuration();
+        bad.recipe.delivery = delivery;
+        assert!(
+            bad.validate(&policy, limits, Some(fighter.body_radius))
+                .is_err()
+        );
+    }
 }
 
 #[test]

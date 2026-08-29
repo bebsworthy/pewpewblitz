@@ -223,7 +223,7 @@ fn apply_modifiers(
         DeliveryMethod::Lobbed { distance, .. } => {
             *distance = apply_world(*distance, modifiers.reach_milliunits)?;
         }
-        DeliveryMethod::MeleeArc { reach, .. } => {
+        DeliveryMethod::MeleeArc { reach, .. } | DeliveryMethod::ConeSpray { reach, .. } => {
             *reach = apply_world(*reach, modifiers.reach_milliunits)?;
         }
     }

@@ -79,6 +79,8 @@ fn headless_weapon_preset_and_cover_lane_movement_are_bounded() {
     config.weapon_preset = Some(5);
     assert!(config.validate().is_ok());
     config.weapon_preset = Some(6);
+    assert!(config.validate().is_ok());
+    config.weapon_preset = Some(7);
     assert!(config.validate().is_err());
     config.weapon_preset = Some(4);
     config.window_size = Some((960, 540));

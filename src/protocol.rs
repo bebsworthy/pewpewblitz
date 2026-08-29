@@ -21,10 +21,10 @@ use brawler_routing::{AllocationId, MatchId, PeerId, RequestId, RouteId};
 use crate::builds::{AbilityState, PassiveRuntimeState, ResolvedMatchLoadout};
 use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
-    CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback,
-    LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline, ProjectileSource,
-    ReplicatedAttackSource, StickyBlobState, StraightFlight, TeamId, WeaponDefinitionId,
-    WeaponState,
+    CombatEvidenceCheckpoint, ConeSpray, ConeSprayState, CurrentHealth, Defeated,
+    FighterDefinitionId, KnockbackFeedback, LobbedFlight, Projectile, ProjectileBody,
+    ProjectileDeadline, ProjectileSource, ReplicatedAttackSource, StickyBlobState, StraightFlight,
+    TeamId, WeaponDefinitionId, WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -41,7 +41,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 35;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 36;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -652,6 +652,8 @@ fn register_replicated_components(app: &mut App) {
         .replicate();
     app.component::<KnockbackFeedback>().replicate();
     app.component::<AttackDelivery>().replicate_once();
+    app.component::<ConeSpray>().replicate_once();
+    app.component::<ConeSprayState>().replicate_once();
     app.component::<LobbedFlight>().replicate_once();
     app.component::<ProjectileDeadline>().replicate_once();
     app.component::<StickyBlobState>().replicate();

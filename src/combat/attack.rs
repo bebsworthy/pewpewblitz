@@ -5,6 +5,31 @@
 use super::*;
 
 #[cfg(feature = "server")]
+pub(crate) const MAX_ACTIVE_CONE_SPRAYS: usize = 32;
+
+#[cfg(feature = "server")]
+#[must_use]
+pub(crate) fn cone_spray_timing(
+    emitted_at_tick: u64,
+    propagation_speed: f32,
+    reach: f32,
+    linger_ticks: u64,
+    pulse_interval_ticks: u64,
+) -> (u64, u64, u8) {
+    let fill_ticks = ((reach * crate::timing::SIMULATION_TICK_HZ as f32) / propagation_speed)
+        .ceil()
+        .max(1.0) as u64;
+    let full_at_tick = emitted_at_tick.saturating_add(fill_ticks);
+    let expires_at_tick = full_at_tick.saturating_add(linger_ticks);
+    let pulse_count = expires_at_tick.saturating_sub(emitted_at_tick) / pulse_interval_ticks;
+    (
+        full_at_tick,
+        expires_at_tick,
+        u8::try_from(pulse_count).unwrap_or(u8::MAX),
+    )
+}
+
+#[cfg(feature = "server")]
 pub(super) fn advance_composed_weapon_state(
     state: &mut WeaponState,
     recipe: &WeaponRecipe,
@@ -144,6 +169,7 @@ pub(super) struct MuzzleContactState<'w, 's> {
     world_pending: ResMut<'w, crate::map::PendingWorldTargetDamages>,
     objective_pending: ResMut<'w, crate::matchplay::PendingModeObjectiveDamages>,
     sticky_blobs: Query<'w, 's, &'static StickyBlobRuntime>,
+    cone_sprays: Query<'w, 's, (), With<ConeSprayRuntime>>,
 }
 
 #[cfg(feature = "server")]
@@ -503,6 +529,58 @@ fn emit_attack_deliveries(
             });
             emitted_deliveries = 1;
         }
+        DeliveryMethod::ConeSpray {
+            propagation_speed,
+            reach,
+            angle_degrees,
+            linger_ticks,
+            pulse_interval_ticks,
+            map_occlusion,
+            max_targets,
+        } => {
+            let (full_at_tick, expires_at_tick, pulse_count) = cone_spray_timing(
+                tick,
+                propagation_speed,
+                reach,
+                linger_ticks,
+                pulse_interval_ticks,
+            );
+            let state = ConeSprayState {
+                origin: WorldPoint::from(origin),
+                facing,
+                propagation_speed,
+                maximum_reach: reach,
+                angle_degrees,
+                emitted_at_tick: tick,
+                full_at_tick,
+                expires_at_tick,
+                pulse_interval_ticks,
+                map_occlusion,
+                max_targets,
+            };
+            let mut spray = commands.spawn((
+                ConeSpray,
+                state,
+                ReplicatedAttackSource { attack: source },
+                AttackDelivery {
+                    attack_id,
+                    delivery_index: 0,
+                },
+                ConeSprayRuntime {
+                    owner_entity: entity,
+                    source,
+                    recipe: recipe.clone(),
+                    next_pulse_tick: tick.saturating_add(pulse_interval_ticks),
+                    next_delivery_index: 0,
+                    match_id: match_member.map(|member| member.0),
+                },
+                Replicate::to_clients(NetworkTarget::All),
+            ));
+            if let Some(match_member) = match_member {
+                spray.insert(match_member);
+            }
+            emitted_deliveries = u64::from(pulse_count);
+        }
     }
     emitted_deliveries
 }
@@ -604,7 +682,7 @@ fn record_accepted_attack(
                 DeliveryMethod::Straight { muzzle_offset, .. }
                 | DeliveryMethod::StickyStraight { muzzle_offset, .. }
                 | DeliveryMethod::Lobbed { muzzle_offset, .. } => muzzle_offset,
-                DeliveryMethod::MeleeArc { .. } => 0.0,
+                DeliveryMethod::MeleeArc { .. } | DeliveryMethod::ConeSpray { .. } => 0.0,
             },
         );
         legacy_telemetry.record(CombatLogRecord::Shot {
@@ -769,6 +847,11 @@ pub(super) fn authoritative_composed_fire(
             &muzzle_contacts.objects,
         );
         let sticky_delivery = matches!(recipe.delivery, DeliveryMethod::StickyStraight { .. });
+        if matches!(recipe.delivery, DeliveryMethod::ConeSpray { .. })
+            && muzzle_contacts.cone_sprays.iter().count() >= MAX_ACTIVE_CONE_SPRAYS
+        {
+            continue;
+        }
         if sticky_delivery
             && !blocked_deliveries.is_empty()
             && let DeliveryMethod::StickyStraight {
@@ -1018,5 +1101,13 @@ mod tests {
         assert_eq!(resolved_lob_flight_ticks(520.0, 1.0, 45), 6);
         assert_eq!(resolved_lob_flight_ticks(520.0, 0.0, 45), 6);
         assert_eq!(resolved_lob_flight_ticks(520.0, 900.0, 45), 45);
+    }
+
+    #[test]
+    fn cone_spray_timing_includes_fill_and_linger_pulses() {
+        let (full_at, expires_at, pulses) = cone_spray_timing(100, 480.0, 240.0, 30, 10);
+        assert_eq!(full_at, 130);
+        assert_eq!(expires_at, 160);
+        assert_eq!(pulses, 6);
     }
 }

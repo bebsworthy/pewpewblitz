@@ -120,8 +120,12 @@ impl Plugin for ServerCombatPlugin {
                         .after(sticky::advance_sticky_attachments)
                         .in_set(CombatSet::ProjectileSweep),
                     resolve_melee_attacks.in_set(CombatDamageSet::Combatants),
+                    spray::advance_cone_sprays
+                        .before(resolve_composed_payloads)
+                        .in_set(CombatDamageSet::Combatants),
                     resolve_composed_payloads
                         .after(resolve_melee_attacks)
+                        .after(spray::advance_cone_sprays)
                         .in_set(CombatDamageSet::Combatants),
                     ApplyDeferred
                         .after(resolve_composed_payloads)

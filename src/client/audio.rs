@@ -524,6 +524,11 @@ fn combat_sound(cue: &CombatCue) -> Option<(SoundKind, u64)> {
         CombatCue::DeliveryImpact { attack_id, .. }
         | CombatCue::LobLanded { attack_id, .. }
         | CombatCue::MeleeContact { attack_id, .. } => Some((SoundKind::Impact, attack_id.0)),
+        CombatCue::ConeSprayPulse { event_id, .. }
+        | CombatCue::SelfCloakEnded { event_id, .. }
+        | CombatCue::DemolitionStrikeActivated { event_id, .. } => {
+            Some((SoundKind::Impact, event_id.0))
+        }
         CombatCue::FighterDefeated { attack_id, .. } => Some((SoundKind::Defeat, attack_id.0)),
         CombatCue::FighterReset { event_id, .. } => Some((SoundKind::Reset, event_id.0)),
         CombatCue::SentryFired { event_id, .. } | CombatCue::DeployableRemoved { event_id, .. } => {
@@ -542,10 +547,6 @@ fn combat_sound(cue: &CombatCue) -> Option<(SoundKind, u64)> {
         | CombatCue::ElementalFieldActivated { event_id, .. } => {
             Some((SoundKind::Ready, event_id.0))
         }
-        CombatCue::DemolitionStrikeActivated { event_id, .. } => {
-            Some((SoundKind::Impact, event_id.0))
-        }
-        CombatCue::SelfCloakEnded { event_id, .. } => Some((SoundKind::Impact, event_id.0)),
     }
 }
 

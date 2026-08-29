@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 7;
-pub const FINGERPRINT_FORMAT_VERSION: u16 = 5;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 8;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 6;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -87,6 +87,7 @@ pub enum DeliveryMethodKind {
     StickyStraight,
     Lobbed,
     MeleeArc,
+    ConeSpray,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -173,6 +174,7 @@ impl Default for WeaponRecipePolicy {
                 DeliveryMethodKind::StickyStraight,
                 DeliveryMethodKind::Lobbed,
                 DeliveryMethodKind::MeleeArc,
+                DeliveryMethodKind::ConeSpray,
             ],
             permitted_target_selections: vec![
                 TargetSelectionKind::Direct,
@@ -229,8 +231,8 @@ impl WeaponCatalog {
         if self.schema_version != WEAPON_CATALOG_SCHEMA_VERSION {
             return Err("unsupported weapon catalog schema".to_string());
         }
-        if self.presets.len() != 5 {
-            return Err("the weapon catalog requires exactly five weapon presets".to_string());
+        if self.presets.len() != 6 {
+            return Err("the weapon catalog requires exactly six weapon presets".to_string());
         }
         validate_policy(&self.recipe_policy, limits)?;
         if self
@@ -243,12 +245,12 @@ impl WeaponCatalog {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         for preset in &self.presets {
-            if !matches!(preset.id.0, 1..=5)
+            if !matches!(preset.id.0, 1..=6)
                 || !ids.insert(preset.id)
                 || !keys.insert(preset.key.clone())
                 || !valid_key(&preset.key)
                 || !valid_display_name(&preset.display_name)
-                || !matches!(preset.configuration.presentation_profile_id.0, 1..=5)
+                || !matches!(preset.configuration.presentation_profile_id.0, 1..=6)
             {
                 return Err(format!("invalid preset metadata for {}", preset.key));
             }
@@ -256,8 +258,8 @@ impl WeaponCatalog {
                 .configuration
                 .validate(&self.recipe_policy, limits, None)?;
         }
-        if ids.len() != 5 || !(1..=5).all(|id| ids.contains(&WeaponPresetId(id))) {
-            return Err("weapon preset IDs must be exactly 1 through 5".to_string());
+        if ids.len() != 6 || !(1..=6).all(|id| ids.contains(&WeaponPresetId(id))) {
+            return Err("weapon preset IDs must be exactly 1 through 6".to_string());
         }
         Ok(())
     }
@@ -392,6 +394,15 @@ pub enum DeliveryMethod {
         reach: f32,
         angle_degrees: f32,
     },
+    ConeSpray {
+        propagation_speed: f32,
+        reach: f32,
+        angle_degrees: f32,
+        linger_ticks: u64,
+        pulse_interval_ticks: u64,
+        map_occlusion: bool,
+        max_targets: u8,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -494,7 +505,7 @@ impl WeaponConfiguration {
         fighter_radius: Option<f32>,
     ) -> Result<(), String> {
         let recipe = &self.recipe;
-        if !matches!(self.presentation_profile_id.0, 1..=5) {
+        if !matches!(self.presentation_profile_id.0, 1..=6) {
             return Err("unknown weapon presentation profile".to_string());
         }
         let economy_family = match recipe.economy {
@@ -516,6 +527,7 @@ impl WeaponConfiguration {
             DeliveryMethod::StickyStraight { .. } => DeliveryMethodKind::StickyStraight,
             DeliveryMethod::Lobbed { .. } => DeliveryMethodKind::Lobbed,
             DeliveryMethod::MeleeArc { .. } => DeliveryMethodKind::MeleeArc,
+            DeliveryMethod::ConeSpray { .. } => DeliveryMethodKind::ConeSpray,
         };
         if !policy.permitted_delivery_methods.contains(&delivery_kind) {
             return Err("delivery method is disabled by catalog policy".to_string());
@@ -667,6 +679,51 @@ impl WeaponConfiguration {
                     return Err("melee delivery needs direct payload".to_string());
                 }
             }
+            DeliveryMethod::ConeSpray {
+                propagation_speed,
+                reach,
+                angle_degrees,
+                linger_ticks,
+                pulse_interval_ticks,
+                max_targets,
+                ..
+            } => {
+                if !finite_range(propagation_speed, 0.0, limits.max_world_field)
+                    || !finite_range(propagation_speed, 0.0, policy.max_speed)
+                    || propagation_speed == 0.0
+                    || !finite_range(reach, 0.0, limits.max_world_field)
+                    || !finite_range(reach, 0.0, policy.max_distance)
+                    || reach == 0.0
+                    || !finite_range(angle_degrees, 0.0, limits.max_angle_degrees)
+                    || !finite_range(angle_degrees, 0.0, policy.max_angle_degrees)
+                    || angle_degrees == 0.0
+                    || linger_ticks == 0
+                    || pulse_interval_ticks == 0
+                    || max_targets == 0
+                    || max_targets > policy.max_targets_per_delivery
+                    || max_targets > limits.max_targets_per_delivery
+                {
+                    return Err("invalid cone spray delivery".to_string());
+                }
+                let fill_ticks = ((reach * 60.0) / propagation_speed).ceil().max(1.0) as u64;
+                let lifetime_ticks = fill_ticks.saturating_add(linger_ticks);
+                let pulse_count = lifetime_ticks / pulse_interval_ticks;
+                if lifetime_ticks > limits.max_deadline_ticks
+                    || pulse_interval_ticks > lifetime_ticks
+                    || pulse_count == 0
+                    || pulse_count > u64::from(policy.max_deliveries_per_attack)
+                    || pulse_count > u64::from(limits.max_deliveries_per_attack)
+                {
+                    return Err("invalid cone spray timing".to_string());
+                }
+                if !recipe
+                    .payload_bundles
+                    .iter()
+                    .any(|bundle| matches!(bundle.target, TargetSelection::Direct))
+                {
+                    return Err("cone spray delivery needs direct payload".to_string());
+                }
+            }
         }
         if !matches!(
             recipe.delivery,
@@ -689,7 +746,9 @@ impl WeaponConfiguration {
                 return Err("invalid payload effect count".to_string());
             }
             let target_is_valid = match recipe.delivery {
-                DeliveryMethod::Straight { .. } | DeliveryMethod::MeleeArc { .. } => {
+                DeliveryMethod::Straight { .. }
+                | DeliveryMethod::MeleeArc { .. }
+                | DeliveryMethod::ConeSpray { .. } => {
                     matches!(bundle.target, TargetSelection::Direct)
                 }
                 DeliveryMethod::StickyStraight { .. } | DeliveryMethod::Lobbed { .. } => {
