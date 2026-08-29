@@ -87,15 +87,13 @@ pub(crate) fn requested_damage(
     falloff: DamageFalloff,
     delivery_travel: f32,
     recipient_scale: f32,
-    close_quarters: bool,
+    close_quarters: Option<crate::builds::PassiveParameters>,
     engagement_distance: f32,
 ) -> u16 {
     let base = f32::from(amount) * linear_falloff(falloff, delivery_travel) * recipient_scale;
-    let requested = if close_quarters {
-        crate::abilities::apply_close_quarters_scale(base, engagement_distance)
-    } else {
-        base
-    };
+    let requested = close_quarters.map_or(base, |parameters| {
+        crate::abilities::apply_close_quarters_scale(base, engagement_distance, parameters)
+    });
     requested.clamp(1.0, f32::from(u16::MAX)).round() as u16
 }
 
@@ -241,7 +239,7 @@ pub(super) fn apply_runtime_effects(
     preset_id: WeaponPresetId,
     mut effects_state: ActiveEffects,
     mut motion_state: Option<ExternalMotion>,
-    tenacity: bool,
+    tenacity: Option<crate::builds::ResolvedPassive>,
     cold_capacity: u16,
     freeze_duration_ticks: u64,
     cold_resistance_basis_points: u16,
@@ -323,17 +321,26 @@ pub(super) fn apply_runtime_effects(
                 recipients,
             } => {
                 let base_duration_ticks = duration_ticks;
-                let duration_ticks = if tenacity {
-                    crate::abilities::apply_tenacity_ticks(duration_ticks)
-                } else {
-                    duration_ticks
-                };
-                if tenacity && duration_ticks < base_duration_ticks {
+                let duration_ticks = tenacity.map_or(duration_ticks, |passive| {
+                    let crate::builds::PassiveParameters::Tenacity {
+                        slow_duration_basis_points,
+                    } = passive.parameters
+                    else {
+                        return duration_ticks;
+                    };
+                    crate::abilities::apply_tenacity_ticks(
+                        duration_ticks,
+                        slow_duration_basis_points,
+                    )
+                });
+                if let Some(passive) = tenacity
+                    && duration_ticks < base_duration_ticks
+                {
                     ability_telemetry.record(crate::abilities::AbilityTelemetryRecord {
                         tick,
                         owner_network_id: target_network_id,
                         kind: crate::abilities::AbilityTelemetryKind::PassiveModified {
-                            passive_id: crate::builds::PassiveDefinitionId(6),
+                            passive_id: passive.id,
                             amount: u16::try_from(
                                 base_duration_ticks.saturating_sub(duration_ticks),
                             )

@@ -244,7 +244,7 @@ fn predict_owner_movement(
         let velocity = movement
             * speed
             * active_slow_multiplier(effects, tick.0)
-            * adrenaline_multiplier(passive_state, tick.0);
+            * adrenaline_multiplier(loadout, passive_state, tick.0);
         let mut position = predicted.position + velocity * delta;
         position = resolve_circle_against_blocking_map(
             position,

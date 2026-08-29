@@ -1,15 +1,17 @@
 use bevy::prelude::Vec2;
 
-pub const DASH_MAX_DISTANCE: f32 = 360.0;
-pub const DASH_DURATION_TICKS: u64 = 18;
-
 #[must_use]
-pub fn bounded_dash_endpoint(origin: Vec2, direction: Vec2, clear_distance: f32) -> Option<Vec2> {
-    if !origin.is_finite() || !clear_distance.is_finite() {
+pub fn bounded_dash_endpoint(
+    origin: Vec2,
+    direction: Vec2,
+    clear_distance: f32,
+    maximum_distance: f32,
+) -> Option<Vec2> {
+    if !origin.is_finite() || !clear_distance.is_finite() || !maximum_distance.is_finite() {
         return None;
     }
     let direction = direction.try_normalize()?;
-    let distance = clear_distance.clamp(0.0, DASH_MAX_DISTANCE);
+    let distance = clear_distance.clamp(0.0, maximum_distance);
     (distance > 0.5).then_some(origin + direction * distance)
 }
 
@@ -19,8 +21,9 @@ pub fn stable_dash_contacts(
     segment_end: Vec2,
     already_hit: &[crate::protocol::NetworkEntityId],
     candidates: impl IntoIterator<Item = (crate::protocol::NetworkEntityId, Vec2, bool)>,
+    maximum_targets: u8,
 ) -> Vec<crate::protocol::NetworkEntityId> {
-    let remaining = 8_usize.saturating_sub(already_hit.len());
+    let remaining = usize::from(maximum_targets).saturating_sub(already_hit.len());
     let mut candidates: Vec<_> = candidates
         .into_iter()
         .filter(|(id, position, eligible)| {
@@ -43,9 +46,10 @@ fn stable_dash_contacts_with_radii(
     segment_end: Vec2,
     attacker_radius: f32,
     already_hit: &[crate::protocol::NetworkEntityId],
+    maximum_targets: u8,
     candidates: impl IntoIterator<Item = (crate::protocol::NetworkEntityId, Vec2, f32, bool)>,
 ) -> Vec<crate::protocol::NetworkEntityId> {
-    let remaining = 8_usize.saturating_sub(already_hit.len());
+    let remaining = usize::from(maximum_targets).saturating_sub(already_hit.len());
     let mut candidates: Vec<_> = candidates
         .into_iter()
         .filter(|(id, position, target_radius, eligible)| {
@@ -63,10 +67,15 @@ fn stable_dash_contacts_with_radii(
 }
 
 #[must_use]
-pub fn dash_position(origin: Vec2, endpoint: Vec2, elapsed_ticks: u64) -> Vec2 {
-    let elapsed = u16::try_from(elapsed_ticks.min(DASH_DURATION_TICKS))
-        .expect("dash duration is a small fixed constant");
-    let duration = u16::try_from(DASH_DURATION_TICKS).expect("dash duration fits u16");
+pub fn dash_position(
+    origin: Vec2,
+    endpoint: Vec2,
+    elapsed_ticks: u64,
+    duration_ticks: u64,
+) -> Vec2 {
+    let elapsed =
+        u16::try_from(elapsed_ticks.min(duration_ticks)).expect("validated dash duration fits u16");
+    let duration = u16::try_from(duration_ticks).expect("validated dash duration fits u16");
     let fraction = f32::from(elapsed) / f32::from(duration);
     origin.lerp(endpoint, fraction)
 }
@@ -79,6 +88,53 @@ pub(crate) struct DashRuntime {
     started_at_tick: u64,
     source: crate::combat::AttackSource,
     hit_targets: Vec<crate::protocol::NetworkEntityId>,
+    tuning: ResolvedDashTuning,
+}
+
+#[cfg(feature = "server")]
+impl DashRuntime {
+    pub(crate) const fn charge_maximum(&self) -> u16 {
+        self.tuning.charge_maximum
+    }
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ResolvedDashTuning {
+    charge_maximum: u16,
+    maximum_distance: f32,
+    duration_ticks: u64,
+    damage: u16,
+    knockback_speed: f32,
+    knockback_duration_ticks: u64,
+    maximum_targets: u8,
+}
+
+#[cfg(feature = "server")]
+fn resolve_dash_tuning(
+    parameters: crate::builds::UltimateParameters,
+    charge_maximum: u16,
+) -> Option<ResolvedDashTuning> {
+    let crate::builds::UltimateParameters::Dash {
+        maximum_distance_milliunits,
+        duration_ticks,
+        damage,
+        knockback_speed_milliunits,
+        knockback_duration_ticks,
+        maximum_targets,
+    } = parameters
+    else {
+        return None;
+    };
+    Some(ResolvedDashTuning {
+        charge_maximum,
+        maximum_distance: crate::builds::world_units_from_milliunits(maximum_distance_milliunits)?,
+        duration_ticks,
+        damage,
+        knockback_speed: crate::builds::world_units_from_milliunits(knockback_speed_milliunits)?,
+        knockback_duration_ticks,
+        maximum_targets,
+    })
 }
 
 #[cfg(feature = "server")]
@@ -158,7 +214,11 @@ pub(crate) fn activate_dash(
                 && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
         });
         let held = requested
-            && !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
+            && !crate::movement::input_should_neutralize(
+                tick.0,
+                freshness.last_fresh_tick,
+                crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
+            );
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
         if let Some(mut latch) = latch {
             latch.0 = requested;
@@ -189,7 +249,7 @@ pub(crate) fn activate_dash(
                 | crate::builds::AbilityPhase::Deployed { .. }
         ) {
             Some(crate::abilities::AbilityRejectionReason::AlreadyExecuting)
-        } else if ability.charge != crate::abilities::ULTIMATE_CHARGE_MAX
+        } else if ability.charge != loadout.ultimate.charge_policy.maximum
             || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
         {
             Some(crate::abilities::AbilityRejectionReason::NotCharged)
@@ -205,6 +265,12 @@ pub(crate) fn activate_dash(
             continue;
         }
         let direction = Vec2::from_angle(rotation.as_radians());
+        let Some(dash_tuning) = resolve_dash_tuning(
+            loadout.ultimate.parameters,
+            loadout.ultimate.charge_policy.maximum,
+        ) else {
+            continue;
+        };
         let Ok(direction_dir) = Dir2::new(direction) else {
             continue;
         };
@@ -219,13 +285,18 @@ pub(crate) fn activate_dash(
             position.0,
             rotation.as_radians(),
             direction_dir,
-            &ShapeCastConfig::from_max_distance(DASH_MAX_DISTANCE),
+            &ShapeCastConfig::from_max_distance(dash_tuning.maximum_distance),
             &filter,
         );
         let distance = collision
             .as_ref()
-            .map_or(DASH_MAX_DISTANCE, |hit| hit.distance.max(0.0));
-        let Some(endpoint) = bounded_dash_endpoint(position.0, direction, distance) else {
+            .map_or(dash_tuning.maximum_distance, |hit| hit.distance.max(0.0));
+        let Some(endpoint) = bounded_dash_endpoint(
+            position.0,
+            direction,
+            distance,
+            dash_tuning.maximum_distance,
+        ) else {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -245,7 +316,7 @@ pub(crate) fn activate_dash(
             });
             continue;
         };
-        let ends_at_tick = tick.0.saturating_add(DASH_DURATION_TICKS);
+        let ends_at_tick = tick.0.saturating_add(dash_tuning.duration_ticks);
         *ability = crate::builds::AbilityState {
             charge: 0,
             phase: crate::builds::AbilityPhase::Dashing { ends_at_tick },
@@ -277,7 +348,7 @@ pub(crate) fn activate_dash(
                         target: *identity,
                         source,
                         attack_id,
-                        requested_damage: 35,
+                        requested_damage: dash_tuning.damage,
                         delivery_index: 0,
                         bundle_index: 0,
                         effect_index: 0,
@@ -289,7 +360,7 @@ pub(crate) fn activate_dash(
                         .push(crate::matchplay::PendingModeObjectiveDamage {
                             target: *identity,
                             source,
-                            requested_damage: 35,
+                            requested_damage: dash_tuning.damage,
                             delivery_index: 0,
                             bundle_index: 0,
                             effect_index: 0,
@@ -304,7 +375,8 @@ pub(crate) fn activate_dash(
                 endpoint,
                 started_at_tick: tick.0,
                 source,
-                hit_targets: Vec::with_capacity(8),
+                hit_targets: Vec::with_capacity(usize::from(dash_tuning.maximum_targets)),
+                tuning: dash_tuning,
             })
             .remove::<crate::matchplay::SpawnProtection>();
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -316,9 +388,9 @@ pub(crate) fn activate_dash(
             tick: tick.0,
             owner_network_id: *network_id,
             kind: crate::abilities::AbilityTelemetryKind::DashTravel {
-                requested_distance_milli: distance_milli(DASH_MAX_DISTANCE),
+                requested_distance_milli: distance_milli(dash_tuning.maximum_distance),
                 actual_distance_milli: distance_milli(position.0.distance(endpoint)),
-                map_collision_truncated: distance + 0.01 < DASH_MAX_DISTANCE,
+                map_collision_truncated: distance + 0.01 < dash_tuning.maximum_distance,
             },
         });
     }
@@ -356,6 +428,7 @@ pub(crate) fn advance_dash(
                 Option<&crate::combat::Defeated>,
                 Option<&crate::matchplay::ActiveCombatant>,
                 Option<&crate::abilities::Sentry>,
+                Option<&super::sentry::ResolvedSentryTuning>,
             ),
             bevy::prelude::Or<(
                 bevy::prelude::With<crate::protocol::Fighter>,
@@ -368,17 +441,13 @@ pub(crate) fn advance_dash(
         .p1()
         .iter()
         .map(
-            |(entity, position, network_id, team, defeated, active, sentry)| {
+            |(entity, position, network_id, team, defeated, active, sentry, sentry_tuning)| {
                 (
                     entity,
                     position.0,
                     *network_id,
                     *team,
-                    if sentry.is_some() {
-                        crate::abilities::SENTRY_RADIUS
-                    } else {
-                        tuning.radius
-                    },
+                    sentry_tuning.map_or(tuning.radius, |value| value.body_radius),
                     defeated.is_some(),
                     active.is_some() || sentry.is_some(),
                 )
@@ -401,7 +470,8 @@ pub(crate) fn advance_dash(
                     },
                 ),
             });
-            ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+            ability.phase =
+                crate::abilities::settled_ability_phase(ability.charge, dash.tuning.charge_maximum);
             velocity.0 = Vec2::ZERO;
             commands.entity(entity).remove::<DashRuntime>();
             continue;
@@ -416,7 +486,12 @@ pub(crate) fn advance_dash(
             .0
             .saturating_sub(dash.started_at_tick)
             .saturating_add(1);
-        let next_position = dash_position(dash.origin, dash.endpoint, elapsed);
+        let next_position = dash_position(
+            dash.origin,
+            dash.endpoint,
+            elapsed,
+            dash.tuning.duration_ticks,
+        );
         if !bounds.0.contains_with_inset(next_position, tuning.radius) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
@@ -425,7 +500,8 @@ pub(crate) fn advance_dash(
                     crate::abilities::DashInterruptionReason::OutOfBounds,
                 ),
             });
-            ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+            ability.phase =
+                crate::abilities::settled_ability_phase(ability.charge, dash.tuning.charge_maximum);
             velocity.0 = Vec2::ZERO;
             commands.entity(entity).remove::<DashRuntime>();
             continue;
@@ -437,6 +513,7 @@ pub(crate) fn advance_dash(
             position.0,
             tuning.radius,
             &dash.hit_targets,
+            dash.tuning.maximum_targets,
             targets.iter().map(
                 |(
                     target_entity,
@@ -485,21 +562,22 @@ pub(crate) fn advance_dash(
                     target: crate::combat::TargetSelection::Direct,
                     effects: vec![
                         crate::combat::PayloadEffectDefinition::Damage {
-                            amount: 35,
+                            amount: dash.tuning.damage,
                             falloff: crate::combat::DamageFalloff::None,
                             recipients: crate::combat::RecipientPolicy::Hostiles,
                         },
                         crate::combat::PayloadEffectDefinition::Knockback {
-                            speed: 450.0,
-                            duration_ticks: 6,
+                            speed: dash.tuning.knockback_speed,
+                            duration_ticks: dash.tuning.knockback_duration_ticks,
                             recipients: crate::combat::RecipientPolicy::Hostiles,
                         },
                     ],
                 },
             });
         }
-        if elapsed >= DASH_DURATION_TICKS || tick.0.saturating_add(1) >= ends_at_tick {
-            ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+        if elapsed >= dash.tuning.duration_ticks || tick.0.saturating_add(1) >= ends_at_tick {
+            ability.phase =
+                crate::abilities::settled_ability_phase(ability.charge, dash.tuning.charge_maximum);
             commands.entity(entity).remove::<DashRuntime>();
         }
     }

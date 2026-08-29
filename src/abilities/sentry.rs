@@ -2,40 +2,36 @@ use crate::protocol::NetworkEntityId;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub const SENTRY_PLACEMENT_OFFSETS: [u16; 6] = [96, 88, 80, 72, 64, 56];
-pub const SENTRY_RADIUS: f32 = 20.0;
-pub const SENTRY_ACQUISITION_RANGE: f32 = 480.0;
-pub const SENTRY_ACQUISITION_INTERVAL_TICKS: u64 = 6;
-pub const SENTRY_FIRE_INTERVAL_TICKS: u64 = 30;
-pub const SENTRY_LIFETIME_TICKS: u64 = 720;
-pub const SENTRY_MAXIMUM_HEALTH: u16 = 80;
-
 #[must_use]
 pub fn first_clear_sentry_placement(
     origin: Vec2,
     facing: Vec2,
+    placement_offsets: &[u32],
+    body_radius: f32,
     mut is_clear: impl FnMut(Vec2, f32) -> bool,
 ) -> Option<Vec2> {
     if !origin.is_finite() {
         return None;
     }
     let facing = facing.try_normalize()?;
-    SENTRY_PLACEMENT_OFFSETS
-        .into_iter()
-        .map(|offset| origin + facing * f32::from(offset))
-        .find(|candidate| is_clear(*candidate, SENTRY_RADIUS))
+    placement_offsets
+        .iter()
+        .filter_map(|offset| crate::builds::world_units_from_milliunits(*offset))
+        .map(|offset| origin + facing * offset)
+        .find(|candidate| is_clear(*candidate, body_radius))
 }
 
 #[must_use]
 pub fn stable_sentry_target(
     candidates: impl IntoIterator<Item = (NetworkEntityId, f32, bool)>,
+    acquisition_range: f32,
 ) -> Option<NetworkEntityId> {
     let mut candidates: Vec<_> = candidates
         .into_iter()
         .filter(|(_, distance_squared, visible)| {
             *visible
                 && distance_squared.is_finite()
-                && *distance_squared <= SENTRY_ACQUISITION_RANGE.powi(2)
+                && *distance_squared <= acquisition_range.powi(2)
         })
         .collect();
     candidates.sort_by(|left, right| {
@@ -50,13 +46,14 @@ pub fn stable_sentry_target(
 #[must_use]
 pub(crate) fn stable_sentry_objective_target(
     candidates: impl IntoIterator<Item = (crate::map::DamageableTargetIdentity, f32, bool)>,
+    acquisition_range: f32,
 ) -> Option<crate::map::DamageableTargetIdentity> {
     let mut candidates: Vec<_> = candidates
         .into_iter()
         .filter(|(_, distance_squared, visible)| {
             *visible
                 && distance_squared.is_finite()
-                && *distance_squared <= SENTRY_ACQUISITION_RANGE.powi(2)
+                && *distance_squared <= acquisition_range.powi(2)
         })
         .collect();
     candidates.sort_by(|left, right| {
@@ -86,6 +83,93 @@ pub struct SentryDeadline {
 }
 
 #[cfg(feature = "server")]
+#[derive(Component, Clone, Debug, PartialEq)]
+pub(crate) struct ResolvedSentryTuning {
+    placement_offsets_milliunits: [u32; 6],
+    pub(crate) body_radius: f32,
+    acquisition_range: f32,
+    acquisition_interval_ticks: u64,
+    fire_interval_ticks: u64,
+    lifetime_ticks: u64,
+    maximum_health: u16,
+    charge_maximum: u16,
+    recipe_fingerprint: crate::combat::WeaponRecipeFingerprint,
+    presentation_profile_id: crate::combat::WeaponPresentationProfileId,
+    recipe: crate::combat::WeaponRecipe,
+}
+
+#[cfg(feature = "server")]
+fn resolve_sentry_tuning(
+    ultimate: &crate::builds::ResolvedUltimate,
+) -> Option<ResolvedSentryTuning> {
+    let crate::builds::UltimateParameters::Sentry {
+        placement_offsets_milliunits,
+        body_radius_milliunits,
+        acquisition_range_milliunits,
+        acquisition_interval_ticks,
+        fire_interval_ticks,
+        lifetime_ticks,
+        maximum_health,
+        projectile_speed_milliunits,
+        projectile_radius_milliunits,
+        projectile_range_milliunits,
+        projectile_lifetime_ticks,
+        projectile_damage,
+        presentation_profile_id,
+    } = ultimate.parameters
+    else {
+        return None;
+    };
+    let acquisition_range =
+        crate::builds::world_units_from_milliunits(acquisition_range_milliunits)?;
+    let recipe = crate::combat::WeaponRecipe {
+        economy: crate::combat::WeaponEconomy::Magazine {
+            capacity: 1,
+            refill_ticks: fire_interval_ticks,
+        },
+        fire_cooldown_ticks: fire_interval_ticks,
+        firing: crate::combat::FiringPattern::Single,
+        delivery: crate::combat::DeliveryMethod::Straight {
+            speed: crate::builds::world_units_from_milliunits(projectile_speed_milliunits)?,
+            radius: crate::builds::world_units_from_milliunits(projectile_radius_milliunits)?,
+            range: crate::builds::world_units_from_milliunits(projectile_range_milliunits)?,
+            lifetime_ticks: projectile_lifetime_ticks,
+            muzzle_offset: 0.0,
+        },
+        payload_bundles: vec![crate::combat::PayloadBundleDefinition {
+            target: crate::combat::TargetSelection::Direct,
+            effects: vec![crate::combat::PayloadEffectDefinition::Damage {
+                amount: projectile_damage,
+                falloff: crate::combat::DamageFalloff::None,
+                recipients: crate::combat::RecipientPolicy::Hostiles,
+            }],
+        }],
+        world_effects: Vec::new(),
+    };
+    let bytes = postcard::to_allocvec(&(
+        crate::combat::definitions::FINGERPRINT_FORMAT_VERSION,
+        &recipe,
+    ))
+    .ok()?;
+    let fingerprint = crate::content::fnv1a64(&bytes);
+    Some(ResolvedSentryTuning {
+        placement_offsets_milliunits,
+        body_radius: crate::builds::world_units_from_milliunits(body_radius_milliunits)?,
+        acquisition_range,
+        acquisition_interval_ticks,
+        fire_interval_ticks,
+        lifetime_ticks,
+        maximum_health,
+        charge_maximum: ultimate.charge_policy.maximum,
+        recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(fingerprint.max(1)),
+        presentation_profile_id: crate::combat::WeaponPresentationProfileId(
+            presentation_profile_id,
+        ),
+        recipe,
+    })
+}
+
+#[cfg(feature = "server")]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SentryCleanupRequest {
     pub deployable_id: crate::builds::DeployableId,
@@ -110,19 +194,23 @@ pub(crate) struct SentryRuntime {
 
 #[cfg(feature = "server")]
 impl SentryRuntime {
-    pub(super) fn new(activated_at_tick: u64) -> Self {
+    pub(super) fn new(
+        activated_at_tick: u64,
+        acquisition_interval_ticks: u64,
+        fire_interval_ticks: u64,
+    ) -> Self {
         Self {
-            next_acquire_tick: activated_at_tick.saturating_add(SENTRY_ACQUISITION_INTERVAL_TICKS),
-            next_fire_tick: activated_at_tick.saturating_add(SENTRY_FIRE_INTERVAL_TICKS),
+            next_acquire_tick: activated_at_tick.saturating_add(acquisition_interval_ticks),
+            next_fire_tick: activated_at_tick.saturating_add(fire_interval_ticks),
             target: None,
         }
     }
 
-    pub(super) fn begin_acquisition_if_due(&mut self, tick: u64) -> bool {
+    pub(super) fn begin_acquisition_if_due(&mut self, tick: u64, interval_ticks: u64) -> bool {
         if tick < self.next_acquire_tick {
             return false;
         }
-        self.next_acquire_tick = tick.saturating_add(SENTRY_ACQUISITION_INTERVAL_TICKS);
+        self.next_acquire_tick = tick.saturating_add(interval_ticks);
         true
     }
 
@@ -130,8 +218,8 @@ impl SentryRuntime {
         tick >= self.next_fire_tick
     }
 
-    pub(super) fn record_fire(&mut self, tick: u64) {
-        self.next_fire_tick = tick.saturating_add(SENTRY_FIRE_INTERVAL_TICKS);
+    pub(super) fn record_fire(&mut self, tick: u64, interval_ticks: u64) {
+        self.next_fire_tick = tick.saturating_add(interval_ticks);
     }
 
     pub(super) fn target(&self) -> Option<SentryTarget> {
@@ -246,7 +334,11 @@ pub(crate) fn activate_sentry(
                 && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
         });
         let held = requested
-            && !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
+            && !crate::movement::input_should_neutralize(
+                tick.0,
+                freshness.last_fresh_tick,
+                crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
+            );
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
         if let Some(mut latch) = latch {
             latch.0 = requested;
@@ -277,7 +369,7 @@ pub(crate) fn activate_sentry(
                 | crate::builds::AbilityPhase::Deployed { .. }
         ) {
             Some(crate::abilities::AbilityRejectionReason::AlreadyExecuting)
-        } else if ability.charge != crate::abilities::ULTIMATE_CHARGE_MAX
+        } else if ability.charge != loadout.ultimate.charge_policy.maximum
             || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
         {
             Some(crate::abilities::AbilityRejectionReason::NotCharged)
@@ -297,6 +389,9 @@ pub(crate) fn activate_sentry(
             });
             continue;
         }
+        let Some(sentry_tuning) = resolve_sentry_tuning(&loadout.ultimate) else {
+            continue;
+        };
         let facing = Vec2::from_angle(rotation.as_radians());
         let mut excluded = Vec::with_capacity(1 + defeated_fighters.iter().len());
         excluded.push(owner);
@@ -309,12 +404,18 @@ pub(crate) fn activate_sentry(
                 | crate::movement::PLAYER_ONLY_MAP_LAYER,
         )
         .with_excluded_entities(excluded);
-        let placement = first_clear_sentry_placement(position.0, facing, |candidate, radius| {
-            bounds.0.contains_with_inset(candidate, radius)
-                && spatial_query
-                    .shape_intersections(&Collider::circle(radius), candidate, 0.0, &filter)
-                    .is_empty()
-        });
+        let placement = first_clear_sentry_placement(
+            position.0,
+            facing,
+            &sentry_tuning.placement_offsets_milliunits,
+            sentry_tuning.body_radius,
+            |candidate, radius| {
+                bounds.0.contains_with_inset(candidate, radius)
+                    && spatial_query
+                        .shape_intersections(&Collider::circle(radius), candidate, 0.0, &filter)
+                        .is_empty()
+            },
+        );
         let Some(placement) = placement else {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
@@ -335,7 +436,7 @@ pub(crate) fn activate_sentry(
             });
             continue;
         };
-        let expires_at_tick = tick.0.saturating_add(SENTRY_LIFETIME_TICKS);
+        let expires_at_tick = tick.0.saturating_add(sentry_tuning.lifetime_ticks);
         let identity = SentryIdentity {
             deployable_id,
             owner_player_id: *player,
@@ -344,28 +445,34 @@ pub(crate) fn activate_sentry(
             ultimate_id: loadout.ultimate.id,
             match_id: participant.match_id,
         };
-        commands.spawn((
-            Sentry,
-            identity,
-            SentryDeadline { expires_at_tick },
-            SentryRuntime::new(tick.0),
-            crate::combat::CurrentHealth(SENTRY_MAXIMUM_HEALTH),
-            NetworkEntityId((1_u64 << 63) | deployable_id.0),
-            crate::combat::TeamId(team.0),
-            crate::matchplay::MatchMember(participant.match_id),
-            avian2d::prelude::Position::from_xy(placement.x, placement.y),
-            avian2d::prelude::Rotation::radians(rotation.as_radians()),
-            Collider::circle(SENTRY_RADIUS),
-            Sensor,
-            RigidBody::Static,
-            CollisionLayers::new(
-                crate::movement::DEPLOYABLE_LAYER,
-                crate::movement::PROJECTILE_LAYER
-                    | crate::movement::FIGHTER_LAYER
-                    | crate::movement::DEPLOYABLE_LAYER,
-            ),
-            Replicate::to_clients(NetworkTarget::All),
-        ));
+        commands
+            .spawn((
+                Sentry,
+                identity,
+                SentryDeadline { expires_at_tick },
+                SentryRuntime::new(
+                    tick.0,
+                    sentry_tuning.acquisition_interval_ticks,
+                    sentry_tuning.fire_interval_ticks,
+                ),
+                crate::combat::CurrentHealth(sentry_tuning.maximum_health),
+                NetworkEntityId((1_u64 << 63) | deployable_id.0),
+                crate::combat::TeamId(team.0),
+                crate::matchplay::MatchMember(participant.match_id),
+                avian2d::prelude::Position::from_xy(placement.x, placement.y),
+                avian2d::prelude::Rotation::radians(rotation.as_radians()),
+                Collider::circle(sentry_tuning.body_radius),
+                Sensor,
+                RigidBody::Static,
+                CollisionLayers::new(
+                    crate::movement::DEPLOYABLE_LAYER,
+                    crate::movement::PROJECTILE_LAYER
+                        | crate::movement::FIGHTER_LAYER
+                        | crate::movement::DEPLOYABLE_LAYER,
+                ),
+                Replicate::to_clients(NetworkTarget::All),
+            ))
+            .insert(sentry_tuning);
         *ability = crate::builds::AbilityState {
             charge: 0,
             phase: crate::builds::AbilityPhase::Deployed {
@@ -481,6 +588,7 @@ pub(crate) fn cleanup_requested_sentries(
             &SentryIdentity,
             Option<&SentryDeadline>,
             Option<&avian2d::prelude::Position>,
+            &ResolvedSentryTuning,
         ),
         With<Sentry>,
     >,
@@ -507,9 +615,9 @@ pub(crate) fn cleanup_requested_sentries(
             .or_insert(request);
     }
     for request in selected.into_values() {
-        let Some((entity, identity, deadline, position)) = sentries
+        let Some((entity, identity, deadline, position, tuning)) = sentries
             .iter()
-            .find(|(_, identity, _, _)| identity.deployable_id == request.deployable_id)
+            .find(|(_, identity, ..)| identity.deployable_id == request.deployable_id)
         else {
             continue;
         };
@@ -518,11 +626,11 @@ pub(crate) fn cleanup_requested_sentries(
         let lifetime_ticks = deadline.map_or(0, |deadline| {
             let activated_at_tick = deadline
                 .expires_at_tick
-                .saturating_sub(SENTRY_LIFETIME_TICKS);
+                .saturating_sub(tuning.lifetime_ticks);
             request
                 .requested_at_tick
                 .saturating_sub(activated_at_tick)
-                .min(SENTRY_LIFETIME_TICKS)
+                .min(tuning.lifetime_ticks)
         });
         // Match teardown may queue the same removal earlier in the schedule. Cleanup remains the
         // single ability transaction, but tolerates that external ownership teardown race.
@@ -559,7 +667,8 @@ pub(crate) fn cleanup_requested_sentries(
                         if deployable_id == identity.deployable_id
                 )
             {
-                ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+                ability.phase =
+                    crate::abilities::settled_ability_phase(ability.charge, tuning.charge_maximum);
             }
             if *owner == identity.owner_network_id && cleanup_position.is_none() {
                 cleanup_position = Some(owner_position.0);
@@ -649,6 +758,7 @@ pub(crate) fn tick_sentries(
             &avian2d::prelude::Position,
             &SentryIdentity,
             &mut SentryRuntime,
+            &ResolvedSentryTuning,
         ),
         With<Sentry>,
     >,
@@ -692,14 +802,14 @@ pub(crate) fn tick_sentries(
     use avian2d::prelude::CollisionLayers;
     use bevy::math::Dir2;
     use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
-    for (entity, position, identity, mut runtime) in &mut sentries {
+    for (entity, position, identity, mut runtime, sentry_tuning) in &mut sentries {
         let owner_view = owners
             .iter()
             .find(|(_, id, _, _)| **id == identity.owner_network_id)
             .map(|(_, _, position, loadout)| {
                 (position.0, loadout.fighter_stats.reveal_proximity_radius)
             });
-        if runtime.begin_acquisition_if_due(tick.0) {
+        if runtime.begin_acquisition_if_due(tick.0, sentry_tuning.acquisition_interval_ticks) {
             let fighter_target = stable_sentry_target(fighters.iter().filter_map(
                 |(
                     target_position,
@@ -768,7 +878,7 @@ pub(crate) fn tick_sentries(
                             });
                     Some((*target_id, distance_squared, visible))
                 },
-            ));
+            ), sentry_tuning.acquisition_range);
             if fighter_target.is_some() {
                 runtime.set_fighter_target(fighter_target);
             } else {
@@ -803,6 +913,7 @@ pub(crate) fn tick_sentries(
                             Some((*target, delta.length_squared(), visible))
                         },
                     ),
+                    sentry_tuning.acquisition_range,
                 ));
             }
         }
@@ -906,7 +1017,7 @@ pub(crate) fn tick_sentries(
         let Some(fire_event_id) = ids.allocate_event() else {
             continue;
         };
-        runtime.record_fire(tick.0);
+        runtime.record_fire(tick.0, sentry_tuning.fire_interval_ticks);
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
             tick: tick.0,
             owner_network_id: identity.owner_network_id,
@@ -919,7 +1030,7 @@ pub(crate) fn tick_sentries(
             deployable_id: identity.deployable_id,
             target: cue_target,
             position: crate::combat::WorldPoint::from(position.0),
-            presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
+            presentation_profile_id: sentry_tuning.presentation_profile_id,
         };
         combat_telemetry.record_cue(fire_cue.clone());
         outbox.0.push(fire_cue);
@@ -932,36 +1043,23 @@ pub(crate) fn tick_sentries(
             player_id: identity.owner_player_id,
             owner_network_entity_id: identity.owner_network_id,
             team_id: identity.team_id,
-            recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(0),
-            presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
+            recipe_fingerprint: sentry_tuning.recipe_fingerprint,
+            presentation_profile_id: sentry_tuning.presentation_profile_id,
             legacy_compatibility: false,
             source_preset_id: None,
             origin: crate::combat::WorldPoint::from(position.0),
             facing: direction.y.atan2(direction.x),
         };
-        let recipe = crate::combat::WeaponRecipe {
-            economy: crate::combat::WeaponEconomy::Magazine {
-                capacity: 1,
-                refill_ticks: SENTRY_FIRE_INTERVAL_TICKS,
-            },
-            fire_cooldown_ticks: SENTRY_FIRE_INTERVAL_TICKS,
-            firing: crate::combat::FiringPattern::Single,
-            delivery: crate::combat::DeliveryMethod::Straight {
-                speed: 900.0,
-                radius: 6.0,
-                range: SENTRY_ACQUISITION_RANGE,
-                lifetime_ticks: 32,
-                muzzle_offset: 0.0,
-            },
-            payload_bundles: vec![crate::combat::PayloadBundleDefinition {
-                target: crate::combat::TargetSelection::Direct,
-                effects: vec![crate::combat::PayloadEffectDefinition::Damage {
-                    amount: 10,
-                    falloff: crate::combat::DamageFalloff::None,
-                    recipients: crate::combat::RecipientPolicy::Hostiles,
-                }],
-            }],
-            world_effects: Vec::new(),
+        let recipe = sentry_tuning.recipe.clone();
+        let crate::combat::DeliveryMethod::Straight {
+            speed,
+            radius,
+            range,
+            lifetime_ticks,
+            ..
+        } = recipe.delivery
+        else {
+            continue;
         };
         commands.spawn((
             crate::combat::Projectile,
@@ -978,31 +1076,31 @@ pub(crate) fn tick_sentries(
                 delivery_index: 0,
             },
             crate::combat::ProjectileDeadline {
-                expires_at_tick: tick.0.saturating_add(32),
+                expires_at_tick: tick.0.saturating_add(lifetime_ticks),
             },
             crate::combat::StraightFlight {
                 origin: crate::combat::WorldPoint::from(position.0),
                 facing: source.facing,
-                speed: 900.0,
-                maximum_range: SENTRY_ACQUISITION_RANGE,
+                speed,
+                maximum_range: range,
                 launched_at_tick: tick.0,
             },
-            crate::combat::ProjectileBody::circle(6.0),
+            crate::combat::ProjectileBody::circle(radius),
             crate::combat::ComposedProjectileRuntime {
                 owner_entity: fighter_owner,
                 source_entity: entity,
                 source,
                 delivery_index: 0,
-                velocity: direction * 900.0,
+                velocity: direction * speed,
                 travelled: 0.0,
-                expires_at_tick: tick.0.saturating_add(32),
-                maximum_range: 480.0,
+                expires_at_tick: tick.0.saturating_add(lifetime_ticks),
+                maximum_range: range,
                 landing: None,
                 recipe,
             },
             avian2d::prelude::Position::from_xy(position.x, position.y),
             avian2d::prelude::Rotation::radians(source.facing),
-            crate::combat::ProjectileBody::circle(6.0).collider(),
+            crate::combat::ProjectileBody::circle(radius).collider(),
             CollisionLayers::new(
                 crate::movement::PROJECTILE_LAYER,
                 crate::movement::FIGHTER_LAYER

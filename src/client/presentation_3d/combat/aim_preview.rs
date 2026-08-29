@@ -183,6 +183,7 @@ pub(in super::super) fn update_aim_preview(
     append_nonfighter_aim_blockers(
         &aim.sentries,
         &aim.safes,
+        &fighters,
         controlled_team,
         &mut dynamic_blockers,
     );
@@ -240,10 +241,22 @@ pub(in super::super) fn update_aim_preview(
 fn append_nonfighter_aim_blockers(
     sentries: &SentryAimQuery,
     safes: &SafeAimQuery,
+    fighters: &AimFighterQuery,
     controlled_team: Option<crate::combat::TeamId>,
     blockers: &mut Vec<AimTraceDynamicBlocker>,
 ) {
     for (position, identity, health) in sentries.iter() {
+        let body_radius = fighters
+            .iter()
+            .find(|(network_id, ..)| **network_id == identity.owner_network_id)
+            .and_then(|(_, _, _, _, _, loadout, _, _)| loadout)
+            .and_then(|loadout| match loadout.ultimate.parameters {
+                crate::builds::UltimateParameters::Sentry {
+                    body_radius_milliunits,
+                    ..
+                } => crate::builds::world_units_from_milliunits(body_radius_milliunits),
+                _ => None,
+            });
         if health.0 > 0
             && controlled_team.is_some_and(|controlled_team| {
                 crate::combat::teams_are_hostile(controlled_team, identity.team_id)
@@ -255,7 +268,7 @@ fn append_nonfighter_aim_blockers(
                 position: position.0,
                 rotation: 0.0,
                 shape: crate::map::MapShape::Circle {
-                    radius: crate::abilities::SENTRY_RADIUS,
+                    radius: body_radius.unwrap_or(crate::movement::STANDARD_FIGHTER_RADIUS),
                 },
             });
         }

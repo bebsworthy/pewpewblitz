@@ -605,6 +605,15 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
     reason = "the scenario compares expiry, destruction, disconnect, and impaired recovery for one sentry lifecycle"
 )]
 fn sentry_expiry_destruction_disconnect_and_impaired_recovery_converge() {
+    let brawler::builds::UltimateParameters::Sentry { maximum_health, .. } =
+        brawler::builds::BuildCatalog::embedded()
+            .unwrap()
+            .ultimate(brawler::builds::UltimateDefinitionId(2))
+            .unwrap()
+            .parameters
+    else {
+        panic!("canonical Sentry definition must retain Sentry parameters")
+    };
     let (mut expiry, owner, identity) = active_sentry_fixture();
     expiry.step_until(|harness| {
         let server_tick = harness.server.world().resource::<SimulationTick>().0;
@@ -618,7 +627,7 @@ fn sentry_expiry_destruction_disconnect_and_impaired_recovery_converge() {
                 ), With<brawler::abilities::Sentry>>();
                 sentries.iter(world).any(|(replicated, health, deadline)| {
                     *replicated == identity
-                        && health.0 == brawler::abilities::SENTRY_MAXIMUM_HEALTH
+                        && health.0 == maximum_health
                         && deadline.expires_at_tick > server_tick
                 })
             })

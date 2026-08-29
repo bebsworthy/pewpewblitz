@@ -1,6 +1,6 @@
 (
-    schema_version: 13,
-    balance_revision: BuildRevision(11),
+    schema_version: 14,
+    balance_revision: BuildRevision(12),
     fighter_profiles: (
         default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
         lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
@@ -17,6 +17,7 @@
         standard_magazine: (capacity: 6, refill_ticks: 78),
         expanded: (capacity: 8, refill_ticks: 78),
     ),
+    ultimate_charge: (maximum: 1000, dealt_damage_multiplier: 5, received_damage_multiplier: 3),
     weapon_costs: [
         (weapon_id: WeaponPresetId(1), point_cost: 4),
         (weapon_id: WeaponPresetId(2), point_cost: 5),
@@ -27,8 +28,8 @@
         (weapon_id: WeaponPresetId(7), point_cost: 4),
     ],
     ultimates: [
-        (id: UltimateDefinitionId(1), key: "dash", display_name: "Dash", kind: Dash, point_cost: 3, parameters: Dash),
-        (id: UltimateDefinitionId(2), key: "sentry", display_name: "Sentry", kind: Sentry, point_cost: 4, parameters: Sentry),
+        (id: UltimateDefinitionId(1), key: "dash", display_name: "Dash", kind: Dash, point_cost: 3, parameters: Dash(maximum_distance_milliunits: 360000, duration_ticks: 18, damage: 35, knockback_speed_milliunits: 450000, knockback_duration_ticks: 6, maximum_targets: 8)),
+        (id: UltimateDefinitionId(2), key: "sentry", display_name: "Sentry", kind: Sentry, point_cost: 4, parameters: Sentry(placement_offsets_milliunits: (96000, 88000, 80000, 72000, 64000, 56000), body_radius_milliunits: 20000, acquisition_range_milliunits: 480000, acquisition_interval_ticks: 6, fire_interval_ticks: 30, lifetime_ticks: 720, maximum_health: 80, projectile_speed_milliunits: 900000, projectile_radius_milliunits: 6000, projectile_range_milliunits: 480000, projectile_lifetime_ticks: 32, projectile_damage: 10, presentation_profile_id: 1)),
         (id: UltimateDefinitionId(3), key: "self-cloak", display_name: "Self Cloak", kind: SelfCloak, point_cost: 4, parameters: SelfCloak(duration_ticks: 360)),
         (id: UltimateDefinitionId(4), key: "reveal-scan", display_name: "Reveal Scan", kind: RevealScan, point_cost: 4, parameters: RevealScan(maximum_range_milliunits: 640000, radius_milliunits: 192000, reveal_ticks: 300)),
         (id: UltimateDefinitionId(5), key: "concealment-field", display_name: "Concealment Field", kind: ConcealmentField, point_cost: 4, parameters: ConcealmentField(maximum_range_milliunits: 480000, radius_milliunits: 192000, duration_ticks: 360)),
@@ -40,14 +41,14 @@
         (id: UltimateDefinitionId(11), key: "big-blob", display_name: "Big Blob", kind: BigBlob, point_cost: 4, parameters: BigBlob(maximum_range_milliunits: 520000, flight_ticks: 45, visual_arc_height_milliunits: 140000, landing_clearance_milliunits: 10000, child_speed_milliunits: 520000, child_radius_milliunits: 6000, child_range_milliunits: 213440, child_lifetime_ticks: 60, child_fuse_ticks: 69, child_explosion_radius_milliunits: 42560, child_damage: 140, max_active_per_owner: 12)),
     ],
     passives: [
-        (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2),
-        (id: PassiveDefinitionId(2), key: "reinforced-frame", display_name: "Reinforced Frame", kind: ReinforcedFrame, point_cost: 2),
-        (id: PassiveDefinitionId(3), key: "adrenal-response", display_name: "Adrenal Response", kind: AdrenalResponse, point_cost: 2),
-        (id: PassiveDefinitionId(4), key: "close-quarters", display_name: "Close Quarters", kind: CloseQuarters, point_cost: 2),
-        (id: PassiveDefinitionId(5), key: "quick-cycle", display_name: "Quick Cycle", kind: QuickCycle, point_cost: 2),
-        (id: PassiveDefinitionId(6), key: "tenacity", display_name: "Tenacity", kind: Tenacity, point_cost: 1),
-        (id: PassiveDefinitionId(7), key: "cryogenic-insulation", display_name: "Cryogenic Insulation", kind: CryogenicInsulation, point_cost: 1),
-        (id: PassiveDefinitionId(8), key: "filtered-circulation", display_name: "Filtered Circulation", kind: FilteredCirculation, point_cost: 1),
-        (id: PassiveDefinitionId(9), key: "heat-shielding", display_name: "Heat Shielding", kind: HeatShielding, point_cost: 1),
+        (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2, parameters: LightweightFrame),
+        (id: PassiveDefinitionId(2), key: "reinforced-frame", display_name: "Reinforced Frame", kind: ReinforcedFrame, point_cost: 2, parameters: ReinforcedFrame),
+        (id: PassiveDefinitionId(3), key: "adrenal-response", display_name: "Adrenal Response", kind: AdrenalResponse, point_cost: 2, parameters: AdrenalResponse(duration_ticks: 90, rearm_ticks: 240, movement_bonus_basis_points: 1500)),
+        (id: PassiveDefinitionId(4), key: "close-quarters", display_name: "Close Quarters", kind: CloseQuarters, point_cost: 2, parameters: CloseQuarters(near_distance_milliunits: 240000, far_distance_milliunits: 480000, near_damage_basis_points: 11500, far_damage_basis_points: 8500)),
+        (id: PassiveDefinitionId(5), key: "quick-cycle", display_name: "Quick Cycle", kind: QuickCycle, point_cost: 2, parameters: QuickCycle(refill_duration_basis_points: 6000)),
+        (id: PassiveDefinitionId(6), key: "tenacity", display_name: "Tenacity", kind: Tenacity, point_cost: 1, parameters: Tenacity(slow_duration_basis_points: 6500)),
+        (id: PassiveDefinitionId(7), key: "cryogenic-insulation", display_name: "Cryogenic Insulation", kind: CryogenicInsulation, point_cost: 1, parameters: CryogenicInsulation(resistance_basis_points: 3000)),
+        (id: PassiveDefinitionId(8), key: "filtered-circulation", display_name: "Filtered Circulation", kind: FilteredCirculation, point_cost: 1, parameters: FilteredCirculation(resistance_basis_points: 3000)),
+        (id: PassiveDefinitionId(9), key: "heat-shielding", display_name: "Heat Shielding", kind: HeatShielding, point_cost: 1, parameters: HeatShielding(resistance_basis_points: 3000)),
     ],
 )

@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 12;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 13;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -282,10 +282,45 @@ pub(super) fn load(
         == Some(11)
         && value["snapshot"]["schemaVersion"].as_u64() == Some(16)
     {
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(12);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(17);
         value["snapshot"]["effectTiles"] = serde_json::to_value(validator.baseline.effect_tiles)
             .map_err(|error| format!("canonical effect-tile migration failed: {error}"))?;
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(12)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(17)
+    {
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        let canonical = serde_json::to_value(&validator.baseline).map_err(|error| {
+            format!("canonical authored build tuning migration failed: {error}")
+        })?;
+        value["snapshot"]["ultimateCharge"] = canonical["ultimateCharge"].clone();
+        value["snapshot"]["passives"] = canonical["passives"].clone();
+        let ultimates = value["snapshot"]["ultimates"]
+            .as_array_mut()
+            .ok_or_else(|| "persisted ultimates must be an array".to_string())?;
+        let canonical_ultimates = canonical["ultimates"]
+            .as_array()
+            .ok_or_else(|| "canonical ultimates must be an array".to_string())?;
+        for id in [1, 2] {
+            if ultimates
+                .iter()
+                .any(|ultimate| ultimate["id"].as_u64() == Some(id))
+            {
+                continue;
+            }
+            let entry = canonical_ultimates
+                .iter()
+                .find(|ultimate| ultimate["id"].as_u64() == Some(id))
+                .cloned()
+                .ok_or_else(|| format!("canonical ultimate {id} is missing"))?;
+            ultimates.push(entry);
+        }
+        ultimates.sort_by_key(|ultimate| ultimate["id"].as_u64().unwrap_or(u64::MAX));
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -402,6 +437,21 @@ mod tests {
         snapshot.fighter_profiles.default.maximum_health += 7;
         snapshot.heist.safe_maximum_health = 2_750;
         snapshot.effect_tiles.damage_per_pulse = 17;
+        snapshot.ultimate_charge.dealt_damage_multiplier += 1;
+        let crate::builds::UltimateParameters::Sentry {
+            projectile_damage, ..
+        } = &mut snapshot.ultimates[1].parameters
+        else {
+            panic!("second ultimate is Sentry");
+        };
+        *projectile_damage += 1;
+        let crate::builds::PassiveParameters::QuickCycle {
+            refill_duration_basis_points,
+        } = &mut snapshot.passives[4].parameters
+        else {
+            panic!("fifth passive is Quick Cycle");
+        };
+        *refill_duration_basis_points += 1;
 
         save(&path, &snapshot, BalanceLabRevision(9)).unwrap();
         let loaded = load(&path, &validator).unwrap().unwrap();
@@ -497,7 +547,14 @@ mod tests {
         assert_eq!(loaded.snapshot.weapons.len(), 7);
         assert!(loaded.snapshot.weapons.iter().any(|weapon| weapon.id == 6));
         assert!(loaded.snapshot.weapons.iter().any(|weapon| weapon.id == 7));
-        assert_eq!(loaded.snapshot.ultimates.len(), 9);
+        assert_eq!(loaded.snapshot.ultimates.len(), 11);
+        assert_eq!(loaded.snapshot.ultimates[0].id, 1);
+        assert_eq!(loaded.snapshot.ultimates[1].id, 2);
+        assert_eq!(
+            loaded.snapshot.ultimate_charge,
+            validator.baseline.ultimate_charge
+        );
+        assert_eq!(loaded.snapshot.passives, validator.baseline.passives);
         assert_eq!(
             loaded.snapshot.condition_rules,
             validator.baseline.condition_rules
@@ -509,6 +566,56 @@ mod tests {
         assert_eq!(
             loaded.snapshot.fighter_profiles,
             loaded.builds.fighter_profiles
+        );
+    }
+
+    #[test]
+    fn version_twelve_snapshot_gains_dash_sentry_charge_and_passive_tuning() {
+        let root = TestPath::create();
+        let path = root.0.join("session-v12.json");
+        let (validator, mut snapshot) = fixture();
+        snapshot.fighter_profiles.lightweight.movement_speed = 219.0;
+        save(&path, &snapshot, BalanceLabRevision(12)).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(12);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(17);
+        value["snapshot"]["ultimates"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|ultimate| !matches!(ultimate["id"].as_u64(), Some(1 | 2)));
+        value["snapshot"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ultimateCharge");
+        value["snapshot"]
+            .as_object_mut()
+            .unwrap()
+            .remove("passives");
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let loaded = load(&path, &validator).unwrap().unwrap();
+        assert_eq!(loaded.revision, BalanceLabRevision(12));
+        assert_eq!(loaded.snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(loaded.snapshot.ultimates.len(), 11);
+        assert_eq!(
+            loaded
+                .snapshot
+                .ultimates
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+            (1..=11).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            loaded.snapshot.ultimate_charge,
+            validator.baseline.ultimate_charge
+        );
+        assert_eq!(loaded.snapshot.passives, validator.baseline.passives);
+        assert!(
+            (loaded.snapshot.fighter_profiles.lightweight.movement_speed - 219.0).abs()
+                < f32::EPSILON
         );
     }
 

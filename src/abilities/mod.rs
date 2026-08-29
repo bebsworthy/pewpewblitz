@@ -15,28 +15,20 @@ mod self_cloak;
 mod sentry;
 mod telemetry;
 
+pub use charge::apply_charge;
 #[cfg(any(feature = "server", test))]
 pub(crate) use charge::settled_ability_phase;
-pub use charge::{ULTIMATE_CHARGE_MAX, apply_charge};
 #[cfg(feature = "server")]
 pub(crate) use dash::DashRuntime;
-pub use dash::{
-    DASH_DURATION_TICKS, DASH_MAX_DISTANCE, bounded_dash_endpoint, dash_position,
-    stable_dash_contacts,
-};
+pub use dash::{bounded_dash_endpoint, dash_position, stable_dash_contacts};
 #[cfg(feature = "server")]
 pub(crate) use passives::apply_close_quarters_scale;
-pub use passives::{
-    ADRENAL_DURATION_TICKS, ADRENAL_REARM_TICKS, apply_close_quarters_damage,
-    apply_quick_cycle_ticks, apply_tenacity_ticks,
-};
+pub use passives::{apply_close_quarters_damage, apply_quick_cycle_ticks, apply_tenacity_ticks};
 pub use reveal_scan::targeted_ultimate_center;
 #[cfg(feature = "server")]
 pub(crate) use self_cloak::UltimateGeneration;
 pub use sentry::{
-    SENTRY_ACQUISITION_INTERVAL_TICKS, SENTRY_ACQUISITION_RANGE, SENTRY_FIRE_INTERVAL_TICKS,
-    SENTRY_LIFETIME_TICKS, SENTRY_MAXIMUM_HEALTH, SENTRY_PLACEMENT_OFFSETS, SENTRY_RADIUS, Sentry,
-    SentryDeadline, SentryIdentity, first_clear_sentry_placement, stable_sentry_target,
+    Sentry, SentryDeadline, SentryIdentity, first_clear_sentry_placement, stable_sentry_target,
 };
 #[cfg(feature = "server")]
 pub(crate) use sentry::{

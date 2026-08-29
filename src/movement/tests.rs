@@ -366,6 +366,53 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
 
 #[cfg(feature = "server")]
 #[test]
+fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
+    let decision = MovementDecision {
+        movement: Vec2::X,
+        ..MovementDecision::default()
+    };
+    let builds = crate::builds::BuildCatalog::embedded().unwrap();
+    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    let mut loadout = crate::builds::resolve_build_recipe(
+        &builds,
+        &weapons,
+        &fighter,
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+        },
+    )
+    .unwrap();
+    loadout.passives[0].parameters = crate::builds::PassiveParameters::AdrenalResponse {
+        duration_ticks: 90,
+        rearm_ticks: 240,
+        movement_bonus_basis_points: 2_500,
+    };
+    let passive_state = crate::builds::PassiveRuntimeState {
+        adrenaline_until_tick: Some(10),
+        ..Default::default()
+    };
+    let velocity = resolved_movement_velocity(
+        5,
+        &decision,
+        Some(300.0),
+        300.0,
+        MovementModifiers {
+            passive_loadout: Some(&loadout),
+            passive_state: Some(&passive_state),
+            ..default()
+        },
+    );
+    assert!((velocity.x - 375.0).abs() < 1e-5);
+}
+
+#[cfg(feature = "server")]
+#[test]
 fn repaired_pose_clamps_finite_positions_and_resets_non_finite_facing() {
     let bounds = crate::map::PlayableBounds(crate::map::AxisAlignedMapRect {
         min: Vec2::new(-500.0, -300.0),

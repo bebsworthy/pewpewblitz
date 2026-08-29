@@ -1,20 +1,27 @@
 use crate::builds::{AbilityPhase, AbilityState};
 
-pub const ULTIMATE_CHARGE_MAX: u16 = 1_000;
-
 #[must_use]
-pub fn apply_charge(state: AbilityState, dealt_damage: u16, received_damage: u16) -> AbilityState {
+pub fn apply_charge(
+    state: AbilityState,
+    dealt_damage: u16,
+    received_damage: u16,
+    policy: crate::builds::UltimateChargePolicy,
+) -> AbilityState {
     let earned = u32::from(dealt_damage)
-        .saturating_mul(5)
-        .saturating_add(u32::from(received_damage).saturating_mul(3));
+        .saturating_mul(u32::from(policy.dealt_damage_multiplier))
+        .saturating_add(
+            u32::from(received_damage).saturating_mul(u32::from(policy.received_damage_multiplier)),
+        );
     let charge = u16::try_from(
         u32::from(state.charge)
             .saturating_add(earned)
-            .min(u32::from(ULTIMATE_CHARGE_MAX)),
+            .min(u32::from(policy.maximum)),
     )
     .expect("ultimate charge is capped to a u16 constant");
     let phase = match state.phase {
-        AbilityPhase::Charging | AbilityPhase::Ready => settled_ability_phase(charge),
+        AbilityPhase::Charging | AbilityPhase::Ready => {
+            settled_ability_phase(charge, policy.maximum)
+        }
         active @ (AbilityPhase::Dashing { .. }
         | AbilityPhase::Deployed { .. }
         | AbilityPhase::Cloaked { .. }
@@ -25,8 +32,8 @@ pub fn apply_charge(state: AbilityState, dealt_damage: u16, received_damage: u16
 }
 
 #[must_use]
-pub(crate) const fn settled_ability_phase(charge: u16) -> AbilityPhase {
-    if charge >= ULTIMATE_CHARGE_MAX {
+pub(crate) const fn settled_ability_phase(charge: u16, maximum: u16) -> AbilityPhase {
+    if charge >= maximum {
         AbilityPhase::Ready
     } else {
         AbilityPhase::Charging
@@ -40,13 +47,14 @@ pub(crate) struct ChargeObservationState {
 }
 
 #[cfg(feature = "server")]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 pub(crate) fn observe_primary_damage_charge(
     facts: bevy::prelude::Res<crate::combat::CombatOutcomeFacts>,
     mut fighters: bevy::prelude::Query<
         (
             bevy::prelude::Entity,
             &crate::protocol::NetworkEntityId,
+            &crate::builds::ResolvedMatchLoadout,
             &mut AbilityState,
             Option<&mut ChargeObservationState>,
         ),
@@ -55,7 +63,8 @@ pub(crate) fn observe_primary_damage_charge(
     mut commands: bevy::prelude::Commands,
     mut telemetry: bevy::prelude::ResMut<crate::abilities::AbilityTelemetry>,
 ) {
-    for (entity, network_id, mut ability, observed) in &mut fighters {
+    for (entity, network_id, loadout, mut ability, observed) in &mut fighters {
+        let policy = loadout.ultimate.charge_policy;
         let previous = observed.as_deref().map_or(0, |state| state.last_event_id);
         let mut newest = previous;
         let mut dealt = 0_u16;
@@ -81,13 +90,16 @@ pub(crate) fn observe_primary_damage_charge(
             }
         }
         if dealt != 0 || received != 0 {
-            let was_full = ability.charge == ULTIMATE_CHARGE_MAX;
+            let was_full = ability.charge == policy.maximum;
             let potential_earned = u32::from(dealt)
-                .saturating_mul(5)
-                .saturating_add(u32::from(received).saturating_mul(3));
-            let available = u32::from(ULTIMATE_CHARGE_MAX.saturating_sub(ability.charge));
+                .saturating_mul(u32::from(policy.dealt_damage_multiplier))
+                .saturating_add(
+                    u32::from(received)
+                        .saturating_mul(u32::from(policy.received_damage_multiplier)),
+                );
+            let available = u32::from(policy.maximum.saturating_sub(ability.charge));
             let wasted = potential_earned.saturating_sub(available);
-            *ability = apply_charge(*ability, dealt, received);
+            *ability = apply_charge(*ability, dealt, received, policy);
             let event_tick = facts.0.iter().map(|fact| fact.tick).max().unwrap_or(0);
             if dealt != 0 {
                 telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -110,7 +122,7 @@ pub(crate) fn observe_primary_damage_charge(
                     kind: crate::abilities::AbilityTelemetryKind::ChargeWasted(wasted),
                 });
             }
-            if !was_full && ability.charge == ULTIMATE_CHARGE_MAX {
+            if !was_full && ability.charge == policy.maximum {
                 telemetry.record(crate::abilities::AbilityTelemetryRecord {
                     tick: event_tick,
                     owner_network_id: *network_id,

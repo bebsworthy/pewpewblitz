@@ -84,8 +84,11 @@ pub(crate) fn activate_elemental_field(
             owner_network_id: *network_id,
             kind: crate::abilities::AbilityTelemetryKind::ActivationAttempt,
         });
-        let fresh =
-            !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
+        let fresh = !crate::movement::input_should_neutralize(
+            tick.0,
+            freshness.last_fresh_tick,
+            crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
+        );
         let owns_field = fields.iter().any(|()| {
             // Ability phase is the exact per-owner capacity record; the global query owns only
             // the hard match ceiling.
@@ -106,7 +109,7 @@ pub(crate) fn activate_elemental_field(
             || fields.iter().count() >= crate::combat::fields::MAX_ACTIVE_ELEMENTAL_FIELDS
         {
             Some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling)
-        } else if ability.charge != crate::abilities::ULTIMATE_CHARGE_MAX
+        } else if ability.charge != loadout.ultimate.charge_policy.maximum
             || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
         {
             Some(crate::abilities::AbilityRejectionReason::NotCharged)

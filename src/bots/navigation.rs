@@ -7,7 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, BinaryHeap},
 };
 
-const MAX_NAVIGATION_NODES: usize =
+pub(super) const MAX_NAVIGATION_NODES: usize =
     MAX_MAP_DIMENSION_CELLS as usize * MAX_MAP_DIMENSION_CELLS as usize;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -15,6 +15,7 @@ pub(super) struct BotNavigationSnapshot {
     pub dimensions: MapDimensions,
     pub(super) blocked: BTreeSet<u32>,
     pub(super) terrain_cost_milli: BTreeMap<u32, u16>,
+    pub(super) minimum_terrain_cost_milli: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +47,11 @@ pub(super) enum BotRouteProgress {
 }
 
 impl BotNavigationSnapshot {
-    pub(super) fn from_map(map: &ResolvedMap, clearance: f32) -> Option<Self> {
+    pub(super) fn from_map(
+        map: &ResolvedMap,
+        clearance: f32,
+        damage_tile_cost_milli: u16,
+    ) -> Option<Self> {
         let dimensions = map.snapshot.dimensions;
         let node_count = usize::from(dimensions.width) * usize::from(dimensions.height);
         if node_count == 0 || node_count > MAX_NAVIGATION_NODES || !clearance.is_finite() {
@@ -69,24 +74,35 @@ impl BotNavigationSnapshot {
                 }
             }
         }
-        let terrain_cost_milli = map
+        let terrain_cost_milli: BTreeMap<u32, u16> = map
             .effect_tiles
             .iter()
             .map(|tile| {
                 let cost = match tile.behavior {
-                    crate::map::MapEffectTileBehavior::Speed { .. } => 800,
-                    crate::map::MapEffectTileBehavior::Slow { .. } => 1_429,
-                    crate::map::MapEffectTileBehavior::Damage { .. } => 2_000,
+                    crate::map::MapEffectTileBehavior::Speed {
+                        movement_multiplier_milli,
+                    }
+                    | crate::map::MapEffectTileBehavior::Slow {
+                        movement_multiplier_milli,
+                    } => movement_terrain_cost_milli(movement_multiplier_milli),
+                    crate::map::MapEffectTileBehavior::Damage { .. } => damage_tile_cost_milli,
                     crate::map::MapEffectTileBehavior::None => 1_000,
                 };
                 (index(dimensions, tile.cell.x, tile.cell.y), cost)
             })
             .filter(|(_, cost)| *cost != 1_000)
             .collect();
+        let minimum_terrain_cost_milli = terrain_cost_milli
+            .values()
+            .copied()
+            .min()
+            .unwrap_or(1_000)
+            .min(1_000);
         Some(Self {
             dimensions,
             blocked,
             terrain_cost_milli,
+            minimum_terrain_cost_milli,
         })
     }
 
@@ -353,11 +369,7 @@ impl BotRouteSearch {
                 }
                 self.costs[next as usize] = next_cost;
                 self.parents[next as usize] = current.index;
-                let heuristic_scale = if navigation.terrain_cost_milli.is_empty() {
-                    1_000
-                } else {
-                    800
-                };
+                let heuristic_scale = u32::from(navigation.minimum_terrain_cost_milli);
                 self.open.push(Reverse(OpenNode {
                     estimate: next_cost.saturating_add(
                         heuristic((nx, ny), self.goal_cell).saturating_mul(heuristic_scale) / 1_000,
@@ -369,6 +381,12 @@ impl BotRouteSearch {
         }
         BotRouteProgress::Exhausted
     }
+}
+
+fn movement_terrain_cost_milli(movement_multiplier_milli: u16) -> u16 {
+    let multiplier = u32::from(movement_multiplier_milli.max(1));
+    let cost = 1_000_000_u32.div_ceil(multiplier);
+    u16::try_from(cost).unwrap_or(u16::MAX)
 }
 
 fn compress_collinear_route(start: Vec2, route: Vec<Vec2>) -> Vec<Vec2> {

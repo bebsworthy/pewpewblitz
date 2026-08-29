@@ -4,7 +4,7 @@ use super::{
     model::{BotObservation, BotRole, BotTactic, PracticeBotController},
     navigation::{BotNavigationSnapshot, BotRouteProgress, BotRouteStart},
     policy,
-    profile::BotProfile,
+    profile::{BotCatalog, BotProfile},
     team::{BotPlanMember, assign_roles},
 };
 use crate::map::MapDimensions;
@@ -13,13 +13,42 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
 fn profile_is_valid_and_entropy_streams_are_repeatable() {
-    let profile = BotProfile::default();
-    assert!(profile.validate());
+    let profile = BotProfile::embedded().unwrap();
+    assert!(profile.validate().is_ok());
     assert_eq!(profile.search_budget_per_bot(1), 512);
     assert!(profile.search_budget_per_bot(5) * 5 <= 512);
     assert!(profile.search_budget_per_bot(8) * 8 <= 512);
     assert_eq!(entropy::sample_u64(7, 2, 19), entropy::sample_u64(7, 2, 19));
     assert_ne!(entropy::sample_u64(7, 2, 19), entropy::sample_u64(7, 3, 19));
+}
+
+#[test]
+fn embedded_profile_is_valid_bounded_and_fingerprinted() {
+    let catalog = BotCatalog::embedded().unwrap();
+    assert_eq!(
+        catalog.schema_version,
+        super::profile::BOT_CATALOG_SCHEMA_VERSION
+    );
+    let fingerprint = |catalog: &BotCatalog| {
+        crate::content::fnv1a64(&catalog.canonical_fingerprint_material().unwrap())
+    };
+    assert_ne!(fingerprint(&catalog), 0);
+
+    let baseline = fingerprint(&catalog);
+    let mut tuned = catalog;
+    tuned.practice.preferred_range_fraction = 0.8;
+    assert!(tuned.validate().is_ok());
+    assert_ne!(fingerprint(&tuned), baseline);
+
+    let mut invalid = catalog;
+    invalid.practice.reaction_ticks = super::model::MAX_OBSERVATION_HISTORY as u64;
+    assert!(invalid.validate().is_err());
+    invalid = catalog;
+    invalid.practice.maximum_aim_error_radians = f32::NAN;
+    assert!(invalid.validate().is_err());
+    invalid = catalog;
+    invalid.practice.maximum_search_expansions = u32::MAX;
+    assert!(invalid.validate().is_err());
 }
 
 #[test]
@@ -40,6 +69,7 @@ fn navigation_is_stable_and_does_not_cut_a_blocked_corner() {
         dimensions,
         blocked,
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
     let first = navigation.route(start, goal, &[], 1_000, 64).unwrap();
     let second = navigation.route(start, goal, &[], 1_000, 64).unwrap();
@@ -65,6 +95,7 @@ fn navigation_routes_around_expensive_effect_tiles() {
         dimensions,
         blocked: BTreeSet::new(),
         terrain_cost_milli: expensive,
+        minimum_terrain_cost_milli: 1_000,
     };
     let start = dimensions.cell_center(crate::map::MapCell::new(0, 1));
     let goal = dimensions.cell_center(crate::map::MapCell::new(4, 1));
@@ -74,6 +105,32 @@ fn navigation_routes_around_expensive_effect_tiles() {
             .iter()
             .any(|point| (point.y - start.y).abs() > f32::EPSILON)
     );
+}
+
+#[test]
+fn authored_tile_multipliers_drive_costs_and_the_admissible_heuristic() {
+    let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+    let mut map = catalog
+        .resolve_preset(
+            crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+            crate::map::MapInstanceId(1),
+        )
+        .unwrap();
+    let speed = map
+        .effect_tiles
+        .iter_mut()
+        .find(|tile| tile.behavior.kind() == Some(crate::map::EffectTileKind::Speed))
+        .unwrap();
+    speed.behavior = crate::map::MapEffectTileBehavior::Speed {
+        movement_multiplier_milli: 2_000,
+    };
+    let speed_cell = speed.cell;
+    let navigation = BotNavigationSnapshot::from_map(&map, 15.0, 2_000).unwrap();
+    let speed_index = u32::from(speed_cell.y) * u32::from(map.snapshot.dimensions.width)
+        + u32::from(speed_cell.x);
+
+    assert_eq!(navigation.terrain_cost_milli[&speed_index], 500);
+    assert_eq!(navigation.minimum_terrain_cost_milli, 500);
 }
 
 #[test]
@@ -141,12 +198,47 @@ fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
     let intent = policy::choose_intent(
         &observed,
         &mut state,
-        BotProfile::default(),
+        BotProfile::embedded().unwrap(),
         BotRole::Objective,
     );
     assert_eq!(state.tactic, BotTactic::Contest);
     assert!(intent.move_goal.unwrap().distance(Vec2::ZERO) < 160.0);
     assert_eq!(intent.aim_target.unwrap().0, Vec2::new(-500.0, 300.0));
+}
+
+#[test]
+fn nondefault_hot_zone_hold_fraction_changes_the_policy_goal() {
+    let mut observed = observation(10);
+    observed.self_view.position = Vec2::new(-700.0, 0.0);
+    observed.mode = super::model::BotModeView::HotZone {
+        center: Vec2::ZERO,
+        radius: 160.0,
+        status: crate::matchplay::HotZoneStatus::Empty,
+        progress: [0, 0],
+    };
+    let baseline = BotProfile::embedded().unwrap();
+    let mut tuned = baseline;
+    tuned.hot_zone_hold_radius_fraction = 0.8;
+
+    let baseline_goal = policy::choose_intent(
+        &observed,
+        &mut super::model::BotState::default(),
+        baseline,
+        BotRole::Objective,
+    )
+    .move_goal
+    .unwrap();
+    let tuned_goal = policy::choose_intent(
+        &observed,
+        &mut super::model::BotState::default(),
+        tuned,
+        BotRole::Objective,
+    )
+    .move_goal
+    .unwrap();
+
+    assert!((baseline_goal.length() - 72.0).abs() < 0.001);
+    assert!((tuned_goal.length() - 128.0).abs() < 0.001);
 }
 
 #[test]
@@ -159,6 +251,7 @@ fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
         dimensions,
         blocked: BTreeSet::new(),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
     let mut observed = observation(20);
     observed.ability_ready = true;
@@ -180,7 +273,7 @@ fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
     let decision = policy::decide(
         &observed,
         &mut super::model::BotState::default(),
-        BotProfile::default(),
+        BotProfile::embedded().unwrap(),
         &navigation,
         7,
         BotRole::Pressure,
@@ -202,6 +295,7 @@ fn restoration_bot_targets_an_injured_ally_and_uses_the_field() {
         },
         blocked: BTreeSet::new(),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
     let mut observed = observation(20);
     observed.ability_ready = true;
@@ -223,7 +317,7 @@ fn restoration_bot_targets_an_injured_ally_and_uses_the_field() {
     let decision = policy::decide(
         &observed,
         &mut super::model::BotState::default(),
-        BotProfile::default(),
+        BotProfile::embedded().unwrap(),
         &navigation,
         7,
         BotRole::Pressure,
@@ -256,7 +350,7 @@ fn healing_weapon_targets_an_injured_ally() {
     let intent = policy::choose_intent(
         &observed,
         &mut super::model::BotState::default(),
-        BotProfile::default(),
+        BotProfile::embedded().unwrap(),
         BotRole::Pressure,
     );
     assert_eq!(intent.aim_target.unwrap().0, Vec2::new(120.0, 0.0));
@@ -309,7 +403,7 @@ fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
     let intent = policy::choose_intent(
         &observed,
         &mut state,
-        BotProfile::default(),
+        BotProfile::embedded().unwrap(),
         BotRole::Objective,
     );
     assert_eq!(state.tactic, BotTactic::AttackSafe);
@@ -338,7 +432,7 @@ fn object_attack_holds_weapon_standoff_instead_of_entering_the_collider() {
     let intent = policy::choose_intent(
         &observed,
         &mut state,
-        BotProfile::default(),
+        BotProfile::embedded().unwrap(),
         BotRole::Pressure,
     );
     assert_eq!(state.tactic, BotTactic::BreakObject);
@@ -358,8 +452,9 @@ fn corner_stall_starts_a_bounded_inward_escape() {
         dimensions,
         blocked: BTreeSet::new(),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
-    let profile = BotProfile::default();
+    let profile = BotProfile::embedded().unwrap();
     let mut observed = observation(50);
     observed.self_view.position = dimensions.bounds().min + Vec2::splat(32.0);
     let mut state = super::model::BotState {
@@ -396,8 +491,9 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
         dimensions,
         blocked: BTreeSet::new(),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
-    let profile = BotProfile::default();
+    let profile = BotProfile::embedded().unwrap();
     let bounds = dimensions.bounds();
     let mut observed = observation(50);
     observed.self_view.position = bounds.max - Vec2::splat(32.0);
@@ -508,6 +604,7 @@ fn large_navigation_is_bounded_and_exhaustion_fails_closed() {
         dimensions,
         blocked: BTreeSet::from([256 * u32::from(dimensions.width) + 256]),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
     let start = dimensions.cell_center(crate::map::MapCell::new(0, 0));
     let goal = dimensions.cell_center(crate::map::MapCell::new(511, 511));
@@ -528,6 +625,7 @@ fn navigation_search_resumes_deterministically_across_tick_budgets() {
         dimensions,
         blocked: BTreeSet::from([12 * u32::from(dimensions.width) + 16]),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
     let start = dimensions.cell_center(crate::map::MapCell::new(1, 1));
     let goal = dimensions.cell_center(crate::map::MapCell::new(30, 22));
@@ -557,8 +655,9 @@ fn contact_memory_contains_only_observed_facts_and_expires() {
         dimensions,
         blocked: BTreeSet::new(),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
-    let profile = BotProfile::default();
+    let profile = BotProfile::embedded().unwrap();
     let mut state = super::model::BotState::default();
     let mut visible = observation(10);
     visible.visible_enemies.push(super::model::BotFighterView {
@@ -624,8 +723,9 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
         dimensions,
         blocked: BTreeSet::from([20 * u32::from(dimensions.width) + 32]),
         terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
     };
-    let profile = BotProfile::default();
+    let profile = BotProfile::embedded().unwrap();
     let budget = profile.search_budget_per_bot(5);
     let mut samples = Vec::with_capacity(200);
     for sample in 0..200_u64 {

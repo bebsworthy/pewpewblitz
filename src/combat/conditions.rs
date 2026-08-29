@@ -98,6 +98,7 @@ pub(crate) fn advance_conditions(
             &Position,
             &mut CurrentHealth,
             &mut ActiveEffects,
+            Option<&crate::abilities::DashRuntime>,
             &mut crate::builds::AbilityState,
             Has<TestDummy>,
         ),
@@ -106,8 +107,17 @@ pub(crate) fn advance_conditions(
 ) {
     let mut ordered: Vec<_> = fighters.iter_mut().collect();
     ordered.sort_by_key(|(_, network_id, ..)| **network_id);
-    for (entity, network_id, team, position, mut health, mut effects, mut ability, test_dummy) in
-        ordered
+    for (
+        entity,
+        network_id,
+        team,
+        position,
+        mut health,
+        mut effects,
+        dash,
+        mut ability,
+        test_dummy,
+    ) in ordered
     {
         let mut defeated = false;
         for kind in [DamageOverTimeKind::Poison, DamageOverTimeKind::Fire] {
@@ -264,7 +274,10 @@ pub(crate) fn advance_conditions(
         if effects.is_frozen(tick.0)
             && matches!(ability.phase, crate::builds::AbilityPhase::Dashing { .. })
         {
-            ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+            ability.phase = crate::abilities::settled_ability_phase(
+                ability.charge,
+                dash.map_or(u16::MAX, crate::abilities::DashRuntime::charge_maximum),
+            );
             commands
                 .entity(entity)
                 .remove::<crate::abilities::DashRuntime>();

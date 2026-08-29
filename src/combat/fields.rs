@@ -300,7 +300,7 @@ fn settle_field_owner(
     field_id: ElementalFieldId,
     owner_network_id: NetworkEntityId,
 ) {
-    if let Some((_, _, mut ability)) = owners
+    if let Some((_, loadout, mut ability)) = owners
         .iter_mut()
         .find(|(network_id, ..)| **network_id == owner_network_id)
         && matches!(
@@ -309,6 +309,9 @@ fn settle_field_owner(
                 if active == field_id
         )
     {
-        ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+        ability.phase = crate::abilities::settled_ability_phase(
+            ability.charge,
+            loadout.ultimate.charge_policy.maximum,
+        );
     }
 }

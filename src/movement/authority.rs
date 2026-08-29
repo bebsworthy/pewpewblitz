@@ -43,6 +43,7 @@ pub(crate) struct MovementDecision {
 pub(crate) struct MovementModifiers<'a> {
     pub active_effects: Option<&'a crate::combat::ActiveEffects>,
     pub effect_tile: Option<&'a crate::map::EffectTileOccupancy>,
+    pub passive_loadout: Option<&'a crate::builds::ResolvedMatchLoadout>,
     pub passive_state: Option<&'a crate::builds::PassiveRuntimeState>,
     pub external_motion: Option<&'a crate::combat::ExternalMotion>,
 }
@@ -107,11 +108,11 @@ pub(crate) fn resolved_movement_velocity(
     let tile_multiplier = modifiers.effect_tile.map_or(1.0, |occupancy| {
         f32::from(occupancy.behavior.movement_multiplier_milli()) / 1000.0
     });
-    let adrenaline_multiplier = modifiers
-        .passive_state
-        .and_then(|state| state.adrenaline_until_tick)
-        .filter(|deadline| tick < *deadline)
-        .map_or(1.0, |_| 1.15);
+    let adrenaline_multiplier = super::input::adrenaline_multiplier(
+        modifiers.passive_loadout,
+        modifiers.passive_state,
+        tick,
+    );
     decision.movement
         * resolved_speed
         * movement_multiplier
@@ -370,20 +371,19 @@ pub(super) fn authoritative_movement(
         if let Some(aim) = decision.aim {
             rotation = Rotation::radians(aim.y.atan2(aim.x));
         }
+        let loadout = loadouts.get(entity).ok();
         let desired_velocity = if active_effects.is_some_and(|effects| effects.is_frozen(tick.0)) {
             Vec2::ZERO
         } else {
             resolved_movement_velocity(
                 tick.0,
                 &decision,
-                loadouts
-                    .get(entity)
-                    .ok()
-                    .map(|loadout| loadout.fighter_stats.movement_speed),
+                loadout.map(|loadout| loadout.fighter_stats.movement_speed),
                 tuning.speed,
                 MovementModifiers {
                     active_effects,
                     effect_tile,
+                    passive_loadout: loadout,
                     passive_state: passive_states.get(entity).ok(),
                     external_motion,
                 },

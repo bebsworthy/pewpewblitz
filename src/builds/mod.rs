@@ -18,10 +18,11 @@ pub use definitions::{
 pub use model::{
     AbilityPhase, AbilityState, AcceptedBuildSummary, BrawlerBuildRecipe, BuildRecipeFingerprint,
     BuildRevision, DeployableId, ElementalFieldEffect, PassiveDefinitionId, PassiveKind,
-    PassiveRuntimeState, PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats,
-    ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate, RevealProximityModifier,
-    SelectedBuild, UltimateActivationStyle, UltimateDefinitionId, UltimateKind, UltimateParameters,
-    WeaponChoice, world_units_from_milliunits,
+    PassiveParameters, PassiveRuntimeState, PulseMagazine, PulsePower, PulseReach,
+    ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate,
+    RevealProximityModifier, SelectedBuild, UltimateActivationStyle, UltimateChargePolicy,
+    UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
+    world_units_from_milliunits,
 };
 
 #[cfg(test)]

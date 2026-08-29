@@ -3,7 +3,7 @@
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 21;
+pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 22;
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GameplayContentFingerprint(pub u64);
@@ -21,6 +21,7 @@ pub fn gameplay_content_fingerprint(
         crate::weapon_parts::WeaponPartCatalog::embedded()?.canonical_fingerprint_material()?;
     let condition_material =
         crate::combat::CombatConditionRules::embedded()?.canonical_fingerprint_material()?;
+    let bot_material = crate::bots::BotCatalog::embedded()?.canonical_fingerprint_material()?;
     let bytes = postcard::to_allocvec(&(
         GAMEPLAY_CONTENT_ENVELOPE_VERSION,
         weapon_material,
@@ -28,6 +29,7 @@ pub fn gameplay_content_fingerprint(
         build_material,
         part_material,
         condition_material,
+        bot_material,
     ))
     .map_err(|error| format!("gameplay content envelope serialization failed: {error}"))?;
     Ok(GameplayContentFingerprint(fnv1a64(&bytes)))

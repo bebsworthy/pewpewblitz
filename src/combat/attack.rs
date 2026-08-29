@@ -264,7 +264,7 @@ fn queue_blocked_world_target_damage(
                         falloff,
                         0.0,
                         1.0,
-                        false,
+                        None,
                         source.origin.as_vec2().distance(point),
                     ),
                     delivery_index,
@@ -879,11 +879,11 @@ pub(super) fn authoritative_composed_fire(
         let recipe = &resolved.recipe;
         advance_composed_weapon_state(&mut state, recipe, tick.0);
         ensure_ammo_recovery(
-            entity,
-            *network_id,
+            (entity, *network_id),
             tick.0,
             &mut state,
             recipe,
+            loadout,
             &mut passive_states,
             &mut gameplay_telemetry.ability,
         );
@@ -896,8 +896,11 @@ pub(super) fn authoritative_composed_fire(
         let targeted_ultimate_requested = input.gameplay_buttons & FighterInput::ULTIMATE != 0
             && loadout.ultimate.kind.activation_style()
                 == crate::builds::UltimateActivationStyle::Targeted;
-        let held = !input_should_neutralize(tick.0, freshness.last_fresh_tick, 12)
-            && input.is_valid()
+        let held = !input_should_neutralize(
+            tick.0,
+            freshness.last_fresh_tick,
+            crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
+        ) && input.is_valid()
             && !targeted_ultimate_requested
             && input.gameplay_buttons & FighterInput::PRIMARY_FIRE != 0;
         if !held || !matches!(state.phase, WeaponPhase::Ready) {
@@ -1020,11 +1023,11 @@ pub(super) fn authoritative_composed_fire(
             ready_at_tick: tick.0.saturating_add(recipe.fire_cooldown_ticks),
         };
         ensure_ammo_recovery(
-            entity,
-            *network_id,
+            (entity, *network_id),
             tick.0,
             &mut state,
             recipe,
+            loadout,
             &mut passive_states,
             &mut gameplay_telemetry.ability,
         );
@@ -1110,19 +1113,22 @@ fn consume_quick_cycle(
     owner_network_id: NetworkEntityId,
     tick: u64,
     base_ticks: u64,
+    passive: Option<crate::builds::ResolvedPassive>,
     states: &mut Query<&mut crate::builds::PassiveRuntimeState>,
     telemetry: &mut crate::abilities::AbilityTelemetry,
 ) -> u64 {
     let Ok(mut state) = states.get_mut(entity) else {
         return base_ticks;
     };
-    let ticks = consume_quick_cycle_state(&mut state, base_ticks);
-    if ticks < base_ticks {
+    let ticks = consume_quick_cycle_state(&mut state, base_ticks, passive);
+    if let Some(passive) = passive
+        && ticks < base_ticks
+    {
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
             tick,
             owner_network_id,
             kind: crate::abilities::AbilityTelemetryKind::PassiveModified {
-                passive_id: crate::builds::PassiveDefinitionId(5),
+                passive_id: passive.id,
                 amount: u16::try_from(base_ticks.saturating_sub(ticks)).unwrap_or(u16::MAX),
             },
         });
@@ -1132,14 +1138,15 @@ fn consume_quick_cycle(
 
 #[cfg(feature = "server")]
 fn ensure_ammo_recovery(
-    entity: Entity,
-    owner_network_id: NetworkEntityId,
+    owner: (Entity, NetworkEntityId),
     tick: u64,
     state: &mut WeaponState,
     recipe: &WeaponRecipe,
+    loadout: &crate::builds::ResolvedMatchLoadout,
     passive_states: &mut Query<&mut crate::builds::PassiveRuntimeState>,
     telemetry: &mut crate::abilities::AbilityTelemetry,
 ) {
+    let (entity, owner_network_id) = owner;
     if state.ammo >= recipe.economy.capacity() || state.ammo_recovery.is_some() {
         return;
     }
@@ -1148,6 +1155,11 @@ fn ensure_ammo_recovery(
         owner_network_id,
         tick,
         recipe.economy.refill_ticks(),
+        loadout
+            .passives
+            .iter()
+            .find(|passive| passive.kind == crate::builds::PassiveKind::QuickCycle)
+            .copied(),
         passive_states,
         telemetry,
     );
@@ -1161,17 +1173,39 @@ fn ensure_ammo_recovery(
 fn consume_quick_cycle_state(
     state: &mut crate::builds::PassiveRuntimeState,
     base_ticks: u64,
+    passive: Option<crate::builds::ResolvedPassive>,
 ) -> u64 {
     if !state.quick_cycle_primed {
         return base_ticks;
     }
     state.quick_cycle_primed = false;
-    crate::abilities::apply_quick_cycle_ticks(base_ticks)
+    let Some(passive) = passive else {
+        return base_ticks;
+    };
+    let crate::builds::PassiveParameters::QuickCycle {
+        refill_duration_basis_points,
+    } = passive.parameters
+    else {
+        return base_ticks;
+    };
+    crate::abilities::apply_quick_cycle_ticks(base_ticks, refill_duration_basis_points)
 }
 
 #[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
+
+    fn quick_cycle_passive(refill_duration_basis_points: u16) -> crate::builds::ResolvedPassive {
+        crate::builds::ResolvedPassive {
+            id: crate::builds::PassiveDefinitionId(5),
+            kind: crate::builds::PassiveKind::QuickCycle,
+            point_cost: 2,
+            parameters: crate::builds::PassiveParameters::QuickCycle {
+                refill_duration_basis_points,
+            },
+        }
+    }
+
     #[test]
     fn quick_cycle_is_consumed_once_for_magazine_and_charge_refills() {
         for economy in [
@@ -1189,15 +1223,35 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(
-                consume_quick_cycle_state(&mut state, economy.refill_ticks()),
+                consume_quick_cycle_state(
+                    &mut state,
+                    economy.refill_ticks(),
+                    Some(quick_cycle_passive(6_000)),
+                ),
                 36
             );
             assert!(!state.quick_cycle_primed);
             assert_eq!(
-                consume_quick_cycle_state(&mut state, economy.refill_ticks()),
+                consume_quick_cycle_state(
+                    &mut state,
+                    economy.refill_ticks(),
+                    Some(quick_cycle_passive(6_000)),
+                ),
                 60
             );
         }
+    }
+
+    #[test]
+    fn quick_cycle_consumes_nondefault_authored_duration() {
+        let mut state = crate::builds::PassiveRuntimeState {
+            quick_cycle_primed: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            consume_quick_cycle_state(&mut state, 60, Some(quick_cycle_passive(5_000))),
+            30
+        );
     }
 
     #[test]

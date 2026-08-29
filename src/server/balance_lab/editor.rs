@@ -2,7 +2,7 @@ use super::BalanceLabSnapshotV3;
 use crate::{
     builds::{
         MAX_COLD_CAPACITY, MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS,
-        MIN_REVEAL_PROXIMITY_RADIUS, UltimateParameters,
+        MIN_REVEAL_PROXIMITY_RADIUS, PassiveParameters, UltimateParameters,
     },
     combat::{
         DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadEffectDefinition,
@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::Serialize;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 8;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 9;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -178,6 +178,20 @@ impl NumberSpec {
         }
     }
 
+    fn basis_points(minimum: u32, maximum: u32) -> Self {
+        Self {
+            storage_kind: EditorStorageKind::Integer,
+            unit: "%",
+            storage_scale: 100.0,
+            minimum: f64::from(minimum) / 100.0,
+            maximum: f64::from(maximum) / 100.0,
+            minimum_exclusive: false,
+            step: 0.01,
+            control: EditorControl::RangeAndNumber,
+            help: Some("Displayed as a percentage and stored in basis points."),
+        }
+    }
+
     fn per_tick_rate(minimum: u16, maximum: u16, unit: &'static str) -> Self {
         Self {
             storage_kind: EditorStorageKind::Integer,
@@ -220,6 +234,7 @@ impl BalanceLabEditorManifest {
             add_weapon_fields(&mut fields, index, weapon, weapons);
         }
         add_ultimate_fields(&mut fields, snapshot);
+        add_passive_fields(&mut fields, snapshot);
         add_effect_tile_fields(&mut fields);
         add_world_fields(&mut fields);
         Self {
@@ -331,6 +346,26 @@ fn add_global_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             "Lifecycle",
             label,
             spec,
+        );
+    }
+    for (field, label, maximum) in [
+        ("maximum", "Maximum charge", 10_000),
+        ("dealt_damage_multiplier", "Charge per damage dealt", 100),
+        (
+            "received_damage_multiplier",
+            "Charge per damage received",
+            100,
+        ),
+    ] {
+        add_field(
+            fields,
+            path!["ultimateCharge", field],
+            EditorSection::Global,
+            "ultimate-charge",
+            "Ultimate charge",
+            "Combat economy",
+            label,
+            NumberSpec::integer(1, maximum, "charge"),
         );
     }
 }
@@ -1013,6 +1048,157 @@ fn add_weapon_fields(
 fn add_ultimate_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &BalanceLabSnapshotV3) {
     for (index, ultimate) in snapshot.ultimates.iter().enumerate() {
         match ultimate.parameters {
+            UltimateParameters::Dash { .. } => {
+                for (tail, group, label, spec) in [
+                    (
+                        "maximum_distance_milliunits",
+                        "Movement",
+                        "Maximum distance",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "duration_ticks",
+                        "Movement",
+                        "Duration",
+                        NumberSpec::ticks(1, 600),
+                    ),
+                    (
+                        "damage",
+                        "Impact",
+                        "Damage",
+                        NumberSpec::integer(1, 1_000, "health"),
+                    ),
+                    (
+                        "knockback_speed_milliunits",
+                        "Impact",
+                        "Knockback speed",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "knockback_duration_ticks",
+                        "Impact",
+                        "Knockback duration",
+                        NumberSpec::ticks(1, 600),
+                    ),
+                    (
+                        "maximum_targets",
+                        "Capacity",
+                        "Maximum targets",
+                        NumberSpec::integer(1, 32, "targets"),
+                    ),
+                ] {
+                    add_field(
+                        fields,
+                        path!["ultimates", index, "parameters", "Dash", tail],
+                        EditorSection::Ultimates,
+                        &ultimate.key,
+                        &ultimate.display_name,
+                        group,
+                        label,
+                        spec,
+                    );
+                }
+            }
+            UltimateParameters::Sentry { .. } => {
+                for offset in 0..6 {
+                    add_field(
+                        fields,
+                        path![
+                            "ultimates",
+                            index,
+                            "parameters",
+                            "Sentry",
+                            "placement_offsets_milliunits",
+                            offset
+                        ],
+                        EditorSection::Ultimates,
+                        &ultimate.key,
+                        &ultimate.display_name,
+                        "Placement",
+                        &format!("Placement offset {}", offset + 1),
+                        NumberSpec::milliunits(1, 1_024_000),
+                    );
+                }
+                for (tail, group, label, spec) in [
+                    (
+                        "body_radius_milliunits",
+                        "Deployable",
+                        "Body radius",
+                        NumberSpec::milliunits(1, 512_000),
+                    ),
+                    (
+                        "acquisition_range_milliunits",
+                        "Targeting",
+                        "Acquisition range",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "acquisition_interval_ticks",
+                        "Targeting",
+                        "Acquisition interval",
+                        NumberSpec::ticks(1, 600),
+                    ),
+                    (
+                        "fire_interval_ticks",
+                        "Firing",
+                        "Fire interval",
+                        NumberSpec::ticks(1, 3_600),
+                    ),
+                    (
+                        "lifetime_ticks",
+                        "Deployable",
+                        "Lifetime",
+                        NumberSpec::ticks(1, 36_000),
+                    ),
+                    (
+                        "maximum_health",
+                        "Deployable",
+                        "Maximum health",
+                        NumberSpec::integer(1, 10_000, "health"),
+                    ),
+                    (
+                        "projectile_speed_milliunits",
+                        "Projectile",
+                        "Speed",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "projectile_radius_milliunits",
+                        "Projectile",
+                        "Radius",
+                        NumberSpec::milliunits(1, 512_000),
+                    ),
+                    (
+                        "projectile_range_milliunits",
+                        "Projectile",
+                        "Range",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "projectile_lifetime_ticks",
+                        "Projectile",
+                        "Flight lifetime",
+                        NumberSpec::ticks(1, 600),
+                    ),
+                    (
+                        "projectile_damage",
+                        "Projectile",
+                        "Damage",
+                        NumberSpec::integer(1, 1_000, "health"),
+                    ),
+                ] {
+                    add_field(
+                        fields,
+                        path!["ultimates", index, "parameters", "Sentry", tail],
+                        EditorSection::Ultimates,
+                        &ultimate.key,
+                        &ultimate.display_name,
+                        group,
+                        label,
+                        spec,
+                    );
+                }
+            }
             UltimateParameters::SelfCloak { .. } => add_field(
                 fields,
                 path![
@@ -1359,7 +1545,106 @@ fn add_ultimate_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &Balan
                     );
                 }
             }
-            UltimateParameters::Dash | UltimateParameters::Sentry => {}
+        }
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "explicit descriptors keep the small passive editor contract auditable"
+)]
+fn add_passive_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &BalanceLabSnapshotV3) {
+    for (index, passive) in snapshot.passives.iter().enumerate() {
+        let variant = match passive.parameters {
+            PassiveParameters::LightweightFrame | PassiveParameters::ReinforcedFrame => continue,
+            PassiveParameters::AdrenalResponse { .. } => "AdrenalResponse",
+            PassiveParameters::CloseQuarters { .. } => "CloseQuarters",
+            PassiveParameters::QuickCycle { .. } => "QuickCycle",
+            PassiveParameters::Tenacity { .. } => "Tenacity",
+            PassiveParameters::CryogenicInsulation { .. } => "CryogenicInsulation",
+            PassiveParameters::FilteredCirculation { .. } => "FilteredCirculation",
+            PassiveParameters::HeatShielding { .. } => "HeatShielding",
+        };
+        let descriptors: &[(&str, &str, &str, NumberSpec)] = match passive.parameters {
+            PassiveParameters::AdrenalResponse { .. } => &[
+                (
+                    "duration_ticks",
+                    "Timing",
+                    "Boost duration",
+                    NumberSpec::ticks(1, 3_600),
+                ),
+                (
+                    "rearm_ticks",
+                    "Timing",
+                    "Rearm time",
+                    NumberSpec::ticks(1, 36_000),
+                ),
+                (
+                    "movement_bonus_basis_points",
+                    "Effect",
+                    "Movement bonus",
+                    NumberSpec::basis_points(1, 10_000),
+                ),
+            ],
+            PassiveParameters::CloseQuarters { .. } => &[
+                (
+                    "near_distance_milliunits",
+                    "Distance",
+                    "Near distance",
+                    NumberSpec::milliunits(1, 4_096_000),
+                ),
+                (
+                    "far_distance_milliunits",
+                    "Distance",
+                    "Far distance",
+                    NumberSpec::milliunits(1, 4_096_000),
+                ),
+                (
+                    "near_damage_basis_points",
+                    "Effect",
+                    "Near damage",
+                    NumberSpec::basis_points(1, 30_000),
+                ),
+                (
+                    "far_damage_basis_points",
+                    "Effect",
+                    "Far damage",
+                    NumberSpec::basis_points(1, 30_000),
+                ),
+            ],
+            PassiveParameters::QuickCycle { .. } => &[(
+                "refill_duration_basis_points",
+                "Effect",
+                "Refill duration",
+                NumberSpec::basis_points(1, 10_000),
+            )],
+            PassiveParameters::Tenacity { .. } => &[(
+                "slow_duration_basis_points",
+                "Effect",
+                "Slow duration",
+                NumberSpec::basis_points(1, 10_000),
+            )],
+            PassiveParameters::CryogenicInsulation { .. }
+            | PassiveParameters::FilteredCirculation { .. }
+            | PassiveParameters::HeatShielding { .. } => &[(
+                "resistance_basis_points",
+                "Effect",
+                "Resistance",
+                NumberSpec::basis_points(1, 6_000),
+            )],
+            PassiveParameters::LightweightFrame | PassiveParameters::ReinforcedFrame => &[],
+        };
+        for (tail, group, label, spec) in descriptors {
+            add_field(
+                fields,
+                path!["passives", index, "parameters", variant, *tail],
+                EditorSection::Ultimates,
+                &passive.key,
+                &passive.display_name,
+                group,
+                label,
+                *spec,
+            );
         }
     }
 }
@@ -1489,7 +1774,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 177);
+        assert_eq!(manifest.fields.len(), 215);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()
@@ -1506,6 +1791,23 @@ mod tests {
             !paths
                 .iter()
                 .any(|path| path.contains("pickup_definition_id"))
+        );
+        for expected in [
+            "ultimateCharge/maximum",
+            "ultimates/0/parameters/Dash/damage",
+            "ultimates/1/parameters/Sentry/projectile_damage",
+            "passives/2/parameters/AdrenalResponse/duration_ticks",
+            "passives/4/parameters/QuickCycle/refill_duration_basis_points",
+        ] {
+            assert!(
+                paths.contains(expected),
+                "missing authored tuning path {expected}"
+            );
+        }
+        assert!(
+            !paths
+                .iter()
+                .any(|path| path.contains("presentation_profile_id"))
         );
     }
 
@@ -1629,7 +1931,7 @@ mod tests {
             .iter()
             .find(|field| {
                 path_key(&field.path)
-                    == "ultimates/1/parameters/RevealScan/maximum_range_milliunits"
+                    == "ultimates/3/parameters/RevealScan/maximum_range_milliunits"
             })
             .unwrap();
         assert_eq!(range.unit, "world units");

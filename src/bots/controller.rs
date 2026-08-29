@@ -6,7 +6,7 @@ use super::{
     },
     navigation::BotNavigationSnapshot,
     policy,
-    profile::BotProfile,
+    profile::{BotProfile, BotProfileResource},
     team::{BotPlanMember, assign_roles},
 };
 use crate::{
@@ -41,12 +41,8 @@ struct BotNavigationRuntime {
 }
 
 pub(crate) fn install_controller_systems(app: &mut App) {
-    let profile = BotProfile::default();
-    assert!(
-        profile.validate(),
-        "the built-in Practice bot profile is valid"
-    );
-    app.init_resource::<BotNavigationRuntime>()
+    app.init_resource::<BotProfileResource>()
+        .init_resource::<BotNavigationRuntime>()
         .init_resource::<BotDiagnostics>()
         .add_systems(
             FixedUpdate,
@@ -96,6 +92,7 @@ struct RawFighterView {
 )]
 fn capture_observations(
     tick: Res<SimulationTick>,
+    profile: Res<BotProfileResource>,
     map: Res<ResolvedMap>,
     movement: Res<MovementTuning>,
     dynamic_states: Query<&MapDynamicState>,
@@ -147,7 +144,11 @@ fn capture_observations(
         return;
     };
     if navigation.map_instance_id != Some(map.snapshot.identity.instance_id) {
-        navigation.snapshot = BotNavigationSnapshot::from_map(&map, movement.radius + 1.0);
+        navigation.snapshot = BotNavigationSnapshot::from_map(
+            &map,
+            movement.radius + 1.0,
+            profile.0.damage_tile_cost_milli,
+        );
         navigation.map_instance_id = Some(map.snapshot.identity.instance_id);
     }
     let Some(_navigation) = navigation.snapshot.as_ref() else {
@@ -395,6 +396,7 @@ fn weapon_capabilities(loadout: &ResolvedMatchLoadout) -> (f32, f32) {
 )]
 fn decide_and_commit_inputs(
     tick: Res<SimulationTick>,
+    profile: Res<BotProfileResource>,
     navigation: Res<BotNavigationRuntime>,
     roots: Query<&MatchState, With<MatchRoot>>,
     mut diagnostics: ResMut<BotDiagnostics>,
@@ -408,7 +410,7 @@ fn decide_and_commit_inputs(
     )>,
 ) {
     let started_at = std::time::Instant::now();
-    let profile = BotProfile::default();
+    let profile: BotProfile = profile.0;
     let match_active = roots
         .single()
         .is_ok_and(|state| matches!(state.phase, MatchPhase::Active { .. }));

@@ -10,8 +10,8 @@ use crate::combat::WeaponPhase;
 use crate::{
     builds::{
         BuildCatalog, BuildCatalogResource, ElementalFieldEffect, FighterStatProfiles,
-        ResolvedMatchLoadout, SelectedBuild, UltimateDefinitionId, UltimateKind,
-        UltimateParameters,
+        PassiveDefinitionId, PassiveKind, PassiveParameters, ResolvedMatchLoadout, SelectedBuild,
+        UltimateChargePolicy, UltimateDefinitionId, UltimateKind, UltimateParameters,
     },
     combat::{
         CurrentHealth, DamageFalloff, DeliveryMethod, FighterDefinitions, FiringPattern,
@@ -37,7 +37,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 17;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 18;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -79,6 +79,16 @@ struct UltimateTuning {
     display_name: String,
     kind: UltimateKind,
     parameters: UltimateParameters,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PassiveTuning {
+    id: u16,
+    key: String,
+    display_name: String,
+    kind: PassiveKind,
+    parameters: PassiveParameters,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,8 +258,10 @@ struct BalanceLabSnapshotV3 {
     schema_version: u16,
     condition_rules: crate::combat::CombatConditionRules,
     fighter_profiles: FighterStatProfiles,
+    ultimate_charge: UltimateChargePolicy,
     weapons: Vec<WeaponPresetTuning>,
     ultimates: Vec<UltimateTuning>,
+    passives: Vec<PassiveTuning>,
     barrel: BarrelTuning,
     chest: ChestTuning,
     effect_tiles: EffectTileTuning,
@@ -267,6 +279,7 @@ impl BalanceLabSnapshotV3 {
             condition_rules: crate::combat::CombatConditionRules::embedded()
                 .expect("embedded combat-condition rules are valid"),
             fighter_profiles: builds.fighter_profiles,
+            ultimate_charge: builds.ultimate_charge,
             weapons: weapons
                 .presets
                 .iter()
@@ -280,26 +293,23 @@ impl BalanceLabSnapshotV3 {
             ultimates: builds
                 .ultimates
                 .iter()
-                .filter(|ultimate| {
-                    matches!(
-                        ultimate.kind,
-                        UltimateKind::SelfCloak
-                            | UltimateKind::RevealScan
-                            | UltimateKind::ConcealmentField
-                            | UltimateKind::DemolitionStrike
-                            | UltimateKind::CryogenicField
-                            | UltimateKind::FireField
-                            | UltimateKind::PoisonField
-                            | UltimateKind::RestorationField
-                            | UltimateKind::BigBlob
-                    )
-                })
                 .map(|ultimate| UltimateTuning {
                     id: ultimate.id.0,
                     key: ultimate.key.clone(),
                     display_name: ultimate.display_name.clone(),
                     kind: ultimate.kind,
                     parameters: ultimate.parameters,
+                })
+                .collect(),
+            passives: builds
+                .passives
+                .iter()
+                .map(|passive| PassiveTuning {
+                    id: passive.id.0,
+                    key: passive.key.clone(),
+                    display_name: passive.display_name.clone(),
+                    kind: passive.kind,
+                    parameters: passive.parameters,
                 })
                 .collect(),
             barrel: BarrelTuning {
@@ -899,6 +909,7 @@ fn validate_snapshot(
     if candidate.schema_version != SNAPSHOT_SCHEMA_VERSION
         || candidate.weapons.len() != baseline.weapons.len()
         || candidate.ultimates.len() != baseline.ultimates.len()
+        || candidate.passives.len() != baseline.passives.len()
     {
         return Err("unsupported snapshot shape".into());
     }
@@ -932,7 +943,9 @@ fn validate_snapshot(
     next_weapons.validate()?;
     let mut next_builds = current_builds.clone();
     next_builds.fighter_profiles = candidate.fighter_profiles;
+    next_builds.ultimate_charge = candidate.ultimate_charge;
     apply_ultimate_tuning(candidate, baseline, &mut next_builds)?;
+    apply_passive_tuning(candidate, baseline, &mut next_builds)?;
     next_builds.validate()?;
     validate_saved_brawler_combinations(&next_builds, &next_weapons, fighter)?;
     let mut next_maps = current_maps.clone();
@@ -1095,7 +1108,8 @@ fn same_ultimate_parameter_shape(
     supplied: UltimateParameters,
 ) -> bool {
     match (expected, supplied) {
-        (UltimateParameters::SelfCloak { .. }, UltimateParameters::SelfCloak { .. })
+        (UltimateParameters::Dash { .. }, UltimateParameters::Dash { .. })
+        | (UltimateParameters::SelfCloak { .. }, UltimateParameters::SelfCloak { .. })
         | (UltimateParameters::RevealScan { .. }, UltimateParameters::RevealScan { .. })
         | (
             UltimateParameters::ConcealmentField { .. },
@@ -1107,6 +1121,16 @@ fn same_ultimate_parameter_shape(
         )
         | (UltimateParameters::BigBlob { .. }, UltimateParameters::BigBlob { .. }) => true,
         (
+            UltimateParameters::Sentry {
+                presentation_profile_id: expected,
+                ..
+            },
+            UltimateParameters::Sentry {
+                presentation_profile_id: supplied,
+                ..
+            },
+        ) => expected == supplied,
+        (
             UltimateParameters::ElementalField {
                 effect: expected, ..
             },
@@ -1116,6 +1140,64 @@ fn same_ultimate_parameter_shape(
         ) => same_elemental_field_effect_shape(expected, supplied),
         _ => false,
     }
+}
+
+fn apply_passive_tuning(
+    candidate: &BalanceLabSnapshotV3,
+    baseline: &BalanceLabSnapshotV3,
+    next_builds: &mut BuildCatalog,
+) -> Result<(), String> {
+    for (expected, supplied) in baseline.passives.iter().zip(&candidate.passives) {
+        if supplied.id != expected.id
+            || supplied.key != expected.key
+            || supplied.display_name != expected.display_name
+            || supplied.kind != expected.kind
+            || !same_passive_parameter_shape(expected.parameters, supplied.parameters)
+        {
+            return Err("passive identity or parameter topology changed".into());
+        }
+        let passive = next_builds
+            .passives
+            .iter_mut()
+            .find(|passive| passive.id == PassiveDefinitionId(supplied.id))
+            .ok_or_else(|| "unknown passive definition".to_string())?;
+        passive.parameters = supplied.parameters;
+    }
+    Ok(())
+}
+
+fn same_passive_parameter_shape(expected: PassiveParameters, supplied: PassiveParameters) -> bool {
+    matches!(
+        (expected, supplied),
+        (
+            PassiveParameters::LightweightFrame,
+            PassiveParameters::LightweightFrame
+        ) | (
+            PassiveParameters::ReinforcedFrame,
+            PassiveParameters::ReinforcedFrame
+        ) | (
+            PassiveParameters::AdrenalResponse { .. },
+            PassiveParameters::AdrenalResponse { .. }
+        ) | (
+            PassiveParameters::CloseQuarters { .. },
+            PassiveParameters::CloseQuarters { .. }
+        ) | (
+            PassiveParameters::QuickCycle { .. },
+            PassiveParameters::QuickCycle { .. }
+        ) | (
+            PassiveParameters::Tenacity { .. },
+            PassiveParameters::Tenacity { .. }
+        ) | (
+            PassiveParameters::CryogenicInsulation { .. },
+            PassiveParameters::CryogenicInsulation { .. }
+        ) | (
+            PassiveParameters::FilteredCirculation { .. },
+            PassiveParameters::FilteredCirculation { .. }
+        ) | (
+            PassiveParameters::HeatShielding { .. },
+            PassiveParameters::HeatShielding { .. }
+        )
+    )
 }
 
 fn same_elemental_field_effect_shape(
@@ -1402,10 +1484,7 @@ mod tests {
             fighter_profile_id: crate::profiles::FighterProfileId(fighter_profile_id),
             weapon_base_id: crate::profiles::WeaponBaseId(weapon_base_id),
             ultimate_id: UltimateDefinitionId(1),
-            passive_ids: [
-                crate::builds::PassiveDefinitionId(3),
-                crate::builds::PassiveDefinitionId(4),
-            ],
+            passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
             equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: crate::profiles::ProfileRevision::INITIAL,
         };
@@ -1514,9 +1593,20 @@ mod tests {
         let mut numeric = baseline.clone();
         numeric.weapons[0].recipe.fire_cooldown_ticks += 1;
         numeric.heist.safe_maximum_health = 2_500;
-        let UltimateParameters::SelfCloak { duration_ticks } = &mut numeric.ultimates[0].parameters
+        numeric.ultimate_charge.dealt_damage_multiplier += 1;
+        let UltimateParameters::Dash { damage, .. } = &mut numeric.ultimates[0].parameters else {
+            panic!("first tunable ultimate is Dash");
+        };
+        *damage += 1;
+        let UltimateParameters::SelfCloak { duration_ticks } = &mut numeric.ultimates[2].parameters
         else {
-            panic!("first tunable ultimate is Self Cloak");
+            panic!("third tunable ultimate is Self Cloak");
+        };
+        *duration_ticks += 1;
+        let PassiveParameters::AdrenalResponse { duration_ticks, .. } =
+            &mut numeric.passives[2].parameters
+        else {
+            panic!("third passive is Adrenal Response");
         };
         *duration_ticks += 1;
         let DeliveryMethod::Straight { range, .. } = &mut numeric.weapons[0].recipe.delivery else {
@@ -1558,6 +1648,34 @@ mod tests {
         };
         assert!(
             validate_snapshot(&structural, &baseline, &builds, &weapons, &maps, &fighter).is_err()
+        );
+        let mut presentation = baseline.clone();
+        let UltimateParameters::Sentry {
+            presentation_profile_id,
+            ..
+        } = &mut presentation.ultimates[1].parameters
+        else {
+            panic!("second ultimate is Sentry");
+        };
+        *presentation_profile_id += 1;
+        assert!(
+            validate_snapshot(&presentation, &baseline, &builds, &weapons, &maps, &fighter,)
+                .is_err()
+        );
+        let mut passive_topology = baseline.clone();
+        passive_topology.passives[2].parameters = PassiveParameters::QuickCycle {
+            refill_duration_basis_points: 6_000,
+        };
+        assert!(
+            validate_snapshot(
+                &passive_topology,
+                &baseline,
+                &builds,
+                &weapons,
+                &maps,
+                &fighter,
+            )
+            .is_err()
         );
         assert_eq!(builds, BuildCatalog::embedded().unwrap());
         assert_eq!(weapons, WeaponCatalog::embedded().unwrap());
@@ -1717,10 +1835,7 @@ mod tests {
             fighter_profile_id: crate::profiles::FighterProfileId(1),
             weapon_base_id: crate::profiles::WeaponBaseId(3),
             ultimate_id: UltimateDefinitionId(7),
-            passive_ids: [
-                crate::builds::PassiveDefinitionId(5),
-                crate::builds::PassiveDefinitionId(6),
-            ],
+            passive_ids: [PassiveDefinitionId(5), PassiveDefinitionId(6)],
             equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: crate::profiles::ProfileRevision::INITIAL,
         };

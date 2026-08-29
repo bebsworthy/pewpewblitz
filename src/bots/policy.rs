@@ -11,8 +11,6 @@ use crate::{combat::WeaponPhase, map::MAP_CELL_SIZE_WORLD, protocol::FighterInpu
 use bevy::prelude::*;
 
 const AIM_ERROR_STREAM: u64 = 1;
-const PERIMETER_RECOVERY_TRIGGER: f32 = MAP_CELL_SIZE_WORLD * 2.0;
-const PERIMETER_RECOVERY_RELEASE: f32 = MAP_CELL_SIZE_WORLD * 5.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum BotNavigationSearchStatus {
@@ -70,11 +68,14 @@ pub(super) fn decide(
                 ),
                 |ally| (ally.position, ally.velocity),
             );
-        if u32::from(observation.self_view.current_health) * 4
-            <= u32::from(observation.self_view.maximum_health) * 3
+        if health_fraction(
+            observation.self_view.current_health,
+            observation.self_view.maximum_health,
+        ) <= profile.restoration_health_fraction
             || observation.allies.iter().any(|ally| {
                 ally.active
-                    && u32::from(ally.current_health) * 4 <= u32::from(ally.maximum_health) * 3
+                    && health_fraction(ally.current_health, ally.maximum_health)
+                        <= profile.restoration_health_fraction
             })
         {
             intent.aim_target = Some(restoration_target);
@@ -97,12 +98,12 @@ pub(super) fn decide(
     let aim = intent.aim_target.map(|(position, velocity)| {
         let delta = position - observation.self_view.position;
         let distance = delta.length();
-        let flight_ticks = if observation.projectile_speed > 0.0 {
-            distance / observation.projectile_speed * 60.0
+        let flight_seconds = if observation.projectile_speed > 0.0 {
+            distance / observation.projectile_speed
         } else {
             0.0
         };
-        let intercept = position + velocity * (flight_ticks / 60.0);
+        let intercept = position + velocity * flight_seconds;
         if observation.tick >= state.aim_error_until_tick {
             state.aim_error_radians =
                 entropy::signed_unit(seed, AIM_ERROR_STREAM, observation.tick)
@@ -150,9 +151,9 @@ pub(super) fn decide(
     };
     if use_ultimate
         && observation.ability_ready
-        && state
-            .last_ultimate_tick
-            .is_none_or(|last| observation.tick.saturating_sub(last) > 12)
+        && state.last_ultimate_tick.is_none_or(|last| {
+            observation.tick.saturating_sub(last) > profile.ultimate_retrigger_ticks
+        })
     {
         buttons |= FighterInput::ULTIMATE;
         state.last_ultimate_tick = Some(observation.tick);
@@ -292,26 +293,36 @@ pub(super) fn choose_intent(
             .unwrap_or(Vec2::X);
         return BotIntent {
             move_goal: Some(if distance < preferred {
-                self_position + away * (preferred - distance).clamp(64.0, 160.0)
+                self_position
+                    + away
+                        * (preferred - distance).clamp(
+                            profile.retreat_step_min_world,
+                            profile.retreat_step_max_world,
+                        )
             } else {
                 self_position
             }),
             aim_target: Some((enemy.position, enemy.velocity)),
             fire: true,
-            dash: distance < preferred * 0.6,
+            dash: distance < preferred * profile.retreat_dash_range_fraction,
         };
     }
     if let BotModeView::HotZone { center, radius, .. } = observation.mode
         && state.tactic == BotTactic::Contest
     {
-        let hold = hot_zone_hold_point(center, radius, observation.self_view.network_id.0);
+        let hold = hot_zone_hold_point(
+            center,
+            radius,
+            observation.self_view.network_id.0,
+            profile.hot_zone_hold_radius_fraction,
+        );
         return BotIntent {
             move_goal: Some(hold),
             aim_target: enemy.map(|enemy| (enemy.position, enemy.velocity)),
             fire: enemy.is_some_and(|enemy| {
                 self_position.distance(enemy.position) <= observation.weapon_range
             }),
-            dash: self_position.distance(center) > radius * 1.5,
+            dash: self_position.distance(center) > radius * profile.hot_zone_dash_radius_fraction,
         };
     }
     if state.tactic == BotTactic::AttackSafe
@@ -323,14 +334,14 @@ pub(super) fn choose_intent(
             .try_normalize()
             .unwrap_or(Vec2::X);
         return BotIntent {
-            move_goal: Some(if distance > standoff * 1.05 {
+            move_goal: Some(if distance > standoff * profile.standoff_arrival_fraction {
                 safe.position - direction * standoff
             } else {
                 self_position
             }),
             aim_target: Some((safe.position, Vec2::ZERO)),
             fire: distance <= observation.weapon_range,
-            dash: distance > observation.weapon_range * 1.35,
+            dash: distance > observation.weapon_range * profile.attack_safe_dash_range_fraction,
         };
     }
     if state.tactic == BotTactic::DefendSafe
@@ -340,7 +351,9 @@ pub(super) fn choose_intent(
             .and_then(|safe| (safe.position - friendly_safe.position).try_normalize())
             .unwrap_or(Vec2::X);
         let anchor = friendly_safe.position
-            + hostile_direction * (observation.weapon_range * 0.25).min(240.0);
+            + hostile_direction
+                * (observation.weapon_range * profile.defend_anchor_range_fraction)
+                    .min(profile.defend_anchor_max_distance);
         return BotIntent {
             move_goal: Some(anchor),
             aim_target: enemy.map(|enemy| (enemy.position, enemy.velocity)),
@@ -356,10 +369,10 @@ pub(super) fn choose_intent(
         let direction = (enemy.position - self_position)
             .try_normalize()
             .unwrap_or(Vec2::X);
-        let move_goal = if distance > preferred * 1.1 {
+        let move_goal = if distance > preferred * profile.pressure_far_range_fraction {
             enemy.position - direction * preferred
-        } else if distance < preferred * 0.65 {
-            self_position - direction * preferred * 0.4
+        } else if distance < preferred * profile.pressure_near_range_fraction {
+            self_position - direction * preferred * profile.pressure_retreat_fraction
         } else {
             let strafe = Vec2::new(-direction.y, direction.x)
                 * if observation.self_view.network_id.0 & 1 == 0 {
@@ -367,13 +380,13 @@ pub(super) fn choose_intent(
                 } else {
                     -1.0
                 };
-            self_position + strafe * 96.0
+            self_position + strafe * profile.pressure_strafe_distance
         };
         return BotIntent {
             move_goal: Some(move_goal),
             aim_target: Some((enemy.position, enemy.velocity)),
             fire: distance <= observation.weapon_range,
-            dash: distance > observation.weapon_range * 1.2,
+            dash: distance > observation.weapon_range * profile.pressure_dash_range_fraction,
         };
     }
 
@@ -406,7 +419,7 @@ pub(super) fn choose_intent(
             .try_normalize()
             .unwrap_or(Vec2::X);
         return BotIntent {
-            move_goal: Some(if distance > standoff * 1.05 {
+            move_goal: Some(if distance > standoff * profile.standoff_arrival_fraction {
                 object.position - direction * standoff
             } else {
                 self_position
@@ -438,10 +451,15 @@ fn safe_object(
     })
 }
 
-fn hot_zone_hold_point(center: Vec2, radius: f32, stable_id: u64) -> Vec2 {
+fn hot_zone_hold_point(
+    center: Vec2,
+    radius: f32,
+    stable_id: u64,
+    hold_radius_fraction: f32,
+) -> Vec2 {
     let directions = [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y];
     let index = usize::try_from(stable_id % directions.len() as u64).unwrap_or(0);
-    center + directions[index] * radius * 0.45
+    center + directions[index] * radius * hold_radius_fraction
 }
 
 fn movement_axis(
@@ -454,15 +472,17 @@ fn movement_axis(
 ) -> (Vec2, BotNavigationDecisionDiagnostics) {
     let diagnostics = BotNavigationDecisionDiagnostics::default();
     let position = observation.self_view.position;
-    if !navigation.is_inside_perimeter(position, PERIMETER_RECOVERY_TRIGGER) {
+    let perimeter_trigger = MAP_CELL_SIZE_WORLD * profile.perimeter_recovery_trigger_cells;
+    let perimeter_release = MAP_CELL_SIZE_WORLD * profile.perimeter_recovery_release_cells;
+    if !navigation.is_inside_perimeter(position, perimeter_trigger) {
         state.perimeter_recovery = true;
     } else if state.perimeter_recovery
-        && navigation.is_inside_perimeter(position, PERIMETER_RECOVERY_RELEASE)
+        && navigation.is_inside_perimeter(position, perimeter_release)
     {
         state.perimeter_recovery = false;
     }
     let goal = if state.perimeter_recovery {
-        Some(navigation.perimeter_recovery_goal(position, PERIMETER_RECOVERY_RELEASE))
+        Some(navigation.perimeter_recovery_goal(position, perimeter_release))
     } else {
         goal
     };
@@ -475,7 +495,8 @@ fn movement_axis(
         return (state.stuck_escape_axis, diagnostics);
     }
     if state.stationary_ticks >= profile.stuck_ticks
-        && observation.self_view.position.distance_squared(goal) > 28.0_f32.powi(2)
+        && observation.self_view.position.distance_squared(goal)
+            > profile.waypoint_reach_distance.powi(2)
     {
         let dynamic_blockers: Vec<_> = observation
             .objects
@@ -505,7 +526,7 @@ fn movement_axis(
             .self_view
             .position
             .distance_squared(state.route[state.route_cursor])
-            <= 28.0_f32.powi(2)
+            <= profile.waypoint_reach_distance.powi(2)
     {
         state.route_cursor += 1;
     }
@@ -516,9 +537,9 @@ fn movement_axis(
     for ally in &observation.allies {
         let delta = observation.self_view.position - ally.position;
         if let Some(away) = delta.try_normalize()
-            && delta.length_squared() < 72.0_f32.powi(2)
+            && delta.length_squared() < profile.ally_separation_distance.powi(2)
         {
-            direction += away * 0.45;
+            direction += away * profile.ally_separation_weight;
         }
     }
     (direction.clamp_length_max(1.0), diagnostics)
@@ -533,9 +554,9 @@ fn update_route(
     search_budget: usize,
 ) -> BotNavigationDecisionDiagnostics {
     let mut diagnostics = BotNavigationDecisionDiagnostics::default();
-    let goal_changed = state
-        .route_goal
-        .is_none_or(|prior| prior.distance_squared(goal) > 256.0);
+    let goal_changed = state.route_goal.is_none_or(|prior| {
+        prior.distance_squared(goal) > profile.route_goal_change_distance.powi(2)
+    });
     if goal_changed {
         state.route.clear();
         state.route_cursor = 0;
@@ -559,8 +580,8 @@ fn update_route(
             observation.self_view.position,
             goal,
             &dynamic_blockers,
-            profile.maximum_search_expansions,
-            profile.maximum_route_points,
+            profile.maximum_search_expansions(),
+            profile.maximum_route_points(),
         ) {
             Some(BotRouteStart::Complete(route)) => {
                 state.route = route;
@@ -607,6 +628,10 @@ fn update_route(
         }
     }
     diagnostics
+}
+
+fn health_fraction(current: u16, maximum: u16) -> f32 {
+    f32::from(current) / f32::from(maximum.max(1))
 }
 
 fn rotate(vector: Vec2, radians: f32) -> Vec2 {

@@ -113,6 +113,13 @@ pub enum UltimateKind {
     BigBlob,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UltimateChargePolicy {
+    pub maximum: u16,
+    pub dealt_damage_multiplier: u16,
+    pub received_damage_multiplier: u16,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UltimateActivationStyle {
     Immediate,
@@ -138,8 +145,29 @@ impl UltimateKind {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UltimateParameters {
-    Dash,
-    Sentry,
+    Dash {
+        maximum_distance_milliunits: u32,
+        duration_ticks: u64,
+        damage: u16,
+        knockback_speed_milliunits: u32,
+        knockback_duration_ticks: u64,
+        maximum_targets: u8,
+    },
+    Sentry {
+        placement_offsets_milliunits: [u32; 6],
+        body_radius_milliunits: u32,
+        acquisition_range_milliunits: u32,
+        acquisition_interval_ticks: u64,
+        fire_interval_ticks: u64,
+        lifetime_ticks: u64,
+        maximum_health: u16,
+        projectile_speed_milliunits: u32,
+        projectile_radius_milliunits: u32,
+        projectile_range_milliunits: u32,
+        projectile_lifetime_ticks: u64,
+        projectile_damage: u16,
+        presentation_profile_id: u16,
+    },
     SelfCloak {
         duration_ticks: u64,
     },
@@ -210,6 +238,7 @@ pub struct ResolvedUltimate {
     pub kind: UltimateKind,
     pub point_cost: u8,
     pub parameters: UltimateParameters,
+    pub charge_policy: UltimateChargePolicy,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,10 +255,43 @@ pub enum PassiveKind {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PassiveParameters {
+    LightweightFrame,
+    ReinforcedFrame,
+    AdrenalResponse {
+        duration_ticks: u64,
+        rearm_ticks: u64,
+        movement_bonus_basis_points: u16,
+    },
+    CloseQuarters {
+        near_distance_milliunits: u32,
+        far_distance_milliunits: u32,
+        near_damage_basis_points: u16,
+        far_damage_basis_points: u16,
+    },
+    QuickCycle {
+        refill_duration_basis_points: u16,
+    },
+    Tenacity {
+        slow_duration_basis_points: u16,
+    },
+    CryogenicInsulation {
+        resistance_basis_points: u16,
+    },
+    FilteredCirculation {
+        resistance_basis_points: u16,
+    },
+    HeatShielding {
+        resistance_basis_points: u16,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedPassive {
     pub id: PassiveDefinitionId,
     pub kind: PassiveKind,
     pub point_cost: u8,
+    pub parameters: PassiveParameters,
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]

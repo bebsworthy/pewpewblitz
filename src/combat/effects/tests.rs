@@ -13,12 +13,25 @@ fn slow_keeps_strongest_magnitude_and_latest_expiry() {
 #[cfg(feature = "server")]
 #[test]
 fn close_quarters_damage_is_identical_in_reservation_and_application_math() {
+    let close_quarters = crate::builds::PassiveParameters::CloseQuarters {
+        near_distance_milliunits: 240_000,
+        far_distance_milliunits: 480_000,
+        near_damage_basis_points: 11_500,
+        far_damage_basis_points: 8_500,
+    };
     assert_eq!(
-        requested_damage(90, DamageFalloff::None, 0.0, 1.0, true, 240.0),
+        requested_damage(
+            90,
+            DamageFalloff::None,
+            0.0,
+            1.0,
+            Some(close_quarters),
+            240.0,
+        ),
         104
     );
     assert_eq!(
-        requested_damage(90, DamageFalloff::None, 0.0, 1.0, false, 240.0),
+        requested_damage(90, DamageFalloff::None, 0.0, 1.0, None, 240.0),
         90
     );
     assert_eq!(
@@ -31,7 +44,7 @@ fn close_quarters_damage_is_identical_in_reservation_and_application_math() {
             },
             100.0,
             1.0,
-            true,
+            Some(close_quarters),
             240.0,
         ),
         14,
@@ -235,13 +248,13 @@ fn damage_tile_suppresses_composed_heal_event_reservation() {
         ),
     )]);
     assert_eq!(
-        required_payload_event_count(&[], &records, &connected, &HashSet::new(), &mut blocked),
+        required_payload_event_count(&[], &records, &connected, &HashMap::new(), &mut blocked),
         Some(0),
     );
 
     blocked.get_mut(&target).expect("target exists").5 = false;
     assert_eq!(
-        required_payload_event_count(&[], &records, &connected, &HashSet::new(), &mut blocked),
+        required_payload_event_count(&[], &records, &connected, &HashMap::new(), &mut blocked),
         Some(1),
     );
 }

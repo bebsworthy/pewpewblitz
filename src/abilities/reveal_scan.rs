@@ -129,14 +129,18 @@ pub(crate) fn activate_reveal_scan(
             owner_network_id: *network_id,
             kind: crate::abilities::AbilityTelemetryKind::ActivationAttempt,
         });
-        let held = !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
+        let held = !crate::movement::input_should_neutralize(
+            tick.0,
+            freshness.last_fresh_tick,
+            crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
+        );
         let rejection = if !held {
             Some(crate::abilities::AbilityRejectionReason::StaleInput)
         } else if defeated {
             Some(crate::abilities::AbilityRejectionReason::Defeated)
         } else if !active {
             Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if ability.charge != crate::abilities::ULTIMATE_CHARGE_MAX
+        } else if ability.charge != loadout.ultimate.charge_policy.maximum
             || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
         {
             Some(crate::abilities::AbilityRejectionReason::NotCharged)

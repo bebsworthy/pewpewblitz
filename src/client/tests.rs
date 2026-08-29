@@ -650,6 +650,7 @@ fn resolved_fire_field_loadout() -> crate::builds::ResolvedMatchLoadout {
 }
 
 fn targeted_input_test_app(loadout: crate::builds::ResolvedMatchLoadout) -> App {
+    let charge_maximum = loadout.ultimate.charge_policy.maximum;
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<PendingLocalActions>()
@@ -661,7 +662,7 @@ fn targeted_input_test_app(loadout: crate::builds::ResolvedMatchLoadout) -> App 
         Controlled,
         loadout,
         crate::builds::AbilityState {
-            charge: crate::abilities::ULTIMATE_CHARGE_MAX,
+            charge: charge_maximum,
             phase: crate::builds::AbilityPhase::Ready,
         },
     ));
@@ -852,13 +853,14 @@ fn gamepad_stick_magnitude_controls_fire_field_placement_distance() {
     let gamepad_entity = app.world_mut().spawn(gamepad).id();
     let loadout = resolved_fire_field_loadout();
     let ultimate_id = loadout.ultimate.id;
+    let charge_maximum = loadout.ultimate.charge_policy.maximum;
     app.world_mut().spawn((
         Fighter,
         Controlled,
         Position::default(),
         loadout,
         crate::builds::AbilityState {
-            charge: crate::abilities::ULTIMATE_CHARGE_MAX,
+            charge: charge_maximum,
             phase: crate::builds::AbilityPhase::Ready,
         },
     ));

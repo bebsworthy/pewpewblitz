@@ -284,7 +284,7 @@ fn queue_spray_candidate(
                             source,
                             attack_id: source.attack_id,
                             requested_damage: effects::requested_damage(
-                                amount, falloff, distance, 1.0, false, distance,
+                                amount, falloff, distance, 1.0, None, distance,
                             ),
                             delivery_index,
                             bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),

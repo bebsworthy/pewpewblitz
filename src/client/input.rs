@@ -500,7 +500,8 @@ pub(super) fn apply_headless_input(
         sentry_owners.iter().any(|(owner_team, ability, loadout)| {
             *owner_team != *team
                 && loadout.ultimate.kind == crate::builds::UltimateKind::Sentry
-                && (ability.charge >= 800
+                && (u32::from(ability.charge)
+                    >= u32::from(loadout.ultimate.charge_policy.maximum) * 4 / 5
                     || matches!(
                         ability.phase,
                         crate::builds::AbilityPhase::Ready
@@ -697,8 +698,8 @@ fn controlled_gamepad_aim_range(
                 maximum_range_milliunits,
                 ..
             } => maximum_range_milliunits,
-            crate::builds::UltimateParameters::Dash
-            | crate::builds::UltimateParameters::Sentry
+            crate::builds::UltimateParameters::Dash { .. }
+            | crate::builds::UltimateParameters::Sentry { .. }
             | crate::builds::UltimateParameters::SelfCloak { .. } => return None,
         };
         return crate::builds::world_units_from_milliunits(maximum_range_milliunits);

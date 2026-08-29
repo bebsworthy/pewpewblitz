@@ -24,10 +24,47 @@ fn recipe(weapon: u16, ultimate: u16, passives: [u16; 2]) -> BrawlerBuildRecipe 
 #[test]
 fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters() {
     let (builds, _, _) = catalogs();
-    assert_eq!(builds.balance_revision, BuildRevision(11));
+    assert_eq!(builds.balance_revision, BuildRevision(12));
     assert_eq!(builds.weapon_costs.len(), 7);
     assert_eq!(builds.ultimates.len(), 11);
     assert_eq!(builds.passives.len(), 9);
+    assert_eq!(
+        builds.ultimate_charge,
+        UltimateChargePolicy {
+            maximum: 1_000,
+            dealt_damage_multiplier: 5,
+            received_damage_multiplier: 3,
+        }
+    );
+    assert_eq!(
+        builds.ultimate(UltimateDefinitionId(1)).unwrap().parameters,
+        UltimateParameters::Dash {
+            maximum_distance_milliunits: 360_000,
+            duration_ticks: 18,
+            damage: 35,
+            knockback_speed_milliunits: 450_000,
+            knockback_duration_ticks: 6,
+            maximum_targets: 8,
+        }
+    );
+    assert_eq!(
+        builds.ultimate(UltimateDefinitionId(2)).unwrap().parameters,
+        UltimateParameters::Sentry {
+            placement_offsets_milliunits: [96_000, 88_000, 80_000, 72_000, 64_000, 56_000],
+            body_radius_milliunits: 20_000,
+            acquisition_range_milliunits: 480_000,
+            acquisition_interval_ticks: 6,
+            fire_interval_ticks: 30,
+            lifetime_ticks: 720,
+            maximum_health: 80,
+            projectile_speed_milliunits: 900_000,
+            projectile_radius_milliunits: 6_000,
+            projectile_range_milliunits: 480_000,
+            projectile_lifetime_ticks: 32,
+            projectile_damage: 10,
+            presentation_profile_id: 1,
+        }
+    );
     assert_eq!(
         builds.ultimate(UltimateDefinitionId(3)).unwrap().parameters,
         UltimateParameters::SelfCloak {
@@ -291,6 +328,24 @@ fn catalog_accepts_additive_inventory_and_rejects_identity_and_cost_mutations() 
     assert!(invalid.validate().is_err());
     let mut invalid = builds.clone();
     invalid.ultimates[0].kind = UltimateKind::Sentry;
+    assert!(invalid.validate().is_err());
+    let mut invalid = builds.clone();
+    invalid.ultimate_charge.maximum = 0;
+    assert!(invalid.validate().is_err());
+    let mut invalid = builds.clone();
+    let UltimateParameters::Sentry {
+        projectile_range_milliunits,
+        ..
+    } = &mut invalid.ultimates[1].parameters
+    else {
+        panic!("canonical second ultimate must be Sentry")
+    };
+    *projectile_range_milliunits = 481_000;
+    assert!(invalid.validate().is_err());
+    let mut invalid = builds.clone();
+    invalid.passives[2].parameters = PassiveParameters::QuickCycle {
+        refill_duration_basis_points: 6_000,
+    };
     assert!(invalid.validate().is_err());
     let mut invalid = builds;
     invalid.passives[0].key = "Upper_Case".into();

@@ -113,24 +113,27 @@ pub(crate) fn activate_big_blob(
             .iter()
             .filter(|runtime| runtime.source.owner_network_entity_id == *network_id)
             .count();
-        let rejection =
-            if crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12) {
-                Some(crate::abilities::AbilityRejectionReason::StaleInput)
-            } else if defeated {
-                Some(crate::abilities::AbilityRejectionReason::Defeated)
-            } else if !active {
-                Some(crate::abilities::AbilityRejectionReason::Inactive)
-            } else if parents.iter().count() >= 16
-                || owner_blob_count.saturating_add(6) > usize::from(max_active_per_owner)
-            {
-                Some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling)
-            } else if ability.charge != crate::abilities::ULTIMATE_CHARGE_MAX
-                || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-            {
-                Some(crate::abilities::AbilityRejectionReason::NotCharged)
-            } else {
-                None
-            };
+        let rejection = if crate::movement::input_should_neutralize(
+            tick.0,
+            freshness.last_fresh_tick,
+            crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
+        ) {
+            Some(crate::abilities::AbilityRejectionReason::StaleInput)
+        } else if defeated {
+            Some(crate::abilities::AbilityRejectionReason::Defeated)
+        } else if !active {
+            Some(crate::abilities::AbilityRejectionReason::Inactive)
+        } else if parents.iter().count() >= 16
+            || owner_blob_count.saturating_add(6) > usize::from(max_active_per_owner)
+        {
+            Some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling)
+        } else if ability.charge != loadout.ultimate.charge_policy.maximum
+            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
+        {
+            Some(crate::abilities::AbilityRejectionReason::NotCharged)
+        } else {
+            None
+        };
         if let Some(reason) = rejection {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,

@@ -1,8 +1,9 @@
 use super::{
     BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, ElementalFieldEffect,
-    PassiveDefinitionId, PassiveKind, PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats,
-    ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate, RevealProximityModifier,
-    SelectedBuild, UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
+    PassiveDefinitionId, PassiveKind, PassiveParameters, PulseMagazine, PulsePower, PulseReach,
+    ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate,
+    RevealProximityModifier, SelectedBuild, UltimateChargePolicy, UltimateDefinitionId,
+    UltimateKind, UltimateParameters, WeaponChoice,
 };
 use crate::combat::{
     DamageOverTimeKind, DeliveryMethod, FighterDefinition, PayloadEffectDefinition, WeaponCatalog,
@@ -13,8 +14,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 13;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 13;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 14;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 14;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub(crate) const MAX_ULTIMATE_DEFINITIONS: usize = 32;
@@ -34,6 +35,7 @@ pub struct BuildCatalog {
     pub balance_revision: BuildRevision,
     pub fighter_profiles: FighterStatProfiles,
     pub custom_pulse: CustomPulseTuning,
+    pub ultimate_charge: UltimateChargePolicy,
     pub weapon_costs: Vec<WeaponPointCost>,
     pub ultimates: Vec<UltimateDefinition>,
     pub passives: Vec<PassiveDefinition>,
@@ -100,6 +102,7 @@ pub struct PassiveDefinition {
     pub display_name: String,
     pub kind: PassiveKind,
     pub point_cost: u8,
+    pub parameters: PassiveParameters,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,6 +150,7 @@ impl BuildCatalog {
             return Err("weapon point costs must have unique ascending non-zero IDs".into());
         }
         validate_ultimate_definitions(&self.ultimates)?;
+        validate_passive_definitions(&self.passives)?;
         if self
             .ultimates
             .iter()
@@ -185,6 +189,15 @@ impl BuildCatalog {
     }
 
     fn validate_tuning(&self) -> Result<(), String> {
+        if self.ultimate_charge.maximum == 0
+            || self.ultimate_charge.maximum > 10_000
+            || self.ultimate_charge.dealt_damage_multiplier == 0
+            || self.ultimate_charge.dealt_damage_multiplier > 100
+            || self.ultimate_charge.received_damage_multiplier == 0
+            || self.ultimate_charge.received_damage_multiplier > 100
+        {
+            return Err("invalid ultimate charge policy".into());
+        }
         for (name, profile) in [
             ("default", self.fighter_profiles.default),
             ("lightweight", self.fighter_profiles.lightweight),
@@ -266,12 +279,43 @@ impl BuildCatalog {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one exhaustive kind/parameter validation matrix keeps authored ultimate bounds reviewable together"
+)]
 fn validate_ultimate_definitions(definitions: &[UltimateDefinition]) -> Result<(), String> {
     if definitions.iter().any(|definition| {
         !matches!(
             (definition.kind, definition.parameters),
-            (UltimateKind::Dash, UltimateParameters::Dash)
-                | (UltimateKind::Sentry, UltimateParameters::Sentry)
+            (
+                UltimateKind::Dash,
+                UltimateParameters::Dash {
+                    maximum_distance_milliunits: 1..=4_096_000,
+                    duration_ticks: 1..=600,
+                    damage: 1..=1_000,
+                    knockback_speed_milliunits: 1..=4_096_000,
+                    knockback_duration_ticks: 1..=600,
+                    maximum_targets: 1..=32,
+                }
+            )
+                | (
+                    UltimateKind::Sentry,
+                    UltimateParameters::Sentry {
+                        placement_offsets_milliunits: _,
+                        body_radius_milliunits: 1..=512_000,
+                        acquisition_range_milliunits: 1..=4_096_000,
+                        acquisition_interval_ticks: 1..=600,
+                        fire_interval_ticks: 1..=3_600,
+                        lifetime_ticks: 1..=36_000,
+                        maximum_health: 1..=10_000,
+                        projectile_speed_milliunits: 1..=4_096_000,
+                        projectile_radius_milliunits: 1..=512_000,
+                        projectile_range_milliunits: 1..=4_096_000,
+                        projectile_lifetime_ticks: 1..=600,
+                        projectile_damage: 1..=1_000,
+                        presentation_profile_id: 1..,
+                    }
+                )
                 | (
                     UltimateKind::SelfCloak,
                     UltimateParameters::SelfCloak {
@@ -333,6 +377,19 @@ fn validate_ultimate_definitions(definitions: &[UltimateDefinition]) -> Result<(
                 )
         ) || matches!(
             definition.parameters,
+            UltimateParameters::Sentry {
+                placement_offsets_milliunits,
+                body_radius_milliunits,
+                projectile_radius_milliunits,
+                projectile_range_milliunits,
+                acquisition_range_milliunits,
+                ..
+            } if placement_offsets_milliunits.iter().any(|offset| *offset == 0 || *offset > 1_024_000)
+                || placement_offsets_milliunits.windows(2).any(|pair| pair[0] <= pair[1])
+                || projectile_radius_milliunits > body_radius_milliunits
+                || projectile_range_milliunits > acquisition_range_milliunits
+        ) || matches!(
+            definition.parameters,
             UltimateParameters::DemolitionStrike {
                 radius_milliunits,
                 ..
@@ -342,6 +399,80 @@ fn validate_ultimate_definitions(definitions: &[UltimateDefinition]) -> Result<(
         return Err("ultimate kind and parameters do not match engine bounds".into());
     }
     Ok(())
+}
+
+fn validate_passive_definitions(definitions: &[PassiveDefinition]) -> Result<(), String> {
+    let valid = definitions.iter().all(|definition| {
+        matches!(
+            (definition.kind, definition.parameters),
+            (
+                PassiveKind::LightweightFrame,
+                PassiveParameters::LightweightFrame
+            ) | (
+                PassiveKind::ReinforcedFrame,
+                PassiveParameters::ReinforcedFrame
+            ) | (
+                PassiveKind::AdrenalResponse,
+                PassiveParameters::AdrenalResponse {
+                    duration_ticks: 1..=3_600,
+                    rearm_ticks: 1..=36_000,
+                    movement_bonus_basis_points: 1..=10_000,
+                }
+            ) | (
+                PassiveKind::CloseQuarters,
+                PassiveParameters::CloseQuarters {
+                    near_distance_milliunits: 1..=4_096_000,
+                    far_distance_milliunits: 1..=4_096_000,
+                    near_damage_basis_points: 1..=30_000,
+                    far_damage_basis_points: 1..=30_000,
+                }
+            ) | (
+                PassiveKind::QuickCycle,
+                PassiveParameters::QuickCycle {
+                    refill_duration_basis_points: 1..=10_000,
+                }
+            ) | (
+                PassiveKind::Tenacity,
+                PassiveParameters::Tenacity {
+                    slow_duration_basis_points: 1..=10_000,
+                }
+            ) | (
+                PassiveKind::CryogenicInsulation,
+                PassiveParameters::CryogenicInsulation {
+                    resistance_basis_points: 1..=6_000,
+                }
+            ) | (
+                PassiveKind::FilteredCirculation,
+                PassiveParameters::FilteredCirculation {
+                    resistance_basis_points: 1..=6_000,
+                }
+            ) | (
+                PassiveKind::HeatShielding,
+                PassiveParameters::HeatShielding {
+                    resistance_basis_points: 1..=6_000,
+                }
+            )
+        ) && !matches!(
+            definition.parameters,
+            PassiveParameters::AdrenalResponse {
+                duration_ticks,
+                rearm_ticks,
+                ..
+            } if rearm_ticks < duration_ticks
+        ) && !matches!(
+            definition.parameters,
+            PassiveParameters::CloseQuarters {
+                near_distance_milliunits,
+                far_distance_milliunits,
+                near_damage_basis_points,
+                far_damage_basis_points,
+            } if near_distance_milliunits >= far_distance_milliunits
+                || near_damage_basis_points <= far_damage_basis_points
+        )
+    });
+    valid
+        .then_some(())
+        .ok_or_else(|| "passive kind and parameters do not match engine bounds".into())
 }
 
 fn valid_elemental_ultimate_effect(kind: UltimateKind, parameters: UltimateParameters) -> bool {
@@ -542,6 +673,7 @@ fn resolve_build_recipe_inner(
                 id,
                 kind: definition.kind,
                 point_cost: definition.point_cost,
+                parameters: definition.parameters,
             })
             .ok_or(BuildResolutionError::UnknownId)
     });
@@ -580,6 +712,7 @@ fn resolve_build_recipe_inner(
         kind: ultimate_definition.kind,
         point_cost: ultimate_definition.point_cost,
         parameters: ultimate_definition.parameters,
+        charge_policy: catalog.ultimate_charge,
     };
     let (primary_weapon, _weapon_points) =
         resolve_weapon_choice(catalog, weapons, fighter, recipe.weapon)?;
@@ -599,21 +732,39 @@ fn resolve_build_recipe_inner(
     for passive in &passives {
         match passive.kind {
             PassiveKind::CryogenicInsulation => {
+                let PassiveParameters::CryogenicInsulation {
+                    resistance_basis_points,
+                } = passive.parameters
+                else {
+                    return Err(BuildResolutionError::ResolutionFailed);
+                };
                 fighter_stats.cold_resistance_basis_points = fighter_stats
                     .cold_resistance_basis_points
-                    .saturating_add(3_000)
+                    .saturating_add(resistance_basis_points)
                     .min(6_000);
             }
             PassiveKind::FilteredCirculation => {
+                let PassiveParameters::FilteredCirculation {
+                    resistance_basis_points,
+                } = passive.parameters
+                else {
+                    return Err(BuildResolutionError::ResolutionFailed);
+                };
                 fighter_stats.poison_resistance_basis_points = fighter_stats
                     .poison_resistance_basis_points
-                    .saturating_add(3_000)
+                    .saturating_add(resistance_basis_points)
                     .min(6_000);
             }
             PassiveKind::HeatShielding => {
+                let PassiveParameters::HeatShielding {
+                    resistance_basis_points,
+                } = passive.parameters
+                else {
+                    return Err(BuildResolutionError::ResolutionFailed);
+                };
                 fighter_stats.fire_resistance_basis_points = fighter_stats
                     .fire_resistance_basis_points
-                    .saturating_add(3_000)
+                    .saturating_add(resistance_basis_points)
                     .min(6_000);
             }
             PassiveKind::LightweightFrame

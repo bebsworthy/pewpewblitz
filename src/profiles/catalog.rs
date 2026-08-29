@@ -373,8 +373,8 @@ fn validate_ultimate_parameters(definitions: &[AdvertisedUltimate]) -> Result<()
     if definitions.iter().any(|definition| {
         !matches!(
             (definition.kind, definition.parameters),
-            (UltimateKind::Dash, UltimateParameters::Dash)
-                | (UltimateKind::Sentry, UltimateParameters::Sentry)
+            (UltimateKind::Dash, UltimateParameters::Dash { .. })
+                | (UltimateKind::Sentry, UltimateParameters::Sentry { .. })
                 | (
                     UltimateKind::SelfCloak,
                     UltimateParameters::SelfCloak {

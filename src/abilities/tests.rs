@@ -3,6 +3,35 @@ use crate::builds::{AbilityPhase, AbilityState};
 use crate::protocol::NetworkEntityId;
 use bevy::prelude::Vec2;
 
+const fn test_charge_policy() -> crate::builds::UltimateChargePolicy {
+    crate::builds::UltimateChargePolicy {
+        maximum: 1_000,
+        dealt_damage_multiplier: 5,
+        received_damage_multiplier: 3,
+    }
+}
+
+#[cfg(feature = "server")]
+fn test_loadout(
+    ultimate: crate::builds::UltimateDefinitionId,
+    passives: [crate::builds::PassiveDefinitionId; 2],
+) -> crate::builds::ResolvedMatchLoadout {
+    let builds = crate::builds::BuildCatalog::embedded().unwrap();
+    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    crate::builds::resolve_build_recipe(
+        &builds,
+        &weapons,
+        &fighter,
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+            ultimate,
+            passives,
+        },
+    )
+    .unwrap()
+}
+
 #[cfg(feature = "server")]
 fn damage_fact(
     event: u64,
@@ -106,16 +135,28 @@ fn self_cloak_ends_from_attack_fact_without_an_attack_cue_and_preserves_preceden
 
 #[test]
 fn charge_uses_exact_damage_multipliers_caps_and_becomes_ready() {
+    let non_default = crate::builds::UltimateChargePolicy {
+        maximum: 250,
+        dealt_damage_multiplier: 2,
+        received_damage_multiplier: 1,
+    };
     assert_eq!(
-        apply_charge(AbilityState::default(), 1, 1),
+        apply_charge(AbilityState::default(), 100, 25, non_default),
+        AbilityState {
+            charge: 225,
+            phase: AbilityPhase::Charging,
+        }
+    );
+    assert_eq!(
+        apply_charge(AbilityState::default(), 1, 1, test_charge_policy()),
         AbilityState {
             charge: 8,
             phase: AbilityPhase::Charging,
         }
     );
-    let state = apply_charge(AbilityState::default(), 100, 100);
+    let state = apply_charge(AbilityState::default(), 100, 100, test_charge_policy());
     assert_eq!(state.charge, 800);
-    let state = apply_charge(state, u16::MAX, u16::MAX);
+    let state = apply_charge(state, u16::MAX, u16::MAX, test_charge_policy());
     assert_eq!(
         state,
         AbilityState {
@@ -123,7 +164,7 @@ fn charge_uses_exact_damage_multipliers_caps_and_becomes_ready() {
             phase: AbilityPhase::Ready
         }
     );
-    assert_eq!(apply_charge(state, 1, 1), state);
+    assert_eq!(apply_charge(state, 1, 1, test_charge_policy()), state);
     for phase in [
         AbilityPhase::Dashing { ends_at_tick: 10 },
         AbilityPhase::Deployed {
@@ -138,15 +179,15 @@ fn charge_uses_exact_damage_multipliers_caps_and_becomes_ready() {
     ] {
         let active = AbilityState { charge: 0, phase };
         assert_eq!(
-            apply_charge(active, u16::MAX, u16::MAX),
+            apply_charge(active, u16::MAX, u16::MAX, test_charge_policy()),
             AbilityState {
-                charge: ULTIMATE_CHARGE_MAX,
+                charge: test_charge_policy().maximum,
                 phase,
             },
             "active execution preserves its phase while charge continues to accrue",
         );
         assert_eq!(
-            settled_ability_phase(ULTIMATE_CHARGE_MAX),
+            settled_ability_phase(test_charge_policy().maximum, test_charge_policy().maximum),
             AbilityPhase::Ready,
         );
     }
@@ -221,7 +262,7 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
                 last_fresh_tick: Some(7),
             },
             AbilityState {
-                charge: ULTIMATE_CHARGE_MAX,
+                charge: test_charge_policy().maximum,
                 phase: AbilityPhase::Ready,
             },
             ActionState(crate::protocol::FighterInput::from_axes_with_aim_distance(
@@ -319,7 +360,7 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
                 last_fresh_tick: None,
             },
             AbilityState {
-                charge: ULTIMATE_CHARGE_MAX,
+                charge: test_charge_policy().maximum,
                 phase: AbilityPhase::Ready,
             },
             ActionState(crate::protocol::FighterInput::from_axes(
@@ -333,7 +374,7 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
     app.update();
     assert_eq!(
         app.world().get::<AbilityState>(stale).unwrap().charge,
-        ULTIMATE_CHARGE_MAX
+        test_charge_policy().maximum
     );
     assert_eq!(
         app.world()
@@ -347,15 +388,24 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
 #[test]
 fn passive_arithmetic_is_deterministic_at_boundaries() {
     use crate::combat::WeaponEconomy;
-    assert_eq!(apply_close_quarters_damage(100, 0.0), 115);
-    assert_eq!(apply_close_quarters_damage(100, 240.0), 115);
-    assert_eq!(apply_close_quarters_damage(100, 360.0), 100);
-    assert_eq!(apply_close_quarters_damage(101, 360.0), 101);
-    assert_eq!(apply_close_quarters_damage(100, 480.0), 85);
-    assert_eq!(apply_close_quarters_damage(100, 10_000.0), 85);
-    assert_eq!(apply_quick_cycle_ticks(0), 1);
-    assert_eq!(apply_quick_cycle_ticks(1), 1);
-    assert_eq!(apply_quick_cycle_ticks(60), 36);
+    let close_quarters = crate::builds::PassiveParameters::CloseQuarters {
+        near_distance_milliunits: 240_000,
+        far_distance_milliunits: 480_000,
+        near_damage_basis_points: 11_500,
+        far_damage_basis_points: 8_500,
+    };
+    assert_eq!(apply_close_quarters_damage(100, 0.0, close_quarters), 115);
+    assert_eq!(apply_close_quarters_damage(100, 240.0, close_quarters), 115);
+    assert_eq!(apply_close_quarters_damage(100, 360.0, close_quarters), 100);
+    assert_eq!(apply_close_quarters_damage(101, 360.0, close_quarters), 101);
+    assert_eq!(apply_close_quarters_damage(100, 480.0, close_quarters), 85);
+    assert_eq!(
+        apply_close_quarters_damage(100, 10_000.0, close_quarters),
+        85
+    );
+    assert_eq!(apply_quick_cycle_ticks(0, 6_000), 1);
+    assert_eq!(apply_quick_cycle_ticks(1, 6_000), 1);
+    assert_eq!(apply_quick_cycle_ticks(60, 6_000), 36);
     for economy in [
         WeaponEconomy::Magazine {
             capacity: 6,
@@ -366,36 +416,69 @@ fn passive_arithmetic_is_deterministic_at_boundaries() {
             recharge_ticks: 60,
         },
     ] {
-        assert_eq!(apply_quick_cycle_ticks(economy.refill_ticks()), 36);
+        assert_eq!(apply_quick_cycle_ticks(economy.refill_ticks(), 6_000), 36);
     }
-    assert_eq!(apply_tenacity_ticks(0), 1);
-    assert_eq!(apply_tenacity_ticks(1), 1);
-    assert_eq!(apply_tenacity_ticks(45), 30);
+    assert_eq!(apply_tenacity_ticks(0, 6_500), 1);
+    assert_eq!(apply_tenacity_ticks(1, 6_500), 1);
+    assert_eq!(apply_tenacity_ticks(45, 6_500), 30);
+    assert_eq!(apply_quick_cycle_ticks(60, 5_000), 30);
+    assert_eq!(apply_tenacity_ticks(45, 8_000), 36);
 }
 
 #[test]
 fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
+    let maximum_distance = 360.0;
+    let duration_ticks = 18;
+    let maximum_targets = 8;
     let origin = Vec2::new(10.0, 20.0);
     assert_eq!(
-        bounded_dash_endpoint(origin, Vec2::X, DASH_MAX_DISTANCE + 100.0),
-        Some(origin + Vec2::X * DASH_MAX_DISTANCE)
+        bounded_dash_endpoint(origin, Vec2::X, 500.0, 125.0),
+        Some(origin + Vec2::X * 125.0),
+        "a non-default authored maximum changes committed travel",
     );
     assert_eq!(
-        bounded_dash_endpoint(origin, Vec2::new(2.0, 0.0), 123.0),
+        dash_position(origin, origin + Vec2::X * 100.0, 2, 5),
+        origin + Vec2::X * 40.0,
+        "a non-default authored duration changes interpolation",
+    );
+    assert_eq!(
+        bounded_dash_endpoint(origin, Vec2::X, maximum_distance + 100.0, maximum_distance,),
+        Some(origin + Vec2::X * maximum_distance)
+    );
+    assert_eq!(
+        bounded_dash_endpoint(origin, Vec2::new(2.0, 0.0), 123.0, maximum_distance),
         Some(origin + Vec2::X * 123.0)
     );
-    assert_eq!(bounded_dash_endpoint(origin, Vec2::X, 0.5), None);
-    assert_eq!(bounded_dash_endpoint(origin, Vec2::X, -1.0), None);
-    assert_eq!(bounded_dash_endpoint(origin, Vec2::ZERO, 100.0), None);
-    assert_eq!(bounded_dash_endpoint(origin, Vec2::X, f32::NAN), None);
-    let endpoint = origin + Vec2::X * DASH_MAX_DISTANCE;
-    assert_eq!(dash_position(origin, endpoint, 0), origin);
     assert_eq!(
-        dash_position(origin, endpoint, 9),
+        bounded_dash_endpoint(origin, Vec2::X, 0.5, maximum_distance),
+        None
+    );
+    assert_eq!(
+        bounded_dash_endpoint(origin, Vec2::X, -1.0, maximum_distance),
+        None
+    );
+    assert_eq!(
+        bounded_dash_endpoint(origin, Vec2::ZERO, 100.0, maximum_distance),
+        None
+    );
+    assert_eq!(
+        bounded_dash_endpoint(origin, Vec2::X, f32::NAN, maximum_distance),
+        None
+    );
+    let endpoint = origin + Vec2::X * maximum_distance;
+    assert_eq!(dash_position(origin, endpoint, 0, duration_ticks), origin);
+    assert_eq!(
+        dash_position(origin, endpoint, 9, duration_ticks),
         origin.lerp(endpoint, 0.5)
     );
-    assert_eq!(dash_position(origin, endpoint, 18), endpoint);
-    assert_eq!(dash_position(origin, endpoint, 100), endpoint);
+    assert_eq!(
+        dash_position(origin, endpoint, 18, duration_ticks),
+        endpoint
+    );
+    assert_eq!(
+        dash_position(origin, endpoint, 100, duration_ticks),
+        endpoint
+    );
 
     let contacts = stable_dash_contacts(
         Vec2::ZERO,
@@ -415,6 +498,7 @@ fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
                 id != 11,
             )
         }),
+        maximum_targets,
     );
     assert_eq!(
         contacts,
@@ -428,6 +512,7 @@ fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
             Vec2::new(360.0, 0.0),
             &already_hit,
             [(NetworkEntityId(9), Vec2::new(180.0, 0.0), true)],
+            maximum_targets,
         )
         .is_empty(),
         "the eight-target lifetime cap must prevent later contacts"
@@ -436,50 +521,75 @@ fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
 
 #[test]
 fn sentry_offsets_and_target_ties_are_stable() {
-    assert_eq!(SENTRY_PLACEMENT_OFFSETS, [96, 88, 80, 72, 64, 56]);
-    assert!((SENTRY_RADIUS - 20.0).abs() < f32::EPSILON);
-    assert!((SENTRY_ACQUISITION_RANGE - 480.0).abs() < f32::EPSILON);
-    assert_eq!(SENTRY_ACQUISITION_INTERVAL_TICKS, 6);
-    assert_eq!(SENTRY_FIRE_INTERVAL_TICKS, 30);
-    assert_eq!(SENTRY_LIFETIME_TICKS, 720);
-    assert_eq!(SENTRY_MAXIMUM_HEALTH, 80);
+    let placement_offsets = [96_000, 88_000, 80_000, 72_000, 64_000, 56_000];
+    let radius = 20.0;
+    let acquisition_range = 480.0;
+    assert_eq!(
+        first_clear_sentry_placement(
+            Vec2::ZERO,
+            Vec2::X,
+            &[42_000, 21_000],
+            7.0,
+            |candidate, radius| {
+                (candidate.x - 42.0).abs() < f32::EPSILON && (radius - 7.0).abs() < f32::EPSILON
+            },
+        ),
+        Some(Vec2::new(42.0, 0.0)),
+        "non-default authored placement geometry is consumed directly",
+    );
     let mut attempted = Vec::new();
-    let placement = first_clear_sentry_placement(Vec2::ZERO, Vec2::X, |candidate, radius| {
-        attempted.push((candidate, radius));
-        candidate.x <= 80.0
-    });
+    let placement = first_clear_sentry_placement(
+        Vec2::ZERO,
+        Vec2::X,
+        &placement_offsets,
+        radius,
+        |candidate, radius| {
+            attempted.push((candidate, radius));
+            candidate.x <= 80.0
+        },
+    );
     assert_eq!(placement, Some(Vec2::new(80.0, 0.0)));
     assert_eq!(
         attempted,
         [96.0, 88.0, 80.0]
-            .map(|x| (Vec2::new(x, 0.0), SENTRY_RADIUS))
+            .map(|x| (Vec2::new(x, 0.0), radius))
             .to_vec()
     );
     assert_eq!(
-        first_clear_sentry_placement(Vec2::ZERO, Vec2::X, |_, _| false),
+        first_clear_sentry_placement(Vec2::ZERO, Vec2::X, &placement_offsets, radius, |_, _| {
+            false
+        },),
         None
     );
     assert_eq!(
-        first_clear_sentry_placement(Vec2::ZERO, Vec2::ZERO, |_, _| true),
+        first_clear_sentry_placement(
+            Vec2::ZERO,
+            Vec2::ZERO,
+            &placement_offsets,
+            radius,
+            |_, _| true,
+        ),
         None
     );
-    let selected = stable_sentry_target([
-        (NetworkEntityId(9), 100.0, true),
-        (NetworkEntityId(3), 100.0, true),
-        (NetworkEntityId(1), 25.0, false),
-        (NetworkEntityId(2), 481.0_f32.powi(2), true),
-    ]);
+    let selected = stable_sentry_target(
+        [
+            (NetworkEntityId(9), 100.0, true),
+            (NetworkEntityId(3), 100.0, true),
+            (NetworkEntityId(1), 25.0, false),
+            (NetworkEntityId(2), 481.0_f32.powi(2), true),
+        ],
+        acquisition_range,
+    );
     assert_eq!(selected, Some(NetworkEntityId(3)));
     assert_eq!(
-        stable_sentry_target([
-            (NetworkEntityId(2), SENTRY_ACQUISITION_RANGE.powi(2), true),
-            (
-                NetworkEntityId(1),
-                (SENTRY_ACQUISITION_RANGE + 0.01).powi(2),
-                true,
-            ),
-            (NetworkEntityId(0), 1.0, false),
-        ]),
+        stable_sentry_target(
+            [
+                (NetworkEntityId(2), acquisition_range.powi(2), true),
+                (NetworkEntityId(1), (acquisition_range + 0.01).powi(2), true,),
+                (NetworkEntityId(0), 1.0, false),
+            ],
+            acquisition_range
+        ),
         Some(NetworkEntityId(2))
     );
 }
@@ -504,21 +614,24 @@ fn sentry_objective_fallback_is_stable_and_does_not_replace_fighter_priority() {
         defending_team: TeamId(1),
     };
     assert_eq!(
-        sentry::stable_sentry_objective_target([
-            (farther, 100.0, true),
-            (stable_tie_winner, 100.0, true),
-        ]),
+        sentry::stable_sentry_objective_target(
+            [(farther, 100.0, true), (stable_tie_winner, 100.0, true),],
+            480.0
+        ),
         Some(stable_tie_winner)
     );
     assert_eq!(
-        sentry::stable_sentry_objective_target([
-            (stable_tie_winner, 1.0, false),
-            (farther, (SENTRY_ACQUISITION_RANGE + 1.0).powi(2), true),
-        ]),
+        sentry::stable_sentry_objective_target(
+            [
+                (stable_tie_winner, 1.0, false),
+                (farther, 481.0_f32.powi(2), true),
+            ],
+            480.0
+        ),
         None
     );
 
-    let fighter = stable_sentry_target([(NetworkEntityId(4), 400.0, true)]);
+    let fighter = stable_sentry_target([(NetworkEntityId(4), 400.0, true)], 480.0);
     assert_eq!(fighter, Some(NetworkEntityId(4)));
     assert!(
         fighter.is_some(),
@@ -538,8 +651,19 @@ fn charge_observer_accepts_only_hostile_primary_damage_and_is_idempotent() {
         .init_resource::<AbilityTelemetry>()
         .add_systems(Update, charge::observe_primary_damage_charge);
     let owner = NetworkEntityId(1);
-    app.world_mut()
-        .spawn((Fighter, owner, TeamId(0), AbilityState::default()));
+    app.world_mut().spawn((
+        Fighter,
+        owner,
+        TeamId(0),
+        test_loadout(
+            crate::builds::UltimateDefinitionId(1),
+            [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(3),
+            ],
+        ),
+        AbilityState::default(),
+    ));
     let mut received = damage_fact(
         6,
         CombatSourceKind::PrimaryWeapon,
@@ -756,25 +880,33 @@ fn deployable_allocator_never_wraps_or_reuses_an_id() {
 #[cfg(feature = "server")]
 #[test]
 fn sentry_acquisition_and_fire_cadence_are_independent_and_stable() {
-    let mut runtime = sentry::SentryRuntime::new(100);
+    let acquisition_interval = 6;
+    let fire_interval = 30;
+    let mut runtime = sentry::SentryRuntime::new(100, acquisition_interval, fire_interval);
     for tick in 100..106 {
-        assert!(!runtime.begin_acquisition_if_due(tick));
+        assert!(!runtime.begin_acquisition_if_due(tick, acquisition_interval));
     }
-    assert!(runtime.begin_acquisition_if_due(106));
-    runtime.set_fighter_target(stable_sentry_target([
-        (NetworkEntityId(9), 100.0, true),
-        (NetworkEntityId(3), 100.0, true),
-    ]));
+    assert!(runtime.begin_acquisition_if_due(106, acquisition_interval));
+    runtime.set_fighter_target(stable_sentry_target(
+        [
+            (NetworkEntityId(9), 100.0, true),
+            (NetworkEntityId(3), 100.0, true),
+        ],
+        480.0,
+    ));
     assert_eq!(
         runtime.target(),
         Some(sentry::SentryTarget::Fighter(NetworkEntityId(3)))
     );
-    assert!(!runtime.begin_acquisition_if_due(111));
-    assert!(runtime.begin_acquisition_if_due(112));
-    runtime.set_fighter_target(stable_sentry_target([
-        (NetworkEntityId(3), 100.0, true),
-        (NetworkEntityId(9), 100.0, true),
-    ]));
+    assert!(!runtime.begin_acquisition_if_due(111, acquisition_interval));
+    assert!(runtime.begin_acquisition_if_due(112, acquisition_interval));
+    runtime.set_fighter_target(stable_sentry_target(
+        [
+            (NetworkEntityId(3), 100.0, true),
+            (NetworkEntityId(9), 100.0, true),
+        ],
+        480.0,
+    ));
     assert_eq!(
         runtime.target(),
         Some(sentry::SentryTarget::Fighter(NetworkEntityId(3)))
@@ -782,7 +914,7 @@ fn sentry_acquisition_and_fire_cadence_are_independent_and_stable() {
 
     assert!(!runtime.fire_is_due(129));
     assert!(runtime.fire_is_due(130));
-    runtime.record_fire(130);
+    runtime.record_fire(130, fire_interval);
     assert!(!runtime.fire_is_due(159));
     assert!(runtime.fire_is_due(160));
 }
@@ -923,6 +1055,32 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
             .adrenaline_until_tick,
         Some(190)
     );
+
+    {
+        let mut runner_loadout = app
+            .world_mut()
+            .get_mut::<crate::builds::ResolvedMatchLoadout>(runner_entity)
+            .unwrap();
+        let adrenal = runner_loadout
+            .passives
+            .iter_mut()
+            .find(|passive| passive.kind == crate::builds::PassiveKind::AdrenalResponse)
+            .unwrap();
+        adrenal.parameters = crate::builds::PassiveParameters::AdrenalResponse {
+            duration_ticks: 45,
+            rearm_ticks: 80,
+            movement_bonus_basis_points: 1_500,
+        };
+    }
+    app.world_mut().resource_mut::<SimulationTick>().0 = 340;
+    app.world_mut().resource_mut::<CombatOutcomeFacts>().0[0].event_id = CombatEventId(4);
+    app.update();
+    let runner_state = app
+        .world()
+        .get::<crate::builds::PassiveRuntimeState>(runner_entity)
+        .unwrap();
+    assert_eq!(runner_state.adrenaline_until_tick, Some(385));
+    assert_eq!(runner_state.adrenaline_rearm_at_tick, Some(420));
 }
 
 #[cfg(feature = "server")]

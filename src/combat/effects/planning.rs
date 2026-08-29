@@ -128,7 +128,7 @@ pub(super) fn required_payload_event_count(
     delivery_records: &[PendingDelivery],
     records: &[PendingPayload],
     connected_owners: &HashSet<u64>,
-    close_quarters_owners: &HashSet<u64>,
+    close_quarters_owners: &HashMap<u64, crate::builds::ResolvedPassive>,
     planned_targets: &mut HashMap<Entity, PlannedTarget>,
 ) -> Option<usize> {
     let retained_deliveries: HashSet<_> = delivery_records
@@ -184,9 +184,13 @@ pub(super) fn required_payload_event_count(
                         falloff,
                         record.delivery_travel,
                         scale,
-                        matches!(record.source.kind, CombatSourceKind::PrimaryWeapon)
-                            && close_quarters_owners
-                                .contains(&record.source.owner_network_entity_id.0),
+                        if matches!(record.source.kind, CombatSourceKind::PrimaryWeapon) {
+                            close_quarters_owners
+                                .get(&record.source.owner_network_entity_id.0)
+                                .map(|passive| passive.parameters)
+                        } else {
+                            None
+                        },
                         record.engagement_distance,
                     );
                     let applied = requested.min(*health);

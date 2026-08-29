@@ -508,7 +508,7 @@ pub(super) fn queue_area_payloads(
                             falloff,
                             lob_launch_point(source, recipe).distance(landing),
                             1.0,
-                            false,
+                            None,
                             source.origin.as_vec2().distance(position.0),
                         ),
                         delivery_index,

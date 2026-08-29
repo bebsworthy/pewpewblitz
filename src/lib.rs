@@ -1,7 +1,6 @@
 //! Reusable application composition for Brawler's client and dedicated server.
 
 pub mod abilities;
-#[cfg(feature = "server")]
 mod bots;
 pub mod builds;
 pub mod combat;

@@ -79,7 +79,11 @@ pub(crate) fn activate_concealment_field(
             owner_network_id: *network_id,
             kind: crate::abilities::AbilityTelemetryKind::ActivationAttempt,
         });
-        let held = !crate::movement::input_should_neutralize(tick.0, freshness.last_fresh_tick, 12);
+        let held = !crate::movement::input_should_neutralize(
+            tick.0,
+            freshness.last_fresh_tick,
+            crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
+        );
         let rejection = if !held {
             Some(crate::abilities::AbilityRejectionReason::StaleInput)
         } else if defeated {
@@ -88,7 +92,7 @@ pub(crate) fn activate_concealment_field(
             Some(crate::abilities::AbilityRejectionReason::Inactive)
         } else if fields.iter().count() >= crate::concealment::MAX_ACTIVE_CONCEALMENT_FIELDS {
             Some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling)
-        } else if ability.charge != crate::abilities::ULTIMATE_CHARGE_MAX
+        } else if ability.charge != loadout.ultimate.charge_policy.maximum
             || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
         {
             Some(crate::abilities::AbilityRejectionReason::NotCharged)
@@ -255,7 +259,10 @@ pub(crate) fn cleanup_concealment_fields(
             if reason.is_some()
                 && matches!(ability.phase, crate::builds::AbilityPhase::FieldActive { field_id, .. } if field_id == state.id)
             {
-                ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+                ability.phase = crate::abilities::settled_ability_phase(
+                    ability.charge,
+                    loadout.ultimate.charge_policy.maximum,
+                );
             }
         } else {
             reason.get_or_insert(Reason::OwnerDisconnected);

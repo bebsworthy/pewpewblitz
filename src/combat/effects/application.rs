@@ -14,7 +14,7 @@ use super::*;
 pub(super) struct ComposedBatch {
     pub(super) disconnected: HashSet<Entity>,
     pub(super) connected_owners: HashSet<u64>,
-    pub(super) close_quarters_owners: HashSet<u64>,
+    pub(super) close_quarters_owners: HashMap<u64, crate::builds::ResolvedPassive>,
     pub(super) records: Vec<PendingPayload>,
     pub(super) deliveries: Vec<PendingDelivery>,
 }
@@ -23,7 +23,7 @@ pub(super) struct ComposedBatch {
 pub(super) struct BatchView<'a> {
     pub(super) disconnected: &'a HashSet<Entity>,
     pub(super) connected_owners: &'a HashSet<u64>,
-    pub(super) close_quarters_owners: &'a HashSet<u64>,
+    pub(super) close_quarters_owners: &'a HashMap<u64, crate::builds::ResolvedPassive>,
     pub(super) records: &'a [PendingPayload],
     pub(super) retained_delivery_keys: &'a HashSet<(AttackId, u8)>,
 }
@@ -57,17 +57,18 @@ pub(super) fn collect_composed_batch<'a>(
         })
         .map(|(network_id, _)| network_id.0)
         .collect();
-    let close_quarters_owners: HashSet<_> = combat
+    let close_quarters_owners: HashMap<_, _> = combat
         .passive_access
         .p1()
         .iter()
-        .filter(|(_, loadout)| {
+        .filter_map(|(network_id, loadout)| {
             loadout
                 .passives
                 .iter()
-                .any(|passive| passive.kind == crate::builds::PassiveKind::CloseQuarters)
+                .find(|passive| passive.kind == crate::builds::PassiveKind::CloseQuarters)
+                .copied()
+                .map(|passive| (network_id.0, passive))
         })
-        .map(|(network_id, _)| network_id.0)
         .collect();
     let mut records: Vec<_> = payloads.cloned().collect();
     records.sort_by(|left, right| {
@@ -317,13 +318,14 @@ pub(super) fn apply_composed_records(
             let loadouts = combat.passive_access.p0();
             loadouts
                 .get(record.target)
-                .map_or((health.0, false, 1_000, 0, 0, 0), |loadout| {
+                .map_or((health.0, None, 1_000, 0, 0, 0), |loadout| {
                     (
                         loadout.fighter_stats.maximum_health,
                         loadout
                             .passives
                             .iter()
-                            .any(|passive| passive.kind == crate::builds::PassiveKind::Tenacity),
+                            .find(|passive| passive.kind == crate::builds::PassiveKind::Tenacity)
+                            .copied(),
                         loadout.fighter_stats.cold_capacity,
                         loadout.fighter_stats.cold_resistance_basis_points,
                         loadout.fighter_stats.poison_resistance_basis_points,
@@ -367,16 +369,21 @@ pub(super) fn apply_composed_records(
                 recipients,
             } = effect
             {
-                let close_quarters = matches!(record.source.kind, CombatSourceKind::PrimaryWeapon)
-                    && batch
-                        .close_quarters_owners
-                        .contains(&record.source.owner_network_entity_id.0);
+                let close_quarters =
+                    if matches!(record.source.kind, CombatSourceKind::PrimaryWeapon) {
+                        batch
+                            .close_quarters_owners
+                            .get(&record.source.owner_network_entity_id.0)
+                            .copied()
+                    } else {
+                        None
+                    };
                 let unmodified_requested = requested_damage(
                     amount,
                     falloff,
                     record.delivery_travel,
                     scale,
-                    false,
+                    None,
                     record.engagement_distance,
                 );
                 let requested = requested_damage(
@@ -384,7 +391,7 @@ pub(super) fn apply_composed_records(
                     falloff,
                     record.delivery_travel,
                     scale,
-                    close_quarters,
+                    close_quarters.map(|passive| passive.parameters),
                     record.engagement_distance,
                 );
                 let applied_damage = requested.min(health.0);
@@ -393,14 +400,16 @@ pub(super) fn apply_composed_records(
                 }
                 let defeats = applied_damage > 0 && !target_defeated && health.0 == applied_damage;
                 let unmodified_applied = unmodified_requested.min(health.0);
-                if close_quarters && applied_damage != unmodified_applied {
+                if let Some(passive) = close_quarters
+                    && applied_damage != unmodified_applied
+                {
                     gameplay_telemetry
                         .ability
                         .record(crate::abilities::AbilityTelemetryRecord {
                             tick,
                             owner_network_id: record.source.owner_network_entity_id,
                             kind: crate::abilities::AbilityTelemetryKind::PassiveModified {
-                                passive_id: crate::builds::PassiveDefinitionId(4),
+                                passive_id: passive.id,
                                 amount: applied_damage.abs_diff(unmodified_applied),
                             },
                         });

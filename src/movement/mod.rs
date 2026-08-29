@@ -25,6 +25,7 @@ pub use input::{
 
 /// Canonical circular fighter footprint used by movement, combat, map clearance, and presentation.
 pub const STANDARD_FIGHTER_RADIUS: f32 = 14.0;
+pub const AUTHORITATIVE_INPUT_STALE_TICKS: u64 = 12;
 
 /// Live input-trace switch and last-seen inputs. Read only by the server-gated coordinator.
 #[derive(Resource, Debug)]
@@ -60,7 +61,7 @@ impl Default for MovementTuning {
             speed: 100.0,
             radius: STANDARD_FIGHTER_RADIUS,
             spawn_facing: 0.0,
-            stale_input_ticks: 12,
+            stale_input_ticks: AUTHORITATIVE_INPUT_STALE_TICKS,
             move_iterations: 4,
             skin_width: 0.01,
         }
