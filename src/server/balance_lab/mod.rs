@@ -37,7 +37,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 12;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 14;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -105,6 +105,7 @@ struct ChestTuning {
 #[serde(rename_all = "camelCase")]
 struct BalanceLabSnapshotV3 {
     schema_version: u16,
+    condition_rules: crate::combat::CombatConditionRules,
     fighter_profiles: FighterStatProfiles,
     weapons: Vec<WeaponPresetTuning>,
     ultimates: Vec<UltimateTuning>,
@@ -121,6 +122,8 @@ impl BalanceLabSnapshotV3 {
     ) -> Self {
         Self {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
+            condition_rules: crate::combat::CombatConditionRules::embedded()
+                .expect("embedded combat-condition rules are valid"),
             fighter_profiles: builds.fighter_profiles,
             weapons: weapons
                 .presets
@@ -146,6 +149,7 @@ impl BalanceLabSnapshotV3 {
                             | UltimateKind::FireField
                             | UltimateKind::PoisonField
                             | UltimateKind::RestorationField
+                            | UltimateKind::BigBlob
                     )
                 })
                 .map(|ultimate| UltimateTuning {
@@ -247,7 +251,7 @@ impl BalanceLabValidator {
 enum BalanceLabCommand {
     Apply {
         transaction_id: u64,
-        request: ApplyRequestV1,
+        request: Box<ApplyRequestV1>,
     },
     Restore {
         transaction_id: u64,
@@ -327,6 +331,9 @@ fn load_persisted_tuning(
             world.resource_mut::<BuildCatalogResource>().0 = loaded.builds;
             world.resource_mut::<WeaponCatalogResource>().0 = loaded.weapons;
             world.resource_mut::<crate::map::MapCatalogResource>().0 = loaded.maps;
+            world
+                .resource_mut::<crate::combat::CombatConditionRulesResource>()
+                .0 = loaded.snapshot.condition_rules;
             info!(
                 path = %path.display(),
                 revision = loaded.revision.0,
@@ -366,6 +373,9 @@ fn start_balance_lab(world: &mut World) {
         }
     };
     let mut baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
+    baseline.condition_rules = world
+        .resource::<crate::combat::CombatConditionRulesResource>()
+        .0;
     if let Some(rules) = world.get_resource::<crate::matchplay::HeistRules>() {
         baseline.heist.safe_maximum_health = rules.safe_maximum_health;
     }
@@ -495,6 +505,7 @@ fn apply_balance_lab_transaction(
     mut builds: ResMut<BuildCatalogResource>,
     mut weapons: ResMut<WeaponCatalogResource>,
     mut maps: ResMut<crate::map::MapCatalogResource>,
+    mut condition_rules: ResMut<crate::combat::CombatConditionRulesResource>,
     mut heist_rules: Option<ResMut<crate::matchplay::HeistRules>>,
     mut restart: ResMut<PendingMatchRestart>,
     mut restart_policy: ResMut<RestartBuildPolicy>,
@@ -523,6 +534,7 @@ fn apply_balance_lab_transaction(
             transaction_id,
             request,
         } => {
+            let request = *request;
             if request.schema_version != SNAPSHOT_SCHEMA_VERSION {
                 reject(runtime, transaction_id, "unsupported apply schema");
                 return;
@@ -668,6 +680,7 @@ fn apply_balance_lab_transaction(
     builds.0 = next_builds;
     weapons.0 = next_weapons;
     maps.0 = next_maps;
+    condition_rules.0 = candidate.condition_rules;
     if let Some(rules) = heist_rules.as_deref_mut() {
         install_heist_tuning(rules, &candidate);
     }
@@ -745,6 +758,7 @@ fn validate_snapshot(
     {
         return Err("unsupported snapshot shape".into());
     }
+    candidate.condition_rules.validate()?;
     if !(100..=20_000).contains(&candidate.heist.safe_maximum_health) {
         return Err("Heist safe maximum health must be within 100..=20000".into());
     }
@@ -944,7 +958,8 @@ fn same_ultimate_parameter_shape(
         | (
             UltimateParameters::DemolitionStrike { .. },
             UltimateParameters::DemolitionStrike { .. },
-        ) => true,
+        )
+        | (UltimateParameters::BigBlob { .. }, UltimateParameters::BigBlob { .. }) => true,
         (
             UltimateParameters::ElementalField {
                 effect: expected, ..
@@ -1012,6 +1027,9 @@ fn same_recipe_shape(expected: &WeaponRecipe, supplied: &WeaponRecipe) -> bool {
         (
             DeliveryMethod::Straight { .. },
             DeliveryMethod::Straight { .. }
+        ) | (
+            DeliveryMethod::StickyStraight { .. },
+            DeliveryMethod::StickyStraight { .. }
         ) | (DeliveryMethod::Lobbed { .. }, DeliveryMethod::Lobbed { .. })
             | (
                 DeliveryMethod::MeleeArc { .. },
@@ -1526,6 +1544,9 @@ mod tests {
             .cold_resistance_basis_points = 1_000;
         candidate.fighter_profiles.reinforced.maximum_health = 233;
         candidate.fighter_profiles.reinforced.cold_capacity = 1_250;
+        candidate.condition_rules.freeze_duration_ticks = 45;
+        candidate.condition_rules.cold_decay_per_tick = 12;
+        let expected_condition_rules = candidate.condition_rules;
         candidate.weapons[0].recipe.fire_cooldown_ticks += 1;
         candidate.weapons[1].recipe.fire_cooldown_ticks += 1;
 
@@ -1548,11 +1569,11 @@ mod tests {
         sender
             .send(BalanceLabCommand::Apply {
                 transaction_id: 1,
-                request: ApplyRequestV1 {
+                request: Box::new(ApplyRequestV1 {
                     schema_version: SNAPSHOT_SCHEMA_VERSION,
                     expected_revision: 0,
                     snapshot: candidate,
-                },
+                }),
             })
             .unwrap();
         let persistence_path = env::temp_dir().join(format!(
@@ -1578,6 +1599,9 @@ mod tests {
             .insert_resource(BuildCatalogResource(builds))
             .insert_resource(WeaponCatalogResource(weapons))
             .insert_resource(crate::map::MapCatalogResource(maps))
+            .insert_resource(crate::combat::CombatConditionRulesResource(
+                baseline.condition_rules,
+            ))
             .init_resource::<PendingMatchRestart>()
             .init_resource::<RestartBuildPolicy>()
             .init_resource::<crate::matchplay::NextMatchId>();
@@ -1638,6 +1662,12 @@ mod tests {
             1_000
         );
         assert_eq!(bot_after.fighter_stats.cold_capacity, 1_250);
+        assert_eq!(
+            app.world()
+                .resource::<crate::combat::CombatConditionRulesResource>()
+                .0,
+            expected_condition_rules
+        );
         assert_ne!(
             human_after.primary_weapon.recipe_fingerprint,
             human_loadout.primary_weapon.recipe_fingerprint

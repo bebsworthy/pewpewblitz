@@ -24,8 +24,11 @@ pub(crate) mod model;
 pub(crate) mod outcomes;
 #[cfg(feature = "server")]
 mod recovery;
+mod rules;
 #[cfg(feature = "server")]
 pub(crate) mod server;
+#[cfg(feature = "server")]
+pub(crate) mod sticky;
 pub(crate) mod telemetry;
 #[cfg(feature = "server")]
 pub(crate) use telemetry::AbilityWeaponTelemetry;
@@ -87,7 +90,7 @@ pub(crate) use model::ElementalFieldRuntime;
 pub use model::{
     ActiveAttackTracker, ActiveAttackTrackers, CombatWorldEffectFact, CombatWorldEffectFacts,
     CombatWorldEffectSource, CompletedAttack, ComposedProjectileRuntime, MeleeAttack,
-    PendingDelivery, PendingDeliveryKind, PendingPayload, SpawnState,
+    PendingDelivery, PendingDeliveryKind, PendingPayload, SpawnState, StickyBlobRuntime,
 };
 pub use model::{
     ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource, AuthoritativePose,
@@ -95,10 +98,14 @@ pub use model::{
     DamageOverTime, DamageOverTimeKind, Defeated, DistanceBand, ElementalFieldId,
     ElementalFieldKind, ElementalFieldState, ExternalMotion, HealthRecoveryState,
     KnockbackFeedback, LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline,
-    ProjectileShape, ProjectileSource, ReplicatedAttackSource, ShotId, SlowEffect, StraightFlight,
-    TeamId, WeaponPhase, WeaponState, WorldPoint, distance_band,
+    ProjectileShape, ProjectileSource, ReplicatedAttackSource, ShotId, SlowEffect, StickyBlobKind,
+    StickyBlobState, StraightFlight, TeamId, WeaponPhase, WeaponState, WorldPoint, distance_band,
 };
 pub use outcomes::{CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTargetKind};
+pub use rules::{
+    COMBAT_CONDITION_RULES_SCHEMA_VERSION, CombatConditionRules, CombatConditionRulesResource,
+    MAX_COLD_DECAY_PER_TICK, MAX_COLD_RULE_TICKS,
+};
 #[cfg(feature = "server")]
 pub use server::ServerCombatPlugin;
 use telemetry::MAX_COMBAT_EVIDENCE_EVENTS;
@@ -163,6 +170,7 @@ pub const PULSE_SIDEARM_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(1);
 pub const SCATTER_CANNON_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(2);
 pub const ARC_LAUNCHER_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(3);
 pub const IMPACT_BLADE_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(4);
+pub const STICKY_BLOMB_DEFINITION: WeaponDefinitionId = WeaponDefinitionId(5);
 /// Reserved team and entity identity for the neutral practice dummy.
 pub const NEUTRAL_TEAM: TeamId = TeamId(u8::MAX);
 pub const DUMMY_NETWORK_ENTITY: NetworkEntityId = NetworkEntityId(0);

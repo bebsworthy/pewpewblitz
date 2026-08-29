@@ -413,9 +413,9 @@ impl ClientNetworkConfig {
         }
         if self
             .weapon_preset
-            .is_some_and(|preset| !(1..=4).contains(&preset))
+            .is_some_and(|preset| !(1..=5).contains(&preset))
         {
-            return Err("--weapon-preset must be between 1 and 4".to_string());
+            return Err("--weapon-preset must be between 1 and 5".to_string());
         }
         if self.window_size.is_some_and(|(width, height)| {
             !(640..=3_840).contains(&width) || !(360..=2_160).contains(&height)

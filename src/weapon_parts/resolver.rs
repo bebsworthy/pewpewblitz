@@ -209,6 +209,12 @@ fn apply_modifiers(
             speed,
             lifetime_ticks,
             ..
+        }
+        | DeliveryMethod::StickyStraight {
+            range,
+            speed,
+            lifetime_ticks,
+            ..
         } => {
             *range = apply_world(*range, modifiers.reach_milliunits)?;
             *lifetime_ticks =
@@ -255,7 +261,7 @@ fn apply_modifiers(
             crate::combat::FiringPattern::Single
         ) || !matches!(
             configuration.recipe.delivery,
-            DeliveryMethod::Straight { .. }
+            DeliveryMethod::Straight { .. } | DeliveryMethod::StickyStraight { .. }
         ))
     {
         return Err(WeaponPartModelError::IncompatibleWeapon);

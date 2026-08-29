@@ -416,6 +416,12 @@ fn existing_starter_inventory_receives_only_new_catalog_parts_once() {
                 [account.to_bytes().as_slice()],
             )
             .unwrap();
+        connection
+            .execute(
+                "UPDATE weapon_part_instances SET display_name='Frosting Module' WHERE account_id=?1 AND definition_id=7",
+                [account.to_bytes().as_slice()],
+            )
+            .unwrap();
     }
     let mut storage = ProfileStorage::open(&database).unwrap();
     let migrated = storage.load_or_create(account).unwrap();
@@ -437,6 +443,14 @@ fn existing_starter_inventory_receives_only_new_catalog_parts_once() {
             .map(|part| part.definition_id.0)
             .collect::<Vec<_>>(),
         vec![9, 10, 11, 12]
+    );
+    assert_eq!(
+        migrated
+            .inventory
+            .iter()
+            .find(|part| part.definition_id.0 == 7)
+            .map(|part| part.display_name.as_str()),
+        Some("Kinetic Dampener")
     );
     assert_eq!(storage.load_or_create(account).unwrap(), migrated);
     drop(storage);

@@ -566,3 +566,153 @@ Native verification remains: observe no disc at zero buildup, partial clockwise 
 
 - User confirmed that the buildup-only, number-free overhead Cold pie indicator works.
 - Approval scope is limited to this HUD indicator. It does not approve BRL-0003 as a whole, and the ticket remains in `doing` pending its remaining acceptance and playtest evidence.
+
+## 2026-08-29 playtest feedback: Frosting versus Cryogenic module
+
+- Observation: a weapon described as having a frost module did not appear to apply Cold buildup.
+- Live-profile evidence: the selected development profile `Brawler 4` equips weapon-part definition 7, `Frosting Module`. That legacy part contributes only `Slow` (15%% for 36 ticks). Definition 9, `Cryogenic Module`, is the distinct part that contributes 250 Cold and drives the overhead buildup pie.
+- Root cause: player-facing naming makes two mechanically distinct parts sound equivalent. This is a comprehension defect, not an authoritative Cold-application failure in the observed build.
+- Disposition: awaiting product correction. Recommended smallest correction is to rename the legacy `Frosting Module` to a plainly non-elemental Slow name while preserving its stable ID and behavior; do not silently convert it to Cold or duplicate Cryogenic behavior.
+
+### Accepted correction
+
+- Rename weapon-part definition 7 from `Frosting Module` to `Kinetic Dampener` so its player-facing name clearly describes its non-elemental Slow role.
+- Preserve definition ID 7, stable key `frosting-module`, Slow values, equipped-slot identity, and all gameplay behavior.
+- Advance the starter inventory revision and migrate existing definition-7 inventory instances to the new display name without replacing their instance IDs or equipment references.
+- Verify embedded catalog validity plus a persisted-profile rename migration. Keep `Cryogenic Module` as the sole Cold-buildup weapon part.
+
+### Rename implemented
+
+- Definition 7 now displays as `Kinetic Dampener`; its stable ID, `frosting-module` key, damage tradeoff, and 15%%/36-tick Slow remain unchanged.
+- Existing stored instances are renamed idempotently during profile load. Their instance IDs and equipped slot references are preserved, and the profile revision advances so clients receive the corrected label.
+- The starter-set revision remains 2. The initial plan to advance it was rejected because that revision participates in the gameplay content fingerprint; a display-only rename must not create a compatibility change.
+- Focused embedded-catalog validation passed. The persisted-profile regression passed with a stale `Frosting Module` label, preserved original part IDs, installed any missing newer parts, renamed definition 7, and remained stable on a second load.
+
+## Proposed correction: authored global Cold/Freeze rules (2026-08-29)
+
+### Ownership recommendation
+
+- Keep `cold_capacity` and `cold_resistance_basis_points` on fighter profiles: they describe how much Cold a target can absorb and how strongly it reduces incoming buildup.
+- Move Cold decay delay/rate, Freeze duration, and post-thaw immunity out of constants into one global `ColdConditionRules` definition. These values describe the shared condition lifecycle, so duplicating them across fighter profiles would make the same meter threshold produce opaque target-specific timing and add redundant tuning controls.
+- If fighter-specific Freeze duration is later desired as an intentional archetype trait, add a separately named modifier then; do not pre-model it now.
+
+### Proposed authored and runtime shape
+
+- Add a focused headless-safe combat-condition catalog under `content/catalogs/` containing `cold_decay_delay_ticks`, `cold_decay_per_tick`, `freeze_duration_ticks`, and `thaw_immunity_ticks`, with the current 90/10/60/90 values as defaults and explicit validation bounds.
+- Load it as a server-authoritative Bevy resource consumed by Cold application and condition advancement. Remove the four gameplay constants from `conditions.rs`.
+- Include its canonical material in the global gameplay content fingerprint. No client authority is introduced; clients continue presenting replicated meter/deadline state.
+
+### Balance Lab exposure
+
+- Add a global `Cold & Freeze` group rather than placing these controls under each fighter: Decay delay, Decay rate, Freeze duration, and Post-thaw immunity.
+- Display timing in seconds with ticks visible, and display decay as both buildup/tick and the derived buildup/second at 60 Hz.
+- Add the rules to Balance Lab snapshot validation, apply/reset, persistence migration, and editor schema. Applying tuning updates the authoritative resource at the ordinary safe restart boundary.
+
+Status: recommendation prepared; awaiting user approval before implementation.
+
+### Accepted Balance Lab information architecture
+
+- Add a top-level `Global` tab for match-wide tuning that is not owned by a fighter, weapon, ultimate, or map object.
+- Place the initial controls in a `Cold & Freeze` section within that tab: buildup decay delay, buildup decay rate, Freeze duration, and post-thaw immunity.
+- The tab is intentionally extensible for later global settings, but this correction implements only the Cold rules currently required. Do not introduce a generic settings registry or speculative empty sections.
+- Fighter tabs continue to own Cold capacity and elemental resistance baselines.
+
+
+## 2026-08-29 — Global cold lifecycle tuning implementation
+
+Implemented the accepted global-versus-fighter ownership split:
+
+- Added build-embedded `content/catalogs/combat_conditions.ron` and validated `CombatConditionRules` runtime ownership for cold decay delay, cold decay rate, freeze duration, and post-thaw immunity.
+- Removed the corresponding hard-coded lifecycle constants from `src/combat/conditions.rs`; direct payloads and ultimate fields now resolve freeze duration from the same server-owned rules resource.
+- Included the rules in the gameplay content fingerprint (content envelope revision 19) without changing the wire schema.
+- Added Balance Lab snapshot/editor/persistence support (snapshot 13, persistence 8, editor 5), including atomic restart-boundary application and migration of revision-7 sessions to canonical baseline rules.
+- Added a top-level **Global** tab with a **Cold & Freeze / Lifecycle** section. Timing values are edited in seconds; decay is displayed as cold per second while preserving deterministic integer-per-tick storage.
+- Kept cold capacity and resistance under each fighter, as previously accepted.
+- Updated the durable combat and Balance Lab documentation with ownership, defaults, units, and migration behavior.
+
+Current authored defaults preserve existing behavior: 1.5 s decay delay, 600 cold/s decay, 1.0 s freeze, and 1.5 s post-thaw immunity.
+
+Verification passed:
+
+- `cargo check --locked --no-default-features --features balance-lab --all-targets`
+- Focused combat-rule, cold-lifecycle, Balance Lab editor, persistence-migration, and atomic-apply tests
+- Balance Lab web unit tests and production build
+- `cargo test --locked --no-default-features --features balance-lab --lib` — 370 passed
+- `just check`
+- `just lint`
+- `just test` — canonical feature matrices passed; network suite 88 passed and performance suite 12 passed
+
+Native operator/playtest confirmation of the new Global controls remains optional follow-up evidence; BRL-0003 remains doing for its wider elemental feature scope.
+
+
+### Gamepad targeted-field placement correction
+
+Player feedback: while a targeted elemental ultimate is armed, right-stick magnitude must control placement distance from the fighter. This is placement range, not field-effect radius.
+
+Implementation contract:
+
+- For gamepad input, derive `aim_distance` from the selected targeted ultimate's authored maximum range while its targeting mode is armed, including Fire Field and the other targeted ultimates sharing that interaction.
+- On the initial ultimate-button frame, use the targeted ultimate range immediately so the sampled distance does not depend on the primary weapon delivery.
+- Outside targeted-ultimate interaction, preserve the existing lobbed-primary range behavior; immediate ultimates and non-lobbed weapons gain no unrelated distance behavior.
+- The server continues to clamp the client distance intent to the authoritative ultimate maximum and playable bounds.
+- Add a focused client input test proving a non-lobbed Fire Field loadout produces different distances from different right-stick magnitudes.
+
+
+Implementation and feedback disposition:
+
+- Confirmed root cause: the existing analog-distance calculation was gated exclusively by the controlled primary weapon's `Lobbed` delivery. A straight-firing weapon paired with Fire Field therefore produced no gamepad `aim_distance`, causing authoritative targeting to use maximum range.
+- Reused the existing calibrated right-stick magnitude mapping. Range selection now prefers the armed/pressed targeted ultimate's authored maximum range and otherwise preserves the lobbed-primary range.
+- The correction applies to Reveal Scan, Concealment Field, Demolition Strike, Cryogenic Field, Fire Field, Poison Field, and Restoration Field through their existing `Targeted` classification. Immediate Dash, Sentry, and Self Cloak are unaffected.
+- Added a focused non-lobbed Fire Field test covering the initial arm frame and two distinct stick magnitudes while targeting remains armed.
+
+Verification passed:
+
+- `cargo fmt --all -- --check`
+- focused Fire Field gamepad placement, existing gamepad mapping, and targeted-ultimate tests
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`
+- `cargo test --locked --no-default-features --features client --lib` — 434 passed
+
+
+### Persistent damage-field cadence correction
+
+Player feedback: a hostile fighter remaining inside Fire Field receives no visible damage.
+
+Root cause and implementation contract:
+
+- Field pulses refresh equal-strength Fire/Poison damage-over-time at the same 30-tick cadence as condition damage. The current refresh replaces `next_tick` before the condition system runs, indefinitely postponing damage while overlap continues.
+- Equal-strength reapplication must refresh source/expiry without postponing the already scheduled damage tick. Stronger conditions retain their existing replacement behavior; weaker conditions remain ignored.
+- Preserve authoritative field overlap, hostility, resistance, spawn-protection, bounded lifecycle, and fixed schedule ordering.
+- Cover the cadence boundary with a focused regression test and run the affected server combat suite.
+
+
+Implementation and verification:
+
+- Changed equal-strength damage-over-time refresh to update attribution, cadence metadata, and extend expiry while preserving the already scheduled `next_tick`. Stronger replacement and weaker rejection behavior are unchanged.
+- Added a pure boundary test for a Fire Field refresh exactly when damage is due.
+- Added a scheduled ECS regression that refreshes Fire before condition processing at tick 30 and proves health drops from 100 to 82, the next damage tick advances to 60, and expiry extends to 120.
+- Because Fire and Poison use the same authoritative damage-over-time refresh path, the correction covers both persistent hostile damage fields.
+
+Verification passed:
+
+- `cargo fmt --all -- --check`
+- focused damage-over-time refresh and scheduled Fire Field regression tests
+- `cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings`
+- `cargo test --locked --no-default-features --features server --lib` — 353 passed
+
+
+## Closeout — 2026-08-29
+
+User playtest acceptance:
+
+- The elemental status HUD was accepted.
+- Frost weapon-part behavior and naming were corrected and accepted through continued playtesting.
+- Targeted ultimate gamepad placement now reuses analog lob-distance shaping across all targeted ultimates.
+- Fire Field damage cadence was corrected after playtesting exposed refresh starvation; the user accepted closeout after the correction.
+
+Learning review:
+
+- Mistake: equal-strength damage-over-time refresh replaced `next_tick`, allowing a field pulse at the same cadence to starve damage forever. Cause: refresh behavior was tested as state replacement rather than against schedule ordering at the exact due tick. Prevention: persistent-effect refresh tests must cover reapplication immediately before lifecycle processing at the due boundary.
+- Mistake: gamepad distance shaping was coupled to the primary weapon's lob delivery even though targeted ultimates consume the same input field. Cause: the client range selector was named and scoped around the first consumer rather than the active targeting interaction. Prevention: when an intent field has multiple authoritative consumers, test each interaction context with a loadout where the other consumer is absent.
+- Useful enduring split: global lifecycle cadence belongs in authored global combat rules; fighter capacity and resistance remain per-fighter tuning. The Balance Lab now reflects that ownership directly.
+
+All feedback is implemented or separately tracked, required automated verification is recorded above, no Ticket questions/comments remain open, and the user explicitly requested BRL-0003 closure.

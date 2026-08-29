@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::Serialize;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 4;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 6;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +63,7 @@ impl From<usize> for EditorPathSegment {
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum EditorSection {
+    Global,
     Fighters,
     Weapons,
     Ultimates,
@@ -177,6 +178,22 @@ impl NumberSpec {
         }
     }
 
+    fn per_tick_rate(minimum: u16, maximum: u16, unit: &'static str) -> Self {
+        Self {
+            storage_kind: EditorStorageKind::Integer,
+            unit,
+            storage_scale: 1.0 / 60.0,
+            minimum: f64::from(minimum) * 60.0,
+            maximum: f64::from(maximum) * 60.0,
+            minimum_exclusive: false,
+            step: 60.0,
+            control: EditorControl::Number,
+            help: Some(
+                "Displayed per second and stored as an integer amount per authoritative 60 Hz tick.",
+            ),
+        }
+    }
+
     fn ranged(mut self) -> Self {
         self.control = EditorControl::RangeAndNumber;
         self
@@ -197,6 +214,7 @@ macro_rules! path {
 impl BalanceLabEditorManifest {
     pub(super) fn from_catalogs(snapshot: &BalanceLabSnapshotV3, weapons: &WeaponCatalog) -> Self {
         let mut fields = Vec::new();
+        add_global_fields(&mut fields);
         add_fighter_fields(&mut fields);
         for (index, weapon) in snapshot.weapons.iter().enumerate() {
             add_weapon_fields(&mut fields, index, weapon, weapons);
@@ -207,6 +225,42 @@ impl BalanceLabEditorManifest {
             schema_version: EDITOR_SCHEMA_VERSION,
             fields,
         }
+    }
+}
+
+fn add_global_fields(fields: &mut Vec<EditorFieldDescriptor>) {
+    for (field, label, spec) in [
+        (
+            "cold_decay_delay_ticks",
+            "Buildup decay delay",
+            NumberSpec::ticks(0, crate::combat::MAX_COLD_RULE_TICKS),
+        ),
+        (
+            "cold_decay_per_tick",
+            "Buildup decay rate",
+            NumberSpec::per_tick_rate(1, crate::combat::MAX_COLD_DECAY_PER_TICK, "cold/s"),
+        ),
+        (
+            "freeze_duration_ticks",
+            "Freeze duration",
+            NumberSpec::ticks(1, crate::combat::MAX_COLD_RULE_TICKS),
+        ),
+        (
+            "thaw_immunity_ticks",
+            "Post-thaw immunity",
+            NumberSpec::ticks(0, crate::combat::MAX_COLD_RULE_TICKS),
+        ),
+    ] {
+        add_field(
+            fields,
+            path!["conditionRules", field],
+            EditorSection::Global,
+            "cold",
+            "Cold & Freeze",
+            "Lifecycle",
+            label,
+            spec,
+        );
     }
 }
 
@@ -456,6 +510,50 @@ fn add_weapon_fields(
                 "Delivery",
                 "Muzzle offset",
                 NumberSpec::positive_decimal(f64::from(limits.max_world_field), "world units"),
+            );
+        }
+        DeliveryMethod::StickyStraight { .. } => {
+            add(
+                path!["delivery", "StickyStraight", "speed"],
+                "Delivery",
+                "Projectile speed",
+                NumberSpec::positive_decimal(f64::from(policy.max_speed), "world units/s"),
+            );
+            add(
+                path!["delivery", "StickyStraight", "radius"],
+                "Delivery",
+                "Projectile radius",
+                NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
+            );
+            add(
+                path!["delivery", "StickyStraight", "range"],
+                "Delivery",
+                "Maximum range",
+                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
+            );
+            add(
+                path!["delivery", "StickyStraight", "lifetime_ticks"],
+                "Delivery",
+                "Projectile lifetime",
+                NumberSpec::ticks(1, policy.max_projectile_lifetime_ticks),
+            );
+            add(
+                path!["delivery", "StickyStraight", "muzzle_offset"],
+                "Delivery",
+                "Muzzle offset",
+                NumberSpec::positive_decimal(f64::from(limits.max_world_field), "world units"),
+            );
+            add(
+                path!["delivery", "StickyStraight", "fuse_ticks"],
+                "Sticky",
+                "Explosion delay",
+                NumberSpec::ticks(1, limits.max_deadline_ticks),
+            );
+            add(
+                path!["delivery", "StickyStraight", "max_active_per_owner"],
+                "Sticky",
+                "Maximum active blobs",
+                NumberSpec::integer(1, 16, "blobs"),
             );
         }
         DeliveryMethod::Lobbed { .. } => {
@@ -972,6 +1070,93 @@ fn add_ultimate_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &Balan
                     }
                 }
             }
+            UltimateParameters::BigBlob { .. } => {
+                for (tail, group, label, spec) in [
+                    (
+                        "maximum_range_milliunits",
+                        "Targeting",
+                        "Maximum throw range",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "flight_ticks",
+                        "Targeting",
+                        "Lob flight time",
+                        NumberSpec::ticks(1, 600),
+                    ),
+                    (
+                        "visual_arc_height_milliunits",
+                        "Targeting",
+                        "Visual arc height",
+                        NumberSpec::milliunits(1, 2_048_000),
+                    ),
+                    (
+                        "landing_clearance_milliunits",
+                        "Targeting",
+                        "Landing clearance",
+                        NumberSpec::milliunits(1, 512_000),
+                    ),
+                    (
+                        "child_speed_milliunits",
+                        "Secondary blobs",
+                        "Travel speed",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "child_radius_milliunits",
+                        "Secondary blobs",
+                        "Projectile radius",
+                        NumberSpec::milliunits(1, 512_000),
+                    ),
+                    (
+                        "child_range_milliunits",
+                        "Secondary blobs",
+                        "Travel range",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "child_lifetime_ticks",
+                        "Secondary blobs",
+                        "Flight lifetime",
+                        NumberSpec::ticks(1, 600),
+                    ),
+                    (
+                        "child_fuse_ticks",
+                        "Explosion",
+                        "Fuse delay",
+                        NumberSpec::ticks(1, 3_600),
+                    ),
+                    (
+                        "child_explosion_radius_milliunits",
+                        "Explosion",
+                        "Explosion radius",
+                        NumberSpec::milliunits(1, 512_000),
+                    ),
+                    (
+                        "child_damage",
+                        "Explosion",
+                        "Damage",
+                        NumberSpec::integer(1, 1_000, "health"),
+                    ),
+                    (
+                        "max_active_per_owner",
+                        "Capacity",
+                        "Maximum active blobs",
+                        NumberSpec::integer(1, 16, "blobs"),
+                    ),
+                ] {
+                    add_field(
+                        fields,
+                        path!["ultimates", index, "parameters", "BigBlob", tail],
+                        EditorSection::Ultimates,
+                        &ultimate.key,
+                        &ultimate.display_name,
+                        group,
+                        label,
+                        spec,
+                    );
+                }
+            }
             UltimateParameters::Dash | UltimateParameters::Sentry => {}
         }
     }
@@ -1102,7 +1287,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 116);
+        assert_eq!(manifest.fields.len(), 145);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()
@@ -1120,6 +1305,31 @@ mod tests {
                 .iter()
                 .any(|path| path.contains("pickup_definition_id"))
         );
+    }
+
+    #[test]
+    fn global_cold_rules_use_seconds_and_per_second_editor_units() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let decay_delay = manifest
+            .fields
+            .iter()
+            .find(|field| path_key(&field.path) == "conditionRules/cold_decay_delay_ticks")
+            .unwrap();
+        assert_eq!(decay_delay.section, EditorSection::Global);
+        assert_eq!(decay_delay.subject_label, "Cold & Freeze");
+        assert_eq!(decay_delay.unit, "s");
+        assert!((decay_delay.storage_scale - 60.0).abs() < f64::EPSILON);
+
+        let decay_rate = manifest
+            .fields
+            .iter()
+            .find(|field| path_key(&field.path) == "conditionRules/cold_decay_per_tick")
+            .unwrap();
+        assert_eq!(decay_rate.unit, "cold/s");
+        assert!((decay_rate.storage_scale - (1.0 / 60.0)).abs() < f64::EPSILON);
+        assert!((decay_rate.minimum - 60.0).abs() < f64::EPSILON);
+        assert!((decay_rate.step - 60.0).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -1,5 +1,7 @@
 //! Server-authoritative ultimate and passive runtime rules.
 
+#[cfg(feature = "server")]
+mod big_blob;
 mod charge;
 mod concealment_field;
 mod dash;
@@ -83,6 +85,7 @@ impl Plugin for ServerAbilityPlugin {
                     concealment_field::activate_concealment_field,
                     demolition::activate_demolition_strike,
                     elemental_field::activate_elemental_field,
+                    big_blob::activate_big_blob,
                     ApplyDeferred,
                 )
                     .chain()
@@ -97,6 +100,7 @@ impl Plugin for ServerAbilityPlugin {
                     ApplyDeferred,
                     dash::advance_dash,
                     sentry::tick_sentries,
+                    big_blob::advance_big_blob_parents,
                 )
                     .chain()
                     .in_set(AbilitySet::Movement),

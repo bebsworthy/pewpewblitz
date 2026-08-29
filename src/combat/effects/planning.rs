@@ -16,9 +16,15 @@ pub(crate) fn payload_target_visible(
 pub(super) fn pending_delivery_kind_order(kind: &PendingDeliveryKind) -> u8 {
     match kind {
         PendingDeliveryKind::StraightImpact { .. } => 0,
-        PendingDeliveryKind::LobLanded { .. } => 1,
-        PendingDeliveryKind::MeleeContact { .. } => 2,
+        PendingDeliveryKind::StickyDetonated { .. } => 1,
+        PendingDeliveryKind::LobLanded { .. } => 2,
+        PendingDeliveryKind::MeleeContact { .. } => 3,
     }
+}
+
+#[cfg(feature = "server")]
+pub(super) const fn delivery_survives_owner_disconnect(kind: &PendingDeliveryKind) -> bool {
+    matches!(kind, PendingDeliveryKind::StickyDetonated { .. })
 }
 
 #[cfg(feature = "server")]
@@ -120,11 +126,16 @@ pub(super) fn required_payload_event_count(
     close_quarters_owners: &HashSet<u64>,
     planned_targets: &mut HashMap<Entity, PlannedTarget>,
 ) -> Option<usize> {
-    let mut required = 0_usize;
-    for delivery in delivery_records
+    let retained_deliveries: HashSet<_> = delivery_records
         .iter()
-        .filter(|delivery| connected_owners.contains(&delivery.source.owner_network_entity_id.0))
-    {
+        .filter(|delivery| delivery_survives_owner_disconnect(&delivery.kind))
+        .map(|delivery| (delivery.source.attack_id, delivery.delivery_index))
+        .collect();
+    let mut required = 0_usize;
+    for delivery in delivery_records.iter().filter(|delivery| {
+        connected_owners.contains(&delivery.source.owner_network_entity_id.0)
+            || retained_deliveries.contains(&(delivery.source.attack_id, delivery.delivery_index))
+    }) {
         required = required.checked_add(
             1 + usize::from(
                 delivery.source.legacy_compatibility
@@ -133,7 +144,9 @@ pub(super) fn required_payload_event_count(
         )?;
     }
     for record in records {
-        if !connected_owners.contains(&record.source.owner_network_entity_id.0) {
+        if !connected_owners.contains(&record.source.owner_network_entity_id.0)
+            && !retained_deliveries.contains(&(record.source.attack_id, record.delivery_index))
+        {
             continue;
         }
         let Some((target_network_id, target_team, health, defeated, target_kind)) =
@@ -223,7 +236,9 @@ pub(super) fn resolve_pending_deliveries(
     let mut resolved_delivery_keys = HashSet::new();
     for delivery in delivery_records {
         resolved_delivery_keys.insert((delivery.source.attack_id, delivery.delivery_index));
-        if !connected_owners.contains(&delivery.source.owner_network_entity_id.0) {
+        if !connected_owners.contains(&delivery.source.owner_network_entity_id.0)
+            && !delivery_survives_owner_disconnect(&delivery.kind)
+        {
             if let Some(entity) = delivery.entity {
                 commands.entity(entity).try_despawn();
             }
@@ -332,6 +347,31 @@ pub(super) fn resolve_pending_deliveries(
                     WeaponTelemetryOutcome::DeliveryLanding,
                 );
             }
+            PendingDeliveryKind::StickyDetonated { position } => {
+                let cue = CombatCue::DeliveryImpact {
+                    event_id,
+                    tick: delivery.tick,
+                    attack_id: delivery.source.attack_id,
+                    delivery_index: delivery.delivery_index,
+                    source: delivery.source.owner_network_entity_id,
+                    weapon_definition_id,
+                    presentation_profile_id: delivery.source.presentation_profile_id,
+                    target: None,
+                    position,
+                    normal: WorldPoint::from(Vec2::ZERO),
+                    distance_band: distance_band(delivery.delivery_travel),
+                };
+                legacy_telemetry.record_cue(cue.clone());
+                outbox.0.push(cue);
+                record_delivery_telemetry(
+                    telemetry,
+                    &delivery,
+                    event_id,
+                    None,
+                    position,
+                    WeaponTelemetryOutcome::DeliveryImpact,
+                );
+            }
             PendingDeliveryKind::MeleeContact { target, position } => {
                 let cue = CombatCue::MeleeContact {
                     event_id,
@@ -363,6 +403,7 @@ pub(super) fn resolve_pending_deliveries(
             let position = match &delivery.kind {
                 PendingDeliveryKind::StraightImpact { position, .. }
                 | PendingDeliveryKind::LobLanded { position }
+                | PendingDeliveryKind::StickyDetonated { position }
                 | PendingDeliveryKind::MeleeContact { position, .. } => *position,
             };
             world_effect_facts.0.push(CombatWorldEffectFact {

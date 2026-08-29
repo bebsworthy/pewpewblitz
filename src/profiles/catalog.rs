@@ -404,6 +404,23 @@ fn validate_ultimate_parameters(definitions: &[AdvertisedUltimate]) -> Result<()
                     }
                 )
                 | (
+                    UltimateKind::BigBlob,
+                    UltimateParameters::BigBlob {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        flight_ticks: 1..=600,
+                        visual_arc_height_milliunits: 1..=2_048_000,
+                        landing_clearance_milliunits: 1..=512_000,
+                        child_speed_milliunits: 1..=4_096_000,
+                        child_radius_milliunits: 1..=512_000,
+                        child_range_milliunits: 1..=4_096_000,
+                        child_lifetime_ticks: 1..=600,
+                        child_fuse_ticks: 1..=3_600,
+                        child_explosion_radius_milliunits: 1..=512_000,
+                        child_damage: 1..=1_000,
+                        max_active_per_owner: 1..=16,
+                    }
+                )
+                | (
                     UltimateKind::CryogenicField
                         | UltimateKind::FireField
                         | UltimateKind::PoisonField
@@ -600,6 +617,7 @@ mod tests {
         catalog.weapon_bases[1].id = WeaponBaseId(20);
         catalog.weapon_bases[2].id = WeaponBaseId(30);
         catalog.weapon_bases[3].id = WeaponBaseId(40);
+        catalog.weapon_bases[4].id = WeaponBaseId(50);
         catalog.revision = catalog.expected_revision().unwrap();
         catalog.validate().unwrap();
         let draft = BrawlerDraft {

@@ -143,6 +143,7 @@ pub(super) struct MuzzleContactState<'w, 's> {
     objects: DamageableMuzzleTargetQuery<'w, 's>,
     world_pending: ResMut<'w, crate::map::PendingWorldTargetDamages>,
     objective_pending: ResMut<'w, crate::matchplay::PendingModeObjectiveDamages>,
+    sticky_blobs: Query<'w, 's, &'static StickyBlobRuntime>,
 }
 
 #[cfg(feature = "server")]
@@ -153,11 +154,16 @@ fn blocked_straight_deliveries(
     spatial_query: &avian2d::prelude::SpatialQuery,
     objects: &DamageableMuzzleTargetQuery<'_, '_>,
 ) -> Vec<BlockedStraightDelivery> {
-    let DeliveryMethod::Straight {
+    let (DeliveryMethod::Straight {
         radius,
         muzzle_offset,
         ..
-    } = recipe.delivery
+    }
+    | DeliveryMethod::StickyStraight {
+        radius,
+        muzzle_offset,
+        ..
+    }) = recipe.delivery
     else {
         return Vec::new();
     };
@@ -267,6 +273,14 @@ fn emit_attack_deliveries(
             range,
             lifetime_ticks,
             muzzle_offset,
+        }
+        | DeliveryMethod::StickyStraight {
+            speed,
+            radius,
+            range,
+            lifetime_ticks,
+            muzzle_offset,
+            ..
         } => {
             let body = ProjectileBody::circle(radius);
             debug_assert!(body.shape.is_valid(), "validated straight projectile body");
@@ -280,6 +294,48 @@ fn emit_attack_deliveries(
                 {
                     let point = blocked.point;
                     let normal = blocked.normal;
+                    if matches!(recipe.delivery, DeliveryMethod::StickyStraight { .. }) {
+                        let sticky_entity = commands
+                            .spawn((
+                                source_component,
+                                ReplicatedAttackSource { attack: source },
+                                AttackDelivery {
+                                    attack_id,
+                                    delivery_index,
+                                },
+                                Position(point),
+                                Rotation::radians(angle),
+                                Replicate::to_clients(NetworkTarget::All),
+                                InterpolationTarget::to_clients(NetworkTarget::All),
+                            ))
+                            .id();
+                        let runtime = ComposedProjectileRuntime {
+                            owner_entity: entity,
+                            source_entity: entity,
+                            source,
+                            delivery_index,
+                            velocity: Vec2::from_angle(angle) * speed,
+                            travelled: origin.distance(point),
+                            expires_at_tick: tick.saturating_add(lifetime_ticks),
+                            maximum_range: range,
+                            landing: None,
+                            recipe: recipe.clone(),
+                        };
+                        let _ = sticky::arm_projectile(
+                            commands,
+                            sticky_entity,
+                            runtime,
+                            point,
+                            None,
+                            StickyBlobKind::Primary,
+                            tick,
+                        );
+                        if let Some(match_member) = match_member {
+                            commands.entity(sticky_entity).insert(match_member);
+                        }
+                        emitted_deliveries = emitted_deliveries.saturating_add(1);
+                        continue;
+                    }
                     if let Some(target) = blocked.target {
                         queue_blocked_world_target_damage(
                             target,
@@ -546,6 +602,7 @@ fn record_accepted_attack(
             facing,
             match recipe.delivery {
                 DeliveryMethod::Straight { muzzle_offset, .. }
+                | DeliveryMethod::StickyStraight { muzzle_offset, .. }
                 | DeliveryMethod::Lobbed { muzzle_offset, .. } => muzzle_offset,
                 DeliveryMethod::MeleeArc { .. } => 0.0,
             },
@@ -711,7 +768,32 @@ pub(super) fn authoritative_composed_fire(
             &muzzle_contacts.spatial_query,
             &muzzle_contacts.objects,
         );
-        let per_blocked_delivery_events = if legacy_compatibility { 2 } else { 1 };
+        let sticky_delivery = matches!(recipe.delivery, DeliveryMethod::StickyStraight { .. });
+        if sticky_delivery
+            && !blocked_deliveries.is_empty()
+            && let DeliveryMethod::StickyStraight {
+                max_active_per_owner,
+                ..
+            } = recipe.delivery
+        {
+            let owner_active = muzzle_contacts
+                .sticky_blobs
+                .iter()
+                .filter(|blob| blob.source.owner_network_entity_id == *network_id)
+                .count();
+            if owner_active >= usize::from(max_active_per_owner)
+                || muzzle_contacts.sticky_blobs.iter().count() >= sticky::MAX_ACTIVE_STICKY_BLOBS
+            {
+                continue;
+            }
+        }
+        let per_blocked_delivery_events = if sticky_delivery {
+            0
+        } else if legacy_compatibility {
+            2
+        } else {
+            1
+        };
         let event_count = 1
             + usize::from(legacy_compatibility)
             + blocked_deliveries.len() * per_blocked_delivery_events;
@@ -801,7 +883,11 @@ pub(super) fn authoritative_composed_fire(
                 origin,
                 facing,
                 ammo_after: state.ammo,
-                blocked_delivery_count: blocked_deliveries.len(),
+                blocked_delivery_count: if sticky_delivery {
+                    0
+                } else {
+                    blocked_deliveries.len()
+                },
                 emitted_deliveries,
                 recipe,
             },

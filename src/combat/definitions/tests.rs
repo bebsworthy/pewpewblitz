@@ -2,9 +2,9 @@
 
 use super::*;
 #[test]
-fn embedded_catalog_is_exactly_four_presets() {
+fn embedded_catalog_is_exactly_five_presets() {
     let catalog = WeaponCatalog::embedded().unwrap();
-    assert_eq!(catalog.presets.len(), 4);
+    assert_eq!(catalog.presets.len(), 5);
     assert_eq!(
         catalog.presets[1].configuration.recipe.payload_bundles[0]
             .effects

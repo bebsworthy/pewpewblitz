@@ -480,9 +480,33 @@ target's resolved Cold resistance and accumulate against that target's resolved 
 resistance passives add 30 percentage points to their matching baseline, clamped at 60%, rather
 than replacing it. Fire and Poison do not have capacities: they remain duration-based
 strongest-refresh damage-over-time conditions, so resistance is their fighter-owned tuning surface.
+The shared Cold lifecycle is separately authored as global combat-condition content: buildup waits
+90 ticks before decaying by 10 per authoritative tick, Freeze lasts 60 ticks, and thaw grants 90
+ticks of immunity by default. Balance Lab exposes these four global rules independently from
+fighter capacity and resistance; server systems consume the installed rule resource rather than
+code constants.
 While a fighter has positive Cold buildup, its projected overhead shows a compact cyan radial meter
 beside the health bar. The visual has no numeric label, uses the resolved target capacity as its
 denominator, and disappears when the buildup meter returns to zero or is consumed by Freeze.
+
+### Sticky Blomb and Big Blob
+
+Sticky Blomb is a straight primary projectile whose first fighter, obstacle, objective, or maximum-
+range contact arms a delayed one-shot area explosion. A fighter hit carries the blob and its future
+blast center until detonation; other contacts anchor it in the world. Its explosion deliberately
+ignores map occlusion while retaining hostile-recipient and target-eligibility rules. A second
+primary hit on the same carrier immediately detonates the existing primary and attaches the new
+blob. Ultimate secondary blobs do not trigger that chain rule.
+
+Every armed blob replicates its current center, source role, fuse interval, and authored radius.
+Clients render the full future-blast boundary plus a nonnumeric fill that grows with fuse progress;
+the telegraph follows an attached carrier and remains distinct from persistent field effects.
+
+Big Blob is an independently selectable targeted lob ultimate. The accepted landing uses the common
+range, bounds, gamepad distance, and map-clearance contract. Landing deals no damage itself: it
+consumes the parent and emits exactly six straight secondary Sticky Blombs at fixed 60-degree world-
+space intervals. Primary and secondary speed, range, collision size, fuse, blast radius, damage, and
+active ceilings are authored values rather than presentation or runtime constants.
 
 Cryogenic, Fire, Poison, and Restoration Field are targeted ultimates. Their replicated regions
 pulse immediately and on a fixed interval, use the same elemental rules as weapon delivery, remain

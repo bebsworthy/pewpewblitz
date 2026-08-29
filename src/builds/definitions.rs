@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 10;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 10;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 11;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 11;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -122,9 +122,9 @@ impl BuildCatalog {
             return Err("unsupported build catalog schema/revision".into());
         }
         self.validate_tuning()?;
-        if self.weapon_costs.len() != 4 || self.ultimates.len() != 10 || self.passives.len() != 9 {
+        if self.weapon_costs.len() != 5 || self.ultimates.len() != 11 || self.passives.len() != 9 {
             return Err(
-                "the build catalog requires four weapon costs, ten ultimates, and nine passives"
+                "the build catalog requires five weapon costs, eleven ultimates, and nine passives"
                     .into(),
             );
         }
@@ -135,6 +135,7 @@ impl BuildCatalog {
             (WeaponPresetId(2), 5),
             (WeaponPresetId(3), 5),
             (WeaponPresetId(4), 4),
+            (WeaponPresetId(5), 4),
         ];
         if !self
             .weapon_costs
@@ -281,6 +282,7 @@ fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(),
         (UltimateDefinitionId(8), UltimateKind::FireField, 4),
         (UltimateDefinitionId(9), UltimateKind::PoisonField, 4),
         (UltimateDefinitionId(10), UltimateKind::RestorationField, 4),
+        (UltimateDefinitionId(11), UltimateKind::BigBlob, 4),
     ];
     if !definitions
         .iter()
@@ -323,6 +325,23 @@ fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(),
                     UltimateParameters::DemolitionStrike {
                         maximum_range_milliunits: 1..=4_096_000,
                         radius_milliunits: 8_000..=64_000,
+                    }
+                )
+                | (
+                    UltimateKind::BigBlob,
+                    UltimateParameters::BigBlob {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        flight_ticks: 1..=600,
+                        visual_arc_height_milliunits: 1..=2_048_000,
+                        landing_clearance_milliunits: 1..=512_000,
+                        child_speed_milliunits: 1..=4_096_000,
+                        child_radius_milliunits: 1..=512_000,
+                        child_range_milliunits: 1..=4_096_000,
+                        child_lifetime_ticks: 1..=600,
+                        child_fuse_ticks: 1..=3_600,
+                        child_explosion_radius_milliunits: 1..=512_000,
+                        child_damage: 1..=1_000,
+                        max_active_per_owner: 1..=16,
                     }
                 )
                 | (

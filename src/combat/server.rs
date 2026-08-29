@@ -109,6 +109,16 @@ impl Plugin for ServerCombatPlugin {
                     sweep_composed_projectiles
                         .after(avian2d::prelude::PhysicsSystems::StepSimulation)
                         .in_set(CombatSet::ProjectileSweep),
+                    ApplyDeferred
+                        .after(sweep_composed_projectiles)
+                        .before(sticky::advance_sticky_attachments)
+                        .in_set(CombatSet::ProjectileSweep),
+                    sticky::advance_sticky_attachments
+                        .after(sweep_composed_projectiles)
+                        .in_set(CombatSet::ProjectileSweep),
+                    sticky::detonate_sticky_blobs
+                        .after(sticky::advance_sticky_attachments)
+                        .in_set(CombatSet::ProjectileSweep),
                     resolve_melee_attacks.in_set(CombatDamageSet::Combatants),
                     resolve_composed_payloads
                         .after(resolve_melee_attacks)

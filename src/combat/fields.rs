@@ -73,6 +73,7 @@ pub(crate) const fn field_kind_for_ultimate(
 pub(crate) fn pulse_and_cleanup_elemental_fields(
     mut commands: Commands,
     tick: Res<SimulationTick>,
+    condition_rules: Res<CombatConditionRulesResource>,
     mut ids: ResMut<NextCombatIds>,
     roots: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
     mut fields: Query<(Entity, &mut ElementalFieldState, &ElementalFieldRuntime)>,
@@ -175,6 +176,7 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                             amount,
                             loadout.fighter_stats.cold_resistance_basis_points,
                             loadout.fighter_stats.cold_capacity,
+                            condition_rules.0.freeze_duration_ticks,
                             pulse_tick,
                             runtime.source,
                         );

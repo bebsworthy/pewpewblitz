@@ -317,6 +317,10 @@ fn capture_observations(
             | crate::builds::UltimateParameters::ElementalField {
                 maximum_range_milliunits,
                 ..
+            }
+            | crate::builds::UltimateParameters::BigBlob {
+                maximum_range_milliunits,
+                ..
             } => {
                 crate::builds::world_units_from_milliunits(maximum_range_milliunits).unwrap_or(0.0)
             }
@@ -375,7 +379,8 @@ fn public_fighter_view(raw: &RawFighterView) -> BotFighterView {
 
 fn weapon_capabilities(loadout: &ResolvedMatchLoadout) -> (f32, f32) {
     match loadout.primary_weapon.recipe.delivery {
-        crate::combat::DeliveryMethod::Straight { speed, range, .. } => (range, speed),
+        crate::combat::DeliveryMethod::Straight { speed, range, .. }
+        | crate::combat::DeliveryMethod::StickyStraight { speed, range, .. } => (range, speed),
         crate::combat::DeliveryMethod::Lobbed { distance, .. } => (distance, 0.0),
         crate::combat::DeliveryMethod::MeleeArc { reach, .. } => (reach, 0.0),
     }

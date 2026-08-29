@@ -436,7 +436,7 @@ pub(crate) fn preview_primitives(
     dynamic: &[AimTraceDynamicBlocker],
 ) -> Vec<PreviewPrimitive> {
     let mut primitives = match resolved.recipe.delivery {
-        DeliveryMethod::Straight { .. } => {
+        DeliveryMethod::Straight { .. } | DeliveryMethod::StickyStraight { .. } => {
             straight_preview_primitives(origin, facing, resolved, index, dynamic)
         }
         DeliveryMethod::Lobbed {
@@ -470,12 +470,18 @@ fn straight_preview_primitives(
     index: &AimTraceBlockerIndex,
     dynamic: &[AimTraceDynamicBlocker],
 ) -> Vec<PreviewPrimitive> {
-    let DeliveryMethod::Straight {
+    let (DeliveryMethod::Straight {
         radius,
         range,
         muzzle_offset,
         ..
-    } = resolved.recipe.delivery
+    }
+    | DeliveryMethod::StickyStraight {
+        radius,
+        range,
+        muzzle_offset,
+        ..
+    }) = resolved.recipe.delivery
     else {
         return Vec::new();
     };

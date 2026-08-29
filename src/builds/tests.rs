@@ -24,9 +24,9 @@ fn recipe(weapon: u16, ultimate: u16, passives: [u16; 2]) -> BrawlerBuildRecipe 
 #[test]
 fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters() {
     let (builds, _, _) = catalogs();
-    assert_eq!(builds.balance_revision, BuildRevision(8));
-    assert_eq!(builds.weapon_costs.len(), 4);
-    assert_eq!(builds.ultimates.len(), 10);
+    assert_eq!(builds.balance_revision, BuildRevision(9));
+    assert_eq!(builds.weapon_costs.len(), 5);
+    assert_eq!(builds.ultimates.len(), 11);
     assert_eq!(builds.passives.len(), 9);
     assert_eq!(
         builds.ultimate(UltimateDefinitionId(3)).unwrap().parameters,
@@ -55,6 +55,26 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
         UltimateParameters::DemolitionStrike {
             maximum_range_milliunits: 520_000,
             radius_milliunits: 64_000,
+        }
+    );
+    assert_eq!(
+        builds
+            .ultimate(UltimateDefinitionId(11))
+            .unwrap()
+            .parameters,
+        UltimateParameters::BigBlob {
+            maximum_range_milliunits: 520_000,
+            flight_ticks: 45,
+            visual_arc_height_milliunits: 140_000,
+            landing_clearance_milliunits: 10_000,
+            child_speed_milliunits: 520_000,
+            child_radius_milliunits: 6_000,
+            child_range_milliunits: 213_440,
+            child_lifetime_ticks: 60,
+            child_fuse_ticks: 69,
+            child_explosion_radius_milliunits: 42_560,
+            child_damage: 140,
+            max_active_per_owner: 12,
         }
     );
 }

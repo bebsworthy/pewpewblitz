@@ -9,7 +9,10 @@ use super::*;
 #[cfg(feature = "server")]
 pub(super) fn legacy_compatibility_recipe(recipe: &WeaponRecipe) -> bool {
     matches!(recipe.firing, FiringPattern::Single)
-        && matches!(recipe.delivery, DeliveryMethod::Straight { .. })
+        && matches!(
+            recipe.delivery,
+            DeliveryMethod::Straight { .. } | DeliveryMethod::StickyStraight { .. }
+        )
         && matches!(
             recipe.payload_bundles.as_slice(),
             [PayloadBundleDefinition {

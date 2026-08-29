@@ -3,6 +3,7 @@ export type JsonValue = null | boolean | number | string | JsonObject | JsonValu
 export type EditorPath = (string | number)[];
 
 export type EditorSection =
+  | "global"
   | "fighters"
   | "weapons"
   | "ultimates"
@@ -50,6 +51,14 @@ export interface FighterProfiles extends JsonObject {
   reinforced: FighterStats;
 }
 
+export interface CombatConditionRules extends JsonObject {
+  schema_version: number;
+  cold_decay_delay_ticks: number;
+  cold_decay_per_tick: number;
+  freeze_duration_ticks: number;
+  thaw_immunity_ticks: number;
+}
+
 export interface WeaponTuning extends JsonObject {
   id: number;
   key: string;
@@ -81,6 +90,7 @@ export interface ChestTuning extends JsonObject {
 
 export interface BalanceLabSnapshot extends JsonObject {
   schemaVersion: number;
+  conditionRules: CombatConditionRules;
   fighterProfiles: FighterProfiles;
   weapons: WeaponTuning[];
   ultimates: UltimateTuning[];

@@ -32,12 +32,21 @@ pub fn resolve_configuration_with_policy(
         return Err("weapon limits exceed code-owned engine ceilings".to_string());
     }
     configuration.validate(&policy, limits, Some(fighter.body_radius))?;
-    if let DeliveryMethod::Straight {
-        radius,
-        muzzle_offset,
-        ..
-    } = configuration.recipe.delivery
-        && muzzle_offset < fighter.body_radius + radius
+    let straight_geometry = match configuration.recipe.delivery {
+        DeliveryMethod::Straight {
+            radius,
+            muzzle_offset,
+            ..
+        }
+        | DeliveryMethod::StickyStraight {
+            radius,
+            muzzle_offset,
+            ..
+        } => Some((radius, muzzle_offset)),
+        DeliveryMethod::Lobbed { .. } | DeliveryMethod::MeleeArc { .. } => None,
+    };
+    if straight_geometry
+        .is_some_and(|(radius, muzzle_offset)| muzzle_offset < fighter.body_radius + radius)
     {
         return Err("straight muzzle starts inside fighter".to_string());
     }
@@ -100,6 +109,13 @@ pub(super) fn normalize_recipe(recipe: &mut WeaponRecipe) {
     }
     match &mut recipe.delivery {
         DeliveryMethod::Straight {
+            speed,
+            radius,
+            range,
+            muzzle_offset,
+            ..
+        }
+        | DeliveryMethod::StickyStraight {
             speed,
             radius,
             range,

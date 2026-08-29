@@ -109,3 +109,20 @@ fn payload_target_gate_orders_kind_combat_and_protection_rules() {
         TargetGate::Apply
     );
 }
+
+#[cfg(feature = "server")]
+#[test]
+fn armed_sticky_detonation_survives_owner_disconnect_but_live_deliveries_do_not() {
+    use crate::combat::effects::planning::delivery_survives_owner_disconnect;
+
+    assert!(delivery_survives_owner_disconnect(
+        &PendingDeliveryKind::StickyDetonated {
+            position: WorldPoint::from(Vec2::ZERO),
+        }
+    ));
+    assert!(!delivery_survives_owner_disconnect(
+        &PendingDeliveryKind::LobLanded {
+            position: WorldPoint::from(Vec2::ZERO),
+        }
+    ));
+}

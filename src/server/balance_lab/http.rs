@@ -145,7 +145,7 @@ fn handle_request(
                 apply.expected_revision,
                 |id| BalanceLabCommand::Apply {
                     transaction_id: id,
-                    request: apply,
+                    request: Box::new(apply),
                 },
             );
         }

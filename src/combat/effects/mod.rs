@@ -146,6 +146,7 @@ pub(super) fn resolve_composed_payloads(
     mut gameplay_telemetry: AbilityWeaponTelemetry,
     mut transaction: CombatTransactionState,
     mut combat: CombatTargetState,
+    condition_rules: Res<CombatConditionRulesResource>,
 ) {
     // Stage one: collect and deterministically order this tick's payloads and deliveries.
     let batch = collect_composed_batch(&mut combat, payloads.read(), deliveries.read());
@@ -170,6 +171,7 @@ pub(super) fn resolve_composed_payloads(
     let mut reserved_events = reserved.into_iter();
 
     // Stage three: resolve deliveries, then apply every payload record against live state.
+    let retained_delivery_keys = batch.retained_delivery_keys();
     let ComposedBatch {
         disconnected,
         connected_owners,
@@ -193,6 +195,7 @@ pub(super) fn resolve_composed_payloads(
         connected_owners: &connected_owners,
         close_quarters_owners: &close_quarters_owners,
         records: &records,
+        retained_delivery_keys: &retained_delivery_keys,
     };
     let mut applied = AppliedComposedState::default();
     apply_composed_records(
@@ -206,6 +209,7 @@ pub(super) fn resolve_composed_payloads(
         &mut transaction,
         &mut applied,
         &mut resolved_delivery_keys,
+        condition_rules.0,
     );
 
     // Stage four: commit accumulated effects, deferred cues, and tracker completion.

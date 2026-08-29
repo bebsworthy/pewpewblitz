@@ -8,6 +8,7 @@ import type {
 import { EditorFieldRow } from "./EditorFieldRow";
 
 const sections: { key: EditorSection; label: string }[] = [
+  { key: "global", label: "Global" },
   { key: "fighters", label: "Fighters" },
   { key: "weapons", label: "Weapons" },
   { key: "ultimates", label: "Ultimates" },
@@ -16,6 +17,7 @@ const sections: { key: EditorSection; label: string }[] = [
 ];
 
 const sectionHelp: Record<EditorSection, string> = {
+  global: "Match-wide authoritative gameplay rules shared by every fighter.",
   fighters: "Creation profiles shared by saved brawlers.",
   weapons: "Authoritative weapon economy, delivery, payload, and world effects.",
   ultimates: "Concealment and reveal timing, targeting, and area rules.",
@@ -35,7 +37,7 @@ interface Props {
 }
 
 export function EditorWorkspace(props: Props) {
-  const [section, setSection] = useState<EditorSection>("fighters");
+  const [section, setSection] = useState<EditorSection>("global");
   const sectionFields = useMemo(
     () => props.fields.filter((field) => field.section === section),
     [props.fields, section],

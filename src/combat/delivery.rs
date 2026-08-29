@@ -127,6 +127,7 @@ pub(super) fn sweep_composed_projectiles(
         Option<&ProjectileBody>,
         Option<&LobbedFlight>,
     )>,
+    mut sticky_blobs: Query<(&mut StickyBlobState, &StickyBlobRuntime)>,
     fighters: Query<
         (
             Entity,
@@ -184,6 +185,15 @@ pub(super) fn sweep_composed_projectiles(
     // ArenaWall entities) and destructible chunk colliders alike, so cover works and
     // carved lanes are the only way through.
     let blocking_geometry: HashSet<Entity> = walls.iter().collect();
+    let mut active_sticky_by_owner: HashMap<u64, usize> = HashMap::new();
+    let mut active_sticky_total = 0_usize;
+    let mut newly_attached_primaries: HashMap<u64, Entity> = HashMap::new();
+    for (_, runtime) in &sticky_blobs {
+        *active_sticky_by_owner
+            .entry(runtime.source.owner_network_entity_id.0)
+            .or_default() += 1;
+        active_sticky_total = active_sticky_total.saturating_add(1);
+    }
     let mut ordered: Vec<_> = projectiles.iter_mut().collect();
     ordered.sort_by_key(|(_, _, runtime, _, lob)| {
         (
@@ -266,6 +276,34 @@ pub(super) fn sweep_composed_projectiles(
             continue;
         }
         if tick.0 >= runtime.expires_at_tick || runtime.travelled >= runtime.maximum_range {
+            if let Some((_, max_active, _)) = sticky::sticky_delivery_parameters(&runtime.recipe) {
+                let owner_active = active_sticky_by_owner
+                    .get(&runtime.source.owner_network_entity_id.0)
+                    .copied()
+                    .unwrap_or_default();
+                if owner_active < usize::from(max_active)
+                    && active_sticky_total < sticky::MAX_ACTIVE_STICKY_BLOBS
+                    && sticky::arm_projectile(
+                        &mut commands,
+                        entity,
+                        (*runtime).clone(),
+                        position.0,
+                        None,
+                        if matches!(runtime.source.kind, CombatSourceKind::PrimaryWeapon) {
+                            StickyBlobKind::Primary
+                        } else {
+                            StickyBlobKind::UltimateSecondary
+                        },
+                        tick.0,
+                    )
+                {
+                    *active_sticky_by_owner
+                        .entry(runtime.source.owner_network_entity_id.0)
+                        .or_default() += 1;
+                    active_sticky_total = active_sticky_total.saturating_add(1);
+                    continue;
+                }
+            }
             record_delivery_termination(
                 &mut ids,
                 &mut telemetry,
@@ -331,6 +369,13 @@ pub(super) fn sweep_composed_projectiles(
                     |(_, team, _, defeated, owner_disconnected)| {
                         runtime.recipe.payload_bundles.iter().any(|bundle| {
                             matches!(bundle.target, TargetSelection::Direct)
+                                || (matches!(
+                                    runtime.recipe.delivery,
+                                    DeliveryMethod::StickyStraight { .. }
+                                ) && matches!(bundle.target, TargetSelection::Area { .. }))
+                        }) && runtime.recipe.payload_bundles.iter().any(|bundle| {
+                            (matches!(bundle.target, TargetSelection::Direct)
+                                || matches!(bundle.target, TargetSelection::Area { .. }))
                                 && fighter_lookup.get(&candidate).is_some_and(
                                     |(_, _, network_id, _, _)| {
                                         payload_can_affect_target(
@@ -356,6 +401,70 @@ pub(super) fn sweep_composed_projectiles(
         };
         runtime.travelled += hit.distance.clamp(0.0, step);
         let target = fighter_lookup.get(&hit.entity).copied();
+        if let Some((_, max_active, explosion_radius)) =
+            sticky::sticky_delivery_parameters(&runtime.recipe)
+        {
+            let owner_active = active_sticky_by_owner
+                .get(&runtime.source.owner_network_entity_id.0)
+                .copied()
+                .unwrap_or_default();
+            if owner_active < usize::from(max_active)
+                && active_sticky_total < sticky::MAX_ACTIVE_STICKY_BLOBS
+            {
+                let attached_to = target
+                    .and_then(|(_, _, network_id, defeated, _)| (!defeated).then_some(network_id));
+                let kind = if matches!(runtime.source.kind, CombatSourceKind::PrimaryWeapon) {
+                    StickyBlobKind::Primary
+                } else {
+                    StickyBlobKind::UltimateSecondary
+                };
+                if kind == StickyBlobKind::Primary
+                    && let Some(target_network_id) = attached_to
+                {
+                    for (mut existing, _) in &mut sticky_blobs {
+                        if sticky::primary_impact_triggers_existing(
+                            kind,
+                            *existing,
+                            target_network_id,
+                        ) {
+                            existing.detonates_at_tick = tick.0;
+                        }
+                    }
+                    if let Some(previous) =
+                        newly_attached_primaries.get(&target_network_id.0).copied()
+                    {
+                        commands.entity(previous).insert(StickyBlobState {
+                            kind: StickyBlobKind::Primary,
+                            attached_to: Some(target_network_id),
+                            armed_at_tick: tick.0,
+                            detonates_at_tick: tick.0,
+                            explosion_radius,
+                        });
+                    }
+                }
+                let armed_position = target.map_or(hit.point2, |(position, ..)| position);
+                if sticky::arm_projectile(
+                    &mut commands,
+                    entity,
+                    (*runtime).clone(),
+                    armed_position,
+                    attached_to,
+                    kind,
+                    tick.0,
+                ) {
+                    if kind == StickyBlobKind::Primary
+                        && let Some(target_network_id) = attached_to
+                    {
+                        newly_attached_primaries.insert(target_network_id.0, entity);
+                    }
+                    *active_sticky_by_owner
+                        .entry(runtime.source.owner_network_entity_id.0)
+                        .or_default() += 1;
+                    active_sticky_total = active_sticky_total.saturating_add(1);
+                    continue;
+                }
+            }
+        }
         if let Some((target_position, target_team, target_network_id, defeated, _)) = target
             && !defeated
         {

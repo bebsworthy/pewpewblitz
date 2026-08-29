@@ -149,10 +149,6 @@ done
 
 if [[ "$mode" == balance-lab ]]; then
     balance_lab_url="http://$balance_lab_addr"
-    if ! open "$balance_lab_url"; then
-        printf 'brawler dev: could not open the default browser; open %s manually\n' \
-            "$balance_lab_url" >&2
-    fi
     (
         while kill -0 "$supervisor_pid" 2>/dev/null; do
             if curl --fail --silent --max-time 1 --output /dev/null "$balance_lab_url"; then
@@ -166,7 +162,7 @@ if [[ "$mode" == balance-lab ]]; then
         done
     ) &
     browser_launcher_pid=$!
-    printf 'brawler dev: running Balance Lab at %s and one interactive client against %s; the page is reopened when Practice is ready; press Ctrl-C to stop both\n' \
+    printf 'brawler dev: running Balance Lab at %s and one interactive client against %s; the page opens when Practice is ready; press Ctrl-C to stop both\n' \
         "$balance_lab_addr" "$bind_addr"
 else
     printf 'brawler dev: running %s interactive client(s) against %s with stable slots under %s; press Ctrl-C to stop\n' \

@@ -220,6 +220,28 @@ pub struct ProjectileDeadline {
     pub expires_at_tick: u64,
 }
 
+/// Public source role for an armed Sticky Blomb. The role is part of the chain-detonation rule:
+/// only a new primary impact may detonate an already attached primary.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StickyBlobKind {
+    Primary,
+    UltimateSecondary,
+}
+
+/// Replicated, bounded state for one armed delayed explosion.
+///
+/// `Position` carries the current authoritative center. When `attached_to` is present the server
+/// updates that center from the carrier every fixed tick; clients use the radius and deadline to
+/// draw the mandatory moving future-blast telegraph.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct StickyBlobState {
+    pub kind: StickyBlobKind,
+    pub attached_to: Option<NetworkEntityId>,
+    pub armed_at_tick: u64,
+    pub detonates_at_tick: u64,
+    pub explosion_radius: f32,
+}
+
 /// Latest server-computed fighter pose carried without client interpolation for evidence and
 /// late-join auditing. The ordinary Position/Rotation pair remains the presentation pose.
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -455,6 +477,14 @@ pub struct ComposedProjectileRuntime {
 }
 
 #[cfg(feature = "server")]
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct StickyBlobRuntime {
+    pub source: AttackSource,
+    pub delivery_index: u8,
+    pub recipe: WeaponRecipe,
+}
+
+#[cfg(feature = "server")]
 #[derive(Message, Clone, Debug, PartialEq)]
 pub struct MeleeAttack {
     pub source: AttackSource,
@@ -539,6 +569,9 @@ pub enum PendingDeliveryKind {
         distance_band: DistanceBand,
     },
     LobLanded {
+        position: WorldPoint,
+    },
+    StickyDetonated {
         position: WorldPoint,
     },
     MeleeContact {

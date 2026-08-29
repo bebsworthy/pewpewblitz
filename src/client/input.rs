@@ -200,14 +200,18 @@ pub(super) fn sample_local_input(
                     buttons |= FighterInput::ULTIMATE;
                 }
                 let shaped_aim = right.is_finite().then(|| settings.shape_aim(right));
+                let aim_range = controlled_gamepad_aim_range(
+                    &fighters,
+                    pending.targeted_ultimate,
+                    buttons & FighterInput::ULTIMATE != 0,
+                );
                 (
                     settings.shape_move(left),
                     shaped_aim.flatten(),
                     shaped_aim
                         .is_some()
                         .then(|| {
-                            controlled_lob_range(&fighters)
-                                .and_then(|range| settings.shape_aim_distance(right, range))
+                            aim_range.and_then(|range| settings.shape_aim_distance(right, range))
                         })
                         .flatten(),
                     buttons,
@@ -613,20 +617,50 @@ pub(super) fn advance_headless_automation(
     clippy::type_complexity,
     reason = "the query declares this system's complete world view inline at its schedule boundary"
 )]
-fn controlled_lob_range(
+fn controlled_gamepad_aim_range(
     fighters: &Query<
         (&Position, Option<&crate::builds::ResolvedMatchLoadout>),
         (With<Fighter>, With<Controlled>),
     >,
+    targeted_ultimate: TargetedUltimateInput,
+    ultimate_button_pressed: bool,
 ) -> Option<f32> {
-    fighters
-        .iter()
-        .next()?
-        .1
-        .map(|loadout| match loadout.primary_weapon.recipe.delivery {
-            crate::combat::DeliveryMethod::Lobbed { distance, .. } => Some(distance),
-            _ => None,
-        })?
+    let loadout = fighters.iter().next()?.1?;
+    if (ultimate_button_pressed || targeted_ultimate.is_targeting(loadout.ultimate.id))
+        && loadout.ultimate.kind.activation_style()
+            == crate::builds::UltimateActivationStyle::Targeted
+    {
+        let maximum_range_milliunits = match loadout.ultimate.parameters {
+            crate::builds::UltimateParameters::RevealScan {
+                maximum_range_milliunits,
+                ..
+            }
+            | crate::builds::UltimateParameters::ConcealmentField {
+                maximum_range_milliunits,
+                ..
+            }
+            | crate::builds::UltimateParameters::DemolitionStrike {
+                maximum_range_milliunits,
+                ..
+            }
+            | crate::builds::UltimateParameters::ElementalField {
+                maximum_range_milliunits,
+                ..
+            }
+            | crate::builds::UltimateParameters::BigBlob {
+                maximum_range_milliunits,
+                ..
+            } => maximum_range_milliunits,
+            crate::builds::UltimateParameters::Dash
+            | crate::builds::UltimateParameters::Sentry
+            | crate::builds::UltimateParameters::SelfCloak { .. } => return None,
+        };
+        return crate::builds::world_units_from_milliunits(maximum_range_milliunits);
+    }
+    match loadout.primary_weapon.recipe.delivery {
+        crate::combat::DeliveryMethod::Lobbed { distance, .. } => Some(distance),
+        _ => None,
+    }
 }
 
 #[allow(

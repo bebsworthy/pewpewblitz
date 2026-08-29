@@ -1,0 +1,7 @@
+(
+    schema_version: 1,
+    cold_decay_delay_ticks: 90,
+    cold_decay_per_tick: 10,
+    freeze_duration_ticks: 60,
+    thaw_immunity_ticks: 90,
+)

@@ -9,11 +9,6 @@ use super::*;
 use avian2d::prelude::{CollisionLayers, Position};
 use bevy::prelude::*;
 
-pub(crate) const COLD_DECAY_DELAY_TICKS: u64 = 90;
-pub(crate) const COLD_DECAY_PER_TICK: u16 = 10;
-pub(crate) const FREEZE_TICKS: u64 = 60;
-pub(crate) const THAW_IMMUNITY_TICKS: u64 = 90;
-
 #[must_use]
 pub(crate) fn condition_damage_source(source: ConditionSource) -> DamageSource {
     match source.kind {
@@ -51,6 +46,34 @@ pub(crate) fn condition_damage_source(source: ConditionSource) -> DamageSource {
     }
 }
 
+pub(crate) fn advance_cold_lifecycle(cold: &mut ColdState, tick: u64, rules: CombatConditionRules) {
+    if cold
+        .frozen_until_tick
+        .is_some_and(|deadline| tick >= deadline)
+    {
+        cold.frozen_until_tick = None;
+        cold.immunity_until_tick = Some(tick.saturating_add(rules.thaw_immunity_ticks));
+        cold.source = None;
+    }
+    if cold
+        .immunity_until_tick
+        .is_some_and(|deadline| tick >= deadline)
+    {
+        cold.immunity_until_tick = None;
+    }
+    if cold.meter != 0
+        && tick
+            >= cold
+                .last_contribution_tick
+                .saturating_add(rules.cold_decay_delay_ticks)
+    {
+        cold.meter = cold.meter.saturating_sub(rules.cold_decay_per_tick);
+        if cold.meter == 0 {
+            cold.source = None;
+        }
+    }
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -61,6 +84,7 @@ pub(crate) fn condition_damage_source(source: ConditionSource) -> DamageSource {
 pub(crate) fn advance_conditions(
     mut commands: Commands,
     tick: Res<SimulationTick>,
+    condition_rules: Res<CombatConditionRulesResource>,
     mut ids: ResMut<NextCombatIds>,
     mut facts: ResMut<CombatOutcomeFacts>,
     mut outbox: ResMut<CombatOutbox>,
@@ -237,40 +261,117 @@ pub(crate) fn advance_conditions(
             continue;
         }
 
-        if effects.is_frozen(tick.0) {
-            if matches!(ability.phase, crate::builds::AbilityPhase::Dashing { .. }) {
-                ability.phase = crate::abilities::settled_ability_phase(ability.charge);
-                commands
-                    .entity(entity)
-                    .remove::<crate::abilities::DashRuntime>();
-            }
-        } else if effects
-            .cold
-            .frozen_until_tick
-            .is_some_and(|deadline| tick.0 >= deadline)
+        if effects.is_frozen(tick.0)
+            && matches!(ability.phase, crate::builds::AbilityPhase::Dashing { .. })
         {
-            effects.cold.frozen_until_tick = None;
-            effects.cold.immunity_until_tick = Some(tick.0.saturating_add(THAW_IMMUNITY_TICKS));
-            effects.cold.source = None;
+            ability.phase = crate::abilities::settled_ability_phase(ability.charge);
+            commands
+                .entity(entity)
+                .remove::<crate::abilities::DashRuntime>();
         }
-        if effects
-            .cold
-            .immunity_until_tick
-            .is_some_and(|deadline| tick.0 >= deadline)
-        {
-            effects.cold.immunity_until_tick = None;
+        advance_cold_lifecycle(&mut effects.cold, tick.0, condition_rules.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn field_source() -> ConditionSource {
+        ConditionSource {
+            action_id: AttackId(7),
+            kind: CombatSourceKind::Ultimate {
+                ultimate_id: crate::builds::UltimateDefinitionId(8),
+            },
+            player_id: PlayerId(1),
+            network_entity_id: NetworkEntityId(1),
+            team_id: TeamId(0),
+            source_preset_id: None,
+            recipe_fingerprint: None,
+            presentation_profile_id: None,
         }
-        if effects.cold.meter != 0
-            && tick.0
-                >= effects
-                    .cold
-                    .last_contribution_tick
-                    .saturating_add(COLD_DECAY_DELAY_TICKS)
-        {
-            effects.cold.meter = effects.cold.meter.saturating_sub(COLD_DECAY_PER_TICK);
-            if effects.cold.meter == 0 {
-                effects.cold.source = None;
-            }
-        }
+    }
+
+    fn refresh_due_fire(mut fighters: Query<&mut ActiveEffects, With<Fighter>>) {
+        let mut effects = fighters.single_mut().expect("one test fighter");
+        effects::refresh_damage_over_time(&mut effects.fire, field_source(), 18, 30, 30, 90);
+    }
+
+    #[test]
+    fn authored_rules_drive_decay_thaw_and_immunity() {
+        let mut rules = CombatConditionRules::embedded().unwrap();
+        rules.cold_decay_delay_ticks = 5;
+        rules.cold_decay_per_tick = 40;
+        rules.thaw_immunity_ticks = 7;
+
+        let mut cold = ColdState {
+            meter: 100,
+            last_contribution_tick: 10,
+            frozen_until_tick: Some(20),
+            immunity_until_tick: None,
+            source: None,
+        };
+        advance_cold_lifecycle(&mut cold, 14, rules);
+        assert_eq!(cold.meter, 100);
+        assert_eq!(cold.frozen_until_tick, Some(20));
+
+        advance_cold_lifecycle(&mut cold, 20, rules);
+        assert_eq!(cold.meter, 60);
+        assert_eq!(cold.frozen_until_tick, None);
+        assert_eq!(cold.immunity_until_tick, Some(27));
+
+        advance_cold_lifecycle(&mut cold, 27, rules);
+        assert_eq!(cold.meter, 20);
+        assert_eq!(cold.immunity_until_tick, None);
+        advance_cold_lifecycle(&mut cold, 28, rules);
+        assert_eq!(cold.meter, 0);
+    }
+
+    #[test]
+    fn due_fire_field_refresh_does_not_prevent_condition_damage() {
+        let mut app = App::new();
+        app.insert_resource(SimulationTick(30))
+            .init_resource::<CombatConditionRulesResource>()
+            .init_resource::<NextCombatIds>()
+            .init_resource::<CombatOutcomeFacts>()
+            .init_resource::<CombatOutbox>()
+            .init_resource::<CombatTelemetry>()
+            .init_resource::<WeaponTelemetry>()
+            .add_systems(Update, (refresh_due_fire, advance_conditions).chain());
+        let fighter = app
+            .world_mut()
+            .spawn((
+                Fighter,
+                NetworkEntityId(2),
+                TeamId(1),
+                Position(Vec2::ZERO),
+                CurrentHealth(100),
+                ActiveEffects {
+                    fire: Some(DamageOverTime {
+                        source: field_source(),
+                        damage_per_tick: 18,
+                        tick_interval: 30,
+                        next_tick: 30,
+                        expires_at_tick: 90,
+                    }),
+                    ..default()
+                },
+                crate::builds::AbilityState::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<CurrentHealth>(fighter),
+            Some(&CurrentHealth(82))
+        );
+        let fire = app
+            .world()
+            .get::<ActiveEffects>(fighter)
+            .and_then(|effects| effects.fire)
+            .expect("Fire remains active after its due tick");
+        assert_eq!(fire.next_tick, 60);
+        assert_eq!(fire.expires_at_tick, 120);
     }
 }

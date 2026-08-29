@@ -4,7 +4,9 @@
 //! modules.
 
 #![allow(clippy::wildcard_imports)]
-use super::planning::{pending_delivery_kind_order, required_payload_event_count};
+use super::planning::{
+    delivery_survives_owner_disconnect, pending_delivery_kind_order, required_payload_event_count,
+};
 use super::runtime::*;
 use super::*;
 
@@ -23,6 +25,7 @@ pub(super) struct BatchView<'a> {
     pub(super) connected_owners: &'a HashSet<u64>,
     pub(super) close_quarters_owners: &'a HashSet<u64>,
     pub(super) records: &'a [PendingPayload],
+    pub(super) retained_delivery_keys: &'a HashSet<(AttackId, u8)>,
 }
 
 /// Mutable per-tick application state accumulated across records and committed once at
@@ -95,6 +98,16 @@ pub(super) fn collect_composed_batch<'a>(
         close_quarters_owners,
         records,
         deliveries,
+    }
+}
+
+impl ComposedBatch {
+    pub(super) fn retained_delivery_keys(&self) -> HashSet<(AttackId, u8)> {
+        self.deliveries
+            .iter()
+            .filter(|delivery| delivery_survives_owner_disconnect(&delivery.kind))
+            .map(|delivery| (delivery.source.attack_id, delivery.delivery_index))
+            .collect()
     }
 }
 
@@ -202,6 +215,7 @@ pub(super) fn apply_composed_records(
     transaction: &mut CombatTransactionState,
     applied: &mut AppliedComposedState,
     resolved_delivery_keys: &mut HashSet<(AttackId, u8)>,
+    condition_rules: CombatConditionRules,
 ) {
     for record in batch.records {
         // Hold the mutable target view for this record; the disjoint match/passive/sentry
@@ -211,6 +225,9 @@ pub(super) fn apply_composed_records(
         if !batch
             .connected_owners
             .contains(&record.source.owner_network_entity_id.0)
+            && !batch
+                .retained_delivery_keys
+                .contains(&(record.source.attack_id, record.delivery_index))
         {
             trackers.active.remove(&record.source.attack_id);
             continue;
@@ -539,6 +556,7 @@ pub(super) fn apply_composed_records(
             motion_state,
             tenacity,
             cold_capacity,
+            condition_rules.freeze_duration_ticks,
             cold_resistance,
             poison_resistance,
             fire_resistance,

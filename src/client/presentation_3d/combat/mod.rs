@@ -16,7 +16,8 @@ pub(super) use effects::{
 pub(super) use entities::{
     reconcile_concealment_field_visuals, reconcile_elemental_field_visuals,
     reconcile_fighter_visuals, reconcile_projectile_visuals, reconcile_sentry_visuals,
-    write_fighter_visual_poses, write_projectile_visual_poses, write_sentry_visual_poses,
+    reconcile_sticky_blob_visuals, update_sticky_blob_fuse_progress, write_fighter_visual_poses,
+    write_projectile_visual_poses, write_sentry_visual_poses, write_sticky_blob_visual_poses,
 };
 pub(super) use fighter_feedback::{
     ConcealedMaterialVariants, reconcile_dash_trails, reconcile_status_visuals,

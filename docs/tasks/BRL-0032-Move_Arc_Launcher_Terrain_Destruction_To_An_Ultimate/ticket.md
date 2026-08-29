@@ -1,14 +1,14 @@
 ---
 id: BRL-0032
 title: Move Arc Launcher terrain destruction to an ultimate
-status: doing
+status: done
 theme: core
 release:
 priority: urgent
 created: 2026-08-28T09:38:23Z
-modified: 2026-08-28T14:03:56Z
-closed:
-revision: 504b1634b3f6232f
+modified: 2026-08-28T16:46:59Z
+closed: 2026-08-28T16:46:59Z
+revision: dd9beedc110840e5
 blocks: []
 related: [BRL-0043, BRL-0044]
 ---

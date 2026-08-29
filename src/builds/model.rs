@@ -110,6 +110,7 @@ pub enum UltimateKind {
     FireField,
     PoisonField,
     RestorationField,
+    BigBlob,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,7 +130,8 @@ impl UltimateKind {
             | Self::CryogenicField
             | Self::FireField
             | Self::PoisonField
-            | Self::RestorationField => UltimateActivationStyle::Targeted,
+            | Self::RestorationField
+            | Self::BigBlob => UltimateActivationStyle::Targeted,
         }
     }
 }
@@ -161,6 +163,20 @@ pub enum UltimateParameters {
         duration_ticks: u64,
         pulse_interval_ticks: u64,
         effect: ElementalFieldEffect,
+    },
+    BigBlob {
+        maximum_range_milliunits: u32,
+        flight_ticks: u64,
+        visual_arc_height_milliunits: u32,
+        landing_clearance_milliunits: u32,
+        child_speed_milliunits: u32,
+        child_radius_milliunits: u32,
+        child_range_milliunits: u32,
+        child_lifetime_ticks: u64,
+        child_fuse_ticks: u64,
+        child_explosion_radius_milliunits: u32,
+        child_damage: u16,
+        max_active_per_owner: u8,
     },
 }
 

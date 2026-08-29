@@ -145,6 +145,7 @@ pub(crate) fn apply_cold_contribution(
     authored_amount: u16,
     resistance_basis_points: u16,
     capacity: u16,
+    freeze_duration_ticks: u64,
     tick: u64,
     source: ConditionSource,
 ) -> bool {
@@ -157,7 +158,7 @@ pub(crate) fn apply_cold_contribution(
         return false;
     }
     cold.meter = 0;
-    cold.frozen_until_tick = Some(tick.saturating_add(conditions::FREEZE_TICKS));
+    cold.frozen_until_tick = Some(tick.saturating_add(freeze_duration_ticks));
     cold.immunity_until_tick = None;
     true
 }
@@ -180,7 +181,11 @@ pub(crate) fn refresh_damage_over_time(
     match slot {
         None => *slot = Some(next),
         Some(current) if damage_per_tick > current.damage_per_tick => *slot = Some(next),
-        Some(current) if damage_per_tick == current.damage_per_tick => *current = next,
+        Some(current) if damage_per_tick == current.damage_per_tick => {
+            current.source = source;
+            current.tick_interval = tick_interval;
+            current.expires_at_tick = current.expires_at_tick.max(next.expires_at_tick);
+        }
         Some(_) => {}
     }
 }
@@ -238,6 +243,7 @@ pub(super) fn apply_runtime_effects(
     mut motion_state: Option<ExternalMotion>,
     tenacity: bool,
     cold_capacity: u16,
+    freeze_duration_ticks: u64,
     cold_resistance_basis_points: u16,
     poison_resistance_basis_points: u16,
     fire_resistance_basis_points: u16,
@@ -411,6 +417,7 @@ pub(super) fn apply_runtime_effects(
                     amount,
                     cold_resistance_basis_points,
                     cold_capacity,
+                    freeze_duration_ticks,
                     tick,
                     record.source.into(),
                 );
@@ -516,6 +523,7 @@ mod elemental_tests {
             125,
             0,
             250,
+            45,
             10,
             source(1),
         ));
@@ -525,11 +533,12 @@ mod elemental_tests {
             125,
             0,
             250,
+            45,
             20,
             source(2),
         ));
         assert_eq!(cold.meter, 0);
-        assert_eq!(cold.frozen_until_tick, Some(20 + conditions::FREEZE_TICKS));
+        assert_eq!(cold.frozen_until_tick, Some(65));
 
         let mut resistant = ColdState::default();
         assert!(!apply_cold_contribution(
@@ -537,6 +546,7 @@ mod elemental_tests {
             125,
             3_000,
             100,
+            45,
             30,
             source(3),
         ));
@@ -553,7 +563,19 @@ mod elemental_tests {
         refresh_damage_over_time(&mut slot, source(3), 10, 30, 20, 120);
         let refreshed = slot.expect("condition");
         assert_eq!(refreshed.source.action_id, AttackId(3));
-        assert_eq!(refreshed.next_tick, 50);
+        assert_eq!(refreshed.next_tick, 35);
         assert_eq!(refreshed.expires_at_tick, 140);
+    }
+
+    #[test]
+    fn equal_field_refresh_at_due_tick_does_not_postpone_damage() {
+        let mut slot = None;
+        refresh_damage_over_time(&mut slot, source(1), 18, 30, 0, 90);
+        assert_eq!(slot.expect("initial field condition").next_tick, 30);
+
+        refresh_damage_over_time(&mut slot, source(1), 18, 30, 30, 90);
+        let refreshed = slot.expect("refreshed field condition");
+        assert_eq!(refreshed.next_tick, 30);
+        assert_eq!(refreshed.expires_at_tick, 120);
     }
 }

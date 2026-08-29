@@ -17,6 +17,28 @@ pub(in super::super) struct ConcealmentFieldVisual3d;
 pub(in super::super) struct ElementalFieldVisual3d;
 
 #[derive(Component)]
+pub(in super::super) struct StickyBlobVisual3d;
+
+#[derive(Component)]
+pub(in super::super) struct StickyFuseProgressVisual3d {
+    owner: Entity,
+    explosion_radius: f32,
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "validated fuse deadlines are bounded far below f32 integer precision"
+)]
+fn sticky_fuse_progress(state: crate::combat::StickyBlobState, tick: u64) -> f32 {
+    let duration = state
+        .detonates_at_tick
+        .saturating_sub(state.armed_at_tick)
+        .max(1);
+    let elapsed = tick.saturating_sub(state.armed_at_tick).min(duration);
+    (elapsed as f32 / duration as f32).clamp(0.02, 1.0)
+}
+
+#[derive(Component)]
 pub(in super::super) struct FighterGroundMarker3d {
     owner: Entity,
 }
@@ -269,6 +291,127 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
     for (root, owner) in &visuals {
         if fields.get(owner.0).is_err() {
             commands.entity(root).despawn();
+        }
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+pub(in super::super) fn reconcile_sticky_blob_visuals(
+    mut commands: Commands,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    blobs: Query<(Entity, &Position, &crate::combat::StickyBlobState)>,
+    visuals: Query<(Entity, &CombatVisualOwner), With<StickyBlobVisual3d>>,
+) {
+    let roots = unique_roots(&mut commands, &visuals);
+    for (owner, position, state) in &blobs {
+        if roots.contains(&owner) {
+            continue;
+        }
+        let blob_scale = match state.kind {
+            crate::combat::StickyBlobKind::Primary => 9.0,
+            crate::combat::StickyBlobKind::UltimateSecondary => 6.0,
+        };
+        let root = commands
+            .spawn((
+                CombatVisualOwner(owner),
+                StickyBlobVisual3d,
+                Transform::from_translation(ground_position(position.0)),
+                Visibility::default(),
+                Name::new("Sticky Blomb armed visual root"),
+            ))
+            .id();
+        commands.entity(root).with_children(|parent| {
+            parent.spawn((
+                Mesh3d(primitives.effect_sphere.clone()),
+                MeshMaterial3d(materials.sticky_blob.clone()),
+                NotShadowCaster,
+                Transform::from_xyz(0.0, blob_scale, 0.0).with_scale(Vec3::splat(blob_scale)),
+                Name::new("Sticky Blomb armed body"),
+            ));
+            parent.spawn((
+                Mesh3d(primitives.area_ring.clone()),
+                MeshMaterial3d(materials.sticky_warning.clone()),
+                NotShadowCaster,
+                NotShadowReceiver,
+                Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.8, 0.0)
+                    .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(state.explosion_radius)),
+                Name::new("Sticky Blomb future explosion boundary"),
+            ));
+            parent.spawn((
+                Mesh3d(primitives.area_disc.clone()),
+                MeshMaterial3d(materials.sticky_warning.clone()),
+                NotShadowCaster,
+                NotShadowReceiver,
+                StickyFuseProgressVisual3d {
+                    owner,
+                    explosion_radius: state.explosion_radius,
+                },
+                Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.6, 0.0)
+                    .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(state.explosion_radius * 0.02)),
+                Name::new("Sticky Blomb fuse progress fill"),
+            ));
+        });
+    }
+    for (root, owner) in &visuals {
+        if blobs.get(owner.0).is_err() {
+            commands.entity(root).despawn();
+        }
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+pub(in super::super) fn update_sticky_blob_fuse_progress(
+    authoritative_ticks: Query<&AuthoritativeTick>,
+    blobs: Query<&crate::combat::StickyBlobState>,
+    mut fills: Query<(&StickyFuseProgressVisual3d, &mut Transform)>,
+) {
+    let tick = authoritative_ticks
+        .iter()
+        .map(|tick| tick.0)
+        .max()
+        .unwrap_or_default();
+    for (fill, mut transform) in &mut fills {
+        let Ok(state) = blobs.get(fill.owner) else {
+            continue;
+        };
+        let progress = sticky_fuse_progress(*state, tick);
+        transform.scale = Vec3::splat(fill.explosion_radius * progress);
+    }
+}
+
+#[cfg(test)]
+mod sticky_visual_tests {
+    use super::*;
+
+    #[test]
+    fn fuse_fill_reaches_full_radius_at_the_authoritative_deadline() {
+        let state = crate::combat::StickyBlobState {
+            kind: crate::combat::StickyBlobKind::Primary,
+            attached_to: None,
+            armed_at_tick: 20,
+            detonates_at_tick: 89,
+            explosion_radius: 85.44,
+        };
+        assert!((sticky_fuse_progress(state, 20) - 0.02).abs() < f32::EPSILON);
+        assert!((sticky_fuse_progress(state, 89) - 1.0).abs() < f32::EPSILON);
+        assert!((sticky_fuse_progress(state, 200) - 1.0).abs() < f32::EPSILON);
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
+pub(in super::super) fn write_sticky_blob_visual_poses(
+    blobs: Query<&Position, With<crate::combat::StickyBlobState>>,
+    mut visuals: Query<
+        (&CombatVisualOwner, &mut Transform),
+        (With<StickyBlobVisual3d>, Without<V3ProjectileVisual>),
+    >,
+) {
+    for (owner, mut transform) in &mut visuals {
+        if let Ok(position) = blobs.get(owner.0) {
+            transform.translation = ground_position(position.0);
         }
     }
 }

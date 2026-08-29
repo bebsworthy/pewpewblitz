@@ -23,7 +23,8 @@ use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
     CombatEvidenceCheckpoint, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback,
     LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline, ProjectileSource,
-    ReplicatedAttackSource, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
+    ReplicatedAttackSource, StickyBlobState, StraightFlight, TeamId, WeaponDefinitionId,
+    WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -653,6 +654,7 @@ fn register_replicated_components(app: &mut App) {
     app.component::<AttackDelivery>().replicate_once();
     app.component::<LobbedFlight>().replicate_once();
     app.component::<ProjectileDeadline>().replicate_once();
+    app.component::<StickyBlobState>().replicate();
     app.component::<StraightFlight>().replicate_once();
     app.component::<ProjectileBody>().replicate_once();
     app.component::<TeamId>().replicate();
@@ -679,6 +681,7 @@ fn register_replicated_components(app: &mut App) {
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::combat::WeaponCatalogResource>()
+            .init_resource::<crate::combat::CombatConditionRulesResource>()
             .add_plugins(crate::builds::BuildContentPlugin)
             .add_plugins(crate::weapon_parts::WeaponPartContentPlugin)
             .add_plugins(crate::map::MapContentPlugin)

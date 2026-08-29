@@ -332,3 +332,14 @@ Do not reopen or rewrite historical V1–V12 implementation records. Reference t
 
 - Initial Balance Lab schema bump handled current snapshots but not the complete historical 3→4→5 migration chain. Cause: updating version constants before modeling each old shape. Prevention: migrate one historical schema step at a time and test removal/addition of changed topology, not only numeric fields.
 - The first canonical run also exposed stale editor field-count and Arc topology expectations. Prevention: when removing an authored field while preserving its generic capability, audit editor descriptors and topology tests separately from engine-level validation.
+
+## Playtest disposition — 2026-08-28
+
+- User explicitly parked the remaining native readability/balance playtest. Implementation and automated evidence remain preserved; resume this ticket when native feedback is desired.
+
+## Native playtest closeout — 2026-08-28
+
+- User confirmed the BRL-0032 playtest is complete and directed the ticket to close.
+- No additional gameplay, readability, targeting, audio, or balance corrections were requested.
+- The unrelated six-client E2E preset-assignment defect remains deferred to BRL-0044 and does not block acceptance of Demolition Strike.
+- BRL-0043 continues to own eventual removal of legacy point-cost schema machinery.

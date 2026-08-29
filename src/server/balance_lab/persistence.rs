@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 7;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 9;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -163,14 +163,55 @@ pub(super) fn load(
         == Some(6)
         && value["snapshot"]["schemaVersion"].as_u64() == Some(11)
     {
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(7);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(12);
         let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
             .map_err(|error| format!("canonical Cold capacity migration failed: {error}"))?;
         for profile in ["default", "lightweight", "reinforced"] {
             value["snapshot"]["fighterProfiles"][profile]["cold_capacity"] =
                 canonical_profiles[profile]["cold_capacity"].clone();
         }
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(7)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(12)
+    {
+        value["schemaVersion"] = serde_json::json!(8);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(13);
+        value["snapshot"]["conditionRules"] =
+            serde_json::to_value(validator.baseline.condition_rules)
+                .map_err(|error| format!("canonical condition-rules migration failed: {error}"))?;
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(8)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(13)
+    {
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        let canonical = serde_json::to_value(&validator.baseline)
+            .map_err(|error| format!("canonical Sticky Blomb migration failed: {error}"))?;
+        let weapons = value["snapshot"]["weapons"]
+            .as_array_mut()
+            .ok_or_else(|| "persisted weapons must be an array".to_string())?;
+        let sticky = canonical["weapons"]
+            .as_array()
+            .and_then(|entries| entries.last())
+            .cloned()
+            .ok_or_else(|| "canonical Sticky Blomb tuning is missing".to_string())?;
+        weapons.push(sticky);
+        let ultimates = value["snapshot"]["ultimates"]
+            .as_array_mut()
+            .ok_or_else(|| "persisted ultimates must be an array".to_string())?;
+        let big_blob = canonical["ultimates"]
+            .as_array()
+            .and_then(|entries| entries.last())
+            .cloned()
+            .ok_or_else(|| "canonical Big Blob tuning is missing".to_string())?;
+        ultimates.push(big_blob);
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -343,7 +384,11 @@ mod tests {
         value["snapshot"]["ultimates"]
             .as_array_mut()
             .unwrap()
-            .retain(|ultimate| ultimate["id"].as_u64() != Some(6));
+            .retain(|ultimate| !matches!(ultimate["id"].as_u64(), Some(6 | 11)));
+        value["snapshot"]["weapons"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|weapon| weapon["id"].as_u64() != Some(5));
         value["snapshot"]["weapons"][2]["recipe"]["worldEffects"] =
             serde_json::json!([{ "DestroyMap": { "radius": 48.0 } }]);
         for profile in ["default", "lightweight", "reinforced"] {
@@ -365,6 +410,12 @@ mod tests {
         let loaded = load(&path, &validator).unwrap().unwrap();
         assert_eq!(loaded.revision, BalanceLabRevision(5));
         assert_eq!(loaded.snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(loaded.snapshot.weapons.len(), 5);
+        assert_eq!(loaded.snapshot.ultimates.len(), 9);
+        assert_eq!(
+            loaded.snapshot.condition_rules,
+            validator.baseline.condition_rules
+        );
         assert!(
             (loaded.snapshot.fighter_profiles.lightweight.movement_speed - 217.0).abs()
                 < f32::EPSILON

@@ -105,6 +105,8 @@ pub(crate) struct Material3dAssets {
     pub(crate) elemental_fire: Handle<StandardMaterial>,
     pub(crate) elemental_poison: Handle<StandardMaterial>,
     pub(crate) elemental_restoration: Handle<StandardMaterial>,
+    pub(crate) sticky_blob: Handle<StandardMaterial>,
+    pub(crate) sticky_warning: Handle<StandardMaterial>,
     pub(crate) scan_area: Handle<StandardMaterial>,
     pub(crate) demolition_area: Handle<StandardMaterial>,
     pub(crate) concealment_field_blue_fill: Handle<StandardMaterial>,
@@ -316,6 +318,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::reconcile_sentry_visuals,
                     combat::reconcile_concealment_field_visuals,
                     combat::reconcile_elemental_field_visuals,
+                    combat::reconcile_sticky_blob_visuals,
                     combat::reconcile_aim_preview_visuals,
                     (
                         combat::reconcile_fighter_visuals,
@@ -347,6 +350,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::update_fighter_overhead_state,
                     combat::reconcile_status_visuals,
                     combat::reconcile_dash_trails,
+                    combat::update_sticky_blob_fuse_progress,
                     combat::update_aim_preview,
                     update_character_animation,
                     tint_3d_zone,
@@ -363,6 +367,7 @@ impl Plugin for WorldPresentationPlugin {
                     (combat::write_fighter_visual_poses, follow_3d_camera).chain(),
                     combat::write_projectile_visual_poses,
                     combat::write_sentry_visual_poses,
+                    combat::write_sticky_blob_visual_poses,
                     combat::write_status_visual_poses,
                 )
                     .after(InterpolationSystems::Interpolate)
@@ -1311,6 +1316,19 @@ fn setup_3d_foundation(
         elemental_restoration: materials.add(StandardMaterial {
             base_color: Color::srgba(0.12, 1.0, 0.56, 0.34),
             emissive: LinearRgba::new(0.05, 1.8, 0.48, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        sticky_blob: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.52, 0.12, 0.72, 0.96),
+            emissive: LinearRgba::new(0.55, 0.04, 1.1, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        sticky_warning: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.84, 0.2, 1.0, 0.42),
+            emissive: LinearRgba::new(0.7, 0.03, 1.4, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()

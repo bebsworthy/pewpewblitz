@@ -515,8 +515,19 @@ fn seed_starter_parts(
     )?;
     let catalog = crate::weapon_parts::WeaponPartCatalog::embedded()
         .map_err(ProfileStorageError::Database)?;
+    let kinetic_dampener = catalog
+        .definition(crate::weapon_parts::WeaponPartDefinitionId(7))
+        .ok_or(ProfileModelError::InvalidPart)?;
+    let renamed = transaction.execute(
+        "UPDATE weapon_part_instances SET display_name=?1 WHERE account_id=?2 AND definition_id=?3 AND display_name<>?1",
+        rusqlite::params![
+            kinetic_dampener.display_name,
+            account_id.to_bytes().as_slice(),
+            kinetic_dampener.id.0
+        ],
+    )? != 0;
     if revision >= i64::from(catalog.starter_set_revision) {
-        return Ok(false);
+        return Ok(renamed);
     }
     let mut existing = std::collections::BTreeSet::new();
     let mut statement = transaction

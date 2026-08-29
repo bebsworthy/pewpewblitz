@@ -138,6 +138,7 @@ pub(super) fn decide(
             | crate::builds::UltimateKind::FireField
             | crate::builds::UltimateKind::PoisonField
             | crate::builds::UltimateKind::RestorationField
+            | crate::builds::UltimateKind::BigBlob
     );
     let use_ultimate = if targeted_ultimate {
         observation.ability_ready

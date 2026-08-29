@@ -72,10 +72,10 @@ client, then use that client to enter Practice:
 just balance-lab
 ```
 
-The launcher opens <http://127.0.0.1:5123> in the default browser immediately. The endpoint does not
-exist until the client enters Practice, so the launcher opens the URL again as soon as that worker
-is ready. Keep the working page open while returning to the menu; it waits for and reconnects to the
-next Practice worker. Accepted overrides are validated and persisted under
+The Balance Lab endpoint does not exist until the client enters Practice. The launcher waits for
+that worker to become ready, then opens <http://127.0.0.1:5123> once in the default browser. Keep
+the working page open while returning to the menu; it waits for and reconnects to the next Practice
+worker. Accepted overrides are validated and persisted under
 `target/balance-lab/session-v2.json`, and **Restore canonical defaults** removes that local override
 without changing canonical authored content. The page also shows the authoritative human/bot roster,
 teams, admitted fighter/weapon/ability choices, and effective weapon-part modifiers for the current

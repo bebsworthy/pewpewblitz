@@ -1,12 +1,12 @@
 (
-    schema_version: 6,
+    schema_version: 7,
     recipe_policy: (
         max_deliveries_per_attack: 16,
         max_payload_bundles: 4,
         max_effects_per_bundle: 4,
         permitted_economy_families: [Magazine, Charges],
         permitted_firing_patterns: [Single, Spread],
-        permitted_delivery_methods: [Straight, Lobbed, MeleeArc],
+        permitted_delivery_methods: [Straight, StickyStraight, Lobbed, MeleeArc],
         permitted_target_selections: [Direct, Area],
         permitted_payload_effects: [Damage, Knockback, Slow, Cold, DamageOverTime, Heal],
         permitted_recipient_policies: [Hostiles, HostilesAndOwner, Allies, AlliesAndOwner],
@@ -98,6 +98,26 @@
                         (target: Direct, effects: [
                             Damage(amount: 34, falloff: None, recipients: Hostiles),
                             Knockback(speed: 650.0, duration_ticks: 6, recipients: Hostiles),
+                        ]),
+                    ],
+                    world_effects: [],
+                ),
+            ),
+        ),
+        (
+            id: WeaponPresetId(5),
+            key: "sticky-blomb",
+            display_name: "Sticky Blomb",
+            configuration: (
+                presentation_profile_id: WeaponPresentationProfileId(5),
+                recipe: (
+                    economy: Magazine(capacity: 3, refill_ticks: 90),
+                    fire_cooldown_ticks: 24,
+                    firing: Single,
+                    delivery: StickyStraight(speed: 520.0, radius: 7.0, range: 640.0, lifetime_ticks: 90, muzzle_offset: 34.0, fuse_ticks: 69, max_active_per_owner: 6),
+                    payload_bundles: [
+                        (target: Area(radius: 85.44, map_occlusion: false, max_targets: 16), effects: [
+                            Damage(amount: 200, falloff: None, recipients: Hostiles),
                         ]),
                     ],
                     world_effects: [],

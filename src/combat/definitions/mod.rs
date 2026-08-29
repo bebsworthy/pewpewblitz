@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 6;
-pub const FINGERPRINT_FORMAT_VERSION: u16 = 4;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 7;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 5;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -84,6 +84,7 @@ pub enum FiringPatternKind {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum DeliveryMethodKind {
     Straight,
+    StickyStraight,
     Lobbed,
     MeleeArc,
 }
@@ -169,6 +170,7 @@ impl Default for WeaponRecipePolicy {
             permitted_firing_patterns: vec![FiringPatternKind::Single, FiringPatternKind::Spread],
             permitted_delivery_methods: vec![
                 DeliveryMethodKind::Straight,
+                DeliveryMethodKind::StickyStraight,
                 DeliveryMethodKind::Lobbed,
                 DeliveryMethodKind::MeleeArc,
             ],
@@ -227,8 +229,8 @@ impl WeaponCatalog {
         if self.schema_version != WEAPON_CATALOG_SCHEMA_VERSION {
             return Err("unsupported weapon catalog schema".to_string());
         }
-        if self.presets.len() != 4 {
-            return Err("M05 requires exactly four weapon presets".to_string());
+        if self.presets.len() != 5 {
+            return Err("the weapon catalog requires exactly five weapon presets".to_string());
         }
         validate_policy(&self.recipe_policy, limits)?;
         if self
@@ -241,12 +243,12 @@ impl WeaponCatalog {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         for preset in &self.presets {
-            if !matches!(preset.id.0, 1..=4)
+            if !matches!(preset.id.0, 1..=5)
                 || !ids.insert(preset.id)
                 || !keys.insert(preset.key.clone())
                 || !valid_key(&preset.key)
                 || !valid_display_name(&preset.display_name)
-                || !matches!(preset.configuration.presentation_profile_id.0, 1..=4)
+                || !matches!(preset.configuration.presentation_profile_id.0, 1..=5)
             {
                 return Err(format!("invalid preset metadata for {}", preset.key));
             }
@@ -254,8 +256,8 @@ impl WeaponCatalog {
                 .configuration
                 .validate(&self.recipe_policy, limits, None)?;
         }
-        if ids.len() != 4 || !(1..=4).all(|id| ids.contains(&WeaponPresetId(id))) {
-            return Err("weapon preset IDs must be exactly 1 through 4".to_string());
+        if ids.len() != 5 || !(1..=5).all(|id| ids.contains(&WeaponPresetId(id))) {
+            return Err("weapon preset IDs must be exactly 1 through 5".to_string());
         }
         Ok(())
     }
@@ -370,6 +372,15 @@ pub enum DeliveryMethod {
         lifetime_ticks: u64,
         muzzle_offset: f32,
     },
+    StickyStraight {
+        speed: f32,
+        radius: f32,
+        range: f32,
+        lifetime_ticks: u64,
+        muzzle_offset: f32,
+        fuse_ticks: u64,
+        max_active_per_owner: u8,
+    },
     Lobbed {
         distance: f32,
         max_flight_ticks: u64,
@@ -483,7 +494,7 @@ impl WeaponConfiguration {
         fighter_radius: Option<f32>,
     ) -> Result<(), String> {
         let recipe = &self.recipe;
-        if !matches!(self.presentation_profile_id.0, 1..=4) {
+        if !matches!(self.presentation_profile_id.0, 1..=5) {
             return Err("unknown weapon presentation profile".to_string());
         }
         let economy_family = match recipe.economy {
@@ -502,6 +513,7 @@ impl WeaponConfiguration {
         }
         let delivery_kind = match recipe.delivery {
             DeliveryMethod::Straight { .. } => DeliveryMethodKind::Straight,
+            DeliveryMethod::StickyStraight { .. } => DeliveryMethodKind::StickyStraight,
             DeliveryMethod::Lobbed { .. } => DeliveryMethodKind::Lobbed,
             DeliveryMethod::MeleeArc { .. } => DeliveryMethodKind::MeleeArc,
         };
@@ -565,6 +577,44 @@ impl WeaponConfiguration {
                     return Err("invalid straight delivery".to_string());
                 }
             }
+            DeliveryMethod::StickyStraight {
+                speed,
+                radius,
+                range,
+                lifetime_ticks,
+                muzzle_offset,
+                fuse_ticks,
+                max_active_per_owner,
+            } => {
+                if !finite_range(speed, 0.0, limits.max_world_field)
+                    || !finite_range(speed, 0.0, policy.max_speed)
+                    || !finite_range(radius, 0.0, limits.max_radius)
+                    || !finite_range(radius, 0.0, policy.max_radius)
+                    || radius == 0.0
+                    || !finite_range(range, 0.0, limits.max_world_field)
+                    || !finite_range(range, 0.0, policy.max_distance)
+                    || range == 0.0
+                    || lifetime_ticks == 0
+                    || lifetime_ticks > limits.max_lifetime_ticks
+                    || lifetime_ticks > policy.max_projectile_lifetime_ticks
+                    || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
+                    || muzzle_offset == 0.0
+                    || fuse_ticks == 0
+                    || fuse_ticks > limits.max_deadline_ticks
+                    || max_active_per_owner == 0
+                    || max_active_per_owner > 16
+                    || speed / 60.0 > range
+                {
+                    return Err("invalid sticky straight delivery".to_string());
+                }
+                if !recipe
+                    .payload_bundles
+                    .iter()
+                    .any(|bundle| matches!(bundle.target, TargetSelection::Area { .. }))
+                {
+                    return Err("sticky straight delivery needs area payload".to_string());
+                }
+            }
             DeliveryMethod::Lobbed {
                 distance,
                 max_flight_ticks,
@@ -618,8 +668,10 @@ impl WeaponConfiguration {
                 }
             }
         }
-        if !matches!(recipe.delivery, DeliveryMethod::Straight { .. })
-            && !matches!(recipe.firing, FiringPattern::Single)
+        if !matches!(
+            recipe.delivery,
+            DeliveryMethod::Straight { .. } | DeliveryMethod::StickyStraight { .. }
+        ) && !matches!(recipe.firing, FiringPattern::Single)
         {
             return Err("spread firing is only valid for straight delivery".to_string());
         }
@@ -640,7 +692,7 @@ impl WeaponConfiguration {
                 DeliveryMethod::Straight { .. } | DeliveryMethod::MeleeArc { .. } => {
                     matches!(bundle.target, TargetSelection::Direct)
                 }
-                DeliveryMethod::Lobbed { .. } => {
+                DeliveryMethod::StickyStraight { .. } | DeliveryMethod::Lobbed { .. } => {
                     matches!(bundle.target, TargetSelection::Area { .. })
                 }
             };

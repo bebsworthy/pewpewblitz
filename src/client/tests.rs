@@ -76,9 +76,9 @@ fn gameplay_window_defaults_to_reference_aspect_and_preserves_override() {
 fn headless_weapon_preset_and_cover_lane_movement_are_bounded() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;
-    config.weapon_preset = Some(4);
-    assert!(config.validate().is_ok());
     config.weapon_preset = Some(5);
+    assert!(config.validate().is_ok());
+    config.weapon_preset = Some(6);
     assert!(config.validate().is_err());
     config.weapon_preset = Some(4);
     config.window_size = Some((960, 540));
@@ -565,6 +565,26 @@ fn resolved_reveal_scan_loadout() -> crate::builds::ResolvedMatchLoadout {
     .expect("reveal scan loadout resolves")
 }
 
+fn resolved_fire_field_loadout() -> crate::builds::ResolvedMatchLoadout {
+    let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
+    let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
+    let fighter = crate::combat::FighterDefinitions::default().entries[0];
+    crate::builds::resolve_build_recipe(
+        &build_catalog,
+        &weapons,
+        &fighter,
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(8),
+            passives: [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(6),
+            ],
+        },
+    )
+    .expect("fire field loadout resolves")
+}
+
 fn targeted_input_test_app(loadout: crate::builds::ResolvedMatchLoadout) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -745,6 +765,71 @@ fn gamepad_sample_maps_sticks_triggers_and_start_to_native_actions() {
         ClientInputContext::Menu
     );
     assert_ne!(pending.action_indicator & ACTION_PAUSE, 0);
+}
+
+#[test]
+fn gamepad_stick_magnitude_controls_fire_field_placement_distance() {
+    let mut gamepad = Gamepad::default();
+    gamepad.analog_mut().set(GamepadAxis::RightStickY, -0.8);
+    gamepad.digital_mut().press(GamepadButton::RightTrigger);
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .init_resource::<PendingLocalActions>()
+        .insert_resource(ClientPlayableGate(true))
+        .init_resource::<ClientInputContext>()
+        .init_resource::<InputDeviceActivity>()
+        .init_resource::<ClientInputSettings>()
+        .add_systems(
+            Update,
+            (sample_local_input, resolve_targeted_ultimate_input).chain(),
+        );
+    let gamepad_entity = app.world_mut().spawn(gamepad).id();
+    let loadout = resolved_fire_field_loadout();
+    let ultimate_id = loadout.ultimate.id;
+    app.world_mut().spawn((
+        Fighter,
+        Controlled,
+        Position::default(),
+        loadout,
+        crate::builds::AbilityState {
+            charge: crate::abilities::ULTIMATE_CHARGE_MAX,
+            phase: crate::builds::AbilityPhase::Ready,
+        },
+    ));
+
+    app.update();
+    let far_distance = app
+        .world()
+        .resource::<PendingLocalActions>()
+        .aim_distance
+        .expect("targeted Fire Field supplies gamepad placement distance");
+    assert!(
+        app.world()
+            .resource::<PendingLocalActions>()
+            .targeted_ultimate
+            .is_targeting(ultimate_id)
+    );
+
+    {
+        let mut gamepad = app
+            .world_mut()
+            .get_mut::<Gamepad>(gamepad_entity)
+            .expect("test gamepad");
+        gamepad.digital_mut().release(GamepadButton::RightTrigger);
+        gamepad.analog_mut().set(GamepadAxis::RightStickY, -0.6);
+    }
+    app.update();
+    let near_distance = app
+        .world()
+        .resource::<PendingLocalActions>()
+        .aim_distance
+        .expect("armed Fire Field keeps gamepad placement distance");
+
+    assert!(near_distance < far_distance);
+    assert!((far_distance - 381.333_34).abs() < 0.001);
+    assert!((near_distance - 242.666_67).abs() < 0.001);
 }
 
 #[test]
