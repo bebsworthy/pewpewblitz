@@ -22,9 +22,9 @@ use crate::builds::{AbilityState, PassiveRuntimeState, ResolvedMatchLoadout};
 use crate::combat::{
     ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
     CombatEvidenceCheckpoint, ConeSpray, ConeSprayState, CurrentHealth, Defeated,
-    FighterDefinitionId, KnockbackFeedback, LobbedFlight, Projectile, ProjectileBody,
-    ProjectileDeadline, ProjectileSource, ReplicatedAttackSource, StickyBlobState, StraightFlight,
-    TeamId, WeaponDefinitionId, WeaponState,
+    FighterDefinitionId, KnockbackFeedback, LobbedFlight, PersistentSplash, PersistentSplashState,
+    Projectile, ProjectileBody, ProjectileDeadline, ProjectileSource, ReplicatedAttackSource,
+    StickyBlobState, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -41,7 +41,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 36;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 37;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -654,6 +654,8 @@ fn register_replicated_components(app: &mut App) {
     app.component::<AttackDelivery>().replicate_once();
     app.component::<ConeSpray>().replicate_once();
     app.component::<ConeSprayState>().replicate_once();
+    app.component::<PersistentSplash>().replicate_once();
+    app.component::<PersistentSplashState>().replicate();
     app.component::<LobbedFlight>().replicate_once();
     app.component::<ProjectileDeadline>().replicate_once();
     app.component::<StickyBlobState>().replicate();

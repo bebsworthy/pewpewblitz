@@ -28,6 +28,8 @@ mod rules;
 #[cfg(feature = "server")]
 pub(crate) mod server;
 #[cfg(feature = "server")]
+mod splash;
+#[cfg(feature = "server")]
 mod spray;
 #[cfg(feature = "server")]
 pub(crate) mod sticky;
@@ -74,8 +76,8 @@ pub use cues::{
 };
 pub use definitions::{
     DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,
-    PayloadEffectDefinition, RecipientPolicy, ResolvedWeapon, SlowStacking, TargetSelection,
-    WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponEconomy,
+    PayloadEffectDefinition, PersistentAreaShape, RecipientPolicy, ResolvedWeapon, SlowStacking,
+    TargetSelection, WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponEconomy,
     WeaponPresentationProfileId, WeaponPresetDefinition, WeaponPresetId, WeaponRecipe,
     WeaponRecipeFingerprint, WeaponRecipePolicy, WorldEffectDefinition, WorldEffectKind,
     linear_falloff, resolve_configuration, spread_angles,
@@ -92,17 +94,18 @@ pub(crate) use model::ElementalFieldRuntime;
 pub use model::{
     ActiveAttackTracker, ActiveAttackTrackers, CombatWorldEffectFact, CombatWorldEffectFacts,
     CombatWorldEffectSource, CompletedAttack, ComposedProjectileRuntime, ConeSprayRuntime,
-    MeleeAttack, PendingDelivery, PendingDeliveryKind, PendingPayload, SpawnState,
-    StickyBlobRuntime,
+    MeleeAttack, PendingDelivery, PendingDeliveryKind, PendingPayload, PersistentSplashRuntime,
+    SpawnState, StickyBlobRuntime,
 };
 pub use model::{
     ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource, AuthoritativePose,
     AuthoritativeTick, ColdState, CombatEventId, CombatSourceKind, ConditionSource, ConeSpray,
     ConeSprayState, CurrentHealth, DamageOverTime, DamageOverTimeKind, Defeated, DistanceBand,
     ElementalFieldId, ElementalFieldKind, ElementalFieldState, ExternalMotion, HealthRecoveryState,
-    KnockbackFeedback, LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline,
-    ProjectileShape, ProjectileSource, ReplicatedAttackSource, ShotId, SlowEffect, StickyBlobKind,
-    StickyBlobState, StraightFlight, TeamId, WeaponPhase, WeaponState, WorldPoint, distance_band,
+    KnockbackFeedback, LobbedFlight, PersistentSplash, PersistentSplashState, Projectile,
+    ProjectileBody, ProjectileDeadline, ProjectileShape, ProjectileSource, ReplicatedAttackSource,
+    ShotId, SlowEffect, StickyBlobKind, StickyBlobState, StraightFlight, TeamId, WeaponPhase,
+    WeaponState, WorldPoint, distance_band,
 };
 pub use outcomes::{CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTargetKind};
 pub use rules::{

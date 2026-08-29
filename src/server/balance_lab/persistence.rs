@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 10;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 11;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -223,8 +223,8 @@ pub(super) fn load(
         == Some(9)
         && value["snapshot"]["schemaVersion"].as_u64() == Some(14)
     {
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(10);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(15);
         let canonical = serde_json::to_value(&validator.baseline)
             .map_err(|error| format!("canonical Spray migration failed: {error}"))?;
         let weapons = value["snapshot"]["weapons"]
@@ -245,6 +245,36 @@ pub(super) fn load(
                 .ok_or_else(|| "canonical Spray tuning is missing".to_string())?;
             weapons.push(spray);
         }
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(10)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(15)
+    {
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        let canonical = serde_json::to_value(&validator.baseline)
+            .map_err(|error| format!("canonical Splash migration failed: {error}"))?;
+        let weapons = value["snapshot"]["weapons"]
+            .as_array_mut()
+            .ok_or_else(|| "persisted weapons must be an array".to_string())?;
+        if !weapons
+            .iter()
+            .any(|weapon| weapon["id"].as_u64() == Some(7))
+        {
+            let splash = canonical["weapons"]
+                .as_array()
+                .and_then(|entries| {
+                    entries
+                        .iter()
+                        .find(|weapon| weapon["id"].as_u64() == Some(7))
+                })
+                .cloned()
+                .ok_or_else(|| "canonical Splash tuning is missing".to_string())?;
+            weapons.push(splash);
+        }
+        weapons.sort_by_key(|weapon| weapon["id"].as_u64().unwrap_or(u64::MAX));
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -421,7 +451,7 @@ mod tests {
         value["snapshot"]["weapons"]
             .as_array_mut()
             .unwrap()
-            .retain(|weapon| !matches!(weapon["id"].as_u64(), Some(5 | 6)));
+            .retain(|weapon| !matches!(weapon["id"].as_u64(), Some(5..=7)));
         value["snapshot"]["weapons"][2]["recipe"]["worldEffects"] =
             serde_json::json!([{ "DestroyMap": { "radius": 48.0 } }]);
         for profile in ["default", "lightweight", "reinforced"] {
@@ -443,8 +473,9 @@ mod tests {
         let loaded = load(&path, &validator).unwrap().unwrap();
         assert_eq!(loaded.revision, BalanceLabRevision(5));
         assert_eq!(loaded.snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
-        assert_eq!(loaded.snapshot.weapons.len(), 6);
+        assert_eq!(loaded.snapshot.weapons.len(), 7);
         assert!(loaded.snapshot.weapons.iter().any(|weapon| weapon.id == 6));
+        assert!(loaded.snapshot.weapons.iter().any(|weapon| weapon.id == 7));
         assert_eq!(loaded.snapshot.ultimates.len(), 9);
         assert_eq!(
             loaded.snapshot.condition_rules,

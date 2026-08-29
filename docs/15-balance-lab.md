@@ -46,21 +46,22 @@ recomputes runtime recipe identities for equipped weapon modifiers whose base re
 persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
 worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 15, the persistence envelope is version 10, and the
-non-persisted editor-manifest schema is version 6. The server manifest explicitly identifies every
+The current snapshot schema is version 16, the persistence envelope is version 11, and the
+non-persisted editor-manifest schema is version 7. The server manifest explicitly identifies every
 editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
 control. The browser does not infer editability or limits from serialized field names. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
-duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, six
+duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, seven
 canonical weapon-base recipes, and the bounded parameters of all nine tunable ultimates,
-including every Sticky Blomb delivery/fuse value and every Big Blob parent/secondary value. Oil-
-barrel health/explosion tuning, Heist safe health, and treasure-chest/restoration-pickup health,
+including every Sticky Blomb delivery/fuse value, every Splash numeric delivery value, and every
+Big Blob parent/secondary value. Oil-barrel health/explosion tuning, Heist safe health, and
+treasure-chest/restoration-pickup health,
 restoration, radius, and lifetime are also editable. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Older supported envelopes
 migrate sequentially by filling canonical chest, fighter-recovery, demolition,
 elemental-resistance, elemental-field, Cold-capacity, and global condition-rule defaults before validation while retaining existing
 tuning. The removed full-build workflow is not a Balance Lab surface. Apply validation
-re-resolves the complete 3×6 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
+re-resolves the complete 3×7 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
 
 The roster view is also non-persisted and read-only. It is projected from the worker's authoritative
@@ -114,12 +115,20 @@ The Spray damage payload also exposes three distance-falloff controls:
 - **Minimum damage scale:** damage multiplier used at and beyond the falloff end. `0.5` means 50%
   damage. It affects damage only, not propagation reach or cone occupancy.
 
+The Splash base exposes maximum placement distance, flight duration, visual arc height, landing
+clearance, muzzle offset, duration, pulse interval, maximum targets per pulse, and maximum active
+areas per owner. Its selected Circle radius or oriented Rectangle half-extents are numeric fields;
+the shape variant, map-occlusion rule, two-effect topology, and recipient policies remain structural.
+Applying an edit starts a clean Practice epoch so in-flight deliveries and active areas cannot mix
+old and new geometry, timing, payload, or capacity rules.
+
 The canonical default fighter starts with `1,000` maximum health, `70` world units/second movement,
 `100 health/second` recovery, and `3.0 seconds` of accepted-attack idle delay. The lightweight and
 reinforced profiles remain independently authored rather than inheriting these values. Canonical
 weapon recovery per round or charge is `1.0 seconds` for Pulse Sidearm, `1.2 seconds` for Scatter
-Cannon, `1.6 seconds` for Arc Launcher, and `1.0 seconds` for Impact Blade. **Apply & reset match**
-re-resolves every admitted human and bot, starts a clean match epoch, initializes health-recovery
+Cannon, `1.6 seconds` for Arc Launcher, `1.0 seconds` for Impact Blade, and `1.5 seconds` for Sticky
+Blomb, Spray, and Splash. **Apply & reset match** re-resolves every admitted human and bot, starts a
+clean match epoch, initializes health-recovery
 inactivity at that epoch, restores starting ammunition, and clears old fire/recovery deadlines.
 Draft edits never mutate the running epoch before that explicit apply action.
 

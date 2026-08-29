@@ -13,8 +13,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 12;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 12;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 13;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 13;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -122,9 +122,9 @@ impl BuildCatalog {
             return Err("unsupported build catalog schema/revision".into());
         }
         self.validate_tuning()?;
-        if self.weapon_costs.len() != 6 || self.ultimates.len() != 11 || self.passives.len() != 9 {
+        if self.weapon_costs.len() != 7 || self.ultimates.len() != 11 || self.passives.len() != 9 {
             return Err(
-                "the build catalog requires six weapon costs, eleven ultimates, and nine passives"
+                "the build catalog requires seven weapon costs, eleven ultimates, and nine passives"
                     .into(),
             );
         }
@@ -137,6 +137,7 @@ impl BuildCatalog {
             (WeaponPresetId(4), 4),
             (WeaponPresetId(5), 4),
             (WeaponPresetId(6), 4),
+            (WeaponPresetId(7), 4),
         ];
         if !self
             .weapon_costs

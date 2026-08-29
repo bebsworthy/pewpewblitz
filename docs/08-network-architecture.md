@@ -297,6 +297,19 @@ no gameplay physics schedule, predicts no hidden target, and cannot accept a hit
 Adding another shape is an exact current-protocol/content-schema change and updates collision,
 replication, visual footprint, aim trace, and verification as one capability.
 
+Persistent Splash areas are ordinary replicated combat entities after their authoritative lob
+lands. `PersistentSplashState` carries only the public presentation/recovery facts: center, facing,
+circle or oriented-rectangle shape, activation/next-pulse/expiry ticks, pulse interval, occlusion
+and target ceilings, and the two bounded effect definitions. `ReplicatedAttackSource` carries the
+stable attack and owner attribution. The server alone retains the resolved recipe, match generation,
+delivery index, candidate occupancy, recipient decisions, and payload application. Late join and
+reconnect therefore reconstruct a live area from durable component state rather than replaying its
+landing or earlier pulse cues.
+
+Created areas remain valid if their owner is defeated or disconnects; they are removed by expiry or
+match-generation teardown. Clients never send area entry, exit, pulse, damage, healing, or status
+claims, and no process-local entity identity is part of the Splash wire contract.
+
 ## Dynamic map synchronization
 
 Map destruction and V10 environment-object state are server-authoritative. An accepted world effect

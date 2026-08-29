@@ -1,12 +1,12 @@
 (
-    schema_version: 8,
+    schema_version: 9,
     recipe_policy: (
         max_deliveries_per_attack: 16,
         max_payload_bundles: 4,
         max_effects_per_bundle: 4,
         permitted_economy_families: [Magazine, Charges],
         permitted_firing_patterns: [Single, Spread],
-        permitted_delivery_methods: [Straight, StickyStraight, Lobbed, MeleeArc, ConeSpray],
+        permitted_delivery_methods: [Straight, StickyStraight, Lobbed, MeleeArc, ConeSpray, Splash],
         permitted_target_selections: [Direct, Area],
         permitted_payload_effects: [Damage, Knockback, Slow, Cold, DamageOverTime, Heal],
         permitted_recipient_policies: [Hostiles, HostilesAndOwner, Allies, AlliesAndOwner],
@@ -138,6 +138,27 @@
                     payload_bundles: [
                         (target: Direct, effects: [
                             Damage(amount: 40, falloff: Linear(start_distance: 120.0, end_distance: 240.0, minimum_scale: 0.5), recipients: Hostiles),
+                        ]),
+                    ],
+                    world_effects: [],
+                ),
+            ),
+        ),
+        (
+            id: WeaponPresetId(7),
+            key: "splash",
+            display_name: "Splash",
+            configuration: (
+                presentation_profile_id: WeaponPresentationProfileId(7),
+                recipe: (
+                    economy: Magazine(capacity: 3, refill_ticks: 90),
+                    fire_cooldown_ticks: 24,
+                    firing: Single,
+                    delivery: Splash(distance: 480.0, max_flight_ticks: 36, visual_arc_height: 110.0, landing_clearance_radius: 10.0, muzzle_offset: 34.0, shape: Circle(radius: 96.0), duration_ticks: 240, pulse_interval_ticks: 30, map_occlusion: true, max_targets: 6, max_active_per_owner: 2),
+                    payload_bundles: [
+                        (target: Direct, effects: [
+                            Damage(amount: 36, falloff: None, recipients: Hostiles),
+                            Heal(amount: 24, recipients: AlliesAndOwner),
                         ]),
                     ],
                     world_effects: [],

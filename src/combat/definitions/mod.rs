@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 8;
-pub const FINGERPRINT_FORMAT_VERSION: u16 = 6;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 9;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 7;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -88,6 +88,7 @@ pub enum DeliveryMethodKind {
     Lobbed,
     MeleeArc,
     ConeSpray,
+    Splash,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -175,6 +176,7 @@ impl Default for WeaponRecipePolicy {
                 DeliveryMethodKind::Lobbed,
                 DeliveryMethodKind::MeleeArc,
                 DeliveryMethodKind::ConeSpray,
+                DeliveryMethodKind::Splash,
             ],
             permitted_target_selections: vec![
                 TargetSelectionKind::Direct,
@@ -231,8 +233,8 @@ impl WeaponCatalog {
         if self.schema_version != WEAPON_CATALOG_SCHEMA_VERSION {
             return Err("unsupported weapon catalog schema".to_string());
         }
-        if self.presets.len() != 6 {
-            return Err("the weapon catalog requires exactly six weapon presets".to_string());
+        if self.presets.len() != 7 {
+            return Err("the weapon catalog requires exactly seven weapon presets".to_string());
         }
         validate_policy(&self.recipe_policy, limits)?;
         if self
@@ -245,12 +247,12 @@ impl WeaponCatalog {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         for preset in &self.presets {
-            if !matches!(preset.id.0, 1..=6)
+            if !matches!(preset.id.0, 1..=7)
                 || !ids.insert(preset.id)
                 || !keys.insert(preset.key.clone())
                 || !valid_key(&preset.key)
                 || !valid_display_name(&preset.display_name)
-                || !matches!(preset.configuration.presentation_profile_id.0, 1..=6)
+                || !matches!(preset.configuration.presentation_profile_id.0, 1..=7)
             {
                 return Err(format!("invalid preset metadata for {}", preset.key));
             }
@@ -258,8 +260,8 @@ impl WeaponCatalog {
                 .configuration
                 .validate(&self.recipe_policy, limits, None)?;
         }
-        if ids.len() != 6 || !(1..=6).all(|id| ids.contains(&WeaponPresetId(id))) {
-            return Err("weapon preset IDs must be exactly 1 through 6".to_string());
+        if ids.len() != 7 || !(1..=7).all(|id| ids.contains(&WeaponPresetId(id))) {
+            return Err("weapon preset IDs must be exactly 1 through 7".to_string());
         }
         Ok(())
     }
@@ -365,6 +367,49 @@ pub enum FiringPattern {
     },
 }
 
+/// Authored stationary geometry for one persistent Splash delivery.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum PersistentAreaShape {
+    Circle { radius: f32 },
+    Rectangle { half_extents: [f32; 2] },
+}
+
+impl PersistentAreaShape {
+    #[must_use]
+    pub fn is_valid(self, maximum_radius: f32) -> bool {
+        match self {
+            Self::Circle { radius } => finite_range(radius, 0.0, maximum_radius) && radius > 0.0,
+            Self::Rectangle {
+                half_extents: [x, y],
+            } => {
+                finite_range(x, 0.0, maximum_radius)
+                    && finite_range(y, 0.0, maximum_radius)
+                    && x > 0.0
+                    && y > 0.0
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn contains(
+        self,
+        center: bevy::prelude::Vec2,
+        facing: f32,
+        point: bevy::prelude::Vec2,
+        padding: f32,
+    ) -> bool {
+        match self {
+            Self::Circle { radius } => center.distance_squared(point) <= (radius + padding).powi(2),
+            Self::Rectangle {
+                half_extents: [x, y],
+            } => {
+                let local = bevy::prelude::Mat2::from_angle(-facing) * (point - center);
+                local.x.abs() <= x + padding && local.y.abs() <= y + padding
+            }
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum DeliveryMethod {
     Straight {
@@ -402,6 +447,19 @@ pub enum DeliveryMethod {
         pulse_interval_ticks: u64,
         map_occlusion: bool,
         max_targets: u8,
+    },
+    Splash {
+        distance: f32,
+        max_flight_ticks: u64,
+        visual_arc_height: f32,
+        landing_clearance_radius: f32,
+        muzzle_offset: f32,
+        shape: PersistentAreaShape,
+        duration_ticks: u64,
+        pulse_interval_ticks: u64,
+        map_occlusion: bool,
+        max_targets: u8,
+        max_active_per_owner: u8,
     },
 }
 
@@ -505,7 +563,7 @@ impl WeaponConfiguration {
         fighter_radius: Option<f32>,
     ) -> Result<(), String> {
         let recipe = &self.recipe;
-        if !matches!(self.presentation_profile_id.0, 1..=6) {
+        if !matches!(self.presentation_profile_id.0, 1..=7) {
             return Err("unknown weapon presentation profile".to_string());
         }
         let economy_family = match recipe.economy {
@@ -528,6 +586,7 @@ impl WeaponConfiguration {
             DeliveryMethod::Lobbed { .. } => DeliveryMethodKind::Lobbed,
             DeliveryMethod::MeleeArc { .. } => DeliveryMethodKind::MeleeArc,
             DeliveryMethod::ConeSpray { .. } => DeliveryMethodKind::ConeSpray,
+            DeliveryMethod::Splash { .. } => DeliveryMethodKind::Splash,
         };
         if !policy.permitted_delivery_methods.contains(&delivery_kind) {
             return Err("delivery method is disabled by catalog policy".to_string());
@@ -724,6 +783,67 @@ impl WeaponConfiguration {
                     return Err("cone spray delivery needs direct payload".to_string());
                 }
             }
+            DeliveryMethod::Splash {
+                distance,
+                max_flight_ticks,
+                visual_arc_height,
+                landing_clearance_radius,
+                muzzle_offset,
+                shape,
+                duration_ticks,
+                pulse_interval_ticks,
+                max_targets,
+                max_active_per_owner,
+                ..
+            } => {
+                let maximum_radius = limits.max_radius.min(policy.max_radius);
+                let pulse_count = duration_ticks / pulse_interval_ticks.max(1) + 1;
+                if !finite_range(distance, 0.0, limits.max_world_field)
+                    || !finite_range(distance, 0.0, policy.max_distance)
+                    || distance == 0.0
+                    || max_flight_ticks == 0
+                    || max_flight_ticks > limits.max_lifetime_ticks
+                    || max_flight_ticks > policy.max_projectile_lifetime_ticks
+                    || !finite_range(visual_arc_height, 0.0, policy.max_distance)
+                    || !finite_range(landing_clearance_radius, 0.0, maximum_radius)
+                    || landing_clearance_radius == 0.0
+                    || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
+                    || muzzle_offset == 0.0
+                    || !shape.is_valid(maximum_radius)
+                    || duration_ticks == 0
+                    || duration_ticks > limits.max_deadline_ticks
+                    || duration_ticks > policy.max_effect_duration_ticks
+                    || pulse_interval_ticks == 0
+                    || pulse_interval_ticks > duration_ticks
+                    || pulse_count > u64::from(limits.max_deliveries_per_attack)
+                    || pulse_count > u64::from(policy.max_deliveries_per_attack)
+                    || max_targets == 0
+                    || max_targets > limits.max_targets_per_delivery
+                    || max_targets > policy.max_targets_per_delivery
+                    || max_active_per_owner == 0
+                    || max_active_per_owner > 8
+                {
+                    return Err("invalid splash delivery".to_string());
+                }
+                if recipe.payload_bundles.len() != 1
+                    || !matches!(recipe.payload_bundles[0].target, TargetSelection::Direct)
+                    || !(1..=2).contains(&recipe.payload_bundles[0].effects.len())
+                    || !recipe.world_effects.is_empty()
+                {
+                    return Err(
+                        "splash delivery needs one bounded direct payload bundle".to_string()
+                    );
+                }
+                let mut identities = HashSet::new();
+                for effect in &recipe.payload_bundles[0].effects {
+                    let Some(identity) = splash_effect_identity(*effect) else {
+                        return Err("splash delivery does not support knockback".to_string());
+                    };
+                    if !identities.insert(identity) {
+                        return Err("splash effect identities must be distinct".to_string());
+                    }
+                }
+            }
         }
         if !matches!(
             recipe.delivery,
@@ -748,7 +868,8 @@ impl WeaponConfiguration {
             let target_is_valid = match recipe.delivery {
                 DeliveryMethod::Straight { .. }
                 | DeliveryMethod::MeleeArc { .. }
-                | DeliveryMethod::ConeSpray { .. } => {
+                | DeliveryMethod::ConeSpray { .. }
+                | DeliveryMethod::Splash { .. } => {
                     matches!(bundle.target, TargetSelection::Direct)
                 }
                 DeliveryMethod::StickyStraight { .. } | DeliveryMethod::Lobbed { .. } => {
@@ -816,6 +937,24 @@ impl WeaponConfiguration {
             return Err("invalid fighter radius".to_string());
         }
         Ok(())
+    }
+}
+
+fn splash_effect_identity(effect: PayloadEffectDefinition) -> Option<u8> {
+    match effect {
+        PayloadEffectDefinition::Damage { .. } => Some(0),
+        PayloadEffectDefinition::Slow { .. } => Some(1),
+        PayloadEffectDefinition::Cold { .. } => Some(2),
+        PayloadEffectDefinition::DamageOverTime {
+            kind: super::DamageOverTimeKind::Poison,
+            ..
+        } => Some(3),
+        PayloadEffectDefinition::DamageOverTime {
+            kind: super::DamageOverTimeKind::Fire,
+            ..
+        } => Some(4),
+        PayloadEffectDefinition::Heal { .. } => Some(5),
+        PayloadEffectDefinition::Knockback { .. } => None,
     }
 }
 

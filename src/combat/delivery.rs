@@ -103,6 +103,14 @@ pub(super) fn queue_damageable_target(
 }
 
 #[cfg(feature = "server")]
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct ProjectileEnvironmentState<'w, 's> {
+    active_splashes: Query<'w, 's, &'static PersistentSplashRuntime>,
+    roots: Query<'w, 's, &'static crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
+    walls: Query<'w, 's, Entity, With<ArenaWall>>,
+}
+
+#[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 #[allow(
@@ -128,6 +136,7 @@ pub(super) fn sweep_composed_projectiles(
         Option<&LobbedFlight>,
     )>,
     mut sticky_blobs: Query<(&mut StickyBlobState, &StickyBlobRuntime)>,
+    environment: ProjectileEnvironmentState,
     fighters: Query<
         (
             Entity,
@@ -153,7 +162,6 @@ pub(super) fn sweep_composed_projectiles(
         )>,
     >,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
-    walls: Query<Entity, With<ArenaWall>>,
     spatial_query: avian2d::prelude::SpatialQuery,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
@@ -184,7 +192,7 @@ pub(super) fn sweep_composed_projectiles(
     // Static authoritative geometry stops projectiles: permanent map colliders (the
     // ArenaWall entities) and destructible chunk colliders alike, so cover works and
     // carved lanes are the only way through.
-    let blocking_geometry: HashSet<Entity> = walls.iter().collect();
+    let blocking_geometry: HashSet<Entity> = environment.walls.iter().collect();
     let mut active_sticky_by_owner: HashMap<u64, usize> = HashMap::new();
     let mut active_sticky_total = 0_usize;
     let mut newly_attached_primaries: HashMap<u64, Entity> = HashMap::new();
@@ -247,6 +255,86 @@ pub(super) fn sweep_composed_projectiles(
                 continue;
             }
             let landing = lob.landing.as_vec2();
+            if let DeliveryMethod::Splash {
+                shape,
+                duration_ticks,
+                pulse_interval_ticks,
+                map_occlusion,
+                max_targets,
+                max_active_per_owner,
+                ..
+            } = runtime.recipe.delivery
+            {
+                let owner_active = environment
+                    .active_splashes
+                    .iter()
+                    .filter(|splash| {
+                        splash.source.owner_network_entity_id
+                            == runtime.source.owner_network_entity_id
+                    })
+                    .count();
+                if owner_active >= usize::from(max_active_per_owner)
+                    || environment.active_splashes.iter().count()
+                        >= splash::MAX_ACTIVE_PERSISTENT_SPLASHES
+                {
+                    record_delivery_termination(
+                        &mut ids,
+                        &mut telemetry,
+                        tick.0,
+                        &runtime,
+                        landing,
+                        WeaponTelemetryOutcome::DeliveryCancelled,
+                    );
+                    commands.entity(entity).try_despawn();
+                    splash::settle_unresolved_splash(&mut trackers, runtime.source.attack_id);
+                    continue;
+                }
+                let (expires_at_tick, _) =
+                    splash::splash_timing(tick.0, duration_ticks, pulse_interval_ticks);
+                let mut splash_entity = commands.spawn((
+                    PersistentSplash,
+                    PersistentSplashState {
+                        center: WorldPoint::from(landing),
+                        facing: runtime.source.facing,
+                        shape,
+                        activated_at_tick: tick.0,
+                        next_pulse_tick: tick.0,
+                        expires_at_tick,
+                        pulse_interval_ticks,
+                        map_occlusion,
+                        max_targets,
+                        effects: splash::presentation_effects(&runtime.recipe),
+                    },
+                    ReplicatedAttackSource {
+                        attack: runtime.source,
+                    },
+                    PersistentSplashRuntime {
+                        source: runtime.source,
+                        recipe: runtime.recipe.clone(),
+                        next_delivery_index: 1,
+                        match_id: environment.roots.single().ok().map(|root| root.match_id),
+                    },
+                    Replicate::to_clients(NetworkTarget::All),
+                ));
+                if let Ok(root) = environment.roots.single() {
+                    splash_entity.insert(crate::matchplay::MatchMember(root.match_id));
+                }
+                commands.entity(entity).try_despawn();
+                deliveries.write(PendingDelivery {
+                    entity: None,
+                    source: runtime.source,
+                    delivery_index: 0,
+                    tick: tick.0,
+                    engagement_distance: 0.0,
+                    delivery_travel: lob_launch_point(runtime.source, &runtime.recipe)
+                        .distance(landing),
+                    kind: PendingDeliveryKind::LobLanded {
+                        position: WorldPoint::from(landing),
+                    },
+                    world_effects: Vec::new(),
+                });
+                continue;
+            }
             let _queued_payloads = queue_area_payloads(
                 landing,
                 runtime.source,

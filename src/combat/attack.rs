@@ -109,11 +109,16 @@ fn resolved_lob_landing(
     bounds: &crate::map::PlayableBounds,
     spatial_query: &avian2d::prelude::SpatialQuery,
 ) -> Option<Vec2> {
-    let DeliveryMethod::Lobbed {
+    let (DeliveryMethod::Lobbed {
         distance,
         landing_clearance_radius,
         ..
-    } = recipe.delivery
+    }
+    | DeliveryMethod::Splash {
+        distance,
+        landing_clearance_radius,
+        ..
+    }) = recipe.delivery
     else {
         return None;
     };
@@ -170,6 +175,8 @@ pub(super) struct MuzzleContactState<'w, 's> {
     objective_pending: ResMut<'w, crate::matchplay::PendingModeObjectiveDamages>,
     sticky_blobs: Query<'w, 's, &'static StickyBlobRuntime>,
     cone_sprays: Query<'w, 's, (), With<ConeSprayRuntime>>,
+    splashes: Query<'w, 's, &'static PersistentSplashRuntime>,
+    projectiles: Query<'w, 's, &'static ComposedProjectileRuntime>,
 }
 
 #[cfg(feature = "server")]
@@ -519,6 +526,64 @@ fn emit_attack_deliveries(
             }
             emitted_deliveries = 1;
         }
+        DeliveryMethod::Splash {
+            distance,
+            max_flight_ticks,
+            visual_arc_height,
+            muzzle_offset,
+            duration_ticks,
+            pulse_interval_ticks,
+            ..
+        } => {
+            let landing = lob_landing.expect("validated Splash landing must exist");
+            let launch = muzzle_position(origin, facing, muzzle_offset);
+            let flight_ticks =
+                resolved_lob_flight_ticks(distance, origin.distance(landing), max_flight_ticks);
+            let mut projectile = commands.spawn((
+                Projectile,
+                source_component,
+                ReplicatedAttackSource { attack: source },
+                AttackDelivery {
+                    attack_id,
+                    delivery_index: 0,
+                },
+                ProjectileDeadline {
+                    expires_at_tick: tick.saturating_add(flight_ticks),
+                },
+                LobbedFlight {
+                    launch: WorldPoint::from(launch),
+                    landing: WorldPoint::from(landing),
+                    launched_at_tick: tick,
+                    lands_at_tick: tick.saturating_add(flight_ticks),
+                    visual_arc_height,
+                },
+                ComposedProjectileRuntime {
+                    owner_entity: entity,
+                    source_entity: entity,
+                    source,
+                    delivery_index: 0,
+                    velocity: Vec2::ZERO,
+                    travelled: 0.0,
+                    expires_at_tick: tick.saturating_add(flight_ticks),
+                    maximum_range: distance,
+                    landing: Some(landing),
+                    recipe: recipe.clone(),
+                },
+                Position::from_xy(launch.x, launch.y),
+                Rotation::radians(facing),
+                Replicate::to_clients(NetworkTarget::All),
+                InterpolationTarget::to_clients(NetworkTarget::All),
+            ));
+            if let Some(match_member) = match_member {
+                projectile.insert(match_member);
+            }
+            let (_, pulse_count) = splash::splash_timing(
+                tick.saturating_add(flight_ticks),
+                duration_ticks,
+                pulse_interval_ticks,
+            );
+            emitted_deliveries = u64::from(pulse_count).saturating_add(1);
+        }
         DeliveryMethod::MeleeArc { .. } => {
             melee.write(MeleeAttack {
                 source,
@@ -681,7 +746,8 @@ fn record_accepted_attack(
             match recipe.delivery {
                 DeliveryMethod::Straight { muzzle_offset, .. }
                 | DeliveryMethod::StickyStraight { muzzle_offset, .. }
-                | DeliveryMethod::Lobbed { muzzle_offset, .. } => muzzle_offset,
+                | DeliveryMethod::Lobbed { muzzle_offset, .. }
+                | DeliveryMethod::Splash { muzzle_offset, .. } => muzzle_offset,
                 DeliveryMethod::MeleeArc { .. } | DeliveryMethod::ConeSpray { .. } => 0.0,
             },
         );
@@ -835,7 +901,11 @@ pub(super) fn authoritative_composed_fire(
             &bounds,
             &muzzle_contacts.spatial_query,
         );
-        if matches!(recipe.delivery, DeliveryMethod::Lobbed { .. }) && lob_landing.is_none() {
+        if matches!(
+            recipe.delivery,
+            DeliveryMethod::Lobbed { .. } | DeliveryMethod::Splash { .. }
+        ) && lob_landing.is_none()
+        {
             continue;
         }
         let legacy_compatibility = legacy_compatibility_recipe(recipe);
@@ -851,6 +921,38 @@ pub(super) fn authoritative_composed_fire(
             && muzzle_contacts.cone_sprays.iter().count() >= MAX_ACTIVE_CONE_SPRAYS
         {
             continue;
+        }
+        if let DeliveryMethod::Splash {
+            max_active_per_owner,
+            ..
+        } = recipe.delivery
+        {
+            let active_for_owner = muzzle_contacts
+                .splashes
+                .iter()
+                .filter(|splash| splash.source.owner_network_entity_id == *network_id)
+                .count()
+                + muzzle_contacts
+                    .projectiles
+                    .iter()
+                    .filter(|projectile| {
+                        projectile.source.owner_network_entity_id == *network_id
+                            && matches!(projectile.recipe.delivery, DeliveryMethod::Splash { .. })
+                    })
+                    .count();
+            let active_total = muzzle_contacts.splashes.iter().count()
+                + muzzle_contacts
+                    .projectiles
+                    .iter()
+                    .filter(|projectile| {
+                        matches!(projectile.recipe.delivery, DeliveryMethod::Splash { .. })
+                    })
+                    .count();
+            if active_for_owner >= usize::from(max_active_per_owner)
+                || active_total >= splash::MAX_ACTIVE_PERSISTENT_SPLASHES
+            {
+                continue;
+            }
         }
         if sticky_delivery
             && !blocked_deliveries.is_empty()

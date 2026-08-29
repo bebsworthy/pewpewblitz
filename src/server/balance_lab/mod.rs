@@ -37,7 +37,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 15;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 16;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -1037,6 +1037,30 @@ fn same_recipe_shape(expected: &WeaponRecipe, supplied: &WeaponRecipe) -> bool {
                 ..
             },
         ) => left == right,
+        (
+            DeliveryMethod::Splash {
+                shape: left_shape,
+                map_occlusion: left_occlusion,
+                ..
+            },
+            DeliveryMethod::Splash {
+                shape: right_shape,
+                map_occlusion: right_occlusion,
+                ..
+            },
+        ) => {
+            left_occlusion == right_occlusion
+                && matches!(
+                    (left_shape, right_shape),
+                    (
+                        crate::combat::PersistentAreaShape::Circle { .. },
+                        crate::combat::PersistentAreaShape::Circle { .. }
+                    ) | (
+                        crate::combat::PersistentAreaShape::Rectangle { .. },
+                        crate::combat::PersistentAreaShape::Rectangle { .. }
+                    )
+                )
+        }
         _ => false,
     };
     economy

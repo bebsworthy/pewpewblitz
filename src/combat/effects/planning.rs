@@ -20,12 +20,16 @@ pub(super) fn pending_delivery_kind_order(kind: &PendingDeliveryKind) -> u8 {
         PendingDeliveryKind::LobLanded { .. } => 2,
         PendingDeliveryKind::MeleeContact { .. } => 3,
         PendingDeliveryKind::ConeSprayPulse { .. } => 4,
+        PendingDeliveryKind::SplashPulse { .. } => 5,
     }
 }
 
 #[cfg(feature = "server")]
 pub(super) const fn delivery_survives_owner_disconnect(kind: &PendingDeliveryKind) -> bool {
-    matches!(kind, PendingDeliveryKind::StickyDetonated { .. })
+    matches!(
+        kind,
+        PendingDeliveryKind::StickyDetonated { .. } | PendingDeliveryKind::SplashPulse { .. }
+    )
 }
 
 #[cfg(feature = "server")]
@@ -426,6 +430,31 @@ pub(super) fn resolve_pending_deliveries(
                     WeaponTelemetryOutcome::DeliveryImpact,
                 );
             }
+            PendingDeliveryKind::SplashPulse { center } => {
+                let cue = CombatCue::DeliveryImpact {
+                    event_id,
+                    tick: delivery.tick,
+                    attack_id: delivery.source.attack_id,
+                    delivery_index: delivery.delivery_index,
+                    source: delivery.source.owner_network_entity_id,
+                    weapon_definition_id,
+                    presentation_profile_id: delivery.source.presentation_profile_id,
+                    target: None,
+                    position: center,
+                    normal: WorldPoint::from(Vec2::ZERO),
+                    distance_band: distance_band(delivery.delivery_travel),
+                };
+                legacy_telemetry.record_cue(cue.clone());
+                outbox.0.push(cue);
+                record_delivery_telemetry(
+                    telemetry,
+                    &delivery,
+                    event_id,
+                    None,
+                    center,
+                    WeaponTelemetryOutcome::DeliveryImpact,
+                );
+            }
         }
         // World effects are delivery-level facts: exactly one per authored effect for this
         // committed delivery, independent of target count.
@@ -437,6 +466,7 @@ pub(super) fn resolve_pending_deliveries(
                 | PendingDeliveryKind::StickyDetonated { position }
                 | PendingDeliveryKind::MeleeContact { position, .. } => *position,
                 PendingDeliveryKind::ConeSprayPulse { origin, .. } => *origin,
+                PendingDeliveryKind::SplashPulse { center } => *center,
             };
             world_effect_facts.0.push(CombatWorldEffectFact {
                 tick: delivery.tick,

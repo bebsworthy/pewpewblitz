@@ -704,7 +704,8 @@ fn controlled_gamepad_aim_range(
         return crate::builds::world_units_from_milliunits(maximum_range_milliunits);
     }
     match loadout.primary_weapon.recipe.delivery {
-        crate::combat::DeliveryMethod::Lobbed { distance, .. } => Some(distance),
+        crate::combat::DeliveryMethod::Lobbed { distance, .. }
+        | crate::combat::DeliveryMethod::Splash { distance, .. } => Some(distance),
         _ => None,
     }
 }

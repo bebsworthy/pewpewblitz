@@ -1,11 +1,10 @@
 //! Shared combat identities, replicated state, and server-internal delivery messages.
 
 #[cfg(feature = "server")]
+use super::{PayloadBundleDefinition, WeaponRecipe, WorldEffectDefinition};
 use super::{
-    PayloadBundleDefinition, PayloadEffectDefinition, WeaponRecipe, WorldEffectDefinition,
-};
-use super::{
-    WeaponDefinitionId, WeaponPresentationProfileId, WeaponPresetId, WeaponRecipeFingerprint,
+    PayloadEffectDefinition, WeaponDefinitionId, WeaponPresentationProfileId, WeaponPresetId,
+    WeaponRecipeFingerprint,
 };
 use crate::protocol::{NetworkEntityId, PlayerId};
 use bevy::prelude::*;
@@ -223,6 +222,25 @@ pub struct ConeSprayState {
     pub pulse_interval_ticks: u64,
     pub map_occlusion: bool,
     pub max_targets: u8,
+}
+
+/// Marker for one replicated stationary Splash area.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PersistentSplash;
+
+/// Immutable public facts required to render and recover one authoritative Splash area.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct PersistentSplashState {
+    pub center: WorldPoint,
+    pub facing: f32,
+    pub shape: super::PersistentAreaShape,
+    pub activated_at_tick: u64,
+    pub next_pulse_tick: u64,
+    pub expires_at_tick: u64,
+    pub pulse_interval_ticks: u64,
+    pub map_occlusion: bool,
+    pub max_targets: u8,
+    pub effects: [Option<PayloadEffectDefinition>; 2],
 }
 
 impl ConeSprayState {
@@ -541,6 +559,15 @@ pub struct ConeSprayRuntime {
 }
 
 #[cfg(feature = "server")]
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct PersistentSplashRuntime {
+    pub source: AttackSource,
+    pub recipe: WeaponRecipe,
+    pub next_delivery_index: u8,
+    pub match_id: Option<crate::matchplay::MatchId>,
+}
+
+#[cfg(feature = "server")]
 #[derive(Message, Clone, Debug, PartialEq)]
 pub struct PendingPayload {
     pub source: AttackSource,
@@ -629,6 +656,9 @@ pub enum PendingDeliveryKind {
         facing: f32,
         reached_distance: f32,
         angle_degrees: f32,
+    },
+    SplashPulse {
+        center: WorldPoint,
     },
 }
 

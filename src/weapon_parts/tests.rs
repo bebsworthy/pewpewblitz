@@ -47,6 +47,15 @@ fn every_legacy_part_resolves_on_every_weapon_base() {
         for base in 1..=6 {
             resolve_weapon_parts(&weapons, fighter, WeaponPresetId(base), modifiers).unwrap();
         }
+        let splash = resolve_weapon_parts(&weapons, fighter, WeaponPresetId(7), modifiers);
+        if definition.id == WeaponPartDefinitionId(7) {
+            assert_eq!(
+                splash.unwrap_err(),
+                WeaponPartModelError::IncompatibleWeapon
+            );
+        } else {
+            splash.unwrap();
+        }
     }
 }
 
@@ -69,7 +78,7 @@ fn every_legal_zero_to_four_part_combination_resolves_on_its_compatible_bases() 
         let Ok(modifiers) = aggregate_weapon_part_effects(effects) else {
             continue;
         };
-        for base in 1..=6 {
+        for base in 1..=7 {
             let _ = resolve_weapon_parts(&weapons, fighter, WeaponPresetId(base), modifiers);
         }
     }

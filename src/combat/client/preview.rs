@@ -454,6 +454,24 @@ pub(crate) fn preview_primitives(
             map,
             state,
             catalog,
+            None,
+        ),
+        DeliveryMethod::Splash {
+            distance,
+            landing_clearance_radius,
+            shape,
+            ..
+        } => lobbed_preview_primitives(
+            origin,
+            facing,
+            aim_distance,
+            distance,
+            landing_clearance_radius,
+            resolved,
+            map,
+            state,
+            catalog,
+            Some(shape),
         ),
         DeliveryMethod::MeleeArc {
             reach,
@@ -571,6 +589,7 @@ fn lobbed_preview_primitives(
     map: &crate::map::ResolvedMapSnapshot,
     state: &crate::map::MapDynamicState,
     catalog: &crate::map::MapContentCatalog,
+    persistent_shape: Option<PersistentAreaShape>,
 ) -> Vec<PreviewPrimitive> {
     let direction = Vec2::from_angle(facing);
     let desired = origin + direction * aim_distance.unwrap_or(distance).clamp(0.0, distance);
@@ -594,24 +613,50 @@ fn lobbed_preview_primitives(
         PreviewPrimitive::corridor(origin, landing, 2.0, blocked),
         PreviewPrimitive::disc(landing, 6.0, blocked),
     ];
-    let explosion_radius = resolved
-        .recipe
-        .payload_bundles
-        .iter()
-        .find_map(|bundle| match bundle.target {
-            TargetSelection::Area { radius, .. } => Some(radius),
-            TargetSelection::Direct => None,
-        })
-        .unwrap_or(24.0);
-    for index in 0..12 {
-        let a0 = std::f32::consts::TAU * index as f32 / 12.0;
-        let a1 = std::f32::consts::TAU * (index + 1) as f32 / 12.0;
-        primitives.push(PreviewPrimitive::corridor(
-            landing + Vec2::from_angle(a0) * explosion_radius,
-            landing + Vec2::from_angle(a1) * explosion_radius,
-            3.0,
-            blocked,
-        ));
+    let shape = persistent_shape.unwrap_or_else(|| {
+        let radius = resolved
+            .recipe
+            .payload_bundles
+            .iter()
+            .find_map(|bundle| match bundle.target {
+                TargetSelection::Area { radius, .. } => Some(radius),
+                TargetSelection::Direct => None,
+            })
+            .unwrap_or(24.0);
+        PersistentAreaShape::Circle { radius }
+    });
+    match shape {
+        PersistentAreaShape::Circle { radius } => {
+            for index in 0..12 {
+                let a0 = std::f32::consts::TAU * index as f32 / 12.0;
+                let a1 = std::f32::consts::TAU * (index + 1) as f32 / 12.0;
+                primitives.push(PreviewPrimitive::corridor(
+                    landing + Vec2::from_angle(a0) * radius,
+                    landing + Vec2::from_angle(a1) * radius,
+                    3.0,
+                    blocked,
+                ));
+            }
+        }
+        PersistentAreaShape::Rectangle {
+            half_extents: [x, y],
+        } => {
+            let rotation = Mat2::from_angle(facing);
+            let corners = [
+                rotation * Vec2::new(-x, -y) + landing,
+                rotation * Vec2::new(x, -y) + landing,
+                rotation * Vec2::new(x, y) + landing,
+                rotation * Vec2::new(-x, y) + landing,
+            ];
+            for index in 0..4 {
+                primitives.push(PreviewPrimitive::corridor(
+                    corners[index],
+                    corners[(index + 1) % 4],
+                    3.0,
+                    blocked,
+                ));
+            }
+        }
     }
     primitives
 }

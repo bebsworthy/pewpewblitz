@@ -381,7 +381,8 @@ fn weapon_capabilities(loadout: &ResolvedMatchLoadout) -> (f32, f32) {
     match loadout.primary_weapon.recipe.delivery {
         crate::combat::DeliveryMethod::Straight { speed, range, .. }
         | crate::combat::DeliveryMethod::StickyStraight { speed, range, .. } => (range, speed),
-        crate::combat::DeliveryMethod::Lobbed { distance, .. } => (distance, 0.0),
+        crate::combat::DeliveryMethod::Lobbed { distance, .. }
+        | crate::combat::DeliveryMethod::Splash { distance, .. } => (distance, 0.0),
         crate::combat::DeliveryMethod::MeleeArc { reach, .. }
         | crate::combat::DeliveryMethod::ConeSpray { reach, .. } => (reach, 0.0),
     }

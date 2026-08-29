@@ -45,14 +45,16 @@ pub fn resolve_configuration_with_policy(
         } => Some((radius, muzzle_offset)),
         DeliveryMethod::Lobbed { .. }
         | DeliveryMethod::MeleeArc { .. }
-        | DeliveryMethod::ConeSpray { .. } => None,
+        | DeliveryMethod::ConeSpray { .. }
+        | DeliveryMethod::Splash { .. } => None,
     };
     if straight_geometry
         .is_some_and(|(radius, muzzle_offset)| muzzle_offset < fighter.body_radius + radius)
     {
         return Err("straight muzzle starts inside fighter".to_string());
     }
-    if let DeliveryMethod::Lobbed { muzzle_offset, .. } = configuration.recipe.delivery
+    if let DeliveryMethod::Lobbed { muzzle_offset, .. }
+    | DeliveryMethod::Splash { muzzle_offset, .. } = configuration.recipe.delivery
         && muzzle_offset < fighter.body_radius
     {
         return Err("lobbed muzzle starts inside fighter".to_string());
@@ -158,6 +160,7 @@ pub(super) fn normalize_recipe(recipe: &mut WeaponRecipe) {
             n(reach);
             n(angle_degrees);
         }
+        DeliveryMethod::Splash { .. } => normalize_splash_delivery(&mut recipe.delivery, n),
     }
     for effect in &mut recipe.world_effects {
         let WorldEffectDefinition::DestroyMap { radius } = effect;
@@ -197,6 +200,31 @@ pub(super) fn normalize_recipe(recipe: &mut WeaponRecipe) {
                 | PayloadEffectDefinition::DamageOverTime { .. }
                 | PayloadEffectDefinition::Heal { .. } => {}
             }
+        }
+    }
+}
+
+fn normalize_splash_delivery(delivery: &mut DeliveryMethod, normalize: fn(&mut f32)) {
+    let DeliveryMethod::Splash {
+        distance,
+        visual_arc_height,
+        landing_clearance_radius,
+        muzzle_offset,
+        shape,
+        ..
+    } = delivery
+    else {
+        return;
+    };
+    normalize(distance);
+    normalize(visual_arc_height);
+    normalize(landing_clearance_radius);
+    normalize(muzzle_offset);
+    match shape {
+        PersistentAreaShape::Circle { radius } => normalize(radius),
+        PersistentAreaShape::Rectangle { half_extents } => {
+            normalize(&mut half_extents[0]);
+            normalize(&mut half_extents[1]);
         }
     }
 }

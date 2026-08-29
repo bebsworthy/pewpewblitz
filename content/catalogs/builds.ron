@@ -1,6 +1,6 @@
 (
-    schema_version: 12,
-    balance_revision: BuildRevision(10),
+    schema_version: 13,
+    balance_revision: BuildRevision(11),
     fighter_profiles: (
         default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
         lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
@@ -24,6 +24,7 @@
         (weapon_id: WeaponPresetId(4), point_cost: 4),
         (weapon_id: WeaponPresetId(5), point_cost: 4),
         (weapon_id: WeaponPresetId(6), point_cost: 4),
+        (weapon_id: WeaponPresetId(7), point_cost: 4),
     ],
     ultimates: [
         (id: UltimateDefinitionId(1), key: "dash", display_name: "Dash", kind: Dash, point_cost: 3, parameters: Dash),

@@ -125,4 +125,61 @@ fn armed_sticky_detonation_survives_owner_disconnect_but_live_deliveries_do_not(
             position: WorldPoint::from(Vec2::ZERO),
         }
     ));
+    assert!(delivery_survives_owner_disconnect(
+        &PendingDeliveryKind::SplashPulse {
+            center: WorldPoint::from(Vec2::ZERO),
+        }
+    ));
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn dual_splash_payload_routes_damage_to_enemies_and_healing_to_allies() {
+    let source = AttackSource {
+        kind: CombatSourceKind::PrimaryWeapon,
+        attack_id: AttackId(1),
+        player_id: PlayerId(1),
+        owner_network_entity_id: NetworkEntityId(1),
+        team_id: TeamId(1),
+        recipe_fingerprint: WeaponRecipeFingerprint(1),
+        presentation_profile_id: WeaponPresentationProfileId(7),
+        legacy_compatibility: false,
+        source_preset_id: Some(WeaponPresetId(7)),
+        origin: WorldPoint::from(Vec2::ZERO),
+        facing: 0.0,
+    };
+    let damage = PayloadEffectDefinition::Damage {
+        amount: 36,
+        falloff: DamageFalloff::None,
+        recipients: RecipientPolicy::Hostiles,
+    };
+    let heal = PayloadEffectDefinition::Heal {
+        amount: 24,
+        recipients: RecipientPolicy::AlliesAndOwner,
+    };
+
+    assert_eq!(
+        effect_recipient_scale(damage, source, NetworkEntityId(2), TeamId(2)),
+        Some(1.0)
+    );
+    assert_eq!(
+        effect_recipient_scale(heal, source, NetworkEntityId(2), TeamId(2)),
+        None
+    );
+    assert_eq!(
+        effect_recipient_scale(damage, source, NetworkEntityId(3), TeamId(1)),
+        None
+    );
+    assert_eq!(
+        effect_recipient_scale(heal, source, NetworkEntityId(3), TeamId(1)),
+        Some(1.0)
+    );
+    assert_eq!(
+        effect_recipient_scale(damage, source, NetworkEntityId(1), TeamId(1)),
+        None
+    );
+    assert_eq!(
+        effect_recipient_scale(heal, source, NetworkEntityId(1), TeamId(1)),
+        Some(1.0)
+    );
 }

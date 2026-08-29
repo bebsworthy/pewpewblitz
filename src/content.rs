@@ -3,7 +3,7 @@
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 20;
+pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 21;
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GameplayContentFingerprint(pub u64);

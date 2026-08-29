@@ -619,6 +619,7 @@ mod tests {
         catalog.weapon_bases[3].id = WeaponBaseId(40);
         catalog.weapon_bases[4].id = WeaponBaseId(50);
         catalog.weapon_bases[5].id = WeaponBaseId(60);
+        catalog.weapon_bases[6].id = WeaponBaseId(70);
         catalog.revision = catalog.expected_revision().unwrap();
         catalog.validate().unwrap();
         let draft = BrawlerDraft {

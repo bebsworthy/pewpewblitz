@@ -123,9 +123,13 @@ impl Plugin for ServerCombatPlugin {
                     spray::advance_cone_sprays
                         .before(resolve_composed_payloads)
                         .in_set(CombatDamageSet::Combatants),
+                    splash::advance_persistent_splashes
+                        .before(resolve_composed_payloads)
+                        .in_set(CombatDamageSet::Combatants),
                     resolve_composed_payloads
                         .after(resolve_melee_attacks)
                         .after(spray::advance_cone_sprays)
+                        .after(splash::advance_persistent_splashes)
                         .in_set(CombatDamageSet::Combatants),
                     ApplyDeferred
                         .after(resolve_composed_payloads)

@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::Serialize;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 6;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 7;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -640,6 +640,98 @@ fn add_weapon_fields(
                 "Spray",
                 "Maximum targets per pulse",
                 NumberSpec::integer(1, u32::from(policy.max_targets_per_delivery), "targets"),
+            );
+        }
+        DeliveryMethod::Splash { shape, .. } => {
+            add(
+                path!["delivery", "Splash", "distance"],
+                "Splash",
+                "Maximum placement distance",
+                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
+            );
+            add(
+                path!["delivery", "Splash", "max_flight_ticks"],
+                "Splash",
+                "Maximum flight time",
+                NumberSpec::ticks(1, policy.max_projectile_lifetime_ticks),
+            );
+            add(
+                path!["delivery", "Splash", "visual_arc_height"],
+                "Splash",
+                "Visual arc height",
+                NumberSpec::decimal(0.0, f64::from(policy.max_distance), 0.1, "world units"),
+            );
+            add(
+                path!["delivery", "Splash", "landing_clearance_radius"],
+                "Splash",
+                "Landing clearance",
+                NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
+            );
+            add(
+                path!["delivery", "Splash", "muzzle_offset"],
+                "Splash",
+                "Muzzle offset",
+                NumberSpec::positive_decimal(f64::from(limits.max_world_field), "world units"),
+            );
+            match shape {
+                crate::combat::PersistentAreaShape::Circle { .. } => add(
+                    path!["delivery", "Splash", "shape", "Circle", "radius"],
+                    "Splash area",
+                    "Circle radius",
+                    NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
+                ),
+                crate::combat::PersistentAreaShape::Rectangle { .. } => {
+                    add(
+                        path![
+                            "delivery",
+                            "Splash",
+                            "shape",
+                            "Rectangle",
+                            "half_extents",
+                            0
+                        ],
+                        "Splash area",
+                        "Rectangle half-width",
+                        NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
+                    );
+                    add(
+                        path![
+                            "delivery",
+                            "Splash",
+                            "shape",
+                            "Rectangle",
+                            "half_extents",
+                            1
+                        ],
+                        "Splash area",
+                        "Rectangle half-depth",
+                        NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
+                    );
+                }
+            }
+            add(
+                path!["delivery", "Splash", "duration_ticks"],
+                "Splash area",
+                "Area duration",
+                NumberSpec::ticks(1, policy.max_effect_duration_ticks),
+            );
+            add(
+                path!["delivery", "Splash", "pulse_interval_ticks"],
+                "Splash area",
+                "Pulse interval",
+                NumberSpec::ticks(1, policy.max_effect_duration_ticks),
+            );
+            add(
+                path!["delivery", "Splash", "max_targets"],
+                "Splash area",
+                "Maximum targets per pulse",
+                NumberSpec::integer(1, u32::from(policy.max_targets_per_delivery), "targets"),
+            );
+            add(
+                path!["delivery", "Splash", "max_active_per_owner"],
+                "Splash area",
+                "Maximum active areas",
+                NumberSpec::integer(1, 8, "areas"),
             );
         }
     }
@@ -1326,7 +1418,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 158);
+        assert_eq!(manifest.fields.len(), 173);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()

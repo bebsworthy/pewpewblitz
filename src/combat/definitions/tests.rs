@@ -2,9 +2,9 @@
 
 use super::*;
 #[test]
-fn embedded_catalog_is_exactly_six_presets() {
+fn embedded_catalog_is_exactly_seven_presets() {
     let catalog = WeaponCatalog::embedded().unwrap();
-    assert_eq!(catalog.presets.len(), 6);
+    assert_eq!(catalog.presets.len(), 7);
     assert_eq!(
         catalog.presets[1].configuration.recipe.payload_bundles[0]
             .effects
@@ -97,7 +97,43 @@ fn embedded_weapon_defaults_match_the_accepted_balance_pass() {
             max_targets: 6,
         }
     );
+
+    assert_splash_defaults(&catalog.presets[6].configuration.recipe);
 }
+
+fn assert_splash_defaults(splash: &WeaponRecipe) {
+    assert_eq!(
+        splash.delivery,
+        DeliveryMethod::Splash {
+            distance: 480.0,
+            max_flight_ticks: 36,
+            visual_arc_height: 110.0,
+            landing_clearance_radius: 10.0,
+            muzzle_offset: 34.0,
+            shape: PersistentAreaShape::Circle { radius: 96.0 },
+            duration_ticks: 240,
+            pulse_interval_ticks: 30,
+            map_occlusion: true,
+            max_targets: 6,
+            max_active_per_owner: 2,
+        }
+    );
+    assert!(matches!(
+        splash.payload_bundles[0].effects.as_slice(),
+        [
+            PayloadEffectDefinition::Damage {
+                amount: 36,
+                recipients: RecipientPolicy::Hostiles,
+                ..
+            },
+            PayloadEffectDefinition::Heal {
+                amount: 24,
+                recipients: RecipientPolicy::AlliesAndOwner,
+            }
+        ]
+    ));
+}
+
 #[test]
 fn spread_is_symmetric_and_ordered() {
     let values = spread_angles(0.3, 7, 30.0);
@@ -259,6 +295,75 @@ fn spray_configuration() -> WeaponConfiguration {
         .unwrap()
         .configuration
         .clone()
+}
+
+fn splash_configuration() -> WeaponConfiguration {
+    WeaponCatalog::embedded()
+        .unwrap()
+        .preset(WeaponPresetId(7))
+        .unwrap()
+        .configuration
+        .clone()
+}
+
+#[test]
+fn splash_validation_bounds_geometry_cadence_and_effect_identity() {
+    let fighter = super::super::FighterDefinitions::default().entries[0];
+    let policy = WeaponRecipePolicy::default();
+    let limits = EngineWeaponLimits::default();
+
+    let mut rectangle = splash_configuration();
+    let DeliveryMethod::Splash { shape, .. } = &mut rectangle.recipe.delivery else {
+        unreachable!();
+    };
+    *shape = PersistentAreaShape::Rectangle {
+        half_extents: [96.0, 48.0],
+    };
+    rectangle
+        .validate(&policy, limits, Some(fighter.body_radius))
+        .unwrap();
+
+    let mut duplicate = splash_configuration();
+    duplicate.recipe.payload_bundles[0].effects[1] = PayloadEffectDefinition::Damage {
+        amount: 24,
+        falloff: DamageFalloff::None,
+        recipients: RecipientPolicy::Hostiles,
+    };
+    assert!(
+        duplicate
+            .validate(&policy, limits, Some(fighter.body_radius))
+            .unwrap_err()
+            .contains("distinct")
+    );
+
+    let mut knockback = splash_configuration();
+    knockback.recipe.payload_bundles[0].effects[1] = PayloadEffectDefinition::Knockback {
+        speed: 100.0,
+        duration_ticks: 5,
+        recipients: RecipientPolicy::Hostiles,
+    };
+    assert!(
+        knockback
+            .validate(&policy, limits, Some(fighter.body_radius))
+            .unwrap_err()
+            .contains("does not support knockback")
+    );
+
+    let mut too_many_pulses = splash_configuration();
+    let DeliveryMethod::Splash {
+        pulse_interval_ticks,
+        ..
+    } = &mut too_many_pulses.recipe.delivery
+    else {
+        unreachable!();
+    };
+    *pulse_interval_ticks = 1;
+    assert!(
+        too_many_pulses
+            .validate(&policy, limits, Some(fighter.body_radius))
+            .unwrap_err()
+            .contains("invalid splash delivery")
+    );
 }
 
 #[test]

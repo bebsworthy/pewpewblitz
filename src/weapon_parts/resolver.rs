@@ -220,7 +220,7 @@ fn apply_modifiers(
             *lifetime_ticks =
                 ((*range * crate::timing::SIMULATION_TICK_HZ as f32 / *speed).ceil() as u64).max(1);
         }
-        DeliveryMethod::Lobbed { distance, .. } => {
+        DeliveryMethod::Lobbed { distance, .. } | DeliveryMethod::Splash { distance, .. } => {
             *distance = apply_world(*distance, modifiers.reach_milliunits)?;
         }
         DeliveryMethod::MeleeArc { reach, .. } | DeliveryMethod::ConeSpray { reach, .. } => {

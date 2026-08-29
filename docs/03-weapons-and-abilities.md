@@ -53,7 +53,7 @@ it must not select a separate combat implementation.
 The intended long-lived brawler model fixes one fighter profile and one weapon base when the player
 creates that brawler. The fighter-profile identity and persistence lifecycle belong to
 [Fighter and build specification](./02-fighter-model.md); this document owns how the fixed weapon
-base and its equipped parts resolve into an operational weapon. The current six reference weapon
+base and its equipped parts resolve into an operational weapon. The current seven reference weapon
 presets are the initial weapon bases. Lobby authority advertises their stable IDs, display names,
 presentation profile keys, and validated base configurations as part of the connection-scoped
 brawler catalog. More bases may be added as complete playable recipes without changing the
@@ -67,8 +67,9 @@ The current canonical base values affected by ordinary play balance are:
 | Scatter Cannon | 3-shot magazine | 1.2 s/round | 5 over 30° | 600 speed, 2 radius, 320 range | 120/projectile before falloff |
 | Arc Launcher | 3-shot magazine | 1.6 s/round | Single | 520-distance lob | 40 area |
 | Impact Blade | 3 charges | 1.0 s/charge | Single | 120-reach melee arc | 34 |
-| Sticky Blomb | 3-shot magazine | 1.5 s/round | Single | 320-range sticky projectile | 36 impact plus persistent pulses |
+| Sticky Blomb | 3-shot magazine | 1.5 s/round | Single | 640-range delayed sticky projectile | 200 hostile area damage on detonation |
 | Spray | 3-shot magazine | 1.5 s/round | Single spritz | 480-speed, 240-reach, 70° cone | 40/pulse before falloff |
+| Splash | 3-shot magazine | 1.5 s/round | Targeted lob | 480-range persistent circle | 36 hostile damage and 24 allied healing per pulse |
 
 Durations are displayed in seconds but remain positive 60 Hz fixed-tick values in authoritative
 content. Editors accept ordinary decimal seconds and save the nearest fixed tick; for example,
@@ -227,17 +228,18 @@ The established weapon foundation supports:
 
 - magazine and charge economies;
 - single and spread firing patterns;
-- straight projectile, lobbed projectile, melee-arc, sticky-area, and propagating cone-spray delivery;
+- straight projectile, lobbed projectile, melee-arc, delayed sticky, propagating cone-spray, and
+  targeted persistent Splash delivery;
 - direct and bounded area target selection;
-- damage, knockback, and strongest-refreshes slow effects;
+- damage, healing, Cold, Fire/Poison damage-over-time, knockback, and strongest-refreshes slow effects;
 - no falloff and linear damage falloff;
-- hostile and bounded hostile-plus-owner recipient policies;
+- explicit owner, ally, hostile, and bounded combined recipient policies;
 - one bounded terrain-destruction world effect;
 - explicit positive-damage eligibility for live environment objects and hostile Heist objectives;
 - authoritative fire cooldown, one-at-a-time ammunition recovery, lifetime, collision, and outcome attribution;
 - stable presentation cues resolved independently by the client.
 
-The six reference presets are:
+The seven reference presets are:
 
 | Weapon | Pattern | Strength | Cost or weakness |
 |---|---|---|---|
@@ -245,8 +247,9 @@ The six reference presets are:
 | Scatter cannon | Short spread of pellets | Excellent close-range burst | Poor range and falloff |
 | Arc launcher | Lobbed splash projectile | Punishes cover and groups | Slow delivery and recovery |
 | Impact blade | Melee arc | Strong duel pressure and displacement | Must enter danger range |
-| Sticky Blomb | Sticky projectile and persistent area | Denies a bounded position | Delayed repeated value |
+| Sticky Blomb | Delayed sticky area blast | Threatens carriers and bounded positions | Fuse gives time to react |
 | Spray | Instant stationary cone spritz | Sustained close-range area pressure | Must commit aim and origin at firing time |
+| Splash | Targeted lob into a persistent field | Damages hostiles while sustaining its owner and allies | Delayed placement and fixed stationary footprint |
 
 ### Fire and ammunition-recovery lifecycle
 
@@ -341,7 +344,7 @@ Possible future delivery families include:
 
 - charged or delayed projectiles with warning telegraphs;
 - beams or repeated ray ticks;
-- persistent areas and traps;
+- traps and moving or channeled fields;
 - homing or steered projectiles;
 - bouncing, piercing, splitting, boomerang, or returning projectiles;
 - deployables, turrets, and summons.
@@ -532,6 +535,32 @@ Cryogenic, Fire, Poison, and Restoration Field are targeted ultimates. Their rep
 pulse immediately and on a fixed interval, use the same elemental rules as weapon delivery, remain
 after owner defeat or disconnect, and expire or clear on restart/build replacement. Direct hits,
 field pulses, poison ticks, fire ticks, and defeat resolution have a stable authoritative order.
+
+### Splash persistent areas
+
+Splash is a targeted primary lob that becomes a stationary persistent combat area on its validated
+landing. The authored delivery owns either circular or oriented rectangular geometry, duration,
+pulse interval, map occlusion, target ceiling, and active-area ceiling. It pulses immediately on
+landing and at fixed authoritative deadlines through expiry. Clients render and recover replicated
+geometry and timing facts but never report occupancy or effect application.
+
+The canonical preset places a 96-unit-radius circle up to 480 units away. It lasts 240 ticks and
+pulses every 30 ticks, including both its landing and expiry deadlines, for nine pulses total. Each
+owner may have at most two Splash deliveries across flight and active-area state, and a match may
+hold at most 16 active areas. Each pulse considers no more than six live fighters, ordered by
+distance and stable network identity after footprint intersection and current map-occlusion checks.
+
+One Splash area carries one bounded payload bundle with at most two distinct typed effects. Each
+effect retains its ordinary owner/ally/enemy recipient policy and composed-combat semantics. The
+initial Splash damages eligible hostiles while healing its owner and allies on the same pulse;
+healing remains clamped, cannot resurrect, and grants no damage-based ultimate charge. Cold,
+Fire/Poison, Slow, Damage, and Heal reuse their existing target-owned rules and attribution rather
+than creating area-specific effect implementations.
+
+An accepted area remains after its owner is defeated or disconnects. Match completion, restart,
+generation replacement, or expiry removes it. The server replicates the stable attack source plus
+public center, facing, shape, activation/next-pulse/expiry ticks, interval, occlusion rule, target
+ceiling, and effect identities. Private recipe/runtime state and occupancy never cross the wire.
 
 V9 delivered three additional ultimate families: a self cloak that is permanently consumed by an
 accepted attack or positive applied damage, and an instant targeted reveal scan that applies a

@@ -527,7 +527,8 @@ pub(super) fn queue_area_payloads(
 #[cfg(feature = "server")]
 pub(super) fn lob_launch_point(source: AttackSource, recipe: &WeaponRecipe) -> Vec2 {
     let muzzle_offset = match recipe.delivery {
-        DeliveryMethod::Lobbed { muzzle_offset, .. } => muzzle_offset,
+        DeliveryMethod::Lobbed { muzzle_offset, .. }
+        | DeliveryMethod::Splash { muzzle_offset, .. } => muzzle_offset,
         _ => 0.0,
     };
     muzzle_position(source.origin.as_vec2(), source.facing, muzzle_offset)

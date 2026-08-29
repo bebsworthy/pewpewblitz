@@ -172,6 +172,12 @@ assignment.
   beyond its collider;
 - lobbed projectiles may use a presentation-only vertical arc while retaining authoritative ground
   position;
+- a live Splash area reconstructs its replicated circle or oriented rectangle as a low translucent
+  fill with a crisp raised boundary; restoration color identifies allied healing while the hostile
+  effect selects a distinct Fire, Cold, Poison, or damage boundary treatment;
+- Splash geometry remains fixed at its replicated landing center/facing and disappears with the
+  authoritative entity. Client animation may communicate remaining lifetime or pulse cadence but
+  cannot move the footprint, infer occupancy, or apply effects;
 - straight aim previews sweep the same body shape, show a corridor of its exact width from the
   muzzle to the first client-observed contact, and distinguish clear from blocked; spread previews
   show every emitted delivery rather than only outer boundary rays;

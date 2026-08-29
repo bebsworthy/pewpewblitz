@@ -319,6 +319,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::reconcile_sentry_visuals,
                     combat::reconcile_concealment_field_visuals,
                     combat::reconcile_elemental_field_visuals,
+                    combat::reconcile_persistent_splash_visuals,
                     combat::reconcile_cone_spray_visuals,
                     combat::reconcile_sticky_blob_visuals,
                     combat::reconcile_aim_preview_visuals,

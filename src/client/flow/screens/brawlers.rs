@@ -1970,7 +1970,8 @@ fn weapon_preview_text(weapon: &crate::combat::ResolvedWeapon) -> String {
     let reach = match weapon.recipe.delivery {
         crate::combat::DeliveryMethod::Straight { range, .. }
         | crate::combat::DeliveryMethod::StickyStraight { range, .. } => range,
-        crate::combat::DeliveryMethod::Lobbed { distance, .. } => distance,
+        crate::combat::DeliveryMethod::Lobbed { distance, .. }
+        | crate::combat::DeliveryMethod::Splash { distance, .. } => distance,
         crate::combat::DeliveryMethod::MeleeArc { reach, .. }
         | crate::combat::DeliveryMethod::ConeSpray { reach, .. } => reach,
     };

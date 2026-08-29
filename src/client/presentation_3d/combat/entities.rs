@@ -17,6 +17,9 @@ pub(in super::super) struct ConcealmentFieldVisual3d;
 pub(in super::super) struct ElementalFieldVisual3d;
 
 #[derive(Component)]
+pub(in super::super) struct PersistentSplashVisual3d;
+
+#[derive(Component)]
 pub(in super::super) struct StickyBlobVisual3d;
 
 #[derive(Component)]
@@ -293,6 +296,167 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
             commands.entity(root).despawn();
         }
     }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+pub(in super::super) fn reconcile_persistent_splash_visuals(
+    mut commands: Commands,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    splashes: Query<(Entity, &crate::combat::PersistentSplashState)>,
+    visuals: Query<(Entity, &CombatVisualOwner), With<PersistentSplashVisual3d>>,
+) {
+    let roots = unique_roots(&mut commands, &visuals);
+    for (owner, state) in &splashes {
+        if roots.contains(&owner) {
+            continue;
+        }
+        let effect_material = |effect: crate::combat::PayloadEffectDefinition| match effect {
+            crate::combat::PayloadEffectDefinition::Cold { .. }
+            | crate::combat::PayloadEffectDefinition::Slow { .. } => {
+                materials.elemental_cold.clone()
+            }
+            crate::combat::PayloadEffectDefinition::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Poison,
+                ..
+            } => materials.elemental_poison.clone(),
+            crate::combat::PayloadEffectDefinition::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Fire,
+                ..
+            }
+            | crate::combat::PayloadEffectDefinition::Damage { .. }
+            | crate::combat::PayloadEffectDefinition::Knockback { .. } => {
+                materials.elemental_fire.clone()
+            }
+            crate::combat::PayloadEffectDefinition::Heal { .. } => {
+                materials.elemental_restoration.clone()
+            }
+        };
+        let fill = state
+            .effects
+            .iter()
+            .flatten()
+            .copied()
+            .find_map(|effect| {
+                matches!(effect, crate::combat::PayloadEffectDefinition::Heal { .. })
+                    .then(|| effect_material(effect))
+            })
+            .or_else(|| {
+                state
+                    .effects
+                    .iter()
+                    .flatten()
+                    .next()
+                    .copied()
+                    .map(effect_material)
+            })
+            .unwrap_or_else(|| materials.neutral.clone());
+        let boundary = state
+            .effects
+            .iter()
+            .flatten()
+            .copied()
+            .find_map(|effect| {
+                (!matches!(effect, crate::combat::PayloadEffectDefinition::Heal { .. }))
+                    .then(|| effect_material(effect))
+            })
+            .unwrap_or_else(|| fill.clone());
+        spawn_persistent_splash(&mut commands, &primitives, owner, *state, fill, boundary);
+    }
+    for (root, owner) in &visuals {
+        if splashes.get(owner.0).is_err() {
+            commands.entity(root).despawn();
+        }
+    }
+}
+
+fn spawn_persistent_splash(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    owner: Entity,
+    state: crate::combat::PersistentSplashState,
+    fill: Handle<StandardMaterial>,
+    boundary: Handle<StandardMaterial>,
+) {
+    let root = commands
+        .spawn((
+            CombatVisualOwner(owner),
+            PersistentSplashVisual3d,
+            Transform::from_translation(ground_position(state.center.as_vec2()))
+                .with_rotation(ground_rotation(Rotation::radians(state.facing))),
+            Visibility::default(),
+            Name::new("Persistent Splash visual root"),
+        ))
+        .id();
+    commands
+        .entity(root)
+        .with_children(|parent| match state.shape {
+            crate::combat::PersistentAreaShape::Circle { radius } => {
+                parent.spawn((
+                    Mesh3d(primitives.area_disc.clone()),
+                    MeshMaterial3d(fill),
+                    NotShadowCaster,
+                    NotShadowReceiver,
+                    Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0)
+                        .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                        .with_scale(Vec3::splat(radius)),
+                    Name::new("Persistent Splash circle fill"),
+                ));
+                parent.spawn((
+                    Mesh3d(primitives.area_ring.clone()),
+                    MeshMaterial3d(boundary),
+                    NotShadowCaster,
+                    NotShadowReceiver,
+                    Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.6, 0.0)
+                        .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                        .with_scale(Vec3::splat(radius)),
+                    Name::new("Persistent Splash circle boundary"),
+                ));
+            }
+            crate::combat::PersistentAreaShape::Rectangle {
+                half_extents: [x, y],
+            } => {
+                parent.spawn((
+                    Mesh3d(primitives.unit_cuboid.clone()),
+                    MeshMaterial3d(fill),
+                    NotShadowCaster,
+                    NotShadowReceiver,
+                    Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0).with_scale(Vec3::new(
+                        x * 2.0,
+                        0.25,
+                        y * 2.0,
+                    )),
+                    Name::new("Persistent Splash rectangle fill"),
+                ));
+                for (position, scale) in [
+                    (
+                        Vec3::new(0.0, GROUND_EFFECT_HEIGHT + 0.6, -y),
+                        Vec3::new(x * 2.0, 0.5, 2.0),
+                    ),
+                    (
+                        Vec3::new(0.0, GROUND_EFFECT_HEIGHT + 0.6, y),
+                        Vec3::new(x * 2.0, 0.5, 2.0),
+                    ),
+                    (
+                        Vec3::new(-x, GROUND_EFFECT_HEIGHT + 0.6, 0.0),
+                        Vec3::new(2.0, 0.5, y * 2.0),
+                    ),
+                    (
+                        Vec3::new(x, GROUND_EFFECT_HEIGHT + 0.6, 0.0),
+                        Vec3::new(2.0, 0.5, y * 2.0),
+                    ),
+                ] {
+                    parent.spawn((
+                        Mesh3d(primitives.unit_cuboid.clone()),
+                        MeshMaterial3d(boundary.clone()),
+                        NotShadowCaster,
+                        NotShadowReceiver,
+                        Transform::from_translation(position).with_scale(scale),
+                        Name::new("Persistent Splash rectangle boundary"),
+                    ));
+                }
+            }
+        });
 }
 
 #[allow(clippy::needless_pass_by_value)]
