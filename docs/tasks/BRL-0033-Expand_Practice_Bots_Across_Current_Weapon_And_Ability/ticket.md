@@ -10,7 +10,7 @@ modified: 2026-08-28T09:41:00Z
 closed:
 revision: c26c47d24cd06a10
 blocks: []
-related: []
+related: [BRL-0003, BRL-0045]
 ---
 
 # Description

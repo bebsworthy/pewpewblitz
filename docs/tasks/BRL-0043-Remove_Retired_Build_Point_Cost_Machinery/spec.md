@@ -65,3 +65,7 @@ Saved brawlers have one obvious authoritative resolution model with no point cos
 - [ ] Required build/content/protocol/diagnostic compatibility floors advance together without decoders or parallel legacy paths.
 - [ ] Balance Lab, Practice bots, automation, routed admission, recovery, telemetry, and native client flows pass proportional verification.
 - [ ] Durable documentation is reconciled, substantial-work learning is recorded, and `ticket sync` completes without conflicts before closeout.
+
+## 2026-08-28 immediate presentation correction
+
+Playtest exposed live Queue and Match Loading point-cost copy. BRL-0003 removes that misleading copy immediately because it obscures loading diagnosis. This ticket still owns full deletion of `total_points`, the 12-point budget, over-budget outcomes, catalog costs, and related protocol and fingerprint machinery.

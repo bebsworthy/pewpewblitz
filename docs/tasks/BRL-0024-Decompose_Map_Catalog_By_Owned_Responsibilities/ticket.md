@@ -6,9 +6,9 @@ theme: quality
 release:
 priority: none
 created: 2026-08-28T07:20:42Z
-modified: 2026-08-28T08:37:49Z
+modified: 2026-08-29T17:12:28Z
 closed:
-revision: bdee53c2b44bc7b3
+revision: 834144607ed5fca1
 blocks: []
 related: [BRL-0027]
 ---
