@@ -128,6 +128,7 @@ fn v3_part_snapshot_stays_inside_the_routing_bound() {
         catalog
             .definitions
             .iter()
+            .take(4)
             .flat_map(|definition| definition.effects.iter().copied()),
     )
     .unwrap();
@@ -207,7 +208,7 @@ fn sqlite_profile_crud_is_transactional_and_recovers() {
         .create_brawler(account, first.revision, second_id, draft("Same Name", 3, 4))
         .unwrap();
     assert_eq!(second.brawlers.len(), 2);
-    assert_eq!(second.inventory.len(), 8);
+    assert_eq!(second.inventory.len(), 12);
     let part_id = second.inventory[0].id;
     let equipped = store
         .equip_weapon_parts(
@@ -380,7 +381,63 @@ fn sqlite_v1_profile_migrates_and_receives_starter_parts_once() {
     let mut storage = ProfileStorage::open(&database).unwrap();
     let migrated = storage.load_or_create(account).unwrap();
     assert_eq!(migrated.revision.get(), 2);
-    assert_eq!(migrated.inventory.len(), 8);
+    assert_eq!(migrated.inventory.len(), 12);
+    assert_eq!(storage.load_or_create(account).unwrap(), migrated);
+    drop(storage);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn existing_starter_inventory_receives_only_new_catalog_parts_once() {
+    let database = path("starter-set-revision");
+    let account = AccountId::new(78).unwrap();
+    let original_ids = {
+        let mut storage = ProfileStorage::open(&database).unwrap();
+        let snapshot = storage.load_or_create(account).unwrap();
+        snapshot
+            .inventory
+            .iter()
+            .take(8)
+            .map(|part| part.id)
+            .collect::<Vec<_>>()
+    };
+    {
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "DELETE FROM weapon_part_instances WHERE account_id=?1 AND definition_id>=9",
+                [account.to_bytes().as_slice()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE profiles SET starter_part_set=1 WHERE account_id=?1",
+                [account.to_bytes().as_slice()],
+            )
+            .unwrap();
+    }
+    let mut storage = ProfileStorage::open(&database).unwrap();
+    let migrated = storage.load_or_create(account).unwrap();
+    assert_eq!(migrated.inventory.len(), 12);
+    assert_eq!(
+        migrated
+            .inventory
+            .iter()
+            .take(8)
+            .map(|part| part.id)
+            .collect::<Vec<_>>(),
+        original_ids
+    );
+    assert_eq!(
+        migrated
+            .inventory
+            .iter()
+            .skip(8)
+            .map(|part| part.definition_id.0)
+            .collect::<Vec<_>>(),
+        vec![9, 10, 11, 12]
+    );
     assert_eq!(storage.load_or_create(account).unwrap(), migrated);
     drop(storage);
     std::fs::remove_file(database).unwrap();
@@ -466,7 +523,7 @@ fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
     let loaded = loads[0].result.as_ref().unwrap();
     assert_eq!(loaded.account_id, account);
     assert!(loaded.brawlers.is_empty());
-    assert_eq!(loaded.inventory.len(), 8);
+    assert_eq!(loaded.inventory.len(), 12);
 
     let unadvertised = ProfileCommand::CreateBrawler {
         request_id: 1,
@@ -538,6 +595,83 @@ fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
     authority.begin_load(8, account).unwrap();
     let (loads, _) = poll_authority(&mut authority);
     assert_eq!(loads[0].result.as_ref().unwrap().brawlers[0], brawler);
+    drop(authority);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn persisted_incompatible_resistances_load_for_repair_but_fail_admission_explicitly() {
+    let database = path("incompatible-resistance-repair");
+    let account = AccountId::new(43).unwrap();
+    let brawler_id = SavedBrawlerId::new(430).unwrap();
+    {
+        let mut storage = ProfileStorage::open(&database).unwrap();
+        let empty = storage.load_or_create(account).unwrap();
+        storage
+            .create_brawler(
+                account,
+                empty.revision,
+                brawler_id,
+                draft("Repair Me", 1, 1),
+            )
+            .unwrap();
+    }
+    {
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "UPDATE brawlers SET passive_1_id=7,passive_2_id=8 WHERE account_id=?1 AND brawler_id=?2",
+                rusqlite::params![
+                    account.to_bytes().as_slice(),
+                    brawler_id.to_bytes().as_slice()
+                ],
+            )
+            .unwrap();
+    }
+    let mut authority = ProfileAuthority::start(database.clone()).unwrap();
+    authority.begin_load(9, account).unwrap();
+    let (loads, _) = poll_authority(&mut authority);
+    let loaded = loads[0].result.as_ref().unwrap();
+    let brawler = loaded
+        .brawlers
+        .iter()
+        .find(|item| item.id == brawler_id)
+        .unwrap();
+    let incompatible_edit = ProfileCommand::EditBrawler {
+        request_id: 1,
+        expected_profile_revision: loaded.revision,
+        brawler_id,
+        expected_brawler_revision: brawler.revision,
+        edit: BrawlerEdit {
+            name: brawler.name.clone(),
+            ultimate_id: brawler.ultimate_id,
+            passive_ids: [PassiveDefinitionId(7), PassiveDefinitionId(8)],
+        },
+    };
+    assert!(matches!(
+        authority
+            .submit_command(9, incompatible_edit, false)
+            .unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            decision: ProfileDecision::IncompatibleBuild,
+            ..
+        })
+    ));
+    let builds = crate::builds::BuildCatalog::embedded().unwrap();
+    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+    let fighters = crate::combat::FighterDefinitions::default();
+    assert_eq!(
+        authority.admitted_snapshot(
+            9,
+            brawler_id,
+            brawler.revision,
+            &builds,
+            &weapons,
+            &fighters.entries[0],
+        ),
+        Err(ProfileAuthorityError::IncompatibleBuild)
+    );
     drop(authority);
     std::fs::remove_file(database).unwrap();
 }

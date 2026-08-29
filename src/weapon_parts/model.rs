@@ -105,6 +105,18 @@ pub enum WeaponPartEffect {
         penalty_basis_points: u16,
         duration_ticks: u16,
     },
+    Cold {
+        amount: u16,
+    },
+    DamageOverTime {
+        kind: crate::combat::DamageOverTimeKind,
+        damage_per_tick: u16,
+        tick_interval: u16,
+        duration_ticks: u16,
+    },
+    Heal {
+        amount: u16,
+    },
 }
 
 impl WeaponPartEffect {
@@ -141,6 +153,18 @@ impl WeaponPartEffect {
             } => {
                 (1..=6_000).contains(&penalty_basis_points) && (1..=3_600).contains(&duration_ticks)
             }
+            Self::Cold { amount } | Self::Heal { amount } => (1..=1_000).contains(&amount),
+            Self::DamageOverTime {
+                damage_per_tick,
+                tick_interval,
+                duration_ticks,
+                ..
+            } => {
+                (1..=1_000).contains(&damage_per_tick)
+                    && (1..=3_600).contains(&tick_interval)
+                    && tick_interval <= duration_ticks
+                    && (1..=3_600).contains(&duration_ticks)
+            }
         };
         valid
             .then_some(())
@@ -156,6 +180,16 @@ impl WeaponPartEffect {
             Self::RefillInterval { .. } => 3,
             Self::Reach { .. } => 4,
             Self::Slow { .. } => 5,
+            Self::Cold { .. } => 6,
+            Self::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Poison,
+                ..
+            } => 7,
+            Self::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Fire,
+                ..
+            } => 8,
+            Self::Heal { .. } => 9,
         }
     }
 }
@@ -210,6 +244,17 @@ pub struct CanonicalWeaponModifiers {
     pub refill_interval: CanonicalScalarModifier,
     pub reach_milliunits: CanonicalScalarModifier,
     pub slow: Option<CanonicalSlowModifier>,
+    pub cold: Option<u16>,
+    pub poison: Option<CanonicalDamageOverTimeModifier>,
+    pub fire: Option<CanonicalDamageOverTimeModifier>,
+    pub heal: Option<u16>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CanonicalDamageOverTimeModifier {
+    pub damage_per_tick: u16,
+    pub tick_interval: u16,
+    pub duration_ticks: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

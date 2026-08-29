@@ -579,6 +579,22 @@ struct ServerHelloContent<'w> {
     weapon_catalog: Res<'w, WeaponCatalogResource>,
 }
 
+fn resolve_admitted_match_snapshot(
+    snapshot: crate::profiles::MatchBuildSnapshotV3,
+    builds: &crate::builds::BuildCatalog,
+    weapons: &crate::combat::WeaponCatalog,
+    fighter: &crate::combat::FighterDefinition,
+) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
+    #[cfg(feature = "balance-lab")]
+    {
+        snapshot.resolve_revised_balance_lab_catalogs(builds, weapons, fighter)
+    }
+    #[cfg(not(feature = "balance-lab"))]
+    {
+        snapshot.resolve(builds, weapons, fighter)
+    }
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -708,196 +724,225 @@ fn process_client_hellos(
                             reason: MatchJoinRejection::MatchFull,
                         }
                     } else {
-                        match ids.allocate() {
-                            Some((baseline_player_id, baseline_network_entity_id)) => {
-                                let worker_participant = role
-                                    .manifest()
-                                    .and_then(|manifest| {
-                                        authenticated_netcode_id(remote_id).and_then(|client_id| {
-                                            admit_manifest_client(
-                                                manifest,
-                                                client_id,
-                                                routed_peer.map(|peer| peer.peer_id),
-                                                &admitted_client_ids,
+                        let worker_participant = role
+                            .manifest()
+                            .and_then(|manifest| {
+                                authenticated_netcode_id(remote_id).and_then(|client_id| {
+                                    admit_manifest_client(
+                                        manifest,
+                                        client_id,
+                                        routed_peer.map(|peer| peer.peer_id),
+                                        &admitted_client_ids,
+                                    )
+                                    .ok()
+                                })
+                            })
+                            .copied();
+                        let worker_loadout = worker_participant
+                            .as_ref()
+                            .map(|participant| {
+                                let fighter = content
+                                    .fighters
+                                    .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
+                                    .ok_or_else(|| {
+                                        "standard fighter definition disappeared".to_string()
+                                    })?;
+                                let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(
+                                    &participant.build_snapshot,
+                                )?;
+                                resolve_admitted_match_snapshot(
+                                    snapshot,
+                                    &content.builds.0,
+                                    &content.weapon_catalog.0,
+                                    fighter,
+                                )
+                                .map_err(|error| format!("{error:?}"))
+                            })
+                            .transpose();
+                        if let Err(error) = &worker_loadout {
+                            error!(%error, "admitted manifest build did not resolve against the active server catalogs");
+                        }
+                        match worker_loadout {
+                            Err(_) => MatchJoinOutcome::Rejected {
+                                reason: MatchJoinRejection::ContentMismatch,
+                            },
+                            Ok(worker_loadout) => match ids.allocate() {
+                                Some((baseline_player_id, baseline_network_entity_id)) => {
+                                    let worker_assignment = worker_participant.zip(worker_loadout);
+                                    let accepted = MatchJoinOutcome::Accepted {
+                                        player_id: worker_participant
+                                            .map_or(baseline_player_id, |participant| {
+                                                PlayerId(participant.player_id.get())
+                                            }),
+                                        network_entity_id: baseline_network_entity_id,
+                                    };
+                                    let (assigned_team, loadout) =
+                                        if let Some((participant, loadout)) = worker_assignment {
+                                            let team = TeamId(participant.team);
+                                            (team, loadout)
+                                        } else {
+                                            let assigned_team = assigned_team(
+                                                team_counts,
+                                                lifecycle_rules.maximum_participants_per_team,
                                             )
-                                            .ok()
-                                        })
-                                    })
-                                    .copied();
-                                let accepted = MatchJoinOutcome::Accepted {
-                                    player_id: worker_participant
+                                            .expect(
+                                                "capacity was checked before identifier allocation",
+                                            );
+                                            let fighter = content
+                                                .fighters
+                                                .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
+                                                .expect("validated standard fighter definition");
+                                            let loadout =
+                                                crate::builds::resolve_saved_brawler_recipe(
+                                                    &content.builds.0,
+                                                    &content.weapon_catalog.0,
+                                                    fighter,
+                                                    crate::profiles::FighterProfileId(1),
+                                                    crate::profiles::WeaponBaseId(
+                                                        u16::try_from(
+                                                            baseline_player_id.0.saturating_sub(1)
+                                                                % 4
+                                                                + 1,
+                                                        )
+                                                        .expect(
+                                                            "four diagnostic weapon bases fit u16",
+                                                        ),
+                                                    ),
+                                                    crate::builds::UltimateDefinitionId(1),
+                                                    [
+                                                        crate::builds::PassiveDefinitionId(3),
+                                                        crate::builds::PassiveDefinitionId(4),
+                                                    ],
+                                                )
+                                                .expect(
+                                                    "validated direct-diagnostic brawler recipe",
+                                                );
+                                            (assigned_team, loadout)
+                                        };
+                                    let player_id = worker_participant
                                         .map_or(baseline_player_id, |participant| {
                                             PlayerId(participant.player_id.get())
-                                        }),
-                                    network_entity_id: baseline_network_entity_id,
-                                };
-                                let (assigned_team, loadout) = if let Some(participant) =
-                                    worker_participant.as_ref()
-                                {
-                                    let team = TeamId(participant.team);
-                                    let fighter = content
-                                        .fighters
-                                        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-                                        .expect("validated standard fighter definition");
-                                    let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(
-                                        &participant.build_snapshot,
+                                        });
+                                    let network_entity_id = baseline_network_entity_id;
+                                    let display_name = worker_participant.map_or_else(
+                                        || crate::lobby::generated_display_name(player_id.0),
+                                        |participant| participant.display_name.as_str().to_string(),
+                                    );
+                                    let candidates = spawn_points
+                                        .0
+                                        .get(&assigned_team.0)
+                                        .into_iter()
+                                        .flatten()
+                                        .map(|point| SpawnCandidate {
+                                            id: point.spawn_point_id,
+                                            position: point.position,
+                                            facing: point.facing,
+                                        })
+                                        .collect();
+                                    let spawn_point = select_spawn(
+                                        candidates,
+                                        &living_fighters,
+                                        assigned_team,
+                                        movement_tuning.radius * 2.0 + movement_tuning.skin_width,
+                                        match_state.match_id,
+                                        player_id,
+                                        0,
                                     )
-                                    .expect("validated manifest build snapshot");
-                                    let loadout = snapshot
-                                        .resolve(
-                                            &content.builds.0,
-                                            &content.weapon_catalog.0,
-                                            fighter,
-                                        )
-                                        .expect("validated manifest build resolution");
-                                    (team, loadout)
-                                } else {
-                                    let assigned_team = assigned_team(
-                                        team_counts,
-                                        lifecycle_rules.maximum_participants_per_team,
-                                    )
-                                    .expect("capacity was checked before identifier allocation");
-                                    let fighter = content
-                                        .fighters
-                                        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-                                        .expect("validated standard fighter definition");
-                                    let loadout = crate::builds::resolve_saved_brawler_recipe(
-                                        &content.builds.0,
-                                        &content.weapon_catalog.0,
-                                        fighter,
-                                        crate::profiles::FighterProfileId(1),
-                                        crate::profiles::WeaponBaseId(
-                                            u16::try_from(
-                                                baseline_player_id.0.saturating_sub(1) % 4 + 1,
-                                            )
-                                            .expect("four diagnostic weapon bases fit u16"),
+                                    .expect(
+                                        "validated map has a finite spawn for each Wipeout team",
+                                    );
+                                    let spawn_position = spawn_point.position;
+                                    let spawn_facing = spawn_point.facing;
+                                    let (fighter_definition, team, _, _) = default_fighter_runtime(
+                                        assigned_team,
+                                        &content.fighters,
+                                        &content.weapons,
+                                    );
+                                    let health =
+                                        CurrentHealth(loadout.fighter_stats.maximum_health);
+                                    let weapon = WeaponState::ready(
+                                        loadout.primary_weapon.recipe.economy.capacity(),
+                                    );
+                                    let fighter_entity = commands
+                                        .spawn((
+                                            Fighter,
+                                            player_id,
+                                            network_entity_id,
+                                            PlaceholderState {
+                                                spawn_slot: u64::from(spawn_point.id.0),
+                                            },
+                                            fighter_definition,
+                                            team,
+                                            health,
+                                            ActiveEffects::default(),
+                                            AuthoritativeTick::default(),
+                                            SpawnState {
+                                                position: spawn_position,
+                                                facing: spawn_facing,
+                                            },
+                                            Position::from_xy(spawn_position.x, spawn_position.y),
+                                            Rotation::radians(spawn_facing),
+                                            LinearVelocity::default(),
+                                            AngularVelocity::default(),
+                                        ))
+                                        .id();
+                                    commands.entity(fighter_entity).insert((
+                                        HealthRecoveryState::default(),
+                                        crate::matchplay::FighterDisplayName(display_name),
+                                        MatchParticipant {
+                                            match_id: match_state.match_id,
+                                            ready: false,
+                                            restart_ready: false,
+                                        },
+                                        MatchMember(match_state.match_id),
+                                        SpawnAssignment {
+                                            map_instance_id: resolved_map
+                                                .snapshot
+                                                .identity
+                                                .instance_id,
+                                            spawn_point_id: spawn_point.id,
+                                        },
+                                        Collider::circle(movement_tuning.radius),
+                                        RigidBody::Kinematic,
+                                        CustomPositionIntegration,
+                                        CollisionLayers::new(
+                                            crate::movement::FIGHTER_LAYER,
+                                            avian2d::prelude::LayerMask::NONE,
                                         ),
-                                        crate::builds::UltimateDefinitionId(1),
-                                        [
-                                            crate::builds::PassiveDefinitionId(3),
-                                            crate::builds::PassiveDefinitionId(4),
-                                        ],
-                                    )
-                                    .expect("validated direct-diagnostic brawler recipe");
-                                    (assigned_team, loadout)
-                                };
-                                let player_id = worker_participant
-                                    .map_or(baseline_player_id, |participant| {
-                                        PlayerId(participant.player_id.get())
-                                    });
-                                let network_entity_id = baseline_network_entity_id;
-                                let display_name = worker_participant.map_or_else(
-                                    || crate::lobby::generated_display_name(player_id.0),
-                                    |participant| participant.display_name.as_str().to_string(),
-                                );
-                                let candidates = spawn_points
-                                    .0
-                                    .get(&assigned_team.0)
-                                    .into_iter()
-                                    .flatten()
-                                    .map(|point| SpawnCandidate {
-                                        id: point.spawn_point_id,
-                                        position: point.position,
-                                        facing: point.facing,
-                                    })
-                                    .collect();
-                                let spawn_point = select_spawn(
-                                    candidates,
-                                    &living_fighters,
-                                    assigned_team,
-                                    movement_tuning.radius * 2.0 + movement_tuning.skin_width,
-                                    match_state.match_id,
-                                    player_id,
-                                    0,
-                                )
-                                .expect("validated map has a finite spawn for each Wipeout team");
-                                let spawn_position = spawn_point.position;
-                                let spawn_facing = spawn_point.facing;
-                                let (fighter_definition, team, _, _) = default_fighter_runtime(
-                                    assigned_team,
-                                    &content.fighters,
-                                    &content.weapons,
-                                );
-                                let health = CurrentHealth(loadout.fighter_stats.maximum_health);
-                                let weapon = WeaponState::ready(
-                                    loadout.primary_weapon.recipe.economy.capacity(),
-                                );
-                                let fighter_entity = commands
-                                    .spawn((
-                                        Fighter,
+                                        InputFreshness::default(),
+                                        (
+                                            Replicate::to_clients(NetworkTarget::All),
+                                            InterpolationTarget::to_clients(NetworkTarget::All),
+                                        ),
+                                        ControlledBy {
+                                            owner: connection,
+                                            lifetime: Lifetime::SessionBased,
+                                        },
+                                    ));
+                                    commands.entity(fighter_entity).insert((
+                                        loadout.identity,
+                                        loadout,
+                                        AbilityState::default(),
+                                        PassiveRuntimeState::default(),
+                                        weapon,
+                                        ActiveEffects::default(),
+                                    ));
+                                    session.phase = ServerSessionPhase::Active {
                                         player_id,
                                         network_entity_id,
-                                        PlaceholderState {
-                                            spawn_slot: u64::from(spawn_point.id.0),
-                                        },
-                                        fighter_definition,
-                                        team,
-                                        health,
-                                        ActiveEffects::default(),
-                                        AuthoritativeTick::default(),
-                                        SpawnState {
-                                            position: spawn_position,
-                                            facing: spawn_facing,
-                                        },
-                                        Position::from_xy(spawn_position.x, spawn_position.y),
-                                        Rotation::radians(spawn_facing),
-                                        LinearVelocity::default(),
-                                        AngularVelocity::default(),
-                                    ))
-                                    .id();
-                                commands.entity(fighter_entity).insert((
-                                    HealthRecoveryState::default(),
-                                    crate::matchplay::FighterDisplayName(display_name),
-                                    MatchParticipant {
-                                        match_id: match_state.match_id,
-                                        ready: false,
-                                        restart_ready: false,
-                                    },
-                                    MatchMember(match_state.match_id),
-                                    SpawnAssignment {
-                                        map_instance_id: resolved_map.snapshot.identity.instance_id,
-                                        spawn_point_id: spawn_point.id,
-                                    },
-                                    Collider::circle(movement_tuning.radius),
-                                    RigidBody::Kinematic,
-                                    CustomPositionIntegration,
-                                    CollisionLayers::new(
-                                        crate::movement::FIGHTER_LAYER,
-                                        avian2d::prelude::LayerMask::NONE,
-                                    ),
-                                    InputFreshness::default(),
-                                    (
-                                        Replicate::to_clients(NetworkTarget::All),
-                                        InterpolationTarget::to_clients(NetworkTarget::All),
-                                    ),
-                                    ControlledBy {
-                                        owner: connection,
-                                        lifetime: Lifetime::SessionBased,
-                                    },
-                                ));
-                                commands.entity(fighter_entity).insert((
-                                    loadout.identity,
-                                    loadout,
-                                    AbilityState::default(),
-                                    PassiveRuntimeState::default(),
-                                    weapon,
-                                    ActiveEffects::default(),
-                                ));
-                                session.phase = ServerSessionPhase::Active {
-                                    player_id,
-                                    network_entity_id,
-                                };
-                                active_count += 1;
-                                if let Some(client_id) = authenticated_netcode_id(remote_id) {
-                                    admitted_client_ids.insert(client_id);
+                                    };
+                                    active_count += 1;
+                                    if let Some(client_id) = authenticated_netcode_id(remote_id) {
+                                        admitted_client_ids.insert(client_id);
+                                    }
+                                    team_counts[usize::from(assigned_team.0)] =
+                                        team_counts[usize::from(assigned_team.0)].saturating_add(1);
+                                    living_fighters.push((assigned_team, spawn_position));
+                                    accepted
                                 }
-                                team_counts[usize::from(assigned_team.0)] =
-                                    team_counts[usize::from(assigned_team.0)].saturating_add(1);
-                                living_fighters.push((assigned_team, spawn_position));
-                                accepted
-                            }
-                            None => MatchJoinOutcome::Rejected {
-                                reason: MatchJoinRejection::IdentifierExhausted,
+                                None => MatchJoinOutcome::Rejected {
+                                    reason: MatchJoinRejection::IdentifierExhausted,
+                                },
                             },
                         }
                     };

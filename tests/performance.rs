@@ -714,6 +714,7 @@ fn m05_one_hundred_active_effect_states_stay_within_fixed_tick_budget() {
                     movement_multiplier_milli: 700,
                     expires_at_tick: u64::MAX,
                 }),
+                ..default()
             },
             ExternalMotion {
                 velocity: Vec2::new(20.0, 0.0),
@@ -752,6 +753,7 @@ fn m05_combined_worst_case_fixed_tick_stays_within_budget() {
                     movement_multiplier_milli: 700,
                     expires_at_tick: u64::MAX,
                 }),
+                ..default()
             },
             ExternalMotion {
                 velocity: Vec2::new(20.0, 0.0),

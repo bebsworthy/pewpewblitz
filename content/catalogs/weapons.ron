@@ -1,5 +1,5 @@
 (
-    schema_version: 5,
+    schema_version: 6,
     recipe_policy: (
         max_deliveries_per_attack: 16,
         max_payload_bundles: 4,
@@ -8,8 +8,8 @@
         permitted_firing_patterns: [Single, Spread],
         permitted_delivery_methods: [Straight, Lobbed, MeleeArc],
         permitted_target_selections: [Direct, Area],
-        permitted_payload_effects: [Damage, Knockback, Slow],
-        permitted_recipient_policies: [Hostiles, HostilesAndOwner],
+        permitted_payload_effects: [Damage, Knockback, Slow, Cold, DamageOverTime, Heal],
+        permitted_recipient_policies: [Hostiles, HostilesAndOwner, Allies, AlliesAndOwner],
         max_capacity: 32,
         max_fire_cooldown_ticks: 3600,
         max_effect_duration_ticks: 3600,

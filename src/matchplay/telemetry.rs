@@ -316,7 +316,9 @@ impl MatchTelemetry {
                     }
                 }
             }
-            CombatOutcomeKind::Damage { .. } | CombatOutcomeKind::DeployableDestroyed => {}
+            CombatOutcomeKind::Damage { .. }
+            | CombatOutcomeKind::Healing { .. }
+            | CombatOutcomeKind::DeployableDestroyed => {}
         }
     }
 

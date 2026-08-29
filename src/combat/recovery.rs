@@ -1,6 +1,6 @@
 //! Server-authoritative fighter health recovery after an accepted-attack idle window.
 
-use super::{CurrentHealth, Defeated, HealthRecoveryState};
+use super::{ActiveEffects, CurrentHealth, Defeated, HealthRecoveryState};
 use crate::{
     builds::ResolvedMatchLoadout,
     matchplay::{ActiveCombatant, MatchParticipant},
@@ -40,12 +40,13 @@ pub(super) fn restore_attack_idle_health(
             &ResolvedMatchLoadout,
             &mut CurrentHealth,
             &mut HealthRecoveryState,
+            &ActiveEffects,
             Option<&MatchParticipant>,
         ),
         (With<Fighter>, Without<Defeated>),
     >,
 ) {
-    for (entity, loadout, mut health, mut recovery, participant) in &mut fighters {
+    for (entity, loadout, mut health, mut recovery, effects, participant) in &mut fighters {
         if participant.is_some() && !active.contains(entity) {
             recovery.recovery_remainder = 0;
             continue;
@@ -56,6 +57,10 @@ pub(super) fn restore_attack_idle_health(
                 .last_accepted_attack_tick
                 .saturating_add(stats.idle_attack_delay_ticks)
         {
+            recovery.recovery_remainder = 0;
+            continue;
+        }
+        if effects.is_poisoned(tick.0) {
             recovery.recovery_remainder = 0;
             continue;
         }

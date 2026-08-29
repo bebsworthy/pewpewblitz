@@ -352,18 +352,22 @@ pub(super) fn authoritative_movement(
         if let Some(aim) = decision.aim {
             rotation = Rotation::radians(aim.y.atan2(aim.x));
         }
-        let desired_velocity = resolved_movement_velocity(
-            tick.0,
-            &decision,
-            loadouts
-                .get(entity)
-                .ok()
-                .map(|loadout| loadout.fighter_stats.movement_speed),
-            tuning.speed,
-            active_effects,
-            passive_states.get(entity).ok(),
-            external_motion,
-        );
+        let desired_velocity = if active_effects.is_some_and(|effects| effects.is_frozen(tick.0)) {
+            Vec2::ZERO
+        } else {
+            resolved_movement_velocity(
+                tick.0,
+                &decision,
+                loadouts
+                    .get(entity)
+                    .ok()
+                    .map(|loadout| loadout.fighter_stats.movement_speed),
+                tuning.speed,
+                active_effects,
+                passive_states.get(entity).ok(),
+                external_motion,
+            )
+        };
         let filter = SpatialQueryFilter::from_mask(
             STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER | crate::movement::PLAYER_ONLY_MAP_LAYER,
         )

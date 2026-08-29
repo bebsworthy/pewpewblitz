@@ -513,15 +513,44 @@ fn seed_starter_parts(
         [account_id.to_bytes().as_slice()],
         |row| row.get(0),
     )?;
-    if revision >= 1 {
-        return Ok(false);
-    }
     let catalog = crate::weapon_parts::WeaponPartCatalog::embedded()
         .map_err(ProfileStorageError::Database)?;
-    let instances = catalog
-        .starter_instances(crate::weapon_parts::WeaponPartInstanceId::random)
-        .map_err(|_| ProfileModelError::InvalidPart)?;
-    for part in instances {
+    if revision >= i64::from(catalog.starter_set_revision) {
+        return Ok(false);
+    }
+    let mut existing = std::collections::BTreeSet::new();
+    let mut statement = transaction
+        .prepare("SELECT definition_id FROM weapon_part_instances WHERE account_id=?1")?;
+    let rows = statement.query_map([account_id.to_bytes().as_slice()], |row| {
+        row.get::<_, u16>(0)
+    })?;
+    for row in rows {
+        existing.insert(crate::weapon_parts::WeaponPartDefinitionId(row?));
+    }
+    drop(statement);
+    let mut next_ordinal: i64 = transaction.query_row(
+        "SELECT COALESCE(MAX(inventory_ordinal),0) FROM weapon_part_instances WHERE account_id=?1",
+        [account_id.to_bytes().as_slice()],
+        |row| row.get(0),
+    )?;
+    for definition in catalog
+        .definitions
+        .iter()
+        .filter(|definition| !existing.contains(&definition.id))
+    {
+        next_ordinal = next_ordinal
+            .checked_add(1)
+            .ok_or(ProfileModelError::InvalidPart)?;
+        let part = crate::weapon_parts::WeaponPartInstance {
+            id: crate::weapon_parts::WeaponPartInstanceId::random()
+                .map_err(|_| ProfileModelError::InvalidPart)?,
+            inventory_ordinal: from_i64(next_ordinal)?,
+            definition_id: definition.id,
+            display_name: definition.display_name.clone(),
+            effects: definition.effects.clone(),
+        };
+        part.validate()
+            .map_err(|_| ProfileModelError::InvalidPart)?;
         let effects =
             postcard::to_allocvec(&part.effects).map_err(|_| ProfileModelError::InvalidPart)?;
         transaction.execute(
@@ -530,8 +559,11 @@ fn seed_starter_parts(
         )?;
     }
     transaction.execute(
-        "UPDATE profiles SET starter_part_set=1 WHERE account_id=?1 AND starter_part_set=0",
-        [account_id.to_bytes().as_slice()],
+        "UPDATE profiles SET starter_part_set=?1 WHERE account_id=?2 AND starter_part_set<?1",
+        rusqlite::params![
+            catalog.starter_set_revision,
+            account_id.to_bytes().as_slice()
+        ],
     )?;
     Ok(true)
 }

@@ -1,6 +1,6 @@
 use super::{
-    CanonicalScalarModifier, CanonicalSlowModifier, CanonicalWeaponModifiers, WeaponPartEffect,
-    WeaponPartModelError,
+    CanonicalDamageOverTimeModifier, CanonicalScalarModifier, CanonicalSlowModifier,
+    CanonicalWeaponModifiers, WeaponPartEffect, WeaponPartModelError,
 };
 use crate::combat::{
     DeliveryMethod, EngineWeaponLimits, PayloadEffectDefinition, RecipientPolicy, SlowStacking,
@@ -59,9 +59,46 @@ pub fn aggregate_weapon_part_effects(
                     duration_ticks: prior.duration_ticks.max(duration_ticks),
                 });
             }
+            WeaponPartEffect::Cold { amount } => {
+                set_elemental_module(&result)?;
+                result.cold = Some(amount);
+            }
+            WeaponPartEffect::DamageOverTime {
+                kind,
+                damage_per_tick,
+                tick_interval,
+                duration_ticks,
+            } => {
+                set_elemental_module(&result)?;
+                let value = CanonicalDamageOverTimeModifier {
+                    damage_per_tick,
+                    tick_interval,
+                    duration_ticks,
+                };
+                match kind {
+                    crate::combat::DamageOverTimeKind::Poison => result.poison = Some(value),
+                    crate::combat::DamageOverTimeKind::Fire => result.fire = Some(value),
+                }
+            }
+            WeaponPartEffect::Heal { amount } => {
+                set_elemental_module(&result)?;
+                result.heal = Some(amount);
+            }
         }
     }
     Ok(result)
+}
+
+fn set_elemental_module(modifiers: &CanonicalWeaponModifiers) -> Result<(), WeaponPartModelError> {
+    if modifiers.cold.is_some()
+        || modifiers.poison.is_some()
+        || modifiers.fire.is_some()
+        || modifiers.heal.is_some()
+    {
+        Err(WeaponPartModelError::IncompatibleWeapon)
+    } else {
+        Ok(())
+    }
 }
 
 fn add_scalar(
@@ -207,9 +244,73 @@ fn apply_modifiers(
         if let Some(slow) = modifiers.slow {
             merge_slow(bundle, slow)?;
         }
+        merge_elemental_effects(bundle, modifiers)?;
     }
     if (modifiers.slow.is_some() || !is_zero(modifiers.damage)) && !damage_found {
         return Err(WeaponPartModelError::IncompatibleWeapon);
+    }
+    if modifiers.heal.is_some()
+        && (!matches!(
+            configuration.recipe.firing,
+            crate::combat::FiringPattern::Single
+        ) || !matches!(
+            configuration.recipe.delivery,
+            DeliveryMethod::Straight { .. }
+        ))
+    {
+        return Err(WeaponPartModelError::IncompatibleWeapon);
+    }
+    Ok(())
+}
+
+fn merge_elemental_effects(
+    bundle: &mut crate::combat::PayloadBundleDefinition,
+    modifiers: CanonicalWeaponModifiers,
+) -> Result<(), WeaponPartModelError> {
+    let has_hostile_damage = bundle.effects.iter().any(|effect| {
+        matches!(
+            effect,
+            PayloadEffectDefinition::Damage {
+                recipients: RecipientPolicy::Hostiles,
+                ..
+            }
+        )
+    });
+    if !has_hostile_damage {
+        return Ok(());
+    }
+    let next = if let Some(amount) = modifiers.cold {
+        Some(PayloadEffectDefinition::Cold {
+            amount,
+            recipients: RecipientPolicy::Hostiles,
+        })
+    } else if let Some(value) = modifiers.poison {
+        Some(PayloadEffectDefinition::DamageOverTime {
+            kind: crate::combat::DamageOverTimeKind::Poison,
+            damage_per_tick: value.damage_per_tick,
+            tick_interval: u64::from(value.tick_interval),
+            duration_ticks: u64::from(value.duration_ticks),
+            recipients: RecipientPolicy::Hostiles,
+        })
+    } else if let Some(value) = modifiers.fire {
+        Some(PayloadEffectDefinition::DamageOverTime {
+            kind: crate::combat::DamageOverTimeKind::Fire,
+            damage_per_tick: value.damage_per_tick,
+            tick_interval: u64::from(value.tick_interval),
+            duration_ticks: u64::from(value.duration_ticks),
+            recipients: RecipientPolicy::Hostiles,
+        })
+    } else {
+        modifiers.heal.map(|amount| PayloadEffectDefinition::Heal {
+            amount,
+            recipients: RecipientPolicy::Allies,
+        })
+    };
+    if let Some(effect) = next {
+        if bundle.effects.len() >= 4 {
+            return Err(WeaponPartModelError::IncompatibleWeapon);
+        }
+        bundle.effects.push(effect);
     }
     Ok(())
 }

@@ -5,6 +5,8 @@ mod concealment_field;
 mod dash;
 #[cfg(feature = "server")]
 mod demolition;
+#[cfg(feature = "server")]
+mod elemental_field;
 mod passives;
 mod reveal_scan;
 mod self_cloak;
@@ -73,12 +75,14 @@ impl Plugin for ServerAbilityPlugin {
             .add_systems(
                 FixedUpdate,
                 (
+                    suppress_frozen_actions,
                     dash::activate_dash,
                     sentry::activate_sentry,
                     self_cloak::activate_self_cloak,
                     reveal_scan::activate_reveal_scan,
                     concealment_field::activate_concealment_field,
                     demolition::activate_demolition_strike,
+                    elemental_field::activate_elemental_field,
                     ApplyDeferred,
                 )
                     .chain()
@@ -115,6 +119,23 @@ impl Plugin for ServerAbilityPlugin {
                 .after(crate::combat::CombatSet::Lifecycle)
                 .before(crate::concealment::ConcealmentSet::ResolveSources),
         );
+    }
+}
+
+#[cfg(feature = "server")]
+#[allow(clippy::needless_pass_by_value)]
+fn suppress_frozen_actions(
+    tick: Res<crate::timing::SimulationTick>,
+    mut fighters: Query<(
+        &crate::combat::ActiveEffects,
+        &mut lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>,
+    )>,
+) {
+    for (effects, mut action) in &mut fighters {
+        if effects.is_frozen(tick.0) {
+            action.0.gameplay_buttons &= !(crate::protocol::FighterInput::PRIMARY_FIRE
+                | crate::protocol::FighterInput::ULTIMATE);
+        }
     }
 }
 

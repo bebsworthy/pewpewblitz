@@ -68,7 +68,6 @@ pub(super) fn drive_match_loading_check_in(
         grant.allocation_id.get(),
         grant.match_id.get(),
     );
-    let cancel_requested = loading.take_match_cancel_requested();
     for (mut sender, receiver, status_receiver) in &mut clients {
         if let Some(mut status_receiver) = status_receiver {
             consume_match_loading_statuses(&mut status_receiver, correlation, &mut loading);
@@ -76,13 +75,14 @@ pub(super) fn drive_match_loading_check_in(
         if let Some(mut receiver) = receiver {
             consume_match_loading_outcomes(&mut receiver, correlation, &mut loading, &mut routed);
         }
-        if cancel_requested && state.cancel_sent_for != Some(correlation) {
+        if loading.match_cancel_requested() && state.cancel_sent_for != Some(correlation) {
             send_match_loading_action(
                 &mut sender,
                 correlation,
                 MatchLoadingClientAction::CancelMatchStart,
             );
             state.cancel_sent_for = Some(correlation);
+            loading.mark_match_cancel_sent();
             continue;
         }
         if !match_loading_ready_to_send(

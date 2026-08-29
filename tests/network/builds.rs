@@ -35,6 +35,12 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
         let mut builds = world.resource_mut::<brawler::builds::BuildCatalogResource>();
         builds.0.fighter_profiles.default.maximum_health = 222;
         builds.0.fighter_profiles.default.movement_speed = 444.0;
+        builds.0.fighter_profiles.default.cold_capacity = 750;
+        builds
+            .0
+            .fighter_profiles
+            .default
+            .cold_resistance_basis_points = 1_000;
         builds.0.fighter_profiles.lightweight.maximum_health = 222;
         builds.0.fighter_profiles.lightweight.movement_speed = 444.0;
         builds.0.fighter_profiles.reinforced.maximum_health = 222;
@@ -78,6 +84,11 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
     );
     assert_eq!(server_loadout.fighter_stats.maximum_health, 222);
     assert_eq!(server_loadout.fighter_stats.movement_speed, 444.0);
+    assert_eq!(server_loadout.fighter_stats.cold_capacity, 750);
+    assert_eq!(
+        server_loadout.fighter_stats.cold_resistance_basis_points,
+        1_000
+    );
 
     harness.step_until(|harness| {
         let entity = harness.controlled_entity(0);

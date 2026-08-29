@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use super::FighterDefinition;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 5;
-pub const FINGERPRINT_FORMAT_VERSION: u16 = 3;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 6;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 4;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -99,12 +99,17 @@ pub enum PayloadEffectKind {
     Damage,
     Knockback,
     Slow,
+    Cold,
+    DamageOverTime,
+    Heal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum RecipientPolicyKind {
     Hostiles,
     HostilesAndOwner,
+    Allies,
+    AlliesAndOwner,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -175,10 +180,15 @@ impl Default for WeaponRecipePolicy {
                 PayloadEffectKind::Damage,
                 PayloadEffectKind::Knockback,
                 PayloadEffectKind::Slow,
+                PayloadEffectKind::Cold,
+                PayloadEffectKind::DamageOverTime,
+                PayloadEffectKind::Heal,
             ],
             permitted_recipient_policies: vec![
                 RecipientPolicyKind::Hostiles,
                 RecipientPolicyKind::HostilesAndOwner,
+                RecipientPolicyKind::Allies,
+                RecipientPolicyKind::AlliesAndOwner,
             ],
             max_capacity: 32,
             max_fire_cooldown_ticks: 3_600,
@@ -407,6 +417,21 @@ pub enum PayloadEffectDefinition {
         stacking: SlowStacking,
         recipients: RecipientPolicy,
     },
+    Cold {
+        amount: u16,
+        recipients: RecipientPolicy,
+    },
+    DamageOverTime {
+        kind: super::DamageOverTimeKind,
+        damage_per_tick: u16,
+        tick_interval: u64,
+        duration_ticks: u64,
+        recipients: RecipientPolicy,
+    },
+    Heal {
+        amount: u16,
+        recipients: RecipientPolicy,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -423,6 +448,8 @@ pub enum DamageFalloff {
 pub enum RecipientPolicy {
     Hostiles,
     HostilesAndOwner { owner_scale: f32 },
+    Allies,
+    AlliesAndOwner,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -681,6 +708,10 @@ impl WeaponConfiguration {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the closed authored effect enum keeps its complete numeric and recipient policy audit together"
+)]
 fn validate_effect(
     effect: PayloadEffectDefinition,
     policy: &WeaponRecipePolicy,
@@ -751,6 +782,63 @@ fn validate_effect(
                 return Err("invalid slow effect".to_string());
             }
         }
+        PayloadEffectDefinition::Cold { amount, recipients } => {
+            if amount == 0
+                || amount > 1_000
+                || !valid_recipients(recipients, limits)
+                || !policy
+                    .permitted_recipient_policies
+                    .contains(&recipient_kind(recipients))
+                || !policy
+                    .permitted_payload_effects
+                    .contains(&PayloadEffectKind::Cold)
+            {
+                return Err("invalid Cold effect".to_string());
+            }
+        }
+        PayloadEffectDefinition::DamageOverTime {
+            damage_per_tick,
+            tick_interval,
+            duration_ticks,
+            recipients,
+            ..
+        } => {
+            if damage_per_tick == 0
+                || damage_per_tick > limits.max_damage
+                || damage_per_tick > policy.max_damage
+                || tick_interval == 0
+                || tick_interval > duration_ticks
+                || duration_ticks > limits.max_effect_duration_ticks
+                || duration_ticks > policy.max_effect_duration_ticks
+                || !valid_recipients(recipients, limits)
+                || !policy
+                    .permitted_recipient_policies
+                    .contains(&recipient_kind(recipients))
+                || !policy
+                    .permitted_payload_effects
+                    .contains(&PayloadEffectKind::DamageOverTime)
+            {
+                return Err("invalid damage-over-time effect".to_string());
+            }
+        }
+        PayloadEffectDefinition::Heal { amount, recipients } => {
+            if amount == 0
+                || amount > limits.max_damage
+                || amount > policy.max_damage
+                || !matches!(
+                    recipients,
+                    RecipientPolicy::Allies | RecipientPolicy::AlliesAndOwner
+                )
+                || !policy
+                    .permitted_recipient_policies
+                    .contains(&recipient_kind(recipients))
+                || !policy
+                    .permitted_payload_effects
+                    .contains(&PayloadEffectKind::Heal)
+            {
+                return Err("invalid healing effect".to_string());
+            }
+        }
     }
     Ok(())
 }
@@ -759,6 +847,8 @@ fn recipient_kind(recipients: RecipientPolicy) -> RecipientPolicyKind {
     match recipients {
         RecipientPolicy::Hostiles => RecipientPolicyKind::Hostiles,
         RecipientPolicy::HostilesAndOwner { .. } => RecipientPolicyKind::HostilesAndOwner,
+        RecipientPolicy::Allies => RecipientPolicyKind::Allies,
+        RecipientPolicy::AlliesAndOwner => RecipientPolicyKind::AlliesAndOwner,
     }
 }
 
@@ -816,7 +906,9 @@ fn validate_capability_list<T: Ord>(values: &[T], name: &str) -> Result<(), Stri
 
 fn valid_recipients(recipients: RecipientPolicy, limits: EngineWeaponLimits) -> bool {
     match recipients {
-        RecipientPolicy::Hostiles => true,
+        RecipientPolicy::Hostiles | RecipientPolicy::Allies | RecipientPolicy::AlliesAndOwner => {
+            true
+        }
         RecipientPolicy::HostilesAndOwner { owner_scale } => {
             finite_range(owner_scale, 0.0, 1.0) && owner_scale <= 1.0 && limits.max_damage > 0
         }

@@ -30,6 +30,7 @@ pub(super) struct BatchView<'a> {
 #[derive(Default)]
 pub(super) struct AppliedComposedState {
     contacted_deliveries: HashSet<(AttackId, u8, u64)>,
+    cold_contacts: HashSet<(AttackId, u64)>,
     defeated: HashSet<Entity>,
     effects: HashMap<Entity, ActiveEffects>,
     motion: HashMap<Entity, ExternalMotion>,
@@ -284,6 +285,31 @@ pub(super) fn apply_composed_records(
         let legacy_compatibility = record.source.legacy_compatibility;
         let source = cue_damage_source(record.source);
         let mut target_defeated = defeated.is_some() || applied.defeated.contains(&record.target);
+        let (
+            maximum_health,
+            tenacity,
+            cold_capacity,
+            cold_resistance,
+            poison_resistance,
+            fire_resistance,
+        ) = {
+            let loadouts = combat.passive_access.p0();
+            loadouts
+                .get(record.target)
+                .map_or((health.0, false, 1_000, 0, 0, 0), |loadout| {
+                    (
+                        loadout.fighter_stats.maximum_health,
+                        loadout
+                            .passives
+                            .iter()
+                            .any(|passive| passive.kind == crate::builds::PassiveKind::Tenacity),
+                        loadout.fighter_stats.cold_capacity,
+                        loadout.fighter_stats.cold_resistance_basis_points,
+                        loadout.fighter_stats.poison_resistance_basis_points,
+                        loadout.fighter_stats.fire_resistance_basis_points,
+                    )
+                })
+        };
         let owner_contact = *target_network_id == record.source.owner_network_entity_id;
         if !owner_contact
             && !target_defeated
@@ -422,6 +448,72 @@ pub(super) fn apply_composed_records(
                     );
                     target_defeated = true;
                 }
+            } else if let PayloadEffectDefinition::Heal { amount, .. } = effect {
+                let requested = (f32::from(amount) * scale)
+                    .round()
+                    .clamp(1.0, f32::from(u16::MAX)) as u16;
+                let applied_healing = requested.min(maximum_health.saturating_sub(health.0));
+                health.0 = health.0.saturating_add(applied_healing).min(maximum_health);
+                let event_id = reserved_events
+                    .next()
+                    .expect("payload event reservation matches healing");
+                let cue = CombatCue::EffectApplied {
+                    event_id,
+                    tick,
+                    attack_id: record.source.attack_id,
+                    source,
+                    target: *target_network_id,
+                    position: WorldPoint::from(record.position),
+                    effect: CombatEffectCue::Healing {
+                        amount: applied_healing,
+                        health_after: health.0,
+                    },
+                    presentation_profile_id: record.source.presentation_profile_id,
+                };
+                transaction.legacy_telemetry.record_cue(cue.clone());
+                transaction.outbox.0.push(cue);
+                transaction.outcome_facts.0.push(CombatOutcomeFact {
+                    event_id,
+                    tick,
+                    attack_id: record.source.attack_id,
+                    source_kind: record.source.kind,
+                    source_player: Some(record.source.player_id),
+                    source_network_id: Some(record.source.owner_network_entity_id),
+                    source_team: Some(record.source.team_id),
+                    target_network_id: *target_network_id,
+                    target_kind,
+                    target_team: *target_team,
+                    preset_id: record.source.source_preset_id,
+                    recipe_fingerprint: Some(record.source.recipe_fingerprint),
+                    position: WorldPoint::from(record.position),
+                    engagement_distance: record.engagement_distance,
+                    kind: CombatOutcomeKind::Healing {
+                        requested,
+                        applied: applied_healing,
+                        resulting_health: health.0,
+                    },
+                });
+                gameplay_telemetry.weapon.record(WeaponTelemetryRecord {
+                    tick,
+                    event_id,
+                    attack_id: record.source.attack_id,
+                    preset_id,
+                    recipe_fingerprint: record.source.recipe_fingerprint,
+                    delivery_index: Some(record.delivery_index),
+                    source: record.source.owner_network_entity_id,
+                    target: Some(*target_network_id),
+                    position: WorldPoint::from(record.position),
+                    requested_value: requested,
+                    applied_value: applied_healing,
+                    engagement_distance: record.engagement_distance,
+                    delivery_travel: record.delivery_travel,
+                    hostile_contact: false,
+                    effect: Some(effect),
+                    resulting_health: Some(health.0),
+                    resulting_effects: Some(effects_state),
+                    resulting_motion: motion_state,
+                    outcome: WeaponTelemetryOutcome::HealingApplied,
+                });
             }
         }
         if target_defeated {
@@ -445,16 +537,14 @@ pub(super) fn apply_composed_records(
             preset_id,
             effects_state,
             motion_state,
-            combat
-                .passive_access
-                .p0()
-                .get(record.target)
-                .is_ok_and(|loadout| {
-                    loadout
-                        .passives
-                        .iter()
-                        .any(|passive| passive.kind == crate::builds::PassiveKind::Tenacity)
-                }),
+            tenacity,
+            cold_capacity,
+            cold_resistance,
+            poison_resistance,
+            fire_resistance,
+            applied
+                .cold_contacts
+                .insert((record.source.attack_id, target_network_id.0)),
             reserved_events,
             &mut gameplay_telemetry.weapon,
             &mut gameplay_telemetry.ability,
@@ -470,6 +560,7 @@ pub(super) fn apply_composed_records(
 // One applied damage fact fans out into weapon telemetry, legacy telemetry, cues, and
 // outcome facts; every parameter is a fact of that single application.
 #[allow(
+    clippy::large_types_passed_by_value,
     clippy::too_many_arguments,
     clippy::too_many_lines,
     reason = "each parameter is one fact of the damage application being recorded across the telemetry, cue, and outcome sinks"

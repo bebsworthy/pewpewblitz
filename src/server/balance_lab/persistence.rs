@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 5;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 7;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -30,6 +30,10 @@ pub(super) struct LoadedBalanceLab {
     pub(super) maps: crate::map::MapContentCatalog,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the version ladder remains sequential and auditable beside exact persistence parsing"
+)]
 pub(super) fn load(
     path: &Path,
     validator: &BalanceLabValidator,
@@ -80,8 +84,8 @@ pub(super) fn load(
         == Some(4)
         && value["snapshot"]["schemaVersion"].as_u64() == Some(9)
     {
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(5);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(10);
         let demolition = validator
             .baseline
             .ultimates
@@ -109,6 +113,64 @@ pub(super) fn load(
             })
             .ok_or_else(|| "persisted Arc Launcher tuning is missing".to_string())?;
         arc["recipe"]["worldEffects"] = serde_json::json!([]);
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(5)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(10)
+    {
+        value["schemaVersion"] = serde_json::json!(6);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(11);
+        let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
+            .map_err(|error| format!("canonical resistance migration failed: {error}"))?;
+        for profile in ["default", "lightweight", "reinforced"] {
+            for field in [
+                "cold_resistance_basis_points",
+                "poison_resistance_basis_points",
+                "fire_resistance_basis_points",
+            ] {
+                value["snapshot"]["fighterProfiles"][profile][field] =
+                    canonical_profiles[profile][field].clone();
+            }
+        }
+        let ultimates = value["snapshot"]["ultimates"]
+            .as_array_mut()
+            .ok_or_else(|| "persisted ultimate tuning is not an array".to_string())?;
+        for canonical in validator.baseline.ultimates.iter().filter(|ultimate| {
+            matches!(
+                ultimate.kind,
+                crate::builds::UltimateKind::CryogenicField
+                    | crate::builds::UltimateKind::FireField
+                    | crate::builds::UltimateKind::PoisonField
+                    | crate::builds::UltimateKind::RestorationField
+            )
+        }) {
+            if !ultimates
+                .iter()
+                .any(|ultimate| ultimate["id"].as_u64() == Some(u64::from(canonical.id)))
+            {
+                ultimates.push(serde_json::to_value(canonical).map_err(|error| {
+                    format!("canonical elemental field migration failed: {error}")
+                })?);
+            }
+        }
+        ultimates.sort_by_key(|ultimate| ultimate["id"].as_u64().unwrap_or(u64::MAX));
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(6)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(11)
+    {
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
+            .map_err(|error| format!("canonical Cold capacity migration failed: {error}"))?;
+        for profile in ["default", "lightweight", "reinforced"] {
+            value["snapshot"]["fighterProfiles"][profile]["cold_capacity"] =
+                canonical_profiles[profile]["cold_capacity"].clone();
+        }
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -267,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_eight_gains_canonical_fighter_recovery_without_losing_tuning() {
+    fn older_snapshot_gains_canonical_fighter_and_elemental_fields_without_losing_tuning() {
         let root = TestPath::create();
         let path = root.0.join("session-v1.json");
         let (validator, mut snapshot) = fixture();
@@ -293,6 +355,10 @@ mod tests {
                 .as_object_mut()
                 .unwrap()
                 .remove("idle_attack_delay_ticks");
+            value["snapshot"]["fighterProfiles"][profile]
+                .as_object_mut()
+                .unwrap()
+                .remove("cold_capacity");
         }
         fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 

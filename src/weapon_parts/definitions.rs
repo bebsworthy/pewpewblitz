@@ -7,8 +7,8 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const WEAPON_PART_CATALOG_SCHEMA_VERSION: u16 = 1;
-const WEAPON_PART_FINGERPRINT_VERSION: u16 = 1;
+pub const WEAPON_PART_CATALOG_SCHEMA_VERSION: u16 = 2;
+const WEAPON_PART_FINGERPRINT_VERSION: u16 = 2;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct WeaponPartDefinition {
@@ -36,8 +36,8 @@ impl WeaponPartCatalog {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != WEAPON_PART_CATALOG_SCHEMA_VERSION
-            || self.starter_set_revision != 1
-            || self.definitions.len() != 8
+            || self.starter_set_revision != 2
+            || self.definitions.len() != 12
             || self
                 .definitions
                 .windows(2)

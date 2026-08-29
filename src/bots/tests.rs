@@ -105,6 +105,10 @@ fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
         current_health: 100,
         maximum_health: 100,
         active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
     });
     let mut state = super::model::BotState::default();
     let intent = policy::choose_intent(
@@ -140,6 +144,10 @@ fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
         current_health: 100,
         maximum_health: 100,
         active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
     });
     let decision = policy::decide(
         &observed,
@@ -155,6 +163,75 @@ fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
         0
     );
     assert!(decision.input.aim_distance.is_some());
+}
+
+#[test]
+fn restoration_bot_targets_an_injured_ally_and_uses_the_field() {
+    let navigation = BotNavigationSnapshot {
+        dimensions: MapDimensions {
+            width: 32,
+            height: 24,
+        },
+        blocked: BTreeSet::new(),
+    };
+    let mut observed = observation(20);
+    observed.ability_ready = true;
+    observed.ultimate_kind = crate::builds::UltimateKind::RestorationField;
+    observed.ultimate_range = 520.0;
+    observed.allies.push(super::model::BotFighterView {
+        network_id: crate::protocol::NetworkEntityId(3),
+        team: crate::combat::TeamId(0),
+        position: Vec2::new(120.0, 0.0),
+        velocity: Vec2::ZERO,
+        current_health: 40,
+        maximum_health: 100,
+        active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
+    });
+    let decision = policy::decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        BotProfile::default(),
+        &navigation,
+        7,
+        BotRole::Pressure,
+        512,
+    );
+    assert_ne!(
+        decision.input.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE,
+        0
+    );
+}
+
+#[test]
+fn healing_weapon_targets_an_injured_ally() {
+    let mut observed = observation(20);
+    observed.healing_weapon = true;
+    observed.weapon_range = 300.0;
+    observed.allies.push(super::model::BotFighterView {
+        network_id: crate::protocol::NetworkEntityId(3),
+        team: crate::combat::TeamId(0),
+        position: Vec2::new(120.0, 0.0),
+        velocity: Vec2::ZERO,
+        current_health: 40,
+        maximum_health: 100,
+        active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
+    });
+    let intent = policy::choose_intent(
+        &observed,
+        &mut super::model::BotState::default(),
+        BotProfile::default(),
+        BotRole::Pressure,
+    );
+    assert_eq!(intent.aim_target.unwrap().0, Vec2::new(120.0, 0.0));
+    assert!(intent.fire);
 }
 
 #[test]
@@ -175,6 +252,10 @@ fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
         current_health: 100,
         maximum_health: 100,
         active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
     });
     for (anchor, team, position) in [
         (1, TeamId(0), Vec2::new(-900.0, 0.0)),
@@ -299,6 +380,10 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
         current_health: 58,
         maximum_health: 100,
         active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
     });
     let mut state = super::model::BotState::default();
 
@@ -450,6 +535,10 @@ fn contact_memory_contains_only_observed_facts_and_expires() {
         current_health: 100,
         maximum_health: 100,
         active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
     });
     let _ = policy::decide(
         &visible,
@@ -519,6 +608,10 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
                 current_health: 100,
                 maximum_health: 100,
                 active: true,
+                cold_meter: 0,
+                frozen: false,
+                poisoned: false,
+                burning: false,
             });
             let _ = policy::decide(
                 &observed,
@@ -563,6 +656,10 @@ fn observation(tick: u64) -> BotObservation {
             current_health: 100,
             maximum_health: 100,
             active: true,
+            cold_meter: 0,
+            frozen: false,
+            poisoned: false,
+            burning: false,
         },
         allies: Vec::new(),
         visible_enemies: Vec::new(),
@@ -576,5 +673,6 @@ fn observation(tick: u64) -> BotObservation {
         ultimate_range: 0.0,
         weapon_range: 100.0,
         projectile_speed: 100.0,
+        healing_weapon: false,
     }
 }

@@ -172,9 +172,11 @@ fn cancelled_match_start_clears_loading_and_returns_to_game_select_observation()
             generation: 1,
         } if id == reservation_id
     ));
-    assert!(model.take_match_cancel_requested());
+    assert!(model.match_cancel_requested());
 
     model.observe_match_cancellation(true);
+    assert!(!model.match_cancel_requested());
+    assert!(model.outbound.is_empty());
     assert!(model.active().is_none());
     assert_eq!(
         model.phase(),

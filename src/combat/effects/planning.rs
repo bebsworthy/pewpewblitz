@@ -187,12 +187,18 @@ pub(super) fn required_payload_event_count(
                 }
                 PayloadEffectDefinition::Knockback { .. }
                 | PayloadEffectDefinition::Slow { .. }
+                | PayloadEffectDefinition::Cold { .. }
+                | PayloadEffectDefinition::DamageOverTime { .. }
+                | PayloadEffectDefinition::Heal { .. }
                     if !*defeated =>
                 {
                     1
                 }
                 PayloadEffectDefinition::Knockback { .. }
-                | PayloadEffectDefinition::Slow { .. } => 0,
+                | PayloadEffectDefinition::Slow { .. }
+                | PayloadEffectDefinition::Cold { .. }
+                | PayloadEffectDefinition::DamageOverTime { .. }
+                | PayloadEffectDefinition::Heal { .. } => 0,
             };
             required = required.checked_add(event_count)?;
         }

@@ -4,7 +4,10 @@ use crate::{
     builds::BuildCatalog,
     combat::WeaponCatalog,
     profiles::{AdvertisedBrawlerCatalog, MatchBuildSnapshotV3},
-    weapon_parts::{CanonicalScalarModifier, CanonicalSlowModifier, CanonicalWeaponModifiers},
+    weapon_parts::{
+        CanonicalDamageOverTimeModifier, CanonicalScalarModifier, CanonicalSlowModifier,
+        CanonicalWeaponModifiers,
+    },
 };
 use serde::Serialize;
 
@@ -64,6 +67,28 @@ pub(super) struct WeaponModifiersView {
     refill_interval: ScalarModifierView,
     reach_milliunits: ScalarModifierView,
     slow: Option<SlowModifierView>,
+    cold: Option<u16>,
+    poison: Option<DamageOverTimeModifierView>,
+    fire: Option<DamageOverTimeModifierView>,
+    heal: Option<u16>,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct DamageOverTimeModifierView {
+    damage_per_tick: u16,
+    tick_interval: u16,
+    duration_ticks: u16,
+}
+
+impl From<CanonicalDamageOverTimeModifier> for DamageOverTimeModifierView {
+    fn from(value: CanonicalDamageOverTimeModifier) -> Self {
+        Self {
+            damage_per_tick: value.damage_per_tick,
+            tick_interval: value.tick_interval,
+            duration_ticks: value.duration_ticks,
+        }
+    }
 }
 
 impl From<CanonicalWeaponModifiers> for WeaponModifiersView {
@@ -75,6 +100,10 @@ impl From<CanonicalWeaponModifiers> for WeaponModifiersView {
             refill_interval: value.refill_interval.into(),
             reach_milliunits: value.reach_milliunits.into(),
             slow: value.slow.map(Into::into),
+            cold: value.cold,
+            poison: value.poison.map(Into::into),
+            fire: value.fire.map(Into::into),
+            heal: value.heal,
         }
     }
 }
@@ -91,6 +120,13 @@ pub(super) struct PlayerLoadoutView {
     ultimate: LoadoutChoiceView,
     passives: [LoadoutChoiceView; 2],
     weapon_modifiers: WeaponModifiersView,
+    cold_capacity: u16,
+    cold_resistance_baseline_basis_points: u16,
+    poison_resistance_baseline_basis_points: u16,
+    fire_resistance_baseline_basis_points: u16,
+    cold_resistance_basis_points: u16,
+    poison_resistance_basis_points: u16,
+    fire_resistance_basis_points: u16,
 }
 
 pub(super) fn from_manifest(
@@ -168,6 +204,18 @@ fn player_view(
         .collect::<Result<Vec<_>, _>>()?
         .try_into()
         .map_err(|_| "admitted player does not have exactly two passives".to_string())?;
+    let resistance_bonus = |kind| {
+        if snapshot.passive_ids.iter().any(|id| {
+            catalog
+                .passives
+                .iter()
+                .any(|entry| entry.id == *id && entry.kind == kind)
+        }) {
+            3_000
+        } else {
+            0
+        }
+    };
     Ok(PlayerLoadoutView {
         player_id: player_id.to_string(),
         display_name: display_name.to_string(),
@@ -186,6 +234,31 @@ fn player_view(
         ultimate: choice(ultimate.id.0, &ultimate.key, &ultimate.display_name),
         passives,
         weapon_modifiers: snapshot.weapon_modifiers.into(),
+        cold_capacity: fighter_profile.stats.cold_capacity,
+        cold_resistance_baseline_basis_points: fighter_profile.stats.cold_resistance_basis_points,
+        poison_resistance_baseline_basis_points: fighter_profile
+            .stats
+            .poison_resistance_basis_points,
+        fire_resistance_baseline_basis_points: fighter_profile.stats.fire_resistance_basis_points,
+        cold_resistance_basis_points: fighter_profile
+            .stats
+            .cold_resistance_basis_points
+            .saturating_add(resistance_bonus(
+                crate::builds::PassiveKind::CryogenicInsulation,
+            ))
+            .min(6_000),
+        poison_resistance_basis_points: fighter_profile
+            .stats
+            .poison_resistance_basis_points
+            .saturating_add(resistance_bonus(
+                crate::builds::PassiveKind::FilteredCirculation,
+            ))
+            .min(6_000),
+        fire_resistance_basis_points: fighter_profile
+            .stats
+            .fire_resistance_basis_points
+            .saturating_add(resistance_bonus(crate::builds::PassiveKind::HeatShielding))
+            .min(6_000),
     })
 }
 

@@ -54,7 +54,7 @@ pub(in crate::client::flow) fn spawn_match_loading(
         });
 }
 
-fn match_loading_text(
+pub(in crate::client::flow) fn match_loading_text(
     active: &crate::lobby::ReservationStarted,
     phase: Option<crate::lobby::MatchLoadingPhase>,
 ) -> String {
@@ -68,11 +68,8 @@ fn match_loading_text(
         crate::lobby::MatchLoadingPhase::ReturningToQueue => "Returning to queue",
     };
     format!(
-        "{phase}\n{}v{} · Map {}\nYour accepted build: {}/12 points",
-        active.players_per_team,
-        active.players_per_team,
-        active.map_preset_id.0,
-        active.accepted_build.total_points
+        "{phase}\n{}v{} · Map {}\nSaved brawler accepted",
+        active.players_per_team, active.players_per_team, active.map_preset_id.0,
     )
 }
 

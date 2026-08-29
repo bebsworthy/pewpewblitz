@@ -18,7 +18,8 @@ pub fn apply_charge(state: AbilityState, dealt_damage: u16, received_damage: u16
         active @ (AbilityPhase::Dashing { .. }
         | AbilityPhase::Deployed { .. }
         | AbilityPhase::Cloaked { .. }
-        | AbilityPhase::FieldActive { .. }) => active,
+        | AbilityPhase::FieldActive { .. }
+        | AbilityPhase::ElementalFieldActive { .. }) => active,
     };
     AbilityState { charge, phase }
 }

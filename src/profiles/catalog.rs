@@ -24,7 +24,7 @@ pub const MAX_ADVERTISED_ULTIMATES: usize = 32;
 pub const MAX_ADVERTISED_PASSIVES: usize = 32;
 pub const MAX_ADVERTISED_BRAWLER_CATALOG_BYTES: usize = 16 * 1024;
 
-const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 2;
+const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BrawlerCatalogRevision(pub u64);
@@ -211,6 +211,11 @@ impl AdvertisedBrawlerCatalog {
                     < crate::builds::MIN_REVEAL_PROXIMITY_RADIUS
                 || definition.stats.reveal_proximity_radius
                     > crate::builds::MAX_REVEAL_PROXIMITY_RADIUS
+                || definition.stats.cold_capacity == 0
+                || definition.stats.cold_capacity > crate::builds::MAX_COLD_CAPACITY
+                || definition.stats.cold_resistance_basis_points > 6_000
+                || definition.stats.poison_resistance_basis_points > 6_000
+                || definition.stats.fire_resistance_basis_points > 6_000
         }) {
             return Err("invalid advertised fighter profile".into());
         }
@@ -396,6 +401,19 @@ fn validate_ultimate_parameters(definitions: &[AdvertisedUltimate]) -> Result<()
                     UltimateParameters::DemolitionStrike {
                         maximum_range_milliunits: 1..=4_096_000,
                         radius_milliunits: 8_000..=64_000,
+                    }
+                )
+                | (
+                    UltimateKind::CryogenicField
+                        | UltimateKind::FireField
+                        | UltimateKind::PoisonField
+                        | UltimateKind::RestorationField,
+                    UltimateParameters::ElementalField {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        radius_milliunits: 1..=2_048_000,
+                        duration_ticks: 1..=3_600,
+                        pulse_interval_ticks: 1..=3_600,
+                        ..
                     }
                 )
         ) || matches!(

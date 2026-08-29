@@ -41,19 +41,23 @@ restoration-pickup evolution.
 Accepted tuning is stored in `target/balance-lab/session-v2.json`. The page reconnects to later
 Practice workers at the same loopback URL, and each worker validates the persisted snapshot before
 installing it. Deleting build artifacts or using **Restore canonical defaults** removes the override.
+After the immutable admission snapshot is validated against canonical content, the Practice worker
+re-resolves every admitted human and bot against the persisted Lab catalogs. This deliberately
+recomputes runtime recipe identities for equipped weapon modifiers whose base recipe was tuned. If
+persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
+worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 9, the persistence envelope is version 4, and the
-non-persisted editor-manifest schema is version 2. The server manifest explicitly identifies every
+The current snapshot schema is version 12, the persistence envelope is version 7, and the
+non-persisted editor-manifest schema is version 4. The server manifest explicitly identifies every
 editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
 control. The browser does not infer editability or limits from serialized field names. It exposes
 the three permanent fighter profiles, four canonical weapon-base recipes, the bounded parameters of
 all five supported ultimates, oil-barrel health/explosion tuning, Heist safe health, and treasure-
 chest/restoration-pickup health, restoration, radius, and lifetime. Structural IDs, terminal
-topology, replacement assets, and pickup visual identity remain locked. Persistence envelope 3 is
-migrated by filling canonical chest defaults before validation. A version-8 snapshot inside the
-current envelope migrates to snapshot 9 by filling the new fighter-recovery fields from canonical
-content while retaining existing tuning. The removed full-build workflow is not a Balance Lab
-surface. Apply validation
+topology, replacement assets, and pickup visual identity remain locked. Older supported envelopes
+migrate sequentially by filling canonical chest, fighter-recovery, demolition,
+elemental-resistance, elemental-field, and Cold-capacity defaults before validation while retaining existing
+tuning. The removed full-build workflow is not a Balance Lab surface. Apply validation
 re-resolves the complete 3×4 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
 and advertised brawler catalog, and then starts a clean Practice epoch.
 
@@ -68,6 +72,13 @@ Fighter tuning also exposes health recovery per second and the accepted-attack i
 refill/recharge timing is labeled as recovery for one round or charge. These durations require a
 positive authoritative tick value but have no invented balance ceiling; the exact numeric input
 remains available beyond the editor's ordinary playtest range.
+
+Each fighter profile also exposes its own Cold capacity and Cold, Poison, and Fire resistance
+baseline. Resistance is displayed as a percentage while stored in basis points. The roster always
+shows these baselines, including zero values, and distinguishes an equipped passive's additive
+bonus from the effective resolved resistance. Cryogenic weapon and field values are labeled as Cold
+per hit or per pulse, while the target card supplies the capacity denominator that determines
+Freeze timing.
 
 For a straight weapon, **Projectile radius** is the radius of its authoritative circular
 `ProjectileBody`, not an explosion radius or decorative effect size. Applying a new value changes
@@ -147,6 +158,11 @@ Primary implementation ownership currently lives in `src/server/balance_lab/`, w
 tuning in `src/builds/definitions.rs`, weapon definitions and map-destruction bounds in
 `src/combat/definitions/`, object/chest definitions in `src/map/catalog.rs`, Heist safe rules in
 `src/matchplay/heist.rs`, and the operator application in `tools/balance-lab-web/`.
+
+Elemental field timing, range, radius, and effect strength are part of the editable ultimate
+snapshot. The snapshot/persistence schema is migrated when these fields, fighter elemental
+resistances, or Cold capacity enter the catalog so an older saved lab state receives canonical
+values rather than silently omitting the new mechanics.
 
 ## Scope and limitations
 

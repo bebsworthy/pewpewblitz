@@ -165,6 +165,9 @@ pub(super) fn normalize_recipe(recipe: &mut WeaponRecipe) {
                     movement_multiplier,
                     ..
                 } => n(movement_multiplier),
+                PayloadEffectDefinition::Cold { .. }
+                | PayloadEffectDefinition::DamageOverTime { .. }
+                | PayloadEffectDefinition::Heal { .. } => {}
             }
         }
     }

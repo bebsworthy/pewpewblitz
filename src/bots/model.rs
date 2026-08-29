@@ -11,6 +11,10 @@ pub(super) const MAX_OBSERVATION_HISTORY: usize = 16;
 pub(super) const MAX_CONTACTS: usize = brawler_routing::MAX_PARTICIPANTS;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "bot observation exposes independent public life and elemental condition facts"
+)]
 pub(super) struct BotFighterView {
     pub network_id: NetworkEntityId,
     pub team: TeamId,
@@ -19,6 +23,10 @@ pub(super) struct BotFighterView {
     pub current_health: u16,
     pub maximum_health: u16,
     pub active: bool,
+    pub cold_meter: u16,
+    pub frozen: bool,
+    pub poisoned: bool,
+    pub burning: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +86,7 @@ pub(super) struct BotObservation {
     pub ultimate_range: f32,
     pub weapon_range: f32,
     pub projectile_speed: f32,
+    pub healing_weapon: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

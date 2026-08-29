@@ -68,6 +68,11 @@ fn install_manifest_bots(
     for bot in &manifest.bots {
         let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(&bot.build_snapshot)
             .expect("validated bot build snapshot");
+        #[cfg(feature = "balance-lab")]
+        let loadout = snapshot
+            .resolve_revised_balance_lab_catalogs(&builds.0, &weapon_catalog.0, fighter)
+            .expect("validated Balance Lab bot build resolution");
+        #[cfg(not(feature = "balance-lab"))]
         let loadout = snapshot
             .resolve(&builds.0, &weapon_catalog.0, fighter)
             .expect("validated bot build resolution");

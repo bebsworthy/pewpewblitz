@@ -154,7 +154,8 @@ pub(crate) fn update_combat_hud(
                 crate::builds::AbilityPhase::Dashing { .. } => "DASHING",
                 crate::builds::AbilityPhase::Deployed { .. } => "DEPLOYED",
                 crate::builds::AbilityPhase::Cloaked { .. } => "CLOAKED",
-                crate::builds::AbilityPhase::FieldActive { .. } => "FIELD ACTIVE",
+                crate::builds::AbilityPhase::FieldActive { .. }
+                | crate::builds::AbilityPhase::ElementalFieldActive { .. } => "FIELD ACTIVE",
             };
             let remaining = match (ability.phase, authoritative_tick) {
                 (

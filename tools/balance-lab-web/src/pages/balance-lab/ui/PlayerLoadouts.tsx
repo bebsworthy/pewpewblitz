@@ -27,6 +27,11 @@ export function PlayerLoadouts({ players }: { players: PlayerLoadout[] }) {
       {expanded && <div className="loadout-grid" id="player-loadout-grid">
         {players.map((player) => {
           const modifiers = weaponModifierLabels(player.weaponModifiers);
+          const resistances = [
+            ["Cold", player.coldResistanceBaselineBasisPoints, player.coldResistanceBasisPoints],
+            ["Poison", player.poisonResistanceBaselineBasisPoints, player.poisonResistanceBasisPoints],
+            ["Fire", player.fireResistanceBaselineBasisPoints, player.fireResistanceBasisPoints],
+          ] as const;
           return (
             <article className={`loadout-card team-${player.team}`} key={player.playerId}>
               <header>
@@ -54,6 +59,18 @@ export function PlayerLoadouts({ players }: { players: PlayerLoadout[] }) {
                 ) : (
                   <small>None</small>
                 )}
+              </div>
+              <div className="modifier-list">
+                <strong>Elemental baselines</strong>
+                <ul>
+                  <li>Cold capacity {player.coldCapacity}</li>
+                  {resistances.map(([label, baseline, effective]) => (
+                    <li key={label}>
+                      {label} resistance {baseline / 100}%
+                      {effective !== baseline ? ` baseline · ${effective / 100}% effective` : ""}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </article>
           );

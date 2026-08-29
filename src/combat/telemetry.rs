@@ -239,6 +239,9 @@ pub enum WeaponTelemetryOutcome {
     DamageApplied,
     KnockbackApplied,
     SlowApplied,
+    ColdApplied,
+    DamageOverTimeApplied,
+    HealingApplied,
     Defeat,
 }
 

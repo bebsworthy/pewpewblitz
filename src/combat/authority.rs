@@ -277,21 +277,32 @@ pub(super) fn payload_can_affect_target(
     target_team: TeamId,
     target_network_id: NetworkEntityId,
 ) -> bool {
-    if target_network_id == source.owner_network_entity_id {
-        return bundle.effects.iter().any(|effect| {
+    bundle.effects.iter().any(|effect| {
+        let recipients = match *effect {
+            PayloadEffectDefinition::Damage { recipients, .. }
+            | PayloadEffectDefinition::Knockback { recipients, .. }
+            | PayloadEffectDefinition::Slow { recipients, .. }
+            | PayloadEffectDefinition::Cold { recipients, .. }
+            | PayloadEffectDefinition::DamageOverTime { recipients, .. }
+            | PayloadEffectDefinition::Heal { recipients, .. } => recipients,
+        };
+        if target_network_id == source.owner_network_entity_id {
             matches!(
-                effect,
-                PayloadEffectDefinition::Damage {
-                    recipients: RecipientPolicy::HostilesAndOwner { .. },
-                    ..
-                } | PayloadEffectDefinition::Knockback {
-                    recipients: RecipientPolicy::HostilesAndOwner { .. },
-                    ..
-                }
+                recipients,
+                RecipientPolicy::HostilesAndOwner { .. } | RecipientPolicy::AlliesAndOwner
             )
-        });
-    }
-    teams_are_hostile(source.team_id, target_team)
+        } else if teams_are_hostile(source.team_id, target_team) {
+            matches!(
+                recipients,
+                RecipientPolicy::Hostiles | RecipientPolicy::HostilesAndOwner { .. }
+            )
+        } else {
+            matches!(
+                recipients,
+                RecipientPolicy::Allies | RecipientPolicy::AlliesAndOwner
+            )
+        }
+    })
 }
 
 #[cfg(feature = "server")]
@@ -673,7 +684,8 @@ fn combat_cue_subjects(cue: &CombatCue) -> Vec<NetworkEntityId> {
         | CombatCue::LobLanded { source, .. }
         | CombatCue::Muzzle { source, .. }
         | CombatCue::Impact { source, .. }
-        | CombatCue::DemolitionStrikeActivated { source, .. } => vec![*source],
+        | CombatCue::DemolitionStrikeActivated { source, .. }
+        | CombatCue::ElementalFieldActivated { source, .. } => vec![*source],
         CombatCue::MeleeContact { source, target, .. } => vec![*source, *target],
         CombatCue::DamageApplied { source, target, .. }
         | CombatCue::EffectApplied { source, target, .. }

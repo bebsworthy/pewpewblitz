@@ -988,6 +988,7 @@ mod tests {
                     movement_multiplier_milli: 700,
                     expires_at_tick: 88,
                 }),
+                ..default()
             }),
             knockback_feedback: Some(KnockbackFeedback {
                 velocity: WorldPoint { x: 3.0, y: -4.0 },

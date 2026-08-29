@@ -1,10 +1,10 @@
 (
-    schema_version: 8,
-    balance_revision: BuildRevision(6),
+    schema_version: 10,
+    balance_revision: BuildRevision(8),
     fighter_profiles: (
-        default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0),
-        lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0),
-        reinforced: (maximum_health: 120, movement_speed: 90.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 128.0),
+        default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
+        lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
+        reinforced: (maximum_health: 120, movement_speed: 90.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 128.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
     ),
     custom_pulse: (
         light: (damage: 20, fire_cooldown_ticks: 9),
@@ -30,6 +30,10 @@
         (id: UltimateDefinitionId(4), key: "reveal-scan", display_name: "Reveal Scan", kind: RevealScan, point_cost: 4, parameters: RevealScan(maximum_range_milliunits: 640000, radius_milliunits: 192000, reveal_ticks: 300)),
         (id: UltimateDefinitionId(5), key: "concealment-field", display_name: "Concealment Field", kind: ConcealmentField, point_cost: 4, parameters: ConcealmentField(maximum_range_milliunits: 480000, radius_milliunits: 192000, duration_ticks: 360)),
         (id: UltimateDefinitionId(6), key: "demolition-strike", display_name: "Demolition Strike", kind: DemolitionStrike, point_cost: 4, parameters: DemolitionStrike(maximum_range_milliunits: 520000, radius_milliunits: 64000)),
+        (id: UltimateDefinitionId(7), key: "cryogenic-field", display_name: "Cryogenic Field", kind: CryogenicField, point_cost: 4, parameters: ElementalField(maximum_range_milliunits: 520000, radius_milliunits: 150000, duration_ticks: 300, pulse_interval_ticks: 30, effect: Cold(amount: 125))),
+        (id: UltimateDefinitionId(8), key: "fire-field", display_name: "Fire Field", kind: FireField, point_cost: 4, parameters: ElementalField(maximum_range_milliunits: 520000, radius_milliunits: 150000, duration_ticks: 300, pulse_interval_ticks: 30, effect: DamageOverTime(kind: Fire, damage_per_tick: 18, tick_interval: 30, duration_ticks: 90))),
+        (id: UltimateDefinitionId(9), key: "poison-field", display_name: "Poison Field", kind: PoisonField, point_cost: 4, parameters: ElementalField(maximum_range_milliunits: 520000, radius_milliunits: 150000, duration_ticks: 300, pulse_interval_ticks: 30, effect: DamageOverTime(kind: Poison, damage_per_tick: 10, tick_interval: 30, duration_ticks: 180))),
+        (id: UltimateDefinitionId(10), key: "restoration-field", display_name: "Restoration Field", kind: RestorationField, point_cost: 4, parameters: ElementalField(maximum_range_milliunits: 520000, radius_milliunits: 150000, duration_ticks: 300, pulse_interval_ticks: 30, effect: Heal(amount: 45))),
     ],
     passives: [
         (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2),
@@ -38,5 +42,8 @@
         (id: PassiveDefinitionId(4), key: "close-quarters", display_name: "Close Quarters", kind: CloseQuarters, point_cost: 2),
         (id: PassiveDefinitionId(5), key: "quick-cycle", display_name: "Quick Cycle", kind: QuickCycle, point_cost: 2),
         (id: PassiveDefinitionId(6), key: "tenacity", display_name: "Tenacity", kind: Tenacity, point_cost: 1),
+        (id: PassiveDefinitionId(7), key: "cryogenic-insulation", display_name: "Cryogenic Insulation", kind: CryogenicInsulation, point_cost: 1),
+        (id: PassiveDefinitionId(8), key: "filtered-circulation", display_name: "Filtered Circulation", kind: FilteredCirculation, point_cost: 1),
+        (id: PassiveDefinitionId(9), key: "heat-shielding", display_name: "Heat Shielding", kind: HeatShielding, point_cost: 1),
     ],
 )

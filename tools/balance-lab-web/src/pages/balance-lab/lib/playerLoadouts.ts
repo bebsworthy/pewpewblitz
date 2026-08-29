@@ -34,5 +34,9 @@ export function weaponModifierLabels(modifiers: WeaponModifiers) {
       `Slow ${number(modifiers.slow.penaltyBasisPoints / 100)}% · ${modifiers.slow.durationTicks} ticks`,
     );
   }
+  if (modifiers.cold != null) labels.push(`Cold +${modifiers.cold}`);
+  if (modifiers.poison) labels.push(`Poison ${modifiers.poison.damagePerTick}/${modifiers.poison.tickInterval}t · ${modifiers.poison.durationTicks} ticks`);
+  if (modifiers.fire) labels.push(`Fire ${modifiers.fire.damagePerTick}/${modifiers.fire.tickInterval}t · ${modifiers.fire.durationTicks} ticks`);
+  if (modifiers.heal != null) labels.push(`Healing ${modifiers.heal}`);
   return labels;
 }

@@ -68,7 +68,10 @@ pub(crate) fn observe_passive_triggers(
                     crate::builds::PassiveKind::LightweightFrame
                     | crate::builds::PassiveKind::ReinforcedFrame
                     | crate::builds::PassiveKind::CloseQuarters
-                    | crate::builds::PassiveKind::Tenacity => true,
+                    | crate::builds::PassiveKind::Tenacity
+                    | crate::builds::PassiveKind::CryogenicInsulation
+                    | crate::builds::PassiveKind::FilteredCirculation
+                    | crate::builds::PassiveKind::HeatShielding => true,
                 };
                 if is_active {
                     telemetry.record_passive_active_tick(passive.id);

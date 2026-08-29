@@ -17,6 +17,7 @@ pub enum AbilityRejectionReason {
     IdentifierExhausted,
     ActiveFieldCeiling,
     ObjectiveCarrier,
+    Frozen,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -690,7 +691,8 @@ pub(crate) fn observe_ability_outcomes(
                     kind: AbilityTelemetryKind::SentryDestroyed(target_id),
                 });
             }
-            crate::combat::CombatOutcomeKind::ProtectedContact => {}
+            crate::combat::CombatOutcomeKind::ProtectedContact
+            | crate::combat::CombatOutcomeKind::Healing { .. } => {}
         }
     }
 }

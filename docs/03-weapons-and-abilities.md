@@ -466,6 +466,29 @@ Possible future ultimate families include shielding, healing or repair fields, a
 knockback, and temporary wall placement. Each should be introduced as a complete readable gameplay
 slice rather than as unused framework capacity.
 
+The supported elemental family adds four mutually exclusive weapon modules: Cryogenic builds a
+meter that freezes at its threshold, Incendiary and Toxin refresh bounded fire and poison damage,
+and Healing converts a straight single shot into allied healing. Poison suppresses attack-idle
+health recovery while active. Cryogenic Insulation, Filtered Circulation, and Heat Shielding are
+mutually exclusive resistance passives; each reduces only its named buildup or damage-over-time
+contribution.
+
+Every authored fighter profile owns an independently tunable Cold capacity plus Cold, Poison, and
+Fire resistance baselines. The current profiles intentionally begin at 1,000 Cold capacity and 0%
+for each resistance, but equal defaults are not a shared global rule. Cold contributions apply the
+target's resolved Cold resistance and accumulate against that target's resolved capacity. The three
+resistance passives add 30 percentage points to their matching baseline, clamped at 60%, rather
+than replacing it. Fire and Poison do not have capacities: they remain duration-based
+strongest-refresh damage-over-time conditions, so resistance is their fighter-owned tuning surface.
+While a fighter has positive Cold buildup, its projected overhead shows a compact cyan radial meter
+beside the health bar. The visual has no numeric label, uses the resolved target capacity as its
+denominator, and disappears when the buildup meter returns to zero or is consumed by Freeze.
+
+Cryogenic, Fire, Poison, and Restoration Field are targeted ultimates. Their replicated regions
+pulse immediately and on a fixed interval, use the same elemental rules as weapon delivery, remain
+after owner defeat or disconnect, and expire or clear on restart/build replacement. Direct hits,
+field pulses, poison ticks, fire ticks, and defeat resolution have a stable authoritative order.
+
 V9 delivered three additional ultimate families: a self cloak that is permanently consumed by an
 accepted attack or positive applied damage, and an instant targeted reveal scan that applies a
 team-wide forced-reveal deadline to hostile fighters in its accepted area, plus a public targeted

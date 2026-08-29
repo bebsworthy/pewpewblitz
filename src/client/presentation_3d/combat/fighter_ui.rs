@@ -1,16 +1,29 @@
 use super::super::*;
 use super::aim_preview::WeaponPreviewVisual3d;
 use super::common::{GroundMarkerRelation, ground_marker_relation, unique_roots};
+use bevy::{
+    asset::RenderAssetUsages,
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
 const FIGHTER_BODY_WORLD_HEIGHT: f32 = KENNEY_CHARACTER_WORLD_HEIGHT;
 const OVERHEAD_WORLD_HEIGHT: f32 = FIGHTER_BODY_WORLD_HEIGHT + 12.0;
-const OVERHEAD_WIDTH: f32 = 104.0;
+const OVERHEAD_WIDTH: f32 = 120.0;
 const OVERHEAD_HEALTH_HEIGHT: f32 = 37.0;
 const OVERHEAD_AMMO_HEIGHT: f32 = 50.0;
 const HEALTH_BAR_WIDTH: f32 = 76.8;
 const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
+const COLD_PIE_SIZE: f32 = 15.0;
+const COLD_PIE_GAP: f32 = 3.0;
+const COLD_PIE_TEXTURE_SIZE: u32 = 32;
+const COLD_PIE_FRAME_COUNT: usize = 32;
+
+#[derive(Resource)]
+pub(in super::super) struct ColdPieAssets {
+    frames: Vec<Handle<Image>>,
+}
 
 #[derive(Component)]
 pub(in super::super) struct FighterOverheadUi {
@@ -18,6 +31,7 @@ pub(in super::super) struct FighterOverheadUi {
     player_name: Entity,
     health_amount: Entity,
     fill: Entity,
+    cold_pie: Entity,
     ammo_row: Entity,
     ammo_segments: Vec<Entity>,
     ammo_fills: Vec<Entity>,
@@ -26,6 +40,11 @@ pub(in super::super) struct FighterOverheadUi {
 
 #[derive(Component)]
 pub(in super::super) struct FighterHealthFillUi;
+
+#[derive(Component, Default)]
+pub(in super::super) struct FighterColdPieUi {
+    last_frame: Option<usize>,
+}
 
 #[derive(Component)]
 pub(in super::super) struct FighterOverheadTextUi;
@@ -49,6 +68,7 @@ type OverheadFighterQuery<'w, 's> = Query<
         Option<&'static crate::combat::Defeated>,
         Option<&'static AuthoritativeTick>,
         Option<&'static crate::builds::ResolvedMatchLoadout>,
+        Option<&'static crate::combat::ActiveEffects>,
         &'static crate::combat::TeamId,
         Option<&'static crate::matchplay::FighterDisplayName>,
         Option<&'static crate::combat::WeaponState>,
@@ -63,6 +83,105 @@ type AmmoFillQuery<'w, 's> = Query<
     &'static mut Node,
     Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentFillUi>)>,
 >;
+
+type AmmoRowQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Visibility,
+    (
+        With<FighterAmmoRowUi>,
+        Without<FighterOverheadUi>,
+        Without<FighterColdPieUi>,
+    ),
+>;
+
+pub(in super::super) fn prepare_cold_pie_assets(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let frames = (1..=COLD_PIE_FRAME_COUNT)
+        .map(|step| images.add(cold_pie_image(step)))
+        .collect();
+    commands.insert_resource(ColdPieAssets { frames });
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    reason = "the generated 32-pixel UI texture and 32 display steps are exactly bounded"
+)]
+fn cold_pie_image(step: usize) -> Image {
+    let progress = step.min(COLD_PIE_FRAME_COUNT) as f32 / COLD_PIE_FRAME_COUNT as f32;
+    let center = (COLD_PIE_TEXTURE_SIZE as f32 - 1.0) * 0.5;
+    let outer_radius = center;
+    let inner_radius = center - 2.5;
+    let mut data = Vec::with_capacity((COLD_PIE_TEXTURE_SIZE * COLD_PIE_TEXTURE_SIZE * 4) as usize);
+    for y in 0..COLD_PIE_TEXTURE_SIZE {
+        for x in 0..COLD_PIE_TEXTURE_SIZE {
+            let offset = Vec2::new(x as f32 - center, y as f32 - center);
+            let radius = offset.length();
+            let rgba = if radius > outer_radius {
+                [0, 0, 0, 0]
+            } else if radius > inner_radius {
+                [98, 231, 246, 255]
+            } else {
+                let clockwise_from_top =
+                    offset.x.atan2(-offset.y).rem_euclid(core::f32::consts::TAU)
+                        / core::f32::consts::TAU;
+                if clockwise_from_top <= progress {
+                    [91, 225, 244, 255]
+                } else {
+                    [10, 31, 45, 230]
+                }
+            };
+            data.extend_from_slice(&rgba);
+        }
+    }
+    Image::new(
+        Extent3d {
+            width: COLD_PIE_TEXTURE_SIZE,
+            height: COLD_PIE_TEXTURE_SIZE,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
+fn cold_pie_frame(meter: u16, capacity: u16) -> Option<usize> {
+    if meter == 0 || capacity == 0 {
+        return None;
+    }
+    let scaled = usize::from(meter.min(capacity)) * COLD_PIE_FRAME_COUNT;
+    Some(
+        scaled
+            .div_ceil(usize::from(capacity))
+            .clamp(1, COLD_PIE_FRAME_COUNT)
+            - 1,
+    )
+}
+
+fn spawn_cold_pie(commands: &mut Commands) -> Entity {
+    commands
+        .spawn((
+            FighterColdPieUi::default(),
+            ImageNode::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px((OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5 - COLD_PIE_SIZE - COLD_PIE_GAP),
+                top: px(22.0),
+                width: px(COLD_PIE_SIZE),
+                height: px(COLD_PIE_SIZE),
+                ..default()
+            },
+            GlobalZIndex(123),
+            Visibility::Hidden,
+            Name::new("V3 fighter overhead Cold buildup pie"),
+        ))
+        .id()
+}
 
 #[derive(Clone, Copy)]
 struct AmmoPresentation {
@@ -146,6 +265,7 @@ fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity, visual_root: E
         ))
         .add_child(fill)
         .id();
+    let cold_pie = spawn_cold_pie(commands);
     let ammo_row = commands
         .spawn((
             FighterAmmoRowUi,
@@ -170,6 +290,7 @@ fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity, visual_root: E
                 player_name,
                 health_amount,
                 fill,
+                cold_pie,
                 ammo_row,
                 ammo_segments: Vec::new(),
                 ammo_fills: Vec::new(),
@@ -189,6 +310,7 @@ fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity, visual_root: E
             player_name_container,
             health_amount_container,
             health_bar,
+            cold_pie,
             ammo_row,
         ]);
 }
@@ -404,7 +526,7 @@ pub(in super::super) fn update_fighter_overhead_state(
     fighters: OverheadFighterQuery,
     mut overhead_roots: Query<
         (&CombatVisualOwner, &mut FighterOverheadUi, &mut Visibility),
-        Without<WeaponPreviewVisual3d>,
+        (Without<WeaponPreviewVisual3d>, Without<FighterColdPieUi>),
     >,
     mut fill_nodes: AmmoFillQuery,
     mut overhead_texts: Query<(&mut Text, &mut TextColor), With<FighterOverheadTextUi>>,
@@ -412,11 +534,23 @@ pub(in super::super) fn update_fighter_overhead_state(
         &mut BackgroundColor,
         Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentUi>)>,
     >,
-    mut ammo_rows: Query<&mut Visibility, (With<FighterAmmoRowUi>, Without<FighterOverheadUi>)>,
+    mut ammo_rows: AmmoRowQuery,
+    cold_pie_assets: Res<ColdPieAssets>,
+    mut cold_pies: Query<
+        (&mut FighterColdPieUi, &mut ImageNode, &mut Visibility),
+        (
+            With<FighterColdPieUi>,
+            Without<FighterOverheadUi>,
+            Without<FighterAmmoRowUi>,
+        ),
+    >,
 ) {
-    let controlled_team = fighters
-        .iter()
-        .find_map(|(_, _, _, _, _, _, team, _, _, is_controlled)| is_controlled.then_some(*team));
+    let controlled_team =
+        fighters
+            .iter()
+            .find_map(|(_, _, _, _, _, _, _, team, _, _, is_controlled)| {
+                is_controlled.then_some(*team)
+            });
     for (owner, mut overhead, mut visibility) in &mut overhead_roots {
         let Ok((
             _,
@@ -425,6 +559,7 @@ pub(in super::super) fn update_fighter_overhead_state(
             defeated,
             authoritative_tick,
             loadout,
+            active_effects,
             team,
             display_name,
             weapon,
@@ -476,6 +611,26 @@ pub(in super::super) fn update_fighter_overhead_state(
             overhead.last_health = Some(current);
         }
 
+        let cold_frame = loadout.and_then(|loadout| {
+            cold_pie_frame(
+                active_effects.map_or(0, |effects| effects.cold.meter),
+                loadout.fighter_stats.cold_capacity,
+            )
+        });
+        if let Ok((mut pie, mut image, mut pie_visibility)) = cold_pies.get_mut(overhead.cold_pie) {
+            *pie_visibility = if cold_frame.is_some() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if pie.last_frame != cold_frame
+                && let Some(frame) = cold_frame
+            {
+                image.image = cold_pie_assets.frames[frame].clone();
+            }
+            pie.last_frame = cold_frame;
+        }
+
         reconcile_overhead_ammunition(
             &mut commands,
             &mut overhead,
@@ -494,7 +649,7 @@ pub(in super::super) fn update_fighter_overhead_state(
 fn reconcile_overhead_ammunition(
     commands: &mut Commands,
     overhead: &mut FighterOverheadUi,
-    ammo_rows: &mut Query<&mut Visibility, (With<FighterAmmoRowUi>, Without<FighterOverheadUi>)>,
+    ammo_rows: &mut AmmoRowQuery,
     fill_nodes: &mut AmmoFillQuery,
     presentation: AmmoPresentation,
 ) {
@@ -615,6 +770,21 @@ mod tests {
         assert!(overhead_height(false) < overhead_height(true));
         assert!((FIGHTER_BODY_WORLD_HEIGHT - KENNEY_CHARACTER_WORLD_HEIGHT).abs() < f32::EPSILON);
         assert!((OVERHEAD_WORLD_HEIGHT - FIGHTER_BODY_WORLD_HEIGHT - 12.0).abs() < f32::EPSILON);
+        let health_left = (OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5;
+        let pie_right = health_left - COLD_PIE_GAP;
+        assert!(pie_right <= health_left);
+        assert!(pie_right - COLD_PIE_SIZE >= 0.0);
+    }
+
+    #[test]
+    fn cold_pie_is_hidden_without_buildup_and_quantizes_against_target_capacity() {
+        assert_eq!(cold_pie_frame(0, 1_000), None);
+        assert_eq!(cold_pie_frame(125, 0), None);
+        assert_eq!(cold_pie_frame(1, 1_000), Some(0));
+        assert_eq!(cold_pie_frame(500, 1_000), Some(15));
+        assert_eq!(cold_pie_frame(1_000, 1_000), Some(31));
+        assert_eq!(cold_pie_frame(2_000, 1_000), Some(31));
+        assert_eq!(cold_pie_frame(375, 750), Some(15));
     }
 
     #[test]
@@ -640,7 +810,7 @@ mod tests {
                 Vec2::new(320.0, 150.0),
                 OVERHEAD_HEALTH_HEIGHT,
             ),
-            Some(Vec2::new(268.0, 113.0))
+            Some(Vec2::new(260.0, 113.0))
         );
     }
 }

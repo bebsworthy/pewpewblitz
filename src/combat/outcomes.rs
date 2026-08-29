@@ -7,7 +7,14 @@ use bevy::prelude::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CombatOutcomeKind {
     ProtectedContact,
-    Damage { amount: u16 },
+    Damage {
+        amount: u16,
+    },
+    Healing {
+        requested: u16,
+        applied: u16,
+        resulting_health: u16,
+    },
     Defeat,
     DeployableDestroyed,
 }

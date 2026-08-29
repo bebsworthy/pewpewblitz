@@ -60,6 +60,7 @@ pub enum CombatCueKind {
     SelfCloakEnded,
     RevealScanActivated,
     DemolitionStrikeActivated,
+    ElementalFieldActivated,
     ForcedRevealApplied,
 }
 
@@ -86,6 +87,7 @@ impl CombatCueKind {
             Self::SelfCloakEnded => "self_cloak_ended",
             Self::RevealScanActivated => "reveal_scan_activated",
             Self::DemolitionStrikeActivated => "demolition_strike_activated",
+            Self::ElementalFieldActivated => "elemental_field_activated",
             Self::ForcedRevealApplied => "forced_reveal_applied",
         }
     }
@@ -112,6 +114,7 @@ impl CombatCueKind {
             "self_cloak_ended" => Some(Self::SelfCloakEnded),
             "reveal_scan_activated" => Some(Self::RevealScanActivated),
             "demolition_strike_activated" => Some(Self::DemolitionStrikeActivated),
+            "elemental_field_activated" => Some(Self::ElementalFieldActivated),
             "forced_reveal_applied" => Some(Self::ForcedRevealApplied),
             _ => None,
         }
@@ -136,6 +139,19 @@ pub enum CombatEffectCue {
     Slow {
         movement_multiplier_milli: u16,
         expires_at_tick: u64,
+    },
+    Cold {
+        meter: u16,
+        frozen_until_tick: Option<u64>,
+    },
+    DamageOverTime {
+        kind: super::DamageOverTimeKind,
+        damage_per_tick: u16,
+        expires_at_tick: u64,
+    },
+    Healing {
+        amount: u16,
+        health_after: u16,
     },
 }
 
@@ -314,6 +330,16 @@ pub enum CombatCue {
         center: WorldPoint,
         radius_milliunits: u32,
     },
+    ElementalFieldActivated {
+        event_id: CombatEventId,
+        tick: u64,
+        source: NetworkEntityId,
+        field_id: super::ElementalFieldId,
+        kind: super::ElementalFieldKind,
+        center: WorldPoint,
+        radius_milliunits: u32,
+        expires_at_tick: u64,
+    },
     ForcedRevealApplied {
         event_id: CombatEventId,
         tick: u64,
@@ -353,6 +379,9 @@ pub fn combat_cue_key(cue: &CombatCue) -> CombatCueKey {
         }
         CombatCue::DemolitionStrikeActivated { event_id, .. } => {
             (CombatCueKind::DemolitionStrikeActivated, *event_id)
+        }
+        CombatCue::ElementalFieldActivated { event_id, .. } => {
+            (CombatCueKind::ElementalFieldActivated, *event_id)
         }
         CombatCue::ForcedRevealApplied { event_id, .. } => {
             (CombatCueKind::ForcedRevealApplied, *event_id)

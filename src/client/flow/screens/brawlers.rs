@@ -1935,6 +1935,18 @@ fn weapon_part_effect_text(effect: crate::weapon_parts::WeaponPartEffect) -> Str
             "Slow {:.0}%/{duration_ticks}t",
             f32::from(penalty_basis_points) / 100.0
         ),
+        crate::weapon_parts::WeaponPartEffect::Cold { amount } => {
+            format!("Cold +{amount}")
+        }
+        crate::weapon_parts::WeaponPartEffect::DamageOverTime {
+            kind,
+            damage_per_tick,
+            tick_interval,
+            duration_ticks,
+        } => format!("{kind:?} {damage_per_tick}/{tick_interval}t for {duration_ticks}t"),
+        crate::weapon_parts::WeaponPartEffect::Heal { amount } => {
+            format!("Allied healing {amount}")
+        }
     }
 }
 

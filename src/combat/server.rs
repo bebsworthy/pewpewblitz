@@ -38,6 +38,10 @@ pub struct ServerCombatPlugin;
 
 #[cfg(feature = "server")]
 impl Plugin for ServerCombatPlugin {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "combat plugin composition keeps fixed-tick ordering and deferred boundaries visible in one place"
+    )]
     fn build(&self, app: &mut App) {
         if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
             app.insert_resource(TestDummyFixture {
@@ -58,6 +62,7 @@ impl Plugin for ServerCombatPlugin {
             .init_resource::<CombatEvidenceSnapshots>()
             .init_resource::<crate::matchplay::PendingModeObjectiveDamages>()
             .init_resource::<CombatSummaryLogged>()
+            .init_resource::<fields::NextElementalFieldId>()
             .insert_resource(CombatEvidenceMode {
                 enabled: env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1"),
             })
@@ -68,7 +73,9 @@ impl Plugin for ServerCombatPlugin {
                 FixedPostUpdate,
                 (
                     CombatDamageSet::Combatants,
-                    CombatDamageSet::WorldTargets.after(CombatDamageSet::Combatants),
+                    CombatDamageSet::Fields.after(CombatDamageSet::Combatants),
+                    CombatDamageSet::Conditions.after(CombatDamageSet::Fields),
+                    CombatDamageSet::WorldTargets.after(CombatDamageSet::Conditions),
                     CombatDamageSet::ModeObjectives.after(CombatDamageSet::WorldTargets),
                     CombatDamageSet::EnvironmentReactions.after(CombatDamageSet::ModeObjectives),
                     CombatDamageSet::Publish.after(CombatDamageSet::EnvironmentReactions),
@@ -106,6 +113,11 @@ impl Plugin for ServerCombatPlugin {
                     resolve_composed_payloads
                         .after(resolve_melee_attacks)
                         .in_set(CombatDamageSet::Combatants),
+                    ApplyDeferred
+                        .after(resolve_composed_payloads)
+                        .before(CombatDamageSet::Fields),
+                    fields::pulse_and_cleanup_elemental_fields.in_set(CombatDamageSet::Fields),
+                    conditions::advance_conditions.in_set(CombatDamageSet::Conditions),
                     flush_completed_attack_telemetry.in_set(CombatSet::TelemetryAndCues),
                     send_combat_cues.in_set(CombatSet::TelemetryAndCues),
                     publish_authoritative_tick

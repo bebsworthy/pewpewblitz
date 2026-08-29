@@ -34,6 +34,7 @@ use screens::{
         dashboard_layout_class,
     },
     game_select::GameTypeSelectRoot,
+    match_loading::match_loading_text,
     overlays::{FlowErrorRoot, RateLimitTryAgain},
     queue::{queue_cancel_presentation, queue_membership_text},
     results::MatchCompletionRoot,
@@ -1269,6 +1270,24 @@ fn queue_copy_uses_advertised_game_and_saved_brawler_recipe() {
     assert!(copy.contains("Wipeout 2v2"));
     assert!(copy.contains("Saved brawler"));
     assert!(copy.contains("Updating queue"));
+    assert!(!copy.contains("points"));
+
+    let loading_copy = match_loading_text(
+        &crate::lobby::ReservationStarted {
+            reservation_id: crate::lobby::MatchReservationId::new(1).unwrap(),
+            ticket_id: Some(membership.ticket_id),
+            game_type_id: membership.game_type_id.clone(),
+            map_preset_id: crate::map::MapPresetId(1),
+            team_count: 2,
+            players_per_team: 2,
+            accepted_build: membership.accepted_build,
+            loading_deadline_millis: 30_000,
+        },
+        Some(crate::lobby::MatchLoadingPhase::Synchronizing),
+    );
+    assert!(loading_copy.contains("Synchronizing map"));
+    assert!(loading_copy.contains("Saved brawler accepted"));
+    assert!(!loading_copy.contains("points"));
 }
 
 #[test]

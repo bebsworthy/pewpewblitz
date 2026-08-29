@@ -14,6 +14,9 @@ pub(in super::super) struct SentryVisual3d;
 pub(in super::super) struct ConcealmentFieldVisual3d;
 
 #[derive(Component)]
+pub(in super::super) struct ElementalFieldVisual3d;
+
+#[derive(Component)]
 pub(in super::super) struct FighterGroundMarker3d {
     owner: Entity,
 }
@@ -230,6 +233,85 @@ pub(in super::super) fn reconcile_concealment_field_visuals(
             commands.entity(root).despawn();
         }
     }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+pub(in super::super) fn reconcile_elemental_field_visuals(
+    mut commands: Commands,
+    primitives: Res<Primitive3dAssets>,
+    materials: Res<Material3dAssets>,
+    fields: Query<(Entity, &crate::combat::ElementalFieldState)>,
+    visuals: Query<(Entity, &CombatVisualOwner), With<ElementalFieldVisual3d>>,
+) {
+    let roots = unique_roots(&mut commands, &visuals);
+    for (owner, state) in &fields {
+        if !roots.contains(&owner)
+            && let Some(radius) = state.radius()
+        {
+            let material = match state.kind {
+                crate::combat::ElementalFieldKind::Cryogenic => materials.elemental_cold.clone(),
+                crate::combat::ElementalFieldKind::Fire => materials.elemental_fire.clone(),
+                crate::combat::ElementalFieldKind::Poison => materials.elemental_poison.clone(),
+                crate::combat::ElementalFieldKind::Restoration => {
+                    materials.elemental_restoration.clone()
+                }
+            };
+            spawn_elemental_field(
+                &mut commands,
+                &primitives,
+                owner,
+                state.center_vec2(),
+                radius,
+                material,
+            );
+        }
+    }
+    for (root, owner) in &visuals {
+        if fields.get(owner.0).is_err() {
+            commands.entity(root).despawn();
+        }
+    }
+}
+
+fn spawn_elemental_field(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    owner: Entity,
+    center: Vec2,
+    radius: f32,
+    material: Handle<StandardMaterial>,
+) {
+    let root = commands
+        .spawn((
+            CombatVisualOwner(owner),
+            ElementalFieldVisual3d,
+            Transform::from_translation(ground_position(center)),
+            Visibility::default(),
+            Name::new("Elemental Field visual root"),
+        ))
+        .id();
+    commands.entity(root).with_children(|parent| {
+        parent.spawn((
+            Mesh3d(primitives.area_disc.clone()),
+            MeshMaterial3d(material.clone()),
+            NotShadowCaster,
+            NotShadowReceiver,
+            Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0)
+                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                .with_scale(Vec3::splat(radius)),
+            Name::new("Elemental Field fill"),
+        ));
+        parent.spawn((
+            Mesh3d(primitives.area_ring.clone()),
+            MeshMaterial3d(material),
+            NotShadowCaster,
+            NotShadowReceiver,
+            Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.6, 0.0)
+                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                .with_scale(Vec3::splat(radius)),
+            Name::new("Elemental Field boundary"),
+        ));
+    });
 }
 
 fn spawn_concealment_field(

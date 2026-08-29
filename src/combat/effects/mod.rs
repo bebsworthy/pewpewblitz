@@ -33,7 +33,9 @@ pub(crate) use planning::{
     finish_attack_delivery, flush_completed_attack_telemetry, payload_target_visible,
 };
 #[cfg(feature = "server")]
-pub(crate) use runtime::requested_damage;
+pub(crate) use runtime::{
+    apply_cold_contribution, apply_resistance, refresh_damage_over_time, requested_damage,
+};
 /// The bounded authoritative transaction outputs produced by payload resolution, grouped
 /// to keep the scheduling system within the engine's system-parameter budget.
 #[cfg(feature = "server")]

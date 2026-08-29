@@ -24,10 +24,10 @@ fn recipe(weapon: u16, ultimate: u16, passives: [u16; 2]) -> BrawlerBuildRecipe 
 #[test]
 fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters() {
     let (builds, _, _) = catalogs();
-    assert_eq!(builds.balance_revision, BuildRevision(6));
+    assert_eq!(builds.balance_revision, BuildRevision(8));
     assert_eq!(builds.weapon_costs.len(), 4);
-    assert_eq!(builds.ultimates.len(), 6);
-    assert_eq!(builds.passives.len(), 6);
+    assert_eq!(builds.ultimates.len(), 10);
+    assert_eq!(builds.passives.len(), 9);
     assert_eq!(
         builds.ultimate(UltimateDefinitionId(3)).unwrap().parameters,
         UltimateParameters::SelfCloak {
@@ -103,6 +103,45 @@ fn recipes_reject_unknown_ids_and_resolve_exact_budget_and_body_stats() {
     let bruiser = resolve_build_recipe(&builds, &weapons, &fighter, recipe(2, 1, [2, 6])).unwrap();
     assert_eq!(bruiser.fighter_stats.maximum_health, 120);
     assert!((bruiser.fighter_stats.movement_speed - 90.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn saved_fighter_elemental_baselines_are_independent_and_passives_add_to_them() {
+    let (mut builds, weapons, fighter) = catalogs();
+    builds.fighter_profiles.lightweight.cold_capacity = 750;
+    builds
+        .fighter_profiles
+        .lightweight
+        .cold_resistance_basis_points = 1_000;
+    let resolved = resolve_saved_brawler_recipe(
+        &builds,
+        &weapons,
+        &fighter,
+        crate::profiles::FighterProfileId(2),
+        crate::profiles::WeaponBaseId(1),
+        UltimateDefinitionId(1),
+        [PassiveDefinitionId(7), PassiveDefinitionId(6)],
+    )
+    .unwrap();
+    assert_eq!(resolved.fighter_stats.cold_capacity, 750);
+    assert_eq!(resolved.fighter_stats.cold_resistance_basis_points, 4_000);
+    assert_eq!(builds.fighter_profiles.default.cold_capacity, 1_000);
+
+    builds
+        .fighter_profiles
+        .lightweight
+        .cold_resistance_basis_points = 5_000;
+    let clamped = resolve_saved_brawler_recipe(
+        &builds,
+        &weapons,
+        &fighter,
+        crate::profiles::FighterProfileId(2),
+        crate::profiles::WeaponBaseId(1),
+        UltimateDefinitionId(1),
+        [PassiveDefinitionId(7), PassiveDefinitionId(6)],
+    )
+    .unwrap();
+    assert_eq!(clamped.fighter_stats.cold_resistance_basis_points, 6_000);
 }
 
 #[test]
@@ -248,6 +287,12 @@ fn catalog_rejects_non_finite_and_out_of_policy_balance_values() {
     assert!(invalid.validate().is_err());
     let mut invalid = builds.clone();
     invalid.fighter_profiles.reinforced.maximum_health = 0;
+    assert!(invalid.validate().is_err());
+    let mut invalid = builds.clone();
+    invalid.fighter_profiles.reinforced.cold_capacity = 0;
+    assert!(invalid.validate().is_err());
+    let mut invalid = builds.clone();
+    invalid.fighter_profiles.reinforced.cold_capacity = MAX_COLD_CAPACITY + 1;
     assert!(invalid.validate().is_err());
     let mut invalid = builds.clone();
     invalid.fighter_profiles.default.reveal_proximity_radius = f32::NAN;

@@ -329,8 +329,19 @@ pub(super) fn sweep_composed_projectiles(
                         )
                     },
                     |(_, team, _, defeated, owner_disconnected)| {
-                        teams_are_hostile(runtime.source.team_id, *team)
-                            && !defeated
+                        runtime.recipe.payload_bundles.iter().any(|bundle| {
+                            matches!(bundle.target, TargetSelection::Direct)
+                                && fighter_lookup.get(&candidate).is_some_and(
+                                    |(_, _, network_id, _, _)| {
+                                        payload_can_affect_target(
+                                            bundle,
+                                            runtime.source,
+                                            *team,
+                                            *network_id,
+                                        )
+                                    },
+                                )
+                        }) && !defeated
                             && !owner_disconnected
                     },
                 )
@@ -347,7 +358,6 @@ pub(super) fn sweep_composed_projectiles(
         let target = fighter_lookup.get(&hit.entity).copied();
         if let Some((target_position, target_team, target_network_id, defeated, _)) = target
             && !defeated
-            && teams_are_hostile(runtime.source.team_id, target_team)
         {
             for (bundle_index, bundle) in
                 runtime

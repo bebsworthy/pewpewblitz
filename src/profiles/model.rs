@@ -236,6 +236,7 @@ pub enum ProfileDecision {
     MissingPart,
     PartAlreadyEquipped,
     IncompatibleWeapon,
+    IncompatibleBuild,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -356,6 +357,31 @@ impl MatchBuildSnapshotV3 {
         weapons: &crate::combat::WeaponCatalog,
         fighter: &crate::combat::FighterDefinition,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
+        let resolved = self.resolve_against_catalogs(builds, weapons, fighter)?;
+        if resolved.identity != self.accepted_identity {
+            return Err(crate::builds::BuildResolutionError::InvalidCombination);
+        }
+        Ok(resolved)
+    }
+
+    /// Re-resolve a snapshot whose accepted identity was already checked at the immutable match
+    /// manifest boundary against a validated, development-only revised catalog.
+    #[cfg(feature = "balance-lab")]
+    pub(crate) fn resolve_revised_balance_lab_catalogs(
+        self,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+    ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
+        self.resolve_against_catalogs(builds, weapons, fighter)
+    }
+
+    fn resolve_against_catalogs(
+        self,
+        builds: &crate::builds::BuildCatalog,
+        weapons: &crate::combat::WeaponCatalog,
+        fighter: &crate::combat::FighterDefinition,
+    ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
         let mut resolved = crate::builds::resolve_saved_brawler_recipe(
             builds,
             weapons,
@@ -377,9 +403,6 @@ impl MatchBuildSnapshotV3 {
                 crate::builds::BuildRecipeFingerprint(weapon.recipe_fingerprint.0);
         }
         resolved.primary_weapon = weapon;
-        if resolved.identity != self.accepted_identity {
-            return Err(crate::builds::BuildResolutionError::InvalidCombination);
-        }
         Ok(resolved)
     }
 }

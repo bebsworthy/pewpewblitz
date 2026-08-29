@@ -1,24 +1,25 @@
 use super::{
-    BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, PassiveDefinitionId, PassiveKind,
-    PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout,
-    ResolvedPassive, ResolvedUltimate, RevealProximityModifier, SelectedBuild,
-    UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
+    BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, ElementalFieldEffect,
+    PassiveDefinitionId, PassiveKind, PulseMagazine, PulsePower, PulseReach, ResolvedFighterStats,
+    ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate, RevealProximityModifier,
+    SelectedBuild, UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
 };
 use crate::combat::{
-    DeliveryMethod, FighterDefinition, PayloadEffectDefinition, WeaponCatalog, WeaponConfiguration,
-    WeaponEconomy, WeaponPresetId, resolve_configuration,
+    DamageOverTimeKind, DeliveryMethod, FighterDefinition, PayloadEffectDefinition, WeaponCatalog,
+    WeaponConfiguration, WeaponEconomy, WeaponPresetId, resolve_configuration,
 };
 use crate::content::{GameplayContentFingerprint, fnv1a64};
 use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 8;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 8;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 10;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 10;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub const BUILD_POINT_BUDGET: u8 = 12;
 pub const MAX_FIGHTER_MOVEMENT_SPEED: f32 = 1_200.0;
+pub const MAX_COLD_CAPACITY: u16 = 10_000;
 pub const MIN_REVEAL_PROXIMITY_RADIUS: f32 = 32.0;
 pub const MAX_REVEAL_PROXIMITY_RADIUS: f32 = 1_024.0;
 pub const MAX_REVEAL_PROXIMITY_FLAT_MILLIUNITS: i32 = 512_000;
@@ -121,9 +122,9 @@ impl BuildCatalog {
             return Err("unsupported build catalog schema/revision".into());
         }
         self.validate_tuning()?;
-        if self.weapon_costs.len() != 4 || self.ultimates.len() != 6 || self.passives.len() != 6 {
+        if self.weapon_costs.len() != 4 || self.ultimates.len() != 10 || self.passives.len() != 9 {
             return Err(
-                "the build catalog requires four weapon costs, six ultimates, and six passives"
+                "the build catalog requires four weapon costs, ten ultimates, and nine passives"
                     .into(),
             );
         }
@@ -151,6 +152,9 @@ impl BuildCatalog {
             (PassiveDefinitionId(4), PassiveKind::CloseQuarters, 2),
             (PassiveDefinitionId(5), PassiveKind::QuickCycle, 2),
             (PassiveDefinitionId(6), PassiveKind::Tenacity, 1),
+            (PassiveDefinitionId(7), PassiveKind::CryogenicInsulation, 1),
+            (PassiveDefinitionId(8), PassiveKind::FilteredCirculation, 1),
+            (PassiveDefinitionId(9), PassiveKind::HeatShielding, 1),
         ];
         if !self
             .passives
@@ -195,6 +199,11 @@ impl BuildCatalog {
                 || profile.movement_speed > MAX_FIGHTER_MOVEMENT_SPEED
                 || profile.health_recovery_rate == 0
                 || profile.idle_attack_delay_ticks == 0
+                || profile.cold_capacity == 0
+                || profile.cold_capacity > MAX_COLD_CAPACITY
+                || profile.cold_resistance_basis_points > 6_000
+                || profile.poison_resistance_basis_points > 6_000
+                || profile.fire_resistance_basis_points > 6_000
                 || !profile.reveal_proximity_radius.is_finite()
                 || !(MIN_REVEAL_PROXIMITY_RADIUS..=MAX_REVEAL_PROXIMITY_RADIUS)
                     .contains(&profile.reveal_proximity_radius)
@@ -268,6 +277,10 @@ fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(),
         (UltimateDefinitionId(4), UltimateKind::RevealScan, 4),
         (UltimateDefinitionId(5), UltimateKind::ConcealmentField, 4),
         (UltimateDefinitionId(6), UltimateKind::DemolitionStrike, 4),
+        (UltimateDefinitionId(7), UltimateKind::CryogenicField, 4),
+        (UltimateDefinitionId(8), UltimateKind::FireField, 4),
+        (UltimateDefinitionId(9), UltimateKind::PoisonField, 4),
+        (UltimateDefinitionId(10), UltimateKind::RestorationField, 4),
     ];
     if !definitions
         .iter()
@@ -312,17 +325,83 @@ fn validate_ultimate_inventory(definitions: &[UltimateDefinition]) -> Result<(),
                         radius_milliunits: 8_000..=64_000,
                     }
                 )
+                | (
+                    UltimateKind::CryogenicField
+                        | UltimateKind::FireField
+                        | UltimateKind::PoisonField
+                        | UltimateKind::RestorationField,
+                    UltimateParameters::ElementalField {
+                        maximum_range_milliunits: 1..=4_096_000,
+                        radius_milliunits: 1..=2_048_000,
+                        duration_ticks: 1..=3_600,
+                        pulse_interval_ticks: 1..=3_600,
+                        ..
+                    }
+                )
         ) || matches!(
             definition.parameters,
             UltimateParameters::DemolitionStrike {
                 radius_milliunits,
                 ..
             } if !radius_milliunits.is_multiple_of(4_000)
-        )
+        ) || !valid_elemental_ultimate_effect(definition.kind, definition.parameters)
     }) {
         return Err("ultimate kind and parameters do not match engine bounds".into());
     }
     Ok(())
+}
+
+fn valid_elemental_ultimate_effect(kind: UltimateKind, parameters: UltimateParameters) -> bool {
+    match (kind, parameters) {
+        (
+            UltimateKind::CryogenicField,
+            UltimateParameters::ElementalField {
+                effect: ElementalFieldEffect::Cold { amount: 1.. },
+                ..
+            },
+        )
+        | (
+            UltimateKind::FireField,
+            UltimateParameters::ElementalField {
+                effect:
+                    ElementalFieldEffect::DamageOverTime {
+                        kind: DamageOverTimeKind::Fire,
+                        damage_per_tick: 1..,
+                        tick_interval: 1..=3_600,
+                        duration_ticks: 1..=3_600,
+                    },
+                ..
+            },
+        )
+        | (
+            UltimateKind::PoisonField,
+            UltimateParameters::ElementalField {
+                effect:
+                    ElementalFieldEffect::DamageOverTime {
+                        kind: DamageOverTimeKind::Poison,
+                        damage_per_tick: 1..,
+                        tick_interval: 1..=3_600,
+                        duration_ticks: 1..=3_600,
+                    },
+                ..
+            },
+        )
+        | (
+            UltimateKind::RestorationField,
+            UltimateParameters::ElementalField {
+                effect: ElementalFieldEffect::Heal { amount: 1.. },
+                ..
+            },
+        ) => true,
+        (
+            UltimateKind::CryogenicField
+            | UltimateKind::FireField
+            | UltimateKind::PoisonField
+            | UltimateKind::RestorationField,
+            _,
+        ) => false,
+        _ => true,
+    }
 }
 
 /// Resolve one reveal radius from bounded, deterministic authored modifier units.
@@ -484,6 +563,20 @@ fn resolve_build_recipe_inner(
     if has_lightweight && has_reinforced {
         return Err(BuildResolutionError::InvalidCombination);
     }
+    let resistance_passive_count = passives
+        .iter()
+        .filter(|passive| {
+            matches!(
+                passive.kind,
+                PassiveKind::CryogenicInsulation
+                    | PassiveKind::FilteredCirculation
+                    | PassiveKind::HeatShielding
+            )
+        })
+        .count();
+    if resistance_passive_count > 1 {
+        return Err(BuildResolutionError::InvalidCombination);
+    }
     let ultimate_definition = catalog
         .ultimates
         .iter()
@@ -501,7 +594,7 @@ fn resolve_build_recipe_inner(
     if explicit_fighter_profile.is_none() && total_points > BUILD_POINT_BUDGET {
         return Err(BuildResolutionError::OverBudget);
     }
-    let fighter_stats = if let Some((_, stats)) = explicit_fighter_profile {
+    let mut fighter_stats = if let Some((_, stats)) = explicit_fighter_profile {
         stats
     } else if has_lightweight {
         catalog.fighter_profiles.lightweight
@@ -510,6 +603,34 @@ fn resolve_build_recipe_inner(
     } else {
         catalog.fighter_profiles.default
     };
+    for passive in &passives {
+        match passive.kind {
+            PassiveKind::CryogenicInsulation => {
+                fighter_stats.cold_resistance_basis_points = fighter_stats
+                    .cold_resistance_basis_points
+                    .saturating_add(3_000)
+                    .min(6_000);
+            }
+            PassiveKind::FilteredCirculation => {
+                fighter_stats.poison_resistance_basis_points = fighter_stats
+                    .poison_resistance_basis_points
+                    .saturating_add(3_000)
+                    .min(6_000);
+            }
+            PassiveKind::HeatShielding => {
+                fighter_stats.fire_resistance_basis_points = fighter_stats
+                    .fire_resistance_basis_points
+                    .saturating_add(3_000)
+                    .min(6_000);
+            }
+            PassiveKind::LightweightFrame
+            | PassiveKind::ReinforcedFrame
+            | PassiveKind::AdrenalResponse
+            | PassiveKind::CloseQuarters
+            | PassiveKind::QuickCycle
+            | PassiveKind::Tenacity => {}
+        }
+    }
     let mut canonical_passives = recipe.passives;
     canonical_passives.sort();
     let fingerprint_bytes = if let Some((fighter_profile_id, _)) = explicit_fighter_profile {

@@ -1,4 +1,4 @@
-use crate::combat::{ResolvedWeapon, WeaponPresetId};
+use crate::combat::{DamageOverTimeKind, ResolvedWeapon, WeaponPresetId};
 use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +81,11 @@ pub struct ResolvedFighterStats {
     pub idle_attack_delay_ticks: u64,
     /// Observer-owned distance at which an enemy's terrain concealment is revealed.
     pub reveal_proximity_radius: f32,
+    /// Target-owned Cold buildup required to trigger Freeze.
+    pub cold_capacity: u16,
+    pub cold_resistance_basis_points: u16,
+    pub poison_resistance_basis_points: u16,
+    pub fire_resistance_basis_points: u16,
 }
 
 /// Canonical bonus/malus input applied while resolving reveal proximity.
@@ -101,6 +106,10 @@ pub enum UltimateKind {
     RevealScan,
     ConcealmentField,
     DemolitionStrike,
+    CryogenicField,
+    FireField,
+    PoisonField,
+    RestorationField,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,9 +123,13 @@ impl UltimateKind {
     pub const fn activation_style(self) -> UltimateActivationStyle {
         match self {
             Self::Dash | Self::Sentry | Self::SelfCloak => UltimateActivationStyle::Immediate,
-            Self::RevealScan | Self::ConcealmentField | Self::DemolitionStrike => {
-                UltimateActivationStyle::Targeted
-            }
+            Self::RevealScan
+            | Self::ConcealmentField
+            | Self::DemolitionStrike
+            | Self::CryogenicField
+            | Self::FireField
+            | Self::PoisonField
+            | Self::RestorationField => UltimateActivationStyle::Targeted,
         }
     }
 }
@@ -141,6 +154,29 @@ pub enum UltimateParameters {
     DemolitionStrike {
         maximum_range_milliunits: u32,
         radius_milliunits: u32,
+    },
+    ElementalField {
+        maximum_range_milliunits: u32,
+        radius_milliunits: u32,
+        duration_ticks: u64,
+        pulse_interval_ticks: u64,
+        effect: ElementalFieldEffect,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElementalFieldEffect {
+    Cold {
+        amount: u16,
+    },
+    DamageOverTime {
+        kind: DamageOverTimeKind,
+        damage_per_tick: u16,
+        tick_interval: u64,
+        duration_ticks: u64,
+    },
+    Heal {
+        amount: u16,
     },
 }
 
@@ -168,6 +204,9 @@ pub enum PassiveKind {
     CloseQuarters,
     QuickCycle,
     Tenacity,
+    CryogenicInsulation,
+    FilteredCirculation,
+    HeatShielding,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +245,10 @@ pub enum AbilityPhase {
     },
     FieldActive {
         field_id: crate::concealment::ConcealmentFieldId,
+        expires_at_tick: u64,
+    },
+    ElementalFieldActive {
+        field_id: crate::combat::ElementalFieldId,
         expires_at_tick: u64,
     },
 }

@@ -1,7 +1,9 @@
 //! Shared combat identities, replicated state, and server-internal delivery messages.
 
 #[cfg(feature = "server")]
-use super::{PayloadBundleDefinition, WeaponRecipe, WorldEffectDefinition};
+use super::{
+    PayloadBundleDefinition, PayloadEffectDefinition, WeaponRecipe, WorldEffectDefinition,
+};
 use super::{
     WeaponDefinitionId, WeaponPresentationProfileId, WeaponPresetId, WeaponRecipeFingerprint,
 };
@@ -61,9 +63,125 @@ pub struct SlowEffect {
     pub expires_at_tick: u64,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum DamageOverTimeKind {
+    Poison,
+    Fire,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConditionSource {
+    pub action_id: AttackId,
+    pub kind: CombatSourceKind,
+    pub player_id: PlayerId,
+    pub network_entity_id: NetworkEntityId,
+    pub team_id: TeamId,
+    pub source_preset_id: Option<WeaponPresetId>,
+    pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,
+    pub presentation_profile_id: Option<WeaponPresentationProfileId>,
+}
+
+impl From<AttackSource> for ConditionSource {
+    fn from(source: AttackSource) -> Self {
+        Self {
+            action_id: source.attack_id,
+            kind: source.kind,
+            player_id: source.player_id,
+            network_entity_id: source.owner_network_entity_id,
+            team_id: source.team_id,
+            source_preset_id: source.source_preset_id,
+            recipe_fingerprint: Some(source.recipe_fingerprint),
+            presentation_profile_id: Some(source.presentation_profile_id),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamageOverTime {
+    pub source: ConditionSource,
+    pub damage_per_tick: u16,
+    pub tick_interval: u64,
+    pub next_tick: u64,
+    pub expires_at_tick: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ColdState {
+    pub meter: u16,
+    pub last_contribution_tick: u64,
+    pub frozen_until_tick: Option<u64>,
+    pub immunity_until_tick: Option<u64>,
+    pub source: Option<ConditionSource>,
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ActiveEffects {
     pub slow: Option<SlowEffect>,
+    pub cold: ColdState,
+    pub poison: Option<DamageOverTime>,
+    pub fire: Option<DamageOverTime>,
+}
+
+impl ActiveEffects {
+    #[must_use]
+    pub fn is_frozen(self, tick: u64) -> bool {
+        self.cold
+            .frozen_until_tick
+            .is_some_and(|deadline| tick < deadline)
+    }
+
+    #[must_use]
+    pub fn is_poisoned(self, tick: u64) -> bool {
+        self.poison
+            .is_some_and(|condition| tick <= condition.expires_at_tick)
+    }
+}
+
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Reflect,
+)]
+pub struct ElementalFieldId(pub u64);
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum ElementalFieldKind {
+    Cryogenic,
+    Fire,
+    Poison,
+    Restoration,
+}
+
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct ElementalFieldState {
+    pub id: ElementalFieldId,
+    pub kind: ElementalFieldKind,
+    pub owner_network_entity_id: NetworkEntityId,
+    pub team_id: TeamId,
+    pub center: WorldPoint,
+    pub radius_milliunits: u32,
+    pub activated_at_tick: u64,
+    pub next_pulse_tick: u64,
+    pub expires_at_tick: u64,
+}
+
+impl ElementalFieldState {
+    #[must_use]
+    pub fn center_vec2(self) -> Vec2 {
+        self.center.as_vec2()
+    }
+
+    #[must_use]
+    pub fn radius(self) -> Option<f32> {
+        crate::builds::world_units_from_milliunits(self.radius_milliunits)
+    }
+}
+
+#[cfg(feature = "server")]
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ElementalFieldRuntime {
+    pub source: ConditionSource,
+    pub match_id: crate::matchplay::MatchId,
+    pub pulse_interval_ticks: u64,
+    pub effect: PayloadEffectDefinition,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq)]

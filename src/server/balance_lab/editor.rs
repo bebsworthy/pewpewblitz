@@ -1,8 +1,8 @@
 use super::BalanceLabSnapshotV3;
 use crate::{
     builds::{
-        MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS, MIN_REVEAL_PROXIMITY_RADIUS,
-        UltimateParameters,
+        MAX_COLD_CAPACITY, MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS,
+        MIN_REVEAL_PROXIMITY_RADIUS, UltimateParameters,
     },
     combat::{
         DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadEffectDefinition,
@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::Serialize;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 3;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -163,6 +163,20 @@ impl NumberSpec {
         }
     }
 
+    fn resistance_basis_points() -> Self {
+        Self {
+            storage_kind: EditorStorageKind::Integer,
+            unit: "%",
+            storage_scale: 100.0,
+            minimum: 0.0,
+            maximum: 60.0,
+            minimum_exclusive: false,
+            step: 1.0,
+            control: EditorControl::RangeAndNumber,
+            help: Some("Displayed as a percentage and stored in basis points."),
+        }
+    }
+
     fn ranged(mut self) -> Self {
         self.control = EditorControl::RangeAndNumber;
         self
@@ -297,6 +311,33 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             )
             .ranged(),
         );
+        add_field(
+            fields,
+            path!["fighterProfiles", key, "cold_capacity"],
+            EditorSection::Fighters,
+            key,
+            label,
+            "Elemental baselines",
+            "Cold capacity",
+            NumberSpec::integer(1, u32::from(MAX_COLD_CAPACITY), "cold")
+                .help("Target-owned buildup required to trigger Freeze."),
+        );
+        for (field, field_label) in [
+            ("cold_resistance_basis_points", "Cold resistance"),
+            ("poison_resistance_basis_points", "Poison resistance"),
+            ("fire_resistance_basis_points", "Fire resistance"),
+        ] {
+            add_field(
+                fields,
+                path!["fighterProfiles", key, field],
+                EditorSection::Fighters,
+                key,
+                label,
+                "Elemental baselines",
+                field_label,
+                NumberSpec::resistance_basis_points(),
+            );
+        }
     }
 }
 
@@ -616,6 +657,39 @@ fn add_weapon_fields(
                         );
                     }
                 }
+                PayloadEffectDefinition::Cold { .. } => add(
+                    effect_root("Cold", path!["amount"]),
+                    &group,
+                    "Cold per hit",
+                    NumberSpec::integer(1, u32::from(u16::MAX), "cold")
+                        .help("Applied after resistance against the target's Cold capacity."),
+                ),
+                PayloadEffectDefinition::DamageOverTime { .. } => {
+                    add(
+                        effect_root("DamageOverTime", path!["damage_per_tick"]),
+                        &group,
+                        "Damage per tick",
+                        NumberSpec::integer(1, u32::from(policy.max_damage), "health"),
+                    );
+                    add(
+                        effect_root("DamageOverTime", path!["tick_interval"]),
+                        &group,
+                        "Tick interval",
+                        NumberSpec::ticks(1, policy.max_effect_duration_ticks),
+                    );
+                    add(
+                        effect_root("DamageOverTime", path!["duration_ticks"]),
+                        &group,
+                        "Duration",
+                        NumberSpec::ticks(1, policy.max_effect_duration_ticks),
+                    );
+                }
+                PayloadEffectDefinition::Heal { .. } => add(
+                    effect_root("Heal", path!["amount"]),
+                    &group,
+                    "Healing",
+                    NumberSpec::integer(1, u32::from(u16::MAX), "health"),
+                ),
             }
         }
     }
@@ -789,6 +863,115 @@ fn add_ultimate_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &Balan
                     NumberSpec::milliunits(8_000, 64_000),
                 );
             }
+            UltimateParameters::ElementalField { .. } => {
+                for (tail, group, label, spec) in [
+                    (
+                        "maximum_range_milliunits",
+                        "Targeting",
+                        "Maximum range",
+                        NumberSpec::milliunits(1, 4_096_000),
+                    ),
+                    (
+                        "radius_milliunits",
+                        "Area",
+                        "Field radius",
+                        NumberSpec::milliunits(1, 2_048_000),
+                    ),
+                    (
+                        "duration_ticks",
+                        "Timing",
+                        "Field duration",
+                        NumberSpec::ticks(1, 3_600),
+                    ),
+                    (
+                        "pulse_interval_ticks",
+                        "Timing",
+                        "Pulse interval",
+                        NumberSpec::ticks(1, 3_600),
+                    ),
+                ] {
+                    add_field(
+                        fields,
+                        path!["ultimates", index, "parameters", "ElementalField", tail],
+                        EditorSection::Ultimates,
+                        &ultimate.key,
+                        &ultimate.display_name,
+                        group,
+                        label,
+                        spec,
+                    );
+                }
+                let (effect_kind, effect_label) = match ultimate.kind {
+                    crate::builds::UltimateKind::CryogenicField => ("Cold", "Cold per pulse"),
+                    crate::builds::UltimateKind::FireField
+                    | crate::builds::UltimateKind::PoisonField => {
+                        ("DamageOverTime", "Damage per tick")
+                    }
+                    crate::builds::UltimateKind::RestorationField => ("Heal", "Healing"),
+                    _ => continue,
+                };
+                let effect_tail = if effect_kind == "DamageOverTime" {
+                    "damage_per_tick"
+                } else {
+                    "amount"
+                };
+                add_field(
+                    fields,
+                    path![
+                        "ultimates",
+                        index,
+                        "parameters",
+                        "ElementalField",
+                        "effect",
+                        effect_kind,
+                        effect_tail
+                    ],
+                    EditorSection::Ultimates,
+                    &ultimate.key,
+                    &ultimate.display_name,
+                    "Effect",
+                    effect_label,
+                    NumberSpec::integer(
+                        1,
+                        u32::from(u16::MAX),
+                        if effect_kind == "Cold" {
+                            "cold/pulse"
+                        } else {
+                            "points"
+                        },
+                    )
+                    .help(if effect_kind == "Cold" {
+                        "Applied after resistance against each target's Cold capacity."
+                    } else {
+                        "Applied on each authoritative field pulse."
+                    }),
+                );
+                if effect_kind == "DamageOverTime" {
+                    for (tail, label) in [
+                        ("tick_interval", "Damage interval"),
+                        ("duration_ticks", "Damage duration"),
+                    ] {
+                        add_field(
+                            fields,
+                            path![
+                                "ultimates",
+                                index,
+                                "parameters",
+                                "ElementalField",
+                                "effect",
+                                effect_kind,
+                                tail
+                            ],
+                            EditorSection::Ultimates,
+                            &ultimate.key,
+                            &ultimate.display_name,
+                            "Effect",
+                            label,
+                            NumberSpec::ticks(1, 3_600),
+                        );
+                    }
+                }
+            }
             UltimateParameters::Dash | UltimateParameters::Sentry => {}
         }
     }
@@ -915,11 +1098,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_exposes_only_the_eighty_supported_numeric_leaves() {
+    fn manifest_exposes_only_the_supported_numeric_leaves() {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 80);
+        assert_eq!(manifest.fields.len(), 116);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()
@@ -977,6 +1160,25 @@ mod tests {
             .unwrap();
         assert_eq!(delay.unit, "s");
         assert!((delay.storage_scale - 60.0).abs() < f64::EPSILON);
+
+        let cold_capacity = manifest
+            .fields
+            .iter()
+            .find(|field| path_key(&field.path) == "fighterProfiles/default/cold_capacity")
+            .unwrap();
+        assert_eq!(cold_capacity.unit, "cold");
+        assert!((cold_capacity.maximum - f64::from(MAX_COLD_CAPACITY)).abs() < f64::EPSILON);
+
+        let cold_resistance = manifest
+            .fields
+            .iter()
+            .find(|field| {
+                path_key(&field.path) == "fighterProfiles/default/cold_resistance_basis_points"
+            })
+            .unwrap();
+        assert_eq!(cold_resistance.unit, "%");
+        assert!((cold_resistance.storage_scale - 100.0).abs() < f64::EPSILON);
+        assert!((cold_resistance.maximum - 60.0).abs() < f64::EPSILON);
     }
 
     #[test]

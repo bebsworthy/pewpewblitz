@@ -417,6 +417,11 @@ fn cue_effect(
             center,
             radius_milliunits,
             ..
+        }
+        | C::ElementalFieldActivated {
+            center,
+            radius_milliunits,
+            ..
         } => Some((
             center.as_vec2(),
             materials.scan_area.clone(),

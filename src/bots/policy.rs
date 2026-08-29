@@ -36,6 +36,10 @@ pub(super) struct BotDecision {
     pub navigation: BotNavigationDecisionDiagnostics,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the pure decision keeps targeting, gating, and one FighterInput commit auditable together"
+)]
 pub(super) fn decide(
     observation: &BotObservation,
     state: &mut BotState,
@@ -47,7 +51,35 @@ pub(super) fn decide(
 ) -> BotDecision {
     update_contacts(observation, state, profile.contact_memory_ticks);
     update_stationary_state(observation, state);
-    let intent = choose_intent(observation, state, profile, role);
+    let mut intent = choose_intent(observation, state, profile, role);
+    if observation.ultimate_kind == crate::builds::UltimateKind::RestorationField
+        && observation.ability_ready
+    {
+        let restoration_target = observation
+            .allies
+            .iter()
+            .filter(|ally| ally.active && ally.current_health < ally.maximum_health)
+            .min_by_key(|ally| {
+                u32::from(ally.current_health) * u32::from(observation.self_view.maximum_health)
+                    / u32::from(ally.maximum_health.max(1))
+            })
+            .map_or(
+                (
+                    observation.self_view.position,
+                    observation.self_view.velocity,
+                ),
+                |ally| (ally.position, ally.velocity),
+            );
+        if u32::from(observation.self_view.current_health) * 4
+            <= u32::from(observation.self_view.maximum_health) * 3
+            || observation.allies.iter().any(|ally| {
+                ally.active
+                    && u32::from(ally.current_health) * 4 <= u32::from(ally.maximum_health) * 3
+            })
+        {
+            intent.aim_target = Some(restoration_target);
+        }
+    }
     let (move_axis, navigation_diagnostics) = movement_axis(
         observation,
         state,
@@ -99,8 +131,15 @@ pub(super) fn decide(
     {
         buttons |= FighterInput::PRIMARY_FIRE;
     }
-    let use_ultimate = if observation.ultimate_kind == crate::builds::UltimateKind::DemolitionStrike
-    {
+    let targeted_ultimate = matches!(
+        observation.ultimate_kind,
+        crate::builds::UltimateKind::DemolitionStrike
+            | crate::builds::UltimateKind::CryogenicField
+            | crate::builds::UltimateKind::FireField
+            | crate::builds::UltimateKind::PoisonField
+            | crate::builds::UltimateKind::RestorationField
+    );
+    let use_ultimate = if targeted_ultimate {
         observation.ability_ready
             && intent.aim_target.is_some_and(|(position, _)| {
                 position.distance(observation.self_view.position) <= observation.ultimate_range
@@ -196,6 +235,23 @@ pub(super) fn choose_intent(
         .contacts
         .iter()
         .min_by(|a, b| distance_order(self_position, a.position, b.position));
+
+    if observation.healing_weapon
+        && let Some(ally) = observation
+            .allies
+            .iter()
+            .filter(|ally| ally.active && ally.current_health < ally.maximum_health)
+            .min_by_key(|ally| {
+                u32::from(ally.current_health) * 10_000 / u32::from(ally.maximum_health.max(1))
+            })
+    {
+        return BotIntent {
+            move_goal: Some(ally.position),
+            aim_target: Some((ally.position, ally.velocity)),
+            fire: self_position.distance(ally.position) <= observation.weapon_range,
+            dash: false,
+        };
+    }
 
     if observation.tick >= state.tactic_until_tick {
         state.tactic = if health_fraction <= profile.retreat_health_fraction && pickup.is_some() {

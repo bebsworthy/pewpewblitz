@@ -9,8 +9,9 @@ mod roster;
 use crate::combat::WeaponPhase;
 use crate::{
     builds::{
-        BuildCatalog, BuildCatalogResource, FighterStatProfiles, ResolvedMatchLoadout,
-        SelectedBuild, UltimateDefinitionId, UltimateKind, UltimateParameters,
+        BuildCatalog, BuildCatalogResource, ElementalFieldEffect, FighterStatProfiles,
+        ResolvedMatchLoadout, SelectedBuild, UltimateDefinitionId, UltimateKind,
+        UltimateParameters,
     },
     combat::{
         CurrentHealth, DamageFalloff, DeliveryMethod, FighterDefinitions, FiringPattern,
@@ -32,11 +33,11 @@ use std::{
     collections::BTreeMap,
     env,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 10;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 12;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -141,6 +142,10 @@ impl BalanceLabSnapshotV3 {
                             | UltimateKind::RevealScan
                             | UltimateKind::ConcealmentField
                             | UltimateKind::DemolitionStrike
+                            | UltimateKind::CryogenicField
+                            | UltimateKind::FireField
+                            | UltimateKind::PoisonField
+                            | UltimateKind::RestorationField
                     )
                 })
                 .map(|ultimate| UltimateTuning {
@@ -280,6 +285,67 @@ fn projected_player_loadouts(
     roster::from_manifest(manifest, builds, weapons)
 }
 
+fn validate_revised_manifest_loadouts(
+    world: &World,
+    builds: &BuildCatalog,
+    weapons: &WeaponCatalog,
+    fighter: &crate::combat::FighterDefinition,
+) -> Result<(), String> {
+    let manifest = world
+        .resource::<ServerRoleResource>()
+        .manifest()
+        .ok_or_else(|| "Practice manifest disappeared during startup".to_string())?;
+    for snapshot in manifest_selections(manifest)?.into_values() {
+        snapshot
+            .resolve_revised_balance_lab_catalogs(builds, weapons, fighter)
+            .map_err(|error| {
+                format!("admitted loadout is incompatible with persisted tuning: {error:?}")
+            })?;
+    }
+    Ok(())
+}
+
+fn load_persisted_tuning(
+    world: &mut World,
+    path: &Path,
+    validator: &BalanceLabValidator,
+    baseline: &BalanceLabSnapshotV3,
+    fighter: &crate::combat::FighterDefinition,
+) -> (BalanceLabSnapshotV3, BalanceLabRevision) {
+    match persistence::load(path, validator) {
+        Ok(Some(loaded)) => {
+            if let Err(error) =
+                validate_revised_manifest_loadouts(world, &loaded.builds, &loaded.weapons, fighter)
+            {
+                warn!(
+                    path = %path.display(),
+                    %error,
+                    "Balance Lab ignored persisted tuning incompatible with the admitted roster"
+                );
+                return (baseline.clone(), BalanceLabRevision::default());
+            }
+            world.resource_mut::<BuildCatalogResource>().0 = loaded.builds;
+            world.resource_mut::<WeaponCatalogResource>().0 = loaded.weapons;
+            world.resource_mut::<crate::map::MapCatalogResource>().0 = loaded.maps;
+            info!(
+                path = %path.display(),
+                revision = loaded.revision.0,
+                "Balance Lab loaded persisted tuning"
+            );
+            (loaded.snapshot, loaded.revision)
+        }
+        Ok(None) => (baseline.clone(), BalanceLabRevision::default()),
+        Err(error) => {
+            warn!(
+                path = %path.display(),
+                %error,
+                "Balance Lab ignored invalid persisted tuning and kept canonical defaults"
+            );
+            (baseline.clone(), BalanceLabRevision::default())
+        }
+    }
+}
+
 fn start_balance_lab(world: &mut World) {
     let config = match startup_config(world) {
         Ok(Some(config)) => config,
@@ -315,28 +381,13 @@ fn start_balance_lab(world: &mut World) {
         maps,
         fighter,
     };
-    let (applied, revision) = match persistence::load(&config.persistence_path, &validator) {
-        Ok(Some(loaded)) => {
-            world.resource_mut::<BuildCatalogResource>().0 = loaded.builds;
-            world.resource_mut::<WeaponCatalogResource>().0 = loaded.weapons;
-            world.resource_mut::<crate::map::MapCatalogResource>().0 = loaded.maps;
-            info!(
-                path = %config.persistence_path.display(),
-                revision = loaded.revision.0,
-                "Balance Lab loaded persisted tuning"
-            );
-            (loaded.snapshot, loaded.revision)
-        }
-        Ok(None) => (baseline.clone(), BalanceLabRevision::default()),
-        Err(error) => {
-            warn!(
-                path = %config.persistence_path.display(),
-                %error,
-                "Balance Lab ignored invalid persisted tuning and kept canonical defaults"
-            );
-            (baseline.clone(), BalanceLabRevision::default())
-        }
-    };
+    let (applied, revision) = load_persisted_tuning(
+        world,
+        &config.persistence_path,
+        &validator,
+        &baseline,
+        &fighter,
+    );
     if let Some(mut rules) = world.get_resource_mut::<crate::matchplay::HeistRules>() {
         install_heist_tuning(&mut rules, &applied);
     }
@@ -560,7 +611,9 @@ fn apply_balance_lab_transaction(
             );
             return;
         };
-        let Ok(loadout) = snapshot.resolve(&next_builds, &next_weapons, fighter) else {
+        let Ok(loadout) =
+            snapshot.resolve_revised_balance_lab_catalogs(&next_builds, &next_weapons, fighter)
+        else {
             reject(
                 runtime,
                 transaction_id,
@@ -812,6 +865,7 @@ fn validate_saved_brawler_combinations(
         }
     }
     let parts = crate::weapon_parts::WeaponPartCatalog::embedded()?;
+    let canonical_weapons = WeaponCatalog::embedded()?;
     let slot_count = u32::try_from(crate::weapon_parts::WEAPON_PART_SLOT_COUNT)
         .expect("weapon-part slot count fits u32");
     for mask in 0_u16..(1_u16 << parts.definitions.len()) {
@@ -824,9 +878,20 @@ fn validate_saved_brawler_combinations(
             .enumerate()
             .filter(|(index, _)| mask & (1 << index) != 0)
             .flat_map(|(_, definition)| definition.effects.iter().copied());
-        let modifiers = crate::weapon_parts::aggregate_weapon_part_effects(effects)
-            .map_err(|_| "starter weapon-part combination did not aggregate".to_string())?;
+        let Ok(modifiers) = crate::weapon_parts::aggregate_weapon_part_effects(effects) else {
+            continue;
+        };
         for weapon_base in &advertised.weapon_bases {
+            if crate::weapon_parts::resolve_weapon_parts(
+                &canonical_weapons,
+                fighter,
+                WeaponPresetId(weapon_base.id.0),
+                modifiers,
+            )
+            .is_err()
+            {
+                continue;
+            }
             crate::weapon_parts::resolve_weapon_parts(
                 weapons,
                 fighter,
@@ -869,20 +934,59 @@ fn same_ultimate_parameter_shape(
     expected: UltimateParameters,
     supplied: UltimateParameters,
 ) -> bool {
+    match (expected, supplied) {
+        (UltimateParameters::SelfCloak { .. }, UltimateParameters::SelfCloak { .. })
+        | (UltimateParameters::RevealScan { .. }, UltimateParameters::RevealScan { .. })
+        | (
+            UltimateParameters::ConcealmentField { .. },
+            UltimateParameters::ConcealmentField { .. },
+        )
+        | (
+            UltimateParameters::DemolitionStrike { .. },
+            UltimateParameters::DemolitionStrike { .. },
+        ) => true,
+        (
+            UltimateParameters::ElementalField {
+                effect: expected, ..
+            },
+            UltimateParameters::ElementalField {
+                effect: supplied, ..
+            },
+        ) => same_elemental_field_effect_shape(expected, supplied),
+        _ => false,
+    }
+}
+
+fn same_elemental_field_effect_shape(
+    expected: ElementalFieldEffect,
+    supplied: ElementalFieldEffect,
+) -> bool {
     matches!(
         (expected, supplied),
         (
-            UltimateParameters::SelfCloak { .. },
-            UltimateParameters::SelfCloak { .. }
+            ElementalFieldEffect::Cold { .. },
+            ElementalFieldEffect::Cold { .. }
         ) | (
-            UltimateParameters::RevealScan { .. },
-            UltimateParameters::RevealScan { .. }
+            ElementalFieldEffect::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Fire,
+                ..
+            },
+            ElementalFieldEffect::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Fire,
+                ..
+            }
         ) | (
-            UltimateParameters::ConcealmentField { .. },
-            UltimateParameters::ConcealmentField { .. }
+            ElementalFieldEffect::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Poison,
+                ..
+            },
+            ElementalFieldEffect::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Poison,
+                ..
+            }
         ) | (
-            UltimateParameters::DemolitionStrike { .. },
-            UltimateParameters::DemolitionStrike { .. }
+            ElementalFieldEffect::Heal { .. },
+            ElementalFieldEffect::Heal { .. }
         )
     )
 }
@@ -988,6 +1092,22 @@ fn same_effect_shape(left: PayloadEffectDefinition, right: PayloadEffectDefiniti
             PayloadEffectDefinition::Knockback {
                 recipients: right, ..
             },
+        )
+        | (
+            PayloadEffectDefinition::Cold {
+                recipients: left, ..
+            },
+            PayloadEffectDefinition::Cold {
+                recipients: right, ..
+            },
+        )
+        | (
+            PayloadEffectDefinition::Heal {
+                recipients: left, ..
+            },
+            PayloadEffectDefinition::Heal {
+                recipients: right, ..
+            },
         ) => same_recipient_shape(left, right),
         (
             PayloadEffectDefinition::Slow {
@@ -1004,6 +1124,18 @@ fn same_effect_shape(left: PayloadEffectDefinition, right: PayloadEffectDefiniti
             left_stacking == right_stacking
                 && same_recipient_shape(left_recipients, right_recipients)
         }
+        (
+            PayloadEffectDefinition::DamageOverTime {
+                kind: left_kind,
+                recipients: left_recipients,
+                ..
+            },
+            PayloadEffectDefinition::DamageOverTime {
+                kind: right_kind,
+                recipients: right_recipients,
+                ..
+            },
+        ) => left_kind == right_kind && same_recipient_shape(left_recipients, right_recipients),
         _ => false,
     }
 }
@@ -1023,6 +1155,11 @@ fn same_recipient_shape(left: RecipientPolicy, right: RecipientPolicy) -> bool {
             | (
                 RecipientPolicy::HostilesAndOwner { .. },
                 RecipientPolicy::HostilesAndOwner { .. }
+            )
+            | (RecipientPolicy::Allies, RecipientPolicy::Allies)
+            | (
+                RecipientPolicy::AlliesAndOwner,
+                RecipientPolicy::AlliesAndOwner
             )
     )
 }
@@ -1297,6 +1434,76 @@ mod tests {
     }
 
     #[test]
+    fn revised_weapon_tuning_recomputes_an_admitted_modified_weapon_identity() {
+        let builds = BuildCatalog::embedded().unwrap();
+        let weapons = WeaponCatalog::embedded().unwrap();
+        let fighter_definitions = FighterDefinitions::default();
+        let fighter = fighter_definitions.entries[0];
+        let brawler = crate::profiles::SavedBrawler {
+            id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
+            creation_ordinal: 1,
+            name: "Modified Arc".into(),
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_id: crate::profiles::WeaponBaseId(3),
+            ultimate_id: UltimateDefinitionId(7),
+            passive_ids: [
+                crate::builds::PassiveDefinitionId(5),
+                crate::builds::PassiveDefinitionId(6),
+            ],
+            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
+            revision: crate::profiles::ProfileRevision::INITIAL,
+        };
+        let modifiers = crate::weapon_parts::aggregate_weapon_part_effects([
+            crate::weapon_parts::WeaponPartEffect::Damage {
+                flat: 0,
+                percent_basis_points: -1_000,
+            },
+            crate::weapon_parts::WeaponPartEffect::Slow {
+                penalty_basis_points: 1_500,
+                duration_ticks: 36,
+            },
+        ])
+        .unwrap();
+        let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler_and_modifiers(
+            &brawler, modifiers, &builds, &weapons, &fighter,
+        )
+        .unwrap();
+        let canonical = snapshot.resolve(&builds, &weapons, &fighter).unwrap();
+        let mut revised_weapons = weapons.clone();
+        let arc = revised_weapons
+            .presets
+            .iter_mut()
+            .find(|preset| preset.id == WeaponPresetId(3))
+            .unwrap();
+        let damage = arc
+            .configuration
+            .recipe
+            .payload_bundles
+            .iter_mut()
+            .flat_map(|bundle| &mut bundle.effects)
+            .find_map(|effect| match effect {
+                PayloadEffectDefinition::Damage { amount, .. } => Some(amount),
+                _ => None,
+            })
+            .unwrap();
+        *damage = damage.saturating_sub(1);
+        revised_weapons.validate().unwrap();
+
+        assert_eq!(
+            snapshot.resolve(&builds, &revised_weapons, &fighter),
+            Err(crate::builds::BuildResolutionError::InvalidCombination)
+        );
+        let revised = snapshot
+            .resolve_revised_balance_lab_catalogs(&builds, &revised_weapons, &fighter)
+            .unwrap();
+        assert_ne!(revised.identity, canonical.identity);
+        assert_ne!(
+            revised.primary_weapon.recipe_fingerprint,
+            canonical.primary_weapon.recipe_fingerprint
+        );
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)]
     fn fixed_tick_apply_re_resolves_the_complete_practice_roster_atomically() {
         let builds = BuildCatalog::embedded().unwrap();
@@ -1312,7 +1519,13 @@ mod tests {
         applied.heist.safe_maximum_health = 2_750;
         let mut candidate = applied.clone();
         candidate.fighter_profiles.lightweight.maximum_health = 211;
+        candidate.fighter_profiles.lightweight.cold_capacity = 750;
+        candidate
+            .fighter_profiles
+            .lightweight
+            .cold_resistance_basis_points = 1_000;
         candidate.fighter_profiles.reinforced.maximum_health = 233;
+        candidate.fighter_profiles.reinforced.cold_capacity = 1_250;
         candidate.weapons[0].recipe.fire_cooldown_ticks += 1;
         candidate.weapons[1].recipe.fire_cooldown_ticks += 1;
 
@@ -1419,6 +1632,12 @@ mod tests {
         let bot_after = app.world().get::<ResolvedMatchLoadout>(bot).unwrap();
         assert_eq!(human_after.identity, human_loadout.identity);
         assert_eq!(bot_after.identity, bot_loadout.identity);
+        assert_eq!(human_after.fighter_stats.cold_capacity, 750);
+        assert_eq!(
+            human_after.fighter_stats.cold_resistance_basis_points,
+            1_000
+        );
+        assert_eq!(bot_after.fighter_stats.cold_capacity, 1_250);
         assert_ne!(
             human_after.primary_weapon.recipe_fingerprint,
             human_loadout.primary_weapon.recipe_fingerprint

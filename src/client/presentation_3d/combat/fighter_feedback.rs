@@ -23,6 +23,10 @@ enum StatusKind {
     Slow,
     Knockback,
     Reveal,
+    Cold,
+    Frozen,
+    Poison,
+    Fire,
 }
 
 #[derive(Component)]
@@ -218,6 +222,26 @@ pub(in super::super) fn reconcile_status_visuals(
         if knockback.is_some() {
             desired_status.insert((entity, StatusKind::Knockback), position.0);
         }
+        if effects
+            .is_some_and(|value| authoritative_tick.is_some_and(|now| value.is_poisoned(now.0)))
+        {
+            desired_status.insert((entity, StatusKind::Poison), position.0);
+        }
+        if effects.is_some_and(|value| value.cold.meter > 0) {
+            desired_status.insert((entity, StatusKind::Cold), position.0);
+        }
+        if effects.is_some_and(|value| authoritative_tick.is_some_and(|now| value.is_frozen(now.0)))
+        {
+            desired_status.remove(&(entity, StatusKind::Cold));
+            desired_status.insert((entity, StatusKind::Frozen), position.0);
+        }
+        if effects.is_some_and(|value| {
+            value.fire.is_some_and(|fire| {
+                authoritative_tick.is_some_and(|now| now.0 <= fire.expires_at_tick)
+            })
+        }) {
+            desired_status.insert((entity, StatusKind::Fire), position.0);
+        }
         // Forced reveal is a public status wherever the subject is otherwise legally present.
         // Observer-specific entity visibility still prevents this marker leaking a hidden target.
         if concealment
@@ -254,6 +278,9 @@ pub(in super::super) fn reconcile_status_visuals(
                 StatusKind::Slow => materials.status_slow.clone(),
                 StatusKind::Knockback => materials.status_knockback.clone(),
                 StatusKind::Reveal => materials.status_reveal.clone(),
+                StatusKind::Cold | StatusKind::Frozen => materials.elemental_cold.clone(),
+                StatusKind::Poison => materials.status_poison.clone(),
+                StatusKind::Fire => materials.status_fire.clone(),
             }),
             NotShadowCaster,
             NotShadowReceiver,
@@ -265,6 +292,10 @@ pub(in super::super) fn reconcile_status_visuals(
                     StatusKind::Slow => 1.15,
                     StatusKind::Knockback => 0.8,
                     StatusKind::Reveal => 1.8,
+                    StatusKind::Cold => 1.3,
+                    StatusKind::Frozen => 1.9,
+                    StatusKind::Poison => 1.35,
+                    StatusKind::Fire => 1.55,
                 }),
             },
             Name::new("V3 durable combat status"),

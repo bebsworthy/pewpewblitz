@@ -282,6 +282,10 @@ fn targeted_ultimate_preview(
                 crate::builds::UltimateKind::RevealScan
                     | crate::builds::UltimateKind::ConcealmentField
                     | crate::builds::UltimateKind::DemolitionStrike
+                    | crate::builds::UltimateKind::CryogenicField
+                    | crate::builds::UltimateKind::FireField
+                    | crate::builds::UltimateKind::PoisonField
+                    | crate::builds::UltimateKind::RestorationField
             ) && pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
                 && matches!(ability.phase, crate::builds::AbilityPhase::Ready) =>
         {
@@ -299,6 +303,11 @@ fn targeted_ultimate_preview(
                 | crate::builds::UltimateParameters::DemolitionStrike {
                     maximum_range_milliunits,
                     radius_milliunits,
+                }
+                | crate::builds::UltimateParameters::ElementalField {
+                    maximum_range_milliunits,
+                    radius_milliunits,
+                    ..
                 },
             ) = (loadout.ultimate.parameters,)
             else {

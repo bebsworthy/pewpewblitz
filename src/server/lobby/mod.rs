@@ -2007,27 +2007,61 @@ fn apply_practice_start_requests(
                 .expect("authenticated lobby client owns session");
             let started = rejection.map_or_else(
                 || {
-                    let snapshot = fighters
-                        .get(STANDARD_FIGHTER_DEFINITION)
-                        .and_then(|fighter| {
-                            authority
-                                .admitted_snapshot(
-                                    session.netcode_client_id.get(),
-                                    command.brawler_id,
-                                    command.brawler_revision,
-                                    &builds.0,
-                                    &weapons.0,
-                                    fighter,
-                                )
-                                .ok()
-                        })
-                        .ok_or(crate::lobby::PracticeStartRejection::InvalidBuild)?;
                     let fighter = fighters
                         .get(STANDARD_FIGHTER_DEFINITION)
                         .ok_or(crate::lobby::PracticeStartRejection::Internal)?;
-                    let resolved = snapshot
-                        .resolve(&builds.0, &weapons.0, fighter)
-                        .map_err(|_| crate::lobby::PracticeStartRejection::InvalidBuild)?;
+                    let snapshot = authority
+                        .admitted_snapshot(
+                            session.netcode_client_id.get(),
+                            command.brawler_id,
+                            command.brawler_revision,
+                            &builds.0,
+                            &weapons.0,
+                            fighter,
+                        )
+                        .map_err(|error| {
+                            let rejection = match error {
+                                crate::profiles::ProfileAuthorityError::IncompatibleBuild => {
+                                    crate::lobby::PracticeStartRejection::IncompatibleBuild
+                                }
+                                crate::profiles::ProfileAuthorityError::UnknownSession
+                                | crate::profiles::ProfileAuthorityError::TemporarilyUnavailable
+                                | crate::profiles::ProfileAuthorityError::StorageStopped => {
+                                    crate::lobby::PracticeStartRejection::Internal
+                                }
+                                crate::profiles::ProfileAuthorityError::AccountInUse
+                                | crate::profiles::ProfileAuthorityError::AlreadyPending
+                                | crate::profiles::ProfileAuthorityError::QueueLocked
+                                | crate::profiles::ProfileAuthorityError::InvalidRequest
+                                | crate::profiles::ProfileAuthorityError::IdentifierExhausted => {
+                                    crate::lobby::PracticeStartRejection::InvalidBuild
+                                }
+                            };
+                            warn!(
+                                client_id = session.netcode_client_id.get(),
+                                request_id = command.request_id.get(),
+                                brawler_id = ?command.brawler_id,
+                                brawler_revision = command.brawler_revision.get(),
+                                cause = ?error,
+                                ?rejection,
+                                "practice build admission rejected"
+                            );
+                            rejection
+                        })?;
+                    let resolved =
+                        snapshot
+                            .resolve(&builds.0, &weapons.0, fighter)
+                            .map_err(|error| {
+                                warn!(
+                                    client_id = session.netcode_client_id.get(),
+                                    request_id = command.request_id.get(),
+                                    brawler_id = ?command.brawler_id,
+                                    brawler_revision = command.brawler_revision.get(),
+                                    cause = ?error,
+                                    "admitted practice build failed repeat resolution"
+                                );
+                                crate::lobby::PracticeStartRejection::IncompatibleBuild
+                            })?;
                     let accepted = crate::builds::AcceptedBuildSummary {
                         canonical_recipe: crate::builds::BrawlerBuildRecipe {
                             weapon: crate::builds::WeaponChoice::Preset(

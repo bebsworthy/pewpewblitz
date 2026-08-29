@@ -135,8 +135,8 @@ pub(in crate::client::flow) fn queue_membership_text(
             })
     });
     format!(
-        "{game_name}\n{population}\nSaved brawler · {} points\n{ultimate} · {} / {}",
-        membership.accepted_build.total_points, passives[0], passives[1],
+        "{game_name}\n{population}\nSaved brawler accepted\n{ultimate} · {} / {}",
+        passives[0], passives[1],
     )
 }
 

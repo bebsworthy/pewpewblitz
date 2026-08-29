@@ -10,12 +10,16 @@ pub(crate) mod attack;
 mod authority;
 #[cfg(feature = "client")]
 pub(crate) mod client;
+#[cfg(feature = "server")]
+pub(crate) mod conditions;
 pub(crate) mod cues;
 pub(crate) mod definitions;
 pub(crate) mod delivery;
 #[cfg(feature = "server")]
 pub(crate) mod effects;
 pub(crate) mod evidence;
+#[cfg(feature = "server")]
+pub(crate) mod fields;
 pub(crate) mod model;
 pub(crate) mod outcomes;
 #[cfg(feature = "server")]
@@ -78,6 +82,8 @@ pub use evidence::{
 #[cfg(feature = "server")]
 pub use evidence::{CombatEvidenceSnapshots, CombatOutbox};
 #[cfg(feature = "server")]
+pub(crate) use model::ElementalFieldRuntime;
+#[cfg(feature = "server")]
 pub use model::{
     ActiveAttackTracker, ActiveAttackTrackers, CombatWorldEffectFact, CombatWorldEffectFacts,
     CombatWorldEffectSource, CompletedAttack, ComposedProjectileRuntime, MeleeAttack,
@@ -85,11 +91,12 @@ pub use model::{
 };
 pub use model::{
     ActiveEffects, AmmoRecovery, AttackDelivery, AttackId, AttackSource, AuthoritativePose,
-    AuthoritativeTick, CombatEventId, CombatSourceKind, CurrentHealth, Defeated, DistanceBand,
-    ExternalMotion, HealthRecoveryState, KnockbackFeedback, LobbedFlight, Projectile,
-    ProjectileBody, ProjectileDeadline, ProjectileShape, ProjectileSource, ReplicatedAttackSource,
-    ShotId, SlowEffect, StraightFlight, TeamId, WeaponPhase, WeaponState, WorldPoint,
-    distance_band,
+    AuthoritativeTick, ColdState, CombatEventId, CombatSourceKind, ConditionSource, CurrentHealth,
+    DamageOverTime, DamageOverTimeKind, Defeated, DistanceBand, ElementalFieldId,
+    ElementalFieldKind, ElementalFieldState, ExternalMotion, HealthRecoveryState,
+    KnockbackFeedback, LobbedFlight, Projectile, ProjectileBody, ProjectileDeadline,
+    ProjectileShape, ProjectileSource, ReplicatedAttackSource, ShotId, SlowEffect, StraightFlight,
+    TeamId, WeaponPhase, WeaponState, WorldPoint, distance_band,
 };
 pub use outcomes::{CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTargetKind};
 #[cfg(feature = "server")]
@@ -164,6 +171,8 @@ pub const DUMMY_NETWORK_ENTITY: NetworkEntityId = NetworkEntityId(0);
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CombatDamageSet {
     Combatants,
+    Fields,
+    Conditions,
     WorldTargets,
     ModeObjectives,
     EnvironmentReactions,

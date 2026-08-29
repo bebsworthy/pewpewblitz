@@ -1,6 +1,6 @@
 (
-    schema_version: 1,
-    starter_set_revision: 1,
+    schema_version: 2,
+    starter_set_revision: 2,
     definitions: [
         (id: WeaponPartDefinitionId(1), key: "expanded-feed", display_name: "Expanded Feed", presentation_type: "Magazine", effects: [Capacity(flat: 2, percent_basis_points: 0), RefillInterval(flat_ticks: 0, percent_basis_points: 2000)]),
         (id: WeaponPartDefinitionId(2), key: "quick-loader", display_name: "Quick Loader", presentation_type: "Magazine", effects: [Capacity(flat: -1, percent_basis_points: 0), RefillInterval(flat_ticks: 0, percent_basis_points: -2000)]),
@@ -10,5 +10,9 @@
         (id: WeaponPartDefinitionId(6), key: "compact-assembly", display_name: "Compact Assembly", presentation_type: "Barrel", effects: [FireInterval(flat_ticks: 0, percent_basis_points: -1000), Reach(flat_milliunits: 0, percent_basis_points: -1500)]),
         (id: WeaponPartDefinitionId(7), key: "frosting-module", display_name: "Frosting Module", presentation_type: "Element", effects: [Damage(flat: 0, percent_basis_points: -1000), Slow(penalty_basis_points: 1500, duration_ticks: 36)]),
         (id: WeaponPartDefinitionId(8), key: "overcharged-chamber", display_name: "Overcharged Chamber", presentation_type: "Chamber", effects: [Capacity(flat: -1, percent_basis_points: 0), Damage(flat: 4, percent_basis_points: 0)]),
+        (id: WeaponPartDefinitionId(9), key: "cryogenic-module", display_name: "Cryogenic Module", presentation_type: "Element", effects: [Damage(flat: 0, percent_basis_points: -1500), Cold(amount: 250)]),
+        (id: WeaponPartDefinitionId(10), key: "incendiary-module", display_name: "Incendiary Module", presentation_type: "Element", effects: [Damage(flat: 0, percent_basis_points: -1500), DamageOverTime(kind: Fire, damage_per_tick: 25, tick_interval: 30, duration_ticks: 120)]),
+        (id: WeaponPartDefinitionId(11), key: "toxin-module", display_name: "Toxin Module", presentation_type: "Element", effects: [Damage(flat: 0, percent_basis_points: -1500), DamageOverTime(kind: Poison, damage_per_tick: 14, tick_interval: 30, duration_ticks: 240)]),
+        (id: WeaponPartDefinitionId(12), key: "healing-module", display_name: "Healing Module", presentation_type: "Element", effects: [Damage(flat: 0, percent_basis_points: -2000), FireInterval(flat_ticks: 0, percent_basis_points: 1000), Heal(amount: 140)]),
     ],
 )

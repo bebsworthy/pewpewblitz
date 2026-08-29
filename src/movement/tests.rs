@@ -283,6 +283,7 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
             movement_multiplier_milli: 500,
             expires_at_tick: 10,
         }),
+        ..default()
     };
     let velocity = resolved_movement_velocity(5, &decision, None, 300.0, Some(&slow), None, None);
     assert!((velocity.x - 150.0).abs() < 1e-5);

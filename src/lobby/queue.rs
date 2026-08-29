@@ -122,6 +122,7 @@ pub enum PracticeStartRejection {
     UnknownGameType,
     StaleGameConfiguration,
     InvalidBuild,
+    IncompatibleBuild,
     Busy,
     CapacityUnavailable,
     Internal,

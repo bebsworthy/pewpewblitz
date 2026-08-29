@@ -38,6 +38,10 @@ export interface FighterStats extends JsonObject {
   health_recovery_rate: number;
   idle_attack_delay_ticks: number;
   reveal_proximity_radius: number;
+  cold_capacity: number;
+  cold_resistance_basis_points: number;
+  poison_resistance_basis_points: number;
+  fire_resistance_basis_points: number;
 }
 
 export interface FighterProfiles extends JsonObject {
@@ -107,6 +111,12 @@ export interface SlowModifier {
   durationTicks: number;
 }
 
+export interface DamageOverTimeModifier {
+  damagePerTick: number;
+  tickInterval: number;
+  durationTicks: number;
+}
+
 export interface WeaponModifiers {
   capacity: ScalarModifier;
   damage: ScalarModifier;
@@ -114,6 +124,10 @@ export interface WeaponModifiers {
   refillInterval: ScalarModifier;
   reachMilliunits: ScalarModifier;
   slow: SlowModifier | null;
+  cold: number | null;
+  poison: DamageOverTimeModifier | null;
+  fire: DamageOverTimeModifier | null;
+  heal: number | null;
 }
 
 export interface PlayerLoadout {
@@ -126,6 +140,13 @@ export interface PlayerLoadout {
   ultimate: LoadoutChoice;
   passives: [LoadoutChoice, LoadoutChoice];
   weaponModifiers: WeaponModifiers;
+  coldCapacity: number;
+  coldResistanceBaselineBasisPoints: number;
+  poisonResistanceBaselineBasisPoints: number;
+  fireResistanceBaselineBasisPoints: number;
+  coldResistanceBasisPoints: number;
+  poisonResistanceBasisPoints: number;
+  fireResistanceBasisPoints: number;
 }
 
 export interface BalanceLabState {

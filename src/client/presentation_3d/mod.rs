@@ -99,6 +99,12 @@ pub(crate) struct Material3dAssets {
     pub(crate) status_slow: Handle<StandardMaterial>,
     pub(crate) status_knockback: Handle<StandardMaterial>,
     pub(crate) status_reveal: Handle<StandardMaterial>,
+    pub(crate) status_poison: Handle<StandardMaterial>,
+    pub(crate) status_fire: Handle<StandardMaterial>,
+    pub(crate) elemental_cold: Handle<StandardMaterial>,
+    pub(crate) elemental_fire: Handle<StandardMaterial>,
+    pub(crate) elemental_poison: Handle<StandardMaterial>,
+    pub(crate) elemental_restoration: Handle<StandardMaterial>,
     pub(crate) scan_area: Handle<StandardMaterial>,
     pub(crate) demolition_area: Handle<StandardMaterial>,
     pub(crate) concealment_field_blue_fill: Handle<StandardMaterial>,
@@ -283,6 +289,7 @@ impl Plugin for WorldPresentationPlugin {
                 ..default()
             })
             .add_systems(Startup, setup_3d_foundation)
+            .add_systems(Startup, combat::prepare_cold_pie_assets)
             .add_systems(Startup, environment_assets::load_environment_assets)
             .add_systems(
                 Update,
@@ -308,6 +315,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::reconcile_projectile_visuals,
                     combat::reconcile_sentry_visuals,
                     combat::reconcile_concealment_field_visuals,
+                    combat::reconcile_elemental_field_visuals,
                     combat::reconcile_aim_preview_visuals,
                     (
                         combat::reconcile_fighter_visuals,
@@ -1262,6 +1270,48 @@ fn setup_3d_foundation(
         status_reveal: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.12, 0.72),
             emissive: LinearRgba::new(2.2, 0.03, 0.8, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        status_poison: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.42, 0.95, 0.18, 0.86),
+            emissive: LinearRgba::new(0.24, 1.5, 0.08, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        status_fire: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.26, 0.04, 0.86),
+            emissive: LinearRgba::new(2.0, 0.12, 0.01, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        elemental_cold: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.15, 0.78, 1.0, 0.34),
+            emissive: LinearRgba::new(0.05, 0.72, 1.6, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        elemental_fire: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.18, 0.02, 0.36),
+            emissive: LinearRgba::new(2.2, 0.08, 0.01, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        elemental_poison: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.32, 0.92, 0.12, 0.34),
+            emissive: LinearRgba::new(0.2, 1.5, 0.04, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        elemental_restoration: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.12, 1.0, 0.56, 0.34),
+            emissive: LinearRgba::new(0.05, 1.8, 0.48, 1.0),
+            alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),

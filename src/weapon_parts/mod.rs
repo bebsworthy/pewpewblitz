@@ -9,10 +9,10 @@ pub use definitions::{
     WeaponPartContentPlugin, WeaponPartDefinition,
 };
 pub use model::{
-    CanonicalScalarModifier, CanonicalSlowModifier, CanonicalWeaponModifiers,
-    MAX_PART_EFFECTS_PER_INSTANCE, MAX_WEAPON_PARTS_PER_PROFILE, WEAPON_PART_SLOT_COUNT,
-    WeaponPartDefinitionId, WeaponPartEffect, WeaponPartInstance, WeaponPartInstanceId,
-    WeaponPartModelError,
+    CanonicalDamageOverTimeModifier, CanonicalScalarModifier, CanonicalSlowModifier,
+    CanonicalWeaponModifiers, MAX_PART_EFFECTS_PER_INSTANCE, MAX_WEAPON_PARTS_PER_PROFILE,
+    WEAPON_PART_SLOT_COUNT, WeaponPartDefinitionId, WeaponPartEffect, WeaponPartInstance,
+    WeaponPartInstanceId, WeaponPartModelError,
 };
 pub use resolver::{
     aggregate_weapon_part_effects, resolve_advertised_weapon_parts, resolve_weapon_parts,

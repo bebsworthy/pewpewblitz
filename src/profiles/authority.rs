@@ -46,6 +46,7 @@ pub enum ProfileAuthorityError {
     UnknownSession,
     QueueLocked,
     InvalidRequest,
+    IncompatibleBuild,
     TemporarilyUnavailable,
     StorageStopped,
     IdentifierExhausted,
@@ -235,10 +236,9 @@ impl ProfileAuthority {
                 ProfileDecision::InvalidRequest,
             )));
         }
-        if !command_catalog_is_valid(&command, &self.catalog) {
+        if let Some(decision) = command_catalog_rejection(&command, &self.catalog) {
             return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
-                &command,
-                ProfileDecision::InvalidRequest,
+                &command, decision,
             )));
         }
         if let Some(last) = session.last_command.as_ref()
@@ -339,7 +339,7 @@ impl ProfileAuthority {
             weapons,
             fighter,
         )
-        .map_err(|_| ProfileAuthorityError::InvalidRequest)
+        .map_err(|_| ProfileAuthorityError::IncompatibleBuild)
     }
 
     pub fn remove_client(&mut self, client_key: u64) {
@@ -520,14 +520,50 @@ fn equipment_candidate_is_valid(
     .is_ok()
 }
 
-fn command_catalog_is_valid(command: &ProfileCommand, catalog: &AdvertisedBrawlerCatalog) -> bool {
+fn command_catalog_rejection(
+    command: &ProfileCommand,
+    catalog: &AdvertisedBrawlerCatalog,
+) -> Option<ProfileDecision> {
     match command {
-        ProfileCommand::CreateBrawler { draft, .. } => catalog.validate_draft(draft).is_ok(),
-        ProfileCommand::EditBrawler { edit, .. } => catalog.validate_edit(edit).is_ok(),
+        ProfileCommand::CreateBrawler { draft, .. } => catalog
+            .validate_draft(draft)
+            .err()
+            .map(|_| ProfileDecision::InvalidRequest)
+            .or_else(|| {
+                (!resistance_passives_are_compatible(catalog, draft.passive_ids))
+                    .then_some(ProfileDecision::IncompatibleBuild)
+            }),
+        ProfileCommand::EditBrawler { edit, .. } => catalog
+            .validate_edit(edit)
+            .err()
+            .map(|_| ProfileDecision::InvalidRequest)
+            .or_else(|| {
+                (!resistance_passives_are_compatible(catalog, edit.passive_ids))
+                    .then_some(ProfileDecision::IncompatibleBuild)
+            }),
         ProfileCommand::SelectBrawler { .. }
         | ProfileCommand::DeleteBrawler { .. }
-        | ProfileCommand::EquipWeaponParts { .. } => true,
+        | ProfileCommand::EquipWeaponParts { .. } => None,
     }
+}
+
+fn resistance_passives_are_compatible(
+    catalog: &AdvertisedBrawlerCatalog,
+    passive_ids: [crate::builds::PassiveDefinitionId; 2],
+) -> bool {
+    passive_ids
+        .iter()
+        .filter_map(|id| catalog.passives.iter().find(|passive| passive.id == *id))
+        .filter(|passive| {
+            matches!(
+                passive.kind,
+                crate::builds::PassiveKind::CryogenicInsulation
+                    | crate::builds::PassiveKind::FilteredCirculation
+                    | crate::builds::PassiveKind::HeatShielding
+            )
+        })
+        .count()
+        <= 1
 }
 
 fn snapshot_catalog_is_valid(

@@ -87,12 +87,17 @@ impl ClientMatchLoadingModel {
         core::mem::take(&mut self.returned_observation)
     }
 
-    pub(crate) fn take_match_cancel_requested(&mut self) -> bool {
-        core::mem::take(&mut self.match_cancel_requested)
+    pub(crate) const fn match_cancel_requested(&self) -> bool {
+        self.match_cancel_requested
+    }
+
+    pub(crate) fn mark_match_cancel_sent(&mut self) {
+        self.match_cancel_requested = false;
     }
 
     pub(crate) fn observe_match_cancellation(&mut self, accepted: bool) {
         self.match_cancel_requested = false;
+        self.outbound.clear();
         if accepted {
             self.active = None;
             self.phase = Some(crate::lobby::MatchLoadingPhase::ReturningToQueue);
@@ -105,13 +110,22 @@ impl ClientMatchLoadingModel {
 
 pub(super) fn send_matchmaking_messages(
     mut model: ResMut<ClientMatchLoadingModel>,
-    mut senders: Query<&mut MessageSender<crate::lobby::MatchmakingClientMessage>, With<Client>>,
+    mut senders: Query<
+        (
+            &RoutedClientSession,
+            &mut MessageSender<crate::lobby::MatchmakingClientMessage>,
+        ),
+        With<Client>,
+    >,
 ) {
-    let Ok(mut sender) = senders.single_mut() else {
-        return;
-    };
-    while let Some(message) = model.outbound.pop_front() {
-        sender.send::<crate::protocol::SessionChannel>(message);
+    for (session, mut sender) in &mut senders {
+        if session.kind != crate::client::RoutedClientSessionKind::Lobby {
+            continue;
+        }
+        while let Some(message) = model.outbound.pop_front() {
+            sender.send::<crate::protocol::SessionChannel>(message);
+        }
+        break;
     }
 }
 
@@ -196,6 +210,7 @@ fn observe_matchmaking_phase(
             model.phase = Some(crate::lobby::MatchLoadingPhase::ReturningToQueue);
             model.returned_observation = true;
             model.match_cancel_requested = false;
+            model.outbound.clear();
         }
         crate::lobby::MatchmakingServerPhase::PracticeRejected { request_id, reason } => {
             practice.accept_rejection(request_id, reason);

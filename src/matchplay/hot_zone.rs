@@ -529,6 +529,7 @@ mod rules {
                         .is_some_and(|source| source != fact.target_team),
                 ),
                 crate::combat::CombatOutcomeKind::ProtectedContact
+                | crate::combat::CombatOutcomeKind::Healing { .. }
                 | crate::combat::CombatOutcomeKind::DeployableDestroyed => continue,
             };
             if !hostile

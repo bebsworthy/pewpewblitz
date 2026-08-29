@@ -150,6 +150,9 @@ pub(super) fn resolve_flow_action(
             crate::profiles::ProfileDecision::IncompatibleWeapon => {
                 "Those parts do not form a valid weapon configuration.".to_string()
             }
+            crate::profiles::ProfileDecision::IncompatibleBuild => {
+                "Choose only one elemental resistance passive for this brawler.".to_string()
+            }
         });
         if accepted
             && let Some(ordinal) = pending_created_brawler.0.take()
@@ -1195,7 +1198,10 @@ const fn practice_rejection_copy(reason: crate::lobby::PracticeStartRejection) -
             "That practice game is no longer available."
         }
         crate::lobby::PracticeStartRejection::InvalidBuild => {
-            "The selected build was rejected by the server."
+            "The selected brawler no longer matches the server profile. Review and select it again."
+        }
+        crate::lobby::PracticeStartRejection::IncompatibleBuild => {
+            "This brawler has incompatible choices. Edit it and choose only one elemental resistance passive."
         }
         crate::lobby::PracticeStartRejection::Busy => "Another match start is already in progress.",
         crate::lobby::PracticeStartRejection::CapacityUnavailable => {

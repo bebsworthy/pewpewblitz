@@ -62,6 +62,10 @@ pub(crate) fn install_controller_systems(app: &mut App) {
 }
 
 #[derive(Clone)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the private capture record mirrors independent authoritative visibility and condition facts"
+)]
 struct RawFighterView {
     network_id: NetworkEntityId,
     team: TeamId,
@@ -71,6 +75,10 @@ struct RawFighterView {
     maximum_health: u16,
     reveal_radius: f32,
     active: bool,
+    cold_meter: u16,
+    frozen: bool,
+    poisoned: bool,
+    burning: bool,
     concealment: ConcealmentSources,
     forced_reveals: Vec<crate::concealment::TeamRevealDeadline>,
     reveal_locked: bool,
@@ -114,6 +122,7 @@ fn capture_observations(
                 Has<ActiveCombatant>,
                 Has<Defeated>,
                 Option<&ConcealmentPresentationState>,
+                &crate::combat::ActiveEffects,
             ),
             With<Fighter>,
         >,
@@ -161,6 +170,7 @@ fn capture_observations(
                 active,
                 defeated,
                 concealment,
+                effects,
             )| {
                 let presentation = concealment.cloned().unwrap_or_default();
                 RawFighterView {
@@ -172,6 +182,12 @@ fn capture_observations(
                     maximum_health: loadout.fighter_stats.maximum_health,
                     reveal_radius: loadout.fighter_stats.reveal_proximity_radius,
                     active: active && !defeated,
+                    cold_meter: effects.cold.meter,
+                    frozen: effects.is_frozen(tick.0),
+                    poisoned: effects.is_poisoned(tick.0),
+                    burning: effects
+                        .fire
+                        .is_some_and(|fire| tick.0 <= fire.expires_at_tick),
                     concealment: ConcealmentSources {
                         terrain: presentation.inside_concealing_terrain,
                         self_cloak: tick.0 < presentation.self_cloaked_until_tick,
@@ -297,6 +313,10 @@ fn capture_observations(
             crate::builds::UltimateParameters::DemolitionStrike {
                 maximum_range_milliunits,
                 ..
+            }
+            | crate::builds::UltimateParameters::ElementalField {
+                maximum_range_milliunits,
+                ..
             } => {
                 crate::builds::world_units_from_milliunits(maximum_range_milliunits).unwrap_or(0.0)
             }
@@ -322,6 +342,17 @@ fn capture_observations(
             ultimate_range,
             weapon_range,
             projectile_speed,
+            healing_weapon: observer
+                .loadout
+                .primary_weapon
+                .recipe
+                .payload_bundles
+                .iter()
+                .any(|bundle| {
+                    bundle.effects.iter().any(|effect| {
+                        matches!(effect, crate::combat::PayloadEffectDefinition::Heal { .. })
+                    })
+                }),
         });
     }
 }
@@ -335,6 +366,10 @@ fn public_fighter_view(raw: &RawFighterView) -> BotFighterView {
         current_health: raw.current_health,
         maximum_health: raw.maximum_health,
         active: raw.active,
+        cold_meter: raw.cold_meter,
+        frozen: raw.frozen,
+        poisoned: raw.poisoned,
+        burning: raw.burning,
     }
 }
 
