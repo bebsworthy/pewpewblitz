@@ -270,68 +270,29 @@ impl NextDeployableId {
 }
 
 #[cfg(feature = "server")]
-#[derive(Clone, Copy, Debug)]
-struct SentryOwnerLifecycleView {
-    network_id: NetworkEntityId,
-    defeated: bool,
-    active: bool,
-    controller_disconnected: bool,
-}
-
-#[cfg(feature = "server")]
-#[allow(clippy::type_complexity)]
-fn index_sentry_owner_lifecycle(
-    owners: &Query<(
-        &NetworkEntityId,
-        Option<&crate::combat::Defeated>,
-        Option<&crate::matchplay::ActiveCombatant>,
-        Option<&lightyear::prelude::ControlledBy>,
-    )>,
-    disconnected: &Query<
-        Entity,
-        (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
-        ),
-    >,
-) -> Vec<SentryOwnerLifecycleView> {
-    owners
-        .iter()
-        .map(
-            |(network_id, defeated, active, controlled)| SentryOwnerLifecycleView {
-                network_id: *network_id,
-                defeated: defeated.is_some(),
-                active: active.is_some(),
-                controller_disconnected: controlled
-                    .is_some_and(|controlled| disconnected.contains(controlled.owner)),
-            },
-        )
-        .collect()
-}
-
-#[cfg(feature = "server")]
 fn sentry_cleanup_reason(
-    tick: u64,
-    root: Option<&crate::matchplay::MatchState>,
+    facts: &crate::abilities::AbilityCleanupFacts,
     identity: SentryIdentity,
     deadline: SentryDeadline,
     destroyed: bool,
-    owners: &[SentryOwnerLifecycleView],
 ) -> Option<crate::abilities::SentryCleanupReason> {
     if destroyed {
         return Some(crate::abilities::SentryCleanupReason::Destroyed);
     }
-    if tick >= deadline.expires_at_tick {
+    if facts.tick >= deadline.expires_at_tick {
         return Some(crate::abilities::SentryCleanupReason::Expired);
     }
-    if root.is_some_and(|root| root.match_id != identity.match_id) {
+    if facts
+        .match_id
+        .is_some_and(|match_id| match_id != identity.match_id)
+    {
         return Some(crate::abilities::SentryCleanupReason::MatchRestarted);
     }
-    if root.is_some_and(|root| matches!(root.phase, crate::matchplay::MatchPhase::Completed { .. }))
-    {
+    if facts.match_completed {
         return Some(crate::abilities::SentryCleanupReason::MatchCompleted);
     }
-    let Some(owner) = owners
+    let Some(owner) = facts
+        .owners
         .iter()
         .find(|owner| owner.network_id == identity.owner_network_id)
     else {
@@ -592,8 +553,7 @@ pub(crate) fn activate_sentry(
     clippy::type_complexity
 )]
 pub(crate) fn request_sentry_lifecycle_cleanup(
-    tick: Res<crate::timing::SimulationTick>,
-    roots: Query<&crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
+    facts: Res<crate::abilities::AbilityCleanupFacts>,
     sentries: Query<
         (
             &SentryIdentity,
@@ -602,37 +562,15 @@ pub(crate) fn request_sentry_lifecycle_cleanup(
         ),
         With<Sentry>,
     >,
-    owners: Query<(
-        &NetworkEntityId,
-        Option<&crate::combat::Defeated>,
-        Option<&crate::matchplay::ActiveCombatant>,
-        Option<&lightyear::prelude::ControlledBy>,
-    )>,
-    disconnected: Query<
-        Entity,
-        (
-            With<lightyear::prelude::LinkOf>,
-            With<lightyear::prelude::Disconnected>,
-        ),
-    >,
     mut requests: MessageWriter<SentryCleanupRequest>,
 ) {
-    let root = roots.single().ok();
-    let owners = index_sentry_owner_lifecycle(&owners, &disconnected);
     for (identity, deadline, destroyed) in &sentries {
-        let reason = sentry_cleanup_reason(
-            tick.0,
-            root,
-            *identity,
-            *deadline,
-            destroyed.is_some(),
-            &owners,
-        );
+        let reason = sentry_cleanup_reason(&facts, *identity, *deadline, destroyed.is_some());
         if let Some(reason) = reason {
             requests.write(SentryCleanupRequest {
                 deployable_id: identity.deployable_id,
                 reason,
-                requested_at_tick: tick.0,
+                requested_at_tick: facts.tick,
             });
         }
     }

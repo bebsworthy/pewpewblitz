@@ -75,7 +75,7 @@ fn shortened_rules_require_the_explicit_verification_profile() {
     assert_eq!(lifecycle.minimum_participants_per_team, 1);
     assert_eq!(lifecycle.active_limit_ticks, 3_600);
     assert_eq!(lifecycle.countdown_ticks, 30);
-    let wipeout = wipeout_rules_for_profile(MatchRulesProfile::ProcessVerification);
+    let wipeout = crate::modes::wipeout_rules_for_profile(MatchRulesProfile::ProcessVerification);
     assert_eq!(wipeout.target_score, 10);
     let hot_zone =
         crate::matchplay::hot_zone_rules_for_profile(MatchRulesProfile::ProcessVerification);

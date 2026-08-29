@@ -134,12 +134,14 @@ pub(crate) fn configure_match_schedule(app: &mut bevy::prelude::App) {
     app.configure_sets(
         FixedPostUpdate,
         MatchSet::ModeRules
+            .in_set(crate::gameplay::AuthoritativePhase::Objectives)
             .after(crate::abilities::AbilitySet::ObserveOutcomes)
             .after(crate::combat::CombatSet::Damage),
     );
     app.configure_sets(
         FixedPostUpdate,
         MatchSet::Outcomes
+            .in_set(crate::gameplay::AuthoritativePhase::Objectives)
             .after(MatchSet::ModeRules)
             .before(crate::combat::CombatSet::Lifecycle),
     );

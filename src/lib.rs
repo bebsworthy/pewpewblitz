@@ -14,6 +14,7 @@ pub mod lobby;
 mod logging;
 pub mod map;
 pub mod matchplay;
+pub(crate) mod modes;
 pub mod movement;
 pub mod profiles;
 pub mod protocol;

@@ -5,10 +5,7 @@ use crate::{
         AdvertisedGameType, AdvertisedRulesSummary, CatalogRevision, GameTypeId, MAX_GAME_TYPES,
         MAX_MAPS_PER_GAME_TYPE, catalog_revision, validate_catalog, validate_presentation_name,
     },
-    map::{
-        HEIST_MODE_DEFINITION, HOT_ZONE_MODE_DEFINITION, MapDimensionLimits, MapInstanceId,
-        MapPresetId, WIPEOUT_MODE_DEFINITION,
-    },
+    map::{MapDimensionLimits, MapInstanceId, MapPresetId},
     matchplay::{HeistRules, HotZoneRules, MatchLifecycleRules, WipeoutRules},
 };
 use bevy::prelude::Resource;
@@ -154,14 +151,21 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             ));
         }
 
-        let (mode_definition_id, objective_target, rules_summary) = match entry.mode.as_str() {
-            "wipeout" if entry.capture_seconds == 0 && entry.safe_health == 0 => {
+        let mode = crate::modes::descriptor_for_key(&entry.mode).ok_or_else(|| {
+            format!(
+                "game type {} has an unknown mode or mismatched objective",
+                id.as_str()
+            )
+        })?;
+        let (objective_target, rules_summary) = match mode.mode {
+            crate::config::GameMode::Wipeout
+                if entry.capture_seconds == 0 && entry.safe_health == 0 =>
+            {
                 let target_score = entry.kills_to_win;
                 WipeoutRules { target_score }.validate().map_err(|error| {
                     format!("game type {} has invalid objective: {error}", id.as_str())
                 })?;
                 (
-                    WIPEOUT_MODE_DEFINITION,
                     target_score,
                     AdvertisedRulesSummary::Wipeout {
                         target_score,
@@ -169,7 +173,9 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     },
                 )
             }
-            "hot-zone" if entry.kills_to_win == 0 && entry.safe_health == 0 => {
+            crate::config::GameMode::HotZone
+                if entry.kills_to_win == 0 && entry.safe_health == 0 =>
+            {
                 let capture_seconds = entry.capture_seconds;
                 let target_progress_ticks = u16::try_from(seconds_to_ticks(capture_seconds)?)
                     .map_err(|_| {
@@ -183,7 +189,6 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     format!("game type {} has invalid objective: {error}", id.as_str())
                 })?;
                 (
-                    HOT_ZONE_MODE_DEFINITION,
                     target_progress_ticks,
                     AdvertisedRulesSummary::HotZone {
                         target_progress_ticks,
@@ -191,7 +196,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     },
                 )
             }
-            "heist"
+            crate::config::GameMode::Heist
                 if entry.kills_to_win == 0
                     && entry.capture_seconds == 0
                     && entry.safe_health > 0 =>
@@ -206,7 +211,6 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     format!("game type {} has invalid objective: {error}", id.as_str())
                 })?;
                 (
-                    HEIST_MODE_DEFINITION,
                     safe_maximum_health,
                     AdvertisedRulesSummary::Heist {
                         safe_maximum_health,
@@ -221,6 +225,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 ));
             }
         };
+        let mode_definition_id = mode.definition_id;
 
         let mut map_ids = Vec::with_capacity(entry.maps.len());
         let mut unique_maps = BTreeSet::new();
@@ -244,7 +249,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                         id.as_str()
                     )
                 })?;
-            if preset.recipe.mode_definition_id != mode_definition_id {
+            if !mode.accepts_map(preset.recipe.mode_definition_id) {
                 return Err(format!(
                     "game type {} map {key} is incompatible with its mode",
                     id.as_str()
@@ -398,7 +403,7 @@ mod tests {
         let heist = catalog
             .game_types
             .iter()
-            .filter(|game| game.mode_definition_id == HEIST_MODE_DEFINITION)
+            .filter(|game| game.mode_definition_id == crate::map::HEIST_MODE_DEFINITION)
             .collect::<Vec<_>>();
         assert_eq!(heist.len(), 3);
         assert_eq!(heist[0].map_preset_ids, vec![MapPresetId(9)]);

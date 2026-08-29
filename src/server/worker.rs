@@ -1193,23 +1193,20 @@ fn config_from_manifest(
         WorkerManifest::Lobby(manifest) => {
             let catalog = super::lobby::resolve_operator_catalog(&manifest.raw_catalog)
                 .map_err(|_| WorkerBootstrapError::Invalid("invalid lobby game-type catalog"))?;
-            config.game_mode = match catalog
-                .game_types
-                .first()
-                .map(|game_type| game_type.mode_definition_id)
-            {
-                Some(crate::map::WIPEOUT_MODE_DEFINITION) => GameMode::Wipeout,
-                Some(crate::map::HOT_ZONE_MODE_DEFINITION) => GameMode::HotZone,
-                Some(crate::map::HEIST_MODE_DEFINITION) => GameMode::Heist,
-                _ => return Err(WorkerBootstrapError::Invalid("unsupported lobby game mode")),
-            };
+            config.game_mode = crate::modes::descriptor_for_definition(
+                catalog
+                    .game_types
+                    .first()
+                    .map(|game_type| game_type.mode_definition_id)
+                    .ok_or(WorkerBootstrapError::Invalid("unsupported lobby game mode"))?,
+            )
+            .map(|descriptor| descriptor.mode)
+            .ok_or(WorkerBootstrapError::Invalid("unsupported lobby game mode"))?;
         }
         WorkerManifest::Match(manifest) => {
-            config.game_mode = match manifest.mode {
-                brawler_routing::GameMode::Wipeout => GameMode::Wipeout,
-                brawler_routing::GameMode::HotZone => GameMode::HotZone,
-                brawler_routing::GameMode::Heist => GameMode::Heist,
-            };
+            config.game_mode = crate::modes::descriptor_for_routing_mode(manifest.mode)
+                .map(|descriptor| descriptor.mode)
+                .ok_or(WorkerBootstrapError::Invalid("unsupported match game mode"))?;
             config.match_rules_profile = match manifest.rules_profile {
                 1 => MatchRulesProfile::Production,
                 2 => MatchRulesProfile::ProcessVerification,

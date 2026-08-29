@@ -241,27 +241,32 @@ fn capture_observations(
             .total_cmp(&b.position.x)
             .then_with(|| a.position.y.total_cmp(&b.position.y))
     });
-    let mode = if let Some(state) = wipeout {
-        BotModeView::Wipeout {
-            scores: state.team_scores,
+    let mode = match crate::modes::descriptor_for_definition(match_state.mode_definition_id)
+        .and_then(|descriptor| descriptor.bot_projection)
+    {
+        Some(crate::modes::BotModeProjection::Wipeout) => {
+            let Some(state) = wipeout else { return };
+            BotModeView::Wipeout {
+                scores: state.team_scores,
+            }
         }
-    } else if let Some(state) = hot_zone {
-        let Some(zone) = map.objective_zone else {
-            return;
-        };
-        let crate::map::MapShape::Circle { radius } = zone.area.shape else {
-            return;
-        };
-        BotModeView::HotZone {
-            center: zone.area.center,
-            radius,
-            status: state.status,
-            progress: state.progress_ticks,
+        Some(crate::modes::BotModeProjection::HotZone) => {
+            let Some(state) = hot_zone else { return };
+            let Some(zone) = map.objective_zone else {
+                return;
+            };
+            let crate::map::MapShape::Circle { radius } = zone.area.shape else {
+                return;
+            };
+            BotModeView::HotZone {
+                center: zone.area.center,
+                radius,
+                status: state.status,
+                progress: state.progress_ticks,
+            }
         }
-    } else if heist {
-        BotModeView::Heist
-    } else {
-        return;
+        Some(crate::modes::BotModeProjection::Heist) if heist => BotModeView::Heist,
+        _ => return,
     };
     let match_active = matches!(match_state.phase, MatchPhase::Active { .. });
 

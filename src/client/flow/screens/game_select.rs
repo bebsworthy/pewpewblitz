@@ -72,15 +72,9 @@ pub(in crate::client::flow) fn spawn_game_type_select(
             }
             for (index, game_type) in membership.game_types.iter().enumerate() {
                 let mode_name =
-                    if game_type.mode_definition_id == crate::map::WIPEOUT_MODE_DEFINITION {
-                        "Wipeout"
-                    } else if game_type.mode_definition_id == crate::map::HOT_ZONE_MODE_DEFINITION {
-                        "Hot Zone"
-                    } else if game_type.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
-                        "Heist"
-                    } else {
-                        "Unknown mode"
-                    };
+                    crate::modes::descriptor_for_definition(game_type.mode_definition_id)
+                        .and_then(|descriptor| descriptor.presentation)
+                        .map_or("Unknown mode", |projection| projection.selection_label);
                 let map_names = game_type
                     .map_preset_ids
                     .iter()

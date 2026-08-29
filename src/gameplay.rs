@@ -13,6 +13,22 @@ pub enum GameplaySet {
     Finalize,
 }
 
+/// Cross-domain ordering contract for one authoritative fixed-post transaction.
+///
+/// Domain plugins retain their focused internal sets and place those sets into these neutral
+/// phases. This keeps extension plugins independent of concrete combat, map, match, and
+/// presentation implementations while leaving their transaction order visible in one place.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AuthoritativePhase {
+    Delivery,
+    Effects,
+    Environment,
+    Objectives,
+    Visibility,
+    Publication,
+    Finalization,
+}
+
 /// Installs the non-presentation gameplay and fixed-tick foundation.
 pub struct GameplayPlugin;
 
@@ -34,13 +50,25 @@ impl Plugin for GameplayPlugin {
         app.configure_sets(
             FixedPostUpdate,
             (
-                crate::combat::CombatSet::ProjectileSweep,
-                crate::combat::CombatSet::Damage,
-                crate::combat::CombatSet::Lifecycle,
-                crate::combat::CombatSet::TelemetryAndCues,
-                crate::combat::CombatSet::Finalize,
+                AuthoritativePhase::Delivery,
+                AuthoritativePhase::Effects,
+                AuthoritativePhase::Environment,
+                AuthoritativePhase::Objectives,
+                AuthoritativePhase::Visibility,
+                AuthoritativePhase::Publication,
+                AuthoritativePhase::Finalization,
             )
                 .chain(),
+        )
+        .configure_sets(
+            FixedPostUpdate,
+            (
+                crate::combat::CombatSet::ProjectileSweep.in_set(AuthoritativePhase::Delivery),
+                crate::combat::CombatSet::Damage.in_set(AuthoritativePhase::Effects),
+                crate::combat::CombatSet::Lifecycle.in_set(AuthoritativePhase::Objectives),
+                crate::combat::CombatSet::TelemetryAndCues.in_set(AuthoritativePhase::Publication),
+                crate::combat::CombatSet::Finalize.in_set(AuthoritativePhase::Finalization),
+            ),
         )
         .add_systems(
             FixedUpdate,
@@ -67,6 +95,9 @@ mod tests {
     #[derive(Resource, Default)]
     struct SetTrace(Vec<GameplaySet>);
 
+    #[derive(Resource, Default)]
+    struct PhaseTrace(Vec<AuthoritativePhase>);
+
     fn record_input_set(mut trace: ResMut<SetTrace>) {
         trace.0.push(GameplaySet::Input);
     }
@@ -79,18 +110,40 @@ mod tests {
         trace.0.push(GameplaySet::Finalize);
     }
 
+    fn record_phase(phase: AuthoritativePhase) -> impl Fn(ResMut<PhaseTrace>) {
+        move |mut trace| trace.0.push(phase)
+    }
+
     #[test]
     fn fixed_tick_advances_through_bevy_fixed_loop_and_set_chain() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, GameplayPlugin))
             .insert_resource(TimeUpdateStrategy::FixedTimesteps(1))
             .init_resource::<SetTrace>()
+            .init_resource::<PhaseTrace>()
             .add_systems(
                 FixedUpdate,
                 (
                     record_input_set.in_set(GameplaySet::Input),
                     record_simulation_set.in_set(GameplaySet::Simulation),
                     record_finalize_set.in_set(GameplaySet::Finalize),
+                ),
+            )
+            .add_systems(
+                FixedPostUpdate,
+                (
+                    record_phase(AuthoritativePhase::Delivery).in_set(AuthoritativePhase::Delivery),
+                    record_phase(AuthoritativePhase::Effects).in_set(AuthoritativePhase::Effects),
+                    record_phase(AuthoritativePhase::Environment)
+                        .in_set(AuthoritativePhase::Environment),
+                    record_phase(AuthoritativePhase::Objectives)
+                        .in_set(AuthoritativePhase::Objectives),
+                    record_phase(AuthoritativePhase::Visibility)
+                        .in_set(AuthoritativePhase::Visibility),
+                    record_phase(AuthoritativePhase::Publication)
+                        .in_set(AuthoritativePhase::Publication),
+                    record_phase(AuthoritativePhase::Finalization)
+                        .in_set(AuthoritativePhase::Finalization),
                 ),
             );
         crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
@@ -113,5 +166,17 @@ mod tests {
             SIMULATION_TICK
         );
         assert_eq!(SIMULATION_TICK, SimulationTick::duration());
+        assert_eq!(
+            app.world().resource::<PhaseTrace>().0,
+            vec![
+                AuthoritativePhase::Delivery,
+                AuthoritativePhase::Effects,
+                AuthoritativePhase::Environment,
+                AuthoritativePhase::Objectives,
+                AuthoritativePhase::Visibility,
+                AuthoritativePhase::Publication,
+                AuthoritativePhase::Finalization,
+            ]
+        );
     }
 }

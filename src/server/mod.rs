@@ -11,16 +11,12 @@ use crate::{
         TeamId, WeaponCatalogResource, WeaponPresetId, WeaponState, WeaponTelemetry,
         WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
     },
-    config::{GameMode, MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
+    config::{MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
-    map::{
-        AuthoritativeMapPlugin, FEATURE_YARD_HOT_ZONE_PRESET, FEATURE_YARD_WIPEOUT_PRESET,
-        MapStartupSet, ResolvedMap, ServerMapSelection, SpawnAssignment, SpawnPointCatalog,
-    },
+    map::{AuthoritativeMapPlugin, MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
     matchplay::{
-        AuthoritativeMatchPlugin, MatchLifecycleRules, MatchMember, MatchModeSetup,
-        MatchParticipant, MatchPhase, MatchRoot, MatchState, SpawnCandidate,
-        WIPEOUT_RULES_REVISION, WipeoutModePlugin, WipeoutRules, assigned_team, select_spawn,
+        AuthoritativeMatchPlugin, MatchLifecycleRules, MatchMember, MatchParticipant, MatchPhase,
+        MatchRoot, MatchState, SpawnCandidate, assigned_team, select_spawn,
     },
     movement::{
         AuthoritativeMovementPlugin, AvianNetworkPlugin, InputFreshness, InputValidationState,
@@ -362,7 +358,7 @@ impl Plugin for ServerNetworkPlugin {
                     observe_server_endpoint,
                     initialize_sessions,
                     process_client_hellos,
-                    crate::abilities::cleanup_requested_sentries,
+                    crate::abilities::run_pending_ability_cleanup,
                     ApplyDeferred,
                 )
                     .chain()
@@ -1526,64 +1522,9 @@ fn install_server_game_mode(app: &mut App) {
         .world()
         .resource::<ServerNetworkConfig>()
         .match_objective_target;
-    match mode {
-        GameMode::Wipeout => {
-            app.insert_resource(MatchModeSetup {
-                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
-                rules_revision: WIPEOUT_RULES_REVISION,
-            })
-            .insert_resource(objective_target.map_or_else(
-                || wipeout_rules_for_profile(profile),
-                |target_score| {
-                    WipeoutRules { target_score }
-                        .validate()
-                        .expect("validated manifest Wipeout objective")
-                },
-            ))
-            .insert_resource(ServerMapSelection {
-                preset_id: FEATURE_YARD_WIPEOUT_PRESET,
-            })
-            .add_plugins(WipeoutModePlugin);
-        }
-        GameMode::HotZone => {
-            let rules = objective_target.map_or_else(
-                || crate::matchplay::hot_zone_rules_for_profile(profile),
-                |target_progress_ticks| crate::matchplay::HotZoneRules {
-                    target_progress_ticks,
-                },
-            );
-            let rules = rules
-                .validate_with(app.world().resource::<MatchLifecycleRules>())
-                .expect("validated manifest Hot Zone objective");
-            app.insert_resource(crate::matchplay::hot_zone_setup_for_composition())
-                .insert_resource(rules)
-                .insert_resource(ServerMapSelection {
-                    preset_id: FEATURE_YARD_HOT_ZONE_PRESET,
-                })
-                .add_plugins(crate::matchplay::HotZoneModePlugin);
-        }
-        GameMode::Heist => {
-            let rules = objective_target.map_or_else(
-                crate::matchplay::HeistRules::default,
-                |safe_maximum_health| crate::matchplay::HeistRules {
-                    safe_maximum_health,
-                    ..crate::matchplay::HeistRules::default()
-                },
-            );
-            let rules = rules
-                .validate()
-                .expect("validated manifest Heist objective");
-            app.insert_resource(MatchModeSetup {
-                mode_definition_id: crate::map::HEIST_MODE_DEFINITION,
-                rules_revision: crate::matchplay::HEIST_RULES_REVISION,
-            })
-            .insert_resource(rules)
-            .insert_resource(ServerMapSelection {
-                preset_id: crate::map::FEATURE_YARD_HEIST_PRESET,
-            })
-            .add_plugins(crate::matchplay::HeistModePlugin);
-        }
-    }
+    crate::modes::descriptor_for_mode(mode)
+        .expect("every configured game mode has a registered descriptor")
+        .install_server(app, profile, objective_target);
 }
 
 /// The required scenario checkpoints for one asserted weapon preset. Public for the
@@ -1615,15 +1556,6 @@ pub fn match_lifecycle_rules_for_profile(profile: MatchRulesProfile) -> MatchLif
     }
     .validate()
     .expect("configured match lifecycle rules profile must be valid")
-}
-
-fn wipeout_rules_for_profile(profile: MatchRulesProfile) -> WipeoutRules {
-    match profile {
-        MatchRulesProfile::Production => WipeoutRules::default(),
-        MatchRulesProfile::ProcessVerification => WipeoutRules { target_score: 10 },
-    }
-    .validate()
-    .expect("configured Wipeout rules profile must be valid")
 }
 
 /// Build the default production server application.

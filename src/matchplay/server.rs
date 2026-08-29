@@ -307,9 +307,7 @@ fn register_match_outcome_pipeline(app: &mut App) {
             record_match_telemetry,
             clear_combat_facts,
             ApplyDeferred,
-            crate::abilities::request_sentry_lifecycle_cleanup,
-            crate::abilities::cleanup_requested_sentries,
-            ApplyDeferred,
+            crate::abilities::run_ability_cleanup,
             capture_match_summary,
         )
             .chain()

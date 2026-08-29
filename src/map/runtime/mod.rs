@@ -61,6 +61,7 @@ pub fn register_map_runtime(app: &mut App) {
                     .after(crate::combat::CombatSet::Damage),
                 MapRuntimeSet::Publish.after(MapRuntimeSet::ApplyDestruction),
             )
+                .in_set(crate::gameplay::AuthoritativePhase::Environment)
                 .before(crate::matchplay::MatchSet::ModeRules),
         )
         .add_systems(
@@ -93,6 +94,7 @@ pub fn register_map_runtime(app: &mut App) {
                 .before(crate::gameplay::advance_simulation_tick),
         )
         .add_systems(Update, receive_map_recovery_requests);
+    object_authority::register_terminal_reactions(app);
     super::pickups::register_pickup_runtime(app);
     effect_tiles::register(app);
     crate::matchplay::register_environment_reset_system(app, reset_map_on_match_restart);

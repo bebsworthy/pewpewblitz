@@ -11,10 +11,7 @@ use crate::{
     combat::{FighterDefinitions, WeaponCatalogResource},
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
     content::gameplay_content_fingerprint,
-    map::{
-        HOT_ZONE_MODE_DEFINITION, MapCatalogResource, MapContentCatalog, MapInstanceId,
-        MapPresetId, ServerMapSelection, WIPEOUT_MODE_DEFINITION,
-    },
+    map::{MapCatalogResource, MapContentCatalog, MapInstanceId, MapPresetId, ServerMapSelection},
     protocol::protocol_fingerprint,
 };
 #[cfg(test)]
@@ -166,11 +163,9 @@ pub fn admit_manifest_client<'a>(
 }
 
 fn expected_routing_mode(mode: GameMode) -> brawler_routing::GameMode {
-    match mode {
-        GameMode::Wipeout => brawler_routing::GameMode::Wipeout,
-        GameMode::HotZone => brawler_routing::GameMode::HotZone,
-        GameMode::Heist => brawler_routing::GameMode::Heist,
-    }
+    crate::modes::descriptor_for_mode(mode)
+        .expect("every configured game mode has a registered descriptor")
+        .routing_mode
 }
 
 fn validate_manifest_map(
@@ -187,18 +182,15 @@ fn validate_manifest_map_against_catalog(
     catalog: &MapContentCatalog,
 ) -> Result<(), MatchWorkerManifestError> {
     let preset_id = MapPresetId(manifest.map_preset);
-    let mode_definition = match config.game_mode {
-        GameMode::Wipeout => WIPEOUT_MODE_DEFINITION,
-        GameMode::HotZone => HOT_ZONE_MODE_DEFINITION,
-        GameMode::Heist => crate::map::HEIST_MODE_DEFINITION,
-    };
+    let mode = crate::modes::descriptor_for_mode(config.game_mode)
+        .expect("every configured game mode has a registered descriptor");
     let preset = catalog
         .preset(preset_id)
         .ok_or(MatchWorkerManifestError::MapPresetMismatch)?;
     if preset.admission_revision != manifest.map_revision {
         return Err(MatchWorkerManifestError::MapRevisionMismatch);
     }
-    if preset.recipe.mode_definition_id != mode_definition {
+    if !mode.accepts_map(preset.recipe.mode_definition_id) {
         return Err(MatchWorkerManifestError::ModeMismatch);
     }
     catalog

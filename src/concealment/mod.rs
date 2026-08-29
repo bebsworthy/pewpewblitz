@@ -143,9 +143,11 @@ mod server {
             FixedPostUpdate,
             (
                 ConcealmentSet::ResolveSources
+                    .in_set(crate::gameplay::AuthoritativePhase::Visibility)
                     .after(crate::abilities::AbilitySet::ObserveOutcomes)
                     .after(crate::combat::CombatSet::Lifecycle),
                 ConcealmentSet::DecideObservers
+                    .in_set(crate::gameplay::AuthoritativePhase::Visibility)
                     .after(ConcealmentSet::ResolveSources)
                     .before(crate::combat::CombatSet::TelemetryAndCues),
             ),

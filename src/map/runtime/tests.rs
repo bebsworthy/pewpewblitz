@@ -70,6 +70,7 @@ fn barrel_test_app() -> (App, Entity) {
         .init_resource::<crate::combat::CombatOutbox>()
         .init_resource::<crate::combat::NextCombatIds>()
         .insert_resource(crate::timing::SimulationTick(9));
+    object_authority::register_terminal_reactions(&mut app);
     let resolved = app
         .world()
         .resource::<MapCatalogResource>()

@@ -937,6 +937,7 @@ fn sentry_characterization_app() -> App {
         .add_plugins(avian2d::prelude::PhysicsPlugins::default())
         .init_resource::<NextCombatIds>()
         .init_resource::<AbilityTelemetry>()
+        .init_resource::<AbilityCleanupFacts>()
         .init_resource::<CombatTelemetry>()
         .init_resource::<CombatOutbox>()
         .add_message::<SentryCleanupRequest>()
@@ -1600,6 +1601,7 @@ fn sentry_cleanup_is_applied_before_a_due_fire_in_the_same_fixed_phase() {
     app.add_systems(
         FixedUpdate,
         (
+            publish_ability_cleanup_facts,
             request_sentry_lifecycle_cleanup,
             cleanup_requested_sentries,
             ApplyDeferred,
@@ -1894,4 +1896,52 @@ fn production_ability_sets_have_an_explicit_authority_and_outcome_order() {
         ]
     );
     assert_eq!(app.world().resource::<crate::timing::SimulationTick>().0, 1);
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn cleanup_behavior_registration_is_additive_and_duplicate_safe() {
+    use crate::gameplay::GameplayPlugin;
+    use bevy::prelude::*;
+
+    #[derive(Resource, Default)]
+    struct CleanupProbe(u8);
+
+    fn observe_cleanup(mut probe: ResMut<CleanupProbe>) {
+        probe.0 = probe.0.saturating_add(1);
+    }
+
+    struct TestCleanupBehaviorPlugin;
+
+    impl Plugin for TestCleanupBehaviorPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_systems(
+                AbilityCleanupSchedule,
+                observe_cleanup.in_set(AbilityCleanupSet::RequestBehaviors),
+            );
+        }
+    }
+
+    let mut without_behavior = App::new();
+    without_behavior
+        .add_plugins((MinimalPlugins, GameplayPlugin, AbilityCorePlugin))
+        .init_resource::<CleanupProbe>();
+    run_ability_cleanup(without_behavior.world_mut());
+    assert_eq!(without_behavior.world().resource::<CleanupProbe>().0, 0);
+
+    let mut with_behavior = App::new();
+    with_behavior
+        .add_plugins((MinimalPlugins, GameplayPlugin, AbilityCorePlugin))
+        .add_plugins(TestCleanupBehaviorPlugin)
+        .init_resource::<CleanupProbe>();
+    run_ability_cleanup(with_behavior.world_mut());
+    assert_eq!(with_behavior.world().resource::<CleanupProbe>().0, 1);
+
+    let duplicate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        with_behavior.add_plugins(TestCleanupBehaviorPlugin);
+    }));
+    assert!(
+        duplicate.is_err(),
+        "Bevy must reject a duplicate behavior plugin"
+    );
 }

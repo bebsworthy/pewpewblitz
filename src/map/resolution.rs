@@ -111,10 +111,7 @@ fn validate_recipe_identity(
         || recipe.recipe_id.0 == 0
         || recipe.revision == 0
         || recipe.recipe_version != MAP_RECIPE_SCHEMA_VERSION
-        || !matches!(
-            recipe.mode_definition_id,
-            WIPEOUT_MODE_DEFINITION | HOT_ZONE_MODE_DEFINITION | HEIST_MODE_DEFINITION
-        )
+        || crate::modes::descriptor_for_definition(recipe.mode_definition_id).is_none()
     {
         return Err("invalid grid map recipe identity or mode".to_string());
     }

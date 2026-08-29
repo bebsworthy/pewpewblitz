@@ -47,12 +47,7 @@ use std::{
 fn routing_mode_for_definition(
     mode: crate::map::ModeDefinitionId,
 ) -> Option<brawler_routing::GameMode> {
-    match mode {
-        crate::map::WIPEOUT_MODE_DEFINITION => Some(brawler_routing::GameMode::Wipeout),
-        crate::map::HOT_ZONE_MODE_DEFINITION => Some(brawler_routing::GameMode::HotZone),
-        crate::map::HEIST_MODE_DEFINITION => Some(brawler_routing::GameMode::Heist),
-        _ => None,
-    }
+    crate::modes::descriptor_for_definition(mode).map(|descriptor| descriptor.routing_mode)
 }
 
 /// M01's hard upper bound for authenticated lobby sessions.
@@ -574,11 +569,8 @@ impl LobbyState {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let map_preset = match self.mode {
-            GameMode::Wipeout => crate::map::FEATURE_YARD_WIPEOUT_PRESET,
-            GameMode::HotZone => crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
-            GameMode::Heist => crate::map::FEATURE_YARD_HEIST_PRESET,
-        };
+        let mode = crate::modes::descriptor_for_mode(self.mode).ok_or(CodecError::InvalidValue)?;
+        let map_preset = mode.default_map_preset;
         let map_revision = crate::map::MapContentCatalog::embedded()
             .ok()
             .and_then(|catalog| {
@@ -590,19 +582,11 @@ impl LobbyState {
         let body = AllocateRequestBody {
             request_id,
             lobby_session_id: sessions[0].lobby_session_id,
-            mode: match self.mode {
-                GameMode::Wipeout => brawler_routing::GameMode::Wipeout,
-                GameMode::HotZone => brawler_routing::GameMode::HotZone,
-                GameMode::Heist => brawler_routing::GameMode::Heist,
-            },
+            mode: mode.routing_mode,
             map_preset: map_preset.0,
             map_revision,
             rules_profile: 1,
-            objective_target: match self.mode {
-                GameMode::Wipeout => 10,
-                GameMode::HotZone => 1_800,
-                GameMode::Heist => 2_000,
-            },
+            objective_target: mode.default_objective_target,
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
             respawn_ticks: 180,

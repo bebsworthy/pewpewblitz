@@ -113,6 +113,8 @@ pub enum GameMode {
 }
 
 impl GameMode {
+    pub const ALL: [Self; 3] = [Self::Wipeout, Self::HotZone, Self::Heist];
+
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
