@@ -169,6 +169,13 @@ fn resolve_sentry_tuning(
     })
 }
 
+#[cfg(all(test, feature = "server"))]
+pub(super) fn resolve_sentry_tuning_for_test(
+    ultimate: &crate::builds::ResolvedUltimate,
+) -> Option<ResolvedSentryTuning> {
+    resolve_sentry_tuning(ultimate)
+}
+
 #[cfg(feature = "server")]
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SentryCleanupRequest {

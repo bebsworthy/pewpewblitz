@@ -1371,11 +1371,158 @@ fn parse_process_id(value: &str) -> Result<ProcessId, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Shutdown;
+
+    const TEST_PROCESS_ID: u128 = 41;
+    const TEST_WORKER_ID: u128 = 42;
+
+    struct WorkerControlHarness {
+        app: App,
+        supervisor: UnixWorkerChannels,
+        supervisor_control: UnixStream,
+    }
+
+    impl WorkerControlHarness {
+        fn new(role: WorkerEntrypointRole) -> Self {
+            Self::with_result_identity(role, None)
+        }
+
+        fn with_result_identity(
+            role: WorkerEntrypointRole,
+            result_identity: Option<(brawler_routing::MatchId, brawler_routing::AllocationId)>,
+        ) -> Self {
+            let process_id = ProcessId::new(TEST_PROCESS_ID).unwrap();
+            let worker_id = WorkerId::new(TEST_WORKER_ID).unwrap();
+            let (packet_worker, packet_supervisor) = UnixStream::pair().unwrap();
+            let (control_worker, control_supervisor) = UnixStream::pair().unwrap();
+            for stream in [
+                &packet_worker,
+                &packet_supervisor,
+                &control_worker,
+                &control_supervisor,
+            ] {
+                stream.set_nonblocking(true).unwrap();
+            }
+            let supervisor_control = control_supervisor.try_clone().unwrap();
+            let manifest_frame = control_frame(
+                1,
+                ControlBody::Heartbeat(brawler_routing::HeartbeatBody {
+                    generation: brawler_routing::Generation::new(1).unwrap(),
+                    uptime_ms: 0,
+                    active_peers: 0,
+                    packet_frames: 0,
+                    packet_bytes: 0,
+                    control_frames: 0,
+                    control_bytes: 0,
+                    fixed_tick_lag_us: 0,
+                    health_flags: 0,
+                }),
+            );
+            let state = WorkerControlState::new(
+                process_id,
+                worker_id,
+                role,
+                brawler_routing::Generation::new(1).unwrap(),
+                Duration::from_mins(1),
+                manifest_frame,
+                result_identity,
+            )
+            .unwrap();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(state)
+                .add_plugins(WorkerControlPlugin);
+            match role {
+                WorkerEntrypointRole::Lobby => {
+                    app.init_resource::<LobbyControlInbox>()
+                        .init_resource::<LobbyControlOutbox>();
+                }
+                WorkerEntrypointRole::Match => {
+                    app.init_resource::<MatchControlOutbox>();
+                }
+            }
+            app.world_mut().spawn((
+                RoutedWorker::new(
+                    worker_id,
+                    UnixWorkerChannels::from_std(packet_worker, control_worker),
+                ),
+                Linked,
+            ));
+            crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
+            crate::test_app::reject_owned_schedule_ambiguities(&mut app, Last);
+            crate::test_app::finalize(&mut app);
+            Self {
+                app,
+                supervisor: UnixWorkerChannels::from_std(packet_supervisor, control_supervisor),
+                supervisor_control,
+            }
+        }
+
+        fn send(&mut self, frame: &ControlFrame) {
+            self.supervisor
+                .enqueue_control(&frame.encode().unwrap())
+                .unwrap();
+            self.supervisor.flush_control(CONTROL_BURST).unwrap();
+        }
+
+        fn receive(&mut self) -> Vec<ControlFrame> {
+            self.supervisor
+                .control_read_ready(64)
+                .unwrap()
+                .records
+                .into_iter()
+                .map(|record| {
+                    ControlFrame::decode_for(
+                        &record,
+                        ProcessId::new(TEST_PROCESS_ID).unwrap(),
+                        WorkerId::new(TEST_WORKER_ID).unwrap(),
+                    )
+                    .unwrap()
+                })
+                .collect()
+        }
+
+        fn close_supervisor_write(&self) {
+            self.supervisor_control.shutdown(Shutdown::Write).unwrap();
+        }
+
+        fn run_frame(&mut self) {
+            self.app.world_mut().run_schedule(Update);
+            self.app.world_mut().run_schedule(Last);
+        }
+    }
+
+    fn control_frame(sequence: u64, body: ControlBody) -> ControlFrame {
+        ControlFrame::from_raw_sequence(
+            sequence,
+            ProcessId::new(TEST_PROCESS_ID).unwrap(),
+            WorkerId::new(TEST_WORKER_ID).unwrap(),
+            body,
+        )
+        .unwrap()
+    }
+
+    fn stop_body(stop_id: u64) -> StopBody {
+        StopBody {
+            stop_id: brawler_routing::StopId::new(stop_id).unwrap(),
+            reason: 7,
+            graceful_deadline_ms: 500,
+        }
+    }
+
+    fn activation_body(value: u64) -> ActivationBody {
+        ActivationBody {
+            request_id: brawler_routing::RequestId::new(value).unwrap(),
+            allocation_id: brawler_routing::AllocationId::new(u128::from(value)).unwrap(),
+            match_id: brawler_routing::MatchId::new(u128::from(value)).unwrap(),
+        }
+    }
 
     fn allocation_body(request_id: u64) -> AllocateRequestBody {
+        let lobby_session_id = brawler_routing::LobbySessionId::new(1).unwrap();
         AllocateRequestBody {
             request_id: brawler_routing::RequestId::new(request_id).unwrap(),
-            lobby_session_id: brawler_routing::LobbySessionId::new(1).unwrap(),
+            lobby_session_id,
             mode: brawler_routing::GameMode::Wipeout,
             map_preset: 1,
             map_revision: 1,
@@ -1386,7 +1533,28 @@ mod tests {
             respawn_ticks: 180,
             team_count: 2,
             players_per_team: 2,
-            participants: Vec::new(),
+            participants: vec![
+                brawler_routing::AllocateParticipant {
+                    lobby_session_id,
+                    player_id: brawler_routing::PlayerId::new(1).unwrap(),
+                    netcode_client_id: brawler_routing::NetcodeClientId::new(1).unwrap(),
+                    team: 0,
+                    display_name: brawler_routing::MatchDisplayName::new("Player 1").unwrap(),
+                    recipe_fingerprint: 1,
+                    build_revision: 1,
+                    build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[1]).unwrap(),
+                },
+                brawler_routing::AllocateParticipant {
+                    lobby_session_id: brawler_routing::LobbySessionId::new(2).unwrap(),
+                    player_id: brawler_routing::PlayerId::new(2).unwrap(),
+                    netcode_client_id: brawler_routing::NetcodeClientId::new(2).unwrap(),
+                    team: 1,
+                    display_name: brawler_routing::MatchDisplayName::new("Player 2").unwrap(),
+                    recipe_fingerprint: 2,
+                    build_revision: 1,
+                    build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[2]).unwrap(),
+                },
+            ],
             bots: Vec::new(),
         }
     }
@@ -1550,5 +1718,334 @@ mod tests {
             canonical_allocation_result(&state, allocation_match_id),
             Some(first)
         );
+    }
+
+    #[test]
+    fn inbound_control_accepts_contiguous_frames_and_ignores_an_identical_duplicate() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
+        let accepted = control_frame(
+            2,
+            ControlBody::AllocationRejected(brawler_routing::AllocationRejectedBody {
+                request_id: brawler_routing::RequestId::new(2).unwrap(),
+                reason: 3,
+                retry_after_ms: 0,
+            }),
+        );
+        harness.send(&accepted);
+        harness.send(&accepted);
+        harness.send(&control_frame(
+            3,
+            ControlBody::LobbyCapacity(brawler_routing::LobbyCapacityBody {
+                free_match_slots: 4,
+            }),
+        ));
+
+        harness.run_frame();
+
+        let frames: Vec<_> = harness
+            .app
+            .world_mut()
+            .resource_mut::<LobbyControlInbox>()
+            .drain()
+            .collect();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].sequence.get(), 2);
+        assert_eq!(frames[1].sequence.get(), 3);
+        assert!(harness.receive().is_empty());
+    }
+
+    #[test]
+    fn inbound_forward_gap_is_accepted_but_a_late_missing_sequence_fails() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
+        harness.send(&control_frame(
+            3,
+            ControlBody::LobbyCapacity(brawler_routing::LobbyCapacityBody {
+                free_match_slots: 1,
+            }),
+        ));
+
+        harness.run_frame();
+        let accepted: Vec<_> = harness
+            .app
+            .world_mut()
+            .resource_mut::<LobbyControlInbox>()
+            .drain()
+            .collect();
+        assert!(matches!(accepted.as_slice(), [frame] if frame.sequence.get() == 3));
+        assert!(
+            !harness
+                .app
+                .world()
+                .resource::<WorkerControlState>()
+                .exit_sent
+        );
+
+        harness.send(&control_frame(
+            2,
+            ControlBody::LobbyCapacity(brawler_routing::LobbyCapacityBody {
+                free_match_slots: 2,
+            }),
+        ));
+        harness.app.world_mut().run_schedule(Update);
+        assert!(
+            harness
+                .app
+                .world()
+                .resource::<WorkerControlState>()
+                .exit_sent
+        );
+        {
+            let world = harness.app.world_mut();
+            let mut query = world.query::<&RoutedWorker>();
+            assert!(query.single(world).unwrap().channels().control_pending());
+        }
+        harness.app.world_mut().run_schedule(Last);
+
+        let frames = harness.receive();
+        assert_eq!(frames.len(), 1);
+        let ControlBody::Failure(failure) = frames[0].body else {
+            panic!("sequence gap must emit Failure");
+        };
+        assert_eq!(failure.detail_code, FAILURE_DETAIL_MALFORMED);
+        assert_eq!(frames[0].sequence.get(), 2);
+        let exits: Vec<_> = harness
+            .app
+            .world_mut()
+            .resource_mut::<Messages<AppExit>>()
+            .drain()
+            .collect();
+        assert_eq!(exits.len(), 1);
+        assert!(exits[0].is_error());
+    }
+
+    #[test]
+    fn control_eof_fails_without_stop_but_same_read_stop_flushes_exit() {
+        let mut unsolicited = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
+        unsolicited.close_supervisor_write();
+        unsolicited.run_frame();
+        let frames = unsolicited.receive();
+        assert!(
+            matches!(frames.as_slice(), [ControlFrame { body: ControlBody::Failure(failure), .. }] if failure.detail_code == FAILURE_DETAIL_EOF)
+        );
+
+        let mut graceful = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
+        graceful.send(&control_frame(2, ControlBody::Stop(stop_body(9))));
+        graceful.close_supervisor_write();
+        graceful.run_frame();
+        let frames = graceful.receive();
+        assert!(
+            matches!(frames.as_slice(), [ControlFrame { body: ControlBody::Exit(exit), .. }] if !exit.result_sent)
+        );
+        let state = graceful.app.world().resource::<WorkerControlState>();
+        assert!(state.shutdown_requested);
+        assert!(state.exit_sent);
+        assert!(state.app_exit_requested);
+    }
+
+    #[test]
+    fn match_outbox_emits_priority_order_with_contiguous_sequences() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Match);
+        {
+            let mut outbox = harness.app.world_mut().resource_mut::<MatchControlOutbox>();
+            outbox.start_failed = Some(activation_body(1));
+            outbox.cancel = Some(activation_body(2));
+            outbox.activated = Some(activation_body(3));
+        }
+
+        harness.run_frame();
+
+        let frames = harness.receive();
+        assert_eq!(frames.len(), 3);
+        assert!(matches!(frames[0].body, ControlBody::StartFailed(_)));
+        assert!(matches!(frames[1].body, ControlBody::CancelActivation(_)));
+        assert!(matches!(frames[2].body, ControlBody::Activated(_)));
+        assert_eq!(
+            frames
+                .iter()
+                .map(|frame| frame.sequence.get())
+                .collect::<Vec<_>>(),
+            vec![2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn full_control_writer_retains_lobby_request_until_the_next_frame() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
+        harness
+            .app
+            .world_mut()
+            .resource_mut::<WorkerControlState>()
+            .next_heartbeat = Instant::now() + Duration::from_hours(1);
+        assert!(
+            harness
+                .app
+                .world_mut()
+                .resource_mut::<LobbyControlOutbox>()
+                .push(allocation_body(7))
+        );
+        {
+            let world = harness.app.world_mut();
+            let mut query = world.query::<&mut RoutedWorker>();
+            let mut worker = query.single_mut(world).unwrap();
+            for sequence in 100..100 + brawler_routing::WORKER_CONTROL_QUEUE_FRAMES as u64 {
+                worker
+                    .channels_mut()
+                    .enqueue_control(
+                        &control_frame(
+                            sequence,
+                            ControlBody::Heartbeat(brawler_routing::HeartbeatBody {
+                                generation: brawler_routing::Generation::new(1).unwrap(),
+                                uptime_ms: 0,
+                                active_peers: 0,
+                                packet_frames: 0,
+                                packet_bytes: 0,
+                                control_frames: 0,
+                                control_bytes: 0,
+                                fixed_tick_lag_us: 0,
+                                health_flags: 0,
+                            }),
+                        )
+                        .encode()
+                        .unwrap(),
+                    )
+                    .unwrap();
+            }
+        }
+
+        harness.app.world_mut().run_schedule(Update);
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .resource::<LobbyControlOutbox>()
+                .front()
+                .unwrap()
+                .request_id
+                .get(),
+            7
+        );
+        assert!(
+            !harness
+                .app
+                .world()
+                .resource::<WorkerControlState>()
+                .exit_sent
+        );
+        harness.app.world_mut().run_schedule(Last);
+        let initially_flushed = harness.receive();
+        assert_eq!(
+            initially_flushed.len(),
+            brawler_routing::WORKER_CONTROL_QUEUE_FRAMES
+        );
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .resource::<WorkerControlState>()
+                .next_sequence,
+            2
+        );
+
+        harness.app.world_mut().run_schedule(Update);
+        assert_eq!(
+            harness
+                .app
+                .world()
+                .resource::<WorkerControlState>()
+                .next_sequence,
+            3
+        );
+        assert!(
+            harness
+                .app
+                .world()
+                .resource::<LobbyControlOutbox>()
+                .front()
+                .is_none()
+        );
+        harness.app.world_mut().run_schedule(Last);
+        let frames = harness.receive();
+        assert!(
+            matches!(frames.as_slice(), [ControlFrame { sequence, body: ControlBody::AllocateRequest(body), .. }] if sequence.get() == 2 && body.request_id.get() == 7)
+        );
+    }
+
+    #[test]
+    fn heartbeat_deadline_is_deterministic_and_consumes_one_sequence() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
+        harness
+            .app
+            .world_mut()
+            .resource_mut::<WorkerControlState>()
+            .next_heartbeat = Instant::now();
+
+        harness.run_frame();
+        let first = harness.receive();
+        assert!(
+            matches!(first.as_slice(), [ControlFrame { sequence, body: ControlBody::Heartbeat(_), .. }] if sequence.get() == 2)
+        );
+
+        harness.run_frame();
+        assert!(harness.receive().is_empty());
+
+        harness
+            .app
+            .world_mut()
+            .resource_mut::<WorkerControlState>()
+            .next_heartbeat = Instant::now();
+        harness.run_frame();
+        let second = harness.receive();
+        assert!(
+            matches!(second.as_slice(), [ControlFrame { sequence, body: ControlBody::Heartbeat(_), .. }] if sequence.get() == 3)
+        );
+    }
+
+    #[test]
+    fn last_schedule_flushes_result_before_shutdown_exit() {
+        let result_match_id = brawler_routing::MatchId::new(9).unwrap();
+        let allocation_id = brawler_routing::AllocationId::new(10).unwrap();
+        let mut harness = WorkerControlHarness::with_result_identity(
+            WorkerEntrypointRole::Match,
+            Some((result_match_id, allocation_id)),
+        );
+        harness.app.world_mut().spawn((
+            MatchRoot,
+            MatchState {
+                match_id: crate::matchplay::MatchId(9),
+                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                phase: MatchPhase::Completed {
+                    completed_at_tick: 12,
+                    restart_unlocked_at_tick: 72,
+                    result: crate::matchplay::MatchResult::TeamVictory {
+                        team: crate::combat::TeamId(0),
+                    },
+                },
+                rules_revision: 1,
+            },
+        ));
+        {
+            let mut state = harness.app.world_mut().resource_mut::<WorkerControlState>();
+            state.shutdown_requested = true;
+            state.pending_stop = Some(stop_body(11));
+        }
+
+        harness.app.world_mut().run_schedule(Last);
+        let first = harness.receive();
+        assert!(
+            matches!(first.as_slice(), [ControlFrame { sequence, body: ControlBody::Result(_), .. }] if sequence.get() == 2)
+        );
+        {
+            let state = harness.app.world().resource::<WorkerControlState>();
+            assert!(state.result_sent);
+            assert!(!state.exit_sent);
+        }
+
+        harness.app.world_mut().run_schedule(Last);
+        let second = harness.receive();
+        assert!(
+            matches!(second.as_slice(), [ControlFrame { sequence, body: ControlBody::Exit(exit), .. }] if sequence.get() == 3 && exit.result_sent)
+        );
+        let state = harness.app.world().resource::<WorkerControlState>();
+        assert!(state.app_exit_requested);
     }
 }

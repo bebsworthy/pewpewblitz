@@ -847,6 +847,76 @@ pub(super) fn resolve_melee_attacks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "server")]
+    fn test_attack_source() -> AttackSource {
+        AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(41),
+            player_id: PlayerId(3),
+            owner_network_entity_id: NetworkEntityId(7),
+            team_id: TeamId(0),
+            recipe_fingerprint: WeaponRecipeFingerprint(11),
+            presentation_profile_id: WeaponPresentationProfileId(5),
+            legacy_compatibility: false,
+            source_preset_id: Some(WeaponPresetId(1)),
+            origin: WorldPoint::from(Vec2::ZERO),
+            facing: 0.0,
+        }
+    }
+
+    #[cfg(feature = "server")]
+    fn target_damage(
+        target: crate::map::DamageableTargetIdentity,
+    ) -> crate::map::PendingWorldTargetDamage {
+        crate::map::PendingWorldTargetDamage {
+            target,
+            source: test_attack_source(),
+            attack_id: AttackId(41),
+            requested_damage: 17,
+            delivery_index: 2,
+            bundle_index: 3,
+            effect_index: 4,
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "server")]
+    fn projectile_world_hits_route_to_exactly_one_authority_owner() {
+        use crate::map::{
+            DamageableTargetIdentity, MapDynamicGeneration, MapInstanceId, MapPlacementId,
+            ModeAnchorId,
+        };
+        use crate::matchplay::MatchId;
+
+        let map_target = DamageableTargetIdentity::MapObject {
+            generation: MapDynamicGeneration {
+                map_instance_id: MapInstanceId(9),
+                generation: 2,
+            },
+            placement_id: MapPlacementId(12),
+        };
+        let safe_target = DamageableTargetIdentity::HeistSafe {
+            match_id: MatchId(13),
+            anchor_id: ModeAnchorId(4),
+            defending_team: TeamId(1),
+        };
+        let mut world = crate::map::PendingWorldTargetDamages::default();
+        let mut objectives = crate::matchplay::PendingModeObjectiveDamages::default();
+
+        queue_damageable_target(&mut world, &mut objectives, target_damage(map_target));
+        queue_damageable_target(&mut world, &mut objectives, target_damage(safe_target));
+
+        assert_eq!(world.0.len(), 1);
+        assert_eq!(world.0[0].target, map_target);
+        assert_eq!(objectives.0.len(), 1);
+        assert_eq!(objectives.0[0].target, safe_target);
+        assert_eq!(objectives.0[0].requested_damage, 17);
+        assert_eq!(objectives.0[0].delivery_index, 2);
+        assert_eq!(objectives.0[0].bundle_index, 3);
+        assert_eq!(objectives.0[0].effect_index, 4);
+    }
+
     #[test]
     #[cfg(feature = "client")]
     fn arc_height_peaks_at_half_progress() {

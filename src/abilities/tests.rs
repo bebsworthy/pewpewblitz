@@ -2,6 +2,8 @@ use super::*;
 use crate::builds::{AbilityPhase, AbilityState};
 use crate::protocol::NetworkEntityId;
 use bevy::prelude::Vec2;
+#[cfg(feature = "server")]
+use bevy::prelude::{App, Entity, FixedUpdate};
 
 const fn test_charge_policy() -> crate::builds::UltimateChargePolicy {
     crate::builds::UltimateChargePolicy {
@@ -917,6 +919,734 @@ fn sentry_acquisition_and_fire_cadence_are_independent_and_stable() {
     runtime.record_fire(130, fire_interval);
     assert!(!runtime.fire_is_due(159));
     assert!(runtime.fire_is_due(160));
+}
+
+#[cfg(feature = "server")]
+fn sentry_characterization_app() -> App {
+    use crate::{
+        combat::{
+            CombatOutbox, CombatTelemetry, MeleeAttack, NextCombatIds, PendingDelivery,
+            PendingPayload,
+        },
+        gameplay::GameplayPlugin,
+    };
+    use bevy::prelude::*;
+
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, GameplayPlugin))
+        .add_plugins(avian2d::prelude::PhysicsPlugins::default())
+        .init_resource::<NextCombatIds>()
+        .init_resource::<AbilityTelemetry>()
+        .init_resource::<CombatTelemetry>()
+        .init_resource::<CombatOutbox>()
+        .add_message::<SentryCleanupRequest>()
+        .add_message::<PendingPayload>()
+        .add_message::<PendingDelivery>()
+        .add_message::<MeleeAttack>();
+    configure_ability_schedule(&mut app);
+    app
+}
+
+#[cfg(feature = "server")]
+fn canonical_sentry_tuning() -> sentry::ResolvedSentryTuning {
+    let loadout = test_loadout(
+        crate::builds::UltimateDefinitionId(2),
+        [
+            crate::builds::PassiveDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        ],
+    );
+    sentry::resolve_sentry_tuning_for_test(&loadout.ultimate).unwrap()
+}
+
+#[cfg(feature = "server")]
+fn spawn_sentry_owner(app: &mut App, position: Vec2) -> Entity {
+    use crate::{
+        combat::TeamId,
+        matchplay::ActiveCombatant,
+        protocol::{Fighter, PlayerId},
+    };
+    use avian2d::prelude::Position;
+
+    app.world_mut()
+        .spawn((
+            Fighter,
+            PlayerId(1),
+            NetworkEntityId(1),
+            TeamId(0),
+            Position(position),
+            test_loadout(
+                crate::builds::UltimateDefinitionId(2),
+                [
+                    crate::builds::PassiveDefinitionId(1),
+                    crate::builds::PassiveDefinitionId(3),
+                ],
+            ),
+            AbilityState::default(),
+            ActiveCombatant,
+        ))
+        .id()
+}
+
+#[cfg(feature = "server")]
+fn spawn_sentry_target(app: &mut App, network_id: NetworkEntityId, position: Vec2) -> Entity {
+    use crate::{
+        combat::TeamId,
+        matchplay::ActiveCombatant,
+        protocol::{Fighter, PlayerId},
+    };
+    use avian2d::prelude::Position;
+
+    app.world_mut()
+        .spawn((
+            Fighter,
+            PlayerId(network_id.0),
+            network_id,
+            TeamId(1),
+            Position(position),
+            test_loadout(
+                crate::builds::UltimateDefinitionId(2),
+                [
+                    crate::builds::PassiveDefinitionId(1),
+                    crate::builds::PassiveDefinitionId(3),
+                ],
+            ),
+            AbilityState::default(),
+            ActiveCombatant,
+        ))
+        .id()
+}
+
+#[cfg(feature = "server")]
+fn spawn_characterized_sentry(
+    app: &mut App,
+    tuning: sentry::ResolvedSentryTuning,
+    runtime: sentry::SentryRuntime,
+    expires_at_tick: u64,
+) -> Entity {
+    use crate::{
+        builds::{DeployableId, UltimateDefinitionId},
+        combat::TeamId,
+        matchplay::MatchId,
+        protocol::PlayerId,
+    };
+    use avian2d::prelude::Position;
+
+    app.world_mut()
+        .spawn((
+            Sentry,
+            SentryIdentity {
+                deployable_id: DeployableId(7),
+                owner_player_id: PlayerId(1),
+                owner_network_id: NetworkEntityId(1),
+                team_id: TeamId(0),
+                ultimate_id: UltimateDefinitionId(2),
+                match_id: MatchId(11),
+            },
+            SentryDeadline { expires_at_tick },
+            runtime,
+            tuning,
+            Position(Vec2::ZERO),
+        ))
+        .id()
+}
+
+#[cfg(feature = "server")]
+fn run_sentry_tick(app: &mut App, tick: u64) {
+    app.world_mut()
+        .resource_mut::<crate::timing::SimulationTick>()
+        .0 = tick;
+    app.world_mut().run_schedule(FixedUpdate);
+}
+
+#[cfg(feature = "server")]
+#[test]
+#[allow(clippy::too_many_lines)]
+fn sentry_production_tick_preserves_exact_cadence_and_authored_projectile_recipe() {
+    use crate::combat::{
+        CombatCue, CombatOutbox, CombatSourceKind, ComposedProjectileRuntime, DamageFalloff,
+        DeliveryMethod, FiringPattern, PayloadEffectDefinition, Projectile, ProjectileBody,
+        RecipientPolicy, ReplicatedAttackSource, TargetSelection, WeaponEconomy,
+        WeaponPresentationProfileId,
+    };
+    use bevy::prelude::*;
+
+    let mut app = sentry_characterization_app();
+    app.add_systems(
+        FixedUpdate,
+        sentry::tick_sentries.in_set(AbilitySet::Movement),
+    );
+    let tuning = canonical_sentry_tuning();
+    spawn_sentry_owner(&mut app, Vec2::ZERO);
+    let sentry_entity = spawn_characterized_sentry(
+        &mut app,
+        tuning.clone(),
+        sentry::SentryRuntime::new(0, 6, 30),
+        720,
+    );
+    spawn_sentry_target(&mut app, NetworkEntityId(2), Vec2::new(100.0, 0.0));
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
+    crate::test_app::finalize(&mut app);
+
+    run_sentry_tick(&mut app, 5);
+    assert_eq!(
+        app.world()
+            .get::<sentry::SentryRuntime>(sentry_entity)
+            .unwrap()
+            .target(),
+        None
+    );
+    run_sentry_tick(&mut app, 6);
+    assert_eq!(
+        app.world()
+            .get::<sentry::SentryRuntime>(sentry_entity)
+            .unwrap()
+            .target(),
+        Some(sentry::SentryTarget::Fighter(NetworkEntityId(2)))
+    );
+    run_sentry_tick(&mut app, 29);
+    assert!(app.world().resource::<CombatOutbox>().0.is_empty());
+    run_sentry_tick(&mut app, 30);
+
+    let cues = &app.world().resource::<CombatOutbox>().0;
+    assert!(matches!(
+        cues.as_slice(),
+        [CombatCue::SentryFired {
+            tick: 30,
+            owner: NetworkEntityId(1),
+            deployable_id: crate::builds::DeployableId(7),
+            target: Some(NetworkEntityId(2)),
+            presentation_profile_id: WeaponPresentationProfileId(1),
+            ..
+        }]
+    ));
+    {
+        let world = app.world_mut();
+        let mut projectiles = world.query_filtered::<(
+            &ReplicatedAttackSource,
+            &ProjectileBody,
+            &ComposedProjectileRuntime,
+        ), With<Projectile>>();
+        let (replicated, body, runtime) = projectiles.single(world).unwrap();
+        assert!(matches!(
+            replicated.attack.kind,
+            CombatSourceKind::Deployable {
+                ultimate_id: crate::builds::UltimateDefinitionId(2),
+                deployable_id: crate::builds::DeployableId(7),
+            }
+        ));
+        let recipe_bytes = postcard::to_allocvec(&(
+            crate::combat::definitions::FINGERPRINT_FORMAT_VERSION,
+            &runtime.recipe,
+        ))
+        .unwrap();
+        assert_eq!(
+            replicated.attack.recipe_fingerprint,
+            crate::combat::WeaponRecipeFingerprint(crate::content::fnv1a64(&recipe_bytes).max(1))
+        );
+        assert_eq!(
+            replicated.attack.presentation_profile_id,
+            WeaponPresentationProfileId(1)
+        );
+        assert!((body.shape.bounding_radius() - 6.0).abs() < f32::EPSILON);
+        assert_eq!(runtime.expires_at_tick, 62);
+        assert!((runtime.maximum_range - 480.0).abs() < f32::EPSILON);
+        assert_eq!(runtime.velocity, Vec2::new(900.0, 0.0));
+        assert_eq!(
+            runtime.recipe.economy,
+            WeaponEconomy::Magazine {
+                capacity: 1,
+                refill_ticks: 30
+            }
+        );
+        assert_eq!(runtime.recipe.fire_cooldown_ticks, 30);
+        assert_eq!(runtime.recipe.firing, FiringPattern::Single);
+        assert_eq!(
+            runtime.recipe.delivery,
+            DeliveryMethod::Straight {
+                speed: 900.0,
+                radius: 6.0,
+                range: 480.0,
+                lifetime_ticks: 32,
+                muzzle_offset: 0.0,
+            }
+        );
+        assert_eq!(runtime.recipe.payload_bundles.len(), 1);
+        assert_eq!(
+            runtime.recipe.payload_bundles[0].target,
+            TargetSelection::Direct
+        );
+        assert_eq!(
+            runtime.recipe.payload_bundles[0].effects,
+            vec![PayloadEffectDefinition::Damage {
+                amount: 10,
+                falloff: DamageFalloff::None,
+                recipients: RecipientPolicy::Hostiles,
+            }]
+        );
+    }
+
+    run_sentry_tick(&mut app, 59);
+    assert_eq!(app.world().resource::<CombatOutbox>().0.len(), 1);
+    run_sentry_tick(&mut app, 60);
+    assert_eq!(app.world().resource::<CombatOutbox>().0.len(), 2);
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn sentry_prefers_fighters_then_fires_only_at_a_live_hostile_objective() {
+    use crate::{
+        combat::{CombatCue, CombatOutbox, CurrentHealth, TeamId},
+        map::{
+            DamageableLifeState, DamageableTargetIdentity, MapDynamicGeneration, MapInstanceId,
+            ModeAnchorId,
+        },
+        matchplay::{HeistSafe, MatchId},
+    };
+    use avian2d::prelude::Position;
+    use bevy::prelude::*;
+
+    let mut app = sentry_characterization_app();
+    app.add_systems(
+        FixedUpdate,
+        sentry::tick_sentries.in_set(AbilitySet::Movement),
+    );
+    let tuning = canonical_sentry_tuning();
+    spawn_sentry_owner(&mut app, Vec2::ZERO);
+    let sentry_entity =
+        spawn_characterized_sentry(&mut app, tuning, sentry::SentryRuntime::new(0, 6, 30), 720);
+    let fighter = spawn_sentry_target(&mut app, NetworkEntityId(2), Vec2::new(100.0, 0.0));
+    let objective = DamageableTargetIdentity::HeistSafe {
+        match_id: MatchId(11),
+        anchor_id: ModeAnchorId(4),
+        defending_team: TeamId(1),
+    };
+    let objective_entity = app
+        .world_mut()
+        .spawn((
+            Position(Vec2::new(80.0, 0.0)),
+            objective,
+            HeistSafe {
+                match_id: MatchId(11),
+                anchor_id: ModeAnchorId(4),
+                defending_team: TeamId(1),
+                generation: MapDynamicGeneration {
+                    map_instance_id: MapInstanceId(1),
+                    generation: 1,
+                },
+            },
+            CurrentHealth(2_000),
+            DamageableLifeState::Live,
+        ))
+        .id();
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
+    crate::test_app::finalize(&mut app);
+
+    run_sentry_tick(&mut app, 6);
+    assert_eq!(
+        app.world()
+            .get::<sentry::SentryRuntime>(sentry_entity)
+            .unwrap()
+            .target(),
+        Some(sentry::SentryTarget::Fighter(NetworkEntityId(2))),
+        "a visible hostile fighter wins even when the live hostile objective is closer"
+    );
+    run_sentry_tick(&mut app, 30);
+    app.world_mut()
+        .entity_mut(fighter)
+        .remove::<crate::matchplay::ActiveCombatant>();
+    run_sentry_tick(&mut app, 36);
+    assert_eq!(
+        app.world()
+            .get::<sentry::SentryRuntime>(sentry_entity)
+            .unwrap()
+            .target(),
+        Some(sentry::SentryTarget::ModeObjective(objective))
+    );
+    run_sentry_tick(&mut app, 60);
+    let cues: Vec<_> = app
+        .world()
+        .resource::<CombatOutbox>()
+        .0
+        .iter()
+        .filter_map(|cue| match cue {
+            CombatCue::SentryFired { tick, target, .. } => Some((*tick, *target)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(cues, vec![(30, Some(NetworkEntityId(2))), (60, None)]);
+
+    *app.world_mut()
+        .get_mut::<DamageableLifeState>(objective_entity)
+        .unwrap() = DamageableLifeState::TerminalCommitted;
+    run_sentry_tick(&mut app, 66);
+    assert_eq!(
+        app.world()
+            .get::<sentry::SentryRuntime>(sentry_entity)
+            .unwrap()
+            .target(),
+        None
+    );
+    run_sentry_tick(&mut app, 90);
+    assert_eq!(app.world().resource::<CombatOutbox>().0.len(), 2);
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn sentry_revalidates_visibility_and_target_liveness_before_firing() {
+    use crate::{
+        combat::CombatOutbox,
+        concealment::TerrainConcealmentMembership,
+        map::{MapInstanceId, MapPlacementId},
+    };
+    use bevy::prelude::*;
+
+    fn custom_tuning() -> sentry::ResolvedSentryTuning {
+        let mut loadout = test_loadout(
+            crate::builds::UltimateDefinitionId(2),
+            [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(3),
+            ],
+        );
+        let crate::builds::UltimateParameters::Sentry {
+            ref mut acquisition_interval_ticks,
+            ..
+        } = loadout.ultimate.parameters
+        else {
+            unreachable!()
+        };
+        *acquisition_interval_ticks = 7;
+        sentry::resolve_sentry_tuning_for_test(&loadout.ultimate).unwrap()
+    }
+
+    let mut hidden_app = sentry_characterization_app();
+    hidden_app.add_systems(
+        FixedUpdate,
+        sentry::tick_sentries.in_set(AbilitySet::Movement),
+    );
+    let tuning = custom_tuning();
+    spawn_sentry_owner(&mut hidden_app, Vec2::ZERO);
+    let sentry_entity = spawn_characterized_sentry(
+        &mut hidden_app,
+        tuning.clone(),
+        sentry::SentryRuntime::new(0, 7, 30),
+        720,
+    );
+    let target = spawn_sentry_target(&mut hidden_app, NetworkEntityId(2), Vec2::new(300.0, 0.0));
+    crate::test_app::reject_owned_schedule_ambiguities(&mut hidden_app, FixedUpdate);
+    crate::test_app::reject_owned_schedule_ambiguities(&mut hidden_app, FixedPostUpdate);
+    crate::test_app::finalize(&mut hidden_app);
+    for tick in [7, 14, 21, 28] {
+        run_sentry_tick(&mut hidden_app, tick);
+    }
+    hidden_app
+        .world_mut()
+        .entity_mut(target)
+        .insert(TerrainConcealmentMembership {
+            map_instance_id: MapInstanceId(1),
+            placement_id: MapPlacementId(1),
+        });
+    run_sentry_tick(&mut hidden_app, 30);
+    assert!(hidden_app.world().resource::<CombatOutbox>().0.is_empty());
+    assert_eq!(
+        hidden_app
+            .world()
+            .get::<sentry::SentryRuntime>(sentry_entity)
+            .unwrap()
+            .target(),
+        None,
+        "a target that becomes concealed outside reveal proximity is rejected at fire time"
+    );
+
+    let mut inactive_app = sentry_characterization_app();
+    inactive_app.add_systems(
+        FixedUpdate,
+        sentry::tick_sentries.in_set(AbilitySet::Movement),
+    );
+    spawn_sentry_owner(&mut inactive_app, Vec2::ZERO);
+    let inactive_sentry = spawn_characterized_sentry(
+        &mut inactive_app,
+        tuning,
+        sentry::SentryRuntime::new(0, 7, 30),
+        720,
+    );
+    let inactive_target =
+        spawn_sentry_target(&mut inactive_app, NetworkEntityId(2), Vec2::new(100.0, 0.0));
+    crate::test_app::reject_owned_schedule_ambiguities(&mut inactive_app, FixedUpdate);
+    crate::test_app::reject_owned_schedule_ambiguities(&mut inactive_app, FixedPostUpdate);
+    crate::test_app::finalize(&mut inactive_app);
+    for tick in [7, 14, 21, 28] {
+        run_sentry_tick(&mut inactive_app, tick);
+    }
+    inactive_app
+        .world_mut()
+        .entity_mut(inactive_target)
+        .remove::<crate::matchplay::ActiveCombatant>();
+    run_sentry_tick(&mut inactive_app, 30);
+    assert!(inactive_app.world().resource::<CombatOutbox>().0.is_empty());
+    assert_eq!(
+        inactive_app
+            .world()
+            .get::<sentry::SentryRuntime>(inactive_sentry)
+            .unwrap()
+            .target(),
+        None,
+        "a target that leaves active combat is rejected at fire time"
+    );
+}
+
+#[cfg(feature = "server")]
+fn characterized_sentry_source(
+    deployable_id: crate::builds::DeployableId,
+    attack_id: u64,
+) -> crate::combat::AttackSource {
+    crate::combat::AttackSource {
+        kind: crate::combat::CombatSourceKind::Deployable {
+            ultimate_id: crate::builds::UltimateDefinitionId(2),
+            deployable_id,
+        },
+        attack_id: crate::combat::AttackId(attack_id),
+        player_id: crate::protocol::PlayerId(1),
+        owner_network_entity_id: NetworkEntityId(1),
+        team_id: crate::combat::TeamId(0),
+        recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(91),
+        presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
+        legacy_compatibility: false,
+        source_preset_id: None,
+        origin: crate::combat::WorldPoint { x: 0.0, y: 0.0 },
+        facing: 0.0,
+    }
+}
+
+#[cfg(feature = "server")]
+#[test]
+#[allow(clippy::too_many_lines)]
+fn sentry_cleanup_uses_reason_priority_and_purges_only_owned_work() {
+    use crate::{
+        builds::{AbilityPhase, DeployableId},
+        combat::{
+            CombatCue, CombatOutbox, MeleeAttack, PendingDelivery, PendingDeliveryKind,
+            PendingPayload, ReplicatedAttackSource, WorldPoint,
+        },
+    };
+    use bevy::prelude::*;
+
+    let mut app = sentry_characterization_app();
+    app.add_systems(
+        FixedUpdate,
+        (cleanup_requested_sentries, ApplyDeferred)
+            .chain()
+            .in_set(AbilitySet::Movement),
+    );
+    let owner = spawn_sentry_owner(&mut app, Vec2::new(4.0, 5.0));
+    *app.world_mut().get_mut::<AbilityState>(owner).unwrap() = AbilityState {
+        charge: 0,
+        phase: AbilityPhase::Deployed {
+            deployable_id: DeployableId(7),
+            expires_at_tick: 720,
+        },
+    };
+    let sentry_entity = spawn_characterized_sentry(
+        &mut app,
+        canonical_sentry_tuning(),
+        sentry::SentryRuntime::new(0, 6, 30),
+        720,
+    );
+    let owned_source = characterized_sentry_source(DeployableId(7), 41);
+    let foreign_source = characterized_sentry_source(DeployableId(8), 42);
+    let owned_delivery = app
+        .world_mut()
+        .spawn(ReplicatedAttackSource {
+            attack: owned_source,
+        })
+        .id();
+    let foreign_delivery = app
+        .world_mut()
+        .spawn(ReplicatedAttackSource {
+            attack: foreign_source,
+        })
+        .id();
+    let recipe = test_loadout(
+        crate::builds::UltimateDefinitionId(2),
+        [
+            crate::builds::PassiveDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        ],
+    )
+    .primary_weapon
+    .recipe;
+    let bundle = recipe.payload_bundles[0].clone();
+    for source in [owned_source, foreign_source] {
+        app.world_mut().write_message(PendingPayload {
+            source,
+            delivery_index: 0,
+            bundle_index: 0,
+            target: owner,
+            target_network_id: NetworkEntityId(1),
+            position: Vec2::ZERO,
+            engagement_distance: 0.0,
+            delivery_travel: 0.0,
+            contact_fraction: 0.0,
+            bundle: bundle.clone(),
+        });
+        app.world_mut().write_message(PendingDelivery {
+            entity: None,
+            source,
+            delivery_index: 0,
+            tick: 12,
+            engagement_distance: 0.0,
+            delivery_travel: 0.0,
+            kind: PendingDeliveryKind::StraightImpact {
+                target: None,
+                position: WorldPoint { x: 0.0, y: 0.0 },
+                normal: WorldPoint { x: 1.0, y: 0.0 },
+                distance_band: crate::combat::DistanceBand::Close,
+            },
+            world_effects: Vec::new(),
+        });
+        app.world_mut().write_message(MeleeAttack {
+            source,
+            origin: Vec2::ZERO,
+            facing: 0.0,
+            tick: 12,
+            recipe: recipe.clone(),
+        });
+    }
+    app.world_mut().write_message(SentryCleanupRequest {
+        deployable_id: DeployableId(7),
+        reason: SentryCleanupReason::MatchRestarted,
+        requested_at_tick: 12,
+    });
+    app.world_mut().write_message(SentryCleanupRequest {
+        deployable_id: DeployableId(7),
+        reason: SentryCleanupReason::Destroyed,
+        requested_at_tick: 12,
+    });
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
+    crate::test_app::finalize(&mut app);
+
+    run_sentry_tick(&mut app, 12);
+
+    assert!(app.world().get_entity(sentry_entity).is_err());
+    assert!(app.world().get_entity(owned_delivery).is_err());
+    assert!(app.world().get_entity(foreign_delivery).is_ok());
+    assert!(matches!(
+        app.world().get::<AbilityState>(owner).unwrap().phase,
+        AbilityPhase::Charging
+    ));
+    assert!(app.world().resource::<CombatOutbox>().0.iter().any(|cue| {
+        matches!(
+            cue,
+            CombatCue::DeployableRemoved {
+                deployable_id: DeployableId(7),
+                reason: SentryCleanupReason::Destroyed,
+                ..
+            }
+        )
+    }));
+    assert!(
+        app.world()
+            .resource::<AbilityTelemetry>()
+            .records
+            .iter()
+            .any(|record| {
+                matches!(
+                    record.kind,
+                    AbilityTelemetryKind::SentryCleanup {
+                        deployable_id: DeployableId(7),
+                        reason: SentryCleanupReason::Destroyed,
+                        ..
+                    }
+                )
+            })
+    );
+    let payloads: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<PendingPayload>>()
+        .drain()
+        .collect();
+    let deliveries: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<PendingDelivery>>()
+        .drain()
+        .collect();
+    let melee: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<MeleeAttack>>()
+        .drain()
+        .collect();
+    assert_eq!(payloads.len(), 1);
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(melee.len(), 1);
+    assert_eq!(payloads[0].source, foreign_source);
+    assert_eq!(deliveries[0].source, foreign_source);
+    assert_eq!(melee[0].source, foreign_source);
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn sentry_cleanup_is_applied_before_a_due_fire_in_the_same_fixed_phase() {
+    use crate::{
+        builds::{AbilityPhase, DeployableId},
+        combat::{CombatCue, CombatOutbox, Projectile},
+    };
+    use bevy::prelude::*;
+
+    let mut app = sentry_characterization_app();
+    app.add_systems(
+        FixedUpdate,
+        (
+            request_sentry_lifecycle_cleanup,
+            cleanup_requested_sentries,
+            ApplyDeferred,
+            sentry::tick_sentries,
+        )
+            .chain()
+            .in_set(AbilitySet::Movement),
+    );
+    let owner = spawn_sentry_owner(&mut app, Vec2::ZERO);
+    *app.world_mut().get_mut::<AbilityState>(owner).unwrap() = AbilityState {
+        charge: 0,
+        phase: AbilityPhase::Deployed {
+            deployable_id: DeployableId(7),
+            expires_at_tick: 30,
+        },
+    };
+    let mut runtime = sentry::SentryRuntime::new(0, 6, 30);
+    runtime.set_fighter_target(Some(NetworkEntityId(2)));
+    let sentry_entity =
+        spawn_characterized_sentry(&mut app, canonical_sentry_tuning(), runtime, 30);
+    spawn_sentry_target(&mut app, NetworkEntityId(2), Vec2::new(100.0, 0.0));
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedUpdate);
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, FixedPostUpdate);
+    crate::test_app::finalize(&mut app);
+
+    run_sentry_tick(&mut app, 30);
+
+    assert!(app.world().get_entity(sentry_entity).is_err());
+    assert!(app.world().resource::<CombatOutbox>().0.iter().any(|cue| {
+        matches!(
+            cue,
+            CombatCue::DeployableRemoved {
+                reason: SentryCleanupReason::Expired,
+                ..
+            }
+        )
+    }));
+    assert!(
+        !app.world()
+            .resource::<CombatOutbox>()
+            .0
+            .iter()
+            .any(|cue| { matches!(cue, CombatCue::SentryFired { .. }) })
+    );
+    let world = app.world_mut();
+    let mut projectiles = world.query_filtered::<Entity, With<Projectile>>();
+    assert_eq!(projectiles.iter(world).count(), 0);
 }
 
 #[cfg(feature = "server")]

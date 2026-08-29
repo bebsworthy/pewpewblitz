@@ -62,6 +62,64 @@ fn flow_test_app() -> App {
     app
 }
 
+#[derive(Resource, Default)]
+struct InjectedFlowActions(Option<PendingFlowActions>);
+
+fn inject_flow_actions(
+    mut injected: ResMut<InjectedFlowActions>,
+    mut pending: ResMut<PendingFlowActions>,
+) {
+    if let Some(actions) = injected.0.take() {
+        *pending = actions;
+    }
+}
+
+fn flow_action_test_app() -> App {
+    let mut app = flow_test_app();
+    app.init_resource::<InjectedFlowActions>().add_systems(
+        Update,
+        inject_flow_actions
+            .before(resolve_flow_action)
+            .in_set(ClientFlowSet::ResolveFlowAction),
+    );
+    app
+}
+
+#[test]
+fn client_flow_update_schedule_has_no_owned_ambiguities() {
+    let mut app = flow_test_app();
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
+    app.update();
+}
+
+fn enter_dashboard(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::Dashboard);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<ClientFlow>>().get(),
+        ClientFlow::Dashboard
+    );
+}
+
+fn select_first_game(app: &mut App, membership: &ClientLobbyMembership) {
+    let game = &membership.game_types[0];
+    *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType {
+        catalog_revision: Some(membership.catalog_revision),
+        game_type_id: Some(game.id.clone()),
+        configuration_revision: Some(game.configuration_revision),
+    };
+}
+
+fn inject_action(app: &mut App, action: FlowUiAction) {
+    app.world_mut().resource_mut::<InjectedFlowActions>().0 = Some(PendingFlowActions {
+        ordinary: Some(action),
+        ..PendingFlowActions::default()
+    });
+    app.update();
+}
+
 #[test]
 fn brawler_editor_uses_catalog_name_for_concealment_field() {
     let _app = flow_test_app();
@@ -267,6 +325,188 @@ fn lobby_membership_with_brawler() -> ClientLobbyMembership {
     membership.profile.selected_brawler_id = Some(brawler_id);
     membership.profile.next_brawler_ordinal = 2;
     membership
+}
+
+#[test]
+fn explicit_action_preempts_session_and_ordinary_while_profile_decision_still_applies() {
+    let mut app = flow_action_test_app();
+    let membership = lobby_membership_with_brawler();
+    let brawler_id = membership.profile.selected_brawler_id.unwrap();
+    let session = app
+        .world_mut()
+        .spawn((
+            Client,
+            membership.clone(),
+            RoutedClientSession {
+                generation: 1,
+                kind: super::super::RoutedClientSessionKind::Lobby,
+            },
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(membership.profile);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_decision_for_test(crate::profiles::ProfileDecision::InvalidRequest);
+    app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(brawler_id);
+    app.world_mut().resource_mut::<InjectedFlowActions>().0 = Some(PendingFlowActions {
+        session: Some(SessionObservation::ReservationStarted),
+        explicit: Some(FlowUiAction::Cancel),
+        ordinary: Some(FlowUiAction::OpenSettings),
+    });
+
+    app.update();
+
+    assert!(app.world().get_entity(session).is_err());
+    assert!(
+        app.world()
+            .resource::<BrawlerEditDraft>()
+            .inline_error
+            .as_deref()
+            .is_some_and(|error| error.contains("not valid")),
+        "the profile decision is processed before action precedence"
+    );
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None
+    );
+
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<ClientFlow>>().get(),
+        ClientFlow::ServerSelect,
+        "explicit cancellation wins over the reservation and settings actions"
+    );
+    assert_eq!(count_flow_roots(&mut app), 1);
+}
+
+fn configured_lobby_flow_app(membership: ClientLobbyMembership) -> App {
+    let mut app = flow_action_test_app();
+    enter_dashboard(&mut app);
+    select_first_game(&mut app, &membership);
+    app.world_mut().spawn((
+        Client,
+        membership,
+        RoutedClientSession {
+            generation: 1,
+            kind: super::super::RoutedClientSessionKind::Lobby,
+        },
+    ));
+    app.world_mut()
+        .resource_mut::<super::super::ClientPracticeModel>()
+        .bind_generation_for_test(1);
+    app.world_mut()
+        .resource_mut::<super::super::ClientQueueModel>()
+        .bind_lobby_generation(1);
+    app
+}
+
+#[test]
+fn queue_and_practice_require_a_selected_brawler() {
+    let empty_membership = lobby_membership();
+    let mut missing = configured_lobby_flow_app(empty_membership);
+
+    inject_action(&mut missing, FlowUiAction::JoinQueue);
+    assert!(
+        missing
+            .world()
+            .resource::<super::super::ClientQueueModel>()
+            .pending()
+            .is_none()
+    );
+    inject_action(&mut missing, FlowUiAction::StartPractice);
+    assert!(
+        !missing
+            .world()
+            .resource::<super::super::ClientPracticeModel>()
+            .pending()
+    );
+}
+
+#[test]
+fn pending_practice_rejects_queue_join() {
+    let mut practice_first = configured_lobby_flow_app(lobby_membership_with_brawler());
+
+    inject_action(&mut practice_first, FlowUiAction::StartPractice);
+    assert!(
+        practice_first
+            .world()
+            .resource::<super::super::ClientPracticeModel>()
+            .pending()
+    );
+    inject_action(&mut practice_first, FlowUiAction::JoinQueue);
+    assert!(
+        practice_first
+            .world()
+            .resource::<super::super::ClientQueueModel>()
+            .pending()
+            .is_none()
+    );
+}
+
+#[test]
+fn pending_queue_rejects_practice_start() {
+    let mut queue_first = configured_lobby_flow_app(lobby_membership_with_brawler());
+
+    inject_action(&mut queue_first, FlowUiAction::JoinQueue);
+    assert!(
+        queue_first
+            .world()
+            .resource::<super::super::ClientQueueModel>()
+            .pending()
+            .is_some()
+    );
+    inject_action(&mut queue_first, FlowUiAction::StartPractice);
+    assert!(
+        !queue_first
+            .world()
+            .resource::<super::super::ClientPracticeModel>()
+            .pending()
+    );
+}
+
+#[test]
+fn profile_decisions_route_created_and_rejected_edits_to_their_owned_overlays() {
+    let mut app = flow_action_test_app();
+    let membership = lobby_membership_with_brawler();
+    let created = membership.profile.brawlers[0].clone();
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(membership.profile);
+    app.world_mut().resource_mut::<PendingCreatedBrawler>().0 = Some(created.creation_ordinal);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_decision_for_test(crate::profiles::ProfileDecision::Accepted);
+
+    app.update();
+
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(created.id)
+    );
+    assert_eq!(
+        app.world().resource::<DashboardNotice>().0.as_deref(),
+        Some("Created Test Brawler.")
+    );
+
+    app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(created.id);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_decision_for_test(crate::profiles::ProfileDecision::StaleRevision);
+    app.update();
+
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerEditor
+    );
+    assert!(
+        app.world()
+            .resource::<BrawlerEditDraft>()
+            .inline_error
+            .as_deref()
+            .is_some_and(|error| error.contains("changed"))
+    );
 }
 
 #[test]

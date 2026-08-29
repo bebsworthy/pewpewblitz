@@ -26,6 +26,11 @@ impl ClientPracticeModel {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn bind_generation_for_test(&mut self, generation: u64) {
+        self.bind_generation(generation);
+    }
+
     pub fn start(
         &mut self,
         selected: &crate::client::flow::SelectedGameType,

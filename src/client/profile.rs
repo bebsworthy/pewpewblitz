@@ -55,6 +55,11 @@ impl ClientProfileModel {
         );
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_decision_for_test(&mut self, decision: crate::profiles::ProfileDecision) {
+        self.last_decision = Some(decision);
+    }
+
     pub fn create(&mut self, draft: crate::profiles::BrawlerDraft) -> bool {
         let Some(revision) = self.snapshot.as_ref().map(|snapshot| snapshot.revision) else {
             return false;
