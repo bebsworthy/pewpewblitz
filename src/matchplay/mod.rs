@@ -39,6 +39,8 @@ pub use lifecycle::AuthoritativeFighterLifecyclePlugin;
 pub(crate) use lifecycle::{
     FighterLifecycleConfig, FighterReset, complete_fighter_lifecycle, reset_fighter_runtime,
 };
+#[cfg(feature = "server")]
+pub(crate) use model::BotObjectiveView;
 pub use model::{
     ActiveCombatant, FighterDisplayName, MatchClock, MatchId, MatchMember, MatchParticipant,
     MatchPhase, MatchResult, MatchRoot, MatchState, PublicParticipantState,

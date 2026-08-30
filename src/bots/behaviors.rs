@@ -1,7 +1,7 @@
 //! Bounded, process-local Practice-bot intent contributions and deterministic arbitration.
 
 use super::{
-    model::{BotIntent, BotModeView, BotObjectKind, BotObservation, BotRole, BotState, BotTactic},
+    model::{BotIntent, BotObservation, BotRole, BotState, BotTactic},
     profile::{BotArbitrationPolicy, BotBehaviorId, BotProfile, MAX_BOT_BEHAVIOR_REGISTRATIONS},
     registry::{BotBehaviorAppExt, BotBehaviorRegistry},
 };
@@ -285,23 +285,24 @@ mod retreat {
 
 mod objectives {
     use super::{
-        BehaviorContext, BotIntent, BotModeView, BotRole, BotTactic, CandidateBuffer, OBJECTIVES,
-        Vec2, hot_zone_hold_point, nearest_enemy, safe_object,
+        BehaviorContext, BotIntent, BotRole, BotTactic, CandidateBuffer, OBJECTIVES, Vec2,
+        hot_zone_hold_point, nearest_enemy, safe_object,
     };
+    use crate::matchplay::BotObjectiveView;
 
     pub(super) fn contribute(
         context: &BehaviorContext<'_>,
         candidates: &mut CandidateBuffer,
         base_score: u16,
     ) {
-        match (context.role, context.observation.mode) {
-            (BotRole::Objective, BotModeView::HotZone { center, radius, .. }) => {
+        match (context.role, context.observation.objective) {
+            (BotRole::Objective, BotObjectiveView::ControlArea { center, radius }) => {
                 hot_zone(context, candidates, base_score, center, radius);
             }
-            (BotRole::Defender, BotModeView::Heist) => {
+            (BotRole::Defender, BotObjectiveView::AttackAndDefend) => {
                 defend_safe(context, candidates, base_score);
             }
-            (BotRole::Objective, BotModeView::Heist) => {
+            (BotRole::Objective, BotObjectiveView::AttackAndDefend) => {
                 attack_safe(context, candidates, base_score);
             }
             _ => {}
@@ -411,9 +412,8 @@ mod objectives {
 
 mod combat {
     use super::{
-        BehaviorContext, BotIntent, BotObjectKind, BotTactic, CandidateBuffer, FALLBACK, HEALING,
-        OBJECT, PRESSURE, Vec2, distance_order, nearest_enemy, nearest_live_object,
-        object_attack_intent,
+        BehaviorContext, BotIntent, BotTactic, CandidateBuffer, FALLBACK, HEALING, OBJECT,
+        PRESSURE, Vec2, distance_order, nearest_enemy, nearest_live_object, object_attack_intent,
     };
 
     pub(super) fn healing(
@@ -512,12 +512,7 @@ mod combat {
             observation.objects.iter().find(|object| {
                 object.live
                     && goal.distance_squared(object.position) < 1.0
-                    && matches!(
-                        object.kind,
-                        BotObjectKind::OilBarrel
-                            | BotObjectKind::TreasureChest
-                            | BotObjectKind::HeistSafe { .. }
-                    )
+                    && (object.hazardous || object.valuable || object.defending_team.is_some())
             })
         });
         let intent = object.map_or(
@@ -603,12 +598,10 @@ fn safe_object(
     friendly: bool,
 ) -> Option<&super::model::BotObjectView> {
     observation.objects.iter().find(|object| {
-        matches!(
-            object.kind,
-            BotObjectKind::HeistSafe { defending_team }
-                if object.live
-                    && (defending_team == observation.self_view.team) == friendly
-        )
+        object.live
+            && object.defending_team.is_some_and(|defending_team| {
+                (defending_team == observation.self_view.team) == friendly
+            })
     })
 }
 
@@ -695,7 +688,7 @@ mod tests {
             visible_enemies: Vec::new(),
             objects: Vec::new(),
             pickups: Vec::new(),
-            mode: BotModeView::Wipeout { scores: [0, 0] },
+            objective: crate::matchplay::BotObjectiveView::Elimination,
             weapon_phase: crate::combat::WeaponPhase::Ready,
             weapon_ammo: 1,
             ability_ready: false,
@@ -797,11 +790,9 @@ mod tests {
 
     fn arbitration_observation() -> BotObservation {
         let mut observation = observation();
-        observation.mode = BotModeView::HotZone {
+        observation.objective = crate::matchplay::BotObjectiveView::ControlArea {
             center: Vec2::ZERO,
             radius: 160.0,
-            status: crate::matchplay::HotZoneStatus::Empty,
-            progress: [0, 0],
         };
         observation
             .visible_enemies

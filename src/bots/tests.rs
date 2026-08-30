@@ -264,17 +264,17 @@ fn team_roles_are_stable_and_single_heist_bot_attacks() {
         BotPlanMember {
             network_id: NetworkEntityId(30),
             team: TeamId(1),
-            mode: super::model::BotModeView::Heist,
+            objective: crate::matchplay::BotObjectiveView::AttackAndDefend,
         },
         BotPlanMember {
             network_id: NetworkEntityId(10),
             team: TeamId(0),
-            mode: super::model::BotModeView::Heist,
+            objective: crate::matchplay::BotObjectiveView::AttackAndDefend,
         },
         BotPlanMember {
             network_id: NetworkEntityId(20),
             team: TeamId(0),
-            mode: super::model::BotModeView::Heist,
+            objective: crate::matchplay::BotObjectiveView::AttackAndDefend,
         },
     ];
     let forward = assign_roles(&members);
@@ -289,11 +289,9 @@ fn team_roles_are_stable_and_single_heist_bot_attacks() {
 fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
     let mut observed = observation(10);
     observed.self_view.position = Vec2::new(-700.0, 0.0);
-    observed.mode = super::model::BotModeView::HotZone {
+    observed.objective = crate::matchplay::BotObjectiveView::ControlArea {
         center: Vec2::ZERO,
         radius: 160.0,
-        status: crate::matchplay::HotZoneStatus::Empty,
-        progress: [0, 0],
     };
     observed.visible_enemies.push(super::model::BotFighterView {
         network_id: crate::protocol::NetworkEntityId(2),
@@ -325,11 +323,9 @@ fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
 fn nondefault_hot_zone_hold_fraction_changes_the_policy_goal() {
     let mut observed = observation(10);
     observed.self_view.position = Vec2::new(-700.0, 0.0);
-    observed.mode = super::model::BotModeView::HotZone {
+    observed.objective = crate::matchplay::BotObjectiveView::ControlArea {
         center: Vec2::ZERO,
         radius: 160.0,
-        status: crate::matchplay::HotZoneStatus::Empty,
-        progress: [0, 0],
     };
     let baseline = BotProfile::embedded().unwrap();
     let mut tuned = baseline;
@@ -491,7 +487,7 @@ fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
         matchplay::MatchId,
     };
     let mut observed = observation(10);
-    observed.mode = super::model::BotModeView::Heist;
+    observed.objective = crate::matchplay::BotObjectiveView::AttackAndDefend;
     observed.self_view.position = Vec2::new(-700.0, 0.0);
     observed.visible_enemies.push(super::model::BotFighterView {
         network_id: crate::protocol::NetworkEntityId(2),
@@ -516,13 +512,13 @@ fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
                 anchor_id: ModeAnchorId(anchor),
                 defending_team: team,
             },
-            kind: super::model::BotObjectKind::HeistSafe {
-                defending_team: team,
-            },
             position,
             current_health: 1_000,
             maximum_health: 1_000,
             live: true,
+            hazardous: false,
+            valuable: false,
+            defending_team: Some(team),
         });
     }
     let mut state = super::model::BotState::default();
@@ -549,11 +545,13 @@ fn object_attack_holds_weapon_standoff_instead_of_entering_the_collider() {
             generation: observed.map_generation,
             placement_id: crate::map::MapPlacementId(1),
         },
-        kind: super::model::BotObjectKind::TreasureChest,
         position: object_position,
         current_health: 100,
         maximum_health: 100,
         live: true,
+        hazardous: false,
+        valuable: true,
+        defending_team: None,
     });
     let mut state = super::model::BotState::default();
     let intent = policy::choose_intent(
@@ -923,7 +921,7 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
 }
 
 fn observation(tick: u64) -> BotObservation {
-    use super::model::{BotFighterView, BotModeView};
+    use super::model::BotFighterView;
     use crate::{
         combat::{TeamId, WeaponPhase},
         map::{MapDynamicGeneration, MapInstanceId},
@@ -957,7 +955,7 @@ fn observation(tick: u64) -> BotObservation {
         visible_enemies: Vec::new(),
         objects: Vec::new(),
         pickups: Vec::new(),
-        mode: BotModeView::Wipeout { scores: [0, 0] },
+        objective: crate::matchplay::BotObjectiveView::Elimination,
         weapon_phase: WeaponPhase::Ready,
         weapon_ammo: 1,
         ability_ready: false,

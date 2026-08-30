@@ -211,12 +211,20 @@ pub(super) fn spawn_dynamic_collider(
             });
         }
         crate::map::MapDurabilityBehavior::HitPoints(damage_profile_id) => {
-            let maximum_health = world
+            let damage_profile = world
                 .resource::<MapCatalogResource>()
                 .0
                 .damage_profile(damage_profile_id)
-                .expect("validated damage profile exists")
-                .maximum_health;
+                .copied()
+                .expect("validated damage profile exists");
+            let maximum_health = damage_profile.maximum_health;
+            // Full server composition finalizes this registry before Startup. Low-level geometry
+            // tests may intentionally materialize colliders without the authority runtime; those
+            // worlds simply omit consumer-only semantic markers.
+            let semantics = world
+                .get_resource::<super::terminal_reactions::TerminalReactionRegistry>()
+                .and_then(|registry| registry.semantics(damage_profile.terminal.reaction_id()))
+                .unwrap_or_default();
             world.entity_mut(entity).insert((
                 crate::map::DamageableWorldObject,
                 crate::map::DamageableTargetIdentity::MapObject {
@@ -234,6 +242,16 @@ pub(super) fn spawn_dynamic_collider(
                 crate::combat::CurrentHealth(maximum_health),
                 Replicate::to_clients(NetworkTarget::All),
             ));
+            if semantics.hazardous {
+                world
+                    .entity_mut(entity)
+                    .insert(crate::map::HazardousDamageableTarget);
+            }
+            if semantics.valuable {
+                world
+                    .entity_mut(entity)
+                    .insert(crate::map::ValuableDamageableTarget);
+            }
         }
     }
 }

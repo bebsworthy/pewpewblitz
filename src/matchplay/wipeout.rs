@@ -140,10 +140,13 @@ mod rules {
         let Ok(root) = roots.single() else {
             return;
         };
-        commands.entity(root).insert(WipeoutState {
-            team_scores: [0, 0],
-            target_score: rules.target_score,
-        });
+        commands.entity(root).insert((
+            WipeoutState {
+                team_scores: [0, 0],
+                target_score: rules.target_score,
+            },
+            crate::matchplay::BotObjectiveView::Elimination,
+        ));
     }
 
     /// Deadline rule: at or after `ends_at_tick`, recognize an already-present threshold state

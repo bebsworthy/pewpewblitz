@@ -53,6 +53,10 @@ fn performance_app() -> App {
         ..default()
     });
     app.insert_resource(TimeUpdateStrategy::ManualDuration(SIMULATION_TICK));
+    // Production runners finalize plugins before Startup. The benchmark drives `App::update`
+    // directly, so finalize plugin-populated registries explicitly as part of the fixture.
+    app.finish();
+    app.cleanup();
     app.update();
     app
 }

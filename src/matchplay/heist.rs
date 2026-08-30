@@ -312,44 +312,54 @@ mod authority {
                 anchor_id: safe.anchor_id,
                 defending_team: safe.defending_team,
             };
-            commands.spawn((
-                HeistSafe {
-                    match_id: match_state.match_id,
-                    anchor_id: safe.anchor_id,
+            let safe_entity = commands
+                .spawn((
+                    HeistSafe {
+                        match_id: match_state.match_id,
+                        anchor_id: safe.anchor_id,
+                        defending_team: safe.defending_team,
+                        generation,
+                    },
+                    DamageableTargetIdentity::HeistSafe {
+                        match_id: match_state.match_id,
+                        anchor_id: safe.anchor_id,
+                        defending_team: safe.defending_team,
+                    },
+                    DamageableTargetClass::ModeObjective,
+                    DamageableMaximumHealth(rules.safe_maximum_health),
+                    CurrentHealth(rules.safe_maximum_health),
+                    DamageableLifeState::Live,
+                    safe.defending_team,
+                    MapInstanceMember {
+                        map_instance_id: generation.map_instance_id,
+                        placement_id: safe.placement_id,
+                    },
+                    RigidBody::Static,
+                    Collider::rectangle(safe.half_extents.x * 2.0, safe.half_extents.y * 2.0),
+                    crate::movement::map_collision_layers(),
+                    Position(safe.center),
+                    Rotation::radians(f32::from(safe.quarter_turns) * std::f32::consts::FRAC_PI_2),
+                    Transform::from_translation(safe.center.extend(0.0)),
+                    Replicate::to_clients(NetworkTarget::All),
+                ))
+                .id();
+            commands
+                .entity(safe_entity)
+                .insert(crate::map::DefendedDamageableObjective {
                     defending_team: safe.defending_team,
-                    generation,
-                },
-                DamageableTargetIdentity::HeistSafe {
-                    match_id: match_state.match_id,
-                    anchor_id: safe.anchor_id,
-                    defending_team: safe.defending_team,
-                },
-                DamageableTargetClass::ModeObjective,
-                DamageableMaximumHealth(rules.safe_maximum_health),
-                CurrentHealth(rules.safe_maximum_health),
-                DamageableLifeState::Live,
-                safe.defending_team,
-                MapInstanceMember {
-                    map_instance_id: generation.map_instance_id,
-                    placement_id: safe.placement_id,
-                },
-                RigidBody::Static,
-                Collider::rectangle(safe.half_extents.x * 2.0, safe.half_extents.y * 2.0),
-                crate::movement::map_collision_layers(),
-                Position(safe.center),
-                Rotation::radians(f32::from(safe.quarter_turns) * std::f32::consts::FRAC_PI_2),
-                Transform::from_translation(safe.center.extend(0.0)),
-                Replicate::to_clients(NetworkTarget::All),
-            ));
+                });
         }
-        commands.entity(root).insert(HeistState {
-            match_id: match_state.match_id,
-            rules_revision: HEIST_RULES_REVISION,
-            generation,
-            critical_health_percent: rules.critical_health_percent,
-            safes: identities,
-            completion: None,
-        });
+        commands.entity(root).insert((
+            HeistState {
+                match_id: match_state.match_id,
+                rules_revision: HEIST_RULES_REVISION,
+                generation,
+                critical_health_percent: rules.critical_health_percent,
+                safes: identities,
+                completion: None,
+            },
+            crate::matchplay::BotObjectiveView::AttackAndDefend,
+        ));
     }
 
     fn objective_request_key(

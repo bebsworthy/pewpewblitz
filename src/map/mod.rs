@@ -78,6 +78,10 @@ pub use objects::{
     WorldTargetTerminalFact, object_is_live,
 };
 #[cfg(feature = "server")]
+pub(crate) use objects::{
+    DefendedDamageableObjective, HazardousDamageableTarget, ValuableDamageableTarget,
+};
+#[cfg(feature = "server")]
 pub use objects::{
     PendingWorldTargetDamage, PendingWorldTargetDamages, WorldObjectOutbox, WorldObjectTelemetry,
 };

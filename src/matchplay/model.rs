@@ -105,6 +105,16 @@ pub struct MatchState {
     pub rules_revision: u16,
 }
 
+/// Bounded, process-local objective projection published by the installed mode plugin for
+/// authoritative AI consumers. It deliberately describes objective shape rather than mode ID.
+#[cfg(feature = "server")]
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(crate) enum BotObjectiveView {
+    Elimination,
+    ControlArea { center: Vec2, radius: f32 },
+    AttackAndDefend,
+}
+
 /// Generation-tagged shared match clock published on the match root.
 ///
 /// Clients derive countdown/remaining/restart deadlines only from the phase deadline minus

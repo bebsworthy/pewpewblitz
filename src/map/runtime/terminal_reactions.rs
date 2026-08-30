@@ -14,16 +14,42 @@ pub(crate) type TerminalReactionHandler =
 #[derive(Clone, Copy)]
 pub(crate) struct TerminalReactionRegistration {
     id: crate::map::TerminalReactionId,
+    semantics: TerminalReactionSemantics,
     handler: TerminalReactionHandler,
 }
 
 impl TerminalReactionRegistration {
     pub(crate) const fn new(
         id: crate::map::TerminalReactionId,
+        semantics: TerminalReactionSemantics,
         handler: TerminalReactionHandler,
     ) -> Self {
-        Self { id, handler }
+        Self {
+            id,
+            semantics,
+            handler,
+        }
     }
+}
+
+/// Process-local capabilities projected by a terminal-reaction plugin onto each authored
+/// damageable object that uses the reaction. Consumers observe these semantics instead of
+/// recognizing concrete map assets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TerminalReactionSemantics {
+    pub(crate) hazardous: bool,
+    pub(crate) valuable: bool,
+}
+
+impl TerminalReactionSemantics {
+    pub(crate) const HAZARDOUS: Self = Self {
+        hazardous: true,
+        valuable: false,
+    };
+    pub(crate) const VALUABLE: Self = Self {
+        hazardous: false,
+        valuable: true,
+    };
 }
 
 #[derive(Resource, Default)]
@@ -91,6 +117,16 @@ impl TerminalReactionRegistry {
             .binary_search_by_key(&id, |registration| registration.id)
             .ok()
             .map(|index| self.registrations[index].handler)
+    }
+
+    pub(super) fn semantics(
+        &self,
+        id: crate::map::TerminalReactionId,
+    ) -> Option<TerminalReactionSemantics> {
+        self.registrations
+            .binary_search_by_key(&id, |registration| registration.id)
+            .ok()
+            .map(|index| self.registrations[index].semantics)
     }
 
     #[cfg(test)]
@@ -214,7 +250,11 @@ mod tests {
     }
 
     fn registration(id: crate::map::TerminalReactionId) -> TerminalReactionRegistration {
-        TerminalReactionRegistration::new(id, synthetic_handler)
+        TerminalReactionRegistration::new(
+            id,
+            TerminalReactionSemantics::default(),
+            synthetic_handler,
+        )
     }
 
     struct SyntheticReactionPlugin;

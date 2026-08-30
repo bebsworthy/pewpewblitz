@@ -11,7 +11,7 @@ use crate::{
 
 use super::terminal_reactions::{
     TerminalReactionAppExt, TerminalReactionContext, TerminalReactionRegistration,
-    TerminalReactionRegistry,
+    TerminalReactionRegistry, TerminalReactionSemantics,
 };
 use super::{MAX_MAP_DYNAMIC_OUTBOX_EVENTS, MapDynamicOutbox};
 
@@ -33,6 +33,7 @@ impl Plugin for ExplosionTerminalReactionPlugin {
     fn build(&self, app: &mut App) {
         app.try_register_terminal_reaction(TerminalReactionRegistration::new(
             crate::map::TerminalReactionId::EXPLOSION,
+            TerminalReactionSemantics::HAZARDOUS,
             commit_explosion_reaction,
         ))
         .expect("explosion terminal reaction registers once");
@@ -45,6 +46,7 @@ impl Plugin for RestorationPickupTerminalReactionPlugin {
     fn build(&self, app: &mut App) {
         app.try_register_terminal_reaction(TerminalReactionRegistration::new(
             crate::map::TerminalReactionId::RESTORATION_PICKUP,
+            TerminalReactionSemantics::VALUABLE,
             commit_restoration_pickup_reaction,
         ))
         .expect("restoration-pickup terminal reaction registers once");

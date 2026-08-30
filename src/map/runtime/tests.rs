@@ -136,6 +136,19 @@ fn barrel_health(app: &mut App, placement_id: u32) -> Option<u16> {
         .map(|(_, health)| health.0)
 }
 
+fn damageable_semantics(app: &mut App, placement_id: u32) -> Option<(bool, bool)> {
+    let world = app.world_mut();
+    let mut query = world.query::<(
+        &super::super::DamageableTargetIdentity,
+        Has<super::super::HazardousDamageableTarget>,
+        Has<super::super::ValuableDamageableTarget>,
+    )>();
+    query
+        .iter(world)
+        .find(|(identity, ..)| identity.placement_id() == MapPlacementId(placement_id))
+        .map(|(_, hazardous, valuable)| (hazardous, valuable))
+}
+
 fn destruction_fact(position: Vec2, radius: f32) -> CombatWorldEffectFact {
     CombatWorldEffectFact {
         tick: 1,
@@ -389,6 +402,7 @@ fn one_hit_replaces_an_entire_rotated_barrier_and_restart_restores_it() {
 #[test]
 fn barrel_damage_explodes_once_chains_and_restart_restores_a_new_generation() {
     let (mut app, root) = barrel_test_app();
+    assert_eq!(damageable_semantics(&mut app, 240), Some((true, false)));
     let target = barrel_identity(&mut app, 240);
     let source = test_attack_source();
     app.world_mut()
@@ -493,6 +507,7 @@ fn barrel_damage_explodes_once_chains_and_restart_restores_a_new_generation() {
 #[test]
 fn treasure_chest_commits_one_removed_state_and_one_generation_derived_pickup() {
     let (mut app, root) = barrel_test_app();
+    assert_eq!(damageable_semantics(&mut app, 260), Some((false, true)));
     let target = barrel_identity(&mut app, 260);
     let source = AttackSource {
         kind: CombatSourceKind::PrimaryWeapon,

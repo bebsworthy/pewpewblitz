@@ -83,6 +83,24 @@ pub enum DamageableLifeState {
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DamageableWorldObject;
 
+/// Semantic capability projected by the owning terminal-reaction plugin. This marker is
+/// process-local: authoritative and AI systems use it without exposing asset identity.
+#[cfg(feature = "server")]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct HazardousDamageableTarget;
+
+/// Semantic capability for a damageable target whose terminal reaction yields strategic value.
+#[cfg(feature = "server")]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ValuableDamageableTarget;
+
+/// Semantic capability for an attackable mode objective owned by one defending team.
+#[cfg(feature = "server")]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DefendedDamageableObjective {
+    pub(crate) defending_team: crate::combat::TeamId,
+}
+
 #[cfg(feature = "server")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PendingWorldTargetDamage {

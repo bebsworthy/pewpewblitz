@@ -238,3 +238,9 @@ Linked ticket BRL-0074 completed Stage 1 residual timing ownership. Shared simul
 ## Implementation progress — BRL-0075 complete
 
 Linked ticket BRL-0075 completed the terminal-reaction portion of Stage 2. Shared authored terminal behaviors now project stable reaction IDs; a crate-visible, plugin-populated registry seals deterministic bounded registrations against authored map content. Explosion and restoration-pickup plugins own registration, and handlers receive a bounded transaction context rather than arbitrary `World` access. Synthetic registration, all existing barrel/chest runtime behavior, client/server role graphs, `just check`, and `just lint` pass. The lint gate also prompted a focused cleanup of the prior diagnostic-policy test and bounded fractional timing helper.
+
+
+## Stage 2 progress — semantic AI projections complete
+
+- `BRL-0076` moved Practice AI from concrete barrel/chest IDs and mode-specific state inspection to terminal-plugin object semantics, defending-team objective components, and mode-plugin-owned `BotObjectiveView` projections.
+- Real-schedule Practice workers for Wipeout, Hot Zone, and Heist preserve directed input; role, authority, network, and performance gates are green.

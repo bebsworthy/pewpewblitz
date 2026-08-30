@@ -1,9 +1,6 @@
 use super::{
     diagnostics::{BotDecisionTrace, BotDiagnostics},
-    model::{
-        BotFighterView, BotModeView, BotObjectKind, BotObjectView, BotObservation, BotPickupView,
-        PracticeBotController,
-    },
+    model::{BotFighterView, BotObjectView, BotObservation, BotPickupView, PracticeBotController},
     navigation::BotNavigationSnapshot,
     policy,
     profile::{BotCatalogResource, BotProfile},
@@ -19,14 +16,11 @@ use crate::{
     },
     gameplay::GameplaySet,
     map::{
-        DamageableLifeState, DamageableMaximumHealth, DamageableObjectAsset,
-        DamageableTargetIdentity, MapDynamicState, OIL_BARREL_ASSET, ResolvedMap,
-        RestorationPickup, TREASURE_CHEST_ASSET,
+        DamageableLifeState, DamageableMaximumHealth, DamageableTargetIdentity,
+        DefendedDamageableObjective, HazardousDamageableTarget, MapDynamicState, ResolvedMap,
+        RestorationPickup, ValuableDamageableTarget,
     },
-    matchplay::{
-        ActiveCombatant, HeistSafe, HeistState, HotZoneState, MatchPhase, MatchRoot, MatchState,
-        WipeoutState,
-    },
+    matchplay::{ActiveCombatant, BotObjectiveView, MatchPhase, MatchRoot, MatchState},
     movement::{InputFreshness, decoded_input_is_valid},
     protocol::{Fighter, FighterInput, NetworkEntityId},
     timing::SimulationTick,
@@ -96,15 +90,7 @@ fn capture_observations(
     map: Res<ResolvedMap>,
     builds: Res<crate::builds::BuildCatalogResource>,
     dynamic_states: Query<&MapDynamicState>,
-    roots: Query<
-        (
-            &MatchState,
-            Option<&WipeoutState>,
-            Option<&HotZoneState>,
-            Has<HeistState>,
-        ),
-        With<MatchRoot>,
-    >,
+    roots: Query<(&MatchState, &BotObjectiveView), With<MatchRoot>>,
     mut fighters: ParamSet<(
         Query<
             (
@@ -130,14 +116,15 @@ fn capture_observations(
         &Position,
         &CurrentHealth,
         &DamageableMaximumHealth,
-        Option<&DamageableObjectAsset>,
         Option<&DamageableLifeState>,
-        Option<&HeistSafe>,
+        Has<HazardousDamageableTarget>,
+        Has<ValuableDamageableTarget>,
+        Option<&DefendedDamageableObjective>,
     )>,
     pickups: Query<&Position, With<RestorationPickup>>,
     mut navigation: ResMut<BotNavigationRuntime>,
 ) {
-    let Ok((match_state, wipeout, hot_zone, heist)) = roots.single() else {
+    let Ok((match_state, objective)) = roots.single() else {
         return;
     };
     let Ok(dynamic) = dynamic_states.single() else {
@@ -206,27 +193,25 @@ fn capture_observations(
     raw_fighters.sort_by_key(|fighter| fighter.network_id);
     let mut object_views: Vec<_> = objects
         .iter()
-        .filter_map(|(identity, position, health, maximum, asset, life, safe)| {
-            let kind = if let Some(safe) = safe {
-                BotObjectKind::HeistSafe {
-                    defending_team: safe.defending_team,
+        .filter_map(
+            |(identity, position, health, maximum, life, hazardous, valuable, objective)| {
+                let defending_team = objective.map(|objective| objective.defending_team);
+                if !hazardous && !valuable && defending_team.is_none() {
+                    return None;
                 }
-            } else {
-                match asset?.0 {
-                    OIL_BARREL_ASSET => BotObjectKind::OilBarrel,
-                    TREASURE_CHEST_ASSET => BotObjectKind::TreasureChest,
-                    _ => return None,
-                }
-            };
-            Some(BotObjectView {
-                identity: *identity,
-                kind,
-                position: position.0,
-                current_health: health.0,
-                maximum_health: maximum.0,
-                live: life.is_none_or(|life| *life == DamageableLifeState::Live) && health.0 > 0,
-            })
-        })
+                Some(BotObjectView {
+                    identity: *identity,
+                    position: position.0,
+                    current_health: health.0,
+                    maximum_health: maximum.0,
+                    live: life.is_none_or(|life| *life == DamageableLifeState::Live)
+                        && health.0 > 0,
+                    hazardous,
+                    valuable,
+                    defending_team,
+                })
+            },
+        )
         .collect();
     object_views.sort_by_key(|object| object.identity.stable_order_key());
     let mut pickup_views: Vec<_> = pickups
@@ -241,33 +226,6 @@ fn capture_observations(
             .total_cmp(&b.position.x)
             .then_with(|| a.position.y.total_cmp(&b.position.y))
     });
-    let mode = match crate::modes::descriptor_for_definition(match_state.mode_definition_id)
-        .and_then(|descriptor| descriptor.bot_projection)
-    {
-        Some(crate::modes::BotModeProjection::Wipeout) => {
-            let Some(state) = wipeout else { return };
-            BotModeView::Wipeout {
-                scores: state.team_scores,
-            }
-        }
-        Some(crate::modes::BotModeProjection::HotZone) => {
-            let Some(state) = hot_zone else { return };
-            let Some(zone) = map.objective_zone else {
-                return;
-            };
-            let crate::map::MapShape::Circle { radius } = zone.area.shape else {
-                return;
-            };
-            BotModeView::HotZone {
-                center: zone.area.center,
-                radius,
-                status: state.status,
-                progress: state.progress_ticks,
-            }
-        }
-        Some(crate::modes::BotModeProjection::Heist) if heist => BotModeView::Heist,
-        _ => return,
-    };
     let match_active = matches!(match_state.phase, MatchPhase::Active { .. });
 
     for (network_id, mut controller) in &mut fighters.p1() {
@@ -344,7 +302,7 @@ fn capture_observations(
             visible_enemies,
             objects: object_views.clone(),
             pickups: pickup_views.clone(),
-            mode,
+            objective: *objective,
             weapon_phase: observer.weapon.phase,
             weapon_ammo: observer.weapon.ammo,
             ability_ready: matches!(observer.ability.phase, AbilityPhase::Ready),
@@ -428,7 +386,7 @@ fn decide_and_commit_inputs(
                 .map(|observation| BotPlanMember {
                     network_id: *network_id,
                     team: observation.self_view.team,
-                    mode: observation.mode,
+                    objective: observation.objective,
                 })
         })
         .collect::<Vec<_>>();

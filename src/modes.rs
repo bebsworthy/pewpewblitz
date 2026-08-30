@@ -43,14 +43,6 @@ pub(crate) struct ModePresentationProjection {
 }
 
 #[cfg(feature = "server")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BotModeProjection {
-    Wipeout,
-    HotZone,
-    Heist,
-}
-
-#[cfg(feature = "server")]
 type ServerModeInstaller = fn(
     &mut bevy::prelude::App,
     &'static ModeDescriptor,
@@ -78,8 +70,6 @@ pub(crate) struct ModeDescriptor {
     pub(crate) routing_mode: brawler_routing::GameMode,
     #[cfg(feature = "client")]
     pub(crate) presentation: Option<ModePresentationProjection>,
-    #[cfg(feature = "server")]
-    pub(crate) bot_projection: Option<BotModeProjection>,
     #[cfg(feature = "server")]
     install_server: ServerModeInstaller,
 }
@@ -135,8 +125,6 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
             selection_label: "Wipeout",
         }),
         #[cfg(feature = "server")]
-        bot_projection: Some(BotModeProjection::Wipeout),
-        #[cfg(feature = "server")]
         install_server: install_wipeout,
     },
     ModeDescriptor {
@@ -159,8 +147,6 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
             selection_label: "Hot Zone",
         }),
         #[cfg(feature = "server")]
-        bot_projection: Some(BotModeProjection::HotZone),
-        #[cfg(feature = "server")]
         install_server: install_hot_zone,
     },
     ModeDescriptor {
@@ -182,8 +168,6 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
         presentation: Some(ModePresentationProjection {
             selection_label: "Heist",
         }),
-        #[cfg(feature = "server")]
-        bot_projection: Some(BotModeProjection::Heist),
         #[cfg(feature = "server")]
         install_server: install_heist,
     },
@@ -429,8 +413,6 @@ mod tests {
             assert!(descriptor.accepts_map(descriptor.definition_id));
             #[cfg(feature = "client")]
             assert!(descriptor.presentation.is_some());
-            #[cfg(feature = "server")]
-            assert!(descriptor.bot_projection.is_some());
             assert_eq!(
                 descriptor_for_definition(descriptor.definition_id).map(|entry| entry.mode),
                 Some(mode)

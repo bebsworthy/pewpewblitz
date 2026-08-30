@@ -313,15 +313,24 @@ mod rules {
             "Hot Zone mode requires a Hot Zone map"
         );
         let zone = *zone;
-        commands.entity(root).insert(HotZoneState {
-            match_id: state.match_id,
-            zone_anchor_id: zone.anchor_id,
-            occupants: [0, 0],
-            status: HotZoneStatus::Empty,
-            progress_ticks: [0, 0],
-            target_progress_ticks: rules.target_progress_ticks,
-            next_evaluation_tick: HotZoneState::UNINITIALIZED_EVALUATION_TICK,
-        });
+        let crate::map::MapShape::Circle { radius } = zone.area.shape else {
+            panic!("validated Hot Zone objective must be circular");
+        };
+        commands.entity(root).insert((
+            HotZoneState {
+                match_id: state.match_id,
+                zone_anchor_id: zone.anchor_id,
+                occupants: [0, 0],
+                status: HotZoneStatus::Empty,
+                progress_ticks: [0, 0],
+                target_progress_ticks: rules.target_progress_ticks,
+                next_evaluation_tick: HotZoneState::UNINITIALIZED_EVALUATION_TICK,
+            },
+            crate::matchplay::BotObjectiveView::ControlArea {
+                center: zone.area.center,
+                radius,
+            },
+        ));
         commands.insert_resource(ResolvedObjectiveZone {
             anchor_id: zone.anchor_id,
             area: zone.area,

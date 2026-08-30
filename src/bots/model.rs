@@ -1,7 +1,7 @@
 use crate::{
     combat::{TeamId, WeaponPhase},
     map::{DamageableTargetIdentity, MapDynamicGeneration, MapInstanceId},
-    matchplay::{HotZoneStatus, MatchId},
+    matchplay::{BotObjectiveView, MatchId},
     protocol::NetworkEntityId,
 };
 use bevy::prelude::*;
@@ -29,40 +29,21 @@ pub(super) struct BotFighterView {
     pub burning: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum BotObjectKind {
-    OilBarrel,
-    TreasureChest,
-    HeistSafe { defending_team: TeamId },
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct BotObjectView {
     pub identity: DamageableTargetIdentity,
-    pub kind: BotObjectKind,
     pub position: Vec2,
     pub current_health: u16,
     pub maximum_health: u16,
     pub live: bool,
+    pub hazardous: bool,
+    pub valuable: bool,
+    pub defending_team: Option<TeamId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct BotPickupView {
     pub position: Vec2,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum BotModeView {
-    Wipeout {
-        scores: [u16; 2],
-    },
-    HotZone {
-        center: Vec2,
-        radius: f32,
-        status: HotZoneStatus,
-        progress: [u16; 2],
-    },
-    Heist,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,7 +59,7 @@ pub(super) struct BotObservation {
     pub visible_enemies: Vec<BotFighterView>,
     pub objects: Vec<BotObjectView>,
     pub pickups: Vec<BotPickupView>,
-    pub mode: BotModeView,
+    pub objective: BotObjectiveView,
     pub weapon_phase: WeaponPhase,
     pub weapon_ammo: u8,
     pub ability_ready: bool,
