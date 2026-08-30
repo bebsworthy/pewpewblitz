@@ -74,6 +74,8 @@ mod hot_zone;
 mod builds;
 #[path = "network/combat_composed.rs"]
 mod combat_composed;
+#[path = "network/combat_melee.rs"]
+mod combat_melee;
 #[path = "network/combat_projectiles.rs"]
 mod combat_projectiles;
 #[path = "network/combat_pulse.rs"]

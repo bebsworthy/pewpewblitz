@@ -43,3 +43,29 @@
 - `just lint`
 - `just test`
 - No native playtest is required unless behavior changes; this slice must preserve gameplay exactly.
+
+## Implementation and verification — 2026-08-30
+
+- Moved accepted primary-attack delivery emission behind the private `combat::attack::emission` module while leaving admission, ID/event reservation, economy mutation, accepted facts, trackers, cue publication order, and the `GameplaySet::Fire` schedule boundary unchanged.
+- `emit_attack_deliveries` is now a short exhaustive `DeliveryMethod` coordinator. Straight/sticky, blocked contact, melee, cone spray, lobbed, and splash behavior have focused helpers.
+- Lobbed and Splash now share one projectile construction primitive, retaining exact `LobbedFlight`, runtime, deadline, replication/interpolation, `MatchMember`, and flight-duration behavior.
+- Blocked straight contact retains ordered event-cursor consumption and legacy cue/log publication. Blocked sticky emission still arms without publishing an impact event. Tracker cardinality remains one per straight/lob/melee delivery, cone pulse count, and splash pulse count plus landing.
+- Added a routed melee characterization proving Impact Blade emits no projectile, resolves authoritative damage, and records preset telemetry. Existing routed coverage characterizes straight thin-cover and point-blank contact, sticky attachment, lobbed focal distance, persistent splash, cone spray, and same-fixed-tick projectile collision.
+
+Verification passed:
+
+- `cargo fmt --all -- --check`
+- `git diff --check`
+- focused server attack tests: 5 passed
+- focused routed family scenarios: 8 passed (straight thin cover, point-blank object contact, sticky, lobbed, splash, melee, cone spray, first-fixed-tick projectile)
+- `just check`
+- `just lint`
+- `just test`: 492 client, 439 server, 461 Balance Lab, 95 network, and 12 performance tests passed; routing/package suites also passed
+
+No native playtest was required because this was an organization-only authority refactor with direct routed characterization for every delivery family.
+
+## Learn-from-errors review
+
+- The first strict-lint run caught a manual `match` destructuring that should have used `let ... else`; it was corrected before closeout and the full lint matrix was rerun.
+- The focused routed test was initially invoked without the required `network-test` feature. The command failed before executing tests, was corrected, and the successful feature-explicit command plus the canonical suite were recorded.
+- Reusable lesson: preserve the schedule-facing attack transaction and extract deterministic family commits beneath it. This reduces mixed responsibility without introducing unordered systems or a speculative public delivery framework.

@@ -54,6 +54,64 @@ fn close_quarters_damage_is_identical_in_reservation_and_application_math() {
 
 #[cfg(feature = "server")]
 #[test]
+fn damage_plan_is_pure_bounded_and_marks_only_the_first_lethal_application() {
+    use crate::combat::effects::application::plan_damage_application;
+
+    let partial = plan_damage_application(100, false, 40, DamageFalloff::None, 0.0, 1.0, None, 0.0)
+        .expect("partial damage plan");
+    assert_eq!(partial.requested, 40);
+    assert_eq!(partial.applied, 40);
+    assert_eq!(partial.health_after, 60);
+    assert!(!partial.defeats);
+
+    let lethal = plan_damage_application(30, false, 80, DamageFalloff::None, 0.0, 1.0, None, 0.0)
+        .expect("lethal damage plan");
+    assert_eq!(lethal.applied, 30);
+    assert_eq!(lethal.health_after, 0);
+    assert!(lethal.defeats);
+
+    let already_defeated =
+        plan_damage_application(30, true, 80, DamageFalloff::None, 0.0, 1.0, None, 0.0)
+            .expect("damage remains calculable for sequential simulation");
+    assert!(!already_defeated.defeats);
+    assert!(
+        plan_damage_application(0, false, 80, DamageFalloff::None, 0.0, 1.0, None, 0.0,).is_none()
+    );
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn healing_plan_preserves_zero_and_capped_committed_results() {
+    use crate::combat::effects::application::{HealingApplicationPlan, plan_healing_application};
+
+    assert_eq!(
+        plan_healing_application(40, 100, 30, 1.0),
+        HealingApplicationPlan {
+            requested: 30,
+            applied: 30,
+            health_after: 70,
+        }
+    );
+    assert_eq!(
+        plan_healing_application(90, 100, 30, 1.0),
+        HealingApplicationPlan {
+            requested: 30,
+            applied: 10,
+            health_after: 100,
+        }
+    );
+    assert_eq!(
+        plan_healing_application(100, 100, 30, 1.0),
+        HealingApplicationPlan {
+            requested: 30,
+            applied: 0,
+            health_after: 100,
+        }
+    );
+}
+
+#[cfg(feature = "server")]
+#[test]
 fn deployable_target_policy_is_explicit_for_every_m08_source_and_effect() {
     for source in [
         CombatSourceKind::PrimaryWeapon,

@@ -198,6 +198,84 @@ pub(super) const fn payload_target_gate(
     TargetGate::Apply
 }
 
+/// Immutable damage calculation consumed by the authoritative batch transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DamageApplicationPlan {
+    pub(super) requested: u16,
+    pub(super) unmodified_applied: u16,
+    pub(super) applied: u16,
+    pub(super) health_after: u16,
+    pub(super) defeats: bool,
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the plan exposes each authored and current-state input to the pure damage calculation"
+)]
+pub(super) fn plan_damage_application(
+    current_health: u16,
+    target_defeated: bool,
+    amount: u16,
+    falloff: DamageFalloff,
+    delivery_travel: f32,
+    recipient_scale: f32,
+    close_quarters: Option<crate::builds::PassiveParameters>,
+    engagement_distance: f32,
+) -> Option<DamageApplicationPlan> {
+    let unmodified_requested = requested_damage(
+        amount,
+        falloff,
+        delivery_travel,
+        recipient_scale,
+        None,
+        engagement_distance,
+    );
+    let requested = requested_damage(
+        amount,
+        falloff,
+        delivery_travel,
+        recipient_scale,
+        close_quarters,
+        engagement_distance,
+    );
+    let applied = requested.min(current_health);
+    if applied == 0 {
+        return None;
+    }
+    Some(DamageApplicationPlan {
+        requested,
+        unmodified_applied: unmodified_requested.min(current_health),
+        applied,
+        health_after: current_health.saturating_sub(applied),
+        defeats: !target_defeated && current_health == applied,
+    })
+}
+
+/// Immutable healing calculation consumed by the authoritative batch transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct HealingApplicationPlan {
+    pub(super) requested: u16,
+    pub(super) applied: u16,
+    pub(super) health_after: u16,
+}
+
+pub(super) fn plan_healing_application(
+    current_health: u16,
+    maximum_health: u16,
+    amount: u16,
+    recipient_scale: f32,
+) -> HealingApplicationPlan {
+    let requested = (f32::from(amount) * recipient_scale)
+        .round()
+        .clamp(1.0, f32::from(u16::MAX)) as u16;
+    let applied = requested.min(maximum_health.saturating_sub(current_health));
+    HealingApplicationPlan {
+        requested,
+        applied,
+        health_after: current_health.saturating_add(applied).min(maximum_health),
+    }
+}
+
 // The application loop coordinates target resolution, gating, damage, and runtime effects
 // across the sorted batch; its parameter list is the fixed-tick state those stages share.
 #[allow(
@@ -372,30 +450,20 @@ pub(super) fn apply_composed_records(
                     } else {
                         None
                     };
-                let unmodified_requested = requested_damage(
-                    amount,
-                    falloff,
-                    record.delivery_travel,
-                    scale,
-                    None,
-                    record.engagement_distance,
-                );
-                let requested = requested_damage(
+                let Some(plan) = plan_damage_application(
+                    health.0,
+                    target_defeated,
                     amount,
                     falloff,
                     record.delivery_travel,
                     scale,
                     close_quarters.map(|passive| passive.parameters),
                     record.engagement_distance,
-                );
-                let applied_damage = requested.min(health.0);
-                if applied_damage == 0 {
+                ) else {
                     continue;
-                }
-                let defeats = applied_damage > 0 && !target_defeated && health.0 == applied_damage;
-                let unmodified_applied = unmodified_requested.min(health.0);
+                };
                 if let Some(passive) = close_quarters
-                    && applied_damage != unmodified_applied
+                    && plan.applied != plan.unmodified_applied
                 {
                     gameplay_telemetry
                         .ability
@@ -404,7 +472,7 @@ pub(super) fn apply_composed_records(
                             owner_network_id: record.source.owner_network_entity_id,
                             kind: crate::abilities::AbilityTelemetryKind::PassiveModified {
                                 passive_id: passive.id,
-                                amount: applied_damage.abs_diff(unmodified_applied),
+                                amount: plan.applied.abs_diff(plan.unmodified_applied),
                             },
                         });
                 }
@@ -416,12 +484,12 @@ pub(super) fn apply_composed_records(
                         .next()
                         .expect("payload event reservation matches legacy damage")
                 });
-                let defeat_event = defeats.then(|| {
+                let defeat_event = plan.defeats.then(|| {
                     reserved_events
                         .next()
                         .expect("payload event reservation matches defeat")
                 });
-                let legacy_defeat_event = if defeats && legacy_compatibility {
+                let legacy_defeat_event = if plan.defeats && legacy_compatibility {
                     Some(
                         reserved_events
                             .next()
@@ -430,28 +498,26 @@ pub(super) fn apply_composed_records(
                 } else {
                     None
                 };
-                health.0 = health.0.saturating_sub(applied_damage);
-                if applied_damage > 0 {
-                    record_damage_application(
-                        record,
-                        tick,
-                        source,
-                        *target_network_id,
-                        *target_team,
-                        target_kind,
-                        preset_id,
-                        (amount, falloff, recipients),
-                        requested,
-                        applied_damage,
-                        health.0,
-                        damage_event,
-                        legacy_damage_event,
-                        effects_state,
-                        motion_state,
-                        gameplay_telemetry,
-                        transaction,
-                    );
-                }
+                health.0 = plan.health_after;
+                record_damage_application(
+                    record,
+                    tick,
+                    source,
+                    *target_network_id,
+                    *target_team,
+                    target_kind,
+                    preset_id,
+                    (amount, falloff, recipients),
+                    plan.requested,
+                    plan.applied,
+                    plan.health_after,
+                    damage_event,
+                    legacy_damage_event,
+                    effects_state,
+                    motion_state,
+                    gameplay_telemetry,
+                    transaction,
+                );
                 if let Some(defeat_event) = defeat_event {
                     record_target_defeat(
                         commands,
@@ -476,11 +542,8 @@ pub(super) fn apply_composed_records(
                 if effect_tile.is_some_and(crate::map::EffectTileOccupancy::blocks_healing) {
                     continue;
                 }
-                let requested = (f32::from(amount) * scale)
-                    .round()
-                    .clamp(1.0, f32::from(u16::MAX)) as u16;
-                let applied_healing = requested.min(maximum_health.saturating_sub(health.0));
-                health.0 = health.0.saturating_add(applied_healing).min(maximum_health);
+                let plan = plan_healing_application(health.0, maximum_health, amount, scale);
+                health.0 = plan.health_after;
                 let event_id = reserved_events
                     .next()
                     .expect("payload event reservation matches healing");
@@ -492,8 +555,8 @@ pub(super) fn apply_composed_records(
                     target: *target_network_id,
                     position: WorldPoint::from(record.position),
                     effect: CombatEffectCue::Healing {
-                        amount: applied_healing,
-                        health_after: health.0,
+                        amount: plan.applied,
+                        health_after: plan.health_after,
                     },
                 };
                 transaction.legacy_telemetry.record_cue(cue.clone());
@@ -514,9 +577,9 @@ pub(super) fn apply_composed_records(
                     position: WorldPoint::from(record.position),
                     engagement_distance: record.engagement_distance,
                     kind: CombatOutcomeKind::Healing {
-                        requested,
-                        applied: applied_healing,
-                        resulting_health: health.0,
+                        requested: plan.requested,
+                        applied: plan.applied,
+                        resulting_health: plan.health_after,
                     },
                 });
                 gameplay_telemetry.weapon.record(WeaponTelemetryRecord {
@@ -529,13 +592,13 @@ pub(super) fn apply_composed_records(
                     source: record.source.owner_network_entity_id,
                     target: Some(*target_network_id),
                     position: WorldPoint::from(record.position),
-                    requested_value: requested,
-                    applied_value: applied_healing,
+                    requested_value: plan.requested,
+                    applied_value: plan.applied,
                     engagement_distance: record.engagement_distance,
                     delivery_travel: record.delivery_travel,
                     hostile_contact: false,
                     effect: Some(effect),
-                    resulting_health: Some(health.0),
+                    resulting_health: Some(plan.health_after),
                     resulting_effects: Some(effects_state),
                     resulting_motion: motion_state,
                     outcome: WeaponTelemetryOutcome::HealingApplied,
