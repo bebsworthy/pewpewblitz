@@ -34,6 +34,20 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
     assert_eq!(builds.ultimates.len(), 11);
     assert_eq!(builds.passives.len(), 9);
     assert_eq!(
+        builds.direct_diagnostic,
+        definitions::DirectDiagnosticLoadoutPolicy {
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_ids: vec![
+                crate::profiles::WeaponBaseId(1),
+                crate::profiles::WeaponBaseId(2),
+                crate::profiles::WeaponBaseId(3),
+                crate::profiles::WeaponBaseId(4),
+            ],
+            ultimate_id: UltimateDefinitionId(1),
+            passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
+        }
+    );
+    assert_eq!(
         builds.ultimate_charge,
         UltimateChargePolicy {
             maximum: 1_000,
@@ -118,6 +132,109 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
             max_active_per_owner: 12,
         }
     );
+}
+
+#[test]
+#[cfg(feature = "server")]
+fn direct_diagnostic_policy_is_fingerprinted_and_cycles_stable_weapon_ids() {
+    let (builds, weapons) = catalogs();
+    let baseline = builds.fingerprint().unwrap();
+    let mut variants = Vec::new();
+    let mut changed = builds.clone();
+    changed.direct_diagnostic.fighter_profile_id = crate::profiles::FighterProfileId(2);
+    variants.push(changed);
+    let mut changed = builds.clone();
+    changed.direct_diagnostic.weapon_base_ids.rotate_left(1);
+    variants.push(changed);
+    let mut changed = builds.clone();
+    changed.direct_diagnostic.ultimate_id = UltimateDefinitionId(2);
+    variants.push(changed);
+    let mut changed = builds.clone();
+    changed.direct_diagnostic.passive_ids = [PassiveDefinitionId(3), PassiveDefinitionId(5)];
+    variants.push(changed);
+    for changed in variants {
+        assert!(changed.validate_weapon_references(&weapons).is_ok());
+        assert_ne!(changed.fingerprint().unwrap(), baseline);
+    }
+
+    for (player_id, expected_weapon_id) in [(1, 1), (2, 2), (3, 3), (4, 4), (5, 1), (6, 2)] {
+        let loadout = resolve_direct_diagnostic_loadout(&builds, &weapons, player_id).unwrap();
+        assert_eq!(
+            loadout.primary_weapon.source_preset_id,
+            Some(crate::combat::WeaponPresetId(expected_weapon_id))
+        );
+        assert_eq!(loadout.ultimate.id, UltimateDefinitionId(1));
+        assert_eq!(
+            loadout.passives.map(|passive| passive.id),
+            [PassiveDefinitionId(3), PassiveDefinitionId(4)]
+        );
+    }
+    let first = resolve_direct_diagnostic_loadout(&builds, &weapons, 1).unwrap();
+    let historical_identity_material = postcard::to_allocvec(&(
+        BUILD_FINGERPRINT_FORMAT_VERSION,
+        16_u16,
+        builds.balance_revision,
+        1_u16,
+        WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+        UltimateDefinitionId(1),
+        [PassiveDefinitionId(3), PassiveDefinitionId(4)],
+    ))
+    .unwrap();
+    assert_eq!(
+        first.identity.recipe_fingerprint,
+        BuildRecipeFingerprint(crate::content::fnv1a64(&historical_identity_material))
+    );
+    assert_eq!(
+        resolve_direct_diagnostic_loadout(&builds, &weapons, 0),
+        Err(BuildResolutionError::InvalidCombination)
+    );
+}
+
+#[test]
+fn direct_diagnostic_policy_rejects_invalid_local_and_cross_catalog_references() {
+    let (builds, weapons) = catalogs();
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.fighter_profile_id = crate::profiles::FighterProfileId(0);
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.weapon_base_ids.clear();
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.weapon_base_ids[0] = crate::profiles::WeaponBaseId(0);
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.weapon_base_ids =
+        vec![crate::profiles::WeaponBaseId(1); definitions::MAX_DIRECT_DIAGNOSTIC_WEAPONS + 1];
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.weapon_base_ids[1] = invalid.direct_diagnostic.weapon_base_ids[0];
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.ultimate_id = UltimateDefinitionId(u16::MAX);
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.passive_ids = [PassiveDefinitionId(3), PassiveDefinitionId(3)];
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.passive_ids[0] = PassiveDefinitionId(1);
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds.clone();
+    invalid.direct_diagnostic.passive_ids[0] = PassiveDefinitionId(u16::MAX);
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = builds;
+    invalid.direct_diagnostic.weapon_base_ids[0] = crate::profiles::WeaponBaseId(u16::MAX);
+    assert!(invalid.validate().is_ok());
+    assert!(invalid.validate_weapon_references(&weapons).is_err());
 }
 
 #[test]

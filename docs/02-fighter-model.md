@@ -120,6 +120,13 @@ candidate legal or directly install resolved values on a fighter.
 Combat systems consume only the resolved loadout and runtime components. They do not query editor,
 inventory, acquisition, rarity, account, or entitlement state.
 
+The legacy direct-network diagnostic fallback also resolves through this same saved-brawler path.
+Its fighter profile, ordered weapon-base rotation, ultimate, and passives are validated authored
+policy in `content/catalogs/builds.ron`; match admission selects from that explicit stable-ID
+rotation and never derives diagnostic content from definition-vector order. The policy participates
+in global gameplay-content compatibility without changing otherwise-identical player build
+fingerprints.
+
 ## Fighter attributes
 
 Attributes belong to one of three levels: authored or derived loadout values, mutable runtime state,

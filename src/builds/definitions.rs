@@ -14,10 +14,12 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 16;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 17;
 pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 16;
+const BUILD_RECIPE_SCHEMA_VERSION: u16 = 16;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
+pub(crate) const MAX_DIRECT_DIAGNOSTIC_WEAPONS: usize = 8;
 pub(crate) const MAX_ULTIMATE_DEFINITIONS: usize = 32;
 pub(crate) const MAX_PASSIVE_DEFINITIONS: usize = 32;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -40,9 +42,18 @@ pub struct BuildCatalog {
     pub fighter_profiles: FighterStatProfiles,
     pub custom_pulse: CustomPulseTuning,
     pub ultimate_charge: UltimateChargePolicy,
+    pub(crate) direct_diagnostic: DirectDiagnosticLoadoutPolicy,
     pub weapon_costs: Vec<WeaponPointCost>,
     pub ultimates: Vec<UltimateDefinition>,
     pub passives: Vec<PassiveDefinition>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DirectDiagnosticLoadoutPolicy {
+    pub(crate) fighter_profile_id: crate::profiles::FighterProfileId,
+    pub(crate) weapon_base_ids: Vec<crate::profiles::WeaponBaseId>,
+    pub(crate) ultimate_id: UltimateDefinitionId,
+    pub(crate) passive_ids: [PassiveDefinitionId; 2],
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -155,6 +166,7 @@ impl BuildCatalog {
         }
         validate_ultimate_definitions(&self.ultimates)?;
         validate_passive_definitions(&self.passives)?;
+        self.validate_direct_diagnostic_policy()?;
         if self
             .ultimates
             .iter()
@@ -191,6 +203,54 @@ impl BuildCatalog {
         }
         for preset in &weapons.presets {
             weapons.resolve_preset(preset.id, self.fighter_body)?;
+        }
+        for weapon_base_id in &self.direct_diagnostic.weapon_base_ids {
+            resolve_saved_brawler_recipe(
+                self,
+                weapons,
+                self.direct_diagnostic.fighter_profile_id,
+                *weapon_base_id,
+                self.direct_diagnostic.ultimate_id,
+                self.direct_diagnostic.passive_ids,
+            )
+            .map_err(|error| format!("direct diagnostic loadout does not resolve: {error:?}"))?;
+        }
+        Ok(())
+    }
+
+    fn validate_direct_diagnostic_policy(&self) -> Result<(), String> {
+        let policy = &self.direct_diagnostic;
+        if !matches!(policy.fighter_profile_id.0, 1..=3) {
+            return Err("direct diagnostic fighter profile is unsupported".into());
+        }
+        if policy.weapon_base_ids.is_empty()
+            || policy.weapon_base_ids.len() > MAX_DIRECT_DIAGNOSTIC_WEAPONS
+            || policy.weapon_base_ids.iter().any(|id| id.0 == 0)
+            || policy
+                .weapon_base_ids
+                .iter()
+                .enumerate()
+                .any(|(index, id)| policy.weapon_base_ids[index + 1..].contains(id))
+        {
+            return Err("direct diagnostic weapon rotation is invalid".into());
+        }
+        if self.ultimate(policy.ultimate_id).is_none() {
+            return Err("direct diagnostic ultimate is unknown".into());
+        }
+        if policy.passive_ids[0] == policy.passive_ids[1]
+            || policy.passive_ids.iter().any(|id| {
+                self.passives
+                    .iter()
+                    .find(|definition| definition.id == *id)
+                    .is_none_or(|definition| {
+                        matches!(
+                            definition.kind,
+                            PassiveKind::LightweightFrame | PassiveKind::ReinforcedFrame
+                        )
+                    })
+            })
+        {
+            return Err("direct diagnostic passives are invalid".into());
         }
         Ok(())
     }
@@ -658,6 +718,39 @@ pub fn resolve_saved_brawler_recipe(
     )
 }
 
+/// Resolve the authored direct-diagnostic fallback through the ordinary saved-brawler path.
+#[cfg(feature = "server")]
+pub(crate) fn resolve_direct_diagnostic_loadout(
+    catalog: &BuildCatalog,
+    weapons: &WeaponCatalog,
+    player_id: u64,
+) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
+    if player_id == 0 {
+        return Err(BuildResolutionError::InvalidCombination);
+    }
+    let rotation_len = u64::try_from(catalog.direct_diagnostic.weapon_base_ids.len())
+        .map_err(|_| BuildResolutionError::ResolutionFailed)?;
+    if rotation_len == 0 {
+        return Err(BuildResolutionError::ResolutionFailed);
+    }
+    let index = usize::try_from((player_id - 1) % rotation_len)
+        .map_err(|_| BuildResolutionError::ResolutionFailed)?;
+    let weapon_base_id = catalog
+        .direct_diagnostic
+        .weapon_base_ids
+        .get(index)
+        .copied()
+        .ok_or(BuildResolutionError::ResolutionFailed)?;
+    resolve_saved_brawler_recipe(
+        catalog,
+        weapons,
+        catalog.direct_diagnostic.fighter_profile_id,
+        weapon_base_id,
+        catalog.direct_diagnostic.ultimate_id,
+        catalog.direct_diagnostic.passive_ids,
+    )
+}
+
 #[allow(clippy::too_many_lines)]
 fn resolve_build_recipe_inner(
     catalog: &BuildCatalog,
@@ -788,7 +881,7 @@ fn resolve_build_recipe_inner(
     let fingerprint_bytes = if let Some((fighter_profile_id, _)) = explicit_fighter_profile {
         postcard::to_allocvec(&(
             BUILD_FINGERPRINT_FORMAT_VERSION,
-            catalog.schema_version,
+            BUILD_RECIPE_SCHEMA_VERSION,
             catalog.balance_revision,
             fighter_profile_id,
             recipe.weapon,
@@ -798,7 +891,7 @@ fn resolve_build_recipe_inner(
     } else {
         postcard::to_allocvec(&(
             BUILD_FINGERPRINT_FORMAT_VERSION,
-            catalog.schema_version,
+            BUILD_RECIPE_SCHEMA_VERSION,
             catalog.balance_revision,
             recipe.weapon,
             recipe.ultimate,

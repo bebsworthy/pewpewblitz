@@ -223,3 +223,8 @@ The Practice bot behavior extension seam is implemented and closed under linked 
 
 
 BRL-0072's final organization keeps registry build/finalization ownership in `src/bots/registry.rs` and behavior algorithms/arbitration in `src/bots/behaviors.rs`; verification was rerun after that extraction.
+
+
+## Implementation progress — BRL-0073 complete
+
+Linked ticket BRL-0073 moved direct-diagnostic fallback loadout ownership from server admission literals into one validated `BuildCatalog` policy authored in `content/catalogs/builds.ron`. The stable ordered weapon rotation is now data-owned and resolved through the ordinary saved-brawler path by a focused server API. Build catalog schema 17 and the global gameplay-content fingerprint cover the policy, while unchanged player recipe fingerprints remain byte-compatible. Focused build/content/network tests and `just check` pass; no native evidence was required because accepted values and behavior are unchanged.

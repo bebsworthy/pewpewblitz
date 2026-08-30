@@ -1,5 +1,5 @@
 (
-    schema_version: 16,
+    schema_version: 17,
     balance_revision: BuildRevision(12),
     fighter_body: (radius: 14.0),
     fighter_profiles: (
@@ -19,6 +19,12 @@
         expanded: (capacity: 8, refill_ticks: 78),
     ),
     ultimate_charge: (maximum: 1000, dealt_damage_multiplier: 5, received_damage_multiplier: 3),
+    direct_diagnostic: (
+        fighter_profile_id: FighterProfileId(1),
+        weapon_base_ids: [WeaponBaseId(1), WeaponBaseId(2), WeaponBaseId(3), WeaponBaseId(4)],
+        ultimate_id: UltimateDefinitionId(1),
+        passive_ids: (PassiveDefinitionId(3), PassiveDefinitionId(4)),
+    ),
     weapon_costs: [
         (weapon_id: WeaponPresetId(1), point_cost: 4),
         (weapon_id: WeaponPresetId(2), point_cost: 5),

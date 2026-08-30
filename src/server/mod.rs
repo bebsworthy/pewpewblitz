@@ -811,28 +811,13 @@ fn process_client_hellos(
                                                 "capacity was checked before identifier allocation",
                                             );
                                             let loadout =
-                                                crate::builds::resolve_saved_brawler_recipe(
+                                                crate::builds::resolve_direct_diagnostic_loadout(
                                                     &content.builds.0,
                                                     &content.weapon_catalog.0,
-                                                    crate::profiles::FighterProfileId(1),
-                                                    crate::profiles::WeaponBaseId(
-                                                        u16::try_from(
-                                                            baseline_player_id.0.saturating_sub(1)
-                                                                % 4
-                                                                + 1,
-                                                        )
-                                                        .expect(
-                                                            "four diagnostic weapon bases fit u16",
-                                                        ),
-                                                    ),
-                                                    crate::builds::UltimateDefinitionId(1),
-                                                    [
-                                                        crate::builds::PassiveDefinitionId(3),
-                                                        crate::builds::PassiveDefinitionId(4),
-                                                    ],
+                                                    baseline_player_id.0,
                                                 )
                                                 .expect(
-                                                    "validated direct-diagnostic brawler recipe",
+                                                    "validated direct-diagnostic loadout policy",
                                                 );
                                             (assigned_team, loadout)
                                         };

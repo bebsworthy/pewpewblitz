@@ -188,4 +188,21 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn global_fingerprint_includes_authored_direct_diagnostic_policy() {
+        let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+        let maps = crate::map::MapContentCatalog::embedded().unwrap();
+        let builds = crate::builds::BuildCatalog::embedded().unwrap();
+        let baseline = gameplay_content_fingerprint(&weapons, &maps, &builds).unwrap();
+
+        let mut changed = builds;
+        changed.direct_diagnostic.weapon_base_ids.rotate_left(1);
+        changed.validate_weapon_references(&weapons).unwrap();
+
+        assert_ne!(
+            gameplay_content_fingerprint(&weapons, &maps, &changed).unwrap(),
+            baseline
+        );
+    }
 }

@@ -3,6 +3,8 @@
 mod definitions;
 mod model;
 
+#[cfg(feature = "server")]
+pub(crate) use definitions::resolve_direct_diagnostic_loadout;
 pub(crate) use definitions::{MAX_PASSIVE_DEFINITIONS, MAX_ULTIMATE_DEFINITIONS};
 
 pub use definitions::resolve_reveal_proximity_radius;
