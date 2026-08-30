@@ -228,3 +228,8 @@ BRL-0072's final organization keeps registry build/finalization ownership in `sr
 ## Implementation progress — BRL-0073 complete
 
 Linked ticket BRL-0073 moved direct-diagnostic fallback loadout ownership from server admission literals into one validated `BuildCatalog` policy authored in `content/catalogs/builds.ron`. The stable ordered weapon rotation is now data-owned and resolved through the ordinary saved-brawler path by a focused server API. Build catalog schema 17 and the global gameplay-content fingerprint cover the policy, while unchanged player recipe fingerprints remain byte-compatible. Focused build/content/network tests and `just check` pass; no native evidence was required because accepted values and behavior are unchanged.
+
+
+## Implementation progress — BRL-0074 complete
+
+Linked ticket BRL-0074 completed Stage 1 residual timing ownership. Shared simulation conversion APIs now drive Balance Lab and game-selection presentation without literal 60 Hz assumptions. Operator catalog schema 5 owns validated 30-second loading and 10-second route-grant formation timing; one resolved value drives Practice/product advertisement and server enforcement while public protocol shapes and the public game-type catalog revision remain unchanged. Focused timing/catalog/Practice/client/Balance Lab tests and `just check` pass; no native evidence was required because accepted timing and copy are unchanged.

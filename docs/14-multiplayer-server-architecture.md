@@ -198,6 +198,11 @@ client.
 Stable IDs cross process boundaries; Bevy `Entity` values, pointers, resources, and process-local
 handles never do.
 
+Lobby formation timing is validated operator policy in `config/server/game-types.ron`. One resolved
+value supplies both the loading deadline advertised with a reservation and the Practice/product
+deadlines enforced while allocation and route grants converge. Clients may present the advertised
+overall loading duration, but the lobby remains the sole deadline authority.
+
 ## Failure and security requirements
 
 - Reject malformed, oversized, unknown-version, expired, revoked, replayed where prohibited, or

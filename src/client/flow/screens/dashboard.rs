@@ -570,22 +570,22 @@ pub(in crate::client::flow) fn dashboard_game_summary(
             active_limit_ticks,
         } => format!(
             "First to {target_score} - {}s limit",
-            active_limit_ticks / 60
+            crate::timing::simulation_whole_seconds(active_limit_ticks)
         ),
         crate::lobby::AdvertisedRulesSummary::HotZone {
             target_progress_ticks,
             active_limit_ticks,
         } => format!(
             "Hold {}s - {}s limit",
-            target_progress_ticks / 60,
-            active_limit_ticks / 60
+            crate::timing::simulation_whole_seconds(u64::from(target_progress_ticks)),
+            crate::timing::simulation_whole_seconds(active_limit_ticks)
         ),
         crate::lobby::AdvertisedRulesSummary::Heist {
             safe_maximum_health,
             active_limit_ticks,
         } => format!(
             "Destroy the {safe_maximum_health} HP enemy idol - {}s limit",
-            active_limit_ticks / 60
+            crate::timing::simulation_whole_seconds(active_limit_ticks)
         ),
     };
     format!("{rules}\nMap pool: {maps}")

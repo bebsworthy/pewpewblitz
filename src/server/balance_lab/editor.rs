@@ -8,6 +8,7 @@ use crate::{
         DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadEffectDefinition,
         RecipientPolicy, TargetSelection, WeaponCatalog, WeaponEconomy, WorldEffectDefinition,
     },
+    timing::{SIMULATION_TICK_HZ_F64, simulation_seconds_f64},
 };
 use serde::Serialize;
 
@@ -140,13 +141,13 @@ impl NumberSpec {
         Self {
             storage_kind: EditorStorageKind::Integer,
             unit: "s",
-            storage_scale: 60.0,
-            minimum: f64::from(minimum) / 60.0,
-            maximum: f64::from(maximum) / 60.0,
+            storage_scale: SIMULATION_TICK_HZ_F64,
+            minimum: simulation_seconds_f64(u64::from(minimum)),
+            maximum: simulation_seconds_f64(u64::from(maximum)),
             minimum_exclusive: false,
-            step: 1.0 / 60.0,
+            step: simulation_seconds_f64(1),
             control: EditorControl::Number,
-            help: Some("Enter seconds; saved to the nearest 1/60-second server tick."),
+            help: Some("Enter seconds; saved to the nearest authoritative server tick."),
         }
     }
 
@@ -196,15 +197,13 @@ impl NumberSpec {
         Self {
             storage_kind: EditorStorageKind::Integer,
             unit,
-            storage_scale: 1.0 / 60.0,
-            minimum: f64::from(minimum) * 60.0,
-            maximum: f64::from(maximum) * 60.0,
+            storage_scale: 1.0 / SIMULATION_TICK_HZ_F64,
+            minimum: f64::from(minimum) * SIMULATION_TICK_HZ_F64,
+            maximum: f64::from(maximum) * SIMULATION_TICK_HZ_F64,
             minimum_exclusive: false,
-            step: 60.0,
+            step: SIMULATION_TICK_HZ_F64,
             control: EditorControl::Number,
-            help: Some(
-                "Displayed per second and stored as an integer amount per authoritative 60 Hz tick.",
-            ),
+            help: Some("Displayed per second and stored per authoritative server tick."),
         }
     }
 
@@ -1818,7 +1817,7 @@ mod tests {
         assert_eq!(decay_delay.section, EditorSection::Global);
         assert_eq!(decay_delay.subject_label, "Cold & Freeze");
         assert_eq!(decay_delay.unit, "s");
-        assert!((decay_delay.storage_scale - 60.0).abs() < f64::EPSILON);
+        assert!((decay_delay.storage_scale - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
 
         let decay_rate = manifest
             .fields
@@ -1826,9 +1825,9 @@ mod tests {
             .find(|field| path_key(&field.path) == "conditionRules/cold_decay_per_tick")
             .unwrap();
         assert_eq!(decay_rate.unit, "cold/s");
-        assert!((decay_rate.storage_scale - (1.0 / 60.0)).abs() < f64::EPSILON);
-        assert!((decay_rate.minimum - 60.0).abs() < f64::EPSILON);
-        assert!((decay_rate.step - 60.0).abs() < f64::EPSILON);
+        assert!((decay_rate.storage_scale - (1.0 / SIMULATION_TICK_HZ_F64)).abs() < f64::EPSILON);
+        assert!((decay_rate.minimum - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
+        assert!((decay_rate.step - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1853,7 +1852,7 @@ mod tests {
             .find(|field| path_key(&field.path) == "effectTiles/intervalTicks")
             .unwrap();
         assert_eq!(interval.unit, "s");
-        assert!((interval.storage_scale - 60.0).abs() < f64::EPSILON);
+        assert!((interval.storage_scale - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
         assert!((interval.minimum - 0.1).abs() < f64::EPSILON);
         assert!((interval.maximum - 10.0).abs() < f64::EPSILON);
     }
@@ -1895,7 +1894,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(delay.unit, "s");
-        assert!((delay.storage_scale - 60.0).abs() < f64::EPSILON);
+        assert!((delay.storage_scale - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
 
         let cold_capacity = manifest
             .fields

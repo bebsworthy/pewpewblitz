@@ -97,22 +97,22 @@ pub(in crate::client::flow) fn spawn_game_type_select(
                         active_limit_ticks,
                     } => format!(
                         "first to {target_score}; {}s limit",
-                        active_limit_ticks / 60
+                        crate::timing::simulation_whole_seconds(active_limit_ticks)
                     ),
                     crate::lobby::AdvertisedRulesSummary::HotZone {
                         target_progress_ticks,
                         active_limit_ticks,
                     } => format!(
                         "hold {}s; {}s limit",
-                        target_progress_ticks / 60,
-                        active_limit_ticks / 60
+                        crate::timing::simulation_whole_seconds(u64::from(target_progress_ticks)),
+                        crate::timing::simulation_whole_seconds(active_limit_ticks)
                     ),
                     crate::lobby::AdvertisedRulesSummary::Heist {
                         safe_maximum_health,
                         active_limit_ticks,
                     } => format!(
                         "{safe_maximum_health} HP idol; {}s limit",
-                        active_limit_ticks / 60
+                        crate::timing::simulation_whole_seconds(active_limit_ticks)
                     ),
                 };
                 spawn_flow_button(

@@ -12,10 +12,14 @@ use crate::{
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
-pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 4;
+pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 5;
 pub const MAX_OPERATOR_CATALOG_BYTES: usize = 16 * 1024;
+const MAX_FORMATION_DEADLINE_SECONDS: u16 = 300;
 
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub(crate) struct ResolvedLobbyCatalog {
@@ -24,6 +28,7 @@ pub(crate) struct ResolvedLobbyCatalog {
     pub revision: CatalogRevision,
     pub game_types: Vec<AdvertisedGameType>,
     pub brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog,
+    formation_timing: MatchFormationTiming,
     policy_revision: CatalogRevision,
     game_rules: BTreeMap<GameTypeId, ResolvedGameRules>,
     map_admission_revisions: BTreeMap<MapPresetId, u16>,
@@ -41,6 +46,45 @@ pub(crate) struct ResolvedGameRules {
     pub heist_critical_health_percent: u8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MatchFormationTiming {
+    loading_deadline: Duration,
+    grant_deadline: Duration,
+    loading_deadline_millis: u32,
+}
+
+impl MatchFormationTiming {
+    fn resolve(policy: OperatorMatchFormationTiming) -> Result<Self, String> {
+        if policy.loading_deadline_seconds == 0
+            || policy.loading_deadline_seconds > MAX_FORMATION_DEADLINE_SECONDS
+            || policy.grant_deadline_seconds == 0
+            || policy.grant_deadline_seconds > policy.loading_deadline_seconds
+        {
+            return Err("match formation timing is invalid".to_string());
+        }
+        let loading_deadline = Duration::from_secs(u64::from(policy.loading_deadline_seconds));
+        let grant_deadline = Duration::from_secs(u64::from(policy.grant_deadline_seconds));
+        let loading_deadline_millis = u32::try_from(loading_deadline.as_millis())
+            .map_err(|_| "match formation loading deadline exceeds wire capacity".to_string())?;
+        Ok(Self {
+            loading_deadline,
+            grant_deadline,
+            loading_deadline_millis,
+        })
+    }
+
+    pub(crate) fn deadlines_from(self, now: Duration) -> (Duration, Duration) {
+        (
+            now.saturating_add(self.loading_deadline),
+            now.saturating_add(self.grant_deadline),
+        )
+    }
+
+    pub(crate) const fn loading_deadline_millis(self) -> u32 {
+        self.loading_deadline_millis
+    }
+}
+
 impl ResolvedLobbyCatalog {
     pub(crate) fn rules(&self, game_type_id: &GameTypeId) -> Option<ResolvedGameRules> {
         self.game_rules.get(game_type_id).copied()
@@ -48,6 +92,10 @@ impl ResolvedLobbyCatalog {
 
     pub(crate) fn map_admission_revision(&self, preset_id: MapPresetId) -> Option<u16> {
         self.map_admission_revisions.get(&preset_id).copied()
+    }
+
+    pub(crate) const fn formation_timing(&self) -> MatchFormationTiming {
+        self.formation_timing
     }
 
     pub(crate) fn first_rules_for_mode(
@@ -66,10 +114,18 @@ impl ResolvedLobbyCatalog {
 struct OperatorCatalog {
     schema_version: u16,
     server_name: String,
+    formation_timing: OperatorMatchFormationTiming,
     common_lifecycle: OperatorCommonLifecyclePolicy,
     mode_policies: OperatorModePolicies,
     map_dimension_limits: MapDimensionLimits,
     game_types: Vec<OperatorGameType>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OperatorMatchFormationTiming {
+    loading_deadline_seconds: u16,
+    grant_deadline_seconds: u16,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +192,8 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
     let server_name = validate_presentation_name(&operator.server_name)
         .map_err(|error| format!("invalid server name: {error}"))?;
+    let formation_timing_policy = operator.formation_timing;
+    let formation_timing = MatchFormationTiming::resolve(formation_timing_policy)?;
     operator.map_dimension_limits.validate()?;
     if operator.game_types.is_empty() || operator.game_types.len() > MAX_GAME_TYPES {
         return Err(format!(
@@ -193,8 +251,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             ));
         }
         let seconds_to_ticks = |seconds: u16| {
-            u64::from(seconds)
-                .checked_mul(crate::timing::SIMULATION_TICK_HZ)
+            crate::timing::simulation_ticks_from_seconds(u64::from(seconds))
                 .filter(|ticks| *ticks > 0)
                 .ok_or_else(|| format!("game type {} has invalid timing", id.as_str()))
         };
@@ -388,6 +445,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     let revision = CatalogRevision(Sha256::digest(revision_material).into());
     let policy_material = postcard::to_allocvec(&(
         OPERATOR_CATALOG_SCHEMA_VERSION,
+        formation_timing_policy,
         common_lifecycle,
         mode_policies,
     ))
@@ -420,6 +478,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         revision,
         game_types: advertised,
         brawler_catalog,
+        formation_timing,
         policy_revision,
         game_rules,
         map_admission_revisions,
@@ -437,6 +496,13 @@ mod tests {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local PewPew Blitz");
         assert_eq!(catalog.map_dimension_limits, MapDimensionLimits::default());
+        assert_eq!(catalog.formation_timing().loading_deadline_millis(), 30_000);
+        assert_eq!(
+            catalog
+                .formation_timing()
+                .deadlines_from(Duration::from_secs(5)),
+            (Duration::from_secs(35), Duration::from_secs(15))
+        );
         assert_eq!(catalog.game_types.len(), 9);
         let wipeout_three_vs_three = &catalog.game_types[3];
         assert_eq!(
@@ -515,6 +581,10 @@ mod tests {
     fn policy_only_changes_resolve_and_change_the_private_policy_revision() {
         let baseline = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         let changed_source = VALID
+            .replace(
+                "loading_deadline_seconds: 30",
+                "loading_deadline_seconds: 31",
+            )
             .replace("spawn_protection_ticks: 90", "spawn_protection_ticks: 91")
             .replace(
                 "recent_hostile_damage_credit_ticks: 300",
@@ -531,12 +601,27 @@ mod tests {
         assert_eq!(rules.heist_critical_health_percent, 26);
         assert_eq!(changed.revision, baseline.revision);
         assert_ne!(changed.policy_revision, baseline.policy_revision);
+        assert_eq!(changed.formation_timing().loading_deadline_millis(), 31_000);
     }
 
     #[test]
     fn catalog_rejects_unknown_fields_modes_maps_objectives_and_unsupported_topology() {
         for invalid in [
-            VALID.replace("schema_version: 4", "schema_version: 4, surprise: true"),
+            VALID.replace("schema_version: 5", "schema_version: 5, surprise: true"),
+            VALID.replace(
+                "loading_deadline_seconds: 30",
+                "loading_deadline_seconds: 0",
+            ),
+            VALID.replace(
+                "loading_deadline_seconds: 30",
+                "loading_deadline_seconds: 301",
+            ),
+            VALID.replace(
+                "loading_deadline_seconds: 30",
+                "loading_deadline_seconds: 65536",
+            ),
+            VALID.replace("grant_deadline_seconds: 10", "grant_deadline_seconds: 0"),
+            VALID.replace("grant_deadline_seconds: 10", "grant_deadline_seconds: 31"),
             VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
             VALID.replace("feature-yard-wipeout\"", "missing-map\""),
             VALID.replace("players_per_team: 2", "players_per_team: 4"),

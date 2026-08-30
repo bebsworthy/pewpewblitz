@@ -778,7 +778,7 @@ impl LobbyState {
             team_count: game.team_count,
             players_per_team: game.players_per_team,
             accepted_build,
-            loading_deadline_millis: 30_000,
+            loading_deadline_millis: catalog.formation_timing().loading_deadline_millis(),
         })
     }
 
@@ -2063,10 +2063,10 @@ fn apply_practice_start_requests(
                         session_id: client.lobby_session_id,
                         started: started.clone(),
                     });
-                    formation.loading_deadline =
-                        Some(time.elapsed().saturating_add(Duration::from_secs(30)));
-                    formation.grant_deadline =
-                        Some(time.elapsed().saturating_add(Duration::from_secs(10)));
+                    let (loading_deadline, grant_deadline) =
+                        catalog.formation_timing().deadlines_from(time.elapsed());
+                    formation.loading_deadline = Some(loading_deadline);
+                    formation.grant_deadline = Some(grant_deadline);
                     sender.send::<SessionChannel>(crate::lobby::MatchmakingServerMessage {
                         sequence: formation.next_sequence(client.lobby_session_id),
                         phase: crate::lobby::MatchmakingServerPhase::ReservationStarted(started),
@@ -2217,8 +2217,10 @@ fn form_product_reservation(
     }
     formation.active = Some(reservation_id);
     formation.clear_handoff();
-    formation.loading_deadline = Some(time.elapsed().saturating_add(Duration::from_secs(30)));
-    formation.grant_deadline = Some(time.elapsed().saturating_add(Duration::from_secs(10)));
+    let (loading_deadline, grant_deadline) =
+        catalog.formation_timing().deadlines_from(time.elapsed());
+    formation.loading_deadline = Some(loading_deadline);
+    formation.grant_deadline = Some(grant_deadline);
     frame.snapshot_changed = true;
     for (client, mut sender, connected, disconnected) in &mut clients {
         if !connected || disconnected {
@@ -2241,7 +2243,7 @@ fn form_product_reservation(
                     team_count: reservation.team_count,
                     players_per_team: reservation.players_per_team,
                     accepted_build: ticket.accepted_build,
-                    loading_deadline_millis: 30_000,
+                    loading_deadline_millis: catalog.formation_timing().loading_deadline_millis(),
                 },
             ),
         });
@@ -2684,6 +2686,7 @@ mod tests {
             .unwrap();
         let request = &lobby.pending.as_ref().unwrap().body;
         assert_eq!(started.ticket_id, None);
+        assert_eq!(started.loading_deadline_millis, 30_000);
         assert_eq!(started.map_preset_id, crate::map::SWITCHBACK_BASIN_PRESET);
         assert_eq!(request.map_preset, crate::map::SWITCHBACK_BASIN_PRESET.0);
         assert_eq!(request.participants.len(), 1);

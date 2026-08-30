@@ -1,6 +1,10 @@
 (
-  schema_version: 4,
+  schema_version: 5,
   server_name: "Local PewPew Blitz",
+  formation_timing: (
+    loading_deadline_seconds: 30,
+    grant_deadline_seconds: 10,
+  ),
   common_lifecycle: (
     spawn_protection_ticks: 90,
     completed_input_lock_ticks: 60,
