@@ -615,7 +615,7 @@ pub(super) fn apply_composed_records(
             applied.motion.remove(&record.target);
             continue;
         }
-        (effects_state, motion_state) = apply_runtime_effects(
+        let runtime_plan = plan_runtime_effects(
             record,
             tick,
             source,
@@ -636,10 +636,16 @@ pub(super) fn apply_composed_records(
                 .cold_contacts
                 .insert((record.source.attack_id, target_network_id.0)),
             reserved_events,
-            &mut gameplay_telemetry.weapon,
-            &mut gameplay_telemetry.ability,
-            &mut applied.deferred_cues,
         );
+        for telemetry in runtime_plan.weapon_projections {
+            gameplay_telemetry.weapon.record(telemetry);
+        }
+        for telemetry in runtime_plan.ability_projections {
+            gameplay_telemetry.ability.record(telemetry);
+        }
+        applied.deferred_cues.extend(runtime_plan.deferred_cues);
+        effects_state = runtime_plan.effects;
+        motion_state = runtime_plan.motion;
         applied.effects.insert(record.target, effects_state);
         if let Some(motion) = motion_state {
             applied.motion.insert(record.target, motion);

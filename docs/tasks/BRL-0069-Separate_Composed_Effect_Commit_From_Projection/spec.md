@@ -55,3 +55,12 @@ The transaction boundary is batch-wide, not merely per effect. Planning must sim
 - Added direct boundary coverage for zero, partial, lethal, already-defeated sequential damage and partial/capped/zero-applied healing.
 - Focused composed-effect tests pass (9), strict server all-target Clippy passes, formatting/diff hygiene pass, and `just check` passes across client, server, network-test, Balance Lab, routing, and web tooling.
 - This is an intermediate checkpoint, not ticket completion. The remaining implementation must construct the batch-wide sequential `ComposedApplicationPlan`, make commit the sole ECS/tracker mutation pass, convert runtime effects into state-plus-projection planning, and replay immediate/deferred projections in the existing order with final-defeat cue suppression.
+
+## Progress — runtime effects now return projection payloads
+
+- Replaced the telemetry/cue-mutating `apply_runtime_effects` helper with `plan_runtime_effects`, which returns `RuntimeEffectPlan`: resulting `ActiveEffects`, optional `ExternalMotion`, weapon telemetry projections, passive telemetry projections, and deferred effect cues.
+- The existing record coordinator now consumes the plan and publishes its projections afterward. This preserves current ordering while establishing the mutation-free runtime calculation seam required by the batch-wide planner.
+- Focused composed-effect tests pass (13), including resistance, Cold, damage-over-time, plan boundaries, recipient policy, and healing-block behavior.
+- Routed launcher slow replication, persistent splash, sticky, and cone-spray scenarios pass.
+- `just check`, `just lint`, formatting, strict role isolation, and diff hygiene pass.
+- Remaining: move target/tracker mutations and every immediate projection into the batch-wide `ComposedApplicationPlan`, then implement sole commit and ordered projection passes plus atomicity/order characterization.

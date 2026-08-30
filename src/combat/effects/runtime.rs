@@ -226,9 +226,18 @@ pub(super) fn cue_damage_source(source: AttackSource) -> DamageSource {
 }
 
 #[cfg(feature = "server")]
+pub(super) struct RuntimeEffectPlan {
+    pub(super) effects: ActiveEffects,
+    pub(super) motion: Option<ExternalMotion>,
+    pub(super) weapon_projections: Vec<WeaponTelemetryRecord>,
+    pub(super) ability_projections: Vec<crate::abilities::AbilityTelemetryRecord>,
+    pub(super) deferred_cues: Vec<(Entity, CombatCue)>,
+}
+
+#[cfg(feature = "server")]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
-pub(super) fn apply_runtime_effects(
+pub(super) fn plan_runtime_effects(
     record: &PendingPayload,
     tick: u64,
     source: DamageSource,
@@ -247,10 +256,10 @@ pub(super) fn apply_runtime_effects(
     fire_resistance_basis_points: u16,
     allow_cold: bool,
     reserved_events: &mut impl Iterator<Item = CombatEventId>,
-    telemetry: &mut WeaponTelemetry,
-    ability_telemetry: &mut crate::abilities::AbilityTelemetry,
-    deferred_effect_cues: &mut Vec<(Entity, CombatCue)>,
-) -> (ActiveEffects, Option<ExternalMotion>) {
+) -> RuntimeEffectPlan {
+    let mut weapon_projections = Vec::new();
+    let mut ability_projections = Vec::new();
+    let mut deferred_cues = Vec::new();
     for effect in record.bundle.effects.iter().copied() {
         let Some(scale) =
             effect_recipient_scale(effect, record.source, target_network_id, target_team)
@@ -286,7 +295,7 @@ pub(super) fn apply_runtime_effects(
                         expires_at_tick: motion.expires_at_tick,
                     },
                 };
-                telemetry.record(WeaponTelemetryRecord {
+                weapon_projections.push(WeaponTelemetryRecord {
                     tick,
                     event_id,
                     attack_id: record.source.attack_id,
@@ -311,7 +320,7 @@ pub(super) fn apply_runtime_effects(
                     resulting_motion: Some(motion),
                     outcome: WeaponTelemetryOutcome::KnockbackApplied,
                 });
-                deferred_effect_cues.push((record.target, effect_cue));
+                deferred_cues.push((record.target, effect_cue));
             }
             PayloadEffectDefinition::Slow {
                 movement_multiplier,
@@ -335,7 +344,7 @@ pub(super) fn apply_runtime_effects(
                 if let Some(passive) = tenacity
                     && duration_ticks < base_duration_ticks
                 {
-                    ability_telemetry.record(crate::abilities::AbilityTelemetryRecord {
+                    ability_projections.push(crate::abilities::AbilityTelemetryRecord {
                         tick,
                         owner_network_id: target_network_id,
                         kind: crate::abilities::AbilityTelemetryKind::PassiveModified {
@@ -372,7 +381,7 @@ pub(super) fn apply_runtime_effects(
                             expires_at_tick: slow.expires_at_tick,
                         },
                     };
-                    telemetry.record(WeaponTelemetryRecord {
+                    weapon_projections.push(WeaponTelemetryRecord {
                         tick,
                         event_id,
                         attack_id: record.source.attack_id,
@@ -398,7 +407,7 @@ pub(super) fn apply_runtime_effects(
                         resulting_motion: motion_state,
                         outcome: WeaponTelemetryOutcome::SlowApplied,
                     });
-                    deferred_effect_cues.push((record.target, effect_cue));
+                    deferred_cues.push((record.target, effect_cue));
                 }
             }
             PayloadEffectDefinition::Damage { .. } | PayloadEffectDefinition::Heal { .. } => {}
@@ -429,7 +438,7 @@ pub(super) fn apply_runtime_effects(
                 let event_id = reserved_events
                     .next()
                     .expect("payload event reservation matches Cold");
-                deferred_effect_cues.push((
+                deferred_cues.push((
                     record.target,
                     CombatCue::EffectApplied {
                         event_id,
@@ -472,7 +481,7 @@ pub(super) fn apply_runtime_effects(
                 let event_id = reserved_events
                     .next()
                     .expect("payload event reservation matches damage over time");
-                deferred_effect_cues.push((
+                deferred_cues.push((
                     record.target,
                     CombatCue::EffectApplied {
                         event_id,
@@ -491,7 +500,13 @@ pub(super) fn apply_runtime_effects(
             }
         }
     }
-    (effects_state, motion_state)
+    RuntimeEffectPlan {
+        effects: effects_state,
+        motion: motion_state,
+        weapon_projections,
+        ability_projections,
+        deferred_cues,
+    }
 }
 
 #[cfg(test)]
