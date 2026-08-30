@@ -396,6 +396,16 @@ The initial oil-barrel policy is:
 The stable `DamageSource::Environment` protocol shape must be evolved deliberately to express this
 policy. A client-supplied initiator or cause is never accepted.
 
+Combat owns the typed environment-damage transaction for both barrel explosions and effect-tile
+pulses. Map authority selects ordered in-range targets and applies map occlusion, but it does not
+write fighter/deployable health, defeat state, collision, effects, combat facts, damage/defeat
+combat cues, or combat telemetry. The combat transaction revalidates each selected entity,
+reserves the complete event range before mutation, commits health and lifecycle atomically, and
+projects the existing environment facts and legacy cues. Barrel explosions retain their accepted
+V10 eligibility: they can damage the initiator and allies and are not blocked by fighter spawn
+protection; only valid hostile lineage supplies team credit. Damage-tile pulses retain their separate neutral,
+fighter-only, spawn-protection-respecting policy.
+
 ## Oil-barrel behavior
 
 An oil barrel is neutral and publicly damageable during `MatchPhase::Active`. Before active play it
@@ -410,6 +420,12 @@ At zero health, the server atomically:
 4. emits one bounded radial environment-damage request and one public explosion cue;
 5. includes newly terminal barrels in the same bounded stable chain transaction;
 6. retains no burning field, damage-over-time area, movable debris, or loot.
+
+`maximum_targets` is the per-blast budget shared by nearer ordinary world objects first and then
+ordered combatants. `maximum_chain_reactions` is the authored cap on total secondary world-object
+damage applications across the complete root explosion transaction; the code-owned global
+secondary-application ceiling remains an independent safety bound. Both values are validated,
+fingerprinted, Balance-Lab-visible, and consumed by authority.
 
 Every client must present a readable intact/damaged/terminal progression, exact authoritative blast
 radius feedback where useful, and the same collision/terminal meaning in imported and primitive

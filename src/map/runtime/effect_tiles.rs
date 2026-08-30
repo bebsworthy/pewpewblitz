@@ -157,16 +157,23 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
         if let Some(mut current) = world.get_mut::<EffectTileOccupancy>(entity) {
             current.next_pulse_at_tick = Some(tick.saturating_add(u64::from(interval_ticks)));
         }
-        crate::combat::environment::apply_neutral_environment_damage(
+        let targets = [entity];
+        if let Err(error) = crate::combat::environment::apply_environment_damage_batch(
             world,
-            crate::combat::environment::NeutralEnvironmentDamage {
-                target: entity,
+            crate::combat::environment::EnvironmentDamageBatch {
+                targets: &targets,
                 generation: occupancy.generation,
                 placement_id: occupancy.placement_id,
                 damage,
                 tick,
+                origin: None,
+                attack: crate::combat::environment::EnvironmentAttack::Neutral,
+                protection:
+                    crate::combat::environment::EnvironmentProtection::RespectSpawnProtection,
             },
-        );
+        ) {
+            error!(?error, "damage-tile combat transaction failed");
+        }
     }
 }
 

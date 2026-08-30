@@ -540,9 +540,11 @@ pub(super) fn commit_explosion_plan(
             *candidate_entity,
         )
     });
+    let remaining_chain_reactions =
+        usize::from(explosion.maximum_chain_reactions).saturating_sub(*secondary_count);
     let selected_objects: Vec<_> = candidates
         .into_iter()
-        .take(usize::from(explosion.maximum_targets))
+        .take(usize::from(explosion.maximum_targets).min(remaining_chain_reactions))
         .collect();
     let remaining_targets =
         usize::from(explosion.maximum_targets).saturating_sub(selected_objects.len());
@@ -653,59 +655,16 @@ struct ExplosionCombatantPlan {
     maximum_targets: usize,
 }
 
-type ExplosionCombatantCandidate = (
-    f32,
-    u64,
-    Entity,
-    Vec2,
-    crate::combat::CurrentHealth,
-    crate::combat::TeamId,
-    crate::protocol::NetworkEntityId,
-    bool,
-);
-
-fn plan_explosion_combatants(
-    world: &mut World,
-    plan: &ExplosionCombatantPlan,
-) -> (bool, Vec<ExplosionCombatantCandidate>) {
-    let source = plan.source;
+fn select_explosion_combatants(world: &mut World, plan: &ExplosionCombatantPlan) -> Vec<Entity> {
     let origin = plan.position;
     let radius = plan.radius;
     let cause_entity = plan.cause_entity;
-    let active_match = world
-        .query::<&crate::matchplay::MatchState>()
-        .iter(world)
-        .find_map(|state| {
-            matches!(state.phase, crate::matchplay::MatchPhase::Active { .. })
-                .then_some(state.match_id)
-        });
-    let lineage_is_current = active_match.is_some_and(|match_id| {
-        world
-            .query_filtered::<(
-                &crate::protocol::PlayerId,
-                &crate::protocol::NetworkEntityId,
-                &crate::combat::TeamId,
-                &crate::matchplay::MatchMember,
-            ), (
-                With<crate::protocol::Fighter>,
-                With<crate::matchplay::ActiveCombatant>,
-            )>()
-            .iter(world)
-            .any(|(player, network_id, team, member)| {
-                *player == source.player_id
-                    && *network_id == source.owner_network_entity_id
-                    && *team == source.team_id
-                    && member.0 == match_id
-            })
-    });
     let mut candidates: Vec<_> = {
         let mut query = world.query_filtered::<(
             Entity,
             &Position,
             &crate::combat::CurrentHealth,
-            &crate::combat::TeamId,
             &crate::protocol::NetworkEntityId,
-            Has<crate::abilities::Sentry>,
             Has<crate::combat::Defeated>,
         ), Or<(
             With<crate::protocol::Fighter>,
@@ -713,19 +672,15 @@ fn plan_explosion_combatants(
         )>>();
         query
             .iter(world)
-            .filter(|(_, position, health, _, _, _, defeated)| {
+            .filter(|(_, position, health, _, defeated)| {
                 !defeated && health.0 > 0 && position.0.distance_squared(origin) <= radius * radius
             })
-            .map(|(entity, position, health, team, network_id, sentry, _)| {
+            .map(|(entity, position, _, network_id, _)| {
                 (
                     position.0.distance_squared(origin),
                     network_id.0,
                     entity,
                     position.0,
-                    *health,
-                    *team,
-                    *network_id,
-                    sentry,
                 )
             })
             .collect()
@@ -738,151 +693,35 @@ fn plan_explosion_combatants(
     candidates.retain(|candidate| {
         explosion_line_of_sight_clear(world, origin, candidate.3, cause_entity, candidate.2)
     });
-    (lineage_is_current, candidates)
+    candidates
+        .into_iter()
+        .take(plan.maximum_targets)
+        .map(|(_, _, entity, _)| entity)
+        .collect()
 }
-#[allow(
-    clippy::too_many_lines,
-    reason = "the authoritative commit keeps combat-owned health, lifecycle, cues, and facts together"
-)]
+
 fn apply_explosion_to_combatants(world: &mut World, plan: ExplosionCombatantPlan) -> usize {
-    let ExplosionCombatantPlan {
-        tick,
-        source,
-        cause,
-        cause_entity: _,
-        position: origin,
-        damage,
-        radius: _,
-        maximum_targets,
-    } = plan;
-    if maximum_targets == 0 {
+    if plan.maximum_targets == 0 {
         return 0;
     }
-    let (lineage_is_current, candidates) = plan_explosion_combatants(world, &plan);
-    let mut applied_targets = 0;
-    for (_, _, entity, position, health, target_team, target_network_id, sentry) in
-        candidates.into_iter().take(maximum_targets)
-    {
-        let applied = damage.min(health.0);
-        let health_after = health.0 - applied;
-        let defeated = health_after == 0;
-        let event_count = if defeated { 2 } else { 1 };
-        let Some(event_ids) = crate::combat::server::reserve_event_ids(
-            &mut world.resource_mut::<crate::combat::NextCombatIds>(),
-            event_count,
-        ) else {
-            error!("environment damage event identity exhausted");
-            return applied_targets;
-        };
-        applied_targets += 1;
-        world
-            .entity_mut(entity)
-            .insert(crate::combat::CurrentHealth(health_after));
-        let target_kind = if sentry {
-            crate::combat::CombatTargetKind::Deployable
-        } else {
-            crate::combat::CombatTargetKind::Fighter
-        };
-        let hostile_credit = lineage_is_current
-            && source.team_id != target_team
-            && source.owner_network_entity_id != target_network_id
-            && source.team_id.0 <= 1;
-        let source_team = hostile_credit.then_some(source.team_id);
-        let source_kind = crate::combat::CombatSourceKind::Environment;
-        let distance = origin.distance(position);
-        world
-            .resource_mut::<crate::combat::CombatOutcomeFacts>()
-            .0
-            .push(crate::combat::CombatOutcomeFact {
-                event_id: event_ids[0],
-                tick,
-                attack_id: source.attack_id,
-                source_kind,
-                source_player: lineage_is_current.then_some(source.player_id),
-                source_network_id: lineage_is_current.then_some(source.owner_network_entity_id),
-                source_team,
-                target_network_id,
-                target_kind,
-                target_team,
-                preset_id: None,
-                recipe_fingerprint: None,
-                position: crate::combat::WorldPoint::from(position),
-                engagement_distance: distance,
-                kind: crate::combat::CombatOutcomeKind::Damage { amount: applied },
-            });
-        let generation = cause.generation();
-        let damage_source = crate::combat::DamageSource::Environment {
-            map_instance_id: generation.map_instance_id.0,
-            generation: generation.generation,
-            placement_id: cause.placement_id().0,
-            initiating_player: lineage_is_current.then_some(source.player_id),
-            initiating_fighter: lineage_is_current.then_some(source.owner_network_entity_id),
-        };
-        world.resource_mut::<crate::combat::CombatOutbox>().0.push(
-            crate::combat::CombatCue::Damage {
-                event_id: event_ids[0],
-                tick,
-                source: damage_source,
-                target: target_network_id,
-                amount: applied,
-                health_after,
-                distance_band: crate::combat::DistanceBand::Close,
-            },
-        );
-        if !defeated {
-            continue;
+    let targets = select_explosion_combatants(world, &plan);
+    match crate::combat::environment::apply_environment_damage_batch(
+        world,
+        crate::combat::environment::EnvironmentDamageBatch {
+            targets: &targets,
+            generation: plan.cause.generation(),
+            placement_id: plan.cause.placement_id(),
+            damage: plan.damage,
+            tick: plan.tick,
+            origin: Some(plan.position),
+            attack: crate::combat::environment::EnvironmentAttack::Initiated(plan.source),
+            protection: crate::combat::environment::EnvironmentProtection::IgnoreSpawnProtection,
+        },
+    ) {
+        Ok(result) => result.applied_targets,
+        Err(error) => {
+            error!(?error, "environment explosion combat transaction failed");
+            0
         }
-        let defeat_event = event_ids[1];
-        world
-            .entity_mut(entity)
-            .insert((
-                crate::combat::Defeated {
-                    event_id: defeat_event,
-                },
-                avian2d::prelude::CollisionLayers::new(
-                    if sentry {
-                        crate::movement::DEPLOYABLE_LAYER
-                    } else {
-                        crate::movement::FIGHTER_LAYER
-                    },
-                    avian2d::prelude::LayerMask::NONE,
-                ),
-                crate::combat::ActiveEffects::default(),
-            ))
-            .remove::<crate::combat::ExternalMotion>()
-            .remove::<crate::combat::KnockbackFeedback>();
-        world
-            .resource_mut::<crate::combat::CombatOutcomeFacts>()
-            .0
-            .push(crate::combat::CombatOutcomeFact {
-                event_id: defeat_event,
-                tick,
-                attack_id: source.attack_id,
-                source_kind,
-                source_player: lineage_is_current.then_some(source.player_id),
-                source_network_id: lineage_is_current.then_some(source.owner_network_entity_id),
-                source_team,
-                target_network_id,
-                target_kind,
-                target_team,
-                preset_id: None,
-                recipe_fingerprint: None,
-                position: crate::combat::WorldPoint::from(position),
-                engagement_distance: distance,
-                kind: if sentry {
-                    crate::combat::CombatOutcomeKind::DeployableDestroyed
-                } else {
-                    crate::combat::CombatOutcomeKind::Defeat
-                },
-            });
-        world.resource_mut::<crate::combat::CombatOutbox>().0.push(
-            crate::combat::CombatCue::Defeat {
-                event_id: defeat_event,
-                tick,
-                source: Some(damage_source),
-                target: target_network_id,
-            },
-        );
     }
-    applied_targets
 }

@@ -4,13 +4,12 @@ title: Architecture improvement round 3
 status: doing
 theme:
 release:
-priority: none
 created: 2026-08-30T18:38:17Z
-modified: 2026-08-30T22:23:44Z
+modified: 2026-08-30T23:20:29Z
 closed:
-revision: 4856fa59b512dfb2
+revision: 7f75f7adf29e628c
 blocks: []
-related: [BRL-0043, BRL-0071, BRL-0072, BRL-0073, BRL-0074, BRL-0075, BRL-0076, BRL-0077]
+related: [BRL-0043, BRL-0071, BRL-0072, BRL-0073, BRL-0074, BRL-0075, BRL-0076, BRL-0077, BRL-0078]
 ---
 
 # Description

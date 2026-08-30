@@ -248,3 +248,7 @@ Linked ticket BRL-0075 completed the terminal-reaction portion of Stage 2. Share
 ## Round 3 progress (2026-08-31)
 
 BRL-0077 completed the admission/fighter-assembly phase: match hello validation and planning are pure, shared fighter construction is controller-neutral, connected and Practice ownership remain explicit, and canonical verification passed. One timing-sensitive performance sample was transient; all 12 isolated performance gates passed immediately afterward.
+
+## BRL-0078 phase completion
+
+Completed the environment-combat authority phase. Barrel explosion combatant damage now flows through one combat-owned atomic transaction shared with damage tiles; map code owns only deterministic selection, LOS, world-object chaining/reactions, and map telemetry. The previously inert authored chain limit is effective. Focused, role, lint, canonical, full network, and performance verification passed. Child BRL-0078 is complete; the next planned slice is focused effect-tile capability projection.

@@ -67,6 +67,7 @@ fn barrel_test_app() -> (App, Entity) {
         .init_resource::<super::super::PickupTelemetry>()
         .init_resource::<crate::combat::CombatOutcomeFacts>()
         .init_resource::<crate::combat::CombatOutbox>()
+        .init_resource::<crate::combat::CombatTelemetry>()
         .init_resource::<crate::combat::NextCombatIds>()
         .insert_resource(crate::timing::SimulationTick(9))
         .add_plugins((
@@ -505,6 +506,47 @@ fn barrel_damage_explodes_once_chains_and_restart_restores_a_new_generation() {
 }
 
 #[test]
+fn authored_explosion_chain_limit_bounds_the_complete_damage_batch() {
+    let (mut app, _) = barrel_test_app();
+    app.world_mut()
+        .resource_mut::<MapCatalogResource>()
+        .0
+        .explosion_profiles[0]
+        .maximum_chain_reactions = 1;
+    let target = barrel_identity(&mut app, 240);
+    let source = test_attack_source();
+    app.world_mut()
+        .resource_mut::<super::super::PendingWorldTargetDamages>()
+        .0
+        .push(super::super::PendingWorldTargetDamage {
+            target,
+            source,
+            attack_id: source.attack_id,
+            requested_damage: 60,
+            delivery_index: 0,
+            bundle_index: 0,
+            effect_index: 0,
+        });
+
+    process_world_target_damage(app.world_mut());
+
+    assert_eq!(
+        app.world()
+            .resource::<super::super::WorldTargetDamageFacts>()
+            .0
+            .len(),
+        2,
+        "one primary and one authored secondary application are committed"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<super::super::WorldObjectTelemetry>()
+            .chained_object_applications,
+        1
+    );
+}
+
+#[test]
 fn treasure_chest_commits_one_removed_state_and_one_generation_derived_pickup() {
     let (mut app, root) = barrel_test_app();
     assert_eq!(damageable_semantics(&mut app, 260), Some((false, true)));
@@ -678,6 +720,10 @@ fn barrel_explosion_damages_combatants_as_environment_without_object_outcome_lea
     assert_eq!(outcomes.len(), 1);
     assert_eq!(outcomes[0].source_kind, CombatSourceKind::Environment);
     assert_eq!(outcomes[0].source_team, Some(crate::combat::TeamId(0)));
+    let combat_telemetry = app.world().resource::<crate::combat::CombatTelemetry>();
+    assert_eq!(combat_telemetry.applied_damage, 35);
+    assert_eq!(combat_telemetry.cues.len(), 1);
+    assert_eq!(combat_telemetry.records.len(), 1);
     assert_eq!(
         app.world()
             .resource::<super::super::WorldTargetDamageFacts>()

@@ -38,6 +38,20 @@ fn client_barrel_health(harness: &mut Harness, index: usize, placement_id: u32) 
         .map(|(_, health)| health.0)
 }
 
+fn client_fighter_health(
+    harness: &mut Harness,
+    index: usize,
+    network_id: NetworkEntityId,
+) -> Option<(u16, bool)> {
+    let world = harness.clients[index].world_mut();
+    let mut query = world
+        .query_filtered::<(&NetworkEntityId, &CurrentHealth, Option<&Defeated>), With<Fighter>>();
+    query
+        .iter(world)
+        .find(|(candidate, _, _)| **candidate == network_id)
+        .map(|(_, health, defeated)| (health.0, defeated.is_some()))
+}
+
 fn client_pickup_count(harness: &mut Harness, index: usize) -> usize {
     let world = harness.clients[index].world_mut();
     world
@@ -380,6 +394,128 @@ fn barrel_partial_health_and_terminal_absence_converge_for_two_clients() {
     assert_eq!(
         transition.outcome,
         brawler::map::MapPlacementOutcome::ReplacedWith(brawler::map::BARREL_WOOD_DEBRIS_ASSET,)
+    );
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario proves one complete barrel, combat, replication, and telemetry transaction"
+)]
+fn barrel_explosion_damage_is_combat_owned_and_replicates_to_both_clients() {
+    let mut harness = Harness::new_feature_yard_match(2);
+    harness.step_until(|harness| {
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
+    });
+    let waiting = server_match_state(&mut harness);
+    for index in 0..2 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: 1,
+                match_id: waiting.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        matches!(server_match_state(harness).phase, MatchPhase::Active { .. })
+            && client_barrel_health(harness, 0, 240) == Some(60)
+    });
+
+    let source_player = harness.controlled_player_id(0);
+    let target_player = harness.controlled_player_id(1);
+    let (barrel, barrel_position) = {
+        let world = harness.server.world_mut();
+        let mut objects = world.query::<(&DamageableTargetIdentity, &Position)>();
+        objects
+            .iter(world)
+            .find(|(identity, _)| identity.placement_id() == MapPlacementId(240))
+            .map(|(identity, position)| (*identity, position.0))
+            .expect("Feature Yard barrel")
+    };
+    let (source, target_entity, target_network_id, target_health) = {
+        let world = harness.server.world_mut();
+        let mut fighters = world.query_filtered::<(
+            Entity,
+            &PlayerId,
+            &NetworkEntityId,
+            &TeamId,
+            &Position,
+            &CurrentHealth,
+        ), With<Fighter>>();
+        let rows = fighters
+            .iter(world)
+            .map(|(entity, player, network_id, team, position, health)| {
+                (entity, *player, *network_id, *team, position.0, *health)
+            })
+            .collect::<Vec<_>>();
+        let (_, _, source_network_id, source_team, source_position, _) = rows
+            .iter()
+            .find(|(_, player, ..)| *player == source_player)
+            .copied()
+            .expect("source fighter");
+        let (target_entity, _, target_network_id, _, _, target_health) = rows
+            .iter()
+            .find(|(_, player, ..)| *player == target_player)
+            .copied()
+            .expect("target fighter");
+        (
+            AttackSource {
+                kind: CombatSourceKind::PrimaryWeapon,
+                attack_id: AttackId(800),
+                player_id: source_player,
+                owner_network_entity_id: source_network_id,
+                team_id: source_team,
+                recipe_fingerprint: WeaponRecipeFingerprint::default(),
+                legacy_compatibility: false,
+                source_preset_id: None,
+                origin: WorldPoint::from(source_position),
+                facing: 0.0,
+            },
+            target_entity,
+            target_network_id,
+            target_health.0,
+        )
+    };
+    harness
+        .server
+        .world_mut()
+        .entity_mut(target_entity)
+        .insert(Position::from_xy(barrel_position.x, barrel_position.y));
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<PendingWorldTargetDamages>()
+        .0
+        .push(PendingWorldTargetDamage {
+            target: barrel,
+            source,
+            attack_id: source.attack_id,
+            requested_damage: 60,
+            delivery_index: 0,
+            bundle_index: 0,
+            effect_index: 0,
+        });
+
+    let expected_health = target_health.saturating_sub(35);
+    harness.step_until(|harness| {
+        (0..2).all(|index| {
+            client_fighter_health(harness, index, target_network_id)
+                == Some((expected_health, expected_health == 0))
+        })
+    });
+    assert_eq!(
+        harness.server.world().get::<CurrentHealth>(target_entity),
+        Some(&CurrentHealth(expected_health))
+    );
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .applied_damage,
+        35
     );
 }
 
