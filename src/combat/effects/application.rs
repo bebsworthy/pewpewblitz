@@ -499,7 +499,7 @@ pub(super) fn apply_composed_records(
                     None
                 };
                 health.0 = plan.health_after;
-                record_damage_application(
+                project_committed_damage(
                     record,
                     tick,
                     source,
@@ -519,8 +519,16 @@ pub(super) fn apply_composed_records(
                     transaction,
                 );
                 if let Some(defeat_event) = defeat_event {
-                    record_target_defeat(
+                    commit_target_defeat(
                         commands,
+                        record.target,
+                        tick,
+                        target_kind,
+                        defeat_event,
+                        test_dummy,
+                        applied,
+                    );
+                    project_committed_defeat(
                         record,
                         tick,
                         source,
@@ -531,8 +539,6 @@ pub(super) fn apply_composed_records(
                         owner_contact,
                         defeat_event,
                         legacy_defeat_event,
-                        test_dummy,
-                        applied,
                         gameplay_telemetry,
                         transaction,
                     );
@@ -547,62 +553,22 @@ pub(super) fn apply_composed_records(
                 let event_id = reserved_events
                     .next()
                     .expect("payload event reservation matches healing");
-                let cue = CombatCue::EffectApplied {
-                    event_id,
+                project_committed_healing(
+                    record,
                     tick,
-                    attack_id: record.source.attack_id,
                     source,
-                    target: *target_network_id,
-                    position: WorldPoint::from(record.position),
-                    effect: CombatEffectCue::Healing {
-                        amount: plan.applied,
-                        health_after: plan.health_after,
-                    },
-                };
-                transaction.legacy_telemetry.record_cue(cue.clone());
-                transaction.outbox.0.push(cue);
-                transaction.outcome_facts.0.push(CombatOutcomeFact {
-                    event_id,
-                    tick,
-                    attack_id: record.source.attack_id,
-                    source_kind: record.source.kind,
-                    source_player: Some(record.source.player_id),
-                    source_network_id: Some(record.source.owner_network_entity_id),
-                    source_team: Some(record.source.team_id),
-                    target_network_id: *target_network_id,
+                    *target_network_id,
+                    *target_team,
                     target_kind,
-                    target_team: *target_team,
-                    preset_id: record.source.source_preset_id,
-                    recipe_fingerprint: Some(record.source.recipe_fingerprint),
-                    position: WorldPoint::from(record.position),
-                    engagement_distance: record.engagement_distance,
-                    kind: CombatOutcomeKind::Healing {
-                        requested: plan.requested,
-                        applied: plan.applied,
-                        resulting_health: plan.health_after,
-                    },
-                });
-                gameplay_telemetry.weapon.record(WeaponTelemetryRecord {
-                    tick,
-                    event_id,
-                    attack_id: record.source.attack_id,
                     preset_id,
-                    recipe_fingerprint: record.source.recipe_fingerprint,
-                    delivery_index: Some(record.delivery_index),
-                    source: record.source.owner_network_entity_id,
-                    target: Some(*target_network_id),
-                    position: WorldPoint::from(record.position),
-                    requested_value: plan.requested,
-                    applied_value: plan.applied,
-                    engagement_distance: record.engagement_distance,
-                    delivery_travel: record.delivery_travel,
-                    hostile_contact: false,
-                    effect: Some(effect),
-                    resulting_health: Some(plan.health_after),
-                    resulting_effects: Some(effects_state),
-                    resulting_motion: motion_state,
-                    outcome: WeaponTelemetryOutcome::HealingApplied,
-                });
+                    event_id,
+                    effect,
+                    plan,
+                    effects_state,
+                    motion_state,
+                    gameplay_telemetry,
+                    transaction,
+                );
             }
         }
         if target_defeated {
@@ -661,7 +627,7 @@ pub(super) fn apply_composed_records(
     clippy::too_many_lines,
     reason = "each parameter is one fact of the damage application being recorded across the telemetry, cue, and outcome sinks"
 )]
-fn record_damage_application(
+fn project_committed_damage(
     record: &PendingPayload,
     tick: u64,
     source: DamageSource,
@@ -785,15 +751,12 @@ fn record_damage_application(
     });
 }
 
-// A defeat commits the terminal entity state, defeat telemetry, cues, and outcome facts
-// for one target destroyed by this record.
 #[allow(
+    clippy::large_types_passed_by_value,
     clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "each parameter is one fact of the defeat being recorded across entity state, telemetry, cues, and outcomes"
+    reason = "each parameter is a committed healing fact projected to the existing sinks"
 )]
-fn record_target_defeat(
-    commands: &mut Commands,
+fn project_committed_healing(
     record: &PendingPayload,
     tick: u64,
     source: DamageSource,
@@ -801,17 +764,84 @@ fn record_target_defeat(
     target_team: TeamId,
     target_kind: CombatTargetKind,
     preset_id: WeaponPresetId,
-    owner_contact: bool,
-    defeat_event: CombatEventId,
-    legacy_defeat_event: Option<CombatEventId>,
-    test_dummy: Option<&TestDummy>,
-    applied: &mut AppliedComposedState,
+    event_id: CombatEventId,
+    effect: PayloadEffectDefinition,
+    plan: HealingApplicationPlan,
+    effects_state: ActiveEffects,
+    motion_state: Option<ExternalMotion>,
     gameplay_telemetry: &mut AbilityWeaponTelemetry,
     transaction: &mut CombatTransactionState,
 ) {
-    applied.defeated.insert(record.target);
+    let cue = CombatCue::EffectApplied {
+        event_id,
+        tick,
+        attack_id: record.source.attack_id,
+        source,
+        target: target_network_id,
+        position: WorldPoint::from(record.position),
+        effect: CombatEffectCue::Healing {
+            amount: plan.applied,
+            health_after: plan.health_after,
+        },
+    };
+    transaction.legacy_telemetry.record_cue(cue.clone());
+    transaction.outbox.0.push(cue);
+    transaction.outcome_facts.0.push(CombatOutcomeFact {
+        event_id,
+        tick,
+        attack_id: record.source.attack_id,
+        source_kind: record.source.kind,
+        source_player: Some(record.source.player_id),
+        source_network_id: Some(record.source.owner_network_entity_id),
+        source_team: Some(record.source.team_id),
+        target_network_id,
+        target_kind,
+        target_team,
+        preset_id: record.source.source_preset_id,
+        recipe_fingerprint: Some(record.source.recipe_fingerprint),
+        position: WorldPoint::from(record.position),
+        engagement_distance: record.engagement_distance,
+        kind: CombatOutcomeKind::Healing {
+            requested: plan.requested,
+            applied: plan.applied,
+            resulting_health: plan.health_after,
+        },
+    });
+    gameplay_telemetry.weapon.record(WeaponTelemetryRecord {
+        tick,
+        event_id,
+        attack_id: record.source.attack_id,
+        preset_id,
+        recipe_fingerprint: record.source.recipe_fingerprint,
+        delivery_index: Some(record.delivery_index),
+        source: record.source.owner_network_entity_id,
+        target: Some(target_network_id),
+        position: WorldPoint::from(record.position),
+        requested_value: plan.requested,
+        applied_value: plan.applied,
+        engagement_distance: record.engagement_distance,
+        delivery_travel: record.delivery_travel,
+        hostile_contact: false,
+        effect: Some(effect),
+        resulting_health: Some(plan.health_after),
+        resulting_effects: Some(effects_state),
+        resulting_motion: motion_state,
+        outcome: WeaponTelemetryOutcome::HealingApplied,
+    });
+}
+
+fn commit_target_defeat(
+    commands: &mut Commands,
+    target: Entity,
+    tick: u64,
+    target_kind: CombatTargetKind,
+    defeat_event: CombatEventId,
+    test_dummy: Option<&TestDummy>,
+    applied: &mut AppliedComposedState,
+) {
+    applied.defeated.insert(target);
     commands
-        .entity(record.target)
+        .entity(target)
         .insert((
             Defeated {
                 event_id: defeat_event,
@@ -829,14 +859,34 @@ fn record_target_defeat(
         .remove::<ExternalMotion>()
         .remove::<KnockbackFeedback>();
     if let Some(test_dummy) = test_dummy {
-        commands
-            .entity(record.target)
-            .insert(TestDummyResetDeadline(
-                tick.saturating_add(test_dummy.reset_delay_ticks),
-            ));
+        commands.entity(target).insert(TestDummyResetDeadline(
+            tick.saturating_add(test_dummy.reset_delay_ticks),
+        ));
     }
-    applied.effects.remove(&record.target);
-    applied.motion.remove(&record.target);
+    applied.effects.remove(&target);
+    applied.motion.remove(&target);
+}
+
+// A committed defeat projects telemetry, cues, and outcome facts for one target.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "each parameter is one committed defeat fact projected to the existing sinks"
+)]
+fn project_committed_defeat(
+    record: &PendingPayload,
+    tick: u64,
+    source: DamageSource,
+    target_network_id: NetworkEntityId,
+    target_team: TeamId,
+    target_kind: CombatTargetKind,
+    preset_id: WeaponPresetId,
+    owner_contact: bool,
+    defeat_event: CombatEventId,
+    legacy_defeat_event: Option<CombatEventId>,
+    gameplay_telemetry: &mut AbilityWeaponTelemetry,
+    transaction: &mut CombatTransactionState,
+) {
     gameplay_telemetry
         .weapon
         .record_defeat(preset_id, record.source.recipe_fingerprint);

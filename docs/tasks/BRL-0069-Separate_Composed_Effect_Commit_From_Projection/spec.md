@@ -64,3 +64,12 @@ The transaction boundary is batch-wide, not merely per effect. Planning must sim
 - Routed launcher slow replication, persistent splash, sticky, and cone-spray scenarios pass.
 - `just check`, `just lint`, formatting, strict role isolation, and diff hygiene pass.
 - Remaining: move target/tracker mutations and every immediate projection into the batch-wide `ComposedApplicationPlan`, then implement sole commit and ordered projection passes plus atomicity/order characterization.
+
+## Progress — authoritative commits separated from projection
+
+- Damage publication is now explicitly named `project_committed_damage` and runs only after the planned health result has been committed.
+- Healing calculation/health commit now delegates all facts, cues, and telemetry to `project_committed_healing`.
+- Defeat terminal mutation is isolated in `commit_target_defeat`; `project_committed_defeat` owns defeat telemetry, current/legacy cues and logs, and outcome facts. Damage projection remains before defeat projection and legacy event order is unchanged.
+- Focused composed-effect tests pass (13). Routed reciprocal lethal attribution, launcher slow replication, persistent splash, and impaired full-cue convergence pass.
+- `just check`, `just lint`, formatting, strict role isolation, and diff hygiene pass.
+- Remaining: replace the still-immediate coordinator with a batch-wide sequential plan, make batch commit the only target/tracker mutation pass, and replay all immediate/deferred projections from that committed plan.
