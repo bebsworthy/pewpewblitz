@@ -282,6 +282,9 @@ impl Plugin for WorldPresentationPlugin {
         }
         configure_world_presentation_schedule(app);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
+            .insert_resource(
+                combat::VfxCatalog::embedded().expect("embedded client VFX catalog must be valid"),
+            )
             .add_message::<combat::PendingCombatEffect>()
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()

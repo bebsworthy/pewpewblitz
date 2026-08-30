@@ -1,6 +1,8 @@
 //! Private server-hosted Practice bot composition.
 
 #[cfg(feature = "server")]
+mod behaviors;
+#[cfg(feature = "server")]
 mod controller;
 #[cfg(feature = "server")]
 mod diagnostics;

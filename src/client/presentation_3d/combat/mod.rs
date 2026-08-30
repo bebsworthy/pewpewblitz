@@ -7,6 +7,7 @@ mod effects;
 mod entities;
 mod fighter_feedback;
 mod fighter_ui;
+mod vfx_catalog;
 
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
 pub(super) use cone_spray::{reconcile_cone_spray_visuals, update_cone_spray_visuals};
@@ -30,6 +31,7 @@ pub(super) use fighter_ui::{
     prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
     update_fighter_overhead_state,
 };
+pub(super) use vfx_catalog::VfxCatalog;
 
 #[cfg(test)]
 mod tests {
