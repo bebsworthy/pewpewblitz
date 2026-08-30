@@ -1,11 +1,8 @@
 //! Deterministic immediate effect policies.
 //!
-//! The composed-payload pipeline is organized as four ordered stages: collection and
-//! deterministic ordering (`application::collect_composed_batch`), event planning and
-//! reservation (`application::plan_composed_events` plus `planning`), per-record
-//! application (`application::apply_composed_records`), and deferred commit
-//! (`application::commit_composed_batch`). The system below only sequences the stages
-//! and owns no rules itself.
+//! The composed-payload pipeline collects and orders work, reserves the complete event
+//! range, plans the whole target/tracker transaction without mutation, commits it once,
+//! and then projects the committed facts. The system below only sequences those stages.
 
 #[allow(clippy::wildcard_imports)]
 #[cfg(feature = "server")]
@@ -23,8 +20,8 @@ mod tests;
 
 #[cfg(feature = "server")]
 use application::{
-    AppliedComposedState, BatchView, ComposedBatch, apply_composed_records, collect_composed_batch,
-    commit_composed_batch, plan_composed_events,
+    BatchView, ComposedBatch, collect_composed_batch, commit_composed_plan, plan_composed_events,
+    plan_composed_records, project_composed_plan,
 };
 #[cfg(feature = "server")]
 use planning::{abort_composed_event_batch, resolve_pending_deliveries};
@@ -86,8 +83,11 @@ pub(super) struct CombatTargetState<'w, 's> {
                     &'static NetworkEntityId,
                     &'static TeamId,
                     &'static CurrentHealth,
+                    Option<&'static ActiveEffects>,
+                    Option<&'static ExternalMotion>,
                     Option<&'static Defeated>,
                     Option<&'static lightyear::prelude::ControlledBy>,
+                    Option<&'static TestDummy>,
                     Option<&'static crate::map::EffectTileOccupancy>,
                 ),
                 Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
@@ -179,7 +179,8 @@ pub(super) fn resolve_composed_payloads(
     };
     let mut reserved_events = reserved.into_iter();
 
-    // Stage three: resolve deliveries, then apply every payload record against live state.
+    // Stage three: resolve deliveries, then plan the complete payload transaction against
+    // immutable target snapshots and the simulated state of earlier records in this batch.
     let retained_delivery_keys = batch.retained_delivery_keys();
     let ComposedBatch {
         disconnected,
@@ -188,7 +189,7 @@ pub(super) fn resolve_composed_payloads(
         records,
         deliveries,
     } = batch;
-    let mut resolved_delivery_keys = resolve_pending_deliveries(
+    let resolved_delivery_keys = resolve_pending_deliveries(
         &mut commands,
         deliveries,
         &connected_owners,
@@ -206,27 +207,17 @@ pub(super) fn resolve_composed_payloads(
         records: &records,
         retained_delivery_keys: &retained_delivery_keys,
     };
-    let mut applied = AppliedComposedState::default();
-    apply_composed_records(
-        &mut commands,
+    let application_plan = plan_composed_records(
         tick.0,
         &view,
         &mut combat,
         &mut reserved_events,
-        &mut trackers,
-        &mut gameplay_telemetry,
-        &mut transaction,
-        &mut applied,
-        &mut resolved_delivery_keys,
+        resolved_delivery_keys,
         condition_rules.0,
     );
 
-    // Stage four: commit accumulated effects, deferred cues, and tracker completion.
-    commit_composed_batch(
-        &mut commands,
-        &mut trackers,
-        &mut transaction,
-        applied,
-        resolved_delivery_keys,
-    );
+    // Stage four: commit authoritative state exactly once, then publish ordered facts,
+    // telemetry, logs, and cues derived from that committed transaction.
+    commit_composed_plan(&mut commands, &mut combat, &mut trackers, &application_plan);
+    project_composed_plan(application_plan, &mut gameplay_telemetry, &mut transaction);
 }
