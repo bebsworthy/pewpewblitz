@@ -501,7 +501,6 @@ pub(super) fn apply_composed_records(
                         amount: applied_healing,
                         health_after: health.0,
                     },
-                    presentation_profile_id: record.source.presentation_profile_id,
                 };
                 transaction.legacy_telemetry.record_cue(cue.clone());
                 transaction.outbox.0.push(cue);
@@ -650,7 +649,6 @@ fn record_damage_application(
         amount: applied_damage,
         health_after,
         distance_band: band,
-        presentation_profile_id: record.source.presentation_profile_id,
     };
     transaction.legacy_telemetry.record_cue(damage_cue.clone());
     transaction.outbox.0.push(damage_cue);
@@ -808,7 +806,6 @@ fn record_target_defeat(
         source: Some(source),
         target: target_network_id,
         position: WorldPoint::from(record.position),
-        presentation_profile_id: Some(record.source.presentation_profile_id),
     };
     transaction
         .legacy_telemetry

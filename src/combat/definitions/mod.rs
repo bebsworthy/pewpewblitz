@@ -5,17 +5,14 @@ use bevy::prelude::{Component, FromWorld, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 9;
-pub const FINGERPRINT_FORMAT_VERSION: u16 = 7;
+pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 11;
+pub const FINGERPRINT_FORMAT_VERSION: u16 = 9;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 pub(crate) const MAX_WEAPON_PRESETS: usize = 16;
 const MAX_WEAPON_CATALOG_BYTES: usize = 64 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WeaponPresetId(pub u16);
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct WeaponPresentationProfileId(pub u16);
 
 #[derive(
     Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Default,
@@ -151,6 +148,7 @@ pub struct WeaponRecipePolicy {
     pub max_fire_cooldown_ticks: u64,
     pub max_effect_duration_ticks: u64,
     pub max_projectile_lifetime_ticks: u64,
+    pub minimum_lob_flight_ticks: u64,
     pub max_damage: u16,
     pub max_speed: f32,
     pub max_distance: f32,
@@ -200,6 +198,7 @@ impl Default for WeaponRecipePolicy {
             max_fire_cooldown_ticks: 3_600,
             max_effect_duration_ticks: 3_600,
             max_projectile_lifetime_ticks: 600,
+            minimum_lob_flight_ticks: 1,
             max_damage: 1_000,
             max_speed: 4_096.0,
             max_distance: 4_096.0,
@@ -252,7 +251,6 @@ impl WeaponCatalog {
                 || !keys.insert(preset.key.clone())
                 || !valid_key(&preset.key)
                 || !valid_display_name(&preset.display_name)
-                || preset.configuration.presentation_profile_id.0 == 0
             {
                 return Err(format!("invalid preset metadata for {}", preset.key));
             }
@@ -320,7 +318,6 @@ pub struct WeaponPresetDefinition {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct WeaponConfiguration {
-    pub presentation_profile_id: WeaponPresentationProfileId,
     pub recipe: WeaponRecipe,
 }
 
@@ -542,7 +539,6 @@ pub enum SlowStacking {
 pub struct ResolvedWeapon {
     pub source_preset_id: Option<WeaponPresetId>,
     pub recipe_fingerprint: WeaponRecipeFingerprint,
-    pub presentation_profile_id: WeaponPresentationProfileId,
     pub recipe: WeaponRecipe,
 }
 
@@ -564,9 +560,6 @@ impl WeaponConfiguration {
         fighter_radius: Option<f32>,
     ) -> Result<(), String> {
         let recipe = &self.recipe;
-        if self.presentation_profile_id.0 == 0 {
-            return Err("unknown weapon presentation profile".to_string());
-        }
         let economy_family = match recipe.economy {
             WeaponEconomy::Magazine { .. } => EconomyFamily::Magazine,
             WeaponEconomy::Charges { .. } => EconomyFamily::Charges,
@@ -700,6 +693,7 @@ impl WeaponConfiguration {
                     || max_flight_ticks == 0
                     || max_flight_ticks > limits.max_lifetime_ticks
                     || max_flight_ticks > policy.max_projectile_lifetime_ticks
+                    || max_flight_ticks < policy.minimum_lob_flight_ticks
                     || !finite_range(visual_arc_height, 0.0, limits.max_world_field)
                     || !finite_range(visual_arc_height, 0.0, policy.max_distance)
                     || !finite_range(landing_clearance_radius, 0.0, limits.max_radius)
@@ -808,6 +802,7 @@ impl WeaponConfiguration {
                     || max_flight_ticks == 0
                     || max_flight_ticks > limits.max_lifetime_ticks
                     || max_flight_ticks > policy.max_projectile_lifetime_ticks
+                    || max_flight_ticks < policy.minimum_lob_flight_ticks
                     || !finite_range(visual_arc_height, 0.0, policy.max_distance)
                     || !finite_range(landing_clearance_radius, 0.0, maximum_radius)
                     || landing_clearance_radius == 0.0
@@ -1121,6 +1116,8 @@ fn validate_policy(policy: &WeaponRecipePolicy, limits: EngineWeaponLimits) -> R
         || policy.max_effect_duration_ticks > limits.max_effect_duration_ticks
         || policy.max_projectile_lifetime_ticks == 0
         || policy.max_projectile_lifetime_ticks > limits.max_lifetime_ticks
+        || policy.minimum_lob_flight_ticks == 0
+        || policy.minimum_lob_flight_ticks > policy.max_projectile_lifetime_ticks
         || policy.max_damage == 0
         || policy.max_damage > limits.max_damage
         || !finite_range(policy.max_speed, 0.0, limits.max_speed)

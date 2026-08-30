@@ -52,9 +52,8 @@ pub use client::{
     MapPresentationPlugin, MapPresentationSet, PresentedMap, perimeter_visual_shapes,
 };
 pub use effect_tiles::{
-    DAMAGE_TILE_DAMAGE, DAMAGE_TILE_INTERVAL_TICKS, EffectTileKind, EffectTileOccupancy,
-    MAX_EFFECT_TILE_PLACEMENTS, MapEffectTileBehavior, ResolvedEffectTile,
-    SLOW_TILE_MULTIPLIER_MILLI, SPEED_TILE_MULTIPLIER_MILLI,
+    EffectTileKind, EffectTileOccupancy, MAX_EFFECT_TILE_PLACEMENTS, MapEffectTileBehavior,
+    ResolvedEffectTile,
 };
 #[cfg(feature = "client")]
 pub(crate) use geometry::effective_projectile_collider;

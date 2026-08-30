@@ -1804,11 +1804,6 @@ mod tests {
                 "missing authored tuning path {expected}"
             );
         }
-        assert!(
-            !paths
-                .iter()
-                .any(|path| path.contains("presentation_profile_id"))
-        );
     }
 
     #[test]

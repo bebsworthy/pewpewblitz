@@ -2,10 +2,7 @@
 
 #[cfg(feature = "server")]
 use super::{PayloadBundleDefinition, WeaponRecipe, WorldEffectDefinition};
-use super::{
-    PayloadEffectDefinition, WeaponDefinitionId, WeaponPresentationProfileId, WeaponPresetId,
-    WeaponRecipeFingerprint,
-};
+use super::{PayloadEffectDefinition, WeaponDefinitionId, WeaponPresetId, WeaponRecipeFingerprint};
 use crate::protocol::{NetworkEntityId, PlayerId};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -26,7 +23,6 @@ pub struct AttackSource {
     pub owner_network_entity_id: NetworkEntityId,
     pub team_id: TeamId,
     pub recipe_fingerprint: WeaponRecipeFingerprint,
-    pub presentation_profile_id: WeaponPresentationProfileId,
     pub legacy_compatibility: bool,
     pub source_preset_id: Option<WeaponPresetId>,
     pub origin: WorldPoint,
@@ -77,7 +73,6 @@ pub struct ConditionSource {
     pub team_id: TeamId,
     pub source_preset_id: Option<WeaponPresetId>,
     pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,
-    pub presentation_profile_id: Option<WeaponPresentationProfileId>,
 }
 
 impl From<AttackSource> for ConditionSource {
@@ -90,7 +85,6 @@ impl From<AttackSource> for ConditionSource {
             team_id: source.team_id,
             source_preset_id: source.source_preset_id,
             recipe_fingerprint: Some(source.recipe_fingerprint),
-            presentation_profile_id: Some(source.presentation_profile_id),
         }
     }
 }

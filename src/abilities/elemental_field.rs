@@ -24,7 +24,7 @@ pub(crate) fn activate_elemental_field(
             Entity,
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &crate::protocol::PlayerId,
             &crate::protocol::NetworkEntityId,
             &crate::combat::TeamId,
@@ -46,7 +46,7 @@ pub(crate) fn activate_elemental_field(
         entity,
         position,
         rotation,
-        loadout,
+        ultimate,
         player_id,
         network_id,
         team,
@@ -60,15 +60,12 @@ pub(crate) fn activate_elemental_field(
         active,
     ) in &mut casters
     {
-        let Some(kind) = crate::combat::fields::field_kind_for_ultimate(loadout.ultimate.kind)
-        else {
+        let Some(kind) = crate::combat::fields::field_kind_for_ultimate(ultimate.kind) else {
             continue;
         };
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -76,7 +73,7 @@ pub(crate) fn activate_elemental_field(
                 .entity(entity)
                 .insert(crate::abilities::UltimateInputLatch(requested));
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -97,26 +94,28 @@ pub(crate) fn activate_elemental_field(
                 crate::builds::AbilityPhase::ElementalFieldActive { .. }
             )
         });
-        let rejection = if !fresh {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if !active {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if effects.is_frozen(tick.0) {
+        let before_readiness = if effects.is_frozen(tick.0) {
             Some(crate::abilities::AbilityRejectionReason::Frozen)
         } else if owns_field
             || fields.iter().count() >= crate::combat::fields::MAX_ACTIVE_ELEMENTAL_FIELDS
         {
             Some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
         } else {
             None
         };
-        if let Some(reason) = rejection {
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh: fresh,
+                defeated,
+                active,
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions {
+                before_readiness,
+                after_readiness: None,
+            },
+        ) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -130,7 +129,7 @@ pub(crate) fn activate_elemental_field(
             duration_ticks,
             pulse_interval_ticks,
             effect,
-        } = loadout.ultimate.parameters
+        } = ultimate.parameters
         else {
             continue;
         };
@@ -174,14 +173,13 @@ pub(crate) fn activate_elemental_field(
         let source = crate::combat::ConditionSource {
             action_id,
             kind: crate::combat::CombatSourceKind::Ultimate {
-                ultimate_id: loadout.ultimate.id,
+                ultimate_id: ultimate.id,
             },
             player_id: *player_id,
             network_entity_id: *network_id,
             team_id: *team,
             source_preset_id: None,
             recipe_fingerprint: None,
-            presentation_profile_id: None,
         };
         commands.spawn((
             crate::combat::ElementalFieldState {

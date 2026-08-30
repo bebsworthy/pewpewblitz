@@ -22,7 +22,7 @@ pub(crate) fn activate_concealment_field(
             Entity,
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &crate::protocol::NetworkEntityId,
             &crate::combat::TeamId,
             &crate::matchplay::MatchParticipant,
@@ -43,7 +43,7 @@ pub(crate) fn activate_concealment_field(
         entity,
         position,
         rotation,
-        loadout,
+        ultimate,
         network_id,
         team,
         participant,
@@ -56,14 +56,12 @@ pub(crate) fn activate_concealment_field(
         active,
     ) in &mut casters
     {
-        if loadout.ultimate.kind != crate::builds::UltimateKind::ConcealmentField {
+        if ultimate.kind != crate::builds::UltimateKind::ConcealmentField {
             continue;
         }
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -71,7 +69,7 @@ pub(crate) fn activate_concealment_field(
                 .entity(entity)
                 .insert(crate::abilities::UltimateInputLatch(requested));
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -84,22 +82,22 @@ pub(crate) fn activate_concealment_field(
             freshness.last_fresh_tick,
             crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
         );
-        let rejection = if !held {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if !active {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if fields.iter().count() >= crate::concealment::MAX_ACTIVE_CONCEALMENT_FIELDS {
-            Some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
-        } else {
-            None
-        };
-        if let Some(reason) = rejection {
+        let field_ceiling = (fields.iter().count()
+            >= crate::concealment::MAX_ACTIVE_CONCEALMENT_FIELDS)
+            .then_some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling);
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh: held,
+                defeated,
+                active,
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions {
+                before_readiness: field_ceiling,
+                after_readiness: None,
+            },
+        ) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -111,7 +109,7 @@ pub(crate) fn activate_concealment_field(
             maximum_range_milliunits,
             radius_milliunits,
             duration_ticks,
-        } = loadout.ultimate.parameters
+        } = ultimate.parameters
         else {
             continue;
         };
@@ -137,9 +135,8 @@ pub(crate) fn activate_concealment_field(
         ) else {
             continue;
         };
-        let next_generation = generation
-            .as_deref()
-            .map_or(Some(1), |value| value.0.checked_add(1));
+        let next_generation =
+            super::activation::next_ultimate_generation(generation.as_deref().map(|value| value.0));
         let (Some(next_generation), Some(field_id)) = (next_generation, field_ids.allocate())
         else {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -207,7 +204,7 @@ pub(crate) fn cleanup_concealment_fields(
     )>,
     mut owners: Query<(
         &crate::protocol::NetworkEntityId,
-        &crate::builds::ResolvedMatchLoadout,
+        &crate::builds::ResolvedUltimate,
         &mut crate::builds::AbilityState,
         Option<&crate::combat::Defeated>,
         Option<&crate::matchplay::ActiveCombatant>,
@@ -227,7 +224,7 @@ pub(crate) fn cleanup_concealment_fields(
     for (entity, state, owner) in ordered {
         use crate::abilities::ConcealmentFieldCleanupReason as Reason;
         let mut reason = (tick.0 >= state.expires_at_tick).then_some(Reason::Expired);
-        if let Some((_, loadout, mut ability, defeated, active, controlled)) = owners
+        if let Some((_, ultimate, mut ability, defeated, active, controlled)) = owners
             .iter_mut()
             .find(|(network_id, ..)| **network_id == owner.owner_network_id)
         {
@@ -239,9 +236,7 @@ pub(crate) fn cleanup_concealment_fields(
             {
                 reason = Some(Reason::OwnerDisconnected);
             }
-            if reason.is_none()
-                && loadout.ultimate.kind != crate::builds::UltimateKind::ConcealmentField
-            {
+            if reason.is_none() && ultimate.kind != crate::builds::UltimateKind::ConcealmentField {
                 reason = Some(Reason::BuildReplaced);
             }
             if reason.is_none()
@@ -261,7 +256,7 @@ pub(crate) fn cleanup_concealment_fields(
             {
                 ability.phase = crate::abilities::settled_ability_phase(
                     ability.charge,
-                    loadout.ultimate.charge_policy.maximum,
+                    ultimate.charge_policy.maximum,
                 );
             }
         } else {

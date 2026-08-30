@@ -280,7 +280,6 @@ pub(super) fn resolve_pending_deliveries(
                     delivery_index: delivery.delivery_index,
                     source: delivery.source.owner_network_entity_id,
                     weapon_definition_id,
-                    presentation_profile_id: delivery.source.presentation_profile_id,
                     target,
                     position,
                     normal,
@@ -345,7 +344,6 @@ pub(super) fn resolve_pending_deliveries(
                     delivery_index: delivery.delivery_index,
                     source: delivery.source.owner_network_entity_id,
                     weapon_definition_id,
-                    presentation_profile_id: delivery.source.presentation_profile_id,
                     position,
                 };
                 legacy_telemetry.record_cue(cue.clone());
@@ -367,7 +365,6 @@ pub(super) fn resolve_pending_deliveries(
                     delivery_index: delivery.delivery_index,
                     source: delivery.source.owner_network_entity_id,
                     weapon_definition_id,
-                    presentation_profile_id: delivery.source.presentation_profile_id,
                     target: None,
                     position,
                     normal: WorldPoint::from(Vec2::ZERO),
@@ -392,7 +389,6 @@ pub(super) fn resolve_pending_deliveries(
                     delivery_index: delivery.delivery_index,
                     source: delivery.source.owner_network_entity_id,
                     weapon_definition_id,
-                    presentation_profile_id: delivery.source.presentation_profile_id,
                     target,
                     position,
                 };
@@ -420,7 +416,6 @@ pub(super) fn resolve_pending_deliveries(
                     delivery_index: delivery.delivery_index,
                     source: delivery.source.owner_network_entity_id,
                     weapon_definition_id,
-                    presentation_profile_id: delivery.source.presentation_profile_id,
                     origin,
                     facing,
                     reached_distance,
@@ -445,7 +440,6 @@ pub(super) fn resolve_pending_deliveries(
                     delivery_index: delivery.delivery_index,
                     source: delivery.source.owner_network_entity_id,
                     weapon_definition_id,
-                    presentation_profile_id: delivery.source.presentation_profile_id,
                     target: None,
                     position: center,
                     normal: WorldPoint::from(Vec2::ZERO),

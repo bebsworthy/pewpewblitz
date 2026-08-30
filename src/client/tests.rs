@@ -3,6 +3,43 @@
 use super::*;
 
 #[test]
+fn client_network_plugin_does_not_select_gameplay_or_presentation() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.transport = NetworkTransport::Udp;
+    let mut app = App::new();
+    app.insert_resource(config).add_plugins(ClientNetworkPlugin);
+
+    assert!(!app.is_plugin_added::<GameplayContentPlugin>());
+    assert!(!app.is_plugin_added::<ProtocolPlugin>());
+    assert!(!app.is_plugin_added::<ClientReplicatedGameplayPlugin>());
+    assert!(!app.is_plugin_added::<ClientCombatPlugin>());
+    assert!(!app.is_plugin_added::<crate::map::ClientMapPlugin>());
+    assert!(!app.is_plugin_added::<crate::map::MapPresentationPlugin>());
+    assert!(!app.is_plugin_added::<ClientQueuePlugin>());
+    assert!(!app.is_plugin_added::<ClientProfilePlugin>());
+    assert!(!app.is_plugin_added::<ClientPresentationPlugin>());
+}
+
+#[test]
+fn headless_client_builder_explicitly_installs_content_gameplay_and_session_plugins() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.headless = true;
+    config.transport = NetworkTransport::Udp;
+    let app = build_app_with_config(config);
+
+    assert!(app.is_plugin_added::<GameplayContentPlugin>());
+    assert!(app.is_plugin_added::<ProtocolPlugin>());
+    assert!(app.is_plugin_added::<ClientReplicatedGameplayPlugin>());
+    assert!(app.is_plugin_added::<ClientCombatPlugin>());
+    assert!(app.is_plugin_added::<crate::map::ClientMapPlugin>());
+    assert!(app.is_plugin_added::<crate::map::MapPresentationPlugin>());
+    assert!(app.is_plugin_added::<ClientQueuePlugin>());
+    assert!(app.is_plugin_added::<ClientProfilePlugin>());
+    assert!(app.is_plugin_added::<ClientNetworkPlugin>());
+    assert!(!app.is_plugin_added::<ClientPresentationPlugin>());
+}
+
+#[test]
 fn automatic_match_ready_waits_for_the_requested_roster() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;
@@ -26,6 +63,7 @@ fn render_measurement_automatically_readies_without_injecting_combat_input() {
         report_path: "target/report.txt".into(),
         warmup: Duration::from_secs(10),
         measurement: Duration::from_secs(30),
+        reduced_effects: false,
     });
     assert!(automatic_match_command_enabled(&config, 2));
     assert!(config.windowed_combat_demo.is_none());

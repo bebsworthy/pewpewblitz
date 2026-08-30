@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Composed revision of the validated common lifecycle plus Hot Zone rules.
-pub const HOT_ZONE_RULES_REVISION: u16 = 1;
+pub const HOT_ZONE_RULES_REVISION: u16 = 2;
 
 /// World-unit outward expansion defining near-zone combat for telemetry.
 pub const HOT_ZONE_NEAR_COMBAT_EXPANSION: f32 = 240.0;

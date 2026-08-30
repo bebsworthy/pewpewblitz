@@ -5,10 +5,6 @@ use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_EFFECT_TILE_PLACEMENTS: usize = 4_096;
-pub const SPEED_TILE_MULTIPLIER_MILLI: u16 = 1_250;
-pub const SLOW_TILE_MULTIPLIER_MILLI: u16 = 700;
-pub const DAMAGE_TILE_DAMAGE: u16 = 10;
-pub const DAMAGE_TILE_INTERVAL_TICKS: u16 = 30;
 pub(crate) const MAX_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI: u16 = 2_000;
 pub(crate) const MIN_SLOW_TILE_MOVEMENT_MULTIPLIER_MILLI: u16 = 100;
 pub(crate) const MAX_EFFECT_TILE_DAMAGE: u16 = 100;

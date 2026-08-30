@@ -117,9 +117,10 @@ contracts.
 
 - **Existing Start Practice flow.** The player starts practice normally; no bot CLI, helper process,
   lobby pool, matchmaking, or additional check-in is introduced.
-- **One code-owned behavior profile.** There are no player-facing difficulty presets or skill
-  ranking. The target is readable opposition with delayed reactions, imperfect aim, coordinated
-  objective play, and bounded tactical commitments.
+- **One authored, validated behavior profile.** `content/catalogs/bots.ron` is the single source for
+  player-affecting Practice tuning; there are no player-facing difficulty presets or skill ranking.
+  The target is readable opposition with delayed reactions, imperfect aim, coordinated objective
+  play, and bounded tactical commitments.
 - **One canonical saved brawler.** Manifest bots use one validated built-in saved-brawler recipe
   with Pulse primary and Dash. The human may practice with any legal build. Additional bot weapon
   and ability capabilities are evidence-gated.
@@ -302,6 +303,13 @@ navigation framework: implement the one snapshot/search boundary consumed by pra
 The first policy is **hand-written utility scoring with small committed-duration state**.
 It has no Bevy ECS dependency and requires no AI framework.
 
+The authored arbitration table maps every code-registered behavior to one stable numeric ID, an
+enablement flag, and a base score. The commitment bonus is authored beside that table. Validation
+rejects duplicate, missing, or unknown registrations, score overflow, and a disabled fallback.
+Equal effective scores are resolved by the lower stable behavior ID, independent of registration
+order. Contextual eligibility remains focused Rust behavior—for example, retreat still requires low
+health and a visible enemy—rather than becoming a stringly typed rule language.
+
 - **Team planning assigns goals, roles, and reservations.** One pure batch transition considers all
   bot teammates in stable identity order and assigns bounded roles such as pressure, contest,
   attack-safe, defend-safe, or recover-pickup. It prevents every bot from selecting the same target
@@ -363,12 +371,12 @@ Diagnostics support tests and tuning; they do not become bot-specific gameplay p
 
 ## Profile and deterministic entropy
 
-Ship one code-owned, validated `BotProfile` containing only values owned by the first behavior:
+Ship one authored, validated `BotCatalog` containing only values owned by the first behavior:
 reaction delay and contact-memory lifetime; tactical and team-plan cadence; desired range and
-retreat threshold; aim/intercept error and hold duration; tactic commitment; navigation clearance,
-replan, and stuck thresholds; and bounded capability rules. Add profile fields only with behavior
-that consumes them. This is typed code configuration, not player-facing difficulty or authored
-gameplay content.
+retreat threshold; aim/intercept error and hold duration; tactic commitment and arbitration;
+navigation clearance, replan, and stuck thresholds; and bounded capability rules. Add profile
+fields only with behavior that consumes them. This is typed gameplay policy, not a player-facing
+difficulty system or executable behavior graph.
 
 Planner memory and work capacities are code-owned safety limits validated against the selected
 map's measured navigation topology. They are not difficulty knobs and must not be disguised map-

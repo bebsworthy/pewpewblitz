@@ -734,6 +734,7 @@ mod tests {
                 match_id,
                 rules_revision: 1,
                 generation,
+                critical_health_percent: 25,
                 safes: [safe, safe],
                 completion: None,
             },

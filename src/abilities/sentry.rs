@@ -94,7 +94,6 @@ pub(crate) struct ResolvedSentryTuning {
     maximum_health: u16,
     charge_maximum: u16,
     recipe_fingerprint: crate::combat::WeaponRecipeFingerprint,
-    presentation_profile_id: crate::combat::WeaponPresentationProfileId,
     recipe: crate::combat::WeaponRecipe,
 }
 
@@ -115,7 +114,6 @@ fn resolve_sentry_tuning(
         projectile_range_milliunits,
         projectile_lifetime_ticks,
         projectile_damage,
-        presentation_profile_id,
     } = ultimate.parameters
     else {
         return None;
@@ -162,9 +160,6 @@ fn resolve_sentry_tuning(
         maximum_health,
         charge_maximum: ultimate.charge_policy.maximum,
         recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(fingerprint.max(1)),
-        presentation_profile_id: crate::combat::WeaponPresentationProfileId(
-            presentation_profile_id,
-        ),
         recipe,
     })
 }
@@ -328,7 +323,7 @@ pub(crate) fn activate_sentry(
             Entity,
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &crate::protocol::PlayerId,
             &NetworkEntityId,
             &crate::combat::TeamId,
@@ -360,7 +355,7 @@ pub(crate) fn activate_sentry(
         owner,
         position,
         rotation,
-        loadout,
+        ultimate,
         player,
         network_id,
         team,
@@ -373,20 +368,18 @@ pub(crate) fn activate_sentry(
         active,
     ) in &mut fighters
     {
-        if loadout.ultimate.kind != crate::builds::UltimateKind::Sentry {
+        if ultimate.kind != crate::builds::UltimateKind::Sentry {
             continue;
         }
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
+        let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         let held = requested
             && !crate::movement::input_should_neutralize(
                 tick.0,
                 freshness.last_fresh_tick,
                 crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
             );
-        let was_held = latch.as_deref().is_some_and(|latch| latch.0);
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -401,34 +394,32 @@ pub(crate) fn activate_sentry(
                 kind: crate::abilities::AbilityTelemetryKind::ActivationAttempt,
             });
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
-        let rejection = if !held {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated.is_some() {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if active.is_none() {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if matches!(
+        let before_readiness = matches!(
             ability.phase,
             crate::builds::AbilityPhase::Dashing { .. }
                 | crate::builds::AbilityPhase::Deployed { .. }
-        ) {
-            Some(crate::abilities::AbilityRejectionReason::AlreadyExecuting)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
-        } else if existing
+        )
+        .then_some(crate::abilities::AbilityRejectionReason::AlreadyExecuting);
+        let after_readiness = existing
             .iter()
             .any(|identity| identity.owner_network_id == *network_id)
-        {
-            Some(crate::abilities::AbilityRejectionReason::ExistingSentry)
-        } else {
-            None
-        };
-        if let Some(reason) = rejection {
+            .then_some(crate::abilities::AbilityRejectionReason::ExistingSentry);
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh: held,
+                defeated: defeated.is_some(),
+                active: active.is_some(),
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions {
+                before_readiness,
+                after_readiness,
+            },
+        ) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -436,7 +427,7 @@ pub(crate) fn activate_sentry(
             });
             continue;
         }
-        let Some(sentry_tuning) = resolve_sentry_tuning(&loadout.ultimate) else {
+        let Some(sentry_tuning) = resolve_sentry_tuning(ultimate) else {
             continue;
         };
         let facing = Vec2::from_angle(rotation.as_radians());
@@ -489,7 +480,7 @@ pub(crate) fn activate_sentry(
             owner_player_id: *player,
             owner_network_id: *network_id,
             team_id: *team,
-            ultimate_id: loadout.ultimate.id,
+            ultimate_id: ultimate.id,
             match_id: participant.match_id,
         };
         commands
@@ -880,19 +871,19 @@ fn index_sentry_owners(
             Entity,
             &NetworkEntityId,
             &avian2d::prelude::Position,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedFighterStats,
         ),
         With<crate::protocol::Fighter>,
     >,
 ) -> std::collections::BTreeMap<NetworkEntityId, SentryOwnerView> {
     let mut indexed = std::collections::BTreeMap::new();
-    for (entity, network_id, position, loadout) in owners {
+    for (entity, network_id, position, stats) in owners {
         indexed
             .entry(*network_id)
             .and_modify(|view: &mut SentryOwnerView| view.projectile_owner = entity)
             .or_insert(SentryOwnerView {
                 visibility_position: position.0,
-                reveal_radius: loadout.fighter_stats.reveal_proximity_radius,
+                reveal_radius: stats.reveal_proximity_radius,
                 projectile_owner: entity,
             });
     }
@@ -1160,7 +1151,6 @@ fn plan_sentry_fire(
         owner_network_entity_id: identity.owner_network_id,
         team_id: identity.team_id,
         recipe_fingerprint: tuning.recipe_fingerprint,
-        presentation_profile_id: tuning.presentation_profile_id,
         legacy_compatibility: false,
         source_preset_id: None,
         origin: crate::combat::WorldPoint::from(sentry_position),
@@ -1176,7 +1166,6 @@ fn plan_sentry_fire(
             deployable_id: identity.deployable_id,
             target: target.cue_target,
             position: crate::combat::WorldPoint::from(sentry_position),
-            presentation_profile_id: tuning.presentation_profile_id,
         },
         source,
         recipe: tuning.recipe.clone(),
@@ -1330,7 +1319,7 @@ pub(crate) fn tick_sentries(
             Entity,
             &NetworkEntityId,
             &avian2d::prelude::Position,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedFighterStats,
         ),
         With<crate::protocol::Fighter>,
     >,

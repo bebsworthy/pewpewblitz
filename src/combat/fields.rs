@@ -83,7 +83,7 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
             &NetworkEntityId,
             &TeamId,
             &Position,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedFighterStats,
             &mut CurrentHealth,
             &mut ActiveEffects,
             Has<crate::matchplay::SpawnProtection>,
@@ -93,7 +93,7 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
     >,
     mut owners: Query<(
         &NetworkEntityId,
-        &crate::builds::ResolvedMatchLoadout,
+        &crate::builds::ResolvedUltimate,
         &mut crate::builds::AbilityState,
     )>,
     mut facts: ResMut<CombatOutcomeFacts>,
@@ -113,8 +113,8 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
         let owner_replaced = owners
             .iter_mut()
             .find(|(network_id, ..)| **network_id == state.owner_network_entity_id)
-            .is_some_and(|(_, loadout, _)| {
-                field_kind_for_ultimate(loadout.ultimate.kind) != Some(state.kind)
+            .is_some_and(|(_, ultimate, _)| {
+                field_kind_for_ultimate(ultimate.kind) != Some(state.kind)
             });
         let match_invalid = root.is_none_or(|root| {
             root.match_id != runtime.match_id
@@ -139,7 +139,7 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                     target_network_id,
                     target_team,
                     position,
-                    loadout,
+                    stats,
                     mut health,
                     mut effects,
                     protected,
@@ -180,8 +180,8 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                         effects::apply_cold_contribution(
                             &mut effects.cold,
                             amount,
-                            loadout.fighter_stats.cold_resistance_basis_points,
-                            loadout.fighter_stats.cold_capacity,
+                            stats.cold_resistance_basis_points,
+                            stats.cold_capacity,
                             condition_rules.0.freeze_duration_ticks,
                             pulse_tick,
                             runtime.source,
@@ -199,12 +199,8 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                         ..
                     } => {
                         let resistance = match kind {
-                            DamageOverTimeKind::Poison => {
-                                loadout.fighter_stats.poison_resistance_basis_points
-                            }
-                            DamageOverTimeKind::Fire => {
-                                loadout.fighter_stats.fire_resistance_basis_points
-                            }
+                            DamageOverTimeKind::Poison => stats.poison_resistance_basis_points,
+                            DamageOverTimeKind::Fire => stats.fire_resistance_basis_points,
                         };
                         let damage_per_tick =
                             effects::apply_resistance(damage_per_tick, resistance);
@@ -228,16 +224,8 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                     }
                     PayloadEffectDefinition::Heal { amount, .. } => {
                         let requested = amount;
-                        let applied = requested.min(
-                            loadout
-                                .fighter_stats
-                                .maximum_health
-                                .saturating_sub(health.0),
-                        );
-                        health.0 = health
-                            .0
-                            .saturating_add(applied)
-                            .min(loadout.fighter_stats.maximum_health);
+                        let applied = requested.min(stats.maximum_health.saturating_sub(health.0));
+                        health.0 = health.0.saturating_add(applied).min(stats.maximum_health);
                         facts.0.push(CombatOutcomeFact {
                             event_id,
                             tick: pulse_tick,
@@ -274,7 +262,6 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
                     target: *target_network_id,
                     position: position.0.into(),
                     effect: effect_cue,
-                    presentation_profile_id: WeaponPresentationProfileId(1),
                 };
                 telemetry.record_cue(cue.clone());
                 outbox.0.push(cue);
@@ -294,13 +281,13 @@ pub(crate) fn pulse_and_cleanup_elemental_fields(
 fn settle_field_owner(
     owners: &mut Query<(
         &NetworkEntityId,
-        &crate::builds::ResolvedMatchLoadout,
+        &crate::builds::ResolvedUltimate,
         &mut crate::builds::AbilityState,
     )>,
     field_id: ElementalFieldId,
     owner_network_id: NetworkEntityId,
 ) {
-    if let Some((_, loadout, mut ability)) = owners
+    if let Some((_, ultimate, mut ability)) = owners
         .iter_mut()
         .find(|(network_id, ..)| **network_id == owner_network_id)
         && matches!(
@@ -309,9 +296,7 @@ fn settle_field_owner(
                 if active == field_id
         )
     {
-        ability.phase = crate::abilities::settled_ability_phase(
-            ability.charge,
-            loadout.ultimate.charge_policy.maximum,
-        );
+        ability.phase =
+            crate::abilities::settled_ability_phase(ability.charge, ultimate.charge_policy.maximum);
     }
 }

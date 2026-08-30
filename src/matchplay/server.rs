@@ -30,7 +30,7 @@ use lightyear::prelude::{ControlledBy, Disconnected, LinkOf, NetworkTarget, Repl
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Revision of the common lifecycle rules fragment on its own.
-pub const MATCH_LIFECYCLE_RULES_REVISION: u16 = 1;
+pub const MATCH_LIFECYCLE_RULES_REVISION: u16 = 2;
 
 /// Common, mode-neutral match lifecycle rules. The installed mode layers its own scoring
 /// rules on top; `MatchState::rules_revision` describes the validated composition.
@@ -58,8 +58,10 @@ impl Default for MatchLifecycleRules {
             countdown_ticks: 180,
             active_limit_ticks: 10_800,
             respawn_delay_ticks: 180,
-            spawn_protection_ticks: 90,
-            completed_input_lock_ticks: 60,
+            // Runtime composition must replace these neutral sentinels with either authored
+            // production policy or an explicit verification fixture.
+            spawn_protection_ticks: 1,
+            completed_input_lock_ticks: 1,
             movement_displacement_epsilon: 0.25,
             retained_match_summaries: 32,
             retained_match_records: 2_048,
@@ -493,8 +495,8 @@ fn participant_is_connected(
         .is_ok_and(|(_, disconnected)| !disconnected)
 }
 
-const fn generation_projection_is_complete(present: [bool; 5]) -> bool {
-    present[0] && present[1] && present[2] && present[3] && present[4]
+const fn generation_projection_is_complete(present: [bool; 6]) -> bool {
+    present[0] && present[1] && present[2] && present[3] && present[4] && present[5]
 }
 
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
@@ -516,6 +518,7 @@ fn refresh_match_roster(
             Option<&crate::builds::ResolvedFighterStats>,
             Option<&crate::builds::FighterBody>,
             Option<&ResolvedWeapon>,
+            Option<&crate::builds::ResolvedUltimate>,
             Option<&SpawnState>,
             Option<&ControlledBy>,
         ),
@@ -538,6 +541,7 @@ fn refresh_match_roster(
         fighter_stats,
         fighter_body,
         weapon,
+        ultimate,
         spawn,
         controlled,
     ) in &participants
@@ -554,6 +558,7 @@ fn refresh_match_roster(
                 fighter_stats.is_some(),
                 fighter_body.is_some(),
                 weapon.is_some(),
+                ultimate.is_some(),
                 spawn.is_some(),
             ]);
         players.insert(player.0);
@@ -1266,9 +1271,9 @@ mod projection_readiness_tests {
 
     #[test]
     fn every_generation_projection_is_required_before_match_activation() {
-        assert!(generation_projection_is_complete([true; 5]));
-        for missing in 0..5 {
-            let mut present = [true; 5];
+        assert!(generation_projection_is_complete([true; 6]));
+        for missing in 0..6 {
+            let mut present = [true; 6];
             present[missing] = false;
             assert!(!generation_projection_is_complete(present));
         }

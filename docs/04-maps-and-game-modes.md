@@ -260,6 +260,16 @@ exactly two teams or use one advertised topology as an engine-wide ceiling.
 
 ## Supported modes
 
+The checked-in `config/server/game-types.ron` schema 4 catalog owns match balancing at two levels.
+`common_lifecycle` declares spawn-protection and completed-match input-lock durations once for every
+advertised game type. `mode_policies` declares Wipeout's recent-hostile defeat-credit window and
+Heist's critical-health percentage once per mode. Per-game-type entries continue to own topology,
+map selection, objective target, match duration, countdown, and respawn duration. The lobby
+validates this complete policy, incorporates it into the catalog revision, and copies the resolved
+values through allocation and the match manifest; a production worker does not reconstruct them
+from mode defaults. The shortened process-verification profile remains an explicit test/operator
+override rather than a production balance source.
+
 ### Wipeout
 
 Wipeout is a team elimination-score mode. An enemy defeat grants a point; the first team to the
@@ -267,9 +277,10 @@ target wins, or the leading team wins when time expires. Fighters normally re-en
 server-owned respawn delay.
 
 A neutral environment defeat, including a Damage tile pulse, credits the most recent qualifying
-hostile fighter that damaged the target within 300 simulation ticks. This bounded memory is owned
-by the active Wipeout match; direct hostile attribution takes precedence, and self, allied, stale,
-wrong-match, or absent sources never earn credit.
+hostile fighter that damaged the target within the catalog-authored Wipeout credit window (300
+simulation ticks in the checked-in policy). This bounded memory is owned by the active Wipeout
+match; direct hostile attribution takes precedence, and self, allied, stale, wrong-match, or absent
+sources never earn credit.
 
 Its map schema requires compatible team spawns and safe re-entry space but no objective geometry.
 Its runtime owns scores, timeout resolution, respawn policy, victory, and the match summary.
@@ -282,7 +293,9 @@ or timeout rules resolve the result.
 
 Its map schema requires bounded capture volumes, compatible spawns, and enough legal surrounding
 space for entry and contest. Its runtime owns occupancy evaluation, progress, contest state, timeout
-resolution, victory, and the match summary.
+resolution, victory, and the match summary. The 240-world-unit near-zone expansion is telemetry
+classification only: it does not affect capture, movement, damage, targeting, or any other
+authoritative gameplay outcome, so it is intentionally not part of the balance-policy catalog.
 
 ### Heist
 
@@ -293,9 +306,11 @@ common draw/forfeit rules.
 
 Its map schema requires exactly two typed team-objective anchors, compatible spawns, and validated
 attack/defense access. Its runtime owns objective health and team policy, threshold and timeout
-evaluation, critical state, reset, results, and the match summary. The shipped presentation uses
-team idols fitted inside the authoritative safe footprint; the internal `HeistSafe` identity is a
-mode contract and never implies treasure-chest loot.
+evaluation, the catalog-authored critical-health percentage, reset, results, and the match summary.
+The authority copies that threshold into replicated `HeistState`, so HUD and world presentation
+consume the exact match policy rather than maintaining a client constant. The shipped presentation
+uses team idols fitted inside the authoritative safe footprint; the internal `HeistSafe` identity
+is a mode contract and never implies treasure-chest loot.
 
 Together these modes prove that combat, fighter lifecycle, map installation, and common match phases
 are not coupled to one scoring model.

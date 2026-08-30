@@ -83,7 +83,7 @@ impl ManifestCommon {
     fn validate(self, expected_role: WorkerRole) -> Result<(), CodecError> {
         let expected_version = match expected_role {
             WorkerRole::Lobby => 2,
-            WorkerRole::Match => 3,
+            WorkerRole::Match => 4,
         };
         if self.manifest_version != expected_version || self.role != expected_role {
             return Err(CodecError::InvalidValue);
@@ -518,6 +518,10 @@ pub struct MatchManifestV1 {
     pub match_duration_ticks: u64,
     pub countdown_ticks: u64,
     pub respawn_ticks: u64,
+    pub spawn_protection_ticks: u64,
+    pub completed_input_lock_ticks: u64,
+    pub wipeout_recent_hostile_damage_credit_ticks: u64,
+    pub heist_critical_health_percent: u8,
     pub reserved: u8,
     pub seed: u64,
     pub participants: Vec<MatchManifestParticipant>,
@@ -543,6 +547,19 @@ impl fmt::Debug for MatchManifestV1 {
             .field("match_duration_ticks", &self.match_duration_ticks)
             .field("countdown_ticks", &self.countdown_ticks)
             .field("respawn_ticks", &self.respawn_ticks)
+            .field("spawn_protection_ticks", &self.spawn_protection_ticks)
+            .field(
+                "completed_input_lock_ticks",
+                &self.completed_input_lock_ticks,
+            )
+            .field(
+                "wipeout_recent_hostile_damage_credit_ticks",
+                &self.wipeout_recent_hostile_damage_credit_ticks,
+            )
+            .field(
+                "heist_critical_health_percent",
+                &self.heist_critical_health_percent,
+            )
             .field("reserved", &self.reserved)
             .field("seed", &self.seed)
             .field("participant_count", &self.participants.len())
@@ -581,6 +598,10 @@ impl MatchManifestV1 {
         encoder.put_u64(self.match_duration_ticks);
         encoder.put_u64(self.countdown_ticks);
         encoder.put_u64(self.respawn_ticks);
+        encoder.put_u64(self.spawn_protection_ticks);
+        encoder.put_u64(self.completed_input_lock_ticks);
+        encoder.put_u64(self.wipeout_recent_hostile_damage_credit_ticks);
+        encoder.put_u8(self.heist_critical_health_percent);
         encoder.put_u8(self.reserved);
         encoder.put_u64(self.seed);
         encoder.put_u8(u8::try_from(self.participants.len()).map_err(|_| CodecError::Oversize)?);
@@ -633,6 +654,10 @@ impl MatchManifestV1 {
         let match_duration_ticks = decoder.u64()?;
         let countdown_ticks = decoder.u64()?;
         let respawn_ticks = decoder.u64()?;
+        let spawn_protection_ticks = decoder.u64()?;
+        let completed_input_lock_ticks = decoder.u64()?;
+        let wipeout_recent_hostile_damage_credit_ticks = decoder.u64()?;
+        let heist_critical_health_percent = decoder.u8()?;
         let reserved = decoder.u8()?;
         let seed = decoder.u64()?;
         let count = usize::from(decoder.u8()?);
@@ -664,6 +689,10 @@ impl MatchManifestV1 {
             match_duration_ticks,
             countdown_ticks,
             respawn_ticks,
+            spawn_protection_ticks,
+            completed_input_lock_ticks,
+            wipeout_recent_hostile_damage_credit_ticks,
+            heist_critical_health_percent,
             reserved,
             seed,
             participants,
@@ -687,6 +716,10 @@ impl MatchManifestV1 {
             || self.match_duration_ticks == 0
             || self.countdown_ticks == 0
             || self.respawn_ticks == 0
+            || self.spawn_protection_ticks == 0
+            || self.completed_input_lock_ticks == 0
+            || self.wipeout_recent_hostile_damage_credit_ticks == 0
+            || !(1..=99).contains(&self.heist_critical_health_percent)
             || self.participants.is_empty()
             || self.participants.len().saturating_add(self.bots.len()) > MAX_PARTICIPANTS
             || self.heartbeat_ms == 0
@@ -736,7 +769,7 @@ mod tests {
     fn match_manifest(participant_count: usize) -> MatchManifestV1 {
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 3,
+                manifest_version: 4,
                 role: WorkerRole::Match,
                 logical_server_id: id128(1),
                 process_id: id128(2),
@@ -761,6 +794,10 @@ mod tests {
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
             respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
             reserved: 0,
             seed: 13,
             participants: (1..=u64::try_from(participant_count).unwrap())
@@ -775,7 +812,7 @@ mod tests {
 
     // Common fields through seed, before the participant count byte.
     const PARTICIPANT_COUNT_OFFSET: usize =
-        87 + 8 + 16 + 16 + 2 + 2 + 2 + 1 + 2 + 8 + 8 + 8 + 1 + 8;
+        87 + 8 + 16 + 16 + 2 + 2 + 2 + 1 + 2 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 8;
     const ALLOCATION_ID_OFFSET: usize = 87 + 8 + 16;
 
     #[test]
@@ -786,7 +823,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 363);
+        assert_eq!(encoded.len(), 388);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])

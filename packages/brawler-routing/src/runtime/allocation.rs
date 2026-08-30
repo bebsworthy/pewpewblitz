@@ -44,6 +44,52 @@ struct PreparedAllocation {
     spec: WorkerLaunchSpec,
 }
 
+fn build_match_manifest(
+    request: &AllocateRequestBody,
+    context: &AllocationLaunchContext,
+    participants: Vec<MatchManifestParticipant>,
+) -> Result<MatchManifestV1, RuntimeError> {
+    let bots = request
+        .bots
+        .iter()
+        .map(|source| MatchManifestBot {
+            player_id: source.player_id,
+            team: source.team,
+            display_name: source.display_name,
+            recipe_fingerprint: source.recipe_fingerprint,
+            revision: source.build_revision,
+            build_snapshot: source.build_snapshot,
+        })
+        .collect();
+    Ok(MatchManifestV1 {
+        common: context.common,
+        request_id: request.request_id,
+        match_id: context.match_id,
+        allocation_id: context.allocation_id,
+        mode: request.mode,
+        map_preset: request.map_preset,
+        map_revision: request.map_revision,
+        rules_profile: request.rules_profile,
+        objective_target: request.objective_target,
+        match_duration_ticks: request.match_duration_ticks,
+        countdown_ticks: request.countdown_ticks,
+        respawn_ticks: request.respawn_ticks,
+        spawn_protection_ticks: request.spawn_protection_ticks,
+        completed_input_lock_ticks: request.completed_input_lock_ticks,
+        wipeout_recent_hostile_damage_credit_ticks: request
+            .wipeout_recent_hostile_damage_credit_ticks,
+        heist_critical_health_percent: request.heist_critical_health_percent,
+        reserved: 0,
+        seed: context.seed,
+        participants,
+        bots,
+        heartbeat_ms: context.heartbeat_ms,
+        nonce: random_u128()
+            .map_err(|_| RuntimeError::Routing(RoutingErrorCategory::SupervisorInternal))?,
+        digest: [0; 32],
+    })
+}
+
 impl SupervisorRuntime {
     pub(super) fn accept_allocation_request(
         &mut self,
@@ -184,7 +230,7 @@ impl SupervisorRuntime {
         };
         Ok(Some(AllocationLaunchContext {
             common: ManifestCommon {
-                manifest_version: 3,
+                manifest_version: 4,
                 role: WorkerRole::Match,
                 logical_server_id,
                 process_id: identities.process_id,
@@ -311,40 +357,7 @@ impl SupervisorRuntime {
                 capability,
             });
         }
-        let manifest_bots = request
-            .bots
-            .iter()
-            .map(|source| MatchManifestBot {
-                player_id: source.player_id,
-                team: source.team,
-                display_name: source.display_name,
-                recipe_fingerprint: source.recipe_fingerprint,
-                revision: source.build_revision,
-                build_snapshot: source.build_snapshot,
-            })
-            .collect();
-        let manifest = MatchManifestV1 {
-            common: context.common,
-            request_id: request.request_id,
-            match_id: context.match_id,
-            allocation_id: context.allocation_id,
-            mode: request.mode,
-            map_preset: request.map_preset,
-            map_revision: request.map_revision,
-            rules_profile: request.rules_profile,
-            objective_target: request.objective_target,
-            match_duration_ticks: request.match_duration_ticks,
-            countdown_ticks: request.countdown_ticks,
-            respawn_ticks: request.respawn_ticks,
-            reserved: 0,
-            seed: context.seed,
-            participants: manifest_participants,
-            bots: manifest_bots,
-            heartbeat_ms: context.heartbeat_ms,
-            nonce: random_u128()
-                .map_err(|_| RuntimeError::Routing(RoutingErrorCategory::SupervisorInternal))?,
-            digest: [0; 32],
-        };
+        let manifest = build_match_manifest(&request, &context, manifest_participants)?;
         let mut spec = WorkerLaunchSpec::new(
             context.executable,
             WorkerRegistration {

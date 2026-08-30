@@ -110,7 +110,8 @@ fn fighter_runtime_reads_health_and_ammo_from_selected_definitions() {
         capacity: 3,
         refill_ticks: 60,
     };
-    let (_, _, health, weapon) = resolved_fighter_runtime(TeamId(4), &loadout);
+    let (_, _, health, weapon) =
+        resolved_fighter_runtime(TeamId(4), &loadout.fighter_stats, &loadout.primary_weapon);
 
     assert_eq!(health, CurrentHealth(77));
     assert_eq!(weapon.ammo, 3);

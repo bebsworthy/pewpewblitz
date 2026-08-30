@@ -147,7 +147,7 @@ fn capture_observations(
         navigation.snapshot = BotNavigationSnapshot::from_map(
             &map,
             builds.0.fighter_body.radius + 1.0,
-            profile.0.damage_tile_cost_milli,
+            profile.profile.damage_tile_cost_milli,
         );
         navigation.map_instance_id = Some(map.snapshot.identity.instance_id);
     }
@@ -415,7 +415,7 @@ fn decide_and_commit_inputs(
     )>,
 ) {
     let started_at = std::time::Instant::now();
-    let profile: BotProfile = profile.0;
+    let bot_profile: BotProfile = profile.profile;
     let match_active = roots
         .single()
         .is_ok_and(|state| matches!(state.phase, MatchPhase::Active { .. }));
@@ -423,7 +423,7 @@ fn decide_and_commit_inputs(
         .iter_mut()
         .filter_map(|(network_id, controller, ..)| {
             controller
-                .delayed_observation(tick.0, profile.reaction_ticks)
+                .delayed_observation(tick.0, bot_profile.reaction_ticks)
                 .map(|observation| BotPlanMember {
                     network_id: *network_id,
                     team: observation.self_view.team,
@@ -432,7 +432,7 @@ fn decide_and_commit_inputs(
         })
         .collect::<Vec<_>>();
     let roles = assign_roles(&plan_members);
-    let per_bot_search_budget = profile.search_budget_per_bot(plan_members.len());
+    let per_bot_search_budget = bot_profile.search_budget_per_bot(plan_members.len());
     for (network_id, mut controller, mut action, mut freshness, active, defeated) in &mut bots {
         let role = roles.get(network_id).copied().unwrap_or_default();
         let decision = (match_active && active && !defeated)
@@ -440,7 +440,7 @@ fn decide_and_commit_inputs(
             .and_then(|()| navigation.snapshot.as_ref())
             .and_then(|navigation| {
                 controller
-                    .delayed_observation(tick.0, profile.reaction_ticks)
+                    .delayed_observation(tick.0, bot_profile.reaction_ticks)
                     .cloned()
                     .map(|observation| (navigation, observation))
             })
@@ -450,7 +450,7 @@ fn decide_and_commit_inputs(
                 policy::decide(
                     &observation,
                     &mut controller.state,
-                    profile,
+                    policy::BotDecisionPolicy::new(bot_profile, &profile.arbitration),
                     navigation,
                     seed,
                     role,

@@ -101,7 +101,10 @@ pub fn routing_identity() -> Result<RoutingIdentity, MatchWorkerManifestError> {
         .add_plugins(ServerPlugins {
             tick_duration: crate::timing::SIMULATION_TICK,
         })
-        .add_plugins(crate::protocol::ProtocolPlugin);
+        .add_plugins((
+            crate::content::GameplayContentPlugin,
+            crate::protocol::ProtocolPlugin,
+        ));
     let protocol_registry_fingerprint = protocol_fingerprint(app.world_mut());
     let content_fingerprint = gameplay_content_fingerprint(
         &app.world().resource::<WeaponCatalogResource>().0,
@@ -345,6 +348,11 @@ pub fn build_match_worker_app(
     config.match_duration_ticks = Some(manifest.match_duration_ticks);
     config.match_countdown_ticks = Some(manifest.countdown_ticks);
     config.match_respawn_ticks = Some(manifest.respawn_ticks);
+    config.match_spawn_protection_ticks = Some(manifest.spawn_protection_ticks);
+    config.match_completed_input_lock_ticks = Some(manifest.completed_input_lock_ticks);
+    config.wipeout_recent_hostile_damage_credit_ticks =
+        Some(manifest.wipeout_recent_hostile_damage_credit_ticks);
+    config.heist_critical_health_percent = Some(manifest.heist_critical_health_percent);
     validate_match_manifest(&config, &manifest)?;
     let players_per_team = u8::try_from(
         manifest
@@ -397,6 +405,7 @@ pub fn build_lobby_worker_app(
         tick_duration: crate::timing::SIMULATION_TICK,
     })
     .add_plugins((
+        crate::content::GameplayContentPlugin,
         crate::protocol::ProtocolPlugin,
         super::lobby::LobbyPlugin,
         super::routed_worker::RoutedWorkerPlugin,
@@ -455,7 +464,7 @@ mod tests {
         let map_revision = map.admission_revision;
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 3,
+                manifest_version: 4,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -480,6 +489,10 @@ mod tests {
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
             respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
             reserved: 0,
             seed: 1,
             participants: {
@@ -674,6 +687,10 @@ mod tests {
         value.match_duration_ticks = 3_600;
         value.countdown_ticks = 60;
         value.respawn_ticks = 120;
+        value.spawn_protection_ticks = 91;
+        value.completed_input_lock_ticks = 61;
+        value.wipeout_recent_hostile_damage_credit_ticks = 301;
+        value.heist_critical_health_percent = 26;
         let mut worker = build_match_worker_app(config, value.clone()).unwrap();
         crate::test_app::finalize(&mut worker);
         assert_eq!(
@@ -685,19 +702,26 @@ mod tests {
             MapPresetId(value.map_preset)
         );
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
-        assert_eq!(
-            worker
-                .world()
-                .resource::<crate::matchplay::WipeoutRules>()
-                .target_score,
-            1
-        );
+        assert!(worker.is_plugin_added::<crate::server::ServerAuthoritativeGameplayPlugin>());
+        assert!(worker.is_plugin_added::<crate::server::RoutedWorkerPlugin>());
+        let wipeout = worker.world().resource::<crate::matchplay::WipeoutRules>();
+        assert_eq!(wipeout.target_score, 1);
+        assert_eq!(wipeout.recent_hostile_damage_credit_ticks, 301);
         let lifecycle = worker
             .world()
             .resource::<crate::matchplay::MatchLifecycleRules>();
         assert_eq!(lifecycle.active_limit_ticks, 3_600);
         assert_eq!(lifecycle.countdown_ticks, 60);
         assert_eq!(lifecycle.respawn_delay_ticks, 120);
+        assert_eq!(lifecycle.spawn_protection_ticks, 91);
+        assert_eq!(lifecycle.completed_input_lock_ticks, 61);
+        assert_eq!(
+            worker
+                .world()
+                .resource::<ServerNetworkConfig>()
+                .heist_critical_health_percent,
+            Some(26)
+        );
         worker.update();
         let world = worker.world_mut();
         let state = world
@@ -1013,7 +1037,16 @@ mod tests {
         lobby.common.protocol_registry_fingerprint = protocol;
         let worker = build_lobby_worker_app(config, lobby).unwrap();
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
+        assert!(worker.is_plugin_added::<crate::content::GameplayContentPlugin>());
+        assert!(worker.is_plugin_added::<crate::protocol::ProtocolPlugin>());
+        assert!(worker.is_plugin_added::<crate::server::RoutedWorkerPlugin>());
+        assert!(!worker.is_plugin_added::<crate::gameplay::GameplayPlugin>());
+        assert!(!worker.is_plugin_added::<crate::server::ServerAuthoritativeGameplayPlugin>());
         assert!(!worker.is_plugin_added::<crate::combat::ServerCombatPlugin>());
         assert!(!worker.is_plugin_added::<crate::map::AuthoritativeMapPlugin>());
+        assert!(!worker.is_plugin_added::<crate::movement::AuthoritativeMovementPlugin>());
+        assert!(!worker.is_plugin_added::<crate::concealment::ServerConcealmentPlugin>());
+        assert!(!worker.is_plugin_added::<crate::abilities::ServerAbilityPlugin>());
+        assert!(!worker.is_plugin_added::<crate::matchplay::AuthoritativeMatchPlugin>());
     }
 }

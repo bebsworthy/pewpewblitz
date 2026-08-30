@@ -1224,6 +1224,11 @@ fn config_from_manifest(
             config.match_duration_ticks = Some(manifest.match_duration_ticks);
             config.match_countdown_ticks = Some(manifest.countdown_ticks);
             config.match_respawn_ticks = Some(manifest.respawn_ticks);
+            config.match_spawn_protection_ticks = Some(manifest.spawn_protection_ticks);
+            config.match_completed_input_lock_ticks = Some(manifest.completed_input_lock_ticks);
+            config.wipeout_recent_hostile_damage_credit_ticks =
+                Some(manifest.wipeout_recent_hostile_damage_credit_ticks);
+            config.heist_critical_health_percent = Some(manifest.heist_critical_health_percent);
             // The manifest whitelist controls who may join this isolated match. Keep the
             // production endpoint capacity because match composition validates it against the
             // selected rules profile's maximum active-fighter capacity, not only this roster's
@@ -1484,6 +1489,10 @@ mod tests {
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
             respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
             team_count: 2,
             players_per_team: 2,
             participants: vec![

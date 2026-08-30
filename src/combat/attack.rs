@@ -80,24 +80,19 @@ fn requested_lob_distance(
     })
 }
 
-#[cfg(feature = "server")]
-const MINIMUM_LOB_FLIGHT_TICKS: u64 = 6;
-
 /// Scale lob time by the authoritative landing distance while retaining a short presentation and
 /// replication floor. `max_flight_ticks` is the authored duration at maximum range.
 #[cfg(feature = "server")]
 fn resolved_lob_flight_ticks(
     maximum_distance: f32,
     landing_distance: f32,
+    minimum_flight_ticks: u64,
     max_flight_ticks: u64,
 ) -> u64 {
     let proportional = ((landing_distance.clamp(0.0, maximum_distance) / maximum_distance)
         * max_flight_ticks as f32)
         .ceil() as u64;
-    proportional.clamp(
-        MINIMUM_LOB_FLIGHT_TICKS.min(max_flight_ticks),
-        max_flight_ticks,
-    )
+    proportional.clamp(minimum_flight_ticks.min(max_flight_ticks), max_flight_ticks)
 }
 
 #[cfg(feature = "server")]
@@ -184,6 +179,7 @@ pub(super) struct MuzzleContactState<'w, 's> {
 pub(super) struct AttackCommitBuffers<'w> {
     accepted_attacks: ResMut<'w, AcceptedAttackFacts>,
     outbox: ResMut<'w, CombatOutbox>,
+    weapon_catalog: Res<'w, WeaponCatalogResource>,
 }
 
 #[cfg(feature = "server")]
@@ -299,6 +295,7 @@ fn emit_attack_deliveries(
     objective_pending: &mut crate::matchplay::PendingModeObjectiveDamages,
     lob_landing: Option<Vec2>,
     match_member: Option<crate::matchplay::MatchMember>,
+    minimum_lob_flight_ticks: u64,
 ) -> u64 {
     let recipe = &resolved.recipe;
     let attack_id = source.attack_id;
@@ -396,7 +393,6 @@ fn emit_attack_deliveries(
                         delivery_index,
                         source: *network_id,
                         weapon_definition_id: weapon_id,
-                        presentation_profile_id: resolved.presentation_profile_id,
                         target: None,
                         position: WorldPoint::from(point),
                         normal: WorldPoint::from(normal),
@@ -491,8 +487,12 @@ fn emit_attack_deliveries(
         } => {
             let landing = lob_landing.expect("validated lob landing must exist");
             let launch = muzzle_position(origin, facing, muzzle_offset);
-            let flight_ticks =
-                resolved_lob_flight_ticks(distance, origin.distance(landing), max_flight_ticks);
+            let flight_ticks = resolved_lob_flight_ticks(
+                distance,
+                origin.distance(landing),
+                minimum_lob_flight_ticks,
+                max_flight_ticks,
+            );
             let mut projectile = commands.spawn((
                 Projectile,
                 source_component,
@@ -544,8 +544,12 @@ fn emit_attack_deliveries(
         } => {
             let landing = lob_landing.expect("validated Splash landing must exist");
             let launch = muzzle_position(origin, facing, muzzle_offset);
-            let flight_ticks =
-                resolved_lob_flight_ticks(distance, origin.distance(landing), max_flight_ticks);
+            let flight_ticks = resolved_lob_flight_ticks(
+                distance,
+                origin.distance(landing),
+                minimum_lob_flight_ticks,
+                max_flight_ticks,
+            );
             let mut projectile = commands.spawn((
                 Projectile,
                 source_component,
@@ -739,7 +743,6 @@ fn record_accepted_attack(
         source: source.owner_network_entity_id,
         position: WorldPoint::from(origin),
         weapon_definition_id,
-        presentation_profile_id: source.presentation_profile_id,
     };
     legacy_telemetry.record_cue(accepted_cue.clone());
     outbox.0.push(accepted_cue);
@@ -1041,7 +1044,6 @@ pub(super) fn authoritative_composed_fire(
             owner_network_entity_id: *network_id,
             team_id: *team,
             recipe_fingerprint: resolved.recipe_fingerprint,
-            presentation_profile_id: resolved.presentation_profile_id,
             legacy_compatibility,
             source_preset_id: preset_id,
             origin: WorldPoint::from(origin),
@@ -1057,6 +1059,11 @@ pub(super) fn authoritative_composed_fire(
             team_id: *team,
             weapon_definition_id: weapon_id,
         };
+        let minimum_lob_flight_ticks = commit_buffers
+            .weapon_catalog
+            .0
+            .recipe_policy
+            .minimum_lob_flight_ticks;
         let emitted_deliveries = emit_attack_deliveries(
             &mut commands,
             tick.0,
@@ -1078,6 +1085,7 @@ pub(super) fn authoritative_composed_fire(
             lob_landing,
             match_participant
                 .map(|participant| crate::matchplay::MatchMember(participant.match_id)),
+            minimum_lob_flight_ticks,
         );
         record_accepted_attack(
             AcceptedAttackRecord {
@@ -1271,11 +1279,12 @@ mod tests {
 
     #[test]
     fn lob_flight_time_scales_with_landing_distance_and_keeps_a_short_floor() {
-        assert_eq!(resolved_lob_flight_ticks(520.0, 520.0, 45), 45);
-        assert_eq!(resolved_lob_flight_ticks(520.0, 260.0, 45), 23);
-        assert_eq!(resolved_lob_flight_ticks(520.0, 1.0, 45), 6);
-        assert_eq!(resolved_lob_flight_ticks(520.0, 0.0, 45), 6);
-        assert_eq!(resolved_lob_flight_ticks(520.0, 900.0, 45), 45);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 520.0, 6, 45), 45);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 260.0, 6, 45), 23);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 1.0, 6, 45), 6);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 0.0, 6, 45), 6);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 900.0, 6, 45), 45);
+        assert_eq!(resolved_lob_flight_ticks(520.0, 1.0, 9, 45), 9);
     }
 
     #[test]

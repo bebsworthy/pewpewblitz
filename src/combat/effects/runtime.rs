@@ -285,7 +285,6 @@ pub(super) fn apply_runtime_effects(
                         velocity: WorldPoint::from(motion.velocity),
                         expires_at_tick: motion.expires_at_tick,
                     },
-                    presentation_profile_id: record.source.presentation_profile_id,
                 };
                 telemetry.record(WeaponTelemetryRecord {
                     tick,
@@ -372,7 +371,6 @@ pub(super) fn apply_runtime_effects(
                             movement_multiplier_milli: slow.movement_multiplier_milli,
                             expires_at_tick: slow.expires_at_tick,
                         },
-                        presentation_profile_id: record.source.presentation_profile_id,
                     };
                     telemetry.record(WeaponTelemetryRecord {
                         tick,
@@ -444,7 +442,6 @@ pub(super) fn apply_runtime_effects(
                             meter: effects_state.cold.meter,
                             frozen_until_tick: effects_state.cold.frozen_until_tick,
                         },
-                        presentation_profile_id: record.source.presentation_profile_id,
                     },
                 ));
             }
@@ -489,7 +486,6 @@ pub(super) fn apply_runtime_effects(
                             damage_per_tick,
                             expires_at_tick: tick.saturating_add(duration_ticks),
                         },
-                        presentation_profile_id: record.source.presentation_profile_id,
                     },
                 ));
             }
@@ -511,7 +507,6 @@ mod elemental_tests {
             team_id: TeamId(0),
             source_preset_id: Some(WeaponPresetId(1)),
             recipe_fingerprint: None,
-            presentation_profile_id: None,
         }
     }
 

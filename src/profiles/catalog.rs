@@ -24,7 +24,7 @@ pub const MAX_ADVERTISED_ULTIMATES: usize = crate::builds::MAX_ULTIMATE_DEFINITI
 pub const MAX_ADVERTISED_PASSIVES: usize = crate::builds::MAX_PASSIVE_DEFINITIONS;
 pub const MAX_ADVERTISED_BRAWLER_CATALOG_BYTES: usize = 16 * 1024;
 
-const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 4;
+const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 5;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BrawlerCatalogRevision(pub u64);

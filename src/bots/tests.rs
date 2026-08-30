@@ -4,12 +4,16 @@ use super::{
     model::{BotObservation, BotRole, BotTactic, PracticeBotController},
     navigation::{BotNavigationSnapshot, BotRouteProgress, BotRouteStart},
     policy,
-    profile::{BotCatalog, BotProfile},
+    profile::{BotArbitrationPolicy, BotBehaviorId, BotCatalog, BotProfile},
     team::{BotPlanMember, assign_roles},
 };
 use crate::map::MapDimensions;
 use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
+
+fn arbitration_policy() -> BotArbitrationPolicy {
+    BotCatalog::embedded().unwrap().arbitration
+}
 
 #[test]
 fn profile_is_valid_and_entropy_streams_are_repeatable() {
@@ -35,37 +39,110 @@ fn embedded_profile_is_valid_bounded_and_fingerprinted() {
     assert_ne!(fingerprint(&catalog), 0);
 
     let baseline = fingerprint(&catalog);
-    let mut tuned = catalog;
+    let mut tuned = catalog.clone();
     tuned.practice.preferred_range_fraction = 0.8;
     assert!(tuned.validate().is_ok());
     assert_ne!(fingerprint(&tuned), baseline);
 
-    let mut invalid = catalog;
+    let mut invalid = catalog.clone();
     invalid.practice.reaction_ticks = super::model::MAX_OBSERVATION_HISTORY as u64;
     assert!(invalid.validate().is_err());
-    invalid = catalog;
+    invalid = catalog.clone();
     invalid.practice.maximum_aim_error_radians = f32::NAN;
     assert!(invalid.validate().is_err());
-    invalid = catalog;
+    invalid = catalog.clone();
     invalid.practice.maximum_search_expansions = u32::MAX;
     assert!(invalid.validate().is_err());
-    invalid = catalog;
+    invalid = catalog.clone();
     invalid.practice.waypoint_reach_distance = f32::MAX;
     assert_eq!(
         invalid.validate(),
         Err("Practice bot distances exceed map-derived engine bounds".into())
     );
-    invalid = catalog;
+    invalid = catalog.clone();
     invalid.practice.waypoint_reach_distance = crate::map::MAP_CELL_SIZE_WORLD;
     assert_eq!(
         invalid.validate(),
         Err("Practice bot distances exceed map-derived engine bounds".into())
     );
-    invalid = catalog;
+    invalid = catalog.clone();
     invalid.practice.ally_separation_distance = f32::MAX;
     assert_eq!(
         invalid.validate(),
         Err("Practice bot distances exceed map-derived engine bounds".into())
+    );
+}
+
+#[test]
+fn arbitration_policy_round_trips_fingerprints_and_rejects_invalid_coverage() {
+    let catalog = BotCatalog::embedded().unwrap();
+    let encoded = ron::ser::to_string(&catalog).unwrap();
+    let decoded: BotCatalog = ron::from_str(&encoded).unwrap();
+    assert_eq!(decoded, catalog);
+
+    let fingerprint = |candidate: &BotCatalog| {
+        crate::content::fnv1a64(&candidate.canonical_fingerprint_material().unwrap())
+    };
+    let baseline = fingerprint(&catalog);
+    for mutation in 0..3 {
+        let mut tuned = catalog.clone();
+        match mutation {
+            0 => tuned.arbitration.behaviors[0].base_score += 1,
+            1 => tuned.arbitration.commitment_score_bonus += 1,
+            _ => tuned.arbitration.behaviors[0].enabled = false,
+        }
+        assert!(tuned.validate().is_ok());
+        assert_ne!(fingerprint(&tuned), baseline);
+    }
+
+    let mut duplicate = catalog.clone();
+    duplicate.arbitration.behaviors[1].id = duplicate.arbitration.behaviors[0].id;
+    assert_eq!(
+        duplicate.validate(),
+        Err("bot arbitration contains duplicate behavior IDs".into())
+    );
+
+    let mut missing = catalog.clone();
+    missing.arbitration.behaviors.pop();
+    assert_eq!(
+        missing.validate(),
+        Err("bot arbitration must cover every registered behavior exactly once".into())
+    );
+
+    let mut extra = catalog.clone();
+    let mut unknown = extra.arbitration.behaviors[0];
+    unknown.id = BotBehaviorId(99);
+    extra.arbitration.behaviors.push(unknown);
+    assert_eq!(
+        extra.validate(),
+        Err("bot arbitration must cover every registered behavior exactly once".into())
+    );
+
+    let mut zero = catalog.clone();
+    zero.arbitration.behaviors[0].base_score = 0;
+    assert_eq!(
+        zero.validate(),
+        Err("bot arbitration scores exceed engine bounds".into())
+    );
+
+    let mut overflow = catalog.clone();
+    overflow.arbitration.behaviors[0].base_score = u16::MAX;
+    assert_eq!(
+        overflow.validate(),
+        Err("bot arbitration scores exceed engine bounds".into())
+    );
+
+    let mut no_fallback = catalog;
+    no_fallback
+        .arbitration
+        .behaviors
+        .iter_mut()
+        .find(|behavior| behavior.id == BotBehaviorId::FALLBACK)
+        .unwrap()
+        .enabled = false;
+    assert_eq!(
+        no_fallback.validate(),
+        Err("bot fallback behavior must remain enabled".into())
     );
 }
 
@@ -217,6 +294,7 @@ fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
         &observed,
         &mut state,
         BotProfile::embedded().unwrap(),
+        &arbitration_policy(),
         BotRole::Objective,
     );
     assert_eq!(state.tactic, BotTactic::Contest);
@@ -242,6 +320,7 @@ fn nondefault_hot_zone_hold_fraction_changes_the_policy_goal() {
         &observed,
         &mut super::model::BotState::default(),
         baseline,
+        &arbitration_policy(),
         BotRole::Objective,
     )
     .move_goal
@@ -250,6 +329,7 @@ fn nondefault_hot_zone_hold_fraction_changes_the_policy_goal() {
         &observed,
         &mut super::model::BotState::default(),
         tuned,
+        &arbitration_policy(),
         BotRole::Objective,
     )
     .move_goal
@@ -291,7 +371,7 @@ fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
     let decision = policy::decide(
         &observed,
         &mut super::model::BotState::default(),
-        BotProfile::embedded().unwrap(),
+        policy::BotDecisionPolicy::new(BotProfile::embedded().unwrap(), &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -335,7 +415,7 @@ fn restoration_bot_targets_an_injured_ally_and_uses_the_field() {
     let decision = policy::decide(
         &observed,
         &mut super::model::BotState::default(),
-        BotProfile::embedded().unwrap(),
+        policy::BotDecisionPolicy::new(BotProfile::embedded().unwrap(), &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -369,6 +449,7 @@ fn healing_weapon_targets_an_injured_ally() {
         &observed,
         &mut super::model::BotState::default(),
         BotProfile::embedded().unwrap(),
+        &arbitration_policy(),
         BotRole::Pressure,
     );
     assert_eq!(intent.aim_target.unwrap().0, Vec2::new(120.0, 0.0));
@@ -422,6 +503,7 @@ fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
         &observed,
         &mut state,
         BotProfile::embedded().unwrap(),
+        &arbitration_policy(),
         BotRole::Objective,
     );
     assert_eq!(state.tactic, BotTactic::AttackSafe);
@@ -451,6 +533,7 @@ fn object_attack_holds_weapon_standoff_instead_of_entering_the_collider() {
         &observed,
         &mut state,
         BotProfile::embedded().unwrap(),
+        &arbitration_policy(),
         BotRole::Pressure,
     );
     assert_eq!(state.tactic, BotTactic::BreakObject);
@@ -483,7 +566,7 @@ fn corner_stall_starts_a_bounded_inward_escape() {
     let decision = policy::decide(
         &observed,
         &mut state,
-        profile,
+        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -535,7 +618,7 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
     let corner_decision = policy::decide(
         &observed,
         &mut state,
-        profile,
+        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -553,7 +636,7 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
     let recovering_decision = policy::decide(
         &observed,
         &mut state,
-        profile,
+        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -571,7 +654,7 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
     let interior_decision = policy::decide(
         &observed,
         &mut state,
-        profile,
+        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -694,7 +777,7 @@ fn contact_memory_contains_only_observed_facts_and_expires() {
     let _ = policy::decide(
         &visible,
         &mut state,
-        profile,
+        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -707,7 +790,7 @@ fn contact_memory_contains_only_observed_facts_and_expires() {
     let _ = policy::decide(
         &hidden,
         &mut state,
-        profile,
+        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
         &navigation,
         7,
         BotRole::Pressure,
@@ -744,6 +827,7 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
         minimum_terrain_cost_milli: 1_000,
     };
     let profile = BotProfile::embedded().unwrap();
+    let arbitration = arbitration_policy();
     let budget = profile.search_budget_per_bot(5);
     let mut samples = Vec::with_capacity(200);
     for sample in 0..200_u64 {
@@ -769,7 +853,7 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
             let _ = policy::decide(
                 &observed,
                 &mut super::model::BotState::default(),
-                profile,
+                policy::BotDecisionPolicy::new(profile, &arbitration),
                 &navigation,
                 u64::from(ordinal),
                 BotRole::Pressure,

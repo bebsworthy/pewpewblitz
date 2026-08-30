@@ -78,6 +78,20 @@ fn safe_health(harness: &mut Harness, client: Option<usize>) -> [u16; 2] {
     health
 }
 
+fn heist_critical_health_percent(harness: &mut Harness, client: Option<usize>) -> u8 {
+    let world = if let Some(index) = client {
+        harness.clients[index].world_mut()
+    } else {
+        harness.server.world_mut()
+    };
+    let mut query =
+        world.query_filtered::<&brawler::matchplay::HeistState, With<MatchRootMarker>>();
+    query
+        .single(world)
+        .expect("one replicated Heist state")
+        .critical_health_percent
+}
+
 fn drain_heist_cues(
     harness: &mut Harness,
     client: usize,
@@ -107,7 +121,6 @@ fn source_and_target(
         owner_network_entity_id: *network_id,
         team_id: *team,
         recipe_fingerprint: WeaponRecipeFingerprint::default(),
-        presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
         legacy_compatibility: false,
         source_preset_id: None,
         origin: WorldPoint::from(position.0),
@@ -174,6 +187,57 @@ fn restart_after_completion(harness: &mut Harness, request_base: u64) {
 }
 
 #[test]
+fn nondefault_heist_threshold_replicates_and_drives_the_critical_crossing() {
+    const CRITICAL_PERCENT: u8 = 26;
+    let mut harness = Harness::new_heist_match(2);
+    harness
+        .server
+        .insert_resource(brawler::matchplay::HeistRules {
+            safe_maximum_health: 2_000,
+            critical_health_percent: CRITICAL_PERCENT,
+        });
+    select_ready_and_activate(&mut harness, 5);
+
+    step_until_budget(&mut harness, 60, |harness| {
+        (0..2).all(|index| heist_critical_health_percent(harness, Some(index)) == CRITICAL_PERCENT)
+    });
+    assert_eq!(
+        heist_critical_health_percent(&mut harness, None),
+        CRITICAL_PERCENT
+    );
+
+    queue_safe_damage(&mut harness, TeamId(0), 680, 1_479);
+    step_until_budget(&mut harness, 240, |harness| {
+        (0..2).all(|index| safe_health(harness, Some(index)) == [2_000, 521])
+    });
+    assert_eq!(safe_health(&mut harness, None), [2_000, 521]);
+    for index in 0..2 {
+        let cues = drain_heist_cues(&mut harness, index);
+        assert!(cues.iter().any(|cue| {
+            cue.kind == brawler::matchplay::HeistObjectiveCueKind::Damaged
+                && cue.health_after == 521
+        }));
+        assert!(
+            !cues
+                .iter()
+                .any(|cue| { cue.kind == brawler::matchplay::HeistObjectiveCueKind::Critical })
+        );
+    }
+
+    queue_safe_damage(&mut harness, TeamId(0), 681, 1);
+    step_until_budget(&mut harness, 240, |harness| {
+        (0..2).all(|index| safe_health(harness, Some(index)) == [2_000, 520])
+    });
+    assert_eq!(safe_health(&mut harness, None), [2_000, 520]);
+    for index in 0..2 {
+        assert!(drain_heist_cues(&mut harness, index).iter().any(|cue| {
+            cue.kind == brawler::matchplay::HeistObjectiveCueKind::Critical
+                && cue.health_after == 520
+        }));
+    }
+}
+
+#[test]
 #[allow(
     clippy::too_many_lines,
     reason = "the scenario keeps threshold cues, invalid damage, completion, and restart convergence in one authority proof"
@@ -182,6 +246,10 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
     let mut harness = Harness::new_heist_match(2);
     select_ready_and_activate(&mut harness, 10);
     assert_eq!(safe_health(&mut harness, None), [2_000, 2_000]);
+    step_until_budget(&mut harness, 60, |harness| {
+        (0..2).all(|index| heist_critical_health_percent(harness, Some(index)) == 25)
+    });
+    assert_eq!(heist_critical_health_percent(&mut harness, None), 25);
 
     let (rejected_source, enemy_target) = source_and_target(&mut harness, TeamId(0), 698);
     let friendly_target = {

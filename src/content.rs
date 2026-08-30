@@ -1,12 +1,45 @@
-//! Neutral envelope for all shared authored gameplay content.
+//! Neutral envelope and application composition for shared authored gameplay content.
 
-use bevy::prelude::Resource;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 23;
+pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 25;
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GameplayContentFingerprint(pub u64);
+
+/// Installs the validated, build-embedded gameplay catalogs used by every process role.
+///
+/// This plugin is deliberately headless-safe. Client-only presentation catalogs such as audio
+/// and VFX remain owned by their presentation plugins and cannot leak into the server feature
+/// graph through this shared composition boundary.
+pub struct GameplayContentPlugin;
+
+impl Plugin for GameplayContentPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<crate::combat::WeaponCatalogResource>()
+            .init_resource::<crate::combat::CombatConditionRulesResource>()
+            .add_plugins(crate::builds::BuildContentPlugin)
+            .add_plugins(crate::weapon_parts::WeaponPartContentPlugin)
+            .add_plugins(crate::map::MapContentPlugin)
+            .add_systems(Startup, initialize_content_fingerprint);
+    }
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+pub(crate) fn initialize_content_fingerprint(
+    weapons: Res<crate::combat::WeaponCatalogResource>,
+    maps: Res<crate::map::MapCatalogResource>,
+    builds: Res<crate::builds::BuildCatalogResource>,
+    mut commands: Commands,
+) {
+    let fingerprint = gameplay_content_fingerprint(&weapons.0, &maps.0, &builds.0)
+        .expect("embedded gameplay catalogs must fingerprint");
+    commands.insert_resource(fingerprint);
+}
 
 pub fn gameplay_content_fingerprint(
     weapons: &crate::combat::WeaponCatalog,
@@ -46,4 +79,48 @@ pub fn fnv1a64_seeded(seed: u64, bytes: &[u8]) -> u64 {
     bytes.iter().fold(seed, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_plugin_installs_catalogs_and_fingerprint_without_protocol() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, GameplayContentPlugin));
+
+        assert!(
+            app.world()
+                .contains_resource::<crate::combat::WeaponCatalogResource>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<crate::combat::CombatConditionRulesResource>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<crate::builds::BuildCatalogResource>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<crate::weapon_parts::WeaponPartCatalogResource>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<crate::map::MapCatalogResource>()
+        );
+        assert!(!app.is_plugin_added::<crate::protocol::ProtocolPlugin>());
+        assert!(
+            !app.world()
+                .contains_resource::<GameplayContentFingerprint>()
+        );
+
+        app.update();
+
+        assert!(
+            app.world()
+                .contains_resource::<GameplayContentFingerprint>()
+        );
+    }
 }

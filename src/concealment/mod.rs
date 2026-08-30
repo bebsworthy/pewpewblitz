@@ -159,7 +159,7 @@ mod server {
         clippy::needless_pass_by_value,
         reason = "projection reconciliation owns the complete public participant shape"
     )]
-    fn sync_public_participant_projections(
+    pub(super) fn sync_public_participant_projections(
         mut commands: Commands,
         fighters: Query<
             (
@@ -169,7 +169,7 @@ mod server {
                 &crate::matchplay::FighterDisplayName,
                 &crate::matchplay::MatchParticipant,
                 Option<&crate::builds::SelectedBuild>,
-                Option<&crate::builds::ResolvedMatchLoadout>,
+                Option<&crate::combat::ResolvedWeapon>,
                 Option<&crate::matchplay::RespawnState>,
                 Option<&crate::matchplay::SpawnProtection>,
                 Has<Defeated>,
@@ -188,7 +188,7 @@ mod server {
             name,
             participant,
             selected,
-            loadout,
+            weapon,
             respawn,
             protection,
             defeated,
@@ -219,8 +219,7 @@ mod server {
                 display_name: name.0.clone(),
                 participant: *participant,
                 selected: selected.is_some(),
-                weapon_preset_id: loadout
-                    .and_then(|value| value.primary_weapon.source_preset_id.map(|id| id.0)),
+                weapon_preset_id: weapon.and_then(|value| value.source_preset_id.map(|id| id.0)),
                 status,
             };
             if let Some((_, mut existing)) = projections

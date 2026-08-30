@@ -5,13 +5,13 @@ use super::*;
 #[cfg(test)]
 use crate::combat::AttackId;
 use crate::combat::{CombatCue, DeduplicatedCombatCue, WeaponState};
-use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, Volume};
+use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 use std::collections::{HashMap, VecDeque};
 
 const MAX_RECENT_AUDIO_KEYS: usize = 128;
 
 mod catalog;
-use catalog::{AudioAssetKey, AudioCueFamily, AudioProfileCatalog};
+use catalog::{AudioCueFamily, AudioProfileCatalog};
 
 #[derive(Component)]
 struct ClientAudioOneShot;
@@ -586,8 +586,10 @@ fn try_play_audio(
     family: AudioCueFamily,
     reservations: &mut AudioFrameReservations,
 ) -> PlaybackAttempt {
-    let Some(plan) = catalog.playback_plan(family, |asset| {
-        asset_server.is_loaded(audio_handle(handles, asset))
+    let Some(plan) = catalog.playback_plan(family, |asset_id| {
+        handles
+            .audio(asset_id)
+            .is_some_and(|handle| asset_server.is_loaded(handle))
     }) else {
         return PlaybackAttempt::Unavailable;
     };
@@ -596,7 +598,12 @@ fn try_play_audio(
     }
     commands.spawn((
         ClientAudioOneShot,
-        AudioPlayer::new(audio_handle(handles, plan.asset).clone()),
+        AudioPlayer::new(
+            handles
+                .audio(plan.asset_id)
+                .expect("resolved audio asset ID has a retained handle")
+                .clone(),
+        ),
         PlaybackSettings {
             speed: plan.speed,
             volume: Volume::Linear(plan.volume),
@@ -604,16 +611,6 @@ fn try_play_audio(
         },
     ));
     PlaybackAttempt::Played
-}
-
-const fn audio_handle(handles: &ClientAssetHandles, key: AudioAssetKey) -> &Handle<AudioSource> {
-    match key {
-        AudioAssetKey::Fire => &handles.fire,
-        AudioAssetKey::Impact => &handles.impact,
-        AudioAssetKey::Defeat => &handles.defeat,
-        AudioAssetKey::Ready => &handles.ready,
-        AudioAssetKey::Error => &handles.error,
-    }
 }
 
 #[cfg(test)]
@@ -690,7 +687,6 @@ mod tests {
             deployable_id: crate::builds::DeployableId(3),
             target: Some(NetworkEntityId(8)),
             position: crate::combat::WorldPoint { x: 20.0, y: 30.0 },
-            presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
         };
         assert_eq!(combat_sound(&cue), Some((AudioCueFamily::Sentry, 92)));
     }

@@ -14,11 +14,10 @@ mod wipeout;
 #[cfg(feature = "client")]
 pub use heist::ReceivedHeistObjectiveCue;
 pub use heist::{
-    HEIST_CRITICAL_HEALTH_PERCENT, HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HEIST_SAFE_HALF_EXTENTS,
-    HeistCompletion, HeistHealthComparison, HeistObjectiveCue, HeistObjectiveCueKind, HeistRules,
-    HeistSafe, HeistSafeIdentity, HeistState, HeistSummary, MAX_HEIST_OBJECTIVE_CUES,
-    destroyed_safe_result, objective_cue_kind, remaining_health_comparison,
-    timeout_result as heist_timeout_result,
+    HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HEIST_SAFE_HALF_EXTENTS, HeistCompletion,
+    HeistHealthComparison, HeistObjectiveCue, HeistObjectiveCueKind, HeistRules, HeistSafe,
+    HeistSafeIdentity, HeistState, HeistSummary, MAX_HEIST_OBJECTIVE_CUES, destroyed_safe_result,
+    objective_cue_kind, remaining_health_comparison, timeout_result as heist_timeout_result,
 };
 #[cfg(feature = "server")]
 pub use heist::{

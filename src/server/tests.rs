@@ -2,6 +2,44 @@
 
 use super::*;
 
+#[test]
+fn server_network_plugin_does_not_select_gameplay_or_routed_transport() {
+    let mut app = App::new();
+    app.add_plugins(ServerNetworkPlugin);
+
+    assert!(!app.is_plugin_added::<GameplayContentPlugin>());
+    assert!(!app.is_plugin_added::<ProtocolPlugin>());
+    assert!(!app.is_plugin_added::<ServerAuthoritativeGameplayPlugin>());
+    assert!(!app.is_plugin_added::<AuthoritativeMapPlugin>());
+    assert!(!app.is_plugin_added::<AuthoritativeMovementPlugin>());
+    assert!(!app.is_plugin_added::<ServerCombatPlugin>());
+    assert!(!app.is_plugin_added::<crate::concealment::ServerConcealmentPlugin>());
+    assert!(!app.is_plugin_added::<crate::abilities::ServerAbilityPlugin>());
+    assert!(!app.is_plugin_added::<AuthoritativeMatchPlugin>());
+    assert!(!app.is_plugin_added::<RoutedWorkerPlugin>());
+}
+
+#[test]
+fn authoritative_server_builder_explicitly_installs_role_plugins() {
+    let app = build_app_with_config(ServerNetworkConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        ..default()
+    });
+
+    assert!(app.is_plugin_added::<GameplayContentPlugin>());
+    assert!(app.is_plugin_added::<ProtocolPlugin>());
+    assert!(app.is_plugin_added::<ServerAuthoritativeGameplayPlugin>());
+    assert!(app.is_plugin_added::<AuthoritativeMapPlugin>());
+    assert!(app.is_plugin_added::<AuthoritativeMovementPlugin>());
+    assert!(app.is_plugin_added::<ServerCombatPlugin>());
+    assert!(app.is_plugin_added::<crate::concealment::ServerConcealmentPlugin>());
+    assert!(app.is_plugin_added::<crate::abilities::ServerAbilityPlugin>());
+    assert!(app.is_plugin_added::<AuthoritativeMatchPlugin>());
+    assert!(app.is_plugin_added::<practice::PracticeBotPlugin>());
+    assert!(app.is_plugin_added::<ServerNetworkPlugin>());
+    assert!(app.is_plugin_added::<RoutedWorkerPlugin>());
+}
+
 #[derive(Resource, Default)]
 struct SessionScheduleTrace(Vec<&'static str>);
 
@@ -31,6 +69,29 @@ fn server_session_phases_have_one_explicit_authority_order() {
     assert_eq!(
         app.world().resource::<SessionScheduleTrace>().0,
         vec!["receive", "commit", "enforce", "observe", "terminal"]
+    );
+}
+
+#[test]
+fn server_receive_phase_preserves_cleanup_before_deferred_flush() {
+    let mut app = App::new();
+    app.init_resource::<SessionScheduleTrace>();
+    configure_server_session_schedule(&mut app);
+    app.add_systems(
+        Update,
+        (
+            session_probe("network").in_set(ServerSessionReceiveSet::NetworkLifecycle),
+            session_probe("gameplay-cleanup").in_set(ServerSessionReceiveSet::GameplayCleanup),
+            session_probe("flush").in_set(ServerSessionReceiveSet::Flush),
+        ),
+    );
+    crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
+
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<SessionScheduleTrace>().0,
+        vec!["network", "gameplay-cleanup", "flush"]
     );
 }
 

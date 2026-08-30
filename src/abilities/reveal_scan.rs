@@ -63,7 +63,7 @@ pub(crate) fn activate_reveal_scan(
             Entity,
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &crate::protocol::NetworkEntityId,
             &crate::combat::TeamId,
             &crate::movement::InputFreshness,
@@ -94,7 +94,7 @@ pub(crate) fn activate_reveal_scan(
         entity,
         position,
         rotation,
-        loadout,
+        ultimate,
         network_id,
         team,
         freshness,
@@ -106,14 +106,12 @@ pub(crate) fn activate_reveal_scan(
         active,
     ) in &mut casters
     {
-        if loadout.ultimate.kind != crate::builds::UltimateKind::RevealScan {
+        if ultimate.kind != crate::builds::UltimateKind::RevealScan {
             continue;
         }
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -121,7 +119,7 @@ pub(crate) fn activate_reveal_scan(
                 .entity(entity)
                 .insert(crate::abilities::UltimateInputLatch(requested));
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -134,20 +132,16 @@ pub(crate) fn activate_reveal_scan(
             freshness.last_fresh_tick,
             crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
         );
-        let rejection = if !held {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if !active {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
-        } else {
-            None
-        };
-        if let Some(reason) = rejection {
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh: held,
+                defeated,
+                active,
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions::default(),
+        ) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -159,7 +153,7 @@ pub(crate) fn activate_reveal_scan(
             maximum_range_milliunits,
             radius_milliunits,
             reveal_ticks,
-        } = loadout.ultimate.parameters
+        } = ultimate.parameters
         else {
             continue;
         };
@@ -185,9 +179,8 @@ pub(crate) fn activate_reveal_scan(
         ) else {
             continue;
         };
-        let next_generation = generation
-            .as_deref()
-            .map_or(Some(1), |value| value.0.checked_add(1));
+        let next_generation =
+            super::activation::next_ultimate_generation(generation.as_deref().map(|value| value.0));
         let Some(next_generation) = next_generation else {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,

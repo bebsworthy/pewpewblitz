@@ -17,6 +17,15 @@ fn recipe(weapon: u16, ultimate: u16, passives: [u16; 2]) -> BrawlerBuildRecipe 
 }
 
 #[test]
+fn runtime_projection_installs_the_exact_resolved_ultimate() {
+    let (builds, weapons) = catalogs();
+    let loadout = resolve_build_recipe(&builds, &weapons, recipe(1, 6, [1, 3])).unwrap();
+    let projection = MatchLoadoutProjection::new(&loadout, builds.fighter_body);
+
+    assert_eq!(projection.ultimate, loadout.ultimate);
+}
+
+#[test]
 fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters() {
     let (builds, _) = catalogs();
     assert_eq!(builds.balance_revision, BuildRevision(12));
@@ -57,7 +66,6 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
             projectile_range_milliunits: 480_000,
             projectile_lifetime_ticks: 32,
             projectile_damage: 10,
-            presentation_profile_id: 1,
         }
     );
     assert_eq!(

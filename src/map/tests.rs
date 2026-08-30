@@ -1036,7 +1036,28 @@ fn damageable_profiles_reject_invalid_bounds_references_and_incompatible_behavio
 
 #[test]
 fn effect_tiles_accept_bounded_authored_values_and_reject_unsafe_values_and_spawns() {
-    let mut tuned = MapContentCatalog::embedded().unwrap();
+    let embedded = MapContentCatalog::embedded().unwrap();
+    assert_eq!(
+        embedded.gameplay_profiles[10].effect_tile,
+        MapEffectTileBehavior::Speed {
+            movement_multiplier_milli: 1_250,
+        }
+    );
+    assert_eq!(
+        embedded.gameplay_profiles[11].effect_tile,
+        MapEffectTileBehavior::Slow {
+            movement_multiplier_milli: 700,
+        }
+    );
+    assert_eq!(
+        embedded.gameplay_profiles[12].effect_tile,
+        MapEffectTileBehavior::Damage {
+            damage: 10,
+            interval_ticks: 30,
+        }
+    );
+
+    let mut tuned = embedded;
     tuned.gameplay_profiles[10].effect_tile = MapEffectTileBehavior::Speed {
         movement_multiplier_milli: 1_249,
     };

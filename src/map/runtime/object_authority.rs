@@ -946,7 +946,6 @@ mod terminal_registry_tests {
             owner_network_entity_id: crate::protocol::NetworkEntityId(2),
             team_id: crate::combat::TeamId(0),
             recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(3),
-            presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
             legacy_compatibility: false,
             source_preset_id: None,
             origin: crate::combat::WorldPoint { x: 0.0, y: 0.0 },

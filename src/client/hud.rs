@@ -1245,6 +1245,7 @@ mod tests {
                 match_id,
                 rules_revision: crate::matchplay::HEIST_RULES_REVISION,
                 generation,
+                critical_health_percent: 25,
                 safes,
                 completion: None,
             },

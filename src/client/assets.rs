@@ -6,17 +6,21 @@ use bevy::asset::{LoadState, RecursiveDependencyLoadState};
 use bevy::audio::AudioSource;
 use bevy::gltf::Gltf;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 pub const CLIENT_ASSET_MANIFEST: &str = include_str!("../../assets/manifest.ron");
 
+const RETAINED_AUDIO_ASSET_IDS: [&str; 5] = [
+    "audio.fire",
+    "audio.impact",
+    "audio.defeat",
+    "audio.ready",
+    "audio.error",
+];
+
 #[derive(Resource, Clone)]
 pub(crate) struct ClientAssetHandles {
-    pub fire: Handle<AudioSource>,
-    pub impact: Handle<AudioSource>,
-    pub defeat: Handle<AudioSource>,
-    pub ready: Handle<AudioSource>,
-    pub error: Handle<AudioSource>,
+    audio: BTreeMap<String, Handle<AudioSource>>,
     pub character: Handle<Gltf>,
     pub blaster: Handle<Gltf>,
     pub loading_logo: Handle<Image>,
@@ -32,12 +36,13 @@ pub(crate) struct ClientAssetHandles {
 
 impl ClientAssetHandles {
     fn load(asset_server: &AssetServer) -> Self {
+        let audio = audio_asset_paths()
+            .expect("embedded client asset manifest is valid")
+            .into_iter()
+            .map(|(id, path)| (id, asset_server.load(path)))
+            .collect();
         Self {
-            fire: asset_server.load("brawler/audio/fire.ogg"),
-            impact: asset_server.load("brawler/audio/impact.ogg"),
-            defeat: asset_server.load("brawler/audio/defeat.ogg"),
-            ready: asset_server.load("brawler/audio/ready.ogg"),
-            error: asset_server.load("brawler/audio/error.ogg"),
+            audio,
             character: asset_server
                 .load("brawler/models/kenney/mini-characters/character-male-a.glb"),
             blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
@@ -55,11 +60,11 @@ impl ClientAssetHandles {
 
     fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 16] {
         [
-            ("audio.fire", false, asset_server.load_state(&self.fire)),
-            ("audio.impact", false, asset_server.load_state(&self.impact)),
-            ("audio.defeat", false, asset_server.load_state(&self.defeat)),
-            ("audio.ready", false, asset_server.load_state(&self.ready)),
-            ("audio.error", false, asset_server.load_state(&self.error)),
+            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[0]),
+            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[1]),
+            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[2]),
+            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[3]),
+            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[4]),
             (
                 "model.character_male_a",
                 false,
@@ -116,6 +121,21 @@ impl ClientAssetHandles {
                 asset_server.load_state(&self.play_icon),
             ),
         ]
+    }
+
+    pub(crate) fn audio(&self, asset_id: &str) -> Option<&Handle<AudioSource>> {
+        self.audio.get(asset_id)
+    }
+
+    fn audio_state(
+        &self,
+        asset_server: &AssetServer,
+        asset_id: &'static str,
+    ) -> (&'static str, bool, LoadState) {
+        let handle = self
+            .audio(asset_id)
+            .expect("retained audio asset ID is present in the validated manifest");
+        (asset_id, false, asset_server.load_state(handle))
     }
 }
 
@@ -246,6 +266,30 @@ struct AssetManifestEntry {
     fallback: String,
 }
 
+pub(crate) fn audio_asset_paths() -> Result<BTreeMap<String, String>, String> {
+    validate_manifest(CLIENT_ASSET_MANIFEST)?;
+    let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST)
+        .map_err(|error| format!("asset manifest parse failed: {error}"))?;
+    let paths = manifest
+        .assets
+        .into_iter()
+        .filter(|entry| {
+            entry.id.starts_with("audio.")
+                && std::path::Path::new(&entry.path)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("ogg"))
+        })
+        .map(|entry| (entry.id, entry.path))
+        .collect::<BTreeMap<_, _>>();
+    if RETAINED_AUDIO_ASSET_IDS
+        .iter()
+        .any(|asset_id| !paths.contains_key(*asset_id))
+    {
+        return Err("asset manifest is missing a retained audio asset ID".to_string());
+    }
+    Ok(paths)
+}
+
 fn validate_manifest(source: &str) -> Result<(), String> {
     let manifest: AssetManifest =
         ron::from_str(source).map_err(|error| format!("asset manifest parse failed: {error}"))?;
@@ -303,6 +347,16 @@ mod tests {
     #[test]
     fn retained_asset_manifest_has_unique_complete_provenance() {
         validate_manifest(CLIENT_ASSET_MANIFEST).unwrap();
+    }
+
+    #[test]
+    fn retained_audio_ids_resolve_to_the_manifest_owned_paths() {
+        let paths = audio_asset_paths().unwrap();
+        assert_eq!(paths["audio.fire"], "brawler/audio/fire.ogg");
+        assert_eq!(paths["audio.impact"], "brawler/audio/impact.ogg");
+        assert_eq!(paths["audio.defeat"], "brawler/audio/defeat.ogg");
+        assert_eq!(paths["audio.ready"], "brawler/audio/ready.ogg");
+        assert_eq!(paths["audio.error"], "brawler/audio/error.ogg");
     }
 
     #[test]

@@ -60,6 +60,7 @@ fn additive_catalog_still_rejects_invalid_metadata_and_inventory_overrun() {
 #[test]
 fn embedded_weapon_defaults_match_the_accepted_balance_pass() {
     let catalog = WeaponCatalog::embedded().unwrap();
+    assert_eq!(catalog.recipe_policy.minimum_lob_flight_ticks, 6);
     let pulse = &catalog.presets[0].configuration.recipe;
     assert_eq!(
         pulse.economy,
@@ -209,7 +210,6 @@ fn semantically_equal_catalog_text_has_stable_fingerprint() {
 fn non_preset_configuration_uses_the_same_resolver_and_recipe_fingerprint() {
     let fighter = crate::builds::FighterBody { radius: 20.0 };
     let configuration = WeaponConfiguration {
-        presentation_profile_id: WeaponPresentationProfileId(1),
         recipe: WeaponRecipe {
             economy: WeaponEconomy::Magazine {
                 capacity: 2,
@@ -236,15 +236,10 @@ fn non_preset_configuration_uses_the_same_resolver_and_recipe_fingerprint() {
         },
     };
     let first = resolve_configuration(None, configuration.clone(), fighter).unwrap();
-    let mut other_profile = configuration;
-    other_profile.presentation_profile_id = WeaponPresentationProfileId(4);
-    let second = resolve_configuration(None, other_profile, fighter).unwrap();
+    let second = resolve_configuration(None, configuration, fighter).unwrap();
     assert_eq!(first.source_preset_id, None);
     assert_eq!(first.recipe_fingerprint, second.recipe_fingerprint);
-    assert_ne!(
-        first.presentation_profile_id,
-        second.presentation_profile_id
-    );
+    assert_eq!(first.recipe, second.recipe);
 }
 
 #[test]
@@ -306,6 +301,23 @@ fn policy_change_changes_content_fingerprint() {
     let mut second = first.clone();
     second.recipe_policy.max_damage -= 1;
     assert_ne!(first.fingerprint(), second.fingerprint());
+}
+
+#[test]
+fn lob_flight_floor_is_bounded_and_covered_by_every_lobbed_delivery() {
+    let mut zero = WeaponCatalog::embedded().unwrap();
+    zero.recipe_policy.minimum_lob_flight_ticks = 0;
+    assert!(zero.validate().is_err());
+
+    let mut beyond_delivery = WeaponCatalog::embedded().unwrap();
+    beyond_delivery.recipe_policy.minimum_lob_flight_ticks = 37;
+    assert!(beyond_delivery.validate().is_err());
+
+    let baseline = WeaponCatalog::embedded().unwrap();
+    let mut tuned = baseline.clone();
+    tuned.recipe_policy.minimum_lob_flight_ticks = 5;
+    assert!(tuned.validate().is_ok());
+    assert_ne!(baseline.fingerprint(), tuned.fingerprint());
 }
 
 // --- Delivery-level world effects (Milestone 10) ---

@@ -560,6 +560,11 @@ impl LobbyState {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mode = crate::modes::descriptor_for_mode(self.mode).ok_or(CodecError::InvalidValue)?;
+        let rules =
+            resolve_operator_catalog(include_bytes!("../../../config/server/game-types.ron"))
+                .ok()
+                .and_then(|catalog| catalog.first_rules_for_mode(mode.definition_id))
+                .ok_or(CodecError::InvalidValue)?;
         let map_preset = mode.default_map_preset;
         let map_revision = crate::map::MapContentCatalog::embedded()
             .ok()
@@ -576,10 +581,15 @@ impl LobbyState {
             map_preset: map_preset.0,
             map_revision,
             rules_profile: 1,
-            objective_target: mode.default_objective_target,
-            match_duration_ticks: 10_800,
-            countdown_ticks: 180,
-            respawn_ticks: 180,
+            objective_target: rules.objective_target,
+            match_duration_ticks: rules.match_duration_ticks,
+            countdown_ticks: rules.countdown_ticks,
+            respawn_ticks: rules.respawn_ticks,
+            spawn_protection_ticks: rules.spawn_protection_ticks,
+            completed_input_lock_ticks: rules.completed_input_lock_ticks,
+            wipeout_recent_hostile_damage_credit_ticks: rules
+                .wipeout_recent_hostile_damage_credit_ticks,
+            heist_critical_health_percent: rules.heist_critical_health_percent,
             team_count: 2,
             players_per_team: 1,
             participants,
@@ -653,6 +663,11 @@ impl LobbyState {
                 match_duration_ticks: rules.match_duration_ticks,
                 countdown_ticks: rules.countdown_ticks,
                 respawn_ticks: rules.respawn_ticks,
+                spawn_protection_ticks: rules.spawn_protection_ticks,
+                completed_input_lock_ticks: rules.completed_input_lock_ticks,
+                wipeout_recent_hostile_damage_credit_ticks: rules
+                    .wipeout_recent_hostile_damage_credit_ticks,
+                heist_critical_health_percent: rules.heist_critical_health_percent,
                 team_count: reservation.team_count,
                 players_per_team: reservation.players_per_team,
                 participants,
@@ -741,6 +756,11 @@ impl LobbyState {
                 match_duration_ticks: rules.match_duration_ticks,
                 countdown_ticks: rules.countdown_ticks,
                 respawn_ticks: rules.respawn_ticks,
+                spawn_protection_ticks: rules.spawn_protection_ticks,
+                completed_input_lock_ticks: rules.completed_input_lock_ticks,
+                wipeout_recent_hostile_damage_credit_ticks: rules
+                    .wipeout_recent_hostile_damage_credit_ticks,
+                heist_critical_health_percent: rules.heist_critical_health_percent,
                 team_count: game.team_count,
                 players_per_team: game.players_per_team,
                 participants: vec![human],

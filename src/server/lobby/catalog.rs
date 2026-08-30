@@ -3,16 +3,18 @@
 use crate::{
     lobby::{
         AdvertisedGameType, AdvertisedRulesSummary, CatalogRevision, GameTypeId, MAX_GAME_TYPES,
-        MAX_MAPS_PER_GAME_TYPE, catalog_revision, validate_catalog, validate_presentation_name,
+        MAX_MAPS_PER_GAME_TYPE, canonical_catalog_bytes, validate_catalog,
+        validate_presentation_name,
     },
     map::{MapDimensionLimits, MapInstanceId, MapPresetId},
     matchplay::{HeistRules, HotZoneRules, MatchLifecycleRules, WipeoutRules},
 };
 use bevy::prelude::Resource;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 3;
+pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 4;
 pub const MAX_OPERATOR_CATALOG_BYTES: usize = 16 * 1024;
 
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -22,6 +24,7 @@ pub(crate) struct ResolvedLobbyCatalog {
     pub revision: CatalogRevision,
     pub game_types: Vec<AdvertisedGameType>,
     pub brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog,
+    policy_revision: CatalogRevision,
     game_rules: BTreeMap<GameTypeId, ResolvedGameRules>,
     map_admission_revisions: BTreeMap<MapPresetId, u16>,
 }
@@ -32,6 +35,10 @@ pub(crate) struct ResolvedGameRules {
     pub match_duration_ticks: u64,
     pub countdown_ticks: u64,
     pub respawn_ticks: u64,
+    pub spawn_protection_ticks: u64,
+    pub completed_input_lock_ticks: u64,
+    pub wipeout_recent_hostile_damage_credit_ticks: u64,
+    pub heist_critical_health_percent: u8,
 }
 
 impl ResolvedLobbyCatalog {
@@ -42,6 +49,16 @@ impl ResolvedLobbyCatalog {
     pub(crate) fn map_admission_revision(&self, preset_id: MapPresetId) -> Option<u16> {
         self.map_admission_revisions.get(&preset_id).copied()
     }
+
+    pub(crate) fn first_rules_for_mode(
+        &self,
+        mode_definition_id: crate::map::ModeDefinitionId,
+    ) -> Option<ResolvedGameRules> {
+        self.game_types
+            .iter()
+            .find(|game| game.mode_definition_id == mode_definition_id)
+            .and_then(|game| self.rules(&game.id))
+    }
 }
 
 #[derive(Deserialize)]
@@ -49,8 +66,36 @@ impl ResolvedLobbyCatalog {
 struct OperatorCatalog {
     schema_version: u16,
     server_name: String,
+    common_lifecycle: OperatorCommonLifecyclePolicy,
+    mode_policies: OperatorModePolicies,
     map_dimension_limits: MapDimensionLimits,
     game_types: Vec<OperatorGameType>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OperatorCommonLifecyclePolicy {
+    spawn_protection_ticks: u64,
+    completed_input_lock_ticks: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OperatorModePolicies {
+    wipeout: OperatorWipeoutPolicy,
+    heist: OperatorHeistPolicy,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OperatorWipeoutPolicy {
+    recent_hostile_damage_credit_ticks: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OperatorHeistPolicy {
+    critical_health_percent: u8,
 }
 
 #[derive(Deserialize)]
@@ -105,9 +150,29 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         .iter()
         .map(|preset| (preset.id, preset.admission_revision))
         .collect();
-    let lifecycle = MatchLifecycleRules::default()
-        .validate()
-        .map_err(str::to_string)?;
+    let common_lifecycle = operator.common_lifecycle;
+    let mode_policies = operator.mode_policies;
+    let lifecycle = MatchLifecycleRules {
+        spawn_protection_ticks: common_lifecycle.spawn_protection_ticks,
+        completed_input_lock_ticks: common_lifecycle.completed_input_lock_ticks,
+        ..MatchLifecycleRules::default()
+    }
+    .validate()
+    .map_err(str::to_string)?;
+    WipeoutRules {
+        target_score: 1,
+        recent_hostile_damage_credit_ticks: mode_policies
+            .wipeout
+            .recent_hostile_damage_credit_ticks,
+    }
+    .validate()
+    .map_err(str::to_string)?;
+    HeistRules {
+        safe_maximum_health: 1,
+        critical_health_percent: mode_policies.heist.critical_health_percent,
+    }
+    .validate()
+    .map_err(str::to_string)?;
     let mut advertised = Vec::with_capacity(operator.game_types.len());
     let mut game_rules = BTreeMap::new();
     for entry in operator.game_types {
@@ -162,7 +227,14 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 if entry.capture_seconds == 0 && entry.safe_health == 0 =>
             {
                 let target_score = entry.kills_to_win;
-                WipeoutRules { target_score }.validate().map_err(|error| {
+                WipeoutRules {
+                    target_score,
+                    recent_hostile_damage_credit_ticks: mode_policies
+                        .wipeout
+                        .recent_hostile_damage_credit_ticks,
+                }
+                .validate()
+                .map_err(|error| {
                     format!("game type {} has invalid objective: {error}", id.as_str())
                 })?;
                 (
@@ -204,7 +276,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 let safe_maximum_health = entry.safe_health;
                 HeistRules {
                     safe_maximum_health,
-                    ..HeistRules::default()
+                    critical_health_percent: mode_policies.heist.critical_health_percent,
                 }
                 .validate()
                 .map_err(|error| {
@@ -290,6 +362,12 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 match_duration_ticks,
                 countdown_ticks,
                 respawn_ticks,
+                spawn_protection_ticks: common_lifecycle.spawn_protection_ticks,
+                completed_input_lock_ticks: common_lifecycle.completed_input_lock_ticks,
+                wipeout_recent_hostile_damage_credit_ticks: mode_policies
+                    .wipeout
+                    .recent_hostile_damage_credit_ticks,
+                heist_critical_health_percent: mode_policies.heist.critical_health_percent,
             },
         );
         advertised.push(AdvertisedGameType {
@@ -305,8 +383,16 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
     validate_catalog(&advertised)
         .map_err(|error| format!("resolved game-type catalog is invalid: {error}"))?;
-    let revision = catalog_revision(&advertised)
+    let revision_material = canonical_catalog_bytes(&advertised)
         .map_err(|error| format!("catalog revision failed: {error}"))?;
+    let revision = CatalogRevision(Sha256::digest(revision_material).into());
+    let policy_material = postcard::to_allocvec(&(
+        OPERATOR_CATALOG_SCHEMA_VERSION,
+        common_lifecycle,
+        mode_policies,
+    ))
+    .map_err(|error| format!("catalog policy revision failed: {error}"))?;
+    let policy_revision = CatalogRevision(Sha256::digest(policy_material).into());
     let brawler_catalog = crate::profiles::AdvertisedBrawlerCatalog::from_content(
         &crate::builds::BuildCatalog::embedded()?,
         &crate::combat::WeaponCatalog::embedded()?,
@@ -334,6 +420,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         revision,
         game_types: advertised,
         brawler_catalog,
+        policy_revision,
         game_rules,
         map_admission_revisions,
     })
@@ -398,6 +485,10 @@ mod tests {
                 match_duration_ticks: 10_800,
                 countdown_ticks: 180,
                 respawn_ticks: 180,
+                spawn_protection_ticks: 90,
+                completed_input_lock_ticks: 60,
+                wipeout_recent_hostile_damage_credit_ticks: 300,
+                heist_critical_health_percent: 25,
             })
         );
         let heist = catalog
@@ -421,15 +512,50 @@ mod tests {
     }
 
     #[test]
+    fn policy_only_changes_resolve_and_change_the_private_policy_revision() {
+        let baseline = resolve_operator_catalog(VALID.as_bytes()).unwrap();
+        let changed_source = VALID
+            .replace("spawn_protection_ticks: 90", "spawn_protection_ticks: 91")
+            .replace(
+                "recent_hostile_damage_credit_ticks: 300",
+                "recent_hostile_damage_credit_ticks: 301",
+            )
+            .replace("critical_health_percent: 25", "critical_health_percent: 26");
+        let changed = resolve_operator_catalog(changed_source.as_bytes()).unwrap();
+        let rules = changed
+            .first_rules_for_mode(crate::map::WIPEOUT_MODE_DEFINITION)
+            .unwrap();
+
+        assert_eq!(rules.spawn_protection_ticks, 91);
+        assert_eq!(rules.wipeout_recent_hostile_damage_credit_ticks, 301);
+        assert_eq!(rules.heist_critical_health_percent, 26);
+        assert_eq!(changed.revision, baseline.revision);
+        assert_ne!(changed.policy_revision, baseline.policy_revision);
+    }
+
+    #[test]
     fn catalog_rejects_unknown_fields_modes_maps_objectives_and_unsupported_topology() {
         for invalid in [
-            VALID.replace("schema_version: 3", "schema_version: 3, surprise: true"),
+            VALID.replace("schema_version: 4", "schema_version: 4, surprise: true"),
             VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
             VALID.replace("feature-yard-wipeout\"", "missing-map\""),
             VALID.replace("players_per_team: 2", "players_per_team: 4"),
             VALID.replace("kills_to_win: 10", "kills_to_win: 0"),
             VALID.replace("capture_seconds: 30", "kills_to_win: 10"),
             VALID.replace("countdown_seconds: 3", "countdown_seconds: 0"),
+            VALID.replace("spawn_protection_ticks: 90", "spawn_protection_ticks: 0"),
+            VALID.replace(
+                "completed_input_lock_ticks: 60",
+                "completed_input_lock_ticks: 0",
+            ),
+            VALID.replace(
+                "recent_hostile_damage_credit_ticks: 300",
+                "recent_hostile_damage_credit_ticks: 0",
+            ),
+            VALID.replace(
+                "critical_health_percent: 25",
+                "critical_health_percent: 100",
+            ),
             VALID.replace("minimum_width: 20", "minimum_width: 0"),
             VALID.replace("maximum_width: 512", "maximum_width: 513"),
             VALID.replace("minimum_height: 20", "minimum_height: 513"),

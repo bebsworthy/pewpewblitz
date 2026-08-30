@@ -41,7 +41,7 @@ pub(crate) fn activate_big_blob(
             Entity,
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &crate::protocol::PlayerId,
             &crate::protocol::NetworkEntityId,
             &crate::combat::TeamId,
@@ -62,7 +62,7 @@ pub(crate) fn activate_big_blob(
         entity,
         position,
         rotation,
-        loadout,
+        ultimate,
         player_id,
         network_id,
         team,
@@ -75,14 +75,12 @@ pub(crate) fn activate_big_blob(
         active,
     ) in &mut casters
     {
-        if loadout.ultimate.kind != crate::builds::UltimateKind::BigBlob {
+        if ultimate.kind != crate::builds::UltimateKind::BigBlob {
             continue;
         }
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -90,7 +88,7 @@ pub(crate) fn activate_big_blob(
                 .entity(entity)
                 .insert(crate::abilities::UltimateInputLatch(requested));
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -105,7 +103,7 @@ pub(crate) fn activate_big_blob(
             landing_clearance_milliunits,
             max_active_per_owner,
             ..
-        } = loadout.ultimate.parameters
+        } = ultimate.parameters
         else {
             continue;
         };
@@ -113,28 +111,31 @@ pub(crate) fn activate_big_blob(
             .iter()
             .filter(|runtime| runtime.source.owner_network_entity_id == *network_id)
             .count();
-        let rejection = if crate::movement::input_should_neutralize(
+        let input_fresh = !crate::movement::input_should_neutralize(
             tick.0,
             freshness.last_fresh_tick,
             crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
-        ) {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if !active {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if parents.iter().count() >= 16
+        );
+        let before_readiness = if parents.iter().count() >= 16
             || owner_blob_count.saturating_add(6) > usize::from(max_active_per_owner)
         {
             Some(crate::abilities::AbilityRejectionReason::ActiveFieldCeiling)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
         } else {
             None
         };
-        if let Some(reason) = rejection {
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh,
+                defeated,
+                active,
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions {
+                before_readiness,
+                after_readiness: None,
+            },
+        ) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -210,14 +211,13 @@ pub(crate) fn activate_big_blob(
         };
         let source = crate::combat::AttackSource {
             kind: crate::combat::CombatSourceKind::Ultimate {
-                ultimate_id: loadout.ultimate.id,
+                ultimate_id: ultimate.id,
             },
             attack_id,
             player_id: *player_id,
             owner_network_entity_id: *network_id,
             team_id: *team,
             recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(0),
-            presentation_profile_id: crate::combat::WeaponPresentationProfileId(5),
             legacy_compatibility: false,
             source_preset_id: None,
             origin: position.0.into(),
@@ -251,7 +251,7 @@ pub(crate) fn activate_big_blob(
             BigBlobParentRuntime {
                 owner_entity: entity,
                 source,
-                parameters: loadout.ultimate.parameters,
+                parameters: ultimate.parameters,
                 match_member: crate::matchplay::MatchMember(participant.match_id),
             },
             avian2d::prelude::Position(position.0),

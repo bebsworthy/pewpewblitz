@@ -6,24 +6,30 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Composed revision of the validated common lifecycle plus Wipeout rules for this state shape.
-pub const WIPEOUT_RULES_REVISION: u16 = 2;
+pub const WIPEOUT_RULES_REVISION: u16 = 3;
 
 /// Wipeout-specific scoring rules layered on the common `MatchLifecycleRules`.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WipeoutRules {
     pub target_score: u16,
+    pub recent_hostile_damage_credit_ticks: u64,
 }
 
 impl Default for WipeoutRules {
     fn default() -> Self {
-        Self { target_score: 10 }
+        Self {
+            target_score: 10,
+            // Runtime composition replaces this neutral sentinel with authored production
+            // policy or an explicit verification fixture.
+            recent_hostile_damage_credit_ticks: 1,
+        }
     }
 }
 
 impl WipeoutRules {
     pub fn validate(self) -> Result<Self, &'static str> {
-        if self.target_score == 0 {
-            return Err("Wipeout score target must be nonzero");
+        if self.target_score == 0 || self.recent_hostile_damage_credit_ticks == 0 {
+            return Err("Wipeout score target and hostile-credit window must be nonzero");
         }
         Ok(self)
     }
@@ -74,8 +80,6 @@ mod rules {
         timing::SimulationTick,
     };
     use std::collections::{BTreeMap, BTreeSet};
-
-    const RECENT_HOSTILE_DAMAGE_CREDIT_TICKS: u64 = 300;
 
     #[derive(Clone, Copy, Debug)]
     struct RecentHostileDamageCredit {
@@ -205,6 +209,7 @@ mod rules {
     )]
     fn resolve_wipeout_scoring(
         tick: Res<SimulationTick>,
+        rules: Res<WipeoutRules>,
         mut roots: Query<(&MatchState, &mut WipeoutState), With<MatchRoot>>,
         facts: Res<CombatOutcomeFacts>,
         mut scored_events: ResMut<ScoredCombatEvents>,
@@ -237,6 +242,7 @@ mod rules {
                     state.match_id,
                     &participants,
                     &mut scored_events.recent_hostile_damage,
+                    rules.recent_hostile_damage_credit_ticks,
                 );
                 continue;
             }
@@ -318,6 +324,7 @@ mod rules {
         match_id: crate::matchplay::MatchId,
         participants: &Query<(&NetworkEntityId, &TeamId, &MatchParticipantView), With<Fighter>>,
         credits: &mut BTreeMap<NetworkEntityId, RecentHostileDamageCredit>,
+        credit_ticks: u64,
     ) {
         let (Some(source_network_id), Some(source_team)) =
             (fact.source_network_id, fact.source_team)
@@ -343,7 +350,7 @@ mod rules {
                 RecentHostileDamageCredit {
                     source_network_id,
                     source_team,
-                    expires_at_tick: fact.tick.saturating_add(RECENT_HOSTILE_DAMAGE_CREDIT_TICKS),
+                    expires_at_tick: fact.tick.saturating_add(credit_ticks),
                 },
             );
         }
@@ -393,9 +400,20 @@ mod tests {
     fn wipeout_rules_require_a_nonzero_target() {
         assert!(WipeoutRules::default().validate().is_ok());
         assert!(
-            WipeoutRules { target_score: 0 }
-                .validate()
-                .is_err_and(|error| error.contains("nonzero"))
+            WipeoutRules {
+                target_score: 0,
+                ..WipeoutRules::default()
+            }
+            .validate()
+            .is_err_and(|error| error.contains("nonzero"))
+        );
+        assert!(
+            WipeoutRules {
+                recent_hostile_damage_credit_ticks: 0,
+                ..WipeoutRules::default()
+            }
+            .validate()
+            .is_err_and(|error| error.contains("nonzero"))
         );
     }
 }

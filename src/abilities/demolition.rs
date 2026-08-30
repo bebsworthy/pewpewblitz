@@ -23,7 +23,7 @@ pub(crate) fn activate_demolition_strike(
             Entity,
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &crate::protocol::NetworkEntityId,
             &crate::movement::InputFreshness,
             &mut crate::builds::AbilityState,
@@ -39,7 +39,7 @@ pub(crate) fn activate_demolition_strike(
         entity,
         position,
         rotation,
-        loadout,
+        ultimate,
         network_id,
         freshness,
         mut ability,
@@ -49,14 +49,12 @@ pub(crate) fn activate_demolition_strike(
         active,
     ) in &mut casters
     {
-        if loadout.ultimate.kind != crate::builds::UltimateKind::DemolitionStrike {
+        if ultimate.kind != crate::builds::UltimateKind::DemolitionStrike {
             continue;
         }
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -64,7 +62,7 @@ pub(crate) fn activate_demolition_strike(
                 .entity(entity)
                 .insert(crate::abilities::UltimateInputLatch(requested));
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -77,20 +75,16 @@ pub(crate) fn activate_demolition_strike(
             freshness.last_fresh_tick,
             crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
         );
-        let rejection = if !fresh {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if !active {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
-        } else {
-            None
-        };
-        if let Some(reason) = rejection {
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh: fresh,
+                defeated,
+                active,
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions::default(),
+        ) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -101,7 +95,7 @@ pub(crate) fn activate_demolition_strike(
         let crate::builds::UltimateParameters::DemolitionStrike {
             maximum_range_milliunits,
             radius_milliunits,
-        } = loadout.ultimate.parameters
+        } = ultimate.parameters
         else {
             continue;
         };
@@ -152,7 +146,7 @@ pub(crate) fn activate_demolition_strike(
             source: crate::combat::CombatWorldEffectSource::Ultimate {
                 event_id,
                 owner_network_entity_id: *network_id,
-                ultimate_id: loadout.ultimate.id,
+                ultimate_id: ultimate.id,
             },
             position: center.into(),
             effect: crate::combat::WorldEffectDefinition::DestroyMap { radius },

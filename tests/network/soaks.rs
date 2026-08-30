@@ -141,9 +141,15 @@ fn run_match_soak(harness: &mut Harness, clients: usize, hot_zone: bool) {
         });
         // The completed-input lock rejects an immediate restart request; wait it out,
         // then confirm from every participant.
-        for _ in 0..60 {
-            harness.step();
-        }
+        step_until_labelled(harness, "completed input lock", |harness| {
+            matches!(
+                server_match(harness).phase,
+                MatchPhase::Completed {
+                    restart_unlocked_at_tick,
+                    ..
+                } if harness.server_simulation_tick() >= restart_unlocked_at_tick
+            )
+        });
         sequence += 1;
         let restart_request_id = sequence;
         for index in 0..clients {

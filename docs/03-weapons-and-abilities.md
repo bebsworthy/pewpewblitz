@@ -306,9 +306,11 @@ StraightFlight / future trajectory component
 ```
 
 Straight deliveries move through authoritative planar simulation. Lobbed deliveries resolve a
-bounded landing point and flight deadline while clients may present an arc independently. Melee arcs
-are deliveries without projectile entities. The fighter does not own the delivery after creation;
-stable source identity preserves attribution across entity lifecycles.
+bounded landing point and flight deadline while clients may present an arc independently. The
+weapon catalog's recipe policy owns the minimum lob-flight deadline; each Lobbed or Splash recipe
+owns its maximum flight deadline, and validation rejects a recipe whose maximum cannot satisfy the
+catalog floor. Melee arcs are deliveries without projectile entities. The fighter does not own the
+delivery after creation; stable source identity preserves attribution across entity lifecycles.
 
 A cone spray is also a delivery without projectile entities. Attack acceptance immediately fixes
 an immutable world-space origin and facing, then a replicated gas volume grows from that point at

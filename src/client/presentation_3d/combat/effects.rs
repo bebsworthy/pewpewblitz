@@ -1,11 +1,11 @@
 use super::super::*;
-use super::common::GROUND_EFFECT_HEIGHT;
-use super::vfx_catalog::{VfxCatalog, VfxCueFamily, VfxLifetime, VfxRendererFamily};
+use super::vfx_catalog::{
+    VfxCatalog, VfxCueFamily, VfxLifetime, VfxMaterialKey, VfxProfile, VfxRendererFamily,
+};
 use crate::combat::client::DeduplicatedCombatCue;
 use std::collections::{HashMap, VecDeque};
 
 const MAX_EFFECTS: usize = 96;
-const SPHERE_CENTER_HEIGHT_FRACTION: f32 = 0.45;
 
 #[derive(Component)]
 pub(in super::super) struct CombatEffect3d {
@@ -52,18 +52,11 @@ impl PendingCombatEffect {
 }
 
 #[derive(Clone, Copy)]
-enum EffectAnchor {
-    Center,
-    RaisedFixed(f32),
-}
-
-#[derive(Clone, Copy)]
 struct CatalogEffectRequest {
     family: VfxCueFamily,
     reduced: bool,
     position: Vec2,
-    base_scale: f32,
-    anchor: EffectAnchor,
+    authoritative_radius: Option<f32>,
     deadline: Option<(u64, u64, Option<u64>)>,
     label: &'static str,
 }
@@ -76,7 +69,6 @@ fn catalog_effect(
 ) -> PendingCombatEffect {
     let profile =
         catalog.resolve_for_request(request.family, request.reduced, request.deadline.is_some());
-    let scale = request.base_scale * profile.scale_multiplier;
     let (lifetime, expires_at_tick) = match (profile.lifetime, request.deadline) {
         (VfxLifetime::AuthoritativeDeadline, Some((activated, expires, observed))) => (
             reveal_ring_remaining_duration(activated, expires, observed),
@@ -87,13 +79,7 @@ fn catalog_effect(
             unreachable!("validated VFX resolution falls back when no deadline is available")
         }
     };
-    let transform = effect_transform(
-        profile.renderer,
-        request.position,
-        request.base_scale,
-        scale,
-        request.anchor,
-    );
+    let transform = effect_transform(profile, request.position, request.authoritative_radius);
     PendingCombatEffect {
         lifetime,
         expires_at_tick,
@@ -101,7 +87,7 @@ fn catalog_effect(
             VfxRendererFamily::Sphere => primitives.effect_sphere.clone(),
             VfxRendererFamily::GroundRing => primitives.area_ring.clone(),
         },
-        material: vfx_material(&profile.material, materials),
+        material: vfx_material(profile.material, materials),
         transform,
         label: request.label,
         profile_id: profile.id.clone(),
@@ -110,37 +96,39 @@ fn catalog_effect(
 }
 
 fn effect_transform(
-    renderer: VfxRendererFamily,
+    profile: &VfxProfile,
     position: Vec2,
-    base_scale: f32,
-    rendered_scale: f32,
-    anchor: EffectAnchor,
+    authoritative_radius: Option<f32>,
 ) -> Transform {
-    match renderer {
+    let scale = profile
+        .scale
+        .resolve(authoritative_radius)
+        .expect("validated VFX family supplies required authoritative radius");
+    let height = profile
+        .anchor
+        .resolve_height(authoritative_radius)
+        .expect("validated VFX family supplies required authoritative radius");
+    match profile.renderer {
         VfxRendererFamily::GroundRing => Transform {
-            translation: ground_position(position) + Vec3::Y * GROUND_EFFECT_HEIGHT,
+            translation: ground_position(position) + Vec3::Y * height,
             rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
-            scale: Vec3::splat(rendered_scale),
+            scale: Vec3::splat(scale),
         },
         VfxRendererFamily::Sphere => {
-            let height = match anchor {
-                EffectAnchor::Center => base_scale * SPHERE_CENTER_HEIGHT_FRACTION,
-                EffectAnchor::RaisedFixed(height) => height,
-            };
             Transform::from_translation(ground_position(position) + Vec3::Y * height)
-                .with_scale(Vec3::splat(rendered_scale))
+                .with_scale(Vec3::splat(scale))
         }
     }
 }
 
-fn vfx_material(key: &str, materials: &Material3dAssets) -> Handle<StandardMaterial> {
+fn vfx_material(key: VfxMaterialKey, materials: &Material3dAssets) -> Handle<StandardMaterial> {
     match key {
-        "effect_muzzle" => materials.effect_muzzle.clone(),
-        "effect_damage" => materials.effect_damage.clone(),
-        "scan_area" => materials.scan_area.clone(),
-        "demolition_area" => materials.demolition_area.clone(),
-        "pickup_glow" => materials.pickup_glow.clone(),
-        _ => materials.effect_impact.clone(),
+        VfxMaterialKey::EffectMuzzle => materials.effect_muzzle.clone(),
+        VfxMaterialKey::EffectImpact => materials.effect_impact.clone(),
+        VfxMaterialKey::EffectDamage => materials.effect_damage.clone(),
+        VfxMaterialKey::ScanArea => materials.scan_area.clone(),
+        VfxMaterialKey::DemolitionArea => materials.demolition_area.clone(),
+        VfxMaterialKey::PickupGlow => materials.pickup_glow.clone(),
     }
 }
 #[allow(
@@ -180,7 +168,7 @@ pub(in super::super) fn consume_combat_cues(
         {
             visual.shoot_seconds = 0.18;
         }
-        let Some((family, position, scale)) = cue_effect(cue) else {
+        let Some((family, position, authoritative_radius)) = cue_effect(cue) else {
             continue;
         };
         let scan_pulse = matches!(cue, crate::combat::CombatCue::RevealScanActivated { .. });
@@ -199,8 +187,7 @@ pub(in super::super) fn consume_combat_cues(
                 family,
                 reduced,
                 position,
-                base_scale: scale,
-                anchor: EffectAnchor::Center,
+                authoritative_radius,
                 deadline,
                 label: if scan_pulse {
                     "V9 active Reveal Scan area"
@@ -241,15 +228,19 @@ pub(in super::super) fn consume_world_object_cues(
         if cue.target().generation() != map_state.generation_id() {
             continue;
         }
-        let (position, radius, exploded) = match cue {
+        let (position, authoritative_radius, exploded) = match cue {
             crate::map::WorldObjectCue::Damaged { position, .. } => {
-                (position.as_vec2(), 11.0, false)
+                (position.as_vec2(), None, false)
             }
             crate::map::WorldObjectCue::Exploded {
                 position,
                 radius_world_units,
                 ..
-            } => (position.as_vec2(), f32::from(radius_world_units), true),
+            } => (
+                position.as_vec2(),
+                Some(f32::from(radius_world_units)),
+                true,
+            ),
         };
         pending_effects.write(catalog_effect(
             CatalogEffectRequest {
@@ -260,12 +251,7 @@ pub(in super::super) fn consume_world_object_cues(
                 },
                 reduced,
                 position,
-                base_scale: radius,
-                anchor: if exploded {
-                    EffectAnchor::Center
-                } else {
-                    EffectAnchor::RaisedFixed(8.0)
-                },
+                authoritative_radius,
                 deadline: None,
                 label: if exploded {
                     "V10 authoritative oil-barrel blast"
@@ -301,13 +287,12 @@ pub(in super::super) fn consume_pickup_cues(
     };
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
     for cue in received.0.drain(..) {
-        let (identity, position, radius, family, label) = match cue {
+        let (identity, position, family, label) = match cue {
             crate::map::PickupCue::Spawned {
                 identity, position, ..
             } => (
                 identity,
                 position.as_vec2(),
-                22.0,
                 VfxCueFamily::PickupSpawned,
                 "V10 chest restoration drop",
             ),
@@ -316,7 +301,6 @@ pub(in super::super) fn consume_pickup_cues(
             } => (
                 identity,
                 position.as_vec2(),
-                18.0,
                 VfxCueFamily::PickupCollected,
                 "V10 restoration collected",
             ),
@@ -325,7 +309,6 @@ pub(in super::super) fn consume_pickup_cues(
             } => (
                 identity,
                 position.as_vec2(),
-                12.0,
                 VfxCueFamily::PickupExpired,
                 "V10 restoration expired",
             ),
@@ -333,18 +316,12 @@ pub(in super::super) fn consume_pickup_cues(
         if identity.generation != map_state.generation_id() {
             continue;
         }
-        let ring = !matches!(family, VfxCueFamily::PickupCollected);
         pending_effects.write(catalog_effect(
             CatalogEffectRequest {
                 family,
                 reduced,
                 position,
-                base_scale: radius,
-                anchor: if ring {
-                    EffectAnchor::Center
-                } else {
-                    EffectAnchor::RaisedFixed(15.0)
-                },
+                authoritative_radius: None,
                 deadline: None,
                 label,
             },
@@ -387,22 +364,17 @@ pub(in super::super) fn consume_heist_objective_cues(
         {
             continue;
         }
-        let (radius, family) = match cue.kind {
-            crate::matchplay::HeistObjectiveCueKind::Damaged => (12.0, VfxCueFamily::HeistDamaged),
-            crate::matchplay::HeistObjectiveCueKind::Critical => {
-                (30.0, VfxCueFamily::HeistCritical)
-            }
-            crate::matchplay::HeistObjectiveCueKind::Destroyed => {
-                (72.0, VfxCueFamily::HeistDestroyed)
-            }
+        let family = match cue.kind {
+            crate::matchplay::HeistObjectiveCueKind::Damaged => VfxCueFamily::HeistDamaged,
+            crate::matchplay::HeistObjectiveCueKind::Critical => VfxCueFamily::HeistCritical,
+            crate::matchplay::HeistObjectiveCueKind::Destroyed => VfxCueFamily::HeistDestroyed,
         };
         pending_effects.write(catalog_effect(
             CatalogEffectRequest {
                 family,
                 reduced,
                 position: cue.position.as_vec2(),
-                base_scale: radius,
-                anchor: EffectAnchor::Center,
+                authoritative_radius: None,
                 deadline: None,
                 label: match cue.kind {
                     crate::matchplay::HeistObjectiveCueKind::Damaged => "Heist safe hit cue",
@@ -486,25 +458,25 @@ fn reveal_ring_remaining_duration(
         .saturating_add(crate::timing::SIMULATION_TICK.saturating_mul(subsecond_ticks))
 }
 
-fn cue_effect(cue: &crate::combat::CombatCue) -> Option<(VfxCueFamily, Vec2, f32)> {
+fn cue_effect(cue: &crate::combat::CombatCue) -> Option<(VfxCueFamily, Vec2, Option<f32>)> {
     use crate::combat::CombatCue as C;
     match cue {
         C::AttackAccepted { position, .. } | C::SentryFired { position, .. } => {
-            Some((VfxCueFamily::CombatMuzzle, position.as_vec2(), 8.0))
+            Some((VfxCueFamily::CombatMuzzle, position.as_vec2(), None))
         }
         C::DeliveryImpact { position, .. }
         | C::LobLanded { position, .. }
         | C::MeleeContact { position, .. }
         | C::DeployableRemoved { position, .. } => {
-            Some((VfxCueFamily::CombatImpact, position.as_vec2(), 14.0))
+            Some((VfxCueFamily::CombatImpact, position.as_vec2(), None))
         }
         C::DamageApplied { position, .. }
         | C::EffectApplied { position, .. }
         | C::FighterDefeated { position, .. } => {
-            Some((VfxCueFamily::CombatDamage, position.as_vec2(), 12.0))
+            Some((VfxCueFamily::CombatDamage, position.as_vec2(), None))
         }
         C::FighterReset { position, .. } => {
-            Some((VfxCueFamily::CombatReset, position.as_vec2(), 16.0))
+            Some((VfxCueFamily::CombatReset, position.as_vec2(), None))
         }
         C::RevealScanActivated {
             center,
@@ -522,7 +494,9 @@ fn cue_effect(cue: &crate::combat::CombatCue) -> Option<(VfxCueFamily, Vec2, f32
                 VfxCueFamily::ElementalField
             },
             center.as_vec2(),
-            crate::builds::world_units_from_milliunits(*radius_milliunits).unwrap_or(0.0),
+            Some(crate::builds::world_units_from_milliunits(
+                *radius_milliunits,
+            )?),
         )),
         C::DemolitionStrikeActivated {
             center,
@@ -531,7 +505,9 @@ fn cue_effect(cue: &crate::combat::CombatCue) -> Option<(VfxCueFamily, Vec2, f32
         } => Some((
             VfxCueFamily::DemolitionStrike,
             center.as_vec2(),
-            crate::builds::world_units_from_milliunits(*radius_milliunits).unwrap_or(0.0),
+            Some(crate::builds::world_units_from_milliunits(
+                *radius_milliunits,
+            )?),
         )),
         C::Muzzle { .. }
         | C::ConeSprayPulse { .. }
@@ -709,19 +685,16 @@ mod tests {
 
     #[test]
     fn reduced_sphere_scale_preserves_the_semantic_center_height() {
+        let catalog = VfxCatalog::embedded().unwrap();
         let normal = effect_transform(
-            VfxRendererFamily::Sphere,
+            catalog.resolve(VfxCueFamily::CombatMuzzle, false),
             Vec2::new(10.0, 20.0),
-            8.0,
-            8.0,
-            EffectAnchor::Center,
+            None,
         );
         let reduced = effect_transform(
-            VfxRendererFamily::Sphere,
+            catalog.resolve(VfxCueFamily::CombatMuzzle, true),
             Vec2::new(10.0, 20.0),
-            8.0,
-            5.2,
-            EffectAnchor::Center,
+            None,
         );
 
         assert_eq!(reduced.translation, normal.translation);
@@ -731,23 +704,40 @@ mod tests {
 
     #[test]
     fn renderer_family_owns_ground_ring_orientation_and_placement() {
-        let ring = effect_transform(
-            VfxRendererFamily::GroundRing,
-            Vec2::new(10.0, 20.0),
-            8.0,
-            5.2,
-            EffectAnchor::RaisedFixed(99.0),
-        );
+        let catalog = VfxCatalog::embedded().unwrap();
+        let profile = catalog.resolve(VfxCueFamily::RevealScan, false);
+        let ring = effect_transform(profile, Vec2::new(10.0, 20.0), Some(5.2));
 
         assert_eq!(
             ring.translation,
-            ground_position(Vec2::new(10.0, 20.0)) + Vec3::Y * GROUND_EFFECT_HEIGHT
+            ground_position(Vec2::new(10.0, 20.0)) + Vec3::Y * 2.5
         );
         assert_eq!(
             ring.rotation,
             Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)
         );
         assert_eq!(ring.scale, Vec3::splat(5.2));
+    }
+
+    #[test]
+    fn authored_fixed_and_authoritative_radius_geometry_reaches_runtime_transform() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let fixed = effect_transform(
+            catalog.resolve(VfxCueFamily::WorldObjectDamaged, true),
+            Vec2::ZERO,
+            None,
+        );
+        assert!((fixed.translation.y - 8.0).abs() < f32::EPSILON);
+        assert_eq!(fixed.scale, Vec3::splat(7.0));
+
+        let radius = 20.0;
+        let area = effect_transform(
+            catalog.resolve(VfxCueFamily::ElementalField, true),
+            Vec2::ZERO,
+            Some(radius),
+        );
+        assert!((area.translation.y - radius * 0.45).abs() < f32::EPSILON);
+        assert_eq!(area.scale, Vec3::splat(radius * 0.65));
     }
 
     #[test]

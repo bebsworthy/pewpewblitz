@@ -3,11 +3,10 @@
 use super::On;
 use super::{
     ACTION_INTERACT, Added, App, AppExit, ApplyDeferred, Authentication, AuthoritativeTick, Client,
-    ClientCombatEvidenceStatus, ClientCombatPlugin, ClientInputContext, ClientInputSettings,
-    ClientJoinPhase, ClientJoinStatus, ClientLobbyFailure, ClientLobbyIdentity,
-    ClientLobbyMembership, ClientMatchLoadingModel, ClientMatchResultContext,
-    ClientMatchResultState, ClientNetworkConfig, ClientPlayableGate, ClientProfileIdentityState,
-    ClientProfilePlugin, ClientQueuePlugin, ClientSettingsUiSet, ClientShutdown, Commands,
+    ClientCombatEvidenceStatus, ClientInputContext, ClientInputSettings, ClientJoinPhase,
+    ClientJoinStatus, ClientLobbyFailure, ClientLobbyIdentity, ClientLobbyMembership,
+    ClientMatchLoadingModel, ClientMatchResultContext, ClientMatchResultState, ClientNetworkConfig,
+    ClientPlayableGate, ClientProfileIdentityState, ClientSettingsUiSet, ClientShutdown, Commands,
     Component, Connect, Connected, Connecting, Controlled, ControllerDemoGamepad, Disconnect,
     Disconnected, Duration, Entity, FallbackErrorHandler, Fighter, FixedPreUpdate, FixedUpdate,
     Gamepad, GamepadAxis, GamepadButton, Has, HeadlessAutomation, InputDeviceActivity,
@@ -73,7 +72,7 @@ pub(super) use routing::{
     observe_fresh_lobby_return,
 };
 
-/// Installs the client Lightyear group, protocol, connection, and status systems.
+/// Installs client connection, compatibility-handshake, session, input, and status systems.
 pub struct ClientNetworkPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -123,7 +122,7 @@ impl Plugin for ClientNetworkPlugin {
         }
         configure_client_settings_ui(app);
         configure_client_session_schedule(app);
-        install_session_dependencies(app);
+        install_session_state(app);
         configure_input_and_automation(app);
         configure_network_session_systems(app);
         configure_terminal_session_systems(app);
@@ -131,15 +130,8 @@ impl Plugin for ClientNetworkPlugin {
     }
 }
 
-fn install_session_dependencies(app: &mut App) {
+fn install_session_state(app: &mut App) {
     app.insert_resource(FallbackErrorHandler(error))
-        .add_plugins(ClientCombatPlugin)
-        .add_plugins((
-            crate::map::ClientMapPlugin,
-            crate::map::MapPresentationPlugin,
-        ))
-        .add_plugins(ClientQueuePlugin)
-        .add_plugins(ClientProfilePlugin)
         .init_resource::<RosterLogState>()
         .init_resource::<ClientShutdown>()
         .init_resource::<PendingLocalActions>()

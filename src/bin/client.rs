@@ -11,7 +11,7 @@ use std::{env, path::PathBuf, process, time::Duration};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <1-4>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120>]"
+        "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <1-4>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]]"
     );
 }
 
@@ -90,6 +90,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     let mut render_report = None;
     let mut render_warmup_seconds: u64 = 10;
     let mut render_measure_seconds: u64 = 30;
+    let mut render_reduced_effects = false;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--client-id" => client_id = Some(parse_value(&flag, args.next())?),
@@ -166,6 +167,7 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             "--render-measure-seconds" => {
                 render_measure_seconds = parse_value(&flag, args.next())?;
             }
+            "--render-reduced-effects" => render_reduced_effects = true,
             "--help" | "-h" => {
                 usage();
                 process::exit(0);
@@ -277,7 +279,10 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
             report_path,
             warmup: Duration::from_secs(render_warmup_seconds),
             measurement: Duration::from_secs(render_measure_seconds),
+            reduced_effects: render_reduced_effects,
         });
+    } else if render_reduced_effects {
+        return Err("--render-reduced-effects requires --render-report".to_string());
     }
     if windowed_combat_demo {
         config.headless_aim_at_dummy = true;

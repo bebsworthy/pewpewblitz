@@ -1,9 +1,6 @@
 //! Ordered combat presentation cues and their process-evidence codec.
 
-use super::{
-    AttackId, CombatEventId, DistanceBand, ShotId, WeaponDefinitionId, WeaponPresentationProfileId,
-    WorldPoint,
-};
+use super::{AttackId, CombatEventId, DistanceBand, ShotId, WeaponDefinitionId, WorldPoint};
 use crate::protocol::{NetworkEntityId, PlayerId};
 use bevy::prelude::Message;
 use serde::{Deserialize, Serialize};
@@ -174,7 +171,6 @@ pub enum CombatCue {
         source: NetworkEntityId,
         position: WorldPoint,
         weapon_definition_id: WeaponDefinitionId,
-        presentation_profile_id: WeaponPresentationProfileId,
     },
     DeliveryImpact {
         event_id: CombatEventId,
@@ -183,7 +179,6 @@ pub enum CombatCue {
         delivery_index: u8,
         source: NetworkEntityId,
         weapon_definition_id: WeaponDefinitionId,
-        presentation_profile_id: WeaponPresentationProfileId,
         target: Option<NetworkEntityId>,
         position: WorldPoint,
         normal: WorldPoint,
@@ -196,7 +191,6 @@ pub enum CombatCue {
         delivery_index: u8,
         source: NetworkEntityId,
         weapon_definition_id: WeaponDefinitionId,
-        presentation_profile_id: WeaponPresentationProfileId,
         position: WorldPoint,
     },
     MeleeContact {
@@ -206,7 +200,6 @@ pub enum CombatCue {
         delivery_index: u8,
         source: NetworkEntityId,
         weapon_definition_id: WeaponDefinitionId,
-        presentation_profile_id: WeaponPresentationProfileId,
         target: NetworkEntityId,
         position: WorldPoint,
     },
@@ -217,7 +210,6 @@ pub enum CombatCue {
         delivery_index: u8,
         source: NetworkEntityId,
         weapon_definition_id: WeaponDefinitionId,
-        presentation_profile_id: WeaponPresentationProfileId,
         origin: WorldPoint,
         facing: f32,
         reached_distance: f32,
@@ -233,7 +225,6 @@ pub enum CombatCue {
         amount: u16,
         health_after: u16,
         distance_band: DistanceBand,
-        presentation_profile_id: WeaponPresentationProfileId,
     },
     EffectApplied {
         event_id: CombatEventId,
@@ -243,7 +234,6 @@ pub enum CombatCue {
         target: NetworkEntityId,
         position: WorldPoint,
         effect: CombatEffectCue,
-        presentation_profile_id: WeaponPresentationProfileId,
     },
     FighterDefeated {
         event_id: CombatEventId,
@@ -252,7 +242,6 @@ pub enum CombatCue {
         source: Option<DamageSource>,
         target: NetworkEntityId,
         position: WorldPoint,
-        presentation_profile_id: Option<WeaponPresentationProfileId>,
     },
     FighterReset {
         event_id: CombatEventId,
@@ -267,7 +256,6 @@ pub enum CombatCue {
         deployable_id: crate::builds::DeployableId,
         target: Option<NetworkEntityId>,
         position: WorldPoint,
-        presentation_profile_id: WeaponPresentationProfileId,
     },
     DeployableRemoved {
         event_id: CombatEventId,

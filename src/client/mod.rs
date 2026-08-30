@@ -7,6 +7,7 @@ use crate::{
         CombatHudText,
     },
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
+    content::GameplayContentPlugin,
     gameplay::GameplayPlugin,
     matchplay::{MatchParticipant, MatchPhase, MatchRoot, MatchState},
     movement::AvianNetworkPlugin,
@@ -100,6 +101,21 @@ pub use settings::{
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
 pub use shell::ClientShellPlugin;
+
+/// Installs client-side gameplay state reconstructed from authoritative replication and messages.
+/// Connection lifecycle and transport remain owned by [`ClientNetworkPlugin`].
+pub struct ClientReplicatedGameplayPlugin;
+
+impl Plugin for ClientReplicatedGameplayPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(ClientCombatPlugin).add_plugins((
+            crate::map::ClientMapPlugin,
+            crate::map::MapPresentationPlugin,
+            ClientQueuePlugin,
+            ClientProfilePlugin,
+        ));
+    }
+}
 
 /// Explicit client-side state for the sequential routed transport lifecycle.
 ///
@@ -589,8 +605,10 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     })
     .add_plugins((
         GameplayPlugin,
+        GameplayContentPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
+        ClientReplicatedGameplayPlugin,
         ClientNetworkPlugin,
         crate::diagnostics::ProcessDiagnosticsPlugin,
         crate::diagnostics::ClientDiagnosticsOverlayPlugin,

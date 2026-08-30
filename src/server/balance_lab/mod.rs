@@ -38,7 +38,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 18;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 19;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -51,7 +51,7 @@ impl Plugin for BalanceLabPlugin {
         app.add_systems(
             Startup,
             start_balance_lab
-                .after(crate::protocol::initialize_content_fingerprint)
+                .after(crate::content::initialize_content_fingerprint)
                 .before(crate::map::MapStartupSet::Instantiate)
                 .before(crate::matchplay::initialize_match_root),
         )
@@ -660,6 +660,7 @@ fn apply_balance_lab_transaction(
         &mut ResolvedFighterStats,
         &mut FighterBody,
         &mut ResolvedWeapon,
+        &mut crate::builds::ResolvedUltimate,
         &mut CurrentHealth,
         &mut WeaponState,
         &mut HealthRecoveryState,
@@ -855,6 +856,7 @@ fn apply_balance_lab_transaction(
             mut fighter_stats,
             mut fighter_body,
             mut resolved_weapon,
+            mut resolved_ultimate,
             mut health,
             mut weapon,
             mut recovery,
@@ -868,6 +870,7 @@ fn apply_balance_lab_transaction(
         *fighter_stats = loadout.fighter_stats;
         *fighter_body = next_body;
         *resolved_weapon = loadout.primary_weapon.clone();
+        *resolved_ultimate = loadout.ultimate;
         *current = loadout.clone();
     }
     *restart_policy = RestartBuildPolicy::Retain;
@@ -954,7 +957,6 @@ fn validate_snapshot(
             .find(|preset| preset.id == WeaponPresetId(supplied.id))
             .ok_or_else(|| "unknown weapon preset".to_string())?;
         preset.configuration = WeaponConfiguration {
-            presentation_profile_id: preset.configuration.presentation_profile_id,
             recipe: supplied.recipe.clone(),
         };
     }
@@ -1139,17 +1141,8 @@ fn same_ultimate_parameter_shape(
             UltimateParameters::DemolitionStrike { .. },
             UltimateParameters::DemolitionStrike { .. },
         )
-        | (UltimateParameters::BigBlob { .. }, UltimateParameters::BigBlob { .. }) => true,
-        (
-            UltimateParameters::Sentry {
-                presentation_profile_id: expected,
-                ..
-            },
-            UltimateParameters::Sentry {
-                presentation_profile_id: supplied,
-                ..
-            },
-        ) => expected == supplied,
+        | (UltimateParameters::BigBlob { .. }, UltimateParameters::BigBlob { .. })
+        | (UltimateParameters::Sentry { .. }, UltimateParameters::Sentry { .. }) => true,
         (
             UltimateParameters::ElementalField {
                 effect: expected, ..
@@ -1523,7 +1516,7 @@ mod tests {
         };
         brawler_routing::MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 3,
+                manifest_version: 4,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -1548,6 +1541,10 @@ mod tests {
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
             respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
             reserved: 0,
             seed: 1,
             participants: vec![brawler_routing::MatchManifestParticipant {
@@ -1643,16 +1640,6 @@ mod tests {
             total_angle_degrees: 10.0,
         };
         assert!(validate_snapshot(&structural, &baseline, &builds, &weapons, &maps).is_err());
-        let mut presentation = baseline.clone();
-        let UltimateParameters::Sentry {
-            presentation_profile_id,
-            ..
-        } = &mut presentation.ultimates[1].parameters
-        else {
-            panic!("second ultimate is Sentry");
-        };
-        *presentation_profile_id += 1;
-        assert!(validate_snapshot(&presentation, &baseline, &builds, &weapons, &maps,).is_err());
         let mut passive_topology = baseline.clone();
         passive_topology.passives[2].parameters = PassiveParameters::QuickCycle {
             refill_duration_basis_points: 6_000,

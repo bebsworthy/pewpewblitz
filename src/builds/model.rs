@@ -176,7 +176,6 @@ pub enum UltimateParameters {
         projectile_range_milliunits: u32,
         projectile_lifetime_ticks: u64,
         projectile_damage: u16,
-        presentation_profile_id: u16,
     },
     SelfCloak {
         duration_ticks: u64,
@@ -242,7 +241,7 @@ pub fn world_units_from_milliunits(value: u32) -> Option<f32> {
     Some(f32::from(whole) + f32::from(remainder) / 1_000.0)
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedUltimate {
     pub id: UltimateDefinitionId,
     pub kind: UltimateKind,
@@ -323,6 +322,7 @@ pub struct MatchLoadoutProjection {
     pub fighter_stats: ResolvedFighterStats,
     pub fighter_body: FighterBody,
     pub primary_weapon: ResolvedWeapon,
+    pub ultimate: ResolvedUltimate,
 }
 
 impl MatchLoadoutProjection {
@@ -332,6 +332,7 @@ impl MatchLoadoutProjection {
             fighter_stats: loadout.fighter_stats,
             fighter_body,
             primary_weapon: loadout.primary_weapon.clone(),
+            ultimate: loadout.ultimate,
         }
     }
 }

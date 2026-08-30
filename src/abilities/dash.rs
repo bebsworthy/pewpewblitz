@@ -172,7 +172,8 @@ pub(crate) fn activate_dash(
             bevy::prelude::Entity,
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
+            &crate::combat::ResolvedWeapon,
             &crate::builds::FighterBody,
             &crate::protocol::PlayerId,
             &crate::protocol::NetworkEntityId,
@@ -196,7 +197,8 @@ pub(crate) fn activate_dash(
         entity,
         position,
         rotation,
-        loadout,
+        ultimate,
+        weapon,
         body,
         player,
         network_id,
@@ -209,20 +211,18 @@ pub(crate) fn activate_dash(
         latch,
     ) in &mut fighters
     {
-        if loadout.ultimate.kind != crate::builds::UltimateKind::Dash {
+        if ultimate.kind != crate::builds::UltimateKind::Dash {
             continue;
         }
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
+        let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         let held = requested
             && !crate::movement::input_should_neutralize(
                 tick.0,
                 freshness.last_fresh_tick,
                 crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
             );
-        let was_held = latch.as_deref().is_some_and(|latch| latch.0);
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -237,29 +237,28 @@ pub(crate) fn activate_dash(
                 kind: crate::abilities::AbilityTelemetryKind::ActivationAttempt,
             });
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
-        let rejection = if !held {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated.is_some() {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if active.is_none() {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if matches!(
+        let before_readiness = matches!(
             ability.phase,
             crate::builds::AbilityPhase::Dashing { .. }
                 | crate::builds::AbilityPhase::Deployed { .. }
+        )
+        .then_some(crate::abilities::AbilityRejectionReason::AlreadyExecuting);
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh: held,
+                defeated: defeated.is_some(),
+                active: active.is_some(),
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions {
+                before_readiness,
+                after_readiness: None,
+            },
         ) {
-            Some(crate::abilities::AbilityRejectionReason::AlreadyExecuting)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
-        } else {
-            None
-        };
-        if let Some(reason) = rejection {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -268,10 +267,9 @@ pub(crate) fn activate_dash(
             continue;
         }
         let direction = Vec2::from_angle(rotation.as_radians());
-        let Some(dash_tuning) = resolve_dash_tuning(
-            loadout.ultimate.parameters,
-            loadout.ultimate.charge_policy.maximum,
-        ) else {
+        let Some(dash_tuning) =
+            resolve_dash_tuning(ultimate.parameters, ultimate.charge_policy.maximum)
+        else {
             continue;
         };
         let Ok(direction_dir) = Dir2::new(direction) else {
@@ -328,14 +326,13 @@ pub(crate) fn activate_dash(
         health_recovery.recovery_remainder = 0;
         let source = crate::combat::AttackSource {
             kind: crate::combat::CombatSourceKind::Ultimate {
-                ultimate_id: loadout.ultimate.id,
+                ultimate_id: ultimate.id,
             },
             attack_id,
             player_id: *player,
             owner_network_entity_id: *network_id,
             team_id: *team,
-            recipe_fingerprint: loadout.primary_weapon.recipe_fingerprint,
-            presentation_profile_id: loadout.primary_weapon.presentation_profile_id,
+            recipe_fingerprint: weapon.recipe_fingerprint,
             legacy_compatibility: false,
             source_preset_id: None,
             origin: crate::combat::WorldPoint::from(position.0),

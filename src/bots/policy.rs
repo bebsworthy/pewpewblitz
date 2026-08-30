@@ -2,7 +2,7 @@ use super::{
     entropy,
     model::{BotContact, BotIntent, BotObservation, BotRole, BotState, MAX_CONTACTS},
     navigation::{BotNavigationSnapshot, BotRouteProgress, BotRouteStart},
-    profile::BotProfile,
+    profile::{BotArbitrationPolicy, BotProfile},
 };
 use crate::{combat::WeaponPhase, map::MAP_CELL_SIZE_WORLD, protocol::FighterInput};
 use bevy::prelude::*;
@@ -31,6 +31,21 @@ pub(super) struct BotDecision {
     pub navigation: BotNavigationDecisionDiagnostics,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct BotDecisionPolicy<'a> {
+    profile: BotProfile,
+    arbitration: &'a BotArbitrationPolicy,
+}
+
+impl<'a> BotDecisionPolicy<'a> {
+    pub(super) const fn new(profile: BotProfile, arbitration: &'a BotArbitrationPolicy) -> Self {
+        Self {
+            profile,
+            arbitration,
+        }
+    }
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "the pure decision keeps targeting, gating, and one FighterInput commit auditable together"
@@ -38,15 +53,19 @@ pub(super) struct BotDecision {
 pub(super) fn decide(
     observation: &BotObservation,
     state: &mut BotState,
-    profile: BotProfile,
+    policy: BotDecisionPolicy<'_>,
     navigation: &BotNavigationSnapshot,
     seed: u64,
     role: BotRole,
     search_budget: usize,
 ) -> BotDecision {
+    let BotDecisionPolicy {
+        profile,
+        arbitration,
+    } = policy;
     update_contacts(observation, state, profile.contact_memory_ticks);
     update_stationary_state(observation, state);
-    let mut intent = choose_intent(observation, state, profile, role);
+    let mut intent = choose_intent(observation, state, profile, arbitration, role);
     if observation.ultimate_kind == crate::builds::UltimateKind::RestorationField
         && observation.ability_ready
     {
@@ -212,9 +231,10 @@ pub(super) fn choose_intent(
     observation: &BotObservation,
     state: &mut BotState,
     profile: BotProfile,
+    arbitration_policy: &BotArbitrationPolicy,
     role: BotRole,
 ) -> BotIntent {
-    super::behaviors::choose_intent(observation, state, profile, role)
+    super::behaviors::choose_intent(observation, state, profile, arbitration_policy, role)
 }
 fn movement_axis(
     observation: &BotObservation,

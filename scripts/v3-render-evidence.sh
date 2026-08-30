@@ -15,6 +15,7 @@ window_size=${BRAWLER_RENDER_WINDOW_SIZE:-1280x720}
 peer_render_profile=${BRAWLER_RENDER_PEER_PROFILE:-native}
 validate_peer=${BRAWLER_RENDER_VALIDATE_PEER:-1}
 practice_smoke=${BRAWLER_RENDER_PRACTICE:-0}
+reduced_effects=${BRAWLER_RENDER_REDUCED_EFFECTS:-0}
 client_one_log=${report_path}.client-1.log
 client_two_log=${report_path}.client-2.log
 
@@ -36,6 +37,14 @@ case "$practice_smoke" in
     0 | 1) ;;
     *)
         printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_PRACTICE must be 0 or 1' >&2
+        exit 2
+        ;;
+esac
+case "$reduced_effects" in
+    0) render_effect_flag= ;;
+    1) render_effect_flag=--render-reduced-effects ;;
+    *)
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_REDUCED_EFFECTS must be 0 or 1' >&2
         exit 2
         ;;
 esac
@@ -152,14 +161,14 @@ if [[ "$practice_smoke" == 1 ]]; then
         --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
-        --render-measure-seconds "$measure_seconds" \
+        --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         >"$client_one_log" 2>&1 &
 else
     target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
-        --render-measure-seconds "$measure_seconds" \
+        --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         >"$client_one_log" 2>&1 &
 fi
 measured_pid=$!
@@ -172,7 +181,7 @@ if [[ "$practice_smoke" == 0 ]]; then
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0' \
         --window-size "$window_size" \
         --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
-        --render-measure-seconds "$measure_seconds" \
+        --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         >"$client_two_log" 2>&1 &
     peer_pid=$!
 fi

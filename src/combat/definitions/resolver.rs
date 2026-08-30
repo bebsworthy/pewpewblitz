@@ -67,7 +67,6 @@ pub fn resolve_configuration_with_policy(
     let resolved = ResolvedWeapon {
         source_preset_id,
         recipe_fingerprint: fingerprint,
-        presentation_profile_id: configuration.presentation_profile_id,
         recipe,
     };
     if postcard::to_allocvec(&resolved)

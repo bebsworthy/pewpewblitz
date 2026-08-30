@@ -57,7 +57,7 @@ pub struct CombatFighterSnapshot {
 pub struct CombatProjectileSnapshot {
     pub attack_id: AttackId,
     pub delivery_index: u8,
-    pub presentation_profile_id: Option<WeaponPresentationProfileId>,
+    pub source_preset_id: Option<WeaponPresetId>,
     pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,
     pub position: WorldPoint,
     pub body: Option<ProjectileBody>,
@@ -68,7 +68,6 @@ pub struct CombatProjectileSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CombatConeSpraySnapshot {
     pub attack_id: AttackId,
-    pub presentation_profile_id: Option<WeaponPresentationProfileId>,
     pub recipe_fingerprint: Option<WeaponRecipeFingerprint>,
     pub state: ConeSprayState,
 }
@@ -83,7 +82,6 @@ impl CombatConeSpraySnapshot {
         let delivery = delivery?;
         Some(Self {
             attack_id: delivery.attack_id,
-            presentation_profile_id: source.map(|source| source.attack.presentation_profile_id),
             recipe_fingerprint: source.map(|source| source.attack.recipe_fingerprint),
             state: *state,
         })
@@ -137,7 +135,7 @@ impl CombatProjectileSnapshot {
         Some(Self {
             attack_id: delivery.attack_id,
             delivery_index: delivery.delivery_index,
-            presentation_profile_id: source.map(|source| source.attack.presentation_profile_id),
+            source_preset_id: source.and_then(|source| source.attack.source_preset_id),
             recipe_fingerprint: source.map(|source| source.attack.recipe_fingerprint),
             position,
             body: body.copied(),
@@ -145,6 +143,21 @@ impl CombatProjectileSnapshot {
             deadline: deadline.copied(),
         })
     }
+}
+
+#[must_use]
+#[cfg(any(feature = "server", test))]
+fn is_active_spread_flight(projectile: &CombatProjectileSnapshot, weapons: &WeaponCatalog) -> bool {
+    projectile.lobbed_flight.is_none()
+        && projectile
+            .source_preset_id
+            .and_then(|preset_id| weapons.preset(preset_id))
+            .is_some_and(|preset| {
+                matches!(
+                    preset.configuration.recipe.firing,
+                    FiringPattern::Spread { .. }
+                )
+            })
 }
 
 #[must_use]
@@ -350,6 +363,7 @@ fn enqueue_pending_checkpoint(
 pub(super) fn capture_server_combat_checkpoints(
     tick: Res<SimulationTick>,
     mut evidence: ResMut<CombatEvidenceSnapshots>,
+    weapons: Res<WeaponCatalogResource>,
     fighters: Query<
         (
             &NetworkEntityId,
@@ -488,10 +502,10 @@ pub(super) fn capture_server_combat_checkpoints(
         }
         evidence.last_encoded_snapshot = Some(encoded);
     }
-    let has_scatter_flight = snapshot.projectiles.iter().any(|projectile| {
-        projectile.presentation_profile_id == Some(WeaponPresentationProfileId(2))
-            && projectile.lobbed_flight.is_none()
-    });
+    let has_scatter_flight = snapshot
+        .projectiles
+        .iter()
+        .any(|projectile| is_active_spread_flight(projectile, &weapons.0));
     let has_lob_flight = snapshot
         .projectiles
         .iter()
@@ -1084,7 +1098,7 @@ mod tests {
         CombatProjectileSnapshot {
             attack_id: AttackId(11),
             delivery_index: 2,
-            presentation_profile_id: Some(WeaponPresentationProfileId(3)),
+            source_preset_id: Some(WeaponPresetId(3)),
             recipe_fingerprint: Some(WeaponRecipeFingerprint(77)),
             position: WorldPoint { x: 12.0, y: 13.0 },
             body: Some(ProjectileBody::circle(6.0)),
@@ -1102,6 +1116,21 @@ mod tests {
             projectiles: vec![projectile()],
             cone_sprays: Vec::new(),
         }
+    }
+
+    #[test]
+    fn scatter_checkpoint_uses_authored_spread_pattern_from_stable_preset_identity() {
+        let weapons = WeaponCatalog::embedded().unwrap();
+        let mut candidate = projectile();
+
+        candidate.source_preset_id = Some(WeaponPresetId(2));
+        assert!(is_active_spread_flight(&candidate, &weapons));
+
+        candidate.source_preset_id = Some(WeaponPresetId(1));
+        assert!(!is_active_spread_flight(&candidate, &weapons));
+
+        candidate.source_preset_id = None;
+        assert!(!is_active_spread_flight(&candidate, &weapons));
     }
 
     #[test]

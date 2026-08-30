@@ -12,6 +12,7 @@ use crate::{
         decode_combat_cue, encode_state_snapshot, resolved_fighter_runtime,
     },
     config::{MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
+    content::GameplayContentPlugin,
     gameplay::GameplayPlugin,
     map::{AuthoritativeMapPlugin, MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
     matchplay::{
@@ -91,6 +92,31 @@ pub use worker::{
     WorkerEntrypointRole, WorkerLaunchArguments, install_routed_worker_endpoint,
     parse_worker_arguments,
 };
+
+/// Installs the complete server-authoritative gameplay graph.
+///
+/// Session transport, routed worker I/O, diagnostics, and configured mode selection stay at the
+/// application/process composition boundary.
+pub struct ServerAuthoritativeGameplayPlugin;
+
+impl Plugin for ServerAuthoritativeGameplayPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            AuthoritativeMapPlugin,
+            AuthoritativeMovementPlugin,
+            ServerCombatPlugin,
+            crate::concealment::ServerConcealmentPlugin,
+            crate::abilities::ServerAbilityPlugin,
+            AuthoritativeMatchPlugin,
+            practice::PracticeBotPlugin,
+        ))
+        .add_systems(
+            Update,
+            crate::abilities::run_pending_ability_cleanup
+                .in_set(ServerSessionReceiveSet::GameplayCleanup),
+        );
+    }
+}
 
 /// Server-side session phase. Lightyear lifecycle components remain the connection truth.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -284,7 +310,7 @@ fn log_server_startup(config: Option<Res<ServerNetworkConfig>>) {
     );
 }
 
-/// Installs the server Lightyear group, protocol, endpoint, and authoritative session systems.
+/// Installs the server endpoint and authoritative network-session systems.
 pub struct ServerNetworkPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -294,6 +320,13 @@ enum ServerSessionSet {
     Enforce,
     Observe,
     Terminal,
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ServerSessionReceiveSet {
+    NetworkLifecycle,
+    GameplayCleanup,
+    Flush,
 }
 
 fn configure_server_session_schedule(app: &mut App) {
@@ -307,6 +340,16 @@ fn configure_server_session_schedule(app: &mut App) {
             ServerSessionSet::Terminal,
         )
             .chain(),
+    )
+    .configure_sets(
+        Update,
+        (
+            ServerSessionReceiveSet::NetworkLifecycle,
+            ServerSessionReceiveSet::GameplayCleanup,
+            ServerSessionReceiveSet::Flush,
+        )
+            .chain()
+            .in_set(ServerSessionSet::ReceiveAndValidate),
     );
 }
 
@@ -358,12 +401,11 @@ impl Plugin for ServerNetworkPlugin {
                     observe_server_endpoint,
                     initialize_sessions,
                     process_client_hellos,
-                    crate::abilities::run_pending_ability_cleanup,
-                    ApplyDeferred,
                 )
                     .chain()
-                    .in_set(ServerSessionSet::ReceiveAndValidate),
+                    .in_set(ServerSessionReceiveSet::NetworkLifecycle),
             )
+            .add_systems(Update, ApplyDeferred.in_set(ServerSessionReceiveSet::Flush))
             .add_systems(
                 Update,
                 (
@@ -409,13 +451,7 @@ impl Plugin for ServerNetworkPlugin {
                     // Order before the terminal observation set so closeout observations and
                     // the final report see post-shutdown counts and the re-emitted exit.
                     .before(crate::diagnostics::TerminalObservationSet),
-            )
-            .add_plugins((
-                ServerCombatPlugin,
-                crate::concealment::ServerConcealmentPlugin,
-                crate::abilities::ServerAbilityPlugin,
-                RoutedWorkerPlugin,
-            ));
+            );
     }
 }
 
@@ -840,7 +876,11 @@ fn process_client_hellos(
                                         content.builds.0.fighter_body,
                                     );
                                     let (fighter_definition, team, health, weapon) =
-                                        resolved_fighter_runtime(assigned_team, &loadout);
+                                        resolved_fighter_runtime(
+                                            assigned_team,
+                                            &loadout.fighter_stats,
+                                            &loadout.primary_weapon,
+                                        );
                                     let fighter_entity = commands
                                         .spawn((
                                             Fighter,
@@ -1212,7 +1252,7 @@ fn process_match_commands(
         (
             &ControlledBy,
             &mut MatchParticipant,
-            Option<&crate::builds::ResolvedMatchLoadout>,
+            Option<&crate::combat::ResolvedWeapon>,
         ),
         With<Fighter>,
     >,
@@ -1435,11 +1475,32 @@ fn build_match_worker_graph(config: ServerNetworkConfig, players_per_team: u8) -
 }
 
 fn build_authoritative_app(
-    config: ServerNetworkConfig,
+    mut config: ServerNetworkConfig,
     install_terminal_handler: bool,
     exact_players_per_team: Option<u8>,
 ) -> App {
     let mut app = App::new();
+    if config.match_rules_profile == MatchRulesProfile::Production
+        && config.match_objective_target.is_none()
+    {
+        let catalog =
+            lobby::resolve_operator_catalog(include_bytes!("../../config/server/game-types.ron"))
+                .expect("embedded production game-type catalog is valid");
+        let mode = crate::modes::descriptor_for_mode(config.game_mode)
+            .expect("every configured game mode has a registered descriptor");
+        let rules = catalog
+            .first_rules_for_mode(mode.definition_id)
+            .expect("production catalog contains the configured game mode");
+        config.match_objective_target = Some(rules.objective_target);
+        config.match_duration_ticks = Some(rules.match_duration_ticks);
+        config.match_countdown_ticks = Some(rules.countdown_ticks);
+        config.match_respawn_ticks = Some(rules.respawn_ticks);
+        config.match_spawn_protection_ticks = Some(rules.spawn_protection_ticks);
+        config.match_completed_input_lock_ticks = Some(rules.completed_input_lock_ticks);
+        config.wipeout_recent_hostile_damage_credit_ticks =
+            Some(rules.wipeout_recent_hostile_damage_credit_ticks);
+        config.heist_critical_health_percent = Some(rules.heist_critical_health_percent);
+    }
     let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
     if let Some(ticks) = config.match_duration_ticks {
         lifecycle.active_limit_ticks = ticks;
@@ -1449,6 +1510,12 @@ fn build_authoritative_app(
     }
     if let Some(ticks) = config.match_respawn_ticks {
         lifecycle.respawn_delay_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_spawn_protection_ticks {
+        lifecycle.spawn_protection_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_completed_input_lock_ticks {
+        lifecycle.completed_input_lock_ticks = ticks;
     }
     if let Some(players) = exact_players_per_team {
         lifecycle.minimum_participants_per_team = players;
@@ -1472,15 +1539,14 @@ fn build_authoritative_app(
     })
     .add_plugins((
         GameplayPlugin,
+        GameplayContentPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
-        AuthoritativeMapPlugin,
-        AuthoritativeMovementPlugin,
+        ServerAuthoritativeGameplayPlugin,
         ServerNetworkPlugin,
+        RoutedWorkerPlugin,
         DedicatedServerPlugin,
-        AuthoritativeMatchPlugin,
         crate::diagnostics::ProcessDiagnosticsPlugin,
-        practice::PracticeBotPlugin,
     ));
     #[cfg(feature = "balance-lab")]
     app.add_plugins(balance_lab::BalanceLabPlugin);
@@ -1505,9 +1571,23 @@ fn install_server_game_mode(app: &mut App) {
         .world()
         .resource::<ServerNetworkConfig>()
         .match_objective_target;
+    let wipeout_recent_hostile_damage_credit_ticks = app
+        .world()
+        .resource::<ServerNetworkConfig>()
+        .wipeout_recent_hostile_damage_credit_ticks;
+    let heist_critical_health_percent = app
+        .world()
+        .resource::<ServerNetworkConfig>()
+        .heist_critical_health_percent;
     crate::modes::descriptor_for_mode(mode)
         .expect("every configured game mode has a registered descriptor")
-        .install_server(app, profile, objective_target);
+        .install_server(
+            app,
+            profile,
+            objective_target,
+            wipeout_recent_hostile_damage_credit_ticks,
+            heist_critical_health_percent,
+        );
 }
 
 /// The required scenario checkpoints for one asserted weapon preset. Public for the

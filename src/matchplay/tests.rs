@@ -13,7 +13,7 @@ fn match_id_preserves_full_u128_through_format_parse_and_serde() {
 }
 
 #[test]
-fn production_rules_match_the_approved_contract() {
+fn neutral_default_rules_are_valid_composition_scaffolding() {
     let wipeout = WipeoutRules::default().validate().unwrap();
     assert_eq!(wipeout.target_score, 10);
     #[cfg(feature = "server")]
@@ -24,8 +24,8 @@ fn production_rules_match_the_approved_contract() {
         assert_eq!(lifecycle.countdown_ticks, 180);
         assert_eq!(lifecycle.active_limit_ticks, 10_800);
         assert_eq!(lifecycle.respawn_delay_ticks, 180);
-        assert_eq!(lifecycle.spawn_protection_ticks, 90);
-        assert_eq!(lifecycle.completed_input_lock_ticks, 60);
+        assert_eq!(lifecycle.spawn_protection_ticks, 1);
+        assert_eq!(lifecycle.completed_input_lock_ticks, 1);
         let hot_zone = HotZoneRules::default().validate_with(&lifecycle).unwrap();
         assert_eq!(hot_zone.target_progress_ticks, 1_800);
     }
@@ -33,7 +33,14 @@ fn production_rules_match_the_approved_contract() {
 
 #[test]
 fn rules_reject_zero_invalid_capacity_and_overflow() {
-    assert!(WipeoutRules { target_score: 0 }.validate().is_err());
+    assert!(
+        WipeoutRules {
+            target_score: 0,
+            ..WipeoutRules::default()
+        }
+        .validate()
+        .is_err()
+    );
     #[cfg(feature = "server")]
     {
         assert!(

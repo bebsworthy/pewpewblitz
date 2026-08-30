@@ -157,6 +157,28 @@ enum HarnessMode {
     Heist,
 }
 
+fn verification_wipeout_rules() -> brawler::matchplay::WipeoutRules {
+    brawler::matchplay::WipeoutRules {
+        target_score: 10,
+        recent_hostile_damage_credit_ticks: 300,
+    }
+}
+
+fn verification_wipeout_lifecycle() -> brawler::matchplay::MatchLifecycleRules {
+    brawler::matchplay::MatchLifecycleRules {
+        spawn_protection_ticks: 90,
+        completed_input_lock_ticks: 60,
+        ..Default::default()
+    }
+}
+
+fn verification_heist_rules() -> brawler::matchplay::HeistRules {
+    brawler::matchplay::HeistRules {
+        safe_maximum_health: 2_000,
+        critical_health_percent: 25,
+    }
+}
+
 pub(super) struct Harness {
     pub(super) server: App,
     pub(super) server_entity: Entity,
@@ -213,8 +235,20 @@ impl Harness {
     }
 
     pub(super) fn new_match(client_count: usize) -> Self {
-        let mut harness =
-            Self::new_mode_with_options(client_count, None, false, HarnessMode::Wipeout);
+        Self::new_match_with_lifecycle_rules(client_count, verification_wipeout_lifecycle())
+    }
+
+    pub(super) fn new_match_with_lifecycle_rules(
+        client_count: usize,
+        lifecycle: brawler::matchplay::MatchLifecycleRules,
+    ) -> Self {
+        let mut harness = Self::new_mode_with_options(
+            client_count,
+            None,
+            false,
+            HarnessMode::Wipeout,
+            Some(lifecycle),
+        );
         harness
             .server
             .world_mut()
@@ -224,7 +258,7 @@ impl Harness {
 
     pub(super) fn new_hot_zone_match(client_count: usize) -> Self {
         let mut harness =
-            Self::new_mode_with_options(client_count, None, false, HarnessMode::HotZone);
+            Self::new_mode_with_options(client_count, None, false, HarnessMode::HotZone, None);
         harness
             .server
             .world_mut()
@@ -234,7 +268,7 @@ impl Harness {
 
     pub(super) fn new_heist_match(client_count: usize) -> Self {
         let mut harness =
-            Self::new_mode_with_options(client_count, None, false, HarnessMode::Heist);
+            Self::new_mode_with_options(client_count, None, false, HarnessMode::Heist, None);
         harness
             .server
             .world_mut()
@@ -348,6 +382,7 @@ impl Harness {
             client_protocol_id,
             extra_protocol,
             HarnessMode::Wipeout,
+            None,
         )
     }
 
@@ -356,6 +391,7 @@ impl Harness {
         client_protocol_id: Option<u64>,
         extra_protocol: bool,
         mode: HarnessMode,
+        lifecycle_override: Option<brawler::matchplay::MatchLifecycleRules>,
     ) -> Self {
         brawler::testing::install_network_test_logger();
         let server_config = ServerNetworkConfig {
@@ -367,24 +403,26 @@ impl Harness {
         let mut server = App::new();
         server.insert_resource(TestDummyFixture::standard(Vec2::new(0.0, -320.0)));
         server.insert_resource(LegacySandboxActivation);
-        let lifecycle = if matches!(mode, HarnessMode::HotZone | HarnessMode::Heist) {
-            // Shortened verification deadlines with a 1v1 capacity so deterministic
-            // two-client scenarios can activate without changing rule semantics.
-            brawler::matchplay::MatchLifecycleRules {
-                minimum_participants_per_team: 1,
-                ..brawler::server::match_lifecycle_rules_for_profile(
-                    brawler::config::MatchRulesProfile::ProcessVerification,
-                )
+        let lifecycle = lifecycle_override.unwrap_or_else(|| {
+            if matches!(mode, HarnessMode::HotZone | HarnessMode::Heist) {
+                // Shortened verification deadlines with a 1v1 capacity so deterministic
+                // two-client scenarios can activate without changing rule semantics.
+                brawler::matchplay::MatchLifecycleRules {
+                    minimum_participants_per_team: 1,
+                    ..brawler::server::match_lifecycle_rules_for_profile(
+                        brawler::config::MatchRulesProfile::ProcessVerification,
+                    )
+                }
+            } else {
+                verification_wipeout_lifecycle()
             }
-        } else {
-            brawler::matchplay::MatchLifecycleRules::default()
-        };
+        });
         server
             .insert_resource(server_config.clone())
             .insert_resource(lifecycle);
         match mode {
             HarnessMode::Wipeout => {
-                server.insert_resource(brawler::matchplay::WipeoutRules::default());
+                server.insert_resource(verification_wipeout_rules());
             }
             HarnessMode::HotZone => {
                 server
@@ -402,7 +440,7 @@ impl Harness {
                         mode_definition_id: brawler::map::HEIST_MODE_DEFINITION,
                         rules_revision: brawler::matchplay::HEIST_RULES_REVISION,
                     })
-                    .insert_resource(brawler::matchplay::HeistRules::default())
+                    .insert_resource(verification_heist_rules())
                     .insert_resource(brawler::map::ServerMapSelection {
                         preset_id: brawler::map::FEATURE_YARD_HEIST_PRESET,
                     });
@@ -415,12 +453,11 @@ impl Harness {
                 tick_duration: SIMULATION_TICK,
             },
             GameplayPlugin,
+            GameplayContentPlugin,
             ProtocolPlugin,
             AvianNetworkPlugin,
-            AuthoritativeMapPlugin,
-            AuthoritativeMovementPlugin,
+            ServerAuthoritativeGameplayPlugin,
             ServerNetworkPlugin,
-            brawler::matchplay::AuthoritativeMatchPlugin,
         ));
         match mode {
             HarnessMode::Wipeout => server.add_plugins(brawler::matchplay::WipeoutModePlugin),
@@ -484,8 +521,10 @@ impl Harness {
                 tick_duration: SIMULATION_TICK,
             },
             GameplayPlugin,
+            GameplayContentPlugin,
             ProtocolPlugin,
             AvianNetworkPlugin,
+            brawler::client::ClientReplicatedGameplayPlugin,
         ));
         if extra_protocol {
             client.add_plugins(MismatchedProtocolPlugin);
@@ -973,7 +1012,6 @@ pub(super) fn map_destruction_fact(
                 owner_network_entity_id: NetworkEntityId(1),
                 team_id: TeamId(0),
                 recipe_fingerprint: WeaponRecipeFingerprint::default(),
-                presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
                 legacy_compatibility: false,
                 source_preset_id: None,
                 origin: WorldPoint { x: 0.0, y: 0.0 },

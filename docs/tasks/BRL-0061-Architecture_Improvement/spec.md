@@ -270,3 +270,48 @@ Every audit finding must end as implemented, explicitly deferred to a linked bac
 - Build/content schemas were intentionally advanced without changing the existing replicated loadout or saved-profile wire shapes.
 - BRL-0062 passed formatting, checks, Clippy/role isolation, all role and routed tests, performance gates, routed product 1v1/2v2/3v3, all nine Practice combinations, and paired native Metal render evidence.
 - Stages 2–6 remain in BRL-0061 scope and must continue through separately linked implementation tickets. BRL-0061 remains `doing`.
+
+## Remediation progress — Stage 2 implementation, 2026-08-30
+
+- Stage 2 implementation is complete under linked ticket BRL-0063. Match lifecycle/mode, bot arbitration, lob delivery, VFX, and audio policies now have validated authored owners; duplicate effect-tile defaults and the dead weapon presentation-profile chain are removed.
+- Values cross the routed boundary explicitly, authoritative consumers have non-default runtime proofs, client presentation catalogs have strict complete coverage and arithmetic safety, and compatibility/fingerprint versions were advanced where shared/authored shapes changed.
+- Final automated verification is green: formatting, checks, all role-specific lint/isolation gates, 488 client tests, 428 server tests, 450 Balance Lab tests, 94 network scenarios, 12 performance gates, routed product 1v1/2v2/3v3, and all nine Practice combinations.
+- Native default and reduced-effects release-client reports pass. Reduced-effects Practice evidence records live combat (`effect_high_water=3`, `projectile_high_water=2`) with `reduced_effects=true`.
+- BRL-0063 remains `doing` only for human confirmation that the changed manifest-backed ready/fire/impact cues are audible. No automated or native visual defect remains open.
+- After that confirmation, Stage 2 can close. Stages 3–6 remain: plugin dependency direction, focused ECS dependencies/transactions, extension registries, and ownership-based module decomposition.
+
+## Remediation progress — Stage 2 accepted, 2026-08-30
+
+- The user confirmed the reduced-effects Practice run produced audible sound.
+- BRL-0063 now satisfies its final native audio criterion and is closed as `done`.
+- BRL-0061 Stages 1 and 2 are complete. Stages 3–6 remain in scope.
+
+## Remediation progress — Stage 3 complete, 2026-08-30
+
+- Stage 3 is implemented and verified under linked ticket BRL-0064.
+- Shared content and its fingerprint are now owned by a headless-safe `GameplayContentPlugin`; `ProtocolPlugin` is wire-registration only.
+- Explicit `ClientReplicatedGameplayPlugin` and `ServerAuthoritativeGameplayPlugin` composition roots now own role gameplay selection. Client/server session plugins no longer install gameplay, content, presentation, or routed-worker plugins, and pending ability cleanup is installed by the authoritative gameplay root.
+- The authoritative app and minimum lobby worker select routed transport and shared content explicitly. The lobby remains free of match gameplay; client/server feature isolation and compatibility fingerprints are preserved.
+- The extracted session-to-ability cleanup boundary retains its exact transaction order through named network-lifecycle, gameplay-cleanup, and deferred-flush sets with schedule coverage.
+- `just check`, `just lint`, `just test`, `just ci`, formatting, and diff hygiene pass. Routed 1v1/2v2/3v3 and all nine Practice topologies reached Active; no native playtest was required for the organization-only change.
+- BRL-0061 Stages 1–3 are complete. Stages 4–6 remain: focused ECS dependencies and authoritative transactions, extension registries, and ownership-based module decomposition.
+
+
+## Stage 4 progress — focused projection cleanup started
+
+BRL-0065 owns the first Stage 4 slice: remove authoritative reads of the replicated loadout aggregate where Stage 1 already installed the exact fighter-stat, weapon, or generation-presence projection. Ultimate/passive projection, shared ultimate admission, and combat transaction decomposition remain subsequent Stage 4 work.
+
+
+## Stage 4 progress — BRL-0065 complete
+
+The first Stage 4 slice is complete. Recovery, public roster projection, sentry owner visibility, ready admission, and fighter-runtime construction now use the focused Stage 1 components instead of traversing `ResolvedMatchLoadout`. Projection-only characterization and the full canonical suite passed. Remaining Stage 4 work is ultimate/passive capability projection, shared ultimate admission, and combat delivery/effect transaction decomposition.
+
+
+## Stage 4 progress — ultimate capability/admission started
+
+BRL-0066 owns the next Stage 4 slice: atomically project `ResolvedUltimate`, migrate ultimate authority off the replicated aggregate, and consolidate the duplicated rising-edge/common admission/generation policy without moving semantic targeting or execution out of ability plugins.
+
+
+## Stage 4 progress — BRL-0066 complete
+
+Ultimate authority now consumes an atomically installed `ResolvedUltimate` capability. Eight activation coordinators share one pure rising-edge/common admission policy with preserved rejection precedence and raw latch semantics; checked generation rollover is centralized. Match readiness and Balance Lab reconciliation include the new projection. Full server, focused Balance Lab, networked Dash/Sentry, role, lint, and isolation verification passed. Remaining Stage 4 work is passive capability projection and combat delivery/effect transaction decomposition.

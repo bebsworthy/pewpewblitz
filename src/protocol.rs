@@ -41,7 +41,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 40;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 41;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -685,12 +685,6 @@ fn register_replicated_components(app: &mut App) {
 
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::combat::WeaponCatalogResource>()
-            .init_resource::<crate::combat::CombatConditionRulesResource>()
-            .add_plugins(crate::builds::BuildContentPlugin)
-            .add_plugins(crate::weapon_parts::WeaponPartContentPlugin)
-            .add_plugins(crate::map::MapContentPlugin)
-            .add_systems(Startup, initialize_content_fingerprint);
         app.register_message::<MatchHello>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<MatchJoinOutcome>()
@@ -759,21 +753,6 @@ impl Plugin for ProtocolPlugin {
     }
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
-)]
-pub(crate) fn initialize_content_fingerprint(
-    weapons: Res<crate::combat::WeaponCatalogResource>,
-    maps: Res<crate::map::MapCatalogResource>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    mut commands: Commands,
-) {
-    let fingerprint = crate::content::gameplay_content_fingerprint(&weapons.0, &maps.0, &builds.0)
-        .expect("embedded gameplay catalogs must fingerprint");
-    commands.insert_resource(fingerprint);
-}
-
 /// Compute the same application-owned fingerprint on both peers after all protocol plugins run.
 pub fn protocol_fingerprint(world: &mut World) -> u64 {
     let messages = world
@@ -807,6 +786,33 @@ mod tests {
         ConfirmedHistory, Interpolated, InterpolationTimeline, NetworkTimeline, Tick,
     };
 
+    fn assert_no_gameplay_content(app: &App) {
+        assert!(
+            !app.world()
+                .contains_resource::<crate::combat::WeaponCatalogResource>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<crate::combat::CombatConditionRulesResource>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<crate::builds::BuildCatalogResource>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<crate::weapon_parts::WeaponPartCatalogResource>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<crate::map::MapCatalogResource>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<GameplayContentFingerprint>()
+        );
+    }
+
     #[test]
     fn protocol_plugin_registers_messages_channel_and_components() {
         let mut app = App::new();
@@ -820,6 +826,10 @@ mod tests {
             tick_duration: SIMULATION_TICK,
         });
         app.add_plugins(ProtocolPlugin);
+
+        assert!(!app.is_plugin_added::<crate::gameplay::GameplayPlugin>());
+        assert!(!app.is_plugin_added::<crate::content::GameplayContentPlugin>());
+        assert_no_gameplay_content(&app);
 
         assert!(app.is_message_registered::<MatchHello>());
         assert!(app.is_message_registered::<MatchJoinOutcome>());
@@ -886,6 +896,12 @@ mod tests {
         assert!((0..32).any(|id| {
             channels.get_name_from_net_id(id) == core::any::type_name::<CombatChannel>()
         }));
+
+        app.finish();
+        app.cleanup();
+        app.update();
+        assert!(app.world().contains_resource::<ProtocolFingerprint>());
+        assert_no_gameplay_content(&app);
     }
 
     #[cfg(feature = "client")]

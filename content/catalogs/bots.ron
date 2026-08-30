@@ -1,5 +1,5 @@
 (
-    schema_version: 1,
+    schema_version: 2,
     practice: (
         reaction_ticks: 9,
         contact_memory_ticks: 120,
@@ -36,5 +36,17 @@
         ally_separation_weight: 0.45,
         route_goal_change_distance: 16.0,
         damage_tile_cost_milli: 2000,
+    ),
+    arbitration: (
+        commitment_score_bonus: 1000,
+        behaviors: [
+            (id: 10, enabled: true, base_score: 10000),
+            (id: 11, enabled: true, base_score: 600),
+            (id: 12, enabled: true, base_score: 500),
+            (id: 13, enabled: true, base_score: 100),
+            (id: 20, enabled: true, base_score: 700),
+            (id: 30, enabled: true, base_score: 900),
+            (id: 40, enabled: true, base_score: 800),
+        ],
     ),
 )

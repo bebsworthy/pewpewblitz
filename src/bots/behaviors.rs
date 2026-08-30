@@ -2,27 +2,16 @@
 
 use super::{
     model::{BotIntent, BotModeView, BotObjectKind, BotObservation, BotRole, BotState, BotTactic},
-    profile::BotProfile,
+    profile::{BotArbitrationPolicy, BotBehaviorId, BotProfile, MAX_BOT_BEHAVIOR_REGISTRATIONS},
 };
 use bevy::prelude::Vec2;
 
-const MAX_INTENT_CANDIDATES: usize = 8;
-const COMMITMENT_SCORE_BONUS: i16 = 1_000;
-const HEALING_SCORE: i16 = 10_000;
-const PICKUP_SCORE: i16 = 900;
-const RETREAT_SCORE: i16 = 800;
-const OBJECTIVE_SCORE: i16 = 700;
-const PRESSURE_SCORE: i16 = 600;
-const OBJECT_SCORE: i16 = 500;
-const FALLBACK_SCORE: i16 = 100;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct BotBehaviorId(u16);
+const MAX_INTENT_CANDIDATES: usize = MAX_BOT_BEHAVIOR_REGISTRATIONS;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct IntentCandidate {
     behavior_id: BotBehaviorId,
-    score: i16,
+    score: u16,
     tactic: Option<BotTactic>,
     intent: BotIntent,
 }
@@ -30,7 +19,7 @@ pub(super) struct IntentCandidate {
 impl IntentCandidate {
     const fn new(
         behavior_id: BotBehaviorId,
-        score: i16,
+        score: u16,
         tactic: Option<BotTactic>,
         intent: BotIntent,
     ) -> Self {
@@ -53,7 +42,7 @@ pub(super) struct BehaviorContext<'a> {
 #[derive(Clone, Copy)]
 pub(super) struct BehaviorRegistration {
     pub(super) id: BotBehaviorId,
-    pub(super) contribute: fn(&BehaviorContext<'_>, &mut CandidateBuffer),
+    pub(super) contribute: fn(&BehaviorContext<'_>, &mut CandidateBuffer, u16),
 }
 
 #[derive(Default)]
@@ -72,31 +61,31 @@ impl CandidateBuffer {
 }
 
 const HEALING: BehaviorRegistration = BehaviorRegistration {
-    id: BotBehaviorId(10),
+    id: BotBehaviorId::HEALING,
     contribute: combat::healing,
 };
 const PRESSURE: BehaviorRegistration = BehaviorRegistration {
-    id: BotBehaviorId(11),
+    id: BotBehaviorId::PRESSURE,
     contribute: combat::pressure,
 };
 const OBJECT: BehaviorRegistration = BehaviorRegistration {
-    id: BotBehaviorId(12),
+    id: BotBehaviorId::OBJECT,
     contribute: combat::object,
 };
 const FALLBACK: BehaviorRegistration = BehaviorRegistration {
-    id: BotBehaviorId(13),
+    id: BotBehaviorId::FALLBACK,
     contribute: combat::fallback,
 };
 const OBJECTIVES: BehaviorRegistration = BehaviorRegistration {
-    id: BotBehaviorId(20),
+    id: BotBehaviorId::OBJECTIVES,
     contribute: objectives::contribute,
 };
 const PICKUPS: BehaviorRegistration = BehaviorRegistration {
-    id: BotBehaviorId(30),
+    id: BotBehaviorId::PICKUPS,
     contribute: pickups::contribute,
 };
 const RETREAT: BehaviorRegistration = BehaviorRegistration {
-    id: BotBehaviorId(40),
+    id: BotBehaviorId::RETREAT,
     contribute: retreat::contribute,
 };
 
@@ -108,19 +97,24 @@ pub(super) fn choose_intent(
     observation: &BotObservation,
     state: &mut BotState,
     profile: BotProfile,
+    arbitration_policy: &BotArbitrationPolicy,
     role: BotRole,
 ) -> BotIntent {
-    debug_assert!(behavior_registry_is_valid(BEHAVIORS));
+    debug_assert!(behavior_registry_matches_policy(arbitration_policy));
     let context = BehaviorContext {
         observation,
         state,
         profile,
         role,
     };
-    let candidates = collect_candidates(&context, BEHAVIORS);
+    let candidates = collect_candidates(&context, BEHAVIORS, arbitration_policy);
     let committed = (observation.tick < state.tactic_until_tick).then_some(state.tactic);
-    let selected = arbitrate(&candidates.candidates, committed)
-        .expect("the combat policy always contributes a fallback intent");
+    let selected = arbitrate(
+        &candidates.candidates,
+        committed,
+        arbitration_policy.commitment_score_bonus,
+    )
+    .expect("the combat policy always contributes a fallback intent");
     if committed.is_none()
         && let Some(tactic) = selected.tactic
     {
@@ -130,6 +124,14 @@ pub(super) fn choose_intent(
             .saturating_add(profile.tactic_commitment_ticks);
     }
     selected.intent
+}
+
+pub(super) fn behavior_registry_matches_policy(policy: &BotArbitrationPolicy) -> bool {
+    behavior_registry_is_valid(BEHAVIORS)
+        && BEHAVIORS.len() == policy.behaviors.len()
+        && BEHAVIORS
+            .iter()
+            .all(|registration| policy.behavior(registration.id).is_some())
 }
 
 fn behavior_registry_is_valid(registrations: &[BehaviorRegistration]) -> bool {
@@ -144,10 +146,16 @@ fn behavior_registry_is_valid(registrations: &[BehaviorRegistration]) -> bool {
 fn collect_candidates(
     context: &BehaviorContext<'_>,
     registrations: &[BehaviorRegistration],
+    policy: &BotArbitrationPolicy,
 ) -> CandidateBuffer {
     let mut candidates = CandidateBuffer::default();
     for registration in registrations {
-        (registration.contribute)(context, &mut candidates);
+        let behavior = policy
+            .behavior(registration.id)
+            .expect("validated bot policy covers every code registration");
+        if behavior.enabled {
+            (registration.contribute)(context, &mut candidates, behavior.base_score);
+        }
     }
     candidates
 }
@@ -155,22 +163,24 @@ fn collect_candidates(
 fn arbitrate(
     candidates: &[IntentCandidate],
     committed: Option<BotTactic>,
+    commitment_score_bonus: u16,
 ) -> Option<IntentCandidate> {
     let mut selected = None;
-    let mut selected_score = i16::MIN;
+    let mut selected_score = None;
     for candidate in candidates.iter().copied() {
-        let score = candidate.score.saturating_add(
-            committed
-                .filter(|tactic| candidate.tactic == Some(*tactic))
-                .map_or(0, |_| COMMITMENT_SCORE_BONUS),
-        );
-        if score > selected_score
-            || (score == selected_score
+        let score = u32::from(candidate.score)
+            + u32::from(
+                committed
+                    .filter(|tactic| candidate.tactic == Some(*tactic))
+                    .map_or(0, |_| commitment_score_bonus),
+            );
+        if selected_score.is_none_or(|prior| score > prior)
+            || (selected_score == Some(score)
                 && selected
                     .is_none_or(|prior: IntentCandidate| candidate.behavior_id < prior.behavior_id))
         {
             selected = Some(candidate);
-            selected_score = score;
+            selected_score = Some(score);
         }
     }
     selected
@@ -178,11 +188,15 @@ fn arbitrate(
 
 mod pickups {
     use super::{
-        BehaviorContext, BotIntent, BotTactic, CandidateBuffer, IntentCandidate, PICKUP_SCORE,
-        PICKUPS, distance_order, health_fraction,
+        BehaviorContext, BotIntent, BotTactic, CandidateBuffer, IntentCandidate, PICKUPS,
+        distance_order, health_fraction,
     };
 
-    pub(super) fn contribute(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    pub(super) fn contribute(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         if health_fraction(
             observation.self_view.current_health,
@@ -203,7 +217,7 @@ mod pickups {
             &PICKUPS,
             IntentCandidate::new(
                 PICKUPS.id,
-                PICKUP_SCORE,
+                base_score,
                 Some(BotTactic::CollectPickup),
                 BotIntent {
                     move_goal: Some(pickup.position),
@@ -216,11 +230,15 @@ mod pickups {
 
 mod retreat {
     use super::{
-        BehaviorContext, BotIntent, BotTactic, CandidateBuffer, IntentCandidate, RETREAT,
-        RETREAT_SCORE, Vec2, health_fraction, nearest_enemy,
+        BehaviorContext, BotIntent, BotTactic, CandidateBuffer, IntentCandidate, RETREAT, Vec2,
+        health_fraction, nearest_enemy,
     };
 
-    pub(super) fn contribute(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    pub(super) fn contribute(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         if health_fraction(
             observation.self_view.current_health,
@@ -242,7 +260,7 @@ mod retreat {
             &RETREAT,
             IntentCandidate::new(
                 RETREAT.id,
-                RETREAT_SCORE,
+                base_score,
                 Some(BotTactic::Retreat),
                 BotIntent {
                     move_goal: Some(if distance < preferred {
@@ -267,17 +285,24 @@ mod retreat {
 mod objectives {
     use super::{
         BehaviorContext, BotIntent, BotModeView, BotRole, BotTactic, CandidateBuffer,
-        IntentCandidate, OBJECTIVE_SCORE, OBJECTIVES, Vec2, hot_zone_hold_point, nearest_enemy,
-        safe_object,
+        IntentCandidate, OBJECTIVES, Vec2, hot_zone_hold_point, nearest_enemy, safe_object,
     };
 
-    pub(super) fn contribute(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    pub(super) fn contribute(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         match (context.role, context.observation.mode) {
             (BotRole::Objective, BotModeView::HotZone { center, radius, .. }) => {
-                hot_zone(context, candidates, center, radius);
+                hot_zone(context, candidates, base_score, center, radius);
             }
-            (BotRole::Defender, BotModeView::Heist) => defend_safe(context, candidates),
-            (BotRole::Objective, BotModeView::Heist) => attack_safe(context, candidates),
+            (BotRole::Defender, BotModeView::Heist) => {
+                defend_safe(context, candidates, base_score);
+            }
+            (BotRole::Objective, BotModeView::Heist) => {
+                attack_safe(context, candidates, base_score);
+            }
             _ => {}
         }
     }
@@ -285,6 +310,7 @@ mod objectives {
     fn hot_zone(
         context: &BehaviorContext<'_>,
         candidates: &mut CandidateBuffer,
+        base_score: u16,
         center: Vec2,
         radius: f32,
     ) {
@@ -300,7 +326,7 @@ mod objectives {
             &OBJECTIVES,
             IntentCandidate::new(
                 OBJECTIVES.id,
-                OBJECTIVE_SCORE,
+                base_score,
                 Some(BotTactic::Contest),
                 BotIntent {
                     move_goal: Some(hold),
@@ -316,7 +342,11 @@ mod objectives {
         );
     }
 
-    fn attack_safe(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    fn attack_safe(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         let Some(safe) = safe_object(observation, false) else {
             return;
@@ -331,7 +361,7 @@ mod objectives {
             &OBJECTIVES,
             IntentCandidate::new(
                 OBJECTIVES.id,
-                OBJECTIVE_SCORE,
+                base_score,
                 Some(BotTactic::AttackSafe),
                 BotIntent {
                     move_goal: Some(
@@ -351,7 +381,11 @@ mod objectives {
         );
     }
 
-    fn defend_safe(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    fn defend_safe(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         let Some(friendly_safe) = safe_object(observation, true) else {
             return;
@@ -368,7 +402,7 @@ mod objectives {
             &OBJECTIVES,
             IntentCandidate::new(
                 OBJECTIVES.id,
-                OBJECTIVE_SCORE,
+                base_score,
                 Some(BotTactic::DefendSafe),
                 BotIntent {
                     move_goal: Some(anchor),
@@ -386,13 +420,16 @@ mod objectives {
 
 mod combat {
     use super::{
-        BehaviorContext, BotIntent, BotObjectKind, BotTactic, CandidateBuffer, FALLBACK,
-        FALLBACK_SCORE, HEALING, HEALING_SCORE, IntentCandidate, OBJECT, OBJECT_SCORE, PRESSURE,
-        PRESSURE_SCORE, Vec2, distance_order, nearest_enemy, nearest_live_object,
-        object_attack_intent,
+        BehaviorContext, BotIntent, BotObjectKind, BotTactic, CandidateBuffer, FALLBACK, HEALING,
+        IntentCandidate, OBJECT, PRESSURE, Vec2, distance_order, nearest_enemy,
+        nearest_live_object, object_attack_intent,
     };
 
-    pub(super) fn healing(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    pub(super) fn healing(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         if !observation.healing_weapon {
             return;
@@ -411,7 +448,7 @@ mod combat {
             &HEALING,
             IntentCandidate::new(
                 HEALING.id,
-                HEALING_SCORE,
+                base_score,
                 None,
                 BotIntent {
                     move_goal: Some(ally.position),
@@ -424,7 +461,11 @@ mod combat {
         );
     }
 
-    pub(super) fn pressure(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    pub(super) fn pressure(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         let Some(enemy) = nearest_enemy(observation) else {
             return;
@@ -452,7 +493,7 @@ mod combat {
             &PRESSURE,
             IntentCandidate::new(
                 PRESSURE.id,
-                PRESSURE_SCORE,
+                base_score,
                 Some(BotTactic::Pressure),
                 BotIntent {
                     move_goal: Some(move_goal),
@@ -465,7 +506,11 @@ mod combat {
         );
     }
 
-    pub(super) fn object(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    pub(super) fn object(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         if !observation.objects.iter().any(|object| object.live) {
             return;
@@ -499,16 +544,15 @@ mod combat {
         );
         candidates.push(
             &OBJECT,
-            IntentCandidate::new(
-                OBJECT.id,
-                OBJECT_SCORE,
-                Some(BotTactic::BreakObject),
-                intent,
-            ),
+            IntentCandidate::new(OBJECT.id, base_score, Some(BotTactic::BreakObject), intent),
         );
     }
 
-    pub(super) fn fallback(context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    pub(super) fn fallback(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         let observation = context.observation;
         let self_position = observation.self_view.position;
         let goal = context
@@ -523,7 +567,7 @@ mod combat {
             &FALLBACK,
             IntentCandidate::new(
                 FALLBACK.id,
-                FALLBACK_SCORE,
+                base_score,
                 Some(BotTactic::Pressure),
                 BotIntent {
                     move_goal: goal,
@@ -621,12 +665,16 @@ mod tests {
         contribute: contribute_test_behavior,
     };
 
-    fn contribute_test_behavior(_context: &BehaviorContext<'_>, candidates: &mut CandidateBuffer) {
+    fn contribute_test_behavior(
+        _context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+    ) {
         candidates.push(
             &TEST_BEHAVIOR,
             IntentCandidate::new(
                 TEST_BEHAVIOR.id,
-                777,
+                base_score,
                 Some(BotTactic::Contest),
                 BotIntent {
                     move_goal: Some(Vec2::new(7.0, 7.0)),
@@ -688,11 +736,11 @@ mod tests {
             IntentCandidate::new(BotBehaviorId(1), 10, Some(BotTactic::Contest), intent),
         ];
         assert_eq!(
-            arbitrate(&candidates, None).unwrap().behavior_id,
+            arbitrate(&candidates, None, 1_000).unwrap().behavior_id,
             BotBehaviorId(3)
         );
         assert_eq!(
-            arbitrate(&candidates, Some(BotTactic::Contest))
+            arbitrate(&candidates, Some(BotTactic::Contest), 1_000)
                 .unwrap()
                 .behavior_id,
             BotBehaviorId(1)
@@ -703,7 +751,7 @@ mod tests {
     fn candidate_buffer_is_bounded() {
         let registration = BehaviorRegistration {
             id: BotBehaviorId(99),
-            contribute: |_context, _candidates| {},
+            contribute: |_context, _candidates, _base_score| {},
         };
         let mut candidates = CandidateBuffer::default();
         for score in 0..MAX_INTENT_CANDIDATES + 3 {
@@ -711,7 +759,7 @@ mod tests {
                 &registration,
                 IntentCandidate::new(
                     registration.id,
-                    i16::try_from(score).unwrap(),
+                    u16::try_from(score).unwrap(),
                     Some(BotTactic::Pressure),
                     BotIntent::default(),
                 ),
@@ -730,8 +778,17 @@ mod tests {
             profile: BotProfile::embedded().unwrap(),
             role: BotRole::Pressure,
         };
-        let candidates = collect_candidates(&context, &[TEST_BEHAVIOR]);
-        let selected = arbitrate(&candidates.candidates, None).unwrap();
+        let policy = BotArbitrationPolicy {
+            commitment_score_bonus: 1_000,
+            behaviors: vec![super::super::profile::BotBehaviorPolicy {
+                id: TEST_BEHAVIOR.id,
+                enabled: true,
+                base_score: 777,
+            }],
+        };
+        let candidates = collect_candidates(&context, &[TEST_BEHAVIOR], &policy);
+        let selected =
+            arbitrate(&candidates.candidates, None, policy.commitment_score_bonus).unwrap();
         assert_eq!(selected.behavior_id, BotBehaviorId(77));
         assert_eq!(selected.intent.move_goal, Some(Vec2::new(7.0, 7.0)));
     }
@@ -739,9 +796,139 @@ mod tests {
     #[test]
     fn behavior_registry_is_bounded_and_rejects_duplicate_stable_ids() {
         assert!(behavior_registry_is_valid(BEHAVIORS));
+        let embedded = super::super::profile::BotCatalog::embedded().unwrap();
+        assert!(behavior_registry_matches_policy(&embedded.arbitration));
         assert!(!behavior_registry_is_valid(&[TEST_BEHAVIOR, TEST_BEHAVIOR]));
         assert!(!behavior_registry_is_valid(
             &[TEST_BEHAVIOR; MAX_INTENT_CANDIDATES + 1]
         ));
+    }
+
+    fn arbitration_observation() -> BotObservation {
+        let mut observation = observation();
+        observation.mode = BotModeView::HotZone {
+            center: Vec2::ZERO,
+            radius: 160.0,
+            status: crate::matchplay::HotZoneStatus::Empty,
+            progress: [0, 0],
+        };
+        observation
+            .visible_enemies
+            .push(super::super::model::BotFighterView {
+                network_id: crate::protocol::NetworkEntityId(2),
+                team: crate::combat::TeamId(1),
+                position: Vec2::new(80.0, 0.0),
+                velocity: Vec2::ZERO,
+                current_health: 100,
+                maximum_health: 100,
+                active: true,
+                cold_meter: 0,
+                frozen: false,
+                poisoned: false,
+                burning: false,
+            });
+        observation
+    }
+
+    #[test]
+    fn authored_scores_enablement_commitment_and_stable_ties_drive_arbitration() {
+        let observation = arbitration_observation();
+        let state = BotState::default();
+        let context = BehaviorContext {
+            observation: &observation,
+            state: &state,
+            profile: BotProfile::embedded().unwrap(),
+            role: BotRole::Objective,
+        };
+        let mut policy = super::super::profile::BotCatalog::embedded()
+            .unwrap()
+            .arbitration;
+
+        let candidates = collect_candidates(&context, BEHAVIORS, &policy);
+        assert_eq!(
+            arbitrate(&candidates.candidates, None, policy.commitment_score_bonus)
+                .unwrap()
+                .behavior_id,
+            BotBehaviorId::OBJECTIVES
+        );
+
+        policy
+            .behaviors
+            .iter_mut()
+            .find(|behavior| behavior.id == BotBehaviorId::PRESSURE)
+            .unwrap()
+            .base_score = 701;
+        let candidates = collect_candidates(&context, BEHAVIORS, &policy);
+        assert_eq!(
+            arbitrate(&candidates.candidates, None, policy.commitment_score_bonus)
+                .unwrap()
+                .behavior_id,
+            BotBehaviorId::PRESSURE
+        );
+
+        let pressure = policy
+            .behaviors
+            .iter_mut()
+            .find(|behavior| behavior.id == BotBehaviorId::PRESSURE)
+            .unwrap();
+        pressure.base_score = 700;
+        policy
+            .behaviors
+            .iter_mut()
+            .find(|behavior| behavior.id == BotBehaviorId::OBJECTIVES)
+            .unwrap()
+            .enabled = false;
+        let candidates = collect_candidates(&context, BEHAVIORS, &policy);
+        assert_eq!(
+            arbitrate(&candidates.candidates, None, policy.commitment_score_bonus)
+                .unwrap()
+                .behavior_id,
+            BotBehaviorId::PRESSURE
+        );
+
+        policy
+            .behaviors
+            .iter_mut()
+            .find(|behavior| behavior.id == BotBehaviorId::OBJECTIVES)
+            .unwrap()
+            .enabled = true;
+        let candidates = collect_candidates(&context, BEHAVIORS, &policy);
+        assert_eq!(
+            arbitrate(&candidates.candidates, None, policy.commitment_score_bonus)
+                .unwrap()
+                .behavior_id,
+            BotBehaviorId::PRESSURE,
+            "equal authored scores retain the lower stable behavior-ID tie-break"
+        );
+
+        policy
+            .behaviors
+            .iter_mut()
+            .find(|behavior| behavior.id == BotBehaviorId::PRESSURE)
+            .unwrap()
+            .base_score = 600;
+        policy.commitment_score_bonus = 101;
+        let candidates = collect_candidates(&context, BEHAVIORS, &policy);
+        assert_eq!(
+            arbitrate(
+                &candidates.candidates,
+                Some(BotTactic::Pressure),
+                policy.commitment_score_bonus,
+            )
+            .unwrap()
+            .behavior_id,
+            BotBehaviorId::PRESSURE
+        );
+        policy.commitment_score_bonus = 0;
+        assert_eq!(
+            arbitrate(
+                &candidates.candidates,
+                Some(BotTactic::Pressure),
+                policy.commitment_score_bonus,
+            )
+            .unwrap()
+            .behavior_id,
+            BotBehaviorId::OBJECTIVES
+        );
     }
 }

@@ -95,7 +95,8 @@ fn install_manifest_bots(
         occupied.push((team, spawn_point.position));
         let projection =
             crate::builds::MatchLoadoutProjection::new(&loadout, builds.0.fighter_body);
-        let (fighter_definition, _, _, _) = resolved_fighter_runtime(team, &loadout);
+        let (fighter_definition, _, _, _) =
+            resolved_fighter_runtime(team, &loadout.fighter_stats, &loadout.primary_weapon);
         commands
             .spawn((
                 Fighter,

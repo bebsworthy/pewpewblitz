@@ -262,6 +262,21 @@ The asset boundary has four distinct sources:
 | `assets/catalogs/` | Client-owned paths, transforms, material values, theme profiles, and degradation mappings |
 | `content/` | Stable server/client-neutral gameplay, map-asset, gameplay-profile, and theme identities |
 
+Transient VFX and one-shot audio use strict client-only schema-2 catalogs. Every registered cue
+family appears exactly once; a missing family, duplicate mapping, unknown asset/profile reference,
+or unsafe numeric value rejects the embedded catalog instead of silently selecting a default.
+`assets/catalogs/vfx.ron` owns the supported renderer/material key, complete fixed-world or
+authoritative-radius scale policy, anchor height/offset, lifetime, concurrency cap, fallback, and
+reduced-effects profile. Authoritative radii still arrive from replicated gameplay facts: the
+catalog may scale or anchor their presentation but never replaces their gameplay geometry.
+
+`assets/catalogs/audio_profiles.ron` maps semantic cue families to stable IDs from
+`assets/manifest.ron`, which remains the one owner of shipped audio paths and provenance. Audio
+profiles own speed, volume, concurrency, and unavailable-asset fallback. One-shot playback that
+despawns when the source completes is the sole supported runtime mechanic, so it remains an audio
+adapter invariant rather than a misleading authored choice. Client presentation catalog revisions
+do not enter the gameplay content fingerprint or dedicated-server dependency graph.
+
 Only assets owned by a current gameplay, map, product-shell, accessibility, or presentation use are
 promoted into `assets/`. Availability in a source pack is not sufficient. Preview renders, source
 archives, FBX/OBJ alternatives, overview images, and authoring metadata remain source-only unless a
@@ -318,7 +333,10 @@ asset/catalog validation, lifecycle cleanup, animation recovery, relationship co
 query safety, reduced-effects bounds, degraded fallbacks, and server feature isolation. Native
 checks should exercise supported modes, maps/themes, aspect ratios and UI scales, imported and
 fallback paths, Dashboard preview, defeat/respawn, map destruction, objectives, and representative
-combat density.
+combat density. The render-evidence harness accepts `BRAWLER_RENDER_REDUCED_EFFECTS=1` to install
+the same reduced-combat-effects resource used by the product settings shell in non-interactive
+release clients; the generated report records that policy so an accidental default-profile run
+cannot be accepted as reduced-effects evidence.
 
 Imported map-object scale is validated from intrinsic asset bounds after the complete parent/child
 transform chain, not from a profile number in isolation. A nearby authored tile provides a native

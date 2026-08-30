@@ -82,9 +82,9 @@ pub use definitions::{
     DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadBundleDefinition,
     PayloadEffectDefinition, PersistentAreaShape, RecipientPolicy, ResolvedWeapon, SlowStacking,
     TargetSelection, WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponEconomy,
-    WeaponPresentationProfileId, WeaponPresetDefinition, WeaponPresetId, WeaponRecipe,
-    WeaponRecipeFingerprint, WeaponRecipePolicy, WorldEffectDefinition, WorldEffectKind,
-    linear_falloff, resolve_configuration, spread_angles,
+    WeaponPresetDefinition, WeaponPresetId, WeaponRecipe, WeaponRecipeFingerprint,
+    WeaponRecipePolicy, WorldEffectDefinition, WorldEffectKind, linear_falloff,
+    resolve_configuration, resolve_configuration_with_policy, spread_angles,
 };
 pub use evidence::{
     CombatCheckpoint, CombatConeSpraySnapshot, CombatEvidenceCheckpoint, CombatFighterSnapshot,
@@ -335,13 +335,14 @@ pub enum CombatSet {
 #[must_use]
 pub fn resolved_fighter_runtime(
     team_id: TeamId,
-    loadout: &crate::builds::ResolvedMatchLoadout,
+    fighter_stats: &crate::builds::ResolvedFighterStats,
+    primary_weapon: &ResolvedWeapon,
 ) -> (FighterDefinitionId, TeamId, CurrentHealth, WeaponState) {
     (
         STANDARD_FIGHTER_DEFINITION,
         team_id,
-        CurrentHealth(loadout.fighter_stats.maximum_health),
-        WeaponState::ready(loadout.primary_weapon.recipe.economy.capacity()),
+        CurrentHealth(fighter_stats.maximum_health),
+        WeaponState::ready(primary_weapon.recipe.economy.capacity()),
     )
 }
 

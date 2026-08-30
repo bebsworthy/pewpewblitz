@@ -3,15 +3,100 @@ use bevy::prelude::{FromWorld, Resource, World};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
-pub(crate) const BOT_CATALOG_SCHEMA_VERSION: u16 = 1;
-const BOT_FINGERPRINT_FORMAT_VERSION: u16 = 1;
+pub(crate) const BOT_CATALOG_SCHEMA_VERSION: u16 = 2;
+const BOT_FINGERPRINT_FORMAT_VERSION: u16 = 2;
 const MAX_BOT_CATALOG_BYTES: usize = 4 * 1024;
+pub(super) const MAX_BOT_BEHAVIOR_REGISTRATIONS: usize = 8;
 const MAX_REACTION_TICKS: u64 = 15;
 const MAX_SEARCH_EXPANSIONS: u32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as u32 * crate::map::MAX_MAP_DIMENSION_CELLS as u32;
 const MAX_BOT_WORLD_DISTANCE: f32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
 const MAX_PERIMETER_INSET_CELLS: f32 = crate::map::MAX_MAP_DIMENSION_CELLS as f32 / 2.0;
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
+pub(super) struct BotBehaviorId(pub(super) u16);
+
+impl BotBehaviorId {
+    pub(super) const HEALING: Self = Self(10);
+    pub(super) const PRESSURE: Self = Self(11);
+    pub(super) const OBJECT: Self = Self(12);
+    pub(super) const FALLBACK: Self = Self(13);
+    pub(super) const OBJECTIVES: Self = Self(20);
+    pub(super) const PICKUPS: Self = Self(30);
+    pub(super) const RETREAT: Self = Self(40);
+
+    pub(super) const REGISTERED: [Self; 7] = [
+        Self::HEALING,
+        Self::PRESSURE,
+        Self::OBJECT,
+        Self::FALLBACK,
+        Self::OBJECTIVES,
+        Self::PICKUPS,
+        Self::RETREAT,
+    ];
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BotBehaviorPolicy {
+    pub(super) id: BotBehaviorId,
+    pub(super) enabled: bool,
+    pub(super) base_score: u16,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BotArbitrationPolicy {
+    pub(super) commitment_score_bonus: u16,
+    pub(super) behaviors: Vec<BotBehaviorPolicy>,
+}
+
+impl BotArbitrationPolicy {
+    pub(super) fn behavior(&self, id: BotBehaviorId) -> Option<BotBehaviorPolicy> {
+        self.behaviors
+            .iter()
+            .copied()
+            .find(|behavior| behavior.id == id)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.behaviors.len() > MAX_BOT_BEHAVIOR_REGISTRATIONS {
+            return Err("bot arbitration exceeds engine registration capacity".into());
+        }
+        if self.behaviors.iter().any(|behavior| {
+            behavior.base_score == 0
+                || behavior
+                    .base_score
+                    .checked_add(self.commitment_score_bonus)
+                    .is_none()
+        }) {
+            return Err("bot arbitration scores exceed engine bounds".into());
+        }
+        if self.behaviors.iter().enumerate().any(|(index, behavior)| {
+            self.behaviors[index + 1..]
+                .iter()
+                .any(|other| behavior.id == other.id)
+        }) {
+            return Err("bot arbitration contains duplicate behavior IDs".into());
+        }
+        if self.behaviors.len() != BotBehaviorId::REGISTERED.len()
+            || BotBehaviorId::REGISTERED
+                .iter()
+                .any(|id| self.behavior(*id).is_none())
+        {
+            return Err("bot arbitration must cover every registered behavior exactly once".into());
+        }
+        if !self
+            .behavior(BotBehaviorId::FALLBACK)
+            .is_some_and(|fallback| fallback.enabled)
+        {
+            return Err("bot fallback behavior must remain enabled".into());
+        }
+        Ok(())
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -54,7 +139,7 @@ pub(crate) struct BotProfile {
 }
 
 impl BotProfile {
-    #[cfg(feature = "server")]
+    #[cfg(all(test, feature = "server"))]
     pub(crate) fn embedded() -> Result<Self, String> {
         Ok(BotCatalog::embedded()?.practice)
     }
@@ -170,11 +255,12 @@ impl BotProfile {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct BotCatalog {
     pub schema_version: u16,
     pub practice: BotProfile,
+    pub(super) arbitration: BotArbitrationPolicy,
 }
 
 impl BotCatalog {
@@ -190,6 +276,7 @@ impl BotCatalog {
             return Err("unsupported bot catalog schema".into());
         }
         self.practice.validate()?;
+        self.arbitration.validate()?;
         if postcard::to_allocvec(self).map_or(true, |bytes| bytes.len() > MAX_BOT_CATALOG_BYTES) {
             return Err("bot catalog exceeds engine size ceiling".into());
         }
@@ -204,12 +291,23 @@ impl BotCatalog {
 }
 
 #[cfg(feature = "server")]
-#[derive(Resource, Clone, Copy, Debug, PartialEq)]
-pub(super) struct BotProfileResource(pub BotProfile);
+#[derive(Resource, Clone, Debug, PartialEq)]
+pub(super) struct BotProfileResource {
+    pub(super) profile: BotProfile,
+    pub(super) arbitration: BotArbitrationPolicy,
+}
 
 #[cfg(feature = "server")]
 impl FromWorld for BotProfileResource {
     fn from_world(_: &mut World) -> Self {
-        Self(BotProfile::embedded().expect("embedded Practice bot catalog is valid"))
+        let catalog = BotCatalog::embedded().expect("embedded Practice bot catalog is valid");
+        assert!(
+            super::behaviors::behavior_registry_matches_policy(&catalog.arbitration),
+            "Practice bot code registrations must exactly match authored arbitration policy"
+        );
+        Self {
+            profile: catalog.practice,
+            arbitration: catalog.arbitration,
+        }
     }
 }

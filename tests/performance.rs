@@ -10,17 +10,17 @@ use brawler::{
         WeaponPresetId, WorldPoint, resolved_fighter_runtime,
     },
     config::{NetworkTransport, ServerNetworkConfig},
+    content::GameplayContentPlugin,
     gameplay::GameplayPlugin,
-    map::AuthoritativeMapPlugin,
     matchplay::{
         ActiveCombatant, MatchMember, MatchParticipant, MatchPhase, MatchRoot, MatchState,
     },
     movement::{
-        AuthoritativeMovementPlugin, AvianNetworkPlugin, DESTRUCTIBLE_MAP_LAYER, FIGHTER_LAYER,
-        InputFreshness, PROJECTILE_LAYER, STATIC_MAP_LAYER, fighter_collision_layers,
+        AvianNetworkPlugin, DESTRUCTIBLE_MAP_LAYER, FIGHTER_LAYER, InputFreshness,
+        PROJECTILE_LAYER, STATIC_MAP_LAYER, fighter_collision_layers,
     },
     protocol::{Fighter, FighterInput, NetworkEntityId, PlayerId, ProtocolPlugin},
-    server::ServerNetworkPlugin,
+    server::{ServerAuthoritativeGameplayPlugin, ServerNetworkPlugin},
     timing::SIMULATION_TICK,
 };
 use lightyear::prelude::input::native::ActionState;
@@ -36,16 +36,18 @@ fn performance_app() -> App {
             tick_duration: SIMULATION_TICK,
         },
         GameplayPlugin,
+        GameplayContentPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
-        AuthoritativeMapPlugin,
-        AuthoritativeMovementPlugin,
+        ServerAuthoritativeGameplayPlugin,
         ServerNetworkPlugin,
-        brawler::matchplay::AuthoritativeMatchPlugin,
         brawler::matchplay::WipeoutModePlugin,
     ));
     app.insert_resource(brawler::matchplay::MatchLifecycleRules::default());
-    app.insert_resource(brawler::matchplay::WipeoutRules::default());
+    app.insert_resource(brawler::matchplay::WipeoutRules {
+        target_score: 10,
+        recent_hostile_damage_credit_ticks: 300,
+    });
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,
         ..default()
@@ -92,7 +94,8 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
             }
             let (fighter_id, team, health, weapon) = resolved_fighter_runtime(
                 TeamId(u8::try_from(player_id % 2).expect("benchmark team fits in u8")),
-                &loadout,
+                &loadout.fighter_stats,
+                &loadout.primary_weapon,
             );
             let projection =
                 brawler::builds::MatchLoadoutProjection::new(&loadout, builds.fighter_body);
@@ -166,7 +169,8 @@ fn spawn_m05_fighter(
         ],
     )
     .expect("benchmark loadout resolves");
-    let (fighter_id, team, health, weapon) = resolved_fighter_runtime(team, &loadout);
+    let (fighter_id, team, health, weapon) =
+        resolved_fighter_runtime(team, &loadout.fighter_stats, &loadout.primary_weapon);
     let projection =
         brawler::builds::MatchLoadoutProjection::new(&loadout, build_catalog.fighter_body);
     let entity = app
@@ -473,7 +477,6 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
                     owner_network_entity_id: NetworkEntityId(1),
                     team_id: TeamId(0),
                     recipe_fingerprint: recipe.recipe_fingerprint,
-                    presentation_profile_id: recipe.presentation_profile_id,
                     legacy_compatibility: false,
                     source_preset_id: Some(WeaponPresetId(1)),
                     origin: WorldPoint::from(position),
@@ -858,12 +861,11 @@ fn hot_zone_performance_app() -> App {
             tick_duration: SIMULATION_TICK,
         },
         GameplayPlugin,
+        GameplayContentPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
-        AuthoritativeMapPlugin,
-        AuthoritativeMovementPlugin,
+        ServerAuthoritativeGameplayPlugin,
         ServerNetworkPlugin,
-        brawler::matchplay::AuthoritativeMatchPlugin,
     ));
     app.insert_resource(brawler::server::match_lifecycle_rules_for_profile(
         brawler::config::MatchRulesProfile::ProcessVerification,
@@ -991,12 +993,11 @@ fn heist_performance_app() -> App {
             tick_duration: SIMULATION_TICK,
         },
         GameplayPlugin,
+        GameplayContentPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
-        AuthoritativeMapPlugin,
-        AuthoritativeMovementPlugin,
+        ServerAuthoritativeGameplayPlugin,
         ServerNetworkPlugin,
-        brawler::matchplay::AuthoritativeMatchPlugin,
     ));
     app.insert_resource(brawler::server::match_lifecycle_rules_for_profile(
         brawler::config::MatchRulesProfile::ProcessVerification,
@@ -1005,7 +1006,10 @@ fn heist_performance_app() -> App {
         mode_definition_id: brawler::map::HEIST_MODE_DEFINITION,
         rules_revision: brawler::matchplay::HEIST_RULES_REVISION,
     });
-    app.insert_resource(brawler::matchplay::HeistRules::default());
+    app.insert_resource(brawler::matchplay::HeistRules {
+        safe_maximum_health: 2_000,
+        critical_health_percent: 25,
+    });
     app.insert_resource(brawler::map::ServerMapSelection {
         preset_id: brawler::map::FEATURE_YARD_HEIST_PRESET,
     });
@@ -1078,7 +1082,6 @@ fn v10_m02_heist_objective_burst_stays_within_fixed_tick_budget() {
             owner_network_entity_id: *network_id,
             team_id: *team,
             recipe_fingerprint: brawler::combat::WeaponRecipeFingerprint::default(),
-            presentation_profile_id: brawler::combat::WeaponPresentationProfileId(3),
             legacy_compatibility: false,
             source_preset_id: None,
             origin: WorldPoint::from(position.0),

@@ -279,6 +279,12 @@ impl Plugin for WorldPresentationPlugin {
             .render_measurement
             .clone()
         {
+            if config.reduced_effects {
+                app.insert_resource(ClientShellSettings {
+                    reduced_combat_effects: true,
+                    ..Default::default()
+                });
+            }
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
         configure_world_presentation_schedule(app);
@@ -612,6 +618,7 @@ fn reconcile_heist_safe_visuals(
 )]
 fn update_heist_safe_status_visuals(
     materials: Res<Material3dAssets>,
+    heist: Query<Ref<crate::matchplay::HeistState>, With<MatchRoot>>,
     safes: Query<
         (
             Ref<crate::combat::CurrentHealth>,
@@ -625,18 +632,22 @@ fn update_heist_safe_status_visuals(
         &mut MeshMaterial3d<StandardMaterial>,
     )>,
 ) {
+    let Ok(heist) = heist.single() else { return };
     for (status, mut material) in &mut status_visuals {
         let Ok((health, maximum, life)) = safes.get(status.owner) else {
             continue;
         };
-        if !status.is_added() && !health.is_changed() && !maximum.is_changed() && !life.is_changed()
+        if !status.is_added()
+            && !health.is_changed()
+            && !maximum.is_changed()
+            && !life.is_changed()
+            && !heist.is_changed()
         {
             continue;
         }
         let critical = maximum.0 > 0
             && u32::from(health.0) * 100
-                <= u32::from(maximum.0)
-                    * u32::from(crate::matchplay::HEIST_CRITICAL_HEALTH_PERCENT);
+                <= u32::from(maximum.0) * u32::from(heist.critical_health_percent);
         material.0 =
             if critical || matches!(*life, crate::map::DamageableLifeState::TerminalCommitted) {
                 materials.effect_damage.clone()

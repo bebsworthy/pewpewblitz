@@ -1,12 +1,12 @@
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 const AUDIO_PROFILE_CATALOG: &str = include_str!("../../../assets/catalogs/audio_profiles.ron");
-const AUDIO_PROFILE_SCHEMA_VERSION: u16 = 1;
+const AUDIO_PROFILE_SCHEMA_VERSION: u16 = 2;
 const MAX_AUDIO_CONCURRENCY: usize = 24;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum AudioCueFamily {
     Fire,
     Impact,
@@ -26,26 +26,27 @@ pub(super) enum AudioCueFamily {
     Reload,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-pub(super) enum AudioAssetKey {
-    Fire,
-    Impact,
-    Defeat,
-    Ready,
-    Error,
-}
+const ALL_AUDIO_CUE_FAMILIES: [AudioCueFamily; 16] = [
+    AudioCueFamily::Fire,
+    AudioCueFamily::Impact,
+    AudioCueFamily::Defeat,
+    AudioCueFamily::Reset,
+    AudioCueFamily::Ready,
+    AudioCueFamily::Error,
+    AudioCueFamily::Dash,
+    AudioCueFamily::Sentry,
+    AudioCueFamily::SentrySpawn,
+    AudioCueFamily::ConcealmentFieldSpawn,
+    AudioCueFamily::ChargeReady,
+    AudioCueFamily::Passive,
+    AudioCueFamily::ObjectiveHit,
+    AudioCueFamily::ObjectiveCritical,
+    AudioCueFamily::ObjectiveDestroyed,
+    AudioCueFamily::Reload,
+];
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-enum AudioPlaybackFamily {
-    OneShot,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-enum AudioLifetime {
-    UntilComplete,
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 struct AudioCatalogSource {
     schema_version: u16,
     default_profile: String,
@@ -53,27 +54,27 @@ struct AudioCatalogSource {
     profiles: Vec<AudioProfile>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 struct AudioFamilyMapping {
     family: AudioCueFamily,
     profile: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 struct AudioProfile {
     id: String,
-    asset: Option<AudioAssetKey>,
-    playback: AudioPlaybackFamily,
+    asset: Option<String>,
     speed: f32,
     volume: f32,
-    lifetime: AudioLifetime,
     concurrency_cap: usize,
     fallback_profile: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct AudioPlaybackPlan {
-    pub asset: AudioAssetKey,
+pub(super) struct AudioPlaybackPlan<'a> {
+    pub asset_id: &'a str,
     pub speed: f32,
     pub volume: f32,
     pub concurrency_cap: usize,
@@ -81,7 +82,6 @@ pub(super) struct AudioPlaybackPlan {
 
 #[derive(Resource, Clone, Debug)]
 pub(super) struct AudioProfileCatalog {
-    default_profile: String,
     mappings: BTreeMap<AudioCueFamily, String>,
     profiles: BTreeMap<String, AudioProfile>,
 }
@@ -105,8 +105,19 @@ impl AudioProfileCatalog {
             ));
         }
         let mut profiles = BTreeMap::new();
+        let audio_assets = crate::client::assets::audio_asset_paths()?;
         for profile in source.profiles {
             validate_profile(&profile)?;
+            if profile
+                .asset
+                .as_ref()
+                .is_some_and(|asset_id| !audio_assets.contains_key(asset_id))
+            {
+                return Err(format!(
+                    "audio profile {} references an unknown asset-manifest id",
+                    profile.id
+                ));
+            }
             if profiles.insert(profile.id.clone(), profile).is_some() {
                 return Err("duplicate audio profile id".to_string());
             }
@@ -117,12 +128,28 @@ impl AudioProfileCatalog {
         if default.asset.is_some() {
             return Err("audio default profile must degrade to silence".to_string());
         }
+        if default.fallback_profile != source.default_profile {
+            return Err("audio default profile must fall back to itself".to_string());
+        }
         for profile in profiles.values() {
             if !profiles.contains_key(&profile.fallback_profile) {
                 return Err(format!(
                     "audio profile {} references missing fallback {}",
                     profile.id, profile.fallback_profile
                 ));
+            }
+        }
+        for profile in profiles.values() {
+            let mut next = profile.id.as_str();
+            let mut visited = BTreeSet::new();
+            while next != source.default_profile.as_str() {
+                if !visited.insert(next) {
+                    return Err(format!(
+                        "audio profile {} has a fallback cycle that does not reach the default",
+                        profile.id
+                    ));
+                }
+                next = profiles[next].fallback_profile.as_str();
             }
         }
         let mut mappings = BTreeMap::new();
@@ -140,35 +167,40 @@ impl AudioProfileCatalog {
                 ));
             }
         }
-        Ok(Self {
-            default_profile: source.default_profile,
-            mappings,
-            profiles,
-        })
+        if mappings.len() != ALL_AUDIO_CUE_FAMILIES.len()
+            || ALL_AUDIO_CUE_FAMILIES
+                .iter()
+                .any(|family| !mappings.contains_key(family))
+        {
+            return Err(
+                "audio catalog must map every registered cue family exactly once".to_string(),
+            );
+        }
+        Ok(Self { mappings, profiles })
     }
 
-    /// Resolves a profile through its bounded fallback chain. An absent family, missing runtime
-    /// asset, or malformed fallback cycle deterministically degrades to the silent default.
+    /// Resolves a profile through its bounded fallback chain. Catalog validation guarantees that
+    /// every cue family has a mapping; only unavailable runtime assets degrade through fallbacks.
     pub(super) fn playback_plan(
         &self,
         family: AudioCueFamily,
-        mut asset_is_loaded: impl FnMut(AudioAssetKey) -> bool,
-    ) -> Option<AudioPlaybackPlan> {
+        mut asset_is_loaded: impl FnMut(&str) -> bool,
+    ) -> Option<AudioPlaybackPlan<'_>> {
         let mut next = self
             .mappings
             .get(&family)
-            .unwrap_or(&self.default_profile)
+            .expect("validated audio catalogs map every cue family")
             .as_str();
         let mut visited = BTreeSet::new();
         loop {
             let profile = self
                 .profiles
                 .get(next)
-                .unwrap_or_else(|| &self.profiles[&self.default_profile]);
-            let asset = profile.asset?;
-            if asset_is_loaded(asset) {
+                .expect("validated audio fallback references remain available");
+            let asset_id = profile.asset.as_deref()?;
+            if asset_is_loaded(asset_id) {
                 return Some(AudioPlaybackPlan {
-                    asset,
+                    asset_id,
                     speed: profile.speed,
                     volume: profile.volume,
                     concurrency_cap: profile.concurrency_cap,
@@ -183,7 +215,10 @@ impl AudioProfileCatalog {
 
     #[cfg(test)]
     fn mapped_profile(&self, family: AudioCueFamily) -> &AudioProfile {
-        &self.profiles[self.mappings.get(&family).unwrap_or(&self.default_profile)]
+        &self.profiles[self
+            .mappings
+            .get(&family)
+            .expect("validated audio catalogs map every cue family")]
     }
 }
 
@@ -203,14 +238,6 @@ fn validate_profile(profile: &AudioProfile) -> Result<(), String> {
             profile.id
         ));
     }
-    if !matches!(profile.playback, AudioPlaybackFamily::OneShot)
-        || !matches!(profile.lifetime, AudioLifetime::UntilComplete)
-    {
-        return Err(format!(
-            "audio profile {} uses an unsupported playback recipe",
-            profile.id
-        ));
-    }
     Ok(())
 }
 
@@ -222,7 +249,7 @@ mod tests {
     fn embedded_catalog_preserves_builtin_variants_and_caps() {
         let catalog = AudioProfileCatalog::embedded().unwrap();
         let dash = catalog.mapped_profile(AudioCueFamily::Dash);
-        assert_eq!(dash.asset, Some(AudioAssetKey::Defeat));
+        assert_eq!(dash.asset.as_deref(), Some("audio.defeat"));
         assert!((dash.speed - 1.45).abs() < f32::EPSILON);
         assert!((dash.volume - 1.0).abs() < f32::EPSILON);
         assert_eq!(
@@ -238,9 +265,23 @@ mod tests {
     }
 
     #[test]
-    fn invalid_asset_reference_values_and_caps_are_rejected() {
+    fn catalog_source_round_trips_without_losing_policy() {
+        let source: AudioCatalogSource = ron::from_str(AUDIO_PROFILE_CATALOG).unwrap();
+        let encoded = ron::to_string(&source).unwrap();
+        let decoded: AudioCatalogSource = ron::from_str(&encoded).unwrap();
+        assert_eq!(decoded, source);
+        AudioProfileCatalog::from_source(decoded).unwrap();
+    }
+
+    #[test]
+    fn bad_schema_invalid_asset_reference_values_and_caps_are_rejected() {
         for (needle, replacement) in [
-            ("asset: Some(Fire)", "asset: Some(Missing)"),
+            ("schema_version: 2", "schema_version: 3"),
+            ("id: \"silent\"", "id: \"silent\", playback: OneShot"),
+            (
+                "asset: Some(\"audio.fire\")",
+                "asset: Some(\"audio.missing\")",
+            ),
             ("speed: 1.0", "speed: 0.0"),
             ("volume: 1.0", "volume: 1.1"),
             ("concurrency_cap: 20", "concurrency_cap: 25"),
@@ -260,16 +301,17 @@ mod tests {
     #[test]
     fn supported_family_variant_is_selected_from_catalog_data() {
         let source = AUDIO_PROFILE_CATALOG.replacen(
-            "asset: Some(Fire), playback: OneShot, speed: 1.0",
-            "asset: Some(Error), playback: OneShot, speed: 0.8",
+            "asset: Some(\"audio.fire\"), speed: 1.0, volume: 1.0",
+            "asset: Some(\"audio.error\"), speed: 0.8, volume: 0.5",
             1,
         );
         let catalog = AudioProfileCatalog::from_ron(&source).unwrap();
         let plan = catalog
             .playback_plan(AudioCueFamily::Fire, |_| true)
             .unwrap();
-        assert_eq!(plan.asset, AudioAssetKey::Error);
+        assert_eq!(plan.asset_id, "audio.error");
         assert!((plan.speed - 0.8).abs() < f32::EPSILON);
+        assert!((plan.volume - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -277,9 +319,9 @@ mod tests {
         let mut catalog = AudioProfileCatalog::embedded().unwrap();
         catalog.profiles.get_mut("fire").unwrap().fallback_profile = "ready".to_string();
         let plan = catalog
-            .playback_plan(AudioCueFamily::Fire, |asset| asset == AudioAssetKey::Ready)
+            .playback_plan(AudioCueFamily::Fire, |asset| asset == "audio.ready")
             .unwrap();
-        assert_eq!(plan.asset, AudioAssetKey::Ready);
+        assert_eq!(plan.asset_id, "audio.ready");
         assert!(
             catalog
                 .playback_plan(AudioCueFamily::Fire, |_| false)
@@ -288,13 +330,40 @@ mod tests {
     }
 
     #[test]
-    fn missing_family_mapping_uses_silent_default() {
-        let mut catalog = AudioProfileCatalog::embedded().unwrap();
-        catalog.mappings.remove(&AudioCueFamily::Reset);
-        assert!(
-            catalog
-                .playback_plan(AudioCueFamily::Reset, |_| true)
-                .is_none()
-        );
+    fn duplicate_ids_mappings_and_missing_family_are_rejected() {
+        let mut duplicate_profile: AudioCatalogSource =
+            ron::from_str(AUDIO_PROFILE_CATALOG).unwrap();
+        duplicate_profile
+            .profiles
+            .push(duplicate_profile.profiles[0].clone());
+        assert!(AudioProfileCatalog::from_source(duplicate_profile).is_err());
+
+        let mut duplicate_mapping: AudioCatalogSource =
+            ron::from_str(AUDIO_PROFILE_CATALOG).unwrap();
+        duplicate_mapping
+            .mappings
+            .push(duplicate_mapping.mappings[0].clone());
+        assert!(AudioProfileCatalog::from_source(duplicate_mapping).is_err());
+
+        let mut missing_family: AudioCatalogSource = ron::from_str(AUDIO_PROFILE_CATALOG).unwrap();
+        missing_family
+            .mappings
+            .retain(|mapping| mapping.family != AudioCueFamily::Reset);
+        assert!(AudioProfileCatalog::from_source(missing_family).is_err());
+
+        let mut fallback_cycle: AudioCatalogSource = ron::from_str(AUDIO_PROFILE_CATALOG).unwrap();
+        fallback_cycle
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == "fire")
+            .unwrap()
+            .fallback_profile = "impact".to_string();
+        fallback_cycle
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == "impact")
+            .unwrap()
+            .fallback_profile = "fire".to_string();
+        assert!(AudioProfileCatalog::from_source(fallback_cycle).is_err());
     }
 }

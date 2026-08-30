@@ -308,6 +308,10 @@ pub struct AllocateRequestBody {
     pub match_duration_ticks: u64,
     pub countdown_ticks: u64,
     pub respawn_ticks: u64,
+    pub spawn_protection_ticks: u64,
+    pub completed_input_lock_ticks: u64,
+    pub wipeout_recent_hostile_damage_credit_ticks: u64,
+    pub heist_critical_health_percent: u8,
     pub team_count: u8,
     pub players_per_team: u8,
     pub participants: Vec<AllocateParticipant>,
@@ -337,6 +341,10 @@ impl AllocateRequestBody {
             || self.match_duration_ticks == 0
             || self.countdown_ticks == 0
             || self.respawn_ticks == 0
+            || self.spawn_protection_ticks == 0
+            || self.completed_input_lock_ticks == 0
+            || self.wipeout_recent_hostile_damage_credit_ticks == 0
+            || !(1..=99).contains(&self.heist_critical_health_percent)
             || self.team_count == 0
             || self.players_per_team == 0
             || self.participants.is_empty()
@@ -961,6 +969,10 @@ impl ControlBody {
                 encoder.put_u64(value.match_duration_ticks);
                 encoder.put_u64(value.countdown_ticks);
                 encoder.put_u64(value.respawn_ticks);
+                encoder.put_u64(value.spawn_protection_ticks);
+                encoder.put_u64(value.completed_input_lock_ticks);
+                encoder.put_u64(value.wipeout_recent_hostile_damage_credit_ticks);
+                encoder.put_u8(value.heist_critical_health_percent);
                 encoder.put_u8(value.team_count);
                 encoder.put_u8(value.players_per_team);
                 encoder.put_u8(
@@ -1121,6 +1133,10 @@ impl ControlBody {
                 let match_duration_ticks = decoder.u64()?;
                 let countdown_ticks = decoder.u64()?;
                 let respawn_ticks = decoder.u64()?;
+                let spawn_protection_ticks = decoder.u64()?;
+                let completed_input_lock_ticks = decoder.u64()?;
+                let wipeout_recent_hostile_damage_credit_ticks = decoder.u64()?;
+                let heist_critical_health_percent = decoder.u8()?;
                 let team_count = decoder.u8()?;
                 let players_per_team = decoder.u8()?;
                 let count = usize::from(decoder.u8()?);
@@ -1150,6 +1166,10 @@ impl ControlBody {
                     match_duration_ticks,
                     countdown_ticks,
                     respawn_ticks,
+                    spawn_protection_ticks,
+                    completed_input_lock_ticks,
+                    wipeout_recent_hostile_damage_credit_ticks,
+                    heist_critical_health_percent,
                     team_count,
                     players_per_team,
                     participants,
@@ -1627,6 +1647,10 @@ mod tests {
                 match_duration_ticks: 10_800,
                 countdown_ticks: 180,
                 respawn_ticks: 180,
+                spawn_protection_ticks: 90,
+                completed_input_lock_ticks: 60,
+                wipeout_recent_hostile_damage_credit_ticks: 300,
+                heist_critical_health_percent: 25,
                 team_count: 2,
                 players_per_team: 1,
                 participants: vec![participant(1), participant(2)],
@@ -1725,6 +1749,10 @@ mod tests {
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
             respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
             team_count: 2,
             players_per_team: 4,
             participants: (1..=8).map(participant).collect(),
@@ -1735,7 +1763,7 @@ mod tests {
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 493
+            52 + 518
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),
@@ -1812,6 +1840,10 @@ mod tests {
             match_duration_ticks: 10_800,
             countdown_ticks: 180,
             respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
             team_count: 1,
             players_per_team: 1,
             participants: vec![participant(3)],

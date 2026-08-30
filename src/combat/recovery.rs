@@ -2,7 +2,7 @@
 
 use super::{ActiveEffects, CurrentHealth, Defeated, HealthRecoveryState};
 use crate::{
-    builds::ResolvedMatchLoadout,
+    builds::ResolvedFighterStats,
     matchplay::{ActiveCombatant, MatchParticipant},
     protocol::Fighter,
     timing::{SIMULATION_TICK_HZ, SimulationTick},
@@ -37,7 +37,7 @@ pub(super) fn restore_attack_idle_health(
     mut fighters: Query<
         (
             Entity,
-            &ResolvedMatchLoadout,
+            &ResolvedFighterStats,
             &mut CurrentHealth,
             &mut HealthRecoveryState,
             &ActiveEffects,
@@ -47,14 +47,13 @@ pub(super) fn restore_attack_idle_health(
         (With<Fighter>, Without<Defeated>),
     >,
 ) {
-    for (entity, loadout, mut health, mut recovery, effects, participant, effect_tile) in
+    for (entity, stats, mut health, mut recovery, effects, participant, effect_tile) in
         &mut fighters
     {
         if participant.is_some() && !active.contains(entity) {
             recovery.recovery_remainder = 0;
             continue;
         }
-        let stats = loadout.fighter_stats;
         if tick.0
             < recovery
                 .last_accepted_attack_tick
@@ -97,5 +96,47 @@ mod tests {
 
         assert_eq!(advance_recovery(99, 100, 120, 0), (100, 0));
         assert_eq!(advance_recovery(100, 100, 10, 42), (100, 0));
+    }
+
+    #[test]
+    fn recovery_consumes_projected_stats_without_replicated_loadout() {
+        let mut app = App::new();
+        app.insert_resource(SimulationTick(60))
+            .add_systems(Update, restore_attack_idle_health);
+        let fighter = app
+            .world_mut()
+            .spawn((
+                Fighter,
+                ResolvedFighterStats {
+                    maximum_health: 100,
+                    movement_speed: 200.0,
+                    health_recovery_rate: 60,
+                    idle_attack_delay_ticks: 30,
+                    reveal_proximity_radius: 160.0,
+                    cold_capacity: 100,
+                    cold_resistance_basis_points: 0,
+                    poison_resistance_basis_points: 0,
+                    fire_resistance_basis_points: 0,
+                },
+                CurrentHealth(50),
+                HealthRecoveryState {
+                    last_accepted_attack_tick: 0,
+                    recovery_remainder: 0,
+                },
+                ActiveEffects::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<CurrentHealth>(fighter),
+            Some(&CurrentHealth(51))
+        );
+        assert!(
+            app.world()
+                .get::<crate::builds::ResolvedMatchLoadout>(fighter)
+                .is_none()
+        );
     }
 }

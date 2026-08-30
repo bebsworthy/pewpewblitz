@@ -221,12 +221,16 @@ pub(crate) fn rumble_spray_feedback(
         let intensity = match cue {
             CombatCue::AttackAccepted {
                 source,
-                presentation_profile_id: WeaponPresentationProfileId(6),
+                weapon_definition_id: WeaponDefinitionId(6),
                 ..
             } if controlled_ids.contains(source) => Some((0.08, 0.28, 0.08)),
             CombatCue::DamageApplied {
                 target,
-                presentation_profile_id: WeaponPresentationProfileId(6),
+                source:
+                    DamageSource::PlayerWeapon {
+                        weapon_definition_id: WeaponDefinitionId(6),
+                        ..
+                    },
                 ..
             } if controlled_ids.contains(target) => Some((0.16, 0.34, 0.07)),
             _ => None,

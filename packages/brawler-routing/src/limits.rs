@@ -4,7 +4,7 @@ pub const ROUTE_VERSION_V1: u8 = 1;
 pub const PACKET_VERSION_V1: u8 = 1;
 pub const CONTROL_VERSION_V1: u8 = 1;
 pub const CONTROL_VERSION_V2: u8 = 2;
-pub const CONTROL_VERSION_CURRENT: u8 = 4;
+pub const CONTROL_VERSION_CURRENT: u8 = 5;
 
 pub const PUBLIC_MAGIC: [u8; 4] = *b"BRTE";
 pub const PACKET_MAGIC: [u8; 4] = *b"BRPK";

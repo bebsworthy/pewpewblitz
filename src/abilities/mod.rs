@@ -1,6 +1,8 @@
 //! Server-authoritative ultimate and passive runtime rules.
 
 #[cfg(feature = "server")]
+mod activation;
+#[cfg(feature = "server")]
 mod big_blob;
 mod charge;
 mod concealment_field;

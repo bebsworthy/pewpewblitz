@@ -254,7 +254,7 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
             crate::protocol::Fighter,
             Position(Vec2::new(10.0, 20.0)),
             Rotation::IDENTITY,
-            loadout,
+            loadout.ultimate,
             NetworkEntityId(9),
             crate::movement::InputFreshness {
                 last_fresh_tick: Some(7),
@@ -341,18 +341,17 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
     );
 
     // A stale activation request is rejected before charge or world state changes.
-    let demolition_loadout = app
+    let demolition_ultimate = *app
         .world()
-        .get::<crate::builds::ResolvedMatchLoadout>(fighter_entity)
-        .unwrap()
-        .clone();
+        .get::<crate::builds::ResolvedUltimate>(fighter_entity)
+        .unwrap();
     let stale = app
         .world_mut()
         .spawn((
             crate::protocol::Fighter,
             Position(Vec2::ZERO),
             Rotation::IDENTITY,
-            demolition_loadout,
+            demolition_ultimate,
             NetworkEntityId(10),
             crate::movement::InputFreshness {
                 last_fresh_tick: None,
@@ -657,17 +656,18 @@ fn charge_observer_accepts_only_hostile_primary_damage_and_is_idempotent() {
         .init_resource::<AbilityTelemetry>()
         .add_systems(Update, charge::observe_primary_damage_charge);
     let owner = NetworkEntityId(1);
+    let loadout = test_loadout(
+        crate::builds::UltimateDefinitionId(1),
+        [
+            crate::builds::PassiveDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        ],
+    );
     app.world_mut().spawn((
         Fighter,
         owner,
         TeamId(0),
-        test_loadout(
-            crate::builds::UltimateDefinitionId(1),
-            [
-                crate::builds::PassiveDefinitionId(1),
-                crate::builds::PassiveDefinitionId(3),
-            ],
-        ),
+        loadout.ultimate,
         AbilityState::default(),
     ));
     let mut received = damage_fact(
@@ -973,6 +973,13 @@ fn spawn_sentry_owner(app: &mut App, position: Vec2) -> Entity {
     };
     use avian2d::prelude::Position;
 
+    let loadout = test_loadout(
+        crate::builds::UltimateDefinitionId(2),
+        [
+            crate::builds::PassiveDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        ],
+    );
     app.world_mut()
         .spawn((
             Fighter,
@@ -980,13 +987,7 @@ fn spawn_sentry_owner(app: &mut App, position: Vec2) -> Entity {
             NetworkEntityId(1),
             TeamId(0),
             Position(position),
-            test_loadout(
-                crate::builds::UltimateDefinitionId(2),
-                [
-                    crate::builds::PassiveDefinitionId(1),
-                    crate::builds::PassiveDefinitionId(3),
-                ],
-            ),
+            loadout.fighter_stats,
             AbilityState::default(),
             ActiveCombatant,
         ))
@@ -1072,7 +1073,6 @@ fn sentry_production_tick_preserves_exact_cadence_and_authored_projectile_recipe
         CombatCue, CombatOutbox, CombatSourceKind, ComposedProjectileRuntime, DamageFalloff,
         DeliveryMethod, FiringPattern, PayloadEffectDefinition, Projectile, ProjectileBody,
         RecipientPolicy, ReplicatedAttackSource, TargetSelection, WeaponEconomy,
-        WeaponPresentationProfileId,
     };
     use bevy::prelude::*;
 
@@ -1122,7 +1122,6 @@ fn sentry_production_tick_preserves_exact_cadence_and_authored_projectile_recipe
             owner: NetworkEntityId(1),
             deployable_id: crate::builds::DeployableId(7),
             target: Some(NetworkEntityId(2)),
-            presentation_profile_id: WeaponPresentationProfileId(1),
             ..
         }]
     ));
@@ -1149,10 +1148,6 @@ fn sentry_production_tick_preserves_exact_cadence_and_authored_projectile_recipe
         assert_eq!(
             replicated.attack.recipe_fingerprint,
             crate::combat::WeaponRecipeFingerprint(crate::content::fnv1a64(&recipe_bytes).max(1))
-        );
-        assert_eq!(
-            replicated.attack.presentation_profile_id,
-            WeaponPresentationProfileId(1)
         );
         assert!((body.shape.bounding_radius() - 6.0).abs() < f32::EPSILON);
         assert_eq!(runtime.expires_at_tick, 62);
@@ -1418,7 +1413,6 @@ fn characterized_sentry_source(
         owner_network_entity_id: NetworkEntityId(1),
         team_id: crate::combat::TeamId(0),
         recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(91),
-        presentation_profile_id: crate::combat::WeaponPresentationProfileId(1),
         legacy_compatibility: false,
         source_preset_id: None,
         origin: crate::combat::WorldPoint { x: 0.0, y: 0.0 },

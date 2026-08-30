@@ -7,11 +7,10 @@ use crate::{
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub const HEIST_RULES_REVISION: u16 = 1;
+pub const HEIST_RULES_REVISION: u16 = 2;
 pub const HEIST_SAFE_COUNT: usize = 2;
 pub const HEIST_SAFE_HALF_EXTENTS: Vec2 = Vec2::new(48.0, 32.0);
 pub const MAX_HEIST_OBJECTIVE_CUES: usize = 256;
-pub const HEIST_CRITICAL_HEALTH_PERCENT: u8 = 25;
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeistRules {
@@ -23,7 +22,9 @@ impl Default for HeistRules {
     fn default() -> Self {
         Self {
             safe_maximum_health: 2_000,
-            critical_health_percent: HEIST_CRITICAL_HEALTH_PERCENT,
+            // Runtime composition replaces this neutral sentinel with authored production
+            // policy or an explicit verification fixture.
+            critical_health_percent: 1,
         }
     }
 }
@@ -64,6 +65,7 @@ pub struct HeistState {
     pub match_id: super::MatchId,
     pub rules_revision: u16,
     pub generation: MapDynamicGeneration,
+    pub critical_health_percent: u8,
     pub safes: [HeistSafeIdentity; HEIST_SAFE_COUNT],
     pub completion: Option<HeistCompletion>,
 }
@@ -344,6 +346,7 @@ mod authority {
             match_id: match_state.match_id,
             rules_revision: HEIST_RULES_REVISION,
             generation,
+            critical_health_percent: rules.critical_health_percent,
             safes: identities,
             completion: None,
         });
@@ -709,6 +712,7 @@ mod authority {
         };
         heist.match_id = slot.next_id;
         heist.generation = next_generation;
+        heist.critical_health_percent = rules.critical_health_percent;
         heist.completion = None;
         pending.0.clear();
         outbox.0.clear();

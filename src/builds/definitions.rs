@@ -6,16 +6,16 @@ use super::{
     UltimateKind, UltimateParameters, WeaponChoice,
 };
 use crate::combat::{
-    DamageOverTimeKind, DeliveryMethod, PayloadEffectDefinition, WeaponCatalog,
-    WeaponConfiguration, WeaponEconomy, WeaponPresetId, resolve_configuration,
+    DamageOverTimeKind, DeliveryMethod, EngineWeaponLimits, PayloadEffectDefinition, WeaponCatalog,
+    WeaponConfiguration, WeaponEconomy, WeaponPresetId, resolve_configuration_with_policy,
 };
 use crate::content::{GameplayContentFingerprint, fnv1a64};
 use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 15;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 15;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 16;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 16;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub(crate) const MAX_ULTIMATE_DEFINITIONS: usize = 32;
@@ -326,7 +326,6 @@ fn validate_ultimate_definitions(definitions: &[UltimateDefinition]) -> Result<(
                         projectile_range_milliunits: 1..=4_096_000,
                         projectile_lifetime_ticks: 1..=600,
                         projectile_damage: 1..=1_000,
-                        presentation_profile_id: 1..,
                     }
                 )
                 | (
@@ -943,9 +942,15 @@ fn resolve_weapon_choice(
                 .and_then(|points| points.checked_add(reach_cost))
                 .and_then(|points| points.checked_add(magazine_cost))
                 .ok_or(BuildResolutionError::ResolutionFailed)?;
-            resolve_configuration(None, configuration, fighter_body)
-                .map(|weapon| (weapon, points))
-                .map_err(|_| BuildResolutionError::ResolutionFailed)
+            resolve_configuration_with_policy(
+                None,
+                configuration,
+                fighter_body,
+                weapons.recipe_policy.clone(),
+                EngineWeaponLimits::default(),
+            )
+            .map(|weapon| (weapon, points))
+            .map_err(|_| BuildResolutionError::ResolutionFailed)
         }
     }
 }

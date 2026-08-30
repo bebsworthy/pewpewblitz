@@ -29,11 +29,224 @@ fn server_player_position(harness: &mut Harness, player_id: PlayerId) -> Vec2 {
         .expect("server player position")
 }
 
+fn activate_two_player_match(harness: &mut Harness, request_id: u64) {
+    harness.step_until(|harness| {
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
+    });
+    let waiting = server_match(harness);
+    for index in 0..2 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id,
+                match_id: waiting.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness.step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Active { .. }));
+}
+
+fn complete_wipeout_match(harness: &mut Harness, event_id: u64) {
+    let players = {
+        let world = harness.server.world_mut();
+        let mut query =
+            world.query_filtered::<(&PlayerId, &NetworkEntityId, &TeamId), With<Fighter>>();
+        query
+            .iter(world)
+            .filter(|(player, _, _)| player.0 != 0)
+            .map(|(player, network, team)| (*player, *network, *team))
+            .collect::<Vec<_>>()
+    };
+    let source = players
+        .iter()
+        .find(|(_, _, team)| team.0 == 0)
+        .copied()
+        .expect("team-zero fighter");
+    let target = players
+        .iter()
+        .find(|(_, _, team)| team.0 == 1)
+        .copied()
+        .expect("team-one fighter");
+    {
+        let world = harness.server.world_mut();
+        let mut roots =
+            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+        roots.single_mut(world).unwrap().target_score = 1;
+    }
+    let tick = harness.server_simulation_tick();
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<CombatOutcomeFacts>()
+        .0
+        .push(CombatOutcomeFact {
+            event_id: CombatEventId(event_id),
+            tick,
+            attack_id: AttackId(event_id),
+            source_kind: CombatSourceKind::PrimaryWeapon,
+            source_player: Some(source.0),
+            source_network_id: Some(source.1),
+            source_team: Some(source.2),
+            target_network_id: target.1,
+            target_kind: brawler::combat::CombatTargetKind::Fighter,
+            target_team: target.2,
+            preset_id: Some(WeaponPresetId(1)),
+            recipe_fingerprint: None,
+            position: WorldPoint { x: 0.0, y: 0.0 },
+            engagement_distance: 100.0,
+            kind: CombatOutcomeKind::Defeat,
+        });
+}
+
+#[test]
+fn nondefault_spawn_protection_duration_controls_authoritative_expiry() {
+    const PROTECTION_TICKS: u64 = 7;
+    let mut harness = Harness::new_match_with_lifecycle_rules(
+        2,
+        brawler::matchplay::MatchLifecycleRules {
+            spawn_protection_ticks: PROTECTION_TICKS,
+            completed_input_lock_ticks: 9,
+            ..Default::default()
+        },
+    );
+    activate_two_player_match(&mut harness, 7_100);
+
+    let (fighter, expires_at_tick) = {
+        let world = harness.server.world_mut();
+        let mut protected = world.query_filtered::<
+            (Entity, &brawler::matchplay::SpawnProtection),
+            (With<Fighter>, With<MatchParticipant>),
+        >();
+        let (fighter, protection) = protected.iter(world).next().expect("protected fighter");
+        (fighter, protection.expires_at_tick)
+    };
+    let activation_tick = expires_at_tick
+        .checked_sub(PROTECTION_TICKS)
+        .expect("protection deadline includes the configured duration");
+    assert!(harness.server_simulation_tick() >= activation_tick);
+    assert!(harness.server_simulation_tick() < expires_at_tick);
+
+    while harness.server_simulation_tick().saturating_add(1) < expires_at_tick {
+        harness.step();
+        assert!(
+            harness
+                .server
+                .world()
+                .get::<brawler::matchplay::SpawnProtection>(fighter)
+                .is_some(),
+            "protection must remain before its authored deadline"
+        );
+    }
+    harness.step_until(|harness| {
+        harness
+            .server
+            .world()
+            .get::<brawler::matchplay::SpawnProtection>(fighter)
+            .is_none()
+    });
+    assert!(harness.server_simulation_tick() >= expires_at_tick);
+}
+
+#[test]
+fn nondefault_completed_input_lock_controls_restart_command_acceptance() {
+    const INPUT_LOCK_TICKS: u64 = 7;
+    let mut harness = Harness::new_match_with_lifecycle_rules(
+        2,
+        brawler::matchplay::MatchLifecycleRules {
+            spawn_protection_ticks: 9,
+            completed_input_lock_ticks: INPUT_LOCK_TICKS,
+            ..Default::default()
+        },
+    );
+    activate_two_player_match(&mut harness, 7_200);
+
+    complete_wipeout_match(&mut harness, 70_200);
+    harness
+        .step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Completed { .. }));
+    let completed = server_match(&mut harness);
+    let MatchPhase::Completed {
+        completed_at_tick,
+        restart_unlocked_at_tick,
+        ..
+    } = completed.phase
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        restart_unlocked_at_tick - completed_at_tick,
+        INPUT_LOCK_TICKS
+    );
+
+    harness.send_match_command(
+        0,
+        MatchCommandRequest {
+            request_id: 7_201,
+            match_id: completed.match_id,
+            command: MatchCommand::ReadyForRestart,
+        },
+    );
+    harness.step();
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<ServerSession>(harness.server_links[0])
+            .unwrap()
+            .last_match_outcome
+            .unwrap()
+            .decision,
+        MatchCommandDecision::Locked
+    );
+
+    while harness.server_simulation_tick() < restart_unlocked_at_tick {
+        harness.step();
+    }
+    harness.send_match_command(
+        0,
+        MatchCommandRequest {
+            request_id: 7_202,
+            match_id: completed.match_id,
+            command: MatchCommand::ReadyForRestart,
+        },
+    );
+    harness.step();
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<ServerSession>(harness.server_links[0])
+            .unwrap()
+            .last_match_outcome
+            .unwrap()
+            .decision,
+        MatchCommandDecision::Accepted
+    );
+}
+
 #[test]
 fn ready_commands_are_link_scoped_idempotent_and_match_scoped() {
     let mut harness = Harness::new_match(1);
     harness.step_until(|harness| harness.client_is_active(0) && harness.loadout_is_ready(0));
     let state = server_match(&mut harness);
+    let fighter = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<Entity, (With<Fighter>, Without<TestDummy>)>();
+        query.single(world).expect("one authoritative fighter")
+    };
+    assert!(
+        harness
+            .server
+            .world()
+            .get::<brawler::combat::ResolvedWeapon>(fighter)
+            .is_some(),
+        "the atomic runtime projection is the ready-admission capability"
+    );
+    harness
+        .server
+        .world_mut()
+        .entity_mut(fighter)
+        .remove::<brawler::builds::ResolvedMatchLoadout>();
     let ready = MatchCommandRequest {
         request_id: 9,
         match_id: state.match_id,

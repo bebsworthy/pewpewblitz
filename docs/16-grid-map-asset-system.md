@@ -364,7 +364,9 @@ final velocity = ordinary velocity + unmodified ExternalMotion
 Dash, knockback, and other external motion therefore remain unaffected. There is currently no
 implemented combined-multiplier clamp. The production movement path consumes the resolved authored
 multiplier retained by the occupancy, so bounded catalog and Balance Lab changes affect
-authoritative locomotion without changing movement-system code.
+authoritative locomotion without changing movement-system code. Code retains only safety bounds
+and placement ceilings; the accepted Speed, Slow, Damage, and interval values have no mirrored
+runtime constants outside the gameplay-profile catalog.
 
 Damage occupancy schedules its first pulse one complete authored interval after entry. Due pulses
 run in the combat environment-reaction phase, read damage and interval directly from the retained

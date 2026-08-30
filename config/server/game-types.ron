@@ -1,6 +1,14 @@
 (
-  schema_version: 3,
+  schema_version: 4,
   server_name: "Local PewPew Blitz",
+  common_lifecycle: (
+    spawn_protection_ticks: 90,
+    completed_input_lock_ticks: 60,
+  ),
+  mode_policies: (
+    wipeout: (recent_hostile_damage_credit_ticks: 300),
+    heist: (critical_health_percent: 25),
+  ),
   map_dimension_limits: (
     minimum_width: 20,
     minimum_height: 20,

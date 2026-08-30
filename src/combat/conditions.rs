@@ -138,9 +138,6 @@ pub(crate) fn advance_conditions(
                 health.0 = health.0.saturating_sub(applied);
                 let source = condition.source;
                 let cue_source = condition_damage_source(source);
-                let presentation_profile_id = source
-                    .presentation_profile_id
-                    .unwrap_or(WeaponPresentationProfileId(1));
                 let cue = CombatCue::DamageApplied {
                     event_id: damage_event,
                     tick: tick.0,
@@ -151,7 +148,6 @@ pub(crate) fn advance_conditions(
                     amount: applied,
                     health_after: health.0,
                     distance_band: DistanceBand::Close,
-                    presentation_profile_id,
                 };
                 telemetry.applied_damage =
                     telemetry.applied_damage.saturating_add(u64::from(applied));
@@ -215,7 +211,6 @@ pub(crate) fn advance_conditions(
                         source: Some(cue_source),
                         target: *network_id,
                         position: position.0.into(),
-                        presentation_profile_id: source.presentation_profile_id,
                     };
                     telemetry.record_cue(cue.clone());
                     outbox.0.push(cue);
@@ -301,7 +296,6 @@ mod tests {
             team_id: TeamId(0),
             source_preset_id: None,
             recipe_fingerprint: None,
-            presentation_profile_id: None,
         }
     }
 

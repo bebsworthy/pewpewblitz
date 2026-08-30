@@ -181,6 +181,10 @@ pub struct ServerNetworkConfig {
     pub match_duration_ticks: Option<u64>,
     pub match_countdown_ticks: Option<u64>,
     pub match_respawn_ticks: Option<u64>,
+    pub match_spawn_protection_ticks: Option<u64>,
+    pub match_completed_input_lock_ticks: Option<u64>,
+    pub wipeout_recent_hostile_damage_credit_ticks: Option<u64>,
+    pub heist_critical_health_percent: Option<u8>,
 }
 
 impl Default for ServerNetworkConfig {
@@ -201,6 +205,10 @@ impl Default for ServerNetworkConfig {
             match_duration_ticks: None,
             match_countdown_ticks: None,
             match_respawn_ticks: None,
+            match_spawn_protection_ticks: None,
+            match_completed_input_lock_ticks: None,
+            wipeout_recent_hostile_damage_credit_ticks: None,
+            heist_critical_health_percent: None,
         }
     }
 }
@@ -222,6 +230,10 @@ impl ServerNetworkConfig {
             self.match_duration_ticks.is_some(),
             self.match_countdown_ticks.is_some(),
             self.match_respawn_ticks.is_some(),
+            self.match_spawn_protection_ticks.is_some(),
+            self.match_completed_input_lock_ticks.is_some(),
+            self.wipeout_recent_hostile_damage_credit_ticks.is_some(),
+            self.heist_critical_health_percent.is_some(),
         ];
         if match_overrides.iter().any(|present| *present)
             && !match_overrides.iter().all(|present| *present)
@@ -232,8 +244,19 @@ impl ServerNetworkConfig {
             || self.match_duration_ticks == Some(0)
             || self.match_countdown_ticks == Some(0)
             || self.match_respawn_ticks == Some(0)
+            || self.match_spawn_protection_ticks == Some(0)
+            || self.match_completed_input_lock_ticks == Some(0)
+            || self.wipeout_recent_hostile_damage_credit_ticks == Some(0)
         {
             return Err("resolved match rule values must be greater than zero".to_string());
+        }
+        if self
+            .heist_critical_health_percent
+            .is_some_and(|percent| !(1..=99).contains(&percent))
+        {
+            return Err(
+                "resolved Heist critical-health percentage must be within 1..=99".to_string(),
+            );
         }
         Ok(())
     }
@@ -311,6 +334,8 @@ pub struct RenderMeasurementConfig {
     pub report_path: std::path::PathBuf,
     pub warmup: Duration,
     pub measurement: Duration,
+    /// Exercises the persisted accessibility policy in non-interactive native evidence runs.
+    pub reduced_effects: bool,
 }
 
 /// Enables a reproducible windowed smoke scenario through the native gamepad input path.
@@ -576,6 +601,39 @@ mod tests {
     }
 
     #[test]
+    fn resolved_match_policy_is_complete_and_bounded() {
+        let partial = ServerNetworkConfig {
+            match_objective_target: Some(10),
+            ..ServerNetworkConfig::default()
+        };
+        assert!(
+            partial
+                .validate()
+                .is_err_and(|error| error.contains("complete set"))
+        );
+
+        let mut config = ServerNetworkConfig {
+            match_objective_target: Some(10),
+            match_duration_ticks: Some(10_800),
+            match_countdown_ticks: Some(180),
+            match_respawn_ticks: Some(180),
+            match_spawn_protection_ticks: Some(90),
+            match_completed_input_lock_ticks: Some(60),
+            wipeout_recent_hostile_damage_credit_ticks: Some(300),
+            heist_critical_health_percent: Some(25),
+            ..ServerNetworkConfig::default()
+        };
+        assert!(config.validate().is_ok());
+
+        config.heist_critical_health_percent = Some(100);
+        assert!(
+            config
+                .validate()
+                .is_err_and(|error| error.contains("1..=99"))
+        );
+    }
+
+    #[test]
     fn windowed_combat_demo_allows_native_automation_flags() {
         let mut config = ClientNetworkConfig::new(1);
         config.windowed_combat_demo = Some(WindowedCombatDemo);
@@ -607,6 +665,7 @@ mod tests {
             report_path: "render.txt".into(),
             warmup: Duration::from_secs(10),
             measurement: Duration::from_secs(30),
+            reduced_effects: false,
         });
         config.headless_move = Some((1, 0));
         assert!(config.validate().is_ok());

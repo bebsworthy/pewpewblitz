@@ -87,6 +87,16 @@ Authoritative server World
   validation, ownership, cleanup, recovery
 ```
 
+The role application builders own that selection explicitly. `GameplayContentPlugin` installs the
+validated headless-safe catalogs and content fingerprint in every role that participates in
+compatibility checks. `ProtocolPlugin` registers only wire messages, channels, replicated
+components, interpolation, inputs, and the protocol-registry fingerprint. The server application
+adds `ServerAuthoritativeGameplayPlugin`, session networking, and routed-worker transport as
+siblings; the client application similarly adds `ClientReplicatedGameplayPlugin`, session
+networking, and optional presentation as siblings. A protocol or session/transport plugin must not
+select gameplay or presentation transitively. The minimum lobby worker opts into shared content,
+protocol, lobby authority, and routed transport without installing match gameplay.
+
 Authored content/rule definitions may be serializable Rust data or Bevy assets/configuration loaded
 into the worlds that need them. Player-authored brawler builds and weapon recipes are separate from
 those definitions, and immutable resolved match loadouts are separate from mutable runtime state.

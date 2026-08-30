@@ -22,7 +22,7 @@ pub(crate) fn activate_self_cloak(
     mut fighters: Query<
         (
             Entity,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &crate::protocol::NetworkEntityId,
             &crate::movement::InputFreshness,
             &mut crate::builds::AbilityState,
@@ -38,7 +38,7 @@ pub(crate) fn activate_self_cloak(
 ) {
     for (
         entity,
-        loadout,
+        ultimate,
         network_id,
         freshness,
         mut ability,
@@ -50,14 +50,12 @@ pub(crate) fn activate_self_cloak(
         objective_carrier,
     ) in &mut fighters
     {
-        if loadout.ultimate.kind != crate::builds::UltimateKind::SelfCloak {
+        if ultimate.kind != crate::builds::UltimateKind::SelfCloak {
             continue;
         }
-        let requested = action.is_some_and(|action| {
-            action.0.is_valid()
-                && action.0.gameplay_buttons & crate::protocol::FighterInput::ULTIMATE != 0
-        });
         let was_held = latch.as_deref().is_some_and(|latch| latch.0);
+        let request = super::activation::ultimate_request(action.map(|action| action.0), was_held);
+        let requested = request.requested;
         if let Some(mut latch) = latch {
             latch.0 = requested;
         } else {
@@ -65,7 +63,7 @@ pub(crate) fn activate_self_cloak(
                 .entity(entity)
                 .insert(crate::abilities::UltimateInputLatch(requested));
         }
-        if !requested || was_held {
+        if !request.rising_edge {
             continue;
         }
         telemetry.record(crate::abilities::AbilityTelemetryRecord {
@@ -78,22 +76,20 @@ pub(crate) fn activate_self_cloak(
             freshness.last_fresh_tick,
             crate::movement::AUTHORITATIVE_INPUT_STALE_TICKS,
         );
-        let rejection = if !held {
-            Some(crate::abilities::AbilityRejectionReason::StaleInput)
-        } else if defeated {
-            Some(crate::abilities::AbilityRejectionReason::Defeated)
-        } else if !active {
-            Some(crate::abilities::AbilityRejectionReason::Inactive)
-        } else if objective_carrier {
-            Some(crate::abilities::AbilityRejectionReason::ObjectiveCarrier)
-        } else if ability.charge != loadout.ultimate.charge_policy.maximum
-            || !matches!(ability.phase, crate::builds::AbilityPhase::Ready)
-        {
-            Some(crate::abilities::AbilityRejectionReason::NotCharged)
-        } else {
-            None
-        };
-        if let Some(reason) = rejection {
+        if let Err(reason) = super::activation::evaluate_activation_gate(
+            super::activation::ActivationGateContext {
+                input_fresh: held,
+                defeated,
+                active,
+                state: *ability,
+                maximum_charge: ultimate.charge_policy.maximum,
+            },
+            super::activation::ActivationRestrictions {
+                before_readiness: objective_carrier
+                    .then_some(crate::abilities::AbilityRejectionReason::ObjectiveCarrier),
+                after_readiness: None,
+            },
+        ) {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: *network_id,
@@ -101,14 +97,12 @@ pub(crate) fn activate_self_cloak(
             });
             continue;
         }
-        let crate::builds::UltimateParameters::SelfCloak { duration_ticks } =
-            loadout.ultimate.parameters
+        let crate::builds::UltimateParameters::SelfCloak { duration_ticks } = ultimate.parameters
         else {
             continue;
         };
-        let next_generation = generation
-            .as_deref()
-            .map_or(Some(1), |value| value.0.checked_add(1));
+        let next_generation =
+            super::activation::next_ultimate_generation(generation.as_deref().map(|value| value.0));
         let Some(next_generation) = next_generation else {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,

@@ -1,5 +1,5 @@
 (
-    schema_version: 15,
+    schema_version: 16,
     balance_revision: BuildRevision(12),
     fighter_body: (radius: 14.0),
     fighter_profiles: (
@@ -30,7 +30,7 @@
     ],
     ultimates: [
         (id: UltimateDefinitionId(1), key: "dash", display_name: "Dash", kind: Dash, point_cost: 3, parameters: Dash(maximum_distance_milliunits: 360000, duration_ticks: 18, damage: 35, knockback_speed_milliunits: 450000, knockback_duration_ticks: 6, maximum_targets: 8)),
-        (id: UltimateDefinitionId(2), key: "sentry", display_name: "Sentry", kind: Sentry, point_cost: 4, parameters: Sentry(placement_offsets_milliunits: (96000, 88000, 80000, 72000, 64000, 56000), body_radius_milliunits: 20000, acquisition_range_milliunits: 480000, acquisition_interval_ticks: 6, fire_interval_ticks: 30, lifetime_ticks: 720, maximum_health: 80, projectile_speed_milliunits: 900000, projectile_radius_milliunits: 6000, projectile_range_milliunits: 480000, projectile_lifetime_ticks: 32, projectile_damage: 10, presentation_profile_id: 1)),
+        (id: UltimateDefinitionId(2), key: "sentry", display_name: "Sentry", kind: Sentry, point_cost: 4, parameters: Sentry(placement_offsets_milliunits: (96000, 88000, 80000, 72000, 64000, 56000), body_radius_milliunits: 20000, acquisition_range_milliunits: 480000, acquisition_interval_ticks: 6, fire_interval_ticks: 30, lifetime_ticks: 720, maximum_health: 80, projectile_speed_milliunits: 900000, projectile_radius_milliunits: 6000, projectile_range_milliunits: 480000, projectile_lifetime_ticks: 32, projectile_damage: 10)),
         (id: UltimateDefinitionId(3), key: "self-cloak", display_name: "Self Cloak", kind: SelfCloak, point_cost: 4, parameters: SelfCloak(duration_ticks: 360)),
         (id: UltimateDefinitionId(4), key: "reveal-scan", display_name: "Reveal Scan", kind: RevealScan, point_cost: 4, parameters: RevealScan(maximum_range_milliunits: 640000, radius_milliunits: 192000, reveal_ticks: 300)),
         (id: UltimateDefinitionId(5), key: "concealment-field", display_name: "Concealment Field", kind: ConcealmentField, point_cost: 4, parameters: ConcealmentField(maximum_range_milliunits: 480000, radius_milliunits: 192000, duration_ticks: 360)),

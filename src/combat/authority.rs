@@ -58,8 +58,11 @@ pub(super) fn spawn_test_dummy(
     loadout.fighter_stats.maximum_health = map_spawn.maximum_health;
     let body = builds.0.fighter_body;
     let projection = crate::builds::MatchLoadoutProjection::new(&loadout, body);
-    let (fighter_definition, team, health, weapon) =
-        resolved_fighter_runtime(NEUTRAL_TEAM, &loadout);
+    let (fighter_definition, team, health, weapon) = resolved_fighter_runtime(
+        NEUTRAL_TEAM,
+        &loadout.fighter_stats,
+        &loadout.primary_weapon,
+    );
     let dummy = commands
         .spawn((
             Fighter,

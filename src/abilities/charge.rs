@@ -54,7 +54,7 @@ pub(crate) fn observe_primary_damage_charge(
         (
             bevy::prelude::Entity,
             &crate::protocol::NetworkEntityId,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedUltimate,
             &mut AbilityState,
             Option<&mut ChargeObservationState>,
         ),
@@ -63,8 +63,8 @@ pub(crate) fn observe_primary_damage_charge(
     mut commands: bevy::prelude::Commands,
     mut telemetry: bevy::prelude::ResMut<crate::abilities::AbilityTelemetry>,
 ) {
-    for (entity, network_id, loadout, mut ability, observed) in &mut fighters {
-        let policy = loadout.ultimate.charge_policy;
+    for (entity, network_id, ultimate, mut ability, observed) in &mut fighters {
+        let policy = ultimate.charge_policy;
         let previous = observed.as_deref().map_or(0, |state| state.last_event_id);
         let mut newest = previous;
         let mut dealt = 0_u16;

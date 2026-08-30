@@ -56,6 +56,8 @@ type ServerModeInstaller = fn(
     &'static ModeDescriptor,
     crate::config::MatchRulesProfile,
     Option<u16>,
+    Option<u64>,
+    Option<u8>,
 );
 
 #[derive(Clone, Copy)]
@@ -72,8 +74,6 @@ pub(crate) struct ModeDescriptor {
     pub(crate) compatible_maps: CompatibleMapPolicy,
     #[cfg(feature = "server")]
     pub(crate) default_map_preset: MapPresetId,
-    #[cfg(feature = "server")]
-    pub(crate) default_objective_target: u16,
     #[cfg(feature = "server")]
     pub(crate) routing_mode: brawler_routing::GameMode,
     #[cfg(feature = "client")]
@@ -100,8 +100,17 @@ impl ModeDescriptor {
         app: &mut bevy::prelude::App,
         profile: crate::config::MatchRulesProfile,
         objective_target: Option<u16>,
+        wipeout_recent_hostile_damage_credit_ticks: Option<u64>,
+        heist_critical_health_percent: Option<u8>,
     ) {
-        (self.install_server)(app, self, profile, objective_target);
+        (self.install_server)(
+            app,
+            self,
+            profile,
+            objective_target,
+            wipeout_recent_hostile_damage_credit_ticks,
+            heist_critical_health_percent,
+        );
     }
 }
 
@@ -119,8 +128,6 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
         compatible_maps: CompatibleMapPolicy::ExactModeDefinition,
         #[cfg(feature = "server")]
         default_map_preset: FEATURE_YARD_WIPEOUT_PRESET,
-        #[cfg(feature = "server")]
-        default_objective_target: 10,
         #[cfg(feature = "server")]
         routing_mode: brawler_routing::GameMode::Wipeout,
         #[cfg(feature = "client")]
@@ -146,8 +153,6 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
         #[cfg(feature = "server")]
         default_map_preset: FEATURE_YARD_HOT_ZONE_PRESET,
         #[cfg(feature = "server")]
-        default_objective_target: 1_800,
-        #[cfg(feature = "server")]
         routing_mode: brawler_routing::GameMode::HotZone,
         #[cfg(feature = "client")]
         presentation: Some(ModePresentationProjection {
@@ -171,8 +176,6 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
         compatible_maps: CompatibleMapPolicy::ExactModeDefinition,
         #[cfg(feature = "server")]
         default_map_preset: FEATURE_YARD_HEIST_PRESET,
-        #[cfg(feature = "server")]
-        default_objective_target: 2_000,
         #[cfg(feature = "server")]
         routing_mode: brawler_routing::GameMode::Heist,
         #[cfg(feature = "client")]
@@ -223,8 +226,13 @@ pub(crate) fn wipeout_rules_for_profile(
 ) -> crate::matchplay::WipeoutRules {
     use crate::matchplay::WipeoutRules;
     match profile {
-        crate::config::MatchRulesProfile::Production => WipeoutRules::default(),
-        crate::config::MatchRulesProfile::ProcessVerification => WipeoutRules { target_score: 10 },
+        crate::config::MatchRulesProfile::Production => {
+            panic!("production Wipeout requires authored policy")
+        }
+        crate::config::MatchRulesProfile::ProcessVerification => WipeoutRules {
+            target_score: 10,
+            recent_hostile_damage_credit_ticks: 300,
+        },
     }
     .validate()
     .expect("configured Wipeout rules profile must be valid")
@@ -236,6 +244,8 @@ fn install_wipeout(
     descriptor: &'static ModeDescriptor,
     profile: crate::config::MatchRulesProfile,
     objective_target: Option<u16>,
+    wipeout_recent_hostile_damage_credit_ticks: Option<u64>,
+    _heist_critical_health_percent: Option<u8>,
 ) {
     use crate::{
         map::ServerMapSelection,
@@ -245,14 +255,20 @@ fn install_wipeout(
         mode_definition_id: descriptor.definition_id,
         rules_revision: descriptor.rules_revision,
     })
-    .insert_resource(objective_target.map_or_else(
-        || wipeout_rules_for_profile(profile),
-        |target_score| {
-            WipeoutRules { target_score }
-                .validate()
-                .expect("validated manifest Wipeout objective")
+    .insert_resource(
+        match (objective_target, wipeout_recent_hostile_damage_credit_ticks) {
+            (Some(target_score), Some(recent_hostile_damage_credit_ticks)) => WipeoutRules {
+                target_score,
+                recent_hostile_damage_credit_ticks,
+            }
+            .validate()
+            .expect("validated manifest Wipeout policy"),
+            (None, None) if profile == crate::config::MatchRulesProfile::ProcessVerification => {
+                wipeout_rules_for_profile(profile)
+            }
+            _ => panic!("production Wipeout requires one complete authored policy"),
         },
-    ))
+    )
     .insert_resource(ServerMapSelection {
         preset_id: descriptor.default_map_preset,
     })
@@ -265,6 +281,8 @@ fn install_hot_zone(
     descriptor: &'static ModeDescriptor,
     profile: crate::config::MatchRulesProfile,
     objective_target: Option<u16>,
+    _wipeout_recent_hostile_damage_credit_ticks: Option<u64>,
+    _heist_critical_health_percent: Option<u8>,
 ) {
     use crate::{
         map::ServerMapSelection,
@@ -274,7 +292,14 @@ fn install_hot_zone(
         },
     };
     let rules = objective_target.map_or_else(
-        || hot_zone_rules_for_profile(profile),
+        || match profile {
+            crate::config::MatchRulesProfile::ProcessVerification => {
+                hot_zone_rules_for_profile(profile)
+            }
+            crate::config::MatchRulesProfile::Production => {
+                panic!("production Hot Zone requires an authored objective target")
+            }
+        },
         |target_progress_ticks| HotZoneRules {
             target_progress_ticks,
         },
@@ -297,18 +322,28 @@ fn install_hot_zone(
 fn install_heist(
     app: &mut bevy::prelude::App,
     descriptor: &'static ModeDescriptor,
-    _profile: crate::config::MatchRulesProfile,
+    profile: crate::config::MatchRulesProfile,
     objective_target: Option<u16>,
+    _wipeout_recent_hostile_damage_credit_ticks: Option<u64>,
+    heist_critical_health_percent: Option<u8>,
 ) {
     use crate::{
         map::ServerMapSelection,
         matchplay::{HeistModePlugin, HeistRules, MatchModeSetup},
     };
-    let rules =
-        objective_target.map_or_else(HeistRules::default, |safe_maximum_health| HeistRules {
+    let rules = match (objective_target, heist_critical_health_percent) {
+        (Some(safe_maximum_health), Some(critical_health_percent)) => HeistRules {
             safe_maximum_health,
-            ..HeistRules::default()
-        });
+            critical_health_percent,
+        },
+        (None, None) if profile == crate::config::MatchRulesProfile::ProcessVerification => {
+            HeistRules {
+                safe_maximum_health: 2_000,
+                critical_health_percent: 25,
+            }
+        }
+        _ => panic!("production Heist requires one complete authored policy"),
+    };
     let rules = rules
         .validate()
         .expect("validated manifest Heist objective");

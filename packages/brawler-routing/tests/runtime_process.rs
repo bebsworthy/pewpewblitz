@@ -88,6 +88,10 @@ fn allocation_request() -> AllocateRequestBody {
         match_duration_ticks: 10_800,
         countdown_ticks: 180,
         respawn_ticks: 180,
+        spawn_protection_ticks: 90,
+        completed_input_lock_ticks: 60,
+        wipeout_recent_hostile_damage_credit_ticks: 300,
+        heist_critical_health_percent: 25,
         team_count: 2,
         players_per_team: 2,
         participants: vec![

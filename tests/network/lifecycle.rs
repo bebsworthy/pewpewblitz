@@ -321,7 +321,6 @@ fn fabricated_orphan_projectile_is_rejected_before_collision() {
             owner_network_entity_id: NetworkEntityId(99_999),
             team_id: TeamId(0),
             recipe_fingerprint: resolved.primary_weapon.recipe_fingerprint,
-            presentation_profile_id: resolved.primary_weapon.presentation_profile_id,
             legacy_compatibility: false,
             source_preset_id: resolved.primary_weapon.source_preset_id,
             origin: WorldPoint::from(dummy_position.0 - Vec2::new(20.0, 0.0)),
@@ -384,7 +383,10 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
     server
         .insert_resource(server_config)
         .insert_resource(brawler::matchplay::MatchLifecycleRules::default())
-        .insert_resource(brawler::matchplay::WipeoutRules::default())
+        .insert_resource(brawler::matchplay::WipeoutRules {
+            target_score: 10,
+            recent_hostile_damage_credit_ticks: 300,
+        })
         .add_plugins((
             MinimalPlugins,
             StatesPlugin,
@@ -392,12 +394,11 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
                 tick_duration: SIMULATION_TICK,
             },
             GameplayPlugin,
+            GameplayContentPlugin,
             ProtocolPlugin,
             AvianNetworkPlugin,
-            AuthoritativeMapPlugin,
-            AuthoritativeMovementPlugin,
+            ServerAuthoritativeGameplayPlugin,
             ServerNetworkPlugin,
-            brawler::matchplay::AuthoritativeMatchPlugin,
             brawler::matchplay::WipeoutModePlugin,
         ));
     server.finish();
@@ -435,8 +436,10 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
             tick_duration: SIMULATION_TICK,
         },
         GameplayPlugin,
+        GameplayContentPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
+        brawler::client::ClientReplicatedGameplayPlugin,
         ClientNetworkPlugin,
     ));
     client.finish();
