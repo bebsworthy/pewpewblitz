@@ -12,7 +12,7 @@ use crate::{
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
     content::gameplay_content_fingerprint,
     map::{MapCatalogResource, MapContentCatalog, MapInstanceId, MapPresetId, ServerMapSelection},
-    protocol::protocol_fingerprint,
+    protocol::{MatchHello, MatchJoinOutcome, MatchJoinRejection, protocol_fingerprint},
 };
 #[cfg(test)]
 use bevy::app::TerminalCtrlCHandlerPlugin;
@@ -163,6 +163,259 @@ pub fn admit_manifest_client<'a>(
         }
     }
     found.ok_or(MatchWorkerManifestError::UnlistedClient)
+}
+
+#[derive(Clone)]
+pub(super) struct ValidatedMatchHello {
+    source: MatchJoinSource,
+    pub(super) authenticated_client_id: Option<u64>,
+}
+
+#[derive(Clone)]
+enum MatchJoinSource {
+    Direct {
+        assigned_team: crate::combat::TeamId,
+    },
+    Routed {
+        participant: Box<MatchManifestParticipant>,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct MatchHelloValidationContext<'a> {
+    pub(super) hello: &'a MatchHello,
+    pub(super) role: &'a ServerRoleResource,
+    pub(super) remote_id: &'a RemoteId,
+    pub(super) routed_peer: Option<&'a super::RoutedPeer>,
+    pub(super) admitted_client_ids: &'a BTreeSet<u64>,
+    pub(super) match_state: &'a crate::matchplay::MatchState,
+    pub(super) active_count: usize,
+    pub(super) maximum_clients: usize,
+    pub(super) team_counts: [u8; 2],
+    pub(super) maximum_participants_per_team: u8,
+    pub(super) registry_fingerprint: u64,
+    pub(super) content_fingerprint: crate::content::GameplayContentFingerprint,
+}
+
+/// Preserve the public rejection precedence while projecting routed identity into one bounded
+/// planning input. This helper performs no ECS mutation and allocates no runtime identity.
+pub(super) fn validate_match_hello(
+    context: MatchHelloValidationContext<'_>,
+) -> Result<ValidatedMatchHello, MatchJoinRejection> {
+    let MatchHelloValidationContext {
+        hello,
+        role,
+        remote_id,
+        routed_peer,
+        admitted_client_ids,
+        match_state,
+        active_count,
+        maximum_clients,
+        team_counts,
+        maximum_participants_per_team,
+        registry_fingerprint,
+        content_fingerprint,
+    } = context;
+    if hello.protocol_version != crate::protocol::SUPPORTED_PROTOCOL_VERSION {
+        return Err(MatchJoinRejection::ProtocolVersionMismatch);
+    }
+    if hello.build_version != crate::VERSION {
+        return Err(MatchJoinRejection::BuildVersionMismatch);
+    }
+    if hello.registry_fingerprint != registry_fingerprint {
+        return Err(MatchJoinRejection::RegistryMismatch);
+    }
+    if hello.content_fingerprint != content_fingerprint {
+        return Err(MatchJoinRejection::ContentMismatch);
+    }
+    let authenticated_client_id = authenticated_netcode_id(remote_id);
+    let routed_participant = match role.manifest() {
+        Some(manifest) => {
+            let participant = authenticated_client_id
+                .and_then(|client_id| {
+                    admit_manifest_client(
+                        manifest,
+                        client_id,
+                        routed_peer.map(|peer| peer.peer_id),
+                        admitted_client_ids,
+                    )
+                    .ok()
+                })
+                .ok_or(MatchJoinRejection::MatchFull)?;
+            Some(*participant)
+        }
+        None => None,
+    };
+    if !matches!(match_state.phase, crate::matchplay::MatchPhase::Waiting) {
+        return Err(MatchJoinRejection::MatchInProgress);
+    }
+    if active_count >= maximum_clients {
+        return Err(MatchJoinRejection::ServerFull);
+    }
+    let source = if let Some(participant) = routed_participant {
+        MatchJoinSource::Routed {
+            participant: Box::new(participant),
+        }
+    } else {
+        MatchJoinSource::Direct {
+            assigned_team: crate::matchplay::assigned_team(
+                team_counts,
+                maximum_participants_per_team,
+            )
+            .ok_or(MatchJoinRejection::MatchFull)?,
+        }
+    };
+    Ok(ValidatedMatchHello {
+        source,
+        authenticated_client_id,
+    })
+}
+
+pub(super) fn resolve_join_loadout(
+    worker_participant: Option<&MatchManifestParticipant>,
+    builds: &BuildCatalog,
+    weapons: &crate::combat::WeaponCatalog,
+) -> Result<Option<crate::builds::ResolvedMatchLoadout>, MatchJoinRejection> {
+    worker_participant
+        .map(|participant| {
+            let snapshot =
+                crate::profiles::MatchBuildSnapshotV3::decode(&participant.build_snapshot)
+                    .map_err(|error| {
+                        error!(%error, "admitted manifest build snapshot did not decode");
+                        MatchJoinRejection::ContentMismatch
+                    })?;
+            resolve_admitted_match_snapshot(snapshot, builds, weapons).map_err(|error| {
+                error!(
+                    ?error,
+                    "admitted manifest build did not resolve against the active server catalogs"
+                );
+                MatchJoinRejection::ContentMismatch
+            })
+        })
+        .transpose()
+}
+
+fn resolve_admitted_match_snapshot(
+    snapshot: crate::profiles::MatchBuildSnapshotV3,
+    builds: &BuildCatalog,
+    weapons: &crate::combat::WeaponCatalog,
+) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
+    #[cfg(feature = "balance-lab")]
+    {
+        snapshot.resolve_revised_balance_lab_catalogs(builds, weapons)
+    }
+    #[cfg(not(feature = "balance-lab"))]
+    {
+        snapshot.resolve(builds, weapons)
+    }
+}
+
+pub(super) struct FighterJoinPlan {
+    pub(super) outcome: MatchJoinOutcome,
+    pub(super) spawn_spec: super::fighter_spawn::AuthoritativeFighterSpawnSpec,
+    pub(super) assigned_team: crate::combat::TeamId,
+    pub(super) spawn_position: Vec2,
+    pub(super) authenticated_client_id: Option<u64>,
+}
+
+pub(super) struct MatchJoinPlanningContext<'a> {
+    pub(super) validated: ValidatedMatchHello,
+    pub(super) ids: &'a mut super::NextSessionIds,
+    pub(super) living_fighters: &'a [(crate::combat::TeamId, Vec2)],
+    pub(super) spawn_points: &'a crate::map::SpawnPointCatalog,
+    pub(super) match_state: &'a crate::matchplay::MatchState,
+    pub(super) movement_skin_width: f32,
+    pub(super) builds: &'a BuildCatalog,
+    pub(super) weapons: &'a crate::combat::WeaponCatalog,
+    pub(super) map_instance_id: MapInstanceId,
+}
+
+pub(super) fn plan_match_join(
+    context: MatchJoinPlanningContext<'_>,
+) -> Result<FighterJoinPlan, MatchJoinRejection> {
+    let MatchJoinPlanningContext {
+        validated,
+        ids,
+        living_fighters,
+        spawn_points,
+        match_state,
+        movement_skin_width,
+        builds,
+        weapons,
+        map_instance_id,
+    } = context;
+    let worker_participant = match &validated.source {
+        MatchJoinSource::Direct { .. } => None,
+        MatchJoinSource::Routed { participant } => Some(participant.as_ref()),
+    };
+    let worker_loadout = resolve_join_loadout(worker_participant, builds, weapons)?;
+    let (baseline_player_id, network_entity_id) = ids
+        .allocate()
+        .ok_or(MatchJoinRejection::IdentifierExhausted)?;
+    let (player_id, assigned_team, display_name, loadout) = if let Some(participant) =
+        worker_participant
+    {
+        (
+            crate::protocol::PlayerId(participant.player_id.get()),
+            crate::combat::TeamId(participant.team),
+            participant.display_name.as_str().to_string(),
+            worker_loadout.expect("routed participant resolved before identity allocation"),
+        )
+    } else {
+        let MatchJoinSource::Direct { assigned_team } = validated.source else {
+            unreachable!("routed participant handled above");
+        };
+        let loadout =
+            crate::builds::resolve_direct_diagnostic_loadout(builds, weapons, baseline_player_id.0)
+                .expect("validated direct-diagnostic loadout policy");
+        (
+            baseline_player_id,
+            assigned_team,
+            crate::lobby::generated_display_name(baseline_player_id.0),
+            loadout,
+        )
+    };
+    let candidates = spawn_points
+        .0
+        .get(&assigned_team.0)
+        .into_iter()
+        .flatten()
+        .map(|point| crate::matchplay::SpawnCandidate {
+            id: point.spawn_point_id,
+            position: point.position,
+            facing: point.facing,
+        })
+        .collect();
+    let spawn = crate::matchplay::select_spawn(
+        candidates,
+        living_fighters,
+        assigned_team,
+        builds.fighter_body.radius * 2.0 + movement_skin_width,
+        match_state.match_id,
+        player_id,
+        0,
+    )
+    .expect("validated map has a finite spawn for every admitted team");
+    Ok(FighterJoinPlan {
+        outcome: MatchJoinOutcome::Accepted {
+            player_id,
+            network_entity_id,
+        },
+        spawn_spec: super::fighter_spawn::AuthoritativeFighterSpawnSpec {
+            player_id,
+            network_entity_id,
+            team: assigned_team,
+            display_name,
+            loadout,
+            spawn,
+            match_id: match_state.match_id,
+            map_instance_id,
+            ready: false,
+        },
+        assigned_team,
+        spawn_position: spawn.position,
+        authenticated_client_id: validated.authenticated_client_id,
+    })
 }
 
 fn expected_routing_mode(mode: GameMode) -> brawler_routing::GameMode {
@@ -530,6 +783,254 @@ mod tests {
             heartbeat_ms: 1_000,
             nonce: 9,
             digest: [0; 32],
+        }
+    }
+
+    fn waiting_match() -> crate::matchplay::MatchState {
+        crate::matchplay::MatchState {
+            match_id: crate::matchplay::MatchId(41),
+            mode_definition_id: crate::map::ModeDefinitionId(1),
+            phase: crate::matchplay::MatchPhase::Waiting,
+            rules_revision: 1,
+        }
+    }
+
+    fn valid_hello() -> MatchHello {
+        MatchHello {
+            protocol_version: crate::protocol::SUPPORTED_PROTOCOL_VERSION,
+            build_version: crate::VERSION.to_string(),
+            registry_fingerprint: 17,
+            content_fingerprint: crate::content::GameplayContentFingerprint(19),
+        }
+    }
+
+    fn embedded_planning_content() -> (
+        BuildCatalog,
+        crate::combat::WeaponCatalog,
+        crate::map::SpawnPointCatalog,
+    ) {
+        let builds = BuildCatalog::embedded().unwrap();
+        let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+        let maps = MapContentCatalog::embedded().unwrap();
+        let resolved = maps
+            .resolve_preset(MapPresetId(1), MapInstanceId(1))
+            .unwrap();
+        (
+            builds,
+            weapons,
+            crate::map::SpawnPointCatalog(resolved.spawn_points_by_team),
+        )
+    }
+
+    #[test]
+    fn hello_validation_preserves_public_rejection_precedence() {
+        let direct = ServerRoleResource::direct_baseline();
+        let remote_id = RemoteId(lightyear::prelude::PeerId::Netcode(8));
+        let admitted = BTreeSet::new();
+        let mut state = waiting_match();
+        let mut hello = valid_hello();
+        hello.protocol_version = 0;
+        hello.build_version = "wrong".into();
+        hello.registry_fingerprint = 0;
+        hello.content_fingerprint = crate::content::GameplayContentFingerprint(0);
+
+        let validate = |hello: &MatchHello,
+                        state: &crate::matchplay::MatchState,
+                        active_count,
+                        team_counts| {
+            validate_match_hello(MatchHelloValidationContext {
+                hello,
+                role: &direct,
+                remote_id: &remote_id,
+                routed_peer: None,
+                admitted_client_ids: &admitted,
+                match_state: state,
+                active_count,
+                maximum_clients: 2,
+                team_counts,
+                maximum_participants_per_team: 1,
+                registry_fingerprint: 17,
+                content_fingerprint: crate::content::GameplayContentFingerprint(19),
+            })
+            .err()
+        };
+
+        assert_eq!(
+            validate(&hello, &state, 2, [1, 1]),
+            Some(MatchJoinRejection::ProtocolVersionMismatch)
+        );
+        hello.protocol_version = crate::protocol::SUPPORTED_PROTOCOL_VERSION;
+        assert_eq!(
+            validate(&hello, &state, 2, [1, 1]),
+            Some(MatchJoinRejection::BuildVersionMismatch)
+        );
+        hello.build_version = crate::VERSION.to_string();
+        assert_eq!(
+            validate(&hello, &state, 2, [1, 1]),
+            Some(MatchJoinRejection::RegistryMismatch)
+        );
+        hello.registry_fingerprint = 17;
+        assert_eq!(
+            validate(&hello, &state, 2, [1, 1]),
+            Some(MatchJoinRejection::ContentMismatch)
+        );
+        hello.content_fingerprint = crate::content::GameplayContentFingerprint(19);
+        state.phase = crate::matchplay::MatchPhase::Active { ends_at_tick: 50 };
+        assert_eq!(
+            validate(&hello, &state, 2, [1, 1]),
+            Some(MatchJoinRejection::MatchInProgress)
+        );
+        state.phase = crate::matchplay::MatchPhase::Waiting;
+        assert_eq!(
+            validate(&hello, &state, 2, [1, 1]),
+            Some(MatchJoinRejection::ServerFull)
+        );
+        assert_eq!(
+            validate(&hello, &state, 1, [1, 1]),
+            Some(MatchJoinRejection::MatchFull)
+        );
+    }
+
+    #[test]
+    fn routed_identity_is_rejected_before_match_phase_and_capacity() {
+        let routed = ServerRoleResource::match_worker(manifest());
+        let remote_id = RemoteId(lightyear::prelude::PeerId::Netcode(999));
+        let state = crate::matchplay::MatchState {
+            phase: crate::matchplay::MatchPhase::Active { ends_at_tick: 50 },
+            ..waiting_match()
+        };
+        assert_eq!(
+            validate_match_hello(MatchHelloValidationContext {
+                hello: &valid_hello(),
+                role: &routed,
+                remote_id: &remote_id,
+                routed_peer: None,
+                admitted_client_ids: &BTreeSet::new(),
+                match_state: &state,
+                active_count: 2,
+                maximum_clients: 2,
+                team_counts: [1, 1],
+                maximum_participants_per_team: 1,
+                registry_fingerprint: 17,
+                content_fingerprint: crate::content::GameplayContentFingerprint(19),
+            })
+            .err(),
+            Some(MatchJoinRejection::MatchFull)
+        );
+    }
+
+    #[test]
+    fn routed_loadout_failure_does_not_consume_identifiers() {
+        let (builds, weapons, spawns) = embedded_planning_content();
+        let mut participant = manifest().participants[0];
+        participant.build_snapshot = brawler_routing::MatchBuildSnapshot::new(&[0]).unwrap();
+        let mut ids = super::super::NextSessionIds::default();
+        let result = plan_match_join(MatchJoinPlanningContext {
+            validated: ValidatedMatchHello {
+                source: MatchJoinSource::Routed {
+                    participant: Box::new(participant),
+                },
+                authenticated_client_id: Some(8),
+            },
+            ids: &mut ids,
+            living_fighters: &[],
+            spawn_points: &spawns,
+            match_state: &waiting_match(),
+            movement_skin_width: 0.05,
+            builds: &builds,
+            weapons: &weapons,
+            map_instance_id: MapInstanceId(1),
+        });
+        assert_eq!(result.err(), Some(MatchJoinRejection::ContentMismatch));
+        assert_eq!(
+            ids.allocate(),
+            Some((
+                crate::protocol::PlayerId(1),
+                crate::protocol::NetworkEntityId(1)
+            ))
+        );
+    }
+
+    #[test]
+    fn routed_and_direct_plans_preserve_identity_team_and_spawn_policy() {
+        let (builds, weapons, spawns) = embedded_planning_content();
+        let state = waiting_match();
+        let participant = manifest().participants[0];
+        let mut routed_ids = super::super::NextSessionIds::default();
+        let routed = plan_match_join(MatchJoinPlanningContext {
+            validated: ValidatedMatchHello {
+                source: MatchJoinSource::Routed {
+                    participant: Box::new(participant),
+                },
+                authenticated_client_id: Some(8),
+            },
+            ids: &mut routed_ids,
+            living_fighters: &[],
+            spawn_points: &spawns,
+            match_state: &state,
+            movement_skin_width: 0.05,
+            builds: &builds,
+            weapons: &weapons,
+            map_instance_id: MapInstanceId(1),
+        })
+        .unwrap();
+        assert_eq!(routed.assigned_team, crate::combat::TeamId(0));
+        assert_eq!(
+            routed.outcome,
+            MatchJoinOutcome::Accepted {
+                player_id: crate::protocol::PlayerId(7),
+                network_entity_id: crate::protocol::NetworkEntityId(1),
+            }
+        );
+        assert_eq!(
+            routed_ids.allocate(),
+            Some((
+                crate::protocol::PlayerId(2),
+                crate::protocol::NetworkEntityId(2)
+            ))
+        );
+
+        let mut direct_ids = super::super::NextSessionIds::default();
+        let expected = crate::builds::resolve_direct_diagnostic_loadout(&builds, &weapons, 1)
+            .unwrap()
+            .identity;
+        let direct = plan_match_join(MatchJoinPlanningContext {
+            validated: ValidatedMatchHello {
+                source: MatchJoinSource::Direct {
+                    assigned_team: crate::combat::TeamId(1),
+                },
+                authenticated_client_id: Some(8),
+            },
+            ids: &mut direct_ids,
+            living_fighters: &[],
+            spawn_points: &spawns,
+            match_state: &state,
+            movement_skin_width: 0.05,
+            builds: &builds,
+            weapons: &weapons,
+            map_instance_id: MapInstanceId(1),
+        })
+        .unwrap();
+        assert_eq!(direct.assigned_team, crate::combat::TeamId(1));
+        assert_eq!(direct.spawn_spec.loadout.identity, expected);
+        assert_eq!(direct.spawn_position, direct.spawn_spec.spawn.position);
+    }
+
+    #[test]
+    fn identifier_allocation_is_atomic_at_either_counter_limit() {
+        for mut ids in [
+            super::super::NextSessionIds {
+                next_player_id: u64::MAX,
+                next_network_entity_id: 1,
+            },
+            super::super::NextSessionIds {
+                next_player_id: 1,
+                next_network_entity_id: u64::MAX,
+            },
+        ] {
+            let before = (ids.next_player_id, ids.next_network_entity_id);
+            assert_eq!(ids.allocate(), None);
+            assert_eq!((ids.next_player_id, ids.next_network_entity_id), before);
         }
     }
 

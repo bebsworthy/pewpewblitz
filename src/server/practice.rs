@@ -5,25 +5,17 @@
 
 use super::ServerRoleResource;
 use crate::{
-    builds::{AbilityState, BuildCatalogResource, PassiveRuntimeState},
-    combat::{
-        ActiveEffects, AuthoritativeTick, CurrentHealth, HealthRecoveryState, SpawnState,
-        WeaponCatalogResource, WeaponState, resolved_fighter_runtime,
-    },
-    map::{MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
-    matchplay::{
-        MatchMember, MatchParticipant, MatchRoot, MatchState, SpawnCandidate, select_spawn,
-    },
-    movement::{InputFreshness, MovementTuning},
-    protocol::{Fighter, FighterInput, NetworkEntityId, PlaceholderState, PlayerId},
-};
-use avian2d::prelude::{
-    AngularVelocity, Collider, CollisionLayers, CustomPositionIntegration, LinearVelocity,
-    Position, RigidBody, Rotation,
+    builds::BuildCatalogResource,
+    combat::WeaponCatalogResource,
+    map::{MapStartupSet, ResolvedMap, SpawnPointCatalog},
+    matchplay::{MatchRoot, MatchState, SpawnCandidate, select_spawn},
+    movement::MovementTuning,
+    protocol::{NetworkEntityId, PlayerId},
 };
 use bevy::prelude::*;
 use lightyear::prelude::input::native::ActionState;
-use lightyear::prelude::{InterpolationTarget, NetworkTarget, Replicate};
+
+use super::fighter_spawn::{AuthoritativeFighterSpawnSpec, spawn_authoritative_fighter};
 
 pub(super) struct PracticeBotPlugin;
 
@@ -93,65 +85,24 @@ fn install_manifest_bots(
         )
         .expect("validated practice roster has a finite spawn");
         occupied.push((team, spawn_point.position));
-        let projection =
-            crate::builds::MatchLoadoutProjection::new(&loadout, builds.0.fighter_body);
-        let (fighter_definition, _, _, _) =
-            resolved_fighter_runtime(team, &loadout.fighter_stats, &loadout.primary_weapon);
-        commands
-            .spawn((
-                Fighter,
+        let entity = spawn_authoritative_fighter(
+            &mut commands,
+            builds.0.fighter_body,
+            AuthoritativeFighterSpawnSpec {
                 player_id,
                 network_entity_id,
-                PlaceholderState {
-                    spawn_slot: u64::from(spawn_point.id.0),
-                },
-                fighter_definition,
                 team,
-                CurrentHealth(loadout.fighter_stats.maximum_health),
-                loadout.identity,
-                loadout.clone(),
-                AbilityState::default(),
-                PassiveRuntimeState::default(),
-                WeaponState::ready(loadout.primary_weapon.recipe.economy.capacity()),
-                ActiveEffects::default(),
-                AuthoritativeTick::default(),
-                SpawnState {
-                    position: spawn_point.position,
-                    facing: spawn_point.facing,
-                },
-            ))
-            .insert(projection)
-            .insert((
-                HealthRecoveryState::default(),
-                Position::from_xy(spawn_point.position.x, spawn_point.position.y),
-                Rotation::radians(spawn_point.facing),
-                LinearVelocity::default(),
-                AngularVelocity::default(),
-                crate::matchplay::FighterDisplayName(bot.display_name.as_str().to_string()),
-                MatchParticipant {
-                    match_id: match_state.match_id,
-                    ready: true,
-                    restart_ready: false,
-                },
-                MatchMember(match_state.match_id),
-                SpawnAssignment {
-                    map_instance_id: resolved_map.snapshot.identity.instance_id,
-                    spawn_point_id: spawn_point.id,
-                },
-            ))
-            .insert((
-                Collider::circle(builds.0.fighter_body.radius),
-                RigidBody::Kinematic,
-                CustomPositionIntegration,
-                CollisionLayers::new(
-                    crate::movement::FIGHTER_LAYER,
-                    avian2d::prelude::LayerMask::NONE,
-                ),
-                ActionState::<FighterInput>::default(),
-                InputFreshness::default(),
-                crate::bots::PracticeBotController::new(bot.player_id.get()),
-                Replicate::to_clients(NetworkTarget::All),
-                InterpolationTarget::to_clients(NetworkTarget::All),
-            ));
+                display_name: bot.display_name.as_str().to_string(),
+                loadout,
+                spawn: spawn_point,
+                match_id: match_state.match_id,
+                map_instance_id: resolved_map.snapshot.identity.instance_id,
+                ready: true,
+            },
+        );
+        commands.entity(entity).insert((
+            ActionState::<crate::protocol::FighterInput>::default(),
+            crate::bots::PracticeBotController::new(bot.player_id.get()),
+        ));
     }
 }

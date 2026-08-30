@@ -244,3 +244,7 @@ Linked ticket BRL-0075 completed the terminal-reaction portion of Stage 2. Share
 
 - `BRL-0076` moved Practice AI from concrete barrel/chest IDs and mode-specific state inspection to terminal-plugin object semantics, defending-team objective components, and mode-plugin-owned `BotObjectiveView` projections.
 - Real-schedule Practice workers for Wipeout, Hot Zone, and Heist preserve directed input; role, authority, network, and performance gates are green.
+
+## Round 3 progress (2026-08-31)
+
+BRL-0077 completed the admission/fighter-assembly phase: match hello validation and planning are pure, shared fighter construction is controller-neutral, connected and Practice ownership remain explicit, and canonical verification passed. One timing-sensitive performance sample was transient; all 12 isolated performance gates passed immediately afterward.
