@@ -12,7 +12,7 @@ mod objects;
 mod pickups;
 mod resolution;
 #[cfg(feature = "server")]
-mod runtime;
+pub(crate) mod runtime;
 #[cfg(feature = "server")]
 mod server;
 mod state;
@@ -41,7 +41,7 @@ pub use catalog::{
     POWDERLINE_VAULT_PRESET, PlayerCollision, ProjectileCollision, RED_BRICK_WALL_ASSET,
     RUBBLE_ASSET, RestorationPickupDefinition, RestorationPickupDefinitionId, SAND_FLOOR_ASSET,
     SLOW_TILE_ASSET, SPEED_TILE_ASSET, SWITCHBACK_BASIN_ADMISSION_REVISION,
-    SWITCHBACK_BASIN_PRESET, TALL_GRASS_ASSET, TREASURE_CHEST_ASSET,
+    SWITCHBACK_BASIN_PRESET, TALL_GRASS_ASSET, TREASURE_CHEST_ASSET, TerminalReactionId,
     VERDANT_CROSSFIRE_ADMISSION_REVISION, VERDANT_CROSSFIRE_PRESET, WALL_ARENA_ASSET,
     WALL_DUNGEON_ASSET, WATER_ASSET, WIPEOUT_MODE_DEFINITION, WOOD_WALL_ASSET,
     YELLOW_STRIPED_COVER_ASSET,

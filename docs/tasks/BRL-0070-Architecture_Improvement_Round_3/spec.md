@@ -233,3 +233,8 @@ Linked ticket BRL-0073 moved direct-diagnostic fallback loadout ownership from s
 ## Implementation progress — BRL-0074 complete
 
 Linked ticket BRL-0074 completed Stage 1 residual timing ownership. Shared simulation conversion APIs now drive Balance Lab and game-selection presentation without literal 60 Hz assumptions. Operator catalog schema 5 owns validated 30-second loading and 10-second route-grant formation timing; one resolved value drives Practice/product advertisement and server enforcement while public protocol shapes and the public game-type catalog revision remain unchanged. Focused timing/catalog/Practice/client/Balance Lab tests and `just check` pass; no native evidence was required because accepted timing and copy are unchanged.
+
+
+## Implementation progress — BRL-0075 complete
+
+Linked ticket BRL-0075 completed the terminal-reaction portion of Stage 2. Shared authored terminal behaviors now project stable reaction IDs; a crate-visible, plugin-populated registry seals deterministic bounded registrations against authored map content. Explosion and restoration-pickup plugins own registration, and handlers receive a bounded transaction context rather than arbitrary `World` access. Synthetic registration, all existing barrel/chest runtime behavior, client/server role graphs, `just check`, and `just lint` pass. The lint gate also prompted a focused cleanup of the prior diagnostic-policy test and bounded fractional timing helper.

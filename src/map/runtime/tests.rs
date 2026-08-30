@@ -68,8 +68,13 @@ fn barrel_test_app() -> (App, Entity) {
         .init_resource::<crate::combat::CombatOutcomeFacts>()
         .init_resource::<crate::combat::CombatOutbox>()
         .init_resource::<crate::combat::NextCombatIds>()
-        .insert_resource(crate::timing::SimulationTick(9));
-    object_authority::register_terminal_reactions(&mut app);
+        .insert_resource(crate::timing::SimulationTick(9))
+        .add_plugins((
+            terminal_reactions::TerminalReactionRegistryPlugin,
+            object_authority::ExplosionTerminalReactionPlugin,
+            object_authority::RestorationPickupTerminalReactionPlugin,
+        ));
+    crate::test_app::finalize(&mut app);
     let resolved = app
         .world()
         .resource::<MapCatalogResource>()

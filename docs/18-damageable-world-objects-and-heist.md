@@ -82,9 +82,12 @@ DropPickup   -> spawn one specified pickup, then remove or replace the placement
 Ordinary `DestroyMap` removal/replacement remains the separate `MapDestructionBehavior` path; it is
 not a health-bearing terminal variant.
 
-This is a closed enum with validated embedded profiles, not a script, callback list, arbitrary
-effect graph, dynamic component-reflection scheme, or map-authored property bag. A later object
-family adds a new bounded variant only with a complete authoritative and player-visible lifecycle.
+This remains a closed, validated authored enum rather than a script, arbitrary effect graph,
+dynamic component-reflection scheme, or map-authored property bag. Each variant resolves to a
+stable terminal-reaction ID. Server reaction plugins register bounded handlers for those IDs, and
+startup fails if authored content lacks a handler. A later object family adds a bounded authored
+variant plus its reaction plugin and complete authoritative/player-visible lifecycle; it does not
+extend a central runtime handler table.
 
 ### Mode objective
 

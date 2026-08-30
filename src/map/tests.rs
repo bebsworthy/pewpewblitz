@@ -989,6 +989,11 @@ fn damageable_profiles_reject_invalid_bounds_references_and_incompatible_behavio
             outcome: MapPlacementOutcome::ReplacedWith(BARREL_WOOD_DEBRIS_ASSET),
         }
     );
+    assert_eq!(damage.terminal.reaction_id(), TerminalReactionId::EXPLOSION);
+    assert_eq!(
+        damage.terminal.outcome(),
+        MapPlacementOutcome::ReplacedWith(BARREL_WOOD_DEBRIS_ASSET)
+    );
     let debris = catalog.asset(BARREL_WOOD_DEBRIS_ASSET).unwrap();
     assert_eq!(barrel.slot, debris.slot);
     assert_eq!(barrel.footprint_cells, debris.footprint_cells);

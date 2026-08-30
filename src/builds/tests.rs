@@ -34,20 +34,6 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
     assert_eq!(builds.ultimates.len(), 11);
     assert_eq!(builds.passives.len(), 9);
     assert_eq!(
-        builds.direct_diagnostic,
-        definitions::DirectDiagnosticLoadoutPolicy {
-            fighter_profile_id: crate::profiles::FighterProfileId(1),
-            weapon_base_ids: vec![
-                crate::profiles::WeaponBaseId(1),
-                crate::profiles::WeaponBaseId(2),
-                crate::profiles::WeaponBaseId(3),
-                crate::profiles::WeaponBaseId(4),
-            ],
-            ultimate_id: UltimateDefinitionId(1),
-            passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-        }
-    );
-    assert_eq!(
         builds.ultimate_charge,
         UltimateChargePolicy {
             maximum: 1_000,
@@ -130,6 +116,25 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
             child_explosion_radius_milliunits: 42_560,
             child_damage: 140,
             max_active_per_owner: 12,
+        }
+    );
+}
+
+#[test]
+fn embedded_catalog_exposes_direct_diagnostic_policy() {
+    let (builds, _) = catalogs();
+    assert_eq!(
+        builds.direct_diagnostic,
+        definitions::DirectDiagnosticLoadoutPolicy {
+            fighter_profile_id: crate::profiles::FighterProfileId(1),
+            weapon_base_ids: vec![
+                crate::profiles::WeaponBaseId(1),
+                crate::profiles::WeaponBaseId(2),
+                crate::profiles::WeaponBaseId(3),
+                crate::profiles::WeaponBaseId(4),
+            ],
+            ultimate_id: UltimateDefinitionId(1),
+            passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
         }
     );
 }

@@ -292,10 +292,7 @@ fn legal_dynamic_outcomes(
             let outcome = match profile.durability {
                 MapDurabilityBehavior::HitPoints(id) => {
                     let damage = catalog.damage_profile(id)?;
-                    match damage.terminal {
-                        MapObjectTerminalBehavior::Explode { outcome, .. }
-                        | MapObjectTerminalBehavior::DropPickup { outcome, .. } => outcome,
-                    }
+                    damage.terminal.outcome()
                 }
                 MapDurabilityBehavior::Indestructible => match profile.destruction {
                     MapDestructionBehavior::Indestructible => return None,

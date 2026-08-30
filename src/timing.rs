@@ -7,6 +7,10 @@ use core::time::Duration;
 pub const SIMULATION_TICK_HZ: u64 = 60;
 
 /// Floating-point simulation frequency for presentation and authoring-unit conversion.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "the authoritative frequency is the exact small integer 60"
+)]
 pub const SIMULATION_TICK_HZ_F64: f64 = SIMULATION_TICK_HZ as f64;
 
 /// The one source from which application configurations derive their fixed step.
@@ -26,8 +30,8 @@ pub const fn simulation_whole_seconds(ticks: u64) -> u64 {
 
 /// Convert authoritative ticks to fractional seconds for authoring and presentation.
 #[must_use]
-pub fn simulation_seconds_f64(ticks: u64) -> f64 {
-    ticks as f64 / SIMULATION_TICK_HZ_F64
+pub fn simulation_seconds_f64(ticks: u32) -> f64 {
+    f64::from(ticks) / SIMULATION_TICK_HZ_F64
 }
 
 /// Monotonic simulation tick, incremented once per `FixedUpdate` execution.

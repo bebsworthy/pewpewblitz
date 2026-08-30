@@ -267,6 +267,24 @@ pub enum MapDurabilityBehavior {
     HitPoints(MapDamageProfileId),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TerminalReactionId(u16);
+
+impl TerminalReactionId {
+    pub const EXPLOSION: Self = Self(1);
+    pub const RESTORATION_PICKUP: Self = Self(2);
+
+    #[must_use]
+    pub const fn new(value: u16) -> Option<Self> {
+        if value == 0 { None } else { Some(Self(value)) }
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapObjectTerminalBehavior {
     Explode {
@@ -277,6 +295,23 @@ pub enum MapObjectTerminalBehavior {
         pickup_definition_id: RestorationPickupDefinitionId,
         outcome: MapPlacementOutcome,
     },
+}
+
+impl MapObjectTerminalBehavior {
+    #[must_use]
+    pub const fn reaction_id(self) -> TerminalReactionId {
+        match self {
+            Self::Explode { .. } => TerminalReactionId::EXPLOSION,
+            Self::DropPickup { .. } => TerminalReactionId::RESTORATION_PICKUP,
+        }
+    }
+
+    #[must_use]
+    pub const fn outcome(self) -> MapPlacementOutcome {
+        match self {
+            Self::Explode { outcome, .. } | Self::DropPickup { outcome, .. } => outcome,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -767,23 +802,9 @@ fn validate_replacement_assets(
         MapDurabilityBehavior::HitPoints(id) => {
             catalog
                 .damage_profile(id)
-                .and_then(|damage| match damage.terminal {
-                    MapObjectTerminalBehavior::Explode {
-                        outcome: MapPlacementOutcome::ReplacedWith(id),
-                        ..
-                    }
-                    | MapObjectTerminalBehavior::DropPickup {
-                        outcome: MapPlacementOutcome::ReplacedWith(id),
-                        ..
-                    } => Some(id),
-                    MapObjectTerminalBehavior::Explode {
-                        outcome: MapPlacementOutcome::Removed,
-                        ..
-                    }
-                    | MapObjectTerminalBehavior::DropPickup {
-                        outcome: MapPlacementOutcome::Removed,
-                        ..
-                    } => None,
+                .and_then(|damage| match damage.terminal.outcome() {
+                    MapPlacementOutcome::ReplacedWith(id) => Some(id),
+                    MapPlacementOutcome::Removed => None,
                 })
         }
         MapDurabilityBehavior::Indestructible => match profile.destruction {

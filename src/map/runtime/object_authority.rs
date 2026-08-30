@@ -9,81 +9,46 @@ use crate::{
     server::{ServerSession, ServerSessionPhase},
 };
 
+use super::terminal_reactions::{
+    TerminalReactionAppExt, TerminalReactionContext, TerminalReactionRegistration,
+    TerminalReactionRegistry,
+};
 use super::{MAX_MAP_DYNAMIC_OUTBOX_EVENTS, MapDynamicOutbox};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct TerminalReactionId(u16);
-
-const EXPLOSION_REACTION: TerminalReactionId = TerminalReactionId(1);
-const RESTORATION_PICKUP_REACTION: TerminalReactionId = TerminalReactionId(2);
-
-type TerminalReactionHandler =
-    fn(&mut World, &WorldObjectTerminalPlan, &mut TerminalReactionContext<'_>);
-
-#[derive(Resource, Default)]
-struct TerminalReactionRegistry {
-    handlers: std::collections::BTreeMap<TerminalReactionId, TerminalReactionHandler>,
-}
-
-impl TerminalReactionRegistry {
-    fn register(
-        &mut self,
-        id: TerminalReactionId,
-        handler: TerminalReactionHandler,
-    ) -> Result<(), String> {
-        if self.handlers.contains_key(&id) {
-            return Err(format!("duplicate world-object terminal reaction {}", id.0));
-        }
-        self.handlers.insert(id, handler);
-        Ok(())
-    }
-
-    fn handler(&self, id: TerminalReactionId) -> Option<TerminalReactionHandler> {
-        self.handlers.get(&id).copied()
-    }
-
-    #[cfg(test)]
-    fn registered_ids(&self) -> Vec<TerminalReactionId> {
-        self.handlers.keys().copied().collect()
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
-struct WorldObjectTerminalPlan {
-    reaction_id: TerminalReactionId,
-    tick: u64,
-    entity: Entity,
-    position: Vec2,
-    request: crate::map::PendingWorldTargetDamage,
-    reaction_event_id: crate::combat::CombatEventId,
-    behavior: crate::map::MapObjectTerminalBehavior,
-    outcome: crate::map::MapPlacementOutcome,
+pub(crate) struct WorldObjectTerminalPlan {
+    pub(crate) reaction_id: crate::map::TerminalReactionId,
+    pub(crate) tick: u64,
+    pub(crate) entity: Entity,
+    pub(crate) position: Vec2,
+    pub(crate) request: crate::map::PendingWorldTargetDamage,
+    pub(crate) reaction_event_id: crate::combat::CombatEventId,
+    pub(crate) behavior: crate::map::MapObjectTerminalBehavior,
+    pub(crate) outcome: crate::map::MapPlacementOutcome,
 }
 
-struct TerminalReactionContext<'a> {
-    queue: &'a mut std::collections::VecDeque<crate::map::PendingWorldTargetDamage>,
-    secondary_count: &'a mut usize,
-}
+pub(super) struct ExplosionTerminalReactionPlugin;
 
-fn terminal_reaction_id(behavior: crate::map::MapObjectTerminalBehavior) -> TerminalReactionId {
-    match behavior {
-        crate::map::MapObjectTerminalBehavior::Explode { .. } => EXPLOSION_REACTION,
-        crate::map::MapObjectTerminalBehavior::DropPickup { .. } => RESTORATION_PICKUP_REACTION,
+impl Plugin for ExplosionTerminalReactionPlugin {
+    fn build(&self, app: &mut App) {
+        app.try_register_terminal_reaction(TerminalReactionRegistration::new(
+            crate::map::TerminalReactionId::EXPLOSION,
+            commit_explosion_reaction,
+        ))
+        .expect("explosion terminal reaction registers once");
     }
 }
 
-pub(super) fn register_terminal_reactions(app: &mut App) {
-    app.init_resource::<TerminalReactionRegistry>();
-    let mut registry = app.world_mut().resource_mut::<TerminalReactionRegistry>();
-    registry
-        .register(EXPLOSION_REACTION, commit_explosion_reaction)
-        .expect("explosion terminal reaction registers once");
-    registry
-        .register(
-            RESTORATION_PICKUP_REACTION,
+pub(super) struct RestorationPickupTerminalReactionPlugin;
+
+impl Plugin for RestorationPickupTerminalReactionPlugin {
+    fn build(&self, app: &mut App) {
+        app.try_register_terminal_reaction(TerminalReactionRegistration::new(
+            crate::map::TerminalReactionId::RESTORATION_PICKUP,
             commit_restoration_pickup_reaction,
-        )
+        ))
         .expect("restoration-pickup terminal reaction registers once");
+    }
 }
 
 pub(super) fn clear_world_object_tick_facts(
@@ -334,7 +299,7 @@ fn apply_world_damage_batch(world: &mut World, pending: Vec<crate::map::PendingW
         let terminal_handler = terminal_behavior.and_then(|behavior| {
             world
                 .resource::<TerminalReactionRegistry>()
-                .handler(terminal_reaction_id(behavior))
+                .handler(behavior.reaction_id())
         });
         if terminal_behavior.is_some() && terminal_handler.is_none() {
             error!("world-object terminal reaction is not registered");
@@ -372,12 +337,7 @@ fn apply_world_damage_batch(world: &mut World, pending: Vec<crate::map::PendingW
                 applied_damage: applied,
                 health_after,
                 terminal: terminal_behavior.map(|behavior| {
-                    crate::map::WorldTargetTerminalFact::MapPlacement(match behavior {
-                        crate::map::MapObjectTerminalBehavior::Explode { outcome, .. }
-                        | crate::map::MapObjectTerminalBehavior::DropPickup { outcome, .. } => {
-                            outcome
-                        }
-                    })
+                    crate::map::WorldTargetTerminalFact::MapPlacement(behavior.outcome())
                 }),
             });
         world
@@ -396,10 +356,7 @@ fn apply_world_damage_batch(world: &mut World, pending: Vec<crate::map::PendingW
         let Some(behavior) = terminal_behavior else {
             continue;
         };
-        let outcome = match behavior {
-            crate::map::MapObjectTerminalBehavior::Explode { outcome, .. }
-            | crate::map::MapObjectTerminalBehavior::DropPickup { outcome, .. } => outcome,
-        };
+        let outcome = behavior.outcome();
         reaction_count += 1;
         update_world_object_telemetry(world, |telemetry| {
             telemetry.terminal_reactions = telemetry.terminal_reactions.saturating_add(1);
@@ -412,7 +369,7 @@ fn apply_world_damage_batch(world: &mut World, pending: Vec<crate::map::PendingW
             outcome,
         });
         let plan = WorldObjectTerminalPlan {
-            reaction_id: terminal_reaction_id(behavior),
+            reaction_id: behavior.reaction_id(),
             tick,
             entity,
             position,
@@ -421,12 +378,8 @@ fn apply_world_damage_batch(world: &mut World, pending: Vec<crate::map::PendingW
             behavior,
             outcome,
         };
-        let mut context = TerminalReactionContext {
-            queue: &mut queue,
-            secondary_count: &mut secondary_count,
-        };
+        let mut context = TerminalReactionContext::new(world, &mut queue, &mut secondary_count);
         terminal_handler.expect("terminal handler was resolved before committing health")(
-            world,
             &plan,
             &mut context,
         );
@@ -435,11 +388,13 @@ fn apply_world_damage_batch(world: &mut World, pending: Vec<crate::map::PendingW
 }
 
 fn commit_restoration_pickup_reaction(
-    world: &mut World,
     plan: &WorldObjectTerminalPlan,
-    _context: &mut TerminalReactionContext<'_>,
+    context: &mut TerminalReactionContext<'_, '_>,
 ) {
-    debug_assert_eq!(plan.reaction_id, RESTORATION_PICKUP_REACTION);
+    debug_assert_eq!(
+        plan.reaction_id,
+        crate::map::TerminalReactionId::RESTORATION_PICKUP
+    );
     let crate::map::MapObjectTerminalBehavior::DropPickup {
         pickup_definition_id,
         outcome,
@@ -449,6 +404,14 @@ fn commit_restoration_pickup_reaction(
         return;
     };
     debug_assert_eq!(outcome, plan.outcome);
+    context.commit_restoration_pickup(plan, pickup_definition_id);
+}
+
+pub(super) fn commit_restoration_pickup_plan(
+    world: &mut World,
+    plan: &WorldObjectTerminalPlan,
+    pickup_definition_id: crate::map::RestorationPickupDefinitionId,
+) {
     let identity = crate::map::RestorationPickupIdentity {
         generation: plan.request.target.generation(),
         source_placement_id: plan.request.target.placement_id(),
@@ -465,13 +428,11 @@ fn commit_restoration_pickup_reaction(
     world.entity_mut(plan.entity).despawn();
 }
 
-#[allow(clippy::too_many_lines)]
 fn commit_explosion_reaction(
-    world: &mut World,
     plan: &WorldObjectTerminalPlan,
-    context: &mut TerminalReactionContext<'_>,
+    context: &mut TerminalReactionContext<'_, '_>,
 ) {
-    debug_assert_eq!(plan.reaction_id, EXPLOSION_REACTION);
+    debug_assert_eq!(plan.reaction_id, crate::map::TerminalReactionId::EXPLOSION);
     let crate::map::MapObjectTerminalBehavior::Explode {
         explosion_profile_id,
         outcome,
@@ -481,6 +442,17 @@ fn commit_explosion_reaction(
         return;
     };
     debug_assert_eq!(outcome, plan.outcome);
+    context.commit_explosion(plan, explosion_profile_id);
+}
+
+#[allow(clippy::too_many_lines)]
+pub(super) fn commit_explosion_plan(
+    world: &mut World,
+    plan: &WorldObjectTerminalPlan,
+    queue: &mut std::collections::VecDeque<crate::map::PendingWorldTargetDamage>,
+    secondary_count: &mut usize,
+    explosion_profile_id: crate::map::EnvironmentExplosionProfileId,
+) {
     let explosion = *world
         .resource::<MapCatalogResource>()
         .0
@@ -573,25 +545,23 @@ fn commit_explosion_reaction(
     let remaining_targets =
         usize::from(explosion.maximum_targets).saturating_sub(selected_objects.len());
     for (_, _, target, _, _) in selected_objects {
-        if *context.secondary_count >= crate::map::MAX_SECONDARY_DAMAGE_APPLICATIONS {
+        if *secondary_count >= crate::map::MAX_SECONDARY_DAMAGE_APPLICATIONS {
             break;
         }
-        *context.secondary_count += 1;
+        *secondary_count += 1;
         update_world_object_telemetry(world, |telemetry| {
             telemetry.chained_object_applications =
                 telemetry.chained_object_applications.saturating_add(1);
         });
-        context
-            .queue
-            .push_back(crate::map::PendingWorldTargetDamage {
-                target,
-                source: plan.request.source,
-                attack_id: plan.request.attack_id,
-                requested_damage: explosion.damage,
-                delivery_index: plan.request.delivery_index,
-                bundle_index: plan.request.bundle_index,
-                effect_index: u8::MAX,
-            });
+        queue.push_back(crate::map::PendingWorldTargetDamage {
+            target,
+            source: plan.request.source,
+            attack_id: plan.request.attack_id,
+            requested_damage: explosion.damage,
+            delivery_index: plan.request.delivery_index,
+            bundle_index: plan.request.bundle_index,
+            effect_index: u8::MAX,
+        });
     }
     let combatant_applications = apply_explosion_to_combatants(
         world,
@@ -913,104 +883,4 @@ fn apply_explosion_to_combatants(world: &mut World, plan: ExplosionCombatantPlan
         );
     }
     applied_targets
-}
-
-#[cfg(test)]
-mod terminal_registry_tests {
-    use super::*;
-
-    const TEST_REACTION: TerminalReactionId = TerminalReactionId(99);
-
-    #[derive(Resource, Default)]
-    struct TestReactionCount(u8);
-
-    fn test_reaction_handler(
-        world: &mut World,
-        plan: &WorldObjectTerminalPlan,
-        _context: &mut TerminalReactionContext<'_>,
-    ) {
-        assert_eq!(plan.reaction_id, TEST_REACTION);
-        world.resource_mut::<TestReactionCount>().0 += 1;
-    }
-
-    fn test_terminal_plan(world: &mut World) -> WorldObjectTerminalPlan {
-        let entity = world.spawn_empty().id();
-        let generation = crate::map::MapDynamicGeneration {
-            map_instance_id: crate::map::MapInstanceId(4),
-            generation: 2,
-        };
-        let source = crate::combat::AttackSource {
-            kind: crate::combat::CombatSourceKind::PrimaryWeapon,
-            attack_id: crate::combat::AttackId(7),
-            player_id: crate::protocol::PlayerId(1),
-            owner_network_entity_id: crate::protocol::NetworkEntityId(2),
-            team_id: crate::combat::TeamId(0),
-            recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(3),
-            legacy_compatibility: false,
-            source_preset_id: None,
-            origin: crate::combat::WorldPoint { x: 0.0, y: 0.0 },
-            facing: 0.0,
-        };
-        WorldObjectTerminalPlan {
-            reaction_id: TEST_REACTION,
-            tick: 8,
-            entity,
-            position: Vec2::ZERO,
-            request: crate::map::PendingWorldTargetDamage {
-                target: crate::map::DamageableTargetIdentity::MapObject {
-                    generation,
-                    placement_id: crate::map::MapPlacementId(5),
-                },
-                source,
-                attack_id: source.attack_id,
-                requested_damage: 1,
-                delivery_index: 0,
-                bundle_index: 0,
-                effect_index: 0,
-            },
-            reaction_event_id: crate::combat::CombatEventId(9),
-            behavior: crate::map::MapObjectTerminalBehavior::Explode {
-                explosion_profile_id: crate::map::EnvironmentExplosionProfileId(1),
-                outcome: crate::map::MapPlacementOutcome::Removed,
-            },
-            outcome: crate::map::MapPlacementOutcome::Removed,
-        }
-    }
-
-    #[test]
-    fn terminal_registry_is_additive_deterministic_and_rejects_duplicate_or_missing_ids() {
-        let mut registry = TerminalReactionRegistry::default();
-        registry
-            .register(TEST_REACTION, test_reaction_handler)
-            .unwrap();
-        registry
-            .register(EXPLOSION_REACTION, test_reaction_handler)
-            .unwrap();
-        assert_eq!(
-            registry.registered_ids(),
-            vec![EXPLOSION_REACTION, TEST_REACTION]
-        );
-        assert!(registry.handler(RESTORATION_PICKUP_REACTION).is_none());
-        assert_eq!(
-            registry.register(TEST_REACTION, test_reaction_handler),
-            Err("duplicate world-object terminal reaction 99".to_string())
-        );
-
-        let mut world = World::new();
-        world.init_resource::<TestReactionCount>();
-        let plan = test_terminal_plan(&mut world);
-        let mut queue = std::collections::VecDeque::new();
-        let mut secondary_count = 0;
-        registry.handler(TEST_REACTION).unwrap()(
-            &mut world,
-            &plan,
-            &mut TerminalReactionContext {
-                queue: &mut queue,
-                secondary_count: &mut secondary_count,
-            },
-        );
-        assert_eq!(world.resource::<TestReactionCount>().0, 1);
-        assert!(queue.is_empty());
-        assert_eq!(secondary_count, 0);
-    }
 }

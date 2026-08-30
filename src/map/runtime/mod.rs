@@ -45,56 +45,60 @@ pub enum MapRuntimeSet {
 }
 
 pub fn register_map_runtime(app: &mut App) {
-    app.init_resource::<CombatWorldEffectFacts>()
-        .init_resource::<super::PendingWorldTargetDamages>()
-        .init_resource::<super::WorldTargetDamageFacts>()
-        .init_resource::<super::WorldObjectExplosionFacts>()
-        .init_resource::<super::WorldObjectOutbox>()
-        .init_resource::<super::WorldObjectTelemetry>()
-        .init_resource::<MapDynamicOutbox>()
-        .init_resource::<MapDynamicTelemetry>()
-        .configure_sets(
-            FixedPostUpdate,
-            (
-                MapRuntimeSet::ApplyDestruction
-                    .after(crate::abilities::AbilitySet::ObserveOutcomes)
-                    .after(crate::combat::CombatSet::Damage),
-                MapRuntimeSet::Publish.after(MapRuntimeSet::ApplyDestruction),
-            )
-                .in_set(crate::gameplay::AuthoritativePhase::Environment)
-                .before(crate::matchplay::MatchSet::ModeRules),
+    app.add_plugins((
+        terminal_reactions::TerminalReactionRegistryPlugin,
+        object_authority::ExplosionTerminalReactionPlugin,
+        object_authority::RestorationPickupTerminalReactionPlugin,
+    ))
+    .init_resource::<CombatWorldEffectFacts>()
+    .init_resource::<super::PendingWorldTargetDamages>()
+    .init_resource::<super::WorldTargetDamageFacts>()
+    .init_resource::<super::WorldObjectExplosionFacts>()
+    .init_resource::<super::WorldObjectOutbox>()
+    .init_resource::<super::WorldObjectTelemetry>()
+    .init_resource::<MapDynamicOutbox>()
+    .init_resource::<MapDynamicTelemetry>()
+    .configure_sets(
+        FixedPostUpdate,
+        (
+            MapRuntimeSet::ApplyDestruction
+                .after(crate::abilities::AbilitySet::ObserveOutcomes)
+                .after(crate::combat::CombatSet::Damage),
+            MapRuntimeSet::Publish.after(MapRuntimeSet::ApplyDestruction),
         )
-        .add_systems(
-            FixedPostUpdate,
-            apply_map_destruction.in_set(MapRuntimeSet::ApplyDestruction),
-        )
-        .add_systems(
-            FixedPostUpdate,
-            process_world_target_damage.in_set(crate::combat::CombatDamageSet::WorldTargets),
-        )
-        .add_systems(
-            FixedPostUpdate,
-            effect_tiles::apply_damage_tile_pulses
-                .in_set(crate::combat::CombatDamageSet::EnvironmentReactions),
-        )
-        .add_systems(
-            FixedPostUpdate,
-            publish_map_dynamic_traffic.in_set(MapRuntimeSet::Publish),
-        )
-        .add_systems(
-            FixedPostUpdate,
-            send_world_object_cues
-                .in_set(crate::combat::CombatSet::TelemetryAndCues)
-                .after(crate::concealment::ConcealmentSet::DecideObservers),
-        )
-        .add_systems(
-            FixedPostUpdate,
-            clear_world_object_tick_facts
-                .in_set(crate::combat::CombatSet::Finalize)
-                .before(crate::gameplay::advance_simulation_tick),
-        )
-        .add_systems(Update, receive_map_recovery_requests);
-    object_authority::register_terminal_reactions(app);
+            .in_set(crate::gameplay::AuthoritativePhase::Environment)
+            .before(crate::matchplay::MatchSet::ModeRules),
+    )
+    .add_systems(
+        FixedPostUpdate,
+        apply_map_destruction.in_set(MapRuntimeSet::ApplyDestruction),
+    )
+    .add_systems(
+        FixedPostUpdate,
+        process_world_target_damage.in_set(crate::combat::CombatDamageSet::WorldTargets),
+    )
+    .add_systems(
+        FixedPostUpdate,
+        effect_tiles::apply_damage_tile_pulses
+            .in_set(crate::combat::CombatDamageSet::EnvironmentReactions),
+    )
+    .add_systems(
+        FixedPostUpdate,
+        publish_map_dynamic_traffic.in_set(MapRuntimeSet::Publish),
+    )
+    .add_systems(
+        FixedPostUpdate,
+        send_world_object_cues
+            .in_set(crate::combat::CombatSet::TelemetryAndCues)
+            .after(crate::concealment::ConcealmentSet::DecideObservers),
+    )
+    .add_systems(
+        FixedPostUpdate,
+        clear_world_object_tick_facts
+            .in_set(crate::combat::CombatSet::Finalize)
+            .before(crate::gameplay::advance_simulation_tick),
+    )
+    .add_systems(Update, receive_map_recovery_requests);
     super::pickups::register_pickup_runtime(app);
     effect_tiles::register(app);
     crate::matchplay::register_environment_reset_system(app, reset_map_on_match_restart);
@@ -103,7 +107,8 @@ pub fn register_map_runtime(app: &mut App) {
 mod dynamics;
 pub(super) mod effect_tiles;
 mod installation;
-mod object_authority;
+pub(crate) mod object_authority;
+pub(crate) mod terminal_reactions;
 #[cfg(test)]
 mod tests;
 
