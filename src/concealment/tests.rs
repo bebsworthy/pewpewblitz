@@ -128,6 +128,80 @@ fn forced_reveal_sources_refresh_without_stacking_and_remain_team_scoped() {
 
 #[cfg(feature = "server")]
 #[test]
+fn authored_rules_drive_attack_and_damage_reveal_deadlines() {
+    use crate::{
+        combat::{
+            AcceptedAttackFact, AcceptedAttackFacts, AttackId, CombatEventId, CombatOutcomeFact,
+            CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind, CombatTargetKind, TeamId,
+            WorldPoint,
+        },
+        protocol::{Fighter, NetworkEntityId},
+        timing::SimulationTick,
+    };
+    use bevy::prelude::*;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(SimulationTick(40))
+        .insert_resource(ConcealmentRulesResource(ConcealmentRules {
+            schema_version: CONCEALMENT_RULES_SCHEMA_VERSION,
+            attack_reveal_ticks: 7,
+            damage_reveal_ticks: 11,
+        }))
+        .insert_resource(AcceptedAttackFacts(vec![AcceptedAttackFact {
+            event_id: CombatEventId(1),
+            tick: 40,
+            attack_id: AttackId(1),
+            source_network_id: NetworkEntityId(7),
+        }]))
+        .insert_resource(CombatOutcomeFacts(vec![CombatOutcomeFact {
+            event_id: CombatEventId(2),
+            tick: 40,
+            attack_id: AttackId(1),
+            source_kind: CombatSourceKind::PrimaryWeapon,
+            source_player: None,
+            source_network_id: None,
+            source_team: None,
+            target_network_id: NetworkEntityId(7),
+            target_kind: CombatTargetKind::Fighter,
+            target_team: TeamId(1),
+            preset_id: None,
+            recipe_fingerprint: None,
+            position: WorldPoint { x: 0.0, y: 0.0 },
+            engagement_distance: 0.0,
+            kind: CombatOutcomeKind::Damage { amount: 1 },
+        }]))
+        .add_systems(Update, server::observe_attack_and_damage_reveal_locks);
+    let fighter = app.world_mut().spawn((Fighter, NetworkEntityId(7))).id();
+
+    app.update();
+    assert_eq!(
+        *app.world()
+            .entity(fighter)
+            .get::<ConcealmentRevealDeadlines>()
+            .unwrap(),
+        ConcealmentRevealDeadlines {
+            attack_until_tick: 47,
+            damage_until_tick: 51,
+        }
+    );
+
+    app.world_mut().resource_mut::<SimulationTick>().0 = 45;
+    app.update();
+    assert_eq!(
+        *app.world()
+            .entity(fighter)
+            .get::<ConcealmentRevealDeadlines>()
+            .unwrap(),
+        ConcealmentRevealDeadlines {
+            attack_until_tick: 52,
+            damage_until_tick: 56,
+        }
+    );
+}
+
+#[cfg(feature = "server")]
+#[test]
 fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     use crate::{abilities::AbilitySet, combat::CombatSet};
     use bevy::{prelude::*, time::TimeUpdateStrategy};
@@ -136,27 +210,25 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     struct Trace(Vec<&'static str>);
 
     #[derive(Resource, Default)]
-    struct OutcomesObserved(bool);
-
-    #[derive(Resource, Default)]
     struct LifecycleApplied(bool);
 
-    fn observe(mut observed: ResMut<OutcomesObserved>) {
-        observed.0 = true;
-    }
     #[allow(
         clippy::needless_pass_by_value,
         reason = "Bevy systems receive resource parameters by value"
     )]
     fn resolve(
-        observed: Res<OutcomesObserved>,
         lifecycle: Res<LifecycleApplied>,
+        deadlines: Query<&ConcealmentRevealDeadlines, With<crate::protocol::Fighter>>,
         mut trace: ResMut<Trace>,
     ) {
-        assert!(observed.0, "outcomes must precede source resolution");
         assert!(
             lifecycle.0,
             "combat lifecycle must precede source resolution"
+        );
+        assert_eq!(
+            deadlines.single().unwrap().attack_until_tick,
+            3,
+            "the command-written reveal deadline must be visible in source resolution"
         );
         trace.0.push("sources");
     }
@@ -174,8 +246,25 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     app.add_plugins((MinimalPlugins, crate::gameplay::GameplayPlugin))
         .insert_resource(TimeUpdateStrategy::FixedTimesteps(1))
         .init_resource::<Trace>()
-        .init_resource::<OutcomesObserved>()
-        .init_resource::<LifecycleApplied>();
+        .init_resource::<LifecycleApplied>()
+        .insert_resource(ConcealmentRulesResource(ConcealmentRules {
+            schema_version: CONCEALMENT_RULES_SCHEMA_VERSION,
+            attack_reveal_ticks: 3,
+            damage_reveal_ticks: 5,
+        }))
+        .insert_resource(crate::combat::AcceptedAttackFacts(vec![
+            crate::combat::AcceptedAttackFact {
+                event_id: crate::combat::CombatEventId(1),
+                tick: 0,
+                attack_id: crate::combat::AttackId(1),
+                source_network_id: crate::protocol::NetworkEntityId(7),
+            },
+        ]))
+        .init_resource::<crate::combat::CombatOutcomeFacts>();
+    app.world_mut().spawn((
+        crate::protocol::Fighter,
+        crate::protocol::NetworkEntityId(7),
+    ));
     app.configure_sets(
         FixedPostUpdate,
         AbilitySet::ObserveOutcomes.after(CombatSet::Damage),
@@ -184,7 +273,7 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
     app.add_systems(
         FixedPostUpdate,
         (
-            observe.in_set(AbilitySet::ObserveOutcomes),
+            server::observe_attack_and_damage_reveal_locks.in_set(AbilitySet::ObserveOutcomes),
             lifecycle.in_set(CombatSet::Lifecycle),
             resolve.in_set(ConcealmentSet::ResolveSources),
             decide.in_set(ConcealmentSet::DecideObservers),

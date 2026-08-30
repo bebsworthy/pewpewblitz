@@ -1,8 +1,9 @@
 use super::{
     entropy,
-    model::{BotContact, BotIntent, BotObservation, BotRole, BotState, MAX_CONTACTS},
+    model::{BotContact, BotObservation, BotRole, BotState, MAX_CONTACTS},
     navigation::{BotNavigationSnapshot, BotRouteProgress, BotRouteStart},
     profile::{BotArbitrationPolicy, BotProfile},
+    registry::BotBehaviorRegistry,
 };
 use crate::{combat::WeaponPhase, map::MAP_CELL_SIZE_WORLD, protocol::FighterInput};
 use bevy::prelude::*;
@@ -35,13 +36,19 @@ pub(super) struct BotDecision {
 pub(super) struct BotDecisionPolicy<'a> {
     profile: BotProfile,
     arbitration: &'a BotArbitrationPolicy,
+    registry: &'a BotBehaviorRegistry,
 }
 
 impl<'a> BotDecisionPolicy<'a> {
-    pub(super) const fn new(profile: BotProfile, arbitration: &'a BotArbitrationPolicy) -> Self {
+    pub(super) const fn new(
+        profile: BotProfile,
+        arbitration: &'a BotArbitrationPolicy,
+        registry: &'a BotBehaviorRegistry,
+    ) -> Self {
         Self {
             profile,
             arbitration,
+            registry,
         }
     }
 }
@@ -62,10 +69,12 @@ pub(super) fn decide(
     let BotDecisionPolicy {
         profile,
         arbitration,
+        registry,
     } = policy;
     update_contacts(observation, state, profile.contact_memory_ticks);
     update_stationary_state(observation, state);
-    let mut intent = choose_intent(observation, state, profile, arbitration, role);
+    let mut intent =
+        super::behaviors::choose_intent(observation, state, profile, arbitration, registry, role);
     if observation.ultimate_kind == crate::builds::UltimateKind::RestorationField
         && observation.ability_ready
     {
@@ -227,14 +236,22 @@ fn update_stationary_state(observation: &BotObservation, state: &mut BotState) {
     state.last_position = Some(observation.self_view.position);
 }
 
+#[cfg(test)]
 pub(super) fn choose_intent(
     observation: &BotObservation,
     state: &mut BotState,
     profile: BotProfile,
     arbitration_policy: &BotArbitrationPolicy,
     role: BotRole,
-) -> BotIntent {
-    super::behaviors::choose_intent(observation, state, profile, arbitration_policy, role)
+) -> super::model::BotIntent {
+    super::behaviors::choose_intent(
+        observation,
+        state,
+        profile,
+        arbitration_policy,
+        super::behaviors::built_in_registry(),
+        role,
+    )
 }
 fn movement_axis(
     observation: &BotObservation,

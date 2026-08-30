@@ -6,7 +6,8 @@ use super::{
     },
     navigation::BotNavigationSnapshot,
     policy,
-    profile::{BotProfile, BotProfileResource},
+    profile::{BotCatalogResource, BotProfile},
+    registry::BotBehaviorRegistry,
     team::{BotPlanMember, assign_roles},
 };
 use crate::{
@@ -41,8 +42,7 @@ struct BotNavigationRuntime {
 }
 
 pub(crate) fn install_controller_systems(app: &mut App) {
-    app.init_resource::<BotProfileResource>()
-        .init_resource::<BotNavigationRuntime>()
+    app.init_resource::<BotNavigationRuntime>()
         .init_resource::<BotDiagnostics>()
         .add_systems(
             FixedUpdate,
@@ -92,7 +92,7 @@ struct RawFighterView {
 )]
 fn capture_observations(
     tick: Res<SimulationTick>,
-    profile: Res<BotProfileResource>,
+    profile: Res<BotCatalogResource>,
     map: Res<ResolvedMap>,
     builds: Res<crate::builds::BuildCatalogResource>,
     dynamic_states: Query<&MapDynamicState>,
@@ -147,7 +147,7 @@ fn capture_observations(
         navigation.snapshot = BotNavigationSnapshot::from_map(
             &map,
             builds.0.fighter_body.radius + 1.0,
-            profile.profile.damage_tile_cost_milli,
+            profile.0.practice.damage_tile_cost_milli,
         );
         navigation.map_instance_id = Some(map.snapshot.identity.instance_id);
     }
@@ -401,7 +401,8 @@ fn weapon_capabilities(loadout: &ResolvedMatchLoadout) -> (f32, f32) {
 )]
 fn decide_and_commit_inputs(
     tick: Res<SimulationTick>,
-    profile: Res<BotProfileResource>,
+    profile: Res<BotCatalogResource>,
+    registry: Res<BotBehaviorRegistry>,
     navigation: Res<BotNavigationRuntime>,
     roots: Query<&MatchState, With<MatchRoot>>,
     mut diagnostics: ResMut<BotDiagnostics>,
@@ -415,7 +416,7 @@ fn decide_and_commit_inputs(
     )>,
 ) {
     let started_at = std::time::Instant::now();
-    let bot_profile: BotProfile = profile.profile;
+    let bot_profile: BotProfile = profile.0.practice;
     let match_active = roots
         .single()
         .is_ok_and(|state| matches!(state.phase, MatchPhase::Active { .. }));
@@ -450,7 +451,7 @@ fn decide_and_commit_inputs(
                 policy::decide(
                     &observation,
                     &mut controller.state,
-                    policy::BotDecisionPolicy::new(bot_profile, &profile.arbitration),
+                    policy::BotDecisionPolicy::new(bot_profile, &profile.0.arbitration, &registry),
                     navigation,
                     seed,
                     role,

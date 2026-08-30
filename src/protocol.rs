@@ -797,6 +797,14 @@ mod tests {
         );
         assert!(
             !app.world()
+                .contains_resource::<crate::concealment::ConcealmentRulesResource>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<crate::bots::BotCatalogResource>()
+        );
+        assert!(
+            !app.world()
                 .contains_resource::<crate::builds::BuildCatalogResource>()
         );
         assert!(

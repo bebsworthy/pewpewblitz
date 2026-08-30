@@ -16,13 +16,22 @@ mod navigation;
 mod policy;
 mod profile;
 #[cfg(feature = "server")]
+mod registry;
+#[cfg(feature = "server")]
 mod team;
 
 #[cfg(feature = "server")]
-pub(crate) use controller::install_controller_systems;
-#[cfg(feature = "server")]
 pub(crate) use model::PracticeBotController;
-pub(crate) use profile::BotCatalog;
+pub(crate) use profile::{BotCatalog, BotCatalogResource, BotContentPlugin};
+
+#[cfg(feature = "server")]
+pub(crate) fn install_controller_systems(app: &mut bevy::prelude::App) {
+    app.add_plugins((
+        registry::BotBehaviorRegistryPlugin,
+        behaviors::BuiltInBotBehaviorsPlugin,
+    ));
+    controller::install_controller_systems(app);
+}
 
 #[cfg(all(test, feature = "server"))]
 mod tests;

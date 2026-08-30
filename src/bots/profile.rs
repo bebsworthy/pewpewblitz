@@ -1,5 +1,4 @@
-#[cfg(feature = "server")]
-use bevy::prelude::{FromWorld, Resource, World};
+use bevy::prelude::{FromWorld, Plugin, Resource, World};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
@@ -19,23 +18,19 @@ const MAX_PERIMETER_INSET_CELLS: f32 = crate::map::MAX_MAP_DIMENSION_CELLS as f3
 pub(super) struct BotBehaviorId(pub(super) u16);
 
 impl BotBehaviorId {
+    #[cfg(feature = "server")]
     pub(super) const HEALING: Self = Self(10);
+    #[cfg(feature = "server")]
     pub(super) const PRESSURE: Self = Self(11);
+    #[cfg(feature = "server")]
     pub(super) const OBJECT: Self = Self(12);
     pub(super) const FALLBACK: Self = Self(13);
+    #[cfg(feature = "server")]
     pub(super) const OBJECTIVES: Self = Self(20);
+    #[cfg(feature = "server")]
     pub(super) const PICKUPS: Self = Self(30);
+    #[cfg(feature = "server")]
     pub(super) const RETREAT: Self = Self(40);
-
-    pub(super) const REGISTERED: [Self; 7] = [
-        Self::HEALING,
-        Self::PRESSURE,
-        Self::OBJECT,
-        Self::FALLBACK,
-        Self::OBJECTIVES,
-        Self::PICKUPS,
-        Self::RETREAT,
-    ];
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,9 +56,15 @@ impl BotArbitrationPolicy {
             .find(|behavior| behavior.id == id)
     }
 
-    fn validate(&self) -> Result<(), String> {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        if self.behaviors.is_empty() {
+            return Err("bot arbitration must define at least one behavior".into());
+        }
         if self.behaviors.len() > MAX_BOT_BEHAVIOR_REGISTRATIONS {
             return Err("bot arbitration exceeds engine registration capacity".into());
+        }
+        if self.behaviors.iter().any(|behavior| behavior.id.0 == 0) {
+            return Err("bot arbitration behavior IDs must be nonzero".into());
         }
         if self.behaviors.iter().any(|behavior| {
             behavior.base_score == 0
@@ -80,13 +81,6 @@ impl BotArbitrationPolicy {
                 .any(|other| behavior.id == other.id)
         }) {
             return Err("bot arbitration contains duplicate behavior IDs".into());
-        }
-        if self.behaviors.len() != BotBehaviorId::REGISTERED.len()
-            || BotBehaviorId::REGISTERED
-                .iter()
-                .any(|id| self.behavior(*id).is_none())
-        {
-            return Err("bot arbitration must cover every registered behavior exactly once".into());
         }
         if !self
             .behavior(BotBehaviorId::FALLBACK)
@@ -290,24 +284,19 @@ impl BotCatalog {
     }
 }
 
-#[cfg(feature = "server")]
 #[derive(Resource, Clone, Debug, PartialEq)]
-pub(super) struct BotProfileResource {
-    pub(super) profile: BotProfile,
-    pub(super) arbitration: BotArbitrationPolicy,
+pub(crate) struct BotCatalogResource(pub(crate) BotCatalog);
+
+impl FromWorld for BotCatalogResource {
+    fn from_world(_: &mut World) -> Self {
+        Self(BotCatalog::embedded().expect("embedded Practice bot catalog is valid"))
+    }
 }
 
-#[cfg(feature = "server")]
-impl FromWorld for BotProfileResource {
-    fn from_world(_: &mut World) -> Self {
-        let catalog = BotCatalog::embedded().expect("embedded Practice bot catalog is valid");
-        assert!(
-            super::behaviors::behavior_registry_matches_policy(&catalog.arbitration),
-            "Practice bot code registrations must exactly match authored arbitration policy"
-        );
-        Self {
-            profile: catalog.practice,
-            arbitration: catalog.arbitration,
-        }
+pub(crate) struct BotContentPlugin;
+
+impl Plugin for BotContentPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        app.init_resource::<BotCatalogResource>();
     }
 }

@@ -115,7 +115,9 @@ accepted attack or applied damage, and the reveal-scan ultimate.
 
 V9 M01 initially authors `M = 90` ticks (1.5 seconds) and `N = 120` ticks (2 seconds) at 60 Hz.
 These are Balance Lab/playtest values and may change through ordinary balance revision without
-changing the reveal-lock semantics. A deadline is active while `current_tick < deadline`.
+changing the reveal-lock semantics. They are validated build-embedded gameplay data in
+`content/catalogs/concealment.ron`; concealment authority consumes the shared rules resource rather
+than code-owned balance literals. A deadline is active while `current_tick < deadline`.
 
 `M`, `N`, source durations, radii, ranges, charge rules, and cooldowns are bounded authored balance
 values. `M` and `N` may differ. If multiple temporary locks exist, the effective deadline is the

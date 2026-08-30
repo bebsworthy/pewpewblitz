@@ -1,4 +1,5 @@
 use super::{
+    behaviors,
     diagnostics::{BotDecisionTrace, BotDiagnostics},
     entropy,
     model::{BotObservation, BotRole, BotTactic, PracticeBotController},
@@ -74,7 +75,7 @@ fn embedded_profile_is_valid_bounded_and_fingerprinted() {
 }
 
 #[test]
-fn arbitration_policy_round_trips_fingerprints_and_rejects_invalid_coverage() {
+fn arbitration_policy_round_trips_fingerprints_and_validates_authored_structure() {
     let catalog = BotCatalog::embedded().unwrap();
     let encoded = ron::ser::to_string(&catalog).unwrap();
     let decoded: BotCatalog = ron::from_str(&encoded).unwrap();
@@ -104,18 +105,36 @@ fn arbitration_policy_round_trips_fingerprints_and_rejects_invalid_coverage() {
 
     let mut missing = catalog.clone();
     missing.arbitration.behaviors.pop();
-    assert_eq!(
-        missing.validate(),
-        Err("bot arbitration must cover every registered behavior exactly once".into())
-    );
+    assert!(missing.validate().is_ok());
+    assert_ne!(fingerprint(&missing), baseline);
 
     let mut extra = catalog.clone();
     let mut unknown = extra.arbitration.behaviors[0];
     unknown.id = BotBehaviorId(99);
     extra.arbitration.behaviors.push(unknown);
+    assert!(extra.validate().is_ok());
+    assert_ne!(fingerprint(&extra), baseline);
+
+    let mut too_many = extra;
+    unknown.id = BotBehaviorId(100);
+    too_many.arbitration.behaviors.push(unknown);
     assert_eq!(
-        extra.validate(),
-        Err("bot arbitration must cover every registered behavior exactly once".into())
+        too_many.validate(),
+        Err("bot arbitration exceeds engine registration capacity".into())
+    );
+
+    let mut empty = catalog.clone();
+    empty.arbitration.behaviors.clear();
+    assert_eq!(
+        empty.validate(),
+        Err("bot arbitration must define at least one behavior".into())
+    );
+
+    let mut zero_id = catalog.clone();
+    zero_id.arbitration.behaviors[0].id = BotBehaviorId(0);
+    assert_eq!(
+        zero_id.validate(),
+        Err("bot arbitration behavior IDs must be nonzero".into())
     );
 
     let mut zero = catalog.clone();
@@ -371,7 +390,11 @@ fn demolition_bot_uses_ordinary_ultimate_input_toward_a_visible_target() {
     let decision = policy::decide(
         &observed,
         &mut super::model::BotState::default(),
-        policy::BotDecisionPolicy::new(BotProfile::embedded().unwrap(), &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            BotProfile::embedded().unwrap(),
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -415,7 +438,11 @@ fn restoration_bot_targets_an_injured_ally_and_uses_the_field() {
     let decision = policy::decide(
         &observed,
         &mut super::model::BotState::default(),
-        policy::BotDecisionPolicy::new(BotProfile::embedded().unwrap(), &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            BotProfile::embedded().unwrap(),
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -566,7 +593,11 @@ fn corner_stall_starts_a_bounded_inward_escape() {
     let decision = policy::decide(
         &observed,
         &mut state,
-        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            profile,
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -618,7 +649,11 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
     let corner_decision = policy::decide(
         &observed,
         &mut state,
-        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            profile,
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -636,7 +671,11 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
     let recovering_decision = policy::decide(
         &observed,
         &mut state,
-        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            profile,
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -654,7 +693,11 @@ fn low_health_retreat_recovers_from_the_perimeter_without_reselecting_the_corner
     let interior_decision = policy::decide(
         &observed,
         &mut state,
-        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            profile,
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -777,7 +820,11 @@ fn contact_memory_contains_only_observed_facts_and_expires() {
     let _ = policy::decide(
         &visible,
         &mut state,
-        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            profile,
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -790,7 +837,11 @@ fn contact_memory_contains_only_observed_facts_and_expires() {
     let _ = policy::decide(
         &hidden,
         &mut state,
-        policy::BotDecisionPolicy::new(profile, &arbitration_policy()),
+        policy::BotDecisionPolicy::new(
+            profile,
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
         &navigation,
         7,
         BotRole::Pressure,
@@ -853,7 +904,11 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
             let _ = policy::decide(
                 &observed,
                 &mut super::model::BotState::default(),
-                policy::BotDecisionPolicy::new(profile, &arbitration),
+                policy::BotDecisionPolicy::new(
+                    profile,
+                    &arbitration,
+                    behaviors::built_in_registry(),
+                ),
                 &navigation,
                 u64::from(ordinal),
                 BotRole::Pressure,

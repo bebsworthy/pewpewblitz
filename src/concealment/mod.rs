@@ -2,6 +2,7 @@
 
 mod field;
 mod model;
+mod rules;
 pub use field::{
     AlliedConcealmentMemberships, ConcealmentFieldId, ConcealmentFieldState,
     MAX_ACTIVE_CONCEALMENT_FIELDS, ObjectiveCarrier, field_contains,
@@ -9,10 +10,14 @@ pub use field::{
 #[cfg(feature = "server")]
 pub(crate) use field::{ConcealmentFieldOwner, NextConcealmentFieldId};
 pub use model::{
-    ATTACK_REVEAL_TICKS, ConcealmentPresentationState, ConcealmentRevealDeadlines,
-    ConcealmentSources, DAMAGE_REVEAL_TICKS, ForcedRevealSource, ForcedRevealSources,
-    MAX_FORCED_REVEAL_SOURCES, ObserverRelation, ObserverVisibilityInput, TeamRevealDeadline,
-    TerrainConcealmentMembership, observer_can_see, reveal_lock_active,
+    ConcealmentPresentationState, ConcealmentRevealDeadlines, ConcealmentSources,
+    ForcedRevealSource, ForcedRevealSources, MAX_FORCED_REVEAL_SOURCES, ObserverRelation,
+    ObserverVisibilityInput, TeamRevealDeadline, TerrainConcealmentMembership, observer_can_see,
+    reveal_lock_active,
+};
+pub use rules::{
+    CONCEALMENT_RULES_SCHEMA_VERSION, ConcealmentContentPlugin, ConcealmentRules,
+    ConcealmentRulesResource, MAX_REVEAL_LOCK_TICKS,
 };
 
 #[cfg(feature = "server")]
@@ -91,9 +96,10 @@ mod server {
     }
 
     #[allow(clippy::needless_pass_by_value)]
-    fn observe_attack_and_damage_reveal_locks(
+    pub(super) fn observe_attack_and_damage_reveal_locks(
         mut commands: Commands,
         tick: Res<SimulationTick>,
+        rules: Res<ConcealmentRulesResource>,
         accepted_attacks: Res<AcceptedAttackFacts>,
         outcomes: Res<CombatOutcomeFacts>,
         fighters: Query<
@@ -125,12 +131,12 @@ mod server {
             if attack_reveals.contains(&network_id.0) {
                 deadlines.attack_until_tick = deadlines
                     .attack_until_tick
-                    .max(tick.0.saturating_add(ATTACK_REVEAL_TICKS));
+                    .max(tick.0.saturating_add(rules.0.attack_reveal_ticks));
             }
             if damage_reveals.contains(&network_id.0) {
                 deadlines.damage_until_tick = deadlines
                     .damage_until_tick
-                    .max(tick.0.saturating_add(DAMAGE_REVEAL_TICKS));
+                    .max(tick.0.saturating_add(rules.0.damage_reveal_ticks));
             }
             if deadlines != prior.copied().unwrap_or_default() {
                 commands.entity(entity).insert(deadlines);

@@ -303,12 +303,15 @@ navigation framework: implement the one snapshot/search boundary consumed by pra
 The first policy is **hand-written utility scoring with small committed-duration state**.
 It has no Bevy ECS dependency and requires no AI framework.
 
-The authored arbitration table maps every code-registered behavior to one stable numeric ID, an
-enablement flag, and a base score. The commitment bonus is authored beside that table. Validation
-rejects duplicate, missing, or unknown registrations, score overflow, and a disabled fallback.
-Equal effective scores are resolved by the lower stable behavior ID, independent of registration
-order. Contextual eligibility remains focused Rust behavior—for example, retreat still requires low
-health and a visible enemy—rather than becoming a stringly typed rule language.
+The authored arbitration table maps behavior capabilities to stable numeric IDs, enablement flags,
+and base scores. The commitment bonus is authored beside that table. Shared catalog validation
+rejects empty or oversized tables, zero or duplicate IDs, score overflow, and a disabled fallback;
+it deliberately remains independent of server-only executable handlers. Server plugin finalization
+then seals a bounded behavior registry, sorts it by stable ID, and rejects any mismatch between the
+authored policy and registered handlers before schedules run. Equal effective scores are resolved
+by the lower stable behavior ID, independent of plugin registration order. Contextual eligibility
+remains focused Rust behavior—for example, retreat still requires low health and a visible
+enemy—rather than becoming a stringly typed rule language.
 
 - **Team planning assigns goals, roles, and reservations.** One pure batch transition considers all
   bot teammates in stable identity order and assigns bounded roles such as pressure, contest,

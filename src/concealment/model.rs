@@ -1,9 +1,6 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub const ATTACK_REVEAL_TICKS: u64 = 90;
-pub const DAMAGE_REVEAL_TICKS: u64 = 120;
-
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerrainConcealmentMembership {
     pub map_instance_id: crate::map::MapInstanceId,

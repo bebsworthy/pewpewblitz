@@ -1,0 +1,5 @@
+(
+    schema_version: 1,
+    attack_reveal_ticks: 90,
+    damage_reveal_ticks: 120,
+)
